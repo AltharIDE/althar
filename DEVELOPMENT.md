@@ -29,6 +29,7 @@ From the repository root:
 | `bun run dev` | The public site, at `http://localhost:5320` |
 | `bun --filter @althar/desktop dev` | Builds the desktop app and opens it |
 | `bun --filter @althar/ui storybook` | The UI package's Storybook, at `http://localhost:6006` (see [Showing a change works](#showing-a-change-works) for a port of a task's own) |
+| `bun --filter @althar/host build` | Builds the standalone Linux host; [setup, operation and tests](apps/host/README.md) |
 | `bun run check` | Format, type-aware lint and type checks, in every package |
 | `bun run fix` | The same, fixing what can be fixed |
 | `bun run test` | Unit and component tests, in every package |
@@ -60,6 +61,7 @@ everything, Windows' tests, coverage and the packages too, after merge.
 | [`packages/contracts`](packages/contracts) | `@althar/contracts`: the API between the runtime and its clients, and the transport it runs over |
 | [`packages/testing`](packages/testing) | `@althar/testing`: how the tests run in CI, retried once, with the flaky ones reported and quarantined |
 | [`apps/desktop`](apps/desktop) | `@althar/desktop`: the desktop app, Electron with the runtime in a utility process |
+| [`apps/host`](apps/host) | `@althar/host`: a persistent Linux home with encrypted secrets and a systemd user service |
 | [`apps/cli`](apps/cli) | `@althar/cli`: a command-line client for the runtime, which runs a task with a real agent in a terminal |
 | [`brand`](brand) | `@althar/brand`: the mark, lockups, avatars, banners and screenshots, ready to use, and the code that draws them |
 | [`docs/architecture`](docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud |

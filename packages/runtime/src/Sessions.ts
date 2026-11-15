@@ -2706,6 +2706,12 @@ export class Sessions extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const agentId = running.entry.definition.id
           const accountId = running.account.id
+          // A cached reading may still say 98% when the turn runs out. Read the account before publishing its limit so
+          // steering can wait for the real reset; provider failures retain the last reading and never hide the turn's error.
+          if (resetsAt === undefined)
+            yield* planUsage
+              .refresh([accountId], true)
+              .pipe(Effect.catch((error) => Effect.logWarning('Could not refresh usage after a limit', error)))
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const [known] = yield* sql<{
