@@ -58,6 +58,9 @@ export const copyDependencies = async (from: string, destination: string, names:
     for (;;) {
       const found = placements.get(join(parent, 'node_modules', name))
       if (found === source) return
+      // Node stops at the nearest visible package. A conflicting ancestor
+      // shadows an otherwise matching root copy, so this consumer needs its own.
+      if (found !== undefined) break
       if (parent === destination) break
       const next = dirname(parent)
       if (next === parent || relative(destination, next).startsWith('..')) break

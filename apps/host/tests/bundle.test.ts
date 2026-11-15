@@ -1,6 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 
 import { describe, expect, it } from 'vitest'
 
@@ -16,6 +17,25 @@ const pkg = (root: string, name: string, dependencies: Record<string, string> = 
 }
 
 describe('locked host dependency bundles', () => {
+  it('preserves resolution when a nested consumer needs the root version shadowed by its parent', async () => {
+    const root = temporary()
+    const shared = pkg(root, 'shared')
+    pkg(root, 'd')
+    const c = pkg(root, 'c', { shared: '2', d: '2' })
+    const other = pkg(c, 'shared')
+    writeFileSync(join(other, 'package.json'), JSON.stringify({ name: 'shared', version: '2.0.0' }))
+    const external = temporary()
+    const d = pkg(external, 'd', { shared: '1' })
+    symlinkSync(shared, join(external, 'node_modules/shared'))
+    symlinkSync(d, join(c, 'node_modules/d'))
+    const destination = join(temporary(), 'release')
+    mkdirSync(destination)
+    await copyDependencies(join(root, 'package.json'), destination, ['shared', 'd', 'c'])
+    const resolve = createRequire(join(destination, 'node_modules/c/node_modules/d/package.json'))
+    const actual: unknown = JSON.parse(readFileSync(resolve.resolve('shared/package.json'), 'utf8'))
+    expect(actual).toMatchObject({ version: '1.0.0' })
+    expect(resolve.resolve('shared/package.json')).toContain('/c/node_modules/d/node_modules/shared/')
+  })
   it('assembles Node, its license, the host entry and locked dependencies into a self-contained private tree', async () => {
     const root = temporary()
     const entry = join(root, 'entry.js')
