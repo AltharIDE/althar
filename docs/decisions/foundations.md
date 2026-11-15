@@ -18,7 +18,7 @@ How the processes fit together is in [architecture 02](../architecture/02-deskto
 
 ## Where the runtime runs, and who may reach it
 
-Today the runtime runs in the app, one per profile. Work outlives the window, but not the app:
+The desktop runs one runtime per profile. Work outlives the window, but not the app:
 
 - **Closing the last window** leaves Althar working on a Mac, and anywhere the person chose to keep it working in the background.
 - **Quit with work under way asks first.** The runtime counts the leads and reviews in a turn, the runs going, and what agents left running. The window then offers to quit, to keep everything working in the background, or to carry on. With nothing at work, Quit just quits.
@@ -38,9 +38,11 @@ Commands carrying `commandId` have durable API admission and receipts shared acr
 
 New clients reconnect with a home, cursor and checkpoint identifying the exact history entry. A restored, missing or divergent history requires a fresh snapshot. The existing desktop's numeric `Watch` remains compatible; remote clients must use snapshot `position` and `WatchFrom`. Native attention now uses the shared typed API. Notifications remain advisory; pending asks are durable in the home.
 
-Not built yet: a persistent headless host, SSH bootstrap, phone pairing, protected mobile key storage, relay transport, worker enrollment and leases, remote filesystem/preview channels, or multiplayer membership and project grants. A socket listener alone does not supply those features.
+**Standalone Linux host, 15 Nov 2026:** [`apps/host`](../../apps/host/README.md) runs the shared runtime under Node with a persistent profile, separate-key authenticated encryption, private API health, signal cleanup and a systemd user unit with credential delivery. A client does not own its lifetime. It is a trusted personal OS-user boundary; same-user agents are not isolated workers. Installation is from source pending signed distribution and real VPS/provider validation.
 
-**Proposed:** [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) would let a project live on this computer, on a host the person runs, or on a managed one. It would add a persistent headless host, SSH beside a relay, and pools of workers that take work on leases. It keeps one writer per profile and keeps paired input apart from what a socket or an agent may do. Until it is accepted, the state above is the current one.
+Not built yet: SSH bootstrap, phone pairing, protected mobile key storage, relay transport, worker enrollment and leases, remote filesystem/preview channels, or multiplayer membership and project grants. A socket listener alone does not supply those features.
+
+**Proposed:** [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) would let a project live on this computer, on a host the person runs, or on a managed one. It extends the headless foundation with SSH beside a relay, and pools of workers that take work on leases. It keeps one writer per profile and keeps paired input apart from what a socket or an agent may do. Until it is accepted, the state above is the current one.
 
 ## The UI is instant
 
@@ -187,4 +189,5 @@ Not built yet:
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 12 Nov 2026: the window answers while the computer is busy: agents in the background, nothing waiting on the runtime's thread, the store's commits not waiting for the disk, key reads by index, Ship answering once admitted.
 - 13 Nov 2026: the UI is instant: ten rules for what a press shows and what never runs on a thread that answers the person, the bugs they came from, and the lint rules and tests that check them (`althar/press-at-once`, `althar/off-the-thread`).
+- 15 Nov 2026: standalone Linux host lifecycle, unattended encrypted secrets and a supervised user service. Remote enrollment, SSH and provider release validation remain ahead.
 - 14 Nov 2026: shared API identity, private socket attachment, revocable owner devices, durable API command receipts, checked feed positions and native attention. Organization access and commercial entitlements remain separate later work.

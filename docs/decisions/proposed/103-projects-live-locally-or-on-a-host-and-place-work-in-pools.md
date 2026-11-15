@@ -389,10 +389,12 @@ an opt-in private local socket, durable command admission/results, checked
 home/cursor/checkpoint reconnect and typed native attention. See
 [architecture 02](../../architecture/02-desktop-runtime.md#local-transport)
 for the contracts and limits. This does not accept the rest of this proposal
-or complete phase 1: headless lifecycle, SSH bootstrap, protected client keys,
+or complete phase 1: SSH bootstrap, protected client keys,
 remote files/previews, provider validation, pools and workers remain ahead.
 Registered devices currently act for one profile owner; they are not a
 multiplayer permission model. Pricing and entitlements remain separate.
+
+**Host service foundation implemented, 15 Nov 2026:** [`apps/host`](../../../apps/host/README.md) now supplies a persistent Node home, versioned private API, separate-key authenticated encryption, health, restart/signal cleanup and a systemd user service with delivered credentials. This is a trusted single-user process, with co-located agents rather than isolated workers. From-source installation is available; signed distribution, actual VPS/systemd reboot validation, provider headless login/refresh, protected client enrollment, SSH bootstrap and remote files/previews remain phase 1 work. No pools, worker leases, relay or multiplayer authorization are implied.
 
 1. **One usable personal Linux host.** Build `apps/host`, sealing, versioned
    private-socket RPC, pairing and SSH bootstrap. Co-locate a remote project
