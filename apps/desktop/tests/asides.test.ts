@@ -76,7 +76,7 @@ describe('asides', () => {
 })
 
 /** A board of these tasks, as much of one as the asides read. */
-const boardOf = (tasks: ReadonlyArray<BoardTask>) => ({ tasks, calls: [], settledTotal: 0 }) as unknown as BoardSnapshot
+const boardOf = (tasks: ReadonlyArray<BoardTask>, cursor = 1) => ({ cursor, tasks, calls: [], settledTotal: 0 }) as BoardSnapshot
 
 const LEAD: PlanStep = { key: 'implement', agentId: 'claude-code', model: 'opus', effort: 'high', skipped: false }
 
@@ -102,6 +102,38 @@ const useScreen = (client: Client, props: { board: BoardSnapshot; lead: PlanStep
 
 describe('moves on asides', () => {
   const said = boardTask({ taskId: 'a1', title: 'Hi', phase: 'ready', latest: { at: ago(0), by: 'lead', said: 'Hello.' } })
+
+  it.each(['clear', 'task'] as const)('keeps an agreed %s when an older board read arrives, and accepts a newer reopening', (move) => {
+    const { client } = fakeClient()
+    const initial = boardOf([said], 10)
+    const { result, rerender } = renderHook((props: { board: BoardSnapshot }) => useScreen(client, { ...props, lead: LEAD }), {
+      initialProps: { board: initial },
+    })
+    act(() => (move === 'clear' ? result.current.asides.clear(['a1']) : result.current.asides.makeTask('a1')))
+    const agreed = move === 'clear' ? { ...said, phase: 'settled' as const } : { ...said, scratch: false }
+    rerender({ board: boardOf([agreed], 11) })
+    expect(result.current.moves.moving.size).toBe(0)
+    expect(result.current.pills).toEqual([])
+    // The optimistic mask is gone, but a read started before the move must not put its pill back.
+    rerender({ board: initial })
+    expect(result.current.pills).toEqual([])
+    // A real later reopening is still the board's to show.
+    rerender({ board: boardOf([said], 12) })
+    expect(result.current.pills.map((pill) => pill.id)).toEqual(['a1'])
+  })
+
+  it('starts a different project from its own board even when its cursor is lower', () => {
+    const { client } = fakeClient()
+    const { result, rerender } = renderHook(
+      (props: { board: BoardSnapshot | null; projectId: string }) => useAsideMoves(client, props.board, props.projectId),
+      { initialProps: { board: boardOf([said], 10) as BoardSnapshot | null, projectId: 'p1' } },
+    )
+    rerender({ board: null, projectId: 'p2' })
+    expect(result.current.over).toBeNull()
+    const other = boardOf([{ ...said, taskId: 'other' }], 1)
+    rerender({ board: other, projectId: 'p2' })
+    expect(result.current.over).toBe(other)
+  })
 
   it('clears one at once, keeps it gone until the board says so, and brings it back with why where the runtime refused', async () => {
     let refuse = false
