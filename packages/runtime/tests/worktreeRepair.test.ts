@@ -1,7 +1,7 @@
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Logger } from 'effect'
@@ -316,7 +316,7 @@ describe('a task’s worktree whose link broke, in the runtime', () => {
       const stranger = mkdtempSync(join(tmpdir(), 'althar-stranger-'))
       writeFileSync(join(stranger, '.git'), 'gitdir: /nowhere/old/.git/worktrees/x\n')
       assert.isFalse(yield* repair.mend(stranger))
-      assert.deepStrictEqual(linkOf(stranger), { state: 'broken', why: 'gitdir', gitdir: '/nowhere/old/.git/worktrees/x' })
+      assert.deepStrictEqual(linkOf(stranger), { state: 'broken', why: 'gitdir', gitdir: resolve('/nowhere/old/.git/worktrees/x') })
       // Repaired since the command began: it runs again.
       relink(join(task.worktree, '.git'), 'gitdir: /nowhere/old-profile/.git/worktrees/x\n')
       assert.isTrue(yield* repair.mend(task.worktree, 0))
