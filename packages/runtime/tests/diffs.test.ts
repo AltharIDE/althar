@@ -124,6 +124,7 @@ describe('what a task changed', () => {
       const { root, base } = changed()
       const diff = yield* fileDiff(root, base, 'retry.ts')
       assert.isFalse(diff.truncated)
+      assert.isTrue(diff.whole)
       assert.deepStrictEqual(diff.lines, [
         { kind: 'hunk', text: '@@ -1,6 +1,6 @@' },
         { kind: 'removed', old: 1, text: 'const tries = 3', changed: ['3'] },
@@ -165,6 +166,13 @@ describe('what a task changed', () => {
       assert.isFalse(cut.truncated)
       assert.deepStrictEqual(cut.lines[0], { kind: 'hunk', text: '@@ -23998,7 +23998,7 @@ row 23997' })
       assert.isTrue(cut.lines.some((line) => line.kind === 'added' && line.text === 'row changed'))
+      assert.isFalse(cut.whole)
+      assert.isTrue(diff.whole)
+      // A change near the top of a file too long to read whole: its first hunk starts at the first line, yet it is not the file.
+      writeFileSync(join(root, 'huge.txt'), `${huge.map((line, i) => (i === 1 ? 'row changed' : line)).join('\n')}\n`)
+      const top = yield* fileDiff(root, before, 'huge.txt')
+      assert.deepStrictEqual(top.lines[0], { kind: 'hunk', text: '@@ -1,5 +1,5 @@' })
+      assert.isFalse(top.whole)
     }),
   )
 
@@ -194,7 +202,12 @@ describe('what a task changed', () => {
       // Moved without a change: no lines, and it says where it was.
       const moved = yield* fileDiff(root, base, 'notes.md')
       assert.strictEqual(moved.file.from, 'old.md')
-      assert.lengthOf(moved.lines, 0)
+      // A markdown file is read as it is, every line unchanged, so it can open as a page; any other file has no lines.
+      assert.lengthOf(moved.lines, 5)
+      assert.isTrue(moved.lines.every((line) => line.kind === 'context'))
+      assert.isTrue(moved.whole)
+      assert.isTrue(scratch.whole)
+      assert.isFalse(picture.whole)
       // A file the task didn't change, or one outside the worktree, isn't read.
       for (const path of ['README.md', '../../etc/hosts']) {
         const refused = yield* Effect.flip(fileDiff(root, base, path))

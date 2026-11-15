@@ -12,11 +12,15 @@ import {
   type DiffLine,
   DiffLineKind,
   firstMode,
+  modesOf,
+  nextWay,
   type FoundCode,
+  isMarkdown,
   lineToOpen,
   markOf,
   Menu,
   MenuItem,
+  panelMode,
   SplitButton,
   Button,
 } from '@althar/ui'
@@ -26,6 +30,7 @@ import { text as openInText, useEditorList } from '../OpenIn'
 import { ago } from '../time'
 import { usePreferences } from '../usePreferences'
 import { CODE_FRESH, codeKeys, foundRead, placeRead } from './finds'
+import { pictureOf } from './FilePicture'
 
 /*
  * The code a thread's agent names, as the thread's screen offers it to the
@@ -84,7 +89,8 @@ const useCodeRead = (threadId: string, found: FoundCode, mode: CodeMode, fresh: 
     queryKey: codeKeys.text(threadId, file?.path ?? '', commit, line),
     queryFn: () =>
       client.readCode(threadId, file?.path ?? '', { ...(commit === null ? {} : { commit }), ...(line === null ? {} : { line }) }),
-    enabled: file !== null && mode !== 'change',
+    // A markdown file's Changes is drawn from its diff, but is the page as it is where that can't be read: its lines are read too.
+    enabled: file !== null && (mode !== 'change' || isMarkdown(file)),
     staleTime: CODE_FRESH,
     gcTime: 5 * 60_000,
     // The panel reads the file again as it opens: it shows the file as it is now.
@@ -100,19 +106,36 @@ const KINDS: Readonly<Record<ApiDiffLine['kind'], DiffLineKind>> = {
   removed: DiffLineKind.Removed,
 }
 
-/** What the task changed in a file, for the panel's Change: read as it is asked for, and again each time. */
-const useCodeChange = (taskId: string | null, found: FoundCode, on: boolean): readonly DiffLine[] | null | undefined => {
+/**
+ * What the task changed in a file, as the diff of it: read as it is asked for, and again each time; undefined while read, null
+ * where it couldn't be. `whole` says the lines are the file's every one, as a page marks its change from; `again` reads it again
+ * as what it follows changes.
+ */
+export const useChangedFile = (
+  taskId: string | null,
+  path: string,
+  on: boolean,
+  again = '',
+): { readonly lines: readonly DiffLine[]; readonly whole: boolean } | null | undefined => {
   const { client } = useServices()
-  const path = found.kind === 'file' ? found.path : ''
   const read = useQuery({
-    queryKey: codeKeys.change(taskId ?? '', path),
-    queryFn: async () =>
-      (await client.getFileDiff(taskId ?? '', path)).lines.map((line) => ({ ...line, kind: KINDS[line.kind] }) as DiffLine),
+    queryKey: [...codeKeys.change(taskId ?? '', path), again],
+    queryFn: async () => {
+      const diff = await client.getFileDiff(taskId ?? '', path)
+      // Whole only where the runtime says so: a diff in hunks starts at line one too, and ends before the file does.
+      return {
+        lines: diff.lines.map((line) => ({ ...line, kind: KINDS[line.kind] }) as DiffLine),
+        whole: diff.whole === true && !diff.truncated,
+      }
+    },
     enabled: on && taskId !== null && path !== '',
     refetchOnMount: 'always',
   })
   return read.isError ? null : read.data
 }
+
+const useCodeChange = (taskId: string | null, found: FoundCode, on: boolean) =>
+  useChangedFile(taskId, found.kind === 'file' ? found.path : '', on)
 
 /** The peek over a name: its lines as it first shows, where they were read from, and the ways on. */
 function CodePeekOf({
@@ -233,9 +256,10 @@ function CodePanelOf({
   const { client } = useServices()
   const { found } = open
   const [kept, setKept] = useState<{ readonly key: string; readonly mode: CodeMode } | null>(null)
-  const mode = kept !== null && kept.key === codeKey(found) ? kept.mode : firstMode(found)
+  const mode = kept !== null && kept.key === codeKey(found) ? kept.mode : panelMode(found)
   const read = useCodeRead(threadId, found, mode, true)
-  const change = useCodeChange(taskId, found, mode === 'change')
+  // What the task changed, for Change, for a markdown file's Changes, which marks it on the page, and for its Source, the diff.
+  const change = useCodeChange(taskId, found, mode === 'change' || mode === 'source')
   const place = useQuery(placeRead(client, threadId)).data
   const { main, open: inEditor } = useCodeEditors(threadId)
   // Where it is among the thread's names, as the thread is drawn: they are drawn before what they open.
@@ -243,6 +267,18 @@ function CodePanelOf({
   const at = placeAmong(names, open)
   const nav = at < 0 ? null : { at: at + 1, of: names.length }
   const keys = (event: KeyboardEvent<HTMLElement>) => {
+    // M: through a markdown file's ways, as a page, with what the task changed marked, and as its source.
+    if (event.key === 'm' && !event.metaKey && !event.ctrlKey && !event.altKey && isMarkdown(found)) {
+      event.preventDefault()
+      setKept({
+        key: codeKey(found),
+        mode: nextWay(
+          modesOf(found).map((one) => one.value),
+          mode,
+        ),
+      })
+      return
+    }
     if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || main === undefined || found.kind === 'several') return
     event.preventDefault()
     inEditor(main.id, found)
@@ -254,7 +290,8 @@ function CodePanelOf({
       mode={mode}
       onMode={(next) => setKept({ key: codeKey(found), mode: next })}
       {...(read === undefined ? {} : { read })}
-      {...(change === undefined ? {} : { change })}
+      {...(change === undefined ? {} : { change: change === null ? null : change.lines, changeWhole: change?.whole ?? false })}
+      markdown={{ image: pictureOf(threadId) }}
       actions={<OpenCodeIn found={found} threadId={threadId} compact={width < 400} />}
       {...(nav === null ? {} : { nav: { ...nav, onStep: (by: -1 | 1) => stepFrom(open, by) } })}
       onGo={onGo}
@@ -349,6 +386,12 @@ export const useCodeHost = ({
         />
       ),
       open: (found, from) => latest.current.onOpen(found, from),
+      openByName: (name, from) => {
+        void cache.fetchQuery(foundRead(client, cache, threadId, null, [name])).then((found) => {
+          const named = found.get(name)
+          if (named !== undefined) latest.current.onOpen(named, from)
+        })
+      },
       ...(mainId === undefined ? {} : { openInEditor: (found: FoundCode) => latest.current.inEditor(mainId, found) }),
       opened,
       close: () => latest.current.onClose(),
