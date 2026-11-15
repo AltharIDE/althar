@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
@@ -77,6 +77,50 @@ describe('what refs stand on', () => {
       assert.isUndefined(yield* stamp(cwd, ['HEAD~1']))
       assert.isUndefined(yield* stamp(cwd, ['../main']))
       assert.isUndefined(yield* stamp(mkdtempSync(join(tmpdir(), 'althar-not-git-')), ['HEAD']))
+    }),
+  )
+})
+
+describe('what refs stand on, at its edges', () => {
+  it.live('is none where refs or objects live where it can’t stamp them: a reftable, borrowed objects, a `.git` that points nowhere', () =>
+    Effect.gen(function* () {
+      // As `git init --ref-format=reftable` leaves it, whichever git this computer has.
+      const reftable = repository()
+      mkdirSync(join(reftable, '.git', 'reftable'))
+      assert.isUndefined(yield* stamp(reftable, ['HEAD']))
+      const borrowing = repository()
+      writeFileSync(join(borrowing, '.git', 'objects', 'info', 'alternates'), `${repository()}/.git/objects\n`)
+      assert.isUndefined(yield* stamp(borrowing, ['HEAD']))
+      const pointless = realpathSync(mkdtempSync(join(tmpdir(), 'althar-pointer-')))
+      writeFileSync(join(pointless, '.git'), 'not a pointer\n')
+      assert.isUndefined(yield* stamp(pointless, ['HEAD']))
+    }),
+  )
+
+  it.live('reads a worktree its `.git` points to by a relative path, skipping an empty name and one asked twice', () =>
+    Effect.gen(function* () {
+      const cwd = repository()
+      const linked = join(realpathSync(mkdtempSync(join(tmpdir(), 'althar-relative-'))), 'work')
+      git(cwd, 'worktree', 'add', '-q', '-b', 'althar/relative', linked)
+      const absolute = readFileSync(join(linked, '.git'), 'utf8')
+        .replace(/^gitdir: /, '')
+        .trim()
+      writeFileSync(join(linked, '.git'), `gitdir: ${relative(linked, absolute)}\n`)
+      const stamped = yield* stamp(linked, ['', 'HEAD', 'althar', 'HEAD'])
+      assert.isString(stamped)
+      // The same as by its absolute path: the same folders, the same files.
+      writeFileSync(join(linked, '.git'), `gitdir: ${absolute}\n`)
+      assert.strictEqual(yield* stamp(linked, ['HEAD', 'althar']), stamped)
+    }),
+  )
+
+  it.live('is none for symbolic refs that point on further than it follows', () =>
+    Effect.gen(function* () {
+      const cwd = repository()
+      for (let step = 0; step < 6; step += 1) git(cwd, 'symbolic-ref', `refs/heads/step${step}`, `refs/heads/step${step + 1}`)
+      git(cwd, 'branch', 'step6')
+      assert.isUndefined(yield* stamp(cwd, ['step0']))
+      assert.isString(yield* stamp(cwd, ['step4']))
     }),
   )
 })

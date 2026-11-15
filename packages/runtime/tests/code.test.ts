@@ -21,6 +21,7 @@ import {
   readCode,
 } from '../src/code'
 import { NotFound } from '../src/errors'
+import { searchFiles } from '../src/searchFiles'
 
 const numbered = (from: number, to: number, said = (n: number) => `// line ${n}`) =>
   Array.from({ length: to - from + 1 }, (_, i) => said(from + i))
@@ -407,5 +408,45 @@ describe('finding what a message names, at its edges', () => {
         // Neither is read for the window.
         for (const path of ['linked.txt', 'big.bin']) assert.instanceOf(yield* Effect.flip(readCode(task, path)), NotFound, path)
       }),
+  )
+})
+
+describe('listing a place’s files for the file search', () => {
+  it.effect('lists a worktree as it is, untracked files too, but not what it ignores', () =>
+    Effect.gen(function* () {
+      const { root, write } = repository()
+      write('notes.md', 'Not committed yet\n')
+      write('dist/bundle.js', 'ignored\n')
+      const { files } = yield* searchFiles({ kind: 'task', roots: [rootOf(root)] })
+      assert.include(files, 'packages/runtime/src/Runs.ts')
+      assert.include(files, 'notes.md')
+      assert.notInclude(files, 'dist/bundle.js')
+    }),
+  )
+
+  it.effect('lists the default branch at its commit, inside the folder the project is about', () =>
+    Effect.gen(function* () {
+      const { root, first, write } = repository()
+      write('packages/ui/src/later.ts', 'export const later = 1\n')
+      const { files } = yield* searchFiles({ kind: 'default', roots: [rootOf(root, { commit: first, within: 'packages/ui' })] })
+      // Only what the commit holds, under the folder: not what is in the checkout since, nor what is beside it.
+      assert.deepStrictEqual(files, ['packages/ui/src/model.ts', 'packages/ui/tests/Runs.test.ts'])
+    }),
+  )
+
+  it.effect('names each file by its repository where the place has several, once each', () =>
+    Effect.gen(function* () {
+      const one = repository()
+      const two = repository()
+      const { files } = yield* searchFiles({
+        kind: 'task',
+        roots: [
+          rootOf(one.root, { within: 'apps/desktop' }),
+          rootOf(two.root, { slug: 'site', commit: two.second, within: 'apps/desktop' }),
+          rootOf(two.root, { slug: 'site', commit: two.second, within: 'apps/desktop' }),
+        ],
+      })
+      assert.deepStrictEqual(files, ['althar/apps/desktop/src/model.ts', 'site/apps/desktop/src/model.ts'])
+    }),
   )
 })

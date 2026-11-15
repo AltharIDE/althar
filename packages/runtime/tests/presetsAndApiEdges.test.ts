@@ -32,7 +32,7 @@ import { offerPreset, planFromPreset, type PresetPlan, savePreset } from '../src
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { mergeCopyOf } from '../src/reviewCopy'
-import { reviewBrief } from '../src/reviewing'
+import { outsideWhy, reviewBrief } from '../src/reviewing'
 import * as Runtime from '../src/Runtime'
 import { Runs } from '../src/Runs'
 import { Secrets } from '../src/Secrets'
@@ -1055,5 +1055,42 @@ describe('a review after a merge, and an outside review trusted fully', () => {
       },
     })
     assert.include(brief.join('\n'), 'Its code is trusted: the person said Trust fully, so it is set up as the team’s code is')
+  })
+
+  it('says why a pull request not from a fork is from outside, and how far the lead may go at each trust', () => {
+    const review = {
+      repository: ['meridian', 'api'],
+      number: 12,
+      url: `${HOST}/meridian/api/pull/12`,
+      title: 'Retry the checkout',
+      author: 'stranger',
+      member: false,
+      fork: null,
+      outside: true,
+      head: 'a'.repeat(40),
+      base: 'main',
+      baseCommit: 'b'.repeat(40),
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      words: { noun: 'pull request', short: 'PR', prefix: '#' },
+    }
+    const why = "by stranger, whom the host doesn't name one of meridian/api's people"
+    assert.strictEqual(outsideWhy(review), why)
+    assert.strictEqual(outsideWhy({ ...review, fork: ['stranger', 'api'] }), 'from a fork')
+    // Untrusted, it only reads, offline.
+    const reads = reviewBrief({ cwd: '/tmp/review', review }).join('\n')
+    assert.include(reads, `It comes from outside the project, ${why}.`)
+    assert.include(reads, 'You have no network either')
+    assert.include(reads, 'Where the person says to run it, call run_it')
+    // Run safely: its own commands in the sandbox.
+    assert.include(reviewBrief({ cwd: '/tmp/review', review, trust: 'safe' }).join('\n'), 'The person said Run safely')
+    // The team's own, trusted: as the team's code, and online.
+    const team = reviewBrief({ cwd: '/tmp/review', review: { ...review, member: true, outside: false }, trust: 'full' }).join('\n')
+    assert.include(team, "stranger is one of the repository's people.")
+    assert.include(team, 'Its code is trusted: it is the team’s own, and is set up as the team’s code is')
+    assert.notInclude(team, 'You have no network')
+    // The team's own, untrusted: it reads, but isn't told it is offline.
+    assert.notInclude(reviewBrief({ cwd: '/tmp/review', review: { ...review, outside: false } }).join('\n'), 'You have no network')
   })
 })

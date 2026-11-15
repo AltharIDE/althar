@@ -107,6 +107,64 @@ describe('the card says an errand from what Althar knows', () => {
   })
 })
 
+describe('every place a merge can stand, and every wait, in words', () => {
+  const OTHER = 'https://github.com/AltharIDE/althar/pull/774'
+  it('says where the line last read a merge stands, of its own pull request and of another', () => {
+    const lines = (stands: string, over: Partial<ErrandRecord> = {}) => [
+      errandCardLines([merge({ stands, ...over })], change())[0],
+      errandCardLines([merge({ stands, target: OTHER, ...over })], change())[0],
+    ]
+    assert.deepStrictEqual(lines('settle'), [undefined, undefined])
+    assert.deepStrictEqual(lines('queued'), ['In the merge queue', 'In the merge queue: #774'])
+    assert.deepStrictEqual(lines('conflict'), ['Merges once its conflict is settled', 'Merges #774 once its conflict is settled'])
+    assert.deepStrictEqual(lines('stuck'), ['Can’t bring its branch up to date', 'Can’t bring #774’s branch up to date'])
+    assert.deepStrictEqual(lines('update'), ['Bringing its branch up to date', 'Bringing #774’s branch up to date'])
+    assert.deepStrictEqual(lines('behind'), ['Waiting its turn to merge', 'Waiting its turn to merge #774'])
+    assert.deepStrictEqual(lines('ahead'), ['Merges after the merge ahead', 'Merges #774 after the merge ahead'])
+    assert.deepStrictEqual(lines('automerge'), ['Auto-merges once checks pass', 'Auto-merges #774 once checks pass'])
+    for (const stands of ['merge', 'auto', 'merging']) assert.deepStrictEqual(lines(stands), ['Merging', 'Merging #774'])
+    assert.deepStrictEqual(lines('enqueue'), ['Going into the merge queue', 'Going into the merge queue: #774'])
+    assert.deepStrictEqual(lines('enqueue', { waits: [{ kind: 'merge_train', target: '' }] }), [
+      'Going into the merge train',
+      'Going into the merge train: #774',
+    ])
+    assert.deepStrictEqual(lines('empty'), ['No commits to merge', 'No commits to merge #774'])
+    for (const stands of ['checks', 'red'])
+      assert.deepStrictEqual(lines(stands), ['Merges once checks pass', 'Merges #774 once checks pass'])
+    // Held with no reason, it says only that it is held.
+    assert.deepStrictEqual(lines('merge', { paused: true }), ['Merge on hold', 'Merge #774 on hold'])
+  })
+
+  it('unread by the line, goes by the card’s pull request: green, it merges next where nothing queues it', () => {
+    const lone = merge({ waits: [] })
+    assert.deepStrictEqual(errandCardLines([lone], change({ checks: { outcome: 'none' } })), ['Merges next'])
+    assert.deepStrictEqual(errandCardLines([lone], change({ checks: null })), ['Merges once checks pass'])
+    assert.deepStrictEqual(
+      errandCardLines([merge({ waits: [{ kind: 'merge_train', target: '' }] })], change({ checks: { outcome: 'passed' } })),
+      ['Going into the merge train'],
+    )
+    // A card with no pull request of its own names the merge's.
+    assert.deepStrictEqual(errandCardLines([merge({ target: OTHER })], null), ['Merges #774 once checks pass'])
+  })
+
+  it('says each wait another tool has in words, and a tool from a server by its own name', () => {
+    const tool = (waits: ReadonlyArray<string>, over: Partial<ErrandRecord> = {}) =>
+      errandCardLines(
+        [{ tool: 'mcp__deploys__publish_release', target: '', paused: false, waits: waits.map((kind) => ({ kind, target: '' })), ...over }],
+        null,
+      )[0]
+    assert.strictEqual(tool([]), 'Publish release next')
+    assert.strictEqual(tool(['checks']), 'Publish release once checks pass')
+    assert.strictEqual(tool(['review', 'approval']), 'Publish release waits for a review')
+    assert.strictEqual(tool(['merge_queue']), 'Publish release waits for the merge queue')
+    assert.strictEqual(tool(['merge_train']), 'Publish release waits for the merge train')
+    assert.strictEqual(tool(['merge_line', 'merge_in_flight']), 'Publish release waits for its turn to merge')
+    assert.strictEqual(tool(['checks', 'staging']), 'Publish release waits for checks and staging')
+    assert.strictEqual(tool([], { paused: true }), 'Publish release on hold')
+    assert.strictEqual(tool([], { target: OTHER }), 'Publish release #774 next')
+  })
+})
+
 describe('free text is made plain for a card', () => {
   it('turns a pull request’s address into its number and drops the repository, branch and commit', () => {
     assert.strictEqual(
