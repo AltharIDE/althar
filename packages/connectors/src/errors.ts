@@ -19,6 +19,8 @@ export class ConnectorFailed extends Schema.TaggedError<ConnectorFailed>()('Conn
   message: Schema.String,
   /** A bounded response exceeded this byte limit; retrying cannot help. */
   sizeLimit: Schema.optional(Schema.Number),
+  /** The host rejected an upload above this many bytes; a smaller upload may succeed. */
+  uploadLimit: Schema.optional(Schema.Number),
   /** The HTTP status, when there was one. */
   status: Schema.optional(Schema.Number),
   /** When a rate-limited call may be tried again. */

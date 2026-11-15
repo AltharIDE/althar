@@ -2,6 +2,9 @@ import { generateKeyPairSync } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
@@ -17,6 +20,22 @@ const pkg = (root: string, name: string, dependencies: Record<string, string> = 
 }
 
 describe('locked host dependency bundles', () => {
+  it('runs the relocated built entry and encodes a picture with its copied native dependencies', async () => {
+    const destination = temporary()
+    const entry = fileURLToPath(new URL('../dist/althar-host.js', import.meta.url))
+    const relocated = join(destination, 'althar-host.mjs')
+    writeFileSync(relocated, readFileSync(entry))
+    await copyDependencies(entry, destination, ['sharp'])
+    const { stdout } = await promisify(execFile)(process.execPath, [relocated, '--help'])
+    expect(stdout).toContain('althar-host')
+    const probe = join(destination, 'picture.mjs')
+    writeFileSync(
+      probe,
+      `import sharp from 'sharp'; console.log((await sharp({ create: { width: 16, height: 16, channels: 3, background: 'red' } }).jpeg().toBuffer()).length)`,
+    )
+    const encoded = await promisify(execFile)(process.execPath, [probe])
+    expect(Number(encoded.stdout.trim())).toBeGreaterThan(0)
+  })
   it('preserves resolution when a nested consumer needs the root version shadowed by its parent', async () => {
     const root = temporary()
     const shared = pkg(root, 'shared')
@@ -48,11 +67,13 @@ describe('locked host dependency bundles', () => {
     writeFileSync(join(root, 'node/LICENSE'), 'Node license')
     pkg(root, '@agentclientprotocol/claude-agent-acp')
     pkg(root, '@agentclientprotocol/codex-acp')
+    pkg(root, 'sharp')
     const destination = join(temporary(), 'release')
     await assembleBundle({ entry, node, version: '1.2.3' }, destination)
     expect(readFileSync(join(destination, 'node/bin/node'), 'utf8')).toBe('node binary')
     expect(readFileSync(join(destination, 'node/LICENSE'), 'utf8')).toBe('Node license')
     expect(readFileSync(join(destination, 'dist/althar-host.js'), 'utf8')).toBe('host code')
+    expect(readFileSync(join(destination, 'node_modules/sharp/index.js'), 'utf8')).toBe('sharp')
     expect(JSON.parse(readFileSync(join(destination, 'package.json'), 'utf8'))).toMatchObject({ type: 'module', version: '1.2.3' })
     const recaptured = join(temporary(), 'release')
     await assembleBundle(
