@@ -121,7 +121,7 @@ describe('release staging without service interruption', () => {
     const asset = { name: `althar-host-linux-${at.oldInfo.arch}.json`, browser_download_url: 'https://updates.example/feed' }
     const fetch = async (url: string) =>
       new Response(
-        url.includes('api.github.com')
+        new URL(url).hostname === 'api.github.com'
           ? JSON.stringify([
               { tag_name: 'v9.0.0', draft: false, prerelease: false, assets: [asset] },
               { tag_name: 'host-v1.0.0', draft: true, prerelease: false, assets: [asset] },
