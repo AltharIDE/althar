@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from '@effect/vitest'
 import { removeTree, waitFor } from '@althar/testing'
 
-import { nativeCommand, nativeMcp, nativePath, nativeTools } from '../src/native/tools'
+import { bounded, nativeCommand, nativeMcp, nativePath, nativeTools } from '../src/native/tools'
 
 const folders: string[] = []
 const folder = async () => {
@@ -216,5 +216,119 @@ describe('Althar’s native tools', () => {
         return true
       }
     }, Boolean)
+  })
+
+  it('truncates long output, refuses edits too large for one change, and lists files without a slash', async () => {
+    const cwd = await folder()
+    expect(bounded('x'.repeat(70_000))).toMatch(/^x{64000}\n\[Output truncated/)
+    const tools = nativeTools(cwd, {})
+    const tool = (name: string) => {
+      const found = tools.find((tool) => tool.name === name)
+      if (!found) throw new Error(name)
+      return found
+    }
+    const huge = 'x'.repeat(4_000_001)
+    await expect(tool('write_file').run({ path: 'huge.txt', content: huge }, signal())).rejects.toThrow('too large')
+    await writeFile(join(cwd, 'huge.txt'), huge)
+    await expect(tool('edit_file').run({ path: 'huge.txt', old_text: 'x', new_text: 'y' }, signal())).rejects.toThrow('too large')
+    expect(await tool('list_directory').run({ path: '.' }, signal())).toBe('huge.txt')
+  })
+
+  it.skipIf(process.platform === 'win32')('refuses a path under a file rather than guessing where it goes', async () => {
+    const cwd = await folder()
+    await writeFile(join(cwd, 'file.txt'), 'a file')
+    await expect(nativePath(cwd, 'file.txt/inside')).rejects.toMatchObject({ code: 'ENOTDIR' })
+  })
+
+  it.skipIf(process.platform === 'win32')('says which signal stopped a command', async () => {
+    const output = await nativeCommand(await folder(), 'kill -9 $$', {}, signal())
+    expect(output.terminal).toMatchObject({ code: null, signal: 'SIGKILL' })
+    expect(output.text).toContain('[Exit SIGKILL]')
+  })
+
+  it('pages through MCP tools, and reads resources, structured results, failures and too many images', async () => {
+    const cwd = await folder()
+    const image = { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }
+    const results: Record<string, unknown> = {
+      described: {
+        content: [{ type: 'resource', resource: { uri: 'file:///note', text: 'A note' } }],
+        structuredContent: { count: 2 },
+      },
+      failing: { content: [{ type: 'text', text: 'It broke.' }], isError: true },
+      silent: { content: [], isError: true },
+      pictures: { content: [image, image, image, image, image] },
+    }
+    const server = createServer(async (request, response) => {
+      if (request.method !== 'POST') {
+        response.writeHead(405).end()
+        return
+      }
+      let data = ''
+      for await (const chunk of request) data += String(chunk)
+      const value = JSON.parse(data) as { id?: number; method: string; params?: { cursor?: string; name?: string } }
+      if (value.id === undefined) {
+        response.writeHead(202).end()
+        return
+      }
+      const result =
+        value.method === 'tools/list'
+          ? value.params?.cursor === 'next'
+            ? { tools: ['failing', 'silent', 'pictures'].map((name) => ({ name, inputSchema: { type: 'object' } })) }
+            : { tools: [{ name: 'described', description: 'Described', inputSchema: { type: 'object' } }], nextCursor: 'next' }
+          : value.method === 'tools/call'
+            ? results[value.params?.name ?? '']
+            : mcpAnswer(value.method)
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: value.id, result }))
+    })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('No test address')
+    try {
+      const mcp = await nativeMcp([{ type: 'http', name: 'paged', url: `http://127.0.0.1:${address.port}`, headers: {} }], cwd, signal())
+      try {
+        expect(mcp.tools.map((tool) => [tool.name, tool.description, tool.writes])).toEqual([
+          ['mcp__paged__described', 'Described', true],
+          ['mcp__paged__failing', 'failing', true],
+          ['mcp__paged__silent', 'silent', true],
+          ['mcp__paged__pictures', 'pictures', true],
+        ])
+        const run = (index: number) => mcp.tools[index]?.run({}, signal())
+        expect(await run(0)).toEqual({
+          text: `${JSON.stringify({ type: 'resource', resource: { uri: 'file:///note', text: 'A note' } })}\n{"count":2}`,
+          images: [],
+        })
+        await expect(run(1)).rejects.toThrow('It broke.')
+        await expect(run(2)).rejects.toThrow('reported a failure')
+        await expect(run(3)).rejects.toThrow('too many or oversized images')
+      } finally {
+        await mcp.close()
+      }
+    } finally {
+      server.closeAllConnections()
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('gives a stdio MCP server the work file, and nothing else of the session’s environment', async () => {
+    const cwd = await folder()
+    const script = join(cwd, 'server.cjs')
+    const seen = join(cwd, 'seen.json')
+    await writeFile(
+      script,
+      `require('node:fs').writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ work: process.env.ALTHAR_WORK, other: process.env.ALTHAR_OTHER ?? null })); let input = ''; process.stdin.on('data', chunk => { input += chunk; let at; while ((at = input.indexOf('\\n')) >= 0) { const line = input.slice(0, at); input = input.slice(at + 1); const value = JSON.parse(line); if (value.id === undefined) continue; const result = (${mcpAnswer.toString()})(value.method); process.stdout.write(JSON.stringify({jsonrpc:'2.0', id:value.id, result}) + '\\n'); } });`,
+    )
+    const mcp = await nativeMcp(
+      [{ type: 'stdio', name: 'fixture', command: process.execPath, args: [script], env: {} }],
+      cwd,
+      signal(),
+      undefined,
+      { ALTHAR_WORK: join(cwd, 'work.md'), ALTHAR_OTHER: 'kept out' },
+    )
+    try {
+      expect(JSON.parse(await readFile(seen, 'utf8'))).toEqual({ work: join(cwd, 'work.md'), other: null })
+    } finally {
+      await mcp.close()
+    }
   })
 })

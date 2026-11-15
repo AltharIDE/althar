@@ -1,7 +1,15 @@
 import { describe, expect, it } from '@effect/vitest'
 
 import type { NativeRequest } from '../src/native/agent'
-import { copilotFailure, copilotModels, copilotReply, copilotRequest } from '../src/native/copilot'
+import {
+  copilotEvents,
+  copilotFailure,
+  copilotModels,
+  copilotProvider,
+  copilotReply,
+  copilotRequest,
+  type CopilotSend,
+} from '../src/native/copilot'
 
 const request = (protocol: 'chat' | 'responses' | 'messages', extra: Partial<NativeRequest> = {}): NativeRequest => ({
   model: { id: 'test-model', name: 'Test', context: 128_000, output: 4096, images: true, protocol },
@@ -215,5 +223,306 @@ describe('Althar’s direct Copilot model connection', () => {
 
   it.each([401, 403, 429, 503])('reports HTTP %s without echoing an untrusted response body', async (status) => {
     await expect(copilotFailure(new Response('do-not-echo-this-token', { status }))).rejects.not.toThrow('do-not-echo-this-token')
+  })
+
+  it('infers each model’s protocol, context, images and efforts from what Copilot lists', () => {
+    const supports = { tool_calls: true }
+    const limits = { max_context_window_tokens: 200_000, max_prompt_tokens: 100, max_output_tokens: 8192 }
+    const model = (id: string, extra: Record<string, unknown> = {}) => ({ id, capabilities: { supports, limits }, ...extra })
+    const listed = copilotModels({
+      data: [
+        model('listed-responses', { supported_endpoints: ['/responses'] }),
+        model('listed-chat', { supported_endpoints: ['/chat/completions'] }),
+        model('gpt-5.1'),
+        model('gpt-5-mini'),
+        model('gpt-4o'),
+        model('grok-code'),
+        model('mai-code-1'),
+        model('claude-thinking', {
+          supported_endpoints: ['/v1/messages'],
+          capabilities: {
+            supports: { ...supports, adaptive_thinking: true, reasoning_effort: ['low', 7, 'high'] },
+            limits: { ...limits, vision: { supported_media_types: ['application/pdf', 'image/png'] } },
+          },
+        }),
+      ],
+    })
+    expect(listed.map((model) => [model.id, model.protocol])).toEqual([
+      ['listed-responses', 'responses'],
+      ['listed-chat', 'chat'],
+      ['gpt-5.1', 'responses'],
+      ['gpt-5-mini', 'chat'],
+      ['gpt-4o', 'chat'],
+      ['grok-code', 'responses'],
+      ['mai-code-1', 'responses'],
+      ['claude-thinking', 'messages'],
+    ])
+    expect(listed[0]).toMatchObject({ name: 'listed-responses', context: 200_000, output: 8192, images: false })
+    expect(listed.at(-1)).toMatchObject({ images: true, efforts: ['low', 'high'], adaptiveThinking: true })
+  })
+
+  it.each([
+    [402, 'usage limit'],
+    [400, 'rejected this request (HTTP 400)'],
+  ])('says what HTTP %s means', async (status, message) => {
+    await expect(copilotFailure(new Response('not json', { status }))).rejects.toThrow(message)
+  })
+
+  it('says the context window is full when Copilot reports it', async () => {
+    await expect(
+      copilotFailure(Response.json({ error: { code: 'model_max_prompt_tokens_exceeded_context' } }, { status: 400 })),
+    ).rejects.toThrow('context window is full')
+  })
+
+  it('encodes images, assistant words and efforts for every protocol', () => {
+    const image = { type: 'image' as const, data: 'aW1hZ2U=', mimeType: 'image/png' }
+    const messages: NativeRequest['messages'] = [
+      { role: 'system', content: 'You are Althar.' },
+      { role: 'user', content: [{ type: 'text', text: 'Look.' }, image] },
+      { role: 'assistant', content: 'Taking a picture.', tools: [{ id: 'picture', name: 'take_picture', input: {} }] },
+      { role: 'tool', toolCallId: 'picture', content: [{ type: 'text', text: 'Taken.' }, image] },
+      { role: 'user', content: 'And now?' },
+    ]
+    expect(copilotRequest(request('responses', { messages, effort: 'low' })).body).toMatchObject({
+      reasoning: { effort: 'low', summary: 'auto' },
+      input: [
+        { role: 'developer', content: [{ type: 'input_text', text: 'You are Althar.' }] },
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'Look.' },
+            { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2U=' },
+          ],
+        },
+        { role: 'assistant', content: [{ type: 'output_text', text: 'Taking a picture.' }] },
+        { type: 'function_call', call_id: 'picture', name: 'take_picture', arguments: '{}' },
+        {
+          type: 'function_call_output',
+          call_id: 'picture',
+          output: [
+            { type: 'input_text', text: 'Taken.' },
+            { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2U=' },
+          ],
+        },
+        { role: 'user', content: [{ type: 'input_text', text: 'And now?' }] },
+      ],
+    })
+    const anthropic = copilotRequest(request('messages', { messages, effort: 'low' })).body
+    expect(anthropic).toMatchObject({
+      system: 'You are Althar.',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Look.' },
+            { type: 'image', source: { type: 'base64', media_type: 'image/png' } },
+          ],
+        },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Taking a picture.' },
+            { type: 'tool_use', id: 'picture' },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'picture' },
+            { type: 'text', text: 'And now?' },
+          ],
+        },
+      ],
+    })
+    expect(anthropic).not.toHaveProperty('thinking')
+    const chat = copilotRequest(request('chat', { messages, effort: 'low', tools: [] })).body
+    expect(chat).toMatchObject({
+      reasoning_effort: 'low',
+      messages: [
+        { role: 'system' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Look.' },
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } },
+          ],
+        },
+        { role: 'assistant', tool_calls: [{ id: 'picture', type: 'function' }] },
+        { role: 'tool', tool_call_id: 'picture', content: 'Taken.' },
+        { role: 'user', content: [{ type: 'image_url' }] },
+        { role: 'user', content: 'And now?' },
+      ],
+    })
+    expect(chat).not.toHaveProperty('tools')
+  })
+
+  it('reads a whole JSON answer as one event, stops at [DONE], and refuses a stream with no body', async () => {
+    const signal = new AbortController().signal
+    const all = async (response: Response) => {
+      const events: unknown[] = []
+      for await (const event of copilotEvents(response, signal)) events.push(event)
+      return events
+    }
+    expect(await all(Response.json({ whole: true }))).toEqual([{ whole: true }])
+    const done = new Response(': comment\n\ndata: {"a":1}\n\ndata: [DONE]\n\ndata: {"b":2}\n\n', {
+      headers: { 'content-type': 'text/event-stream' },
+    })
+    expect(await all(done)).toEqual([{ a: 1 }])
+    await expect(all(new Response(null, { headers: { 'content-type': 'text/event-stream' } }))).rejects.toThrow('empty response stream')
+  })
+
+  it.each([
+    ['length', 'max_tokens'],
+    ['content_filter', 'refusal'],
+  ] as const)('says a Chat answer that finished with %s stopped early', async (finish, stopped) => {
+    const reply = await copilotReply(
+      Response.json({ choices: [{ message: { content: 'Partial' }, finish_reason: finish }] }),
+      request('chat'),
+    )
+    expect(reply).toMatchObject({ text: 'Partial', tools: [], stopped })
+  })
+
+  it('takes a whole Responses answer, its words from its output, and says when it was cut short', async () => {
+    let said = ''
+    const reply = await copilotReply(
+      Response.json({
+        object: 'response',
+        status: 'incomplete',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'From the output.' }, { type: 'refusal' }] }],
+        usage: { input_tokens: 3, output_tokens: 4 },
+      }),
+      request('responses', {
+        onText: (text) => {
+          said += text
+        },
+      }),
+    )
+    expect(said).toBe('From the output.')
+    expect(reply).toMatchObject({ text: 'From the output.', stopped: 'max_tokens', usage: { input: 3, output: 4 } })
+    expect(reply.continuation).toMatchObject({ protocol: 'responses' })
+  })
+
+  it('takes streamed Responses words as they come', async () => {
+    const reply = await copilotReply(
+      stream(
+        { type: 'response.output_text.delta', delta: 'Streamed.' },
+        {
+          type: 'response.incomplete',
+          response: { status: 'incomplete', output: [{ type: 'message', content: [{ type: 'output_text', text: 'Twice' }] }] },
+        },
+      ),
+      request('responses'),
+    )
+    expect(reply).toMatchObject({ text: 'Streamed.', stopped: 'max_tokens' })
+  })
+
+  it.each([
+    ['an error event', 'chat', [{ error: { message: 'secret' } }], 'could not finish'],
+    ['a failed response', 'responses', [{ type: 'response.failed' }], 'could not finish'],
+    [
+      'a delta without its block',
+      'messages',
+      [{ type: 'content_block_delta', index: 3, delta: { type: 'text_delta', text: 'x' } }],
+      'without a content block',
+    ],
+    [
+      'duplicate tool calls',
+      'responses',
+      [
+        {
+          type: 'response.completed',
+          response: {
+            output: [
+              { type: 'function_call', call_id: 'same', name: 'read_file', arguments: '{}' },
+              { type: 'function_call', call_id: 'same', name: 'read_file', arguments: '{}' },
+            ],
+          },
+        },
+      ],
+      'invalid or duplicate',
+    ],
+    [
+      'tool arguments that are not an object',
+      'chat',
+      [
+        {
+          choices: [
+            { delta: { tool_calls: [{ id: 'c', function: { name: 'read_file', arguments: '[1]' } }] }, finish_reason: 'tool_calls' },
+          ],
+        },
+      ],
+      'invalid tool arguments',
+    ],
+  ] as const)('refuses %s', async (_, protocol, events, message) => {
+    await expect(copilotReply(stream(...events), request(protocol))).rejects.toThrow(message)
+  })
+
+  it.each([
+    ['max_tokens', 'max_tokens'],
+    ['refusal', 'refusal'],
+  ] as const)('says an Anthropic answer that stopped for %s stopped early, and keeps its words', async (reason, stopped) => {
+    const reply = await copilotReply(
+      stream(
+        { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Partial' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'unknown_delta' } },
+        { type: 'message_delta', delta: { stop_reason: reason }, usage: { output_tokens: 2 } },
+        { type: 'message_stop' },
+      ),
+      request('messages'),
+    )
+    expect(reply).toMatchObject({ text: 'Partial', stopped, tools: [], continuation: { items: [{ type: 'text', text: 'Partial' }] } })
+  })
+
+  it('takes a whole Anthropic message, with its words and tool calls', async () => {
+    const reply = await copilotReply(
+      Response.json({
+        type: 'message',
+        content: [
+          { type: 'text', text: 'Reading.' },
+          { type: 'tool_use', id: 'call-1', name: 'read_file', input: { path: 'README.md' } },
+        ],
+        usage: { input_tokens: 5, output_tokens: 6 },
+      }),
+      request('messages'),
+    )
+    expect(reply).toMatchObject({
+      text: 'Reading.',
+      tools: [{ id: 'call-1', name: 'read_file', input: { path: 'README.md' } }],
+      usage: { input: 5, output: 6 },
+    })
+  })
+
+  it('asks Copilot through the runtime’s sender, saying when images or a compaction go with it', async () => {
+    const sent: Array<[string, Parameters<CopilotSend>[1]]> = []
+    const answers: Response[] = [
+      new Response('', { status: 401 }),
+      Response.json({ data: [] }),
+      Response.json({
+        data: [
+          { id: 'gpt-4o', capabilities: { supports: { tool_calls: true }, limits: { max_prompt_tokens: 1000, max_output_tokens: 100 } } },
+        ],
+      }),
+      Response.json({ choices: [{ message: { content: 'Summary.' }, finish_reason: 'stop' }] }),
+      new Response('', { status: 403 }),
+    ]
+    const provider = copilotProvider(async (path, input) => {
+      sent.push([path, input])
+      const answer = answers.shift()
+      if (!answer) throw new Error('No answer left')
+      return answer
+    })
+    const signal = new AbortController().signal
+    await expect(provider.models(signal)).rejects.toThrow('authentication required')
+    await expect(provider.models(signal)).rejects.toThrow('no coding models')
+    expect(await provider.models(signal)).toMatchObject([{ id: 'gpt-4o', protocol: 'chat' }])
+    const image = { type: 'image' as const, data: 'aW1hZ2U=', mimeType: 'image/png' }
+    const ask = request('chat', { purpose: 'compaction', messages: [{ role: 'user', content: [{ type: 'text', text: 'Look.' }, image] }] })
+    expect(await provider.complete(ask)).toMatchObject({ text: 'Summary.' })
+    await expect(provider.complete(request('chat'))).rejects.toThrow('access forbidden')
+    expect(sent.map(([path]) => path)).toEqual(['/models', '/models', '/models', '/chat/completions', '/chat/completions'])
+    expect(sent[3]?.[1]).toMatchObject({ vision: true, compaction: true, initiator: 'user', sessionId: 'native-test' })
+    expect(sent[4]?.[1]).toMatchObject({ vision: false })
+    expect(sent[4]?.[1]).not.toHaveProperty('compaction')
   })
 })
