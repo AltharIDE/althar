@@ -556,7 +556,13 @@ const nudged = (event: AttentionEvent) => {
   }
   if (event._tag !== 'Nudge' || typeof event.title !== 'string' || typeof event.body !== 'string' || typeof event.threadId !== 'string')
     return
-  if (!tells(event.kind, preferences) || [...localWindows()].some((window) => window.isFocused()) || !Notification.isSupported()) return
+  const focused = BrowserWindow.getFocusedWindow()
+  if (
+    !tells(event.kind, preferences) ||
+    (focused !== null && homes.state(focused.webContents.id).current.kind === 'local') ||
+    !Notification.isSupported()
+  )
+    return
   const { threadId } = event
   const notification = new Notification({ title: event.title, body: event.body, ...soundOf(preferences) })
   notification.on('click', () => {
