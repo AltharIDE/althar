@@ -49,6 +49,22 @@ const place = () => {
 }
 
 describe("the coordinator's copies", () => {
+  it.effect('finish overlapping refreshes without removing another refresh’s git files', () =>
+    Effect.gen(function* () {
+      const { home, person, copy } = place()
+      const mirror = join(home, 'mirror.git')
+      yield* freshCopy(person, copy, 'main', mirror)
+      yield* Effect.all(
+        Array.from({ length: 3 }, () => freshCopy(person, copy, 'main', mirror)),
+        { concurrency: 'unbounded' },
+      )
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), git(person, 'rev-parse', 'main'))
+      assert.strictEqual(git(copy, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD')
+      assert.strictEqual(git(copy, 'remote', 'get-url', 'origin'), mirror)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+    }),
+  )
+
   it.effect('are repositories of their own: a tag or a fetch there writes only the copy, and brings what Althar fetched', () =>
     Effect.gen(function* () {
       const { person, copy } = place()
