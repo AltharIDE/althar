@@ -171,7 +171,6 @@ export function VersionLine({ version }: { version: number }) {
         flashSteps(changed.map((one) => one.key))
       }}
     >
-      <Icon name="branch" size={12} className={s.versionMark} />
       <span className={s.versionName}>
         {word()} v{version}
       </span>

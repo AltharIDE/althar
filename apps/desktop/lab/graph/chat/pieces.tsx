@@ -413,7 +413,6 @@ export function Kicker({ last, launched, graph }: { last: Version; launched: boo
     )
   return (
     <span className={s.kicker}>
-      <Icon name="branch" size={12} className={s.kickerMark} />
       {word()} · v{last.n}
     </span>
   )

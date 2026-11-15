@@ -1,7 +1,5 @@
 import { type ComponentProps, useRef, useState } from 'react'
 
-import { Icon } from '@althar/ui'
-
 import { Node, openTask, useWidth } from '../graph/parts'
 import { word } from '../plan'
 import { scenario } from '../state'
@@ -149,7 +147,6 @@ function LiveCard() {
 function Folded({ version }: { version: number }) {
   return (
     <div className={s.folded}>
-      <Icon name="branch" size={12} className={s.foldedMark} />
       <span className={s.foldedName}>
         {word()} v{version}
       </span>

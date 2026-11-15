@@ -106,7 +106,6 @@ function Planned_({ open }: { open: boolean }) {
       )}
       <div className={s.line}>
         <button type="button" className={s.fold} aria-expanded={open} onClick={() => dockOpen.set((was) => !was)}>
-          <Icon name="branch" size={12} className={s.mark} />
           <span className={s.name}>{scenario().name}</span>
           <span className={s.meta}>
             v{last.n} · {count} tasks
@@ -189,7 +188,6 @@ export function DockLine({ version }: { version: number }) {
         flashSteps(changed.map((one) => one.key))
       }}
     >
-      <Icon name="branch" size={12} className={s.versionMark} />
       <span className={s.versionName}>
         {word()} v{version}
       </span>
