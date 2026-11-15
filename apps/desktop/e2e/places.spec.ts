@@ -5,18 +5,11 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, startTask, still } from './support'
+import { launch, openFirstProject, showPanes, startTask, still } from './support'
 
-/*
- * Who holds the places a waiting task waits for (ADR-032): with one agent at a
- * time, a task whose lead finished but left a dev server running keeps its
- * place (the fake agent is no process of its own here, so its CPU can't be
- * read and it counts), the next task's plan waits, and its card names the one
- * that holds it and the server, which it can stop from there: the waiting task
- * then starts on its own.
- */
+/* A finished preview stays available without holding a place; a live lead names the place queued work waits for. */
 
-test('names the task whose server keeps a place, and stops it from the plan that waits', async () => {
+test('frees a finished preview’s place, names the live holder, and starts waiting work when it stops', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
@@ -39,24 +32,26 @@ test('names the task whose server keeps a place, and stops it from the plan that
 
     await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
-    await startTask(page, 'Add a retry to checkout', '[lead:finish]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/).first()).toBeVisible()
-
-    // Its plan card, not started, says who holds the place: the server that keeps it, with the task it is from.
-    const pill = page.getByRole('button', { name: /^Keeping a place/ })
-    await expect(pill).toBeVisible()
-    await pill.click()
-    await expect(page.getByRole('dialog', { name: 'Keeping a place' })).toContainText('Serve the prototype')
-    await still(page)
-    await page.screenshot({ path: 'test-results/places-waiting.png', fullPage: true })
-
-    // Stopped from here, the place frees and the waiting task starts on its own.
-    await page.getByRole('dialog', { name: 'Keeping a place' }).getByRole('button', { name: /^Stop/ }).click()
+    await startTask(page, 'Add a retry to checkout', '[lead:wait]')
+    await expect(page.getByRole('article', { name: 'Add a retry to checkout', exact: true })).toContainText('Running')
     await expect(page.getByText(/^Waiting: /)).toHaveCount(0)
-    await expect(pill).toHaveCount(0)
+    await startTask(page, 'Tidy checkout tests', '[lead:finish]')
+    await expect(page.getByText('Waiting: 1 of 1 agents busy on this Mac: Add a retry to checkout')).toBeVisible()
+
+    await expect(page.getByRole('button', { name: /^Keeping a place/ })).toHaveCount(0)
+    await still(page)
+    await page.screenshot({ path: 'test-results/places-waiting.png', scale: 'css', animations: 'disabled' })
+
+    await showPanes(page, { conversation: false, board: true })
+    await page.getByRole('region', { name: 'Running' }).getByRole('button', { name: 'Add a retry to checkout', exact: true }).click()
+    await page.getByRole('button', { name: 'More for this task' }).click()
+    await page.getByRole('menuitem', { name: /Stop the task/ }).click()
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await showPanes(page, { conversation: true, board: false })
+    await expect(page.getByText(/^Waiting: /)).toHaveCount(0)
     await expect(page.getByText('Ready', { exact: true })).toHaveCount(2)
     await still(page)
-    await page.screenshot({ path: 'test-results/places-started.png', fullPage: true })
+    await page.screenshot({ path: 'test-results/places-started.png', scale: 'css', animations: 'disabled' })
   } finally {
     await electronApp.close()
   }
