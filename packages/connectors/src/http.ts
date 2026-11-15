@@ -179,7 +179,7 @@ const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optio
 /** Host errors are text, including HTML embedded inside a JSON message. Remove markup before decoding escaped text. */
 export const plainError = (value: string): string =>
   value
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>|<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>|<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, ' ')
     .replace(/<\/?[a-z][a-z0-9-]*(?:\s[^<>]*|\s*\/?)>/gi, ' ')
     .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_, code: string) => {
       const n = code[0]?.toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : Number(code)

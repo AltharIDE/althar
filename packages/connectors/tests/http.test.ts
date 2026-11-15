@@ -51,6 +51,8 @@ it('turns HTML in host JSON and GraphQL errors into plain words and keeps the up
   )
   assert.strictEqual(messageOf(JSON.stringify({ message: 'a < b and c > d' }), 'Error'), 'a < b and c > d')
   assert.strictEqual(graphqlFailure('github', { message: '<b>Denied</b>' }, 200).message, 'Denied')
+  for (const tag of ['script', 'style'])
+    assert.strictEqual(messageOf(JSON.stringify({ message: `Denied <${tag}>hidden</${tag}\t\n bar> by host` }), 'Error'), 'Denied by host')
   assert.strictEqual(messageOf('<html><body>Bad gateway</body></html>', 'Bad gateway'), 'Bad gateway')
 })
 
