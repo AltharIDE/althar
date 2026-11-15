@@ -18,6 +18,7 @@ import {
 import { States, statesParameters } from '../../storybook/States'
 import { ChangeState, CheckState } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
+import { MergeButton } from '../../primitives/MergeButton/MergeButton'
 import { visiblePath } from '../../primitives/Path/Path'
 import { ChangeSet, foldersOf, groupsOf } from './ChangeSet'
 
@@ -62,6 +63,31 @@ type Story = StoryObj<typeof meta>
 export const Ready: Story = {}
 /** Alone on the page: the button beside what it acts on, at its own width. */
 export const ReadyAlone: Story = { parameters: { width: ALONE } }
+/** One repository, Accept and merge with its chevron: the split button spans the card like a lone button. */
+export const MergeAlone: Story = {
+  args: {
+    ...ONE_REPO,
+    actions: (
+      <MergeButton variant="signal" onMerge={accept} onBypassQueue={accept}>
+        Accept and merge
+      </MergeButton>
+    ),
+  },
+}
+/** Two actions, the split one beside another: each takes half. */
+export const MergeBesideAnother: Story = {
+  args: {
+    ...ONE_REPO,
+    actions: (
+      <>
+        <Button onClick={open}>Send back</Button>
+        <MergeButton variant="signal" onMerge={accept} onBypassQueue={accept}>
+          Accept and merge
+        </MergeButton>
+      </>
+    ),
+  },
+}
 /** Two reviewers, as a list: GPT-5.2 Codex and Claude Opus 5, each mark beside its own name. */
 export const TwoReviewers: Story = {
   args: { ...CHANGE_READY, review: { state: CheckState.Passed, by: [CODEX, OPUS] } },
