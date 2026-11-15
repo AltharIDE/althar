@@ -309,14 +309,19 @@ function First({
     return connection.state === 'ready' && service !== undefined && hostsCode(service)
   })
   // A first run starts on a folder of this computer's, unless a code host is connected and there's nothing here to offer.
-  const way = draft?.way ?? (codeHosts.length > 0 && project.candidates !== null && project.candidates.length === 0 ? 'clone' : 'folder')
+  // Made, its draft is gone: the way it was made from stays, and with it the steps after.
+  const [madeWay, setMadeWay] = useState<Draft['way']>(null)
+  const way =
+    madeWay ?? draft?.way ?? (codeHosts.length > 0 && project.candidates !== null && project.candidates.length === 0 ? 'clone' : 'folder')
   const folderWay = way === 'folder'
   const make = () =>
     void (
       folderWay || draft === null ? project.make() : draftActions(services).create(inkOf(draft, []), { publish: null, tracker: null })
     ).then((one) => {
       if (one === null) return
-      store.end()
+      setMadeWay(way)
+      // Made, its draft stays on show, as what it was made from, until the welcome goes; it has no tab of its own.
+      if (draft !== null) store.change(draft.id, (now) => ({ ...now, made: true }))
       setMade(one)
     })
   const open = () => {

@@ -374,7 +374,7 @@ export function Welcome({
     setNothing(false)
     onCreate()
   }
-  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating, last: at === steps.length - 1 })
+  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating, last: at === steps.length - 1, made })
   const title = isTour(step) ? t.tour[step].title : step === 'project' && over ? t.project.over : t[step].title
 
   return (
@@ -524,6 +524,7 @@ function mainOf(
     readonly creating: boolean
     /** The last step: it opens the project. */
     readonly last: boolean
+    readonly made: boolean
   },
 ): Main {
   const open = { label: w.t.issues.open(w.name.trim() === '' ? w.t.issues.theProject : w.name.trim()), act: w.onOpen }
@@ -537,6 +538,8 @@ function mainOf(
     case 'agents':
       return w.ready > 0 ? { label: w.t.agents.go, act: w.next } : { label: w.t.agents.without, act: w.next, quiet: true }
     case 'project':
+      // Made, with no step after it, as a clone with no tracker to connect: it opens.
+      if (w.made && w.last) return open
       return { label: w.t.project.make, act: w.make, busy: w.creating, kbd: w.t.project.makeKbd }
     case 'code':
       if (w.last) return open

@@ -280,7 +280,6 @@ test('the first run starts empty: named first, placed, and made a repository wit
     // Chosen by the keyboard, as a radio group is: focus shows on the way, uncut.
     await way(page, /^A folder/).focus()
     await page.keyboard.press('ArrowRight')
-    await page.keyboard.press('ArrowRight')
     await expect(way(page, /^Start empty/)).toHaveAttribute('aria-checked', 'true')
     await expect(way(page, /^Start empty/)).toBeFocused()
     await expect(page.getByRole('button', { name: 'Name it first' })).toBeDisabled()
@@ -326,7 +325,8 @@ test('the first run clones an empty repository from GitHub, gives it a first com
     await page.getByRole('button', { name: 'Check' }).click()
     await page.getByRole('button', { name: 'Done' }).click()
     await page.getByRole('button', { name: 'Clone meridian/api' }).click()
-    await expect(page.getByText('On GitHub, at meridian/api. Tasks open pull requests there.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Chosen meridian/api' })).toBeVisible()
+    await expect(page.getByText('Into ~/code')).toBeVisible()
     await shoot(page, '16-first-run-clone-chosen')
     await page.emulateMedia({ colorScheme: 'dark' })
     await shoot(page, '16-first-run-clone-chosen-dark')
