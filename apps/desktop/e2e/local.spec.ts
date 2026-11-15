@@ -27,6 +27,15 @@ const git = (cwd: string, ...args: Array<string>) =>
 const blockWith = (page: Page, ...parts: Array<Locator>) =>
   parts.reduce((block, part) => block.filter({ has: part }), page.locator('div').filter({ visible: true })).last()
 
+/** Photograph a complete plan held still: its real countdown can otherwise start it between the light and dark shots. */
+const holdForShot = async (page: Page) => {
+  await expect(page.getByRole('button', { name: 'Start now', exact: true }).last()).toBeVisible()
+  await page.getByRole('button', { name: 'Hold', exact: true }).last().click()
+  const start = page.getByRole('button', { name: 'Start', exact: true }).last()
+  await expect(start).toBeVisible()
+  return start
+}
+
 /** One part of the window at 1×, light and then dark. */
 const shoot = async (page: Page, part: Locator, name: string) => {
   await part.scrollIntoViewIfNeeded()
@@ -72,8 +81,9 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await planTask(page, 'Fix the login', '[lead:wait]')
     const worksIn = page.getByRole('radiogroup', { name: 'Works in' }).last()
     await expect(worksIn.getByRole('radio', { name: 'Local' })).toHaveAttribute('aria-checked', 'true')
-    await shoot(page, blockWith(page, worksIn, page.getByRole('button', { name: 'Start now' })), 'plan')
-    await page.getByRole('button', { name: 'Start now' }).last().click()
+    const start = await holdForShot(page)
+    await shoot(page, blockWith(page, worksIn, start), 'plan')
+    await start.click()
 
     // It asks before it takes the checkout, in its thread; nothing switches under the edit.
     await page
@@ -106,8 +116,9 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await planTask(page, 'Dark mode for Settings', '[lead:finish]')
     const taken = page.getByText('Waits for Fix the login.').filter({ visible: true }).last()
     await expect(taken).toBeVisible()
+    const startWaiting = await holdForShot(page)
     await shoot(page, blockWith(page, page.getByRole('radiogroup', { name: 'Works in' }), taken), 'plan-taken')
-    await page.getByRole('button', { name: 'Start now' }).last().click()
+    await startWaiting.click()
     await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     const next = work.getByRole('region', { name: 'Up next' })
