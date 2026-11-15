@@ -38,16 +38,6 @@ export interface AtOnceDefault {
   readonly byMemory: number
 }
 
-/** How many may be at once, and why. */
-export interface AtOnce {
-  /** The person's number, else the default. */
-  readonly count: number
-  /** The person's own number; null where they left the default. */
-  readonly own: number | null
-  /** The default, worked out at this launch from this machine's cores and memory. */
-  readonly machine: AtOnceDefault
-}
-
 /** How many tasks may be at work at once on `machine`, unless the person says otherwise, and why. */
 export const atOnceFor = (machine: Machine): AtOnceDefault => {
   const cores = Math.max(0, Math.floor(machine.cores))

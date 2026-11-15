@@ -391,15 +391,6 @@ describe('the process transport', () => {
 })
 
 describe('childEnvironment', () => {
-  it('keeps a session’s test worker limit through child launches and lets a new session replace it', () => {
-    const spec = { command: 'agent', args: [] }
-    const inherited = childEnvironment(spec, { VITEST_MAX_WORKERS: '2', ALTHAR_DATABASE: 'private' }, false)
-    assert.deepStrictEqual(inherited, { VITEST_MAX_WORKERS: '2' })
-    assert.deepStrictEqual(childEnvironment({ ...spec, env: { VITEST_MAX_WORKERS: '1' } }, inherited, false), {
-      VITEST_MAX_WORKERS: '1',
-    })
-  })
-
   const parent = {
     PATH: '/usr/bin',
     HOME: '/Users/someone',

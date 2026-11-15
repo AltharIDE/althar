@@ -13,9 +13,9 @@
     "site": "bun --filter @althar/site dev",
     "build": "bun --filter '*' build",
     "check": "bun --filter '*' check",
-    "test": "bun packages/testing/src/workspaces.ts test",
+    "test": "bun --filter '*' test",
     "test:e2e": "bun --filter '*' test:e2e",
-    "verify": "bun packages/testing/src/workspaces.ts verify",
+    "verify": "bun --filter '*' verify",
     "prepare": "vp config --no-agent",
     "fix": "bun --filter '*' fix"
   },
