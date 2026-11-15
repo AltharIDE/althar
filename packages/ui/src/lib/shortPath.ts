@@ -15,8 +15,14 @@ export interface PathParts {
   end: string
 }
 
-/** A Windows path: by its drive or share, or by having backslashes and no forward slash. Elsewhere a backslash is part of a name. */
-const isWindows = (path: string) => /^([A-Za-z]:[\\/]|\\\\)/.test(path) || (path.includes('\\') && !path.includes('/'))
+/**
+ * A Windows path: by its drive or share, by having backslashes and no forward
+ * slash, or, mixed, by having several backslashes ("packages/ui\\src\\a.ts");
+ * one backslash among forward slashes is taken as part of a name, as a POSIX
+ * name may hold one.
+ */
+const isWindows = (path: string) =>
+  /^([A-Za-z]:[\\/]|\\\\)/.test(path) || (path.includes('\\') && !path.includes('/')) || path.split('\\').length > 2
 
 /** A path in its folders and its end: a trailing separator makes the last folder the end. A Windows path parts at its backslashes as well as its slashes. */
 export function partsOf(path: string): PathParts {

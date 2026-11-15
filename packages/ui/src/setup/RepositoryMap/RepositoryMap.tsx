@@ -485,7 +485,9 @@ export function RepositoryMap({
                 <Spinner size="small" />
                 <span className={s.name}>{folder.name}</span>
               </div>
-              <span className={s.where}>{folder.where}</span>
+              <span className={s.where}>
+                <Path path={folder.where} />
+              </span>
               <span className={s.readingNote}>{t.reading}</span>
             </li>
           ))}

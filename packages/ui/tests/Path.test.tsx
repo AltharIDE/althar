@@ -28,6 +28,10 @@ describe('partsOf', () => {
     expect(partsOf('packages\\ui\\a.ts')).toEqual({ folders: ['packages\\', 'ui\\'], end: 'a.ts' })
   })
 
+  it('parts a relative Windows path that mixes both slashes, by its several backslashes', () => {
+    expect(partsOf('packages/ui\\src\\Coordinator.ts')).toEqual({ folders: ['packages/', 'ui\\', 'src\\'], end: 'Coordinator.ts' })
+  })
+
   it('leaves a backslash in a name where the path is not a Windows one', () => {
     expect(partsOf('src/we\\ird.ts')).toEqual({ folders: ['src/'], end: 'we\\ird.ts' })
     expect(partsOf('we\\ird')).toEqual({ folders: ['we\\'], end: 'ird' })
