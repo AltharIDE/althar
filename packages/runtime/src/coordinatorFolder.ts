@@ -11,6 +11,7 @@ import { GitFailed, NotFound } from './errors'
 import { commitOf, git, gitWithin } from './git'
 import { Instance } from './Instance'
 import { startOf } from './Projects'
+import { makeKeyedLock } from './keyedLock'
 
 /*
  * The coordinator's working folder (docs/architecture/04): an Althar-owned
@@ -228,41 +229,47 @@ export const freshCopy = (repository: string, path: string, base: string, from =
     yield* copyAt(repository, path, commit, from)
   })
 
+/** A turn ending and a replacement session starting can refresh the same copy; neither may remove the other's git folder. */
+const copies = makeKeyedLock()
+
 /**
  * A copy of `repository` at `path`, detached at `commit`, as `freshCopy`
  * makes one: its git folder made again, borrowing the repository's objects,
  * and anything written in it since thrown away, but what git ignores.
  */
 export const copyAt = (repository: string, path: string, commit: string, from = repository) =>
-  Effect.gen(function* () {
-    const objects = yield* objectsOf(repository)
-    if (from !== repository) yield* freshMirror(repository, from)
-    yield* clearedFor(repository, path)
-    // No template: no sample hooks, nothing but what git needs.
-    yield* git(path, 'init', '--quiet', '--template=', ...(commit.length === 64 ? ['--object-format=sha256'] : []))
-    yield* borrow(join(path, '.git'), objects)
-    yield* git(path, 'config', 'remote.origin.url', from)
-    for (const refspec of MIRRORED) yield* git(path, 'config', '--add', 'remote.origin.fetch', refspec)
-    // A tag made in the copy isn't signed with the person's key, whatever their own config says.
-    yield* git(path, 'config', 'tag.gpgSign', 'false')
-    yield* git(path, 'config', 'commit.gpgSign', 'false')
-    // Its unborn branch may be one it fetches.
-    yield* git(path, 'fetch', '--quiet', '--update-head-ok', 'origin')
-    // The index the last copy ended with, kept beside the mirror, where only Althar writes: with it, checking the copy out again
-    // compares each file with what it was, rather than writing every one afresh, which is most of a refresh in a large repository.
-    // Only what was written in the copy since is put back. One kept in the copy itself could have been changed there.
-    const kept = from === repository ? null : `${from.replace(/\.git$/, '')}.index`
-    const index = join(path, '.git', 'index')
-    if (kept !== null) yield* Effect.ignore(Effect.try(() => copyFileSync(kept, index)))
-    const checkedOut = yield* Effect.exit(git(path, 'checkout', '--quiet', '--detach', '--force', commit))
-    // An index git can't read is no help: checked out again without it, as before.
-    if (checkedOut._tag === 'Failure') {
-      yield* Effect.ignore(removeFully(index))
-      yield* git(path, 'checkout', '--quiet', '--detach', '--force', commit)
-    }
-    yield* git(path, 'clean', '-fdq')
-    if (kept !== null) yield* Effect.ignore(Effect.try(() => copyFileSync(index, kept)))
-  })
+  copies.withLock(
+    resolve(path),
+    Effect.gen(function* () {
+      const objects = yield* objectsOf(repository)
+      if (from !== repository) yield* freshMirror(repository, from)
+      yield* clearedFor(repository, path)
+      // No template: no sample hooks, nothing but what git needs.
+      yield* git(path, 'init', '--quiet', '--template=', ...(commit.length === 64 ? ['--object-format=sha256'] : []))
+      yield* borrow(join(path, '.git'), objects)
+      yield* git(path, 'config', 'remote.origin.url', from)
+      for (const refspec of MIRRORED) yield* git(path, 'config', '--add', 'remote.origin.fetch', refspec)
+      // A tag made in the copy isn't signed with the person's key, whatever their own config says.
+      yield* git(path, 'config', 'tag.gpgSign', 'false')
+      yield* git(path, 'config', 'commit.gpgSign', 'false')
+      // Its unborn branch may be one it fetches.
+      yield* git(path, 'fetch', '--quiet', '--update-head-ok', 'origin')
+      // The index the last copy ended with, kept beside the mirror, where only Althar writes: with it, checking the copy out again
+      // compares each file with what it was, rather than writing every one afresh, which is most of a refresh in a large repository.
+      // Only what was written in the copy since is put back. One kept in the copy itself could have been changed there.
+      const kept = from === repository ? null : `${from.replace(/\.git$/, '')}.index`
+      const index = join(path, '.git', 'index')
+      if (kept !== null) yield* Effect.ignore(Effect.try(() => copyFileSync(kept, index)))
+      const checkedOut = yield* Effect.exit(git(path, 'checkout', '--quiet', '--detach', '--force', commit))
+      // An index git can't read is no help: checked out again without it, as before.
+      if (checkedOut._tag === 'Failure') {
+        yield* Effect.ignore(removeFully(index))
+        yield* git(path, 'checkout', '--quiet', '--detach', '--force', commit)
+      }
+      yield* git(path, 'clean', '-fdq')
+      if (kept !== null) yield* Effect.ignore(Effect.try(() => copyFileSync(index, kept)))
+    }),
+  )
 
 /** Where a project's coordinator folder is, by the project's slug: its copies are in it, each by its repository's. */
 export const coordinatorFolderAt = (worktreeRoot: string, slug: string) => join(worktreeRoot, slug, '.coordinator')

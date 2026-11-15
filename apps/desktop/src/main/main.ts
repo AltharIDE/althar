@@ -13,10 +13,11 @@ import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, theme
 import { CHROME_ARG, decideChrome, type DesktopChrome, parseHexAccent } from './desktop'
 import { chromeOf, FIRST_CHROME_WAIT, type FollowedChrome, followDesktopChrome, systemSources } from './desktopChrome'
 import { keepingAwake } from './awake'
-import { bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
+import { availableWindows, bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
 import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
+import { crashConsent } from './crashConsent'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
@@ -132,7 +133,7 @@ let quitting = false
 let quitConfirmed = false
 /* Quit asked what it stops and is waiting on the person: another Quit meanwhile is their yes. */
 let quitAsking: { readonly settle: (answer: QuitAnswer) => void } | undefined
-/* The person chose to keep working in the background: closing the last window doesn't quit, until a window opens again. */
+/* The person chose to keep working in the background: closing the last window doesn't quit, even after reopening it. */
 let keepingOn = false
 let dictation: ReturnType<typeof startDictation> | undefined
 
@@ -325,6 +326,7 @@ let waiting = 0
  * as kept. A change waits for that read, so the read can't undo it.
  */
 let preferences: AppPreferences = DEFAULT_PREFERENCES
+const crashPolicy = crashConsent(() => preferences.crashReports && !doNotTrack(process.env))
 
 /*
  * Light, dark or as the system is (Settings › Appearance): Electron's nativeTheme is told, and every window's page
@@ -346,6 +348,7 @@ if (process.platform === 'linux') {
 
 const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   preferences = kept
+  keepingOn = kept.keepWorkingOnClose
   awake.wants(kept)
   applyAppearance()
   // A count the runtime gave before the file was read is shown again as the person has it.
@@ -424,7 +427,8 @@ const crashes = Promise.all([install, ready]).then(([install]) => {
     ...usageTarget,
     installId: install.id,
     app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
-    allowed: () => preferences.crashReports && !doNotTrack(process.env),
+    allowed: crashPolicy.allowed,
+    generation: crashPolicy.generation,
     fetch: (url, options) => net.fetch(url, options),
     mask: maskHere,
   })
@@ -436,7 +440,15 @@ const crashes = Promise.all([install, ready]).then(([install]) => {
   return sender
 })
 /** Reports a crash once the sender is there; reporting never fails into what failed. */
-const reportCrash = (report: (sender: CrashReports) => void) => void crashes.then(report).catch(() => undefined)
+const reportCrash = (report: (sender: CrashReports) => void) => {
+  if (!crashPolicy.allowed()) return
+  const accepted = crashPolicy.generation()
+  void crashes
+    .then((sender) => {
+      if (crashPolicy.allowed() && crashPolicy.generation() === accepted) report(sender)
+    })
+    .catch(() => undefined)
+}
 /** Lets crash reports and usage data on their way go, a few seconds at most. */
 const sendersStopped = () =>
   Promise.race([
@@ -461,6 +473,7 @@ app.on('child-process-gone', (_event, details) => {
 
 /* Althar's own windows, apart from the edge's pages. */
 const windows = new Set<BrowserWindow>()
+const closingWindows = new WeakSet<BrowserWindow>()
 let edge: Edge | undefined
 
 /* The pages beside the conversations (browser/pages.ts), once the app is ready. */
@@ -487,7 +500,7 @@ const ownersIn = (said: unknown): ReadonlyArray<string> =>
 
 /** Brings Althar's window forward, a window there is or a new one, from wherever the person is. */
 const bringForward = () => {
-  return raiseWindow(windows, openWindow, () => app.focus({ steal: true }), quiet)
+  return raiseWindow(availableWindows(windows, closingWindows), openWindow, () => app.focus({ steal: true }), quiet)
 }
 
 /** Opens the window on a thread, as a notification or the edge asks. */
@@ -849,7 +862,7 @@ const openWindow = () => {
   }
   windows.add(window)
   window.on('focus', () => focusedLast(windows, window))
-  keepingOn = false
+  window.on('close', () => closingWindows.add(window))
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
   window.on('maximize', () => window.webContents.send('althar:maximized', true))
   window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
@@ -1014,11 +1027,18 @@ ipcMain.handle('althar:preferences', async () => {
 })
 ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unknown) => {
   if (!isPreferenceKey(key)) throw new Error(`Althar has no preference ${String(key)}.`)
-  await preferencesRead
-  // Merged into the preferences as they stand once it is kept, so changes made together each stay.
-  const kept = await writeAppPreference(locations().profile, key, value)
-  preferences = { ...preferences, [key]: kept }
+  // Stop crash reporting before any asynchronous work, including the preference's disk write.
+  const finish = key === 'crashReports' && typeof value === 'boolean' ? crashPolicy.changing() : undefined
+  try {
+    await preferencesRead
+    // Merged into the preferences as they stand once it is kept, so changes made together each stay.
+    const kept = await writeAppPreference(locations().profile, key, value)
+    preferences = { ...preferences, [key]: kept }
+  } finally {
+    finish?.()
+  }
   if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
+  if (key === 'keepWorkingOnClose') keepingOn = preferences.keepWorkingOnClose
   awake.wants(preferences)
   if (key === 'appearance') applyAppearance()
   if (key === 'showLoad') meterLoad(runtime)
@@ -1232,7 +1252,7 @@ void ready.then(() => {
   app.on('browser-window-blur', focusChanged)
   focusChanged()
   app.on('activate', () => {
-    if (windows.size === 0) openWindow()
+    if (availableWindows(windows, closingWindows).size === 0) openWindow()
   })
 })
 
@@ -1320,11 +1340,19 @@ const askToQuit = async () => {
       answer = await askInWindow({ work: work ?? NOT_COUNTED, background, update: updates?.glance().ready ?? null }, asked)
     }
     if (answer === 'quit') {
+      preferences = { ...preferences, keepWorkingOnClose: false }
+      await writeAppPreference(locations().profile, 'keepWorkingOnClose', false).catch((error: unknown) =>
+        logs.error('Could not remember the close choice', { error: String(error) }),
+      )
       quitConfirmed = true
       app.quit()
     } else if (answer === 'background') {
       keepingOn = true
+      preferences = { ...preferences, keepWorkingOnClose: true }
       for (const window of windows) window.close()
+      await writeAppPreference(locations().profile, 'keepWorkingOnClose', true).catch((error: unknown) =>
+        logs.error('Could not remember the close choice', { error: String(error) }),
+      )
     } else if (windows.size === 0 && process.platform !== 'darwin') {
       // The window that asked was closed, which is a Cancel; with no edge page either, Althar would be left with nothing to see.
       bringForward()

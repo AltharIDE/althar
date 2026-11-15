@@ -608,3 +608,11 @@ button.gap:focus-visible {
   background: var(--named-line);
   box-shadow: inset 0 0 0 1px var(--named-edge);
 }
+
+/* a markdown file as a page: it scrolls on its own, and its tints reach into the margin */
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 20px 24px;
+}

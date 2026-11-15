@@ -60,6 +60,7 @@ import { refusalOf, runSkills, type RunSkills } from './Skills'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { coordinatorRow, forgetItems } from './chatView'
+import { type Accepting, acceptingOf } from './admission'
 import { checkpointBeforeTurn, checkpointAfterTurn, recoverTurnUndo, undoConversation, undoTarget, canUndoTask } from './turnUndo'
 import { dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
 import { notesOf } from './notes'
@@ -847,6 +848,12 @@ export class Sessions extends Context.Service<
     retryable(threadId: string): Effect.Effect<boolean, SqlError.SqlError>
     /** Serializes preparation and acceptance in arrival order, holding delivery until the whole burst is ready. */
     accepting<A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
+    /**
+     * Whether a new message waits behind work already claimed on this thread
+     * (`queued`) or is taken as the next turn (`now`). The window draws an
+     * optimistic send from the same answer (`snapshot.accepting`).
+     */
+    placement(threadId: string): Effect.Effect<Accepting, SqlError.SqlError>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
       readonly envelope: CommandEnvelope
@@ -2730,7 +2737,41 @@ export class Sessions extends Context.Service<
           )
         })
 
-      /** Whether the thread has input waiting to be delivered. */
+      /**
+       * Whether a new message waits behind work already claimed: a turn
+       * running or still preparing its prompt, a handover (under way, or due
+       * on the next message), a compaction waiting, or no session held while
+       * the thread waits for a place. A session merely starting is not work
+       * ahead: what the person sends then is the turn that start reads, and
+       * shows in the thread. The window reads the same answer as
+       * `snapshot.accepting`.
+       */
+      const placement = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const running = threads.get(threadId)
+          const [claimed] = yield* sql<{ one: number }>`SELECT 1 AS one FROM turn_deliveries
+            WHERE thread_id = ${threadId} AND state IN ('pending', 'delivered') LIMIT 1`
+          const [waiting] = yield* sql<{ waits: string | null }>`SELECT waits_for_place AS waits FROM threads WHERE id = ${threadId}`
+          // No session holds the thread, and its task waits for a place of its own to start one.
+          const [busy] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM node_attempts a
+            JOIN nodes n ON n.id = a.node_id
+            JOIN workflow_executions e ON e.id = n.execution_id
+            JOIN runs r ON r.id = e.run_id
+            JOIN threads h ON h.task_id = r.task_id
+            WHERE h.id = ${threadId} AND a.state = 'held' AND a.hold_reason = 'machine_busy' LIMIT 1`
+          return acceptingOf({
+            turnRunning: running?.turnRunning === true,
+            handingOver: running?.handover === 'under_way',
+            nextLead: running?.nextLead !== undefined,
+            moved: running?.moved === true,
+            claimed: claimed !== undefined,
+            compactQueued: yield* compactQueued(threadId),
+            waitingForPlace: running === undefined && (waiting?.waits != null || busy !== undefined),
+          })
+        })
+
       /** Whether a compaction (`COMPACT`) waits anywhere in the thread's queue: a handover waits for it (ADR-039). */
       const compactQueued = (threadId: string) =>
         run(
@@ -3113,6 +3154,68 @@ export class Sessions extends Context.Service<
           const web = !offline ? ((yield* policies.current(thread.projectId)).rules.leadsReachWeb ?? true) : false
           const transportOptions: SessionOptions = {
             web,
+            ...(definition.native === 'copilot'
+              ? {
+                  nativeProcesses: {
+                    starting: (command: string) =>
+                      Effect.runPromise(
+                        run(
+                          Effect.gen(function* () {
+                            const id = yield* newId(Ids.process)
+                            yield* sql`INSERT INTO processes ${sql.insert({
+                              id,
+                              projectId: thread.projectId,
+                              deviceId: instance.deviceId,
+                              runtimeInstanceId: instance.id,
+                              providerSessionId: sessionId,
+                              purpose: 'other',
+                              executable: command,
+                              argsRedacted: '[]',
+                              controllerGeneration: 1,
+                              state: 'launching',
+                              launchedAt: yield* timestamp,
+                            })}`
+                            return id
+                          }),
+                        ),
+                      ),
+                    started: (
+                      id: string,
+                      process: { readonly pid: number; readonly osStartedAt?: string; readonly environmentDigest: string },
+                    ) =>
+                      Effect.runPromise(
+                        run(
+                          change('processes', id, {
+                            pid: process.pid,
+                            processGroupId: process.pid,
+                            osStartedAt: process.osStartedAt ?? null,
+                            environmentDigest: process.environmentDigest,
+                            state: 'running',
+                          }).pipe(Effect.asVoid),
+                        ),
+                      ),
+                    stopped: (id: string, report?: { readonly signal: string; readonly survivors: boolean }) =>
+                      Effect.runPromise(
+                        run(
+                          Effect.gen(function* () {
+                            yield* change('processes', id, {
+                              state:
+                                report === undefined
+                                  ? 'unknown'
+                                  : report.survivors
+                                    ? 'running'
+                                    : report.signal === 'none'
+                                      ? 'exited'
+                                      : 'killed',
+                              endedAt: report?.survivors ? null : yield* timestamp,
+                              signal: report?.signal ?? null,
+                            })
+                          }),
+                        ),
+                      ),
+                  },
+                }
+              : {}),
             ...(untrusted ? { untrusted } : {}),
             ...(untrusted && offline ? { offline } : {}),
             ...(skills === undefined ? {} : { skills: skills.folder }),
@@ -3528,8 +3631,8 @@ export class Sessions extends Context.Service<
           // A turn that already started records itself; between turns, this one does.
           running.recording ??= between
           // An agent that doesn't say what it could see: read where it reads, out on the device as a Flatpak's home is the device's by path (ADR-027). A review's lead loads none of the repository's.
-          const launched = definition.launch(adapterNode())
-          if (thread.role === 'task' && thread.review === null && definition.skillFolders !== undefined)
+          if (thread.role === 'task' && thread.review === null && definition.skillFolders !== undefined) {
+            const launched = definition.launch(adapterNode())
             yield* between
               .record({
                 _tag: 'SkillsSeen',
@@ -3543,6 +3646,7 @@ export class Sessions extends Context.Service<
                 ),
               })
               .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the skills an agent could see', cause)))
+          }
           yield* Effect.forkIn(
             run(
               Stream.runForEach(agent.events, (event) =>
@@ -3780,6 +3884,9 @@ export class Sessions extends Context.Service<
           })
         })
 
+      // Always inserts `queued`. Whether the window draws that as the composer
+      // queue or as sent is `placement`: delivery claims the row now, or leaves
+      // it waiting behind a turn, a start, a handover, a compaction, or a place.
       const send = (input: {
         readonly envelope: CommandEnvelope
         readonly threadId: string
@@ -4934,6 +5041,7 @@ export class Sessions extends Context.Service<
         tryAgain: (threadId) => run(tryAgain(threadId)),
         retryable: (threadId) => run(Effect.map(retryOf(threadId), (retry) => retry.retryable)),
         accepting: inputBatches.accepting,
+        placement: (threadId) => run(placement(threadId)),
         send: (input) => run(send(input)),
         noteQueued: (threadId) =>
           run(

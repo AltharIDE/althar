@@ -168,6 +168,15 @@ div.made {
   font: 12px var(--mono);
   color: var(--t-3);
 }
+/* a markdown file's two ways to show, at the head's end */
+.ways {
+  margin-left: auto;
+  align-self: center;
+}
+/* a markdown file as a page, at a reading width; its tints reach into the margin the code has */
+.page {
+  max-width: 78ch;
+}
 .note {
   margin: 0 0 10px;
   font-size: 12px;

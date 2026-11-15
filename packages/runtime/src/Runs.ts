@@ -2336,6 +2336,19 @@ export class Runs extends Context.Service<
           }
           // A quick task's writes still acquire their own branch when its turn ends, even when it yielded to a wait.
           yield* firstWriteOn(event.threadId)
+          // A turn can end after its task settled while it was working. It owes no further report: a reminder would race
+          // settling, keep its agent alive, and prevent a waiting Local task from taking the checkout.
+          // A new conversation after Done still carries on normally; only the turn already under way as it settled ends here.
+          if (event._tag === 'TurnEnded') {
+            const [settledTask] = yield* sql<{ id: string }>`SELECT k.id FROM threads t JOIN tasks k ON k.id = t.task_id
+              JOIN turn_deliveries d ON d.id = ${event.turnId}
+              WHERE t.id = ${event.threadId} AND t.kind = 'task' AND k.state IN ('done', 'abandoned')
+                AND d.requested_at <= k.settled_at`
+            if (settledTask !== undefined) {
+              yield* leftBehind.settled(settledTask.id)
+              return
+            }
+          }
           // A declared external wait is a valid end of turn, not a missing report or a blank answer.
           const [watching] = yield* sql<{ id: string }>`
             SELECT a.id FROM threads t JOIN runs r ON r.task_id = t.task_id AND r.state = 'running'

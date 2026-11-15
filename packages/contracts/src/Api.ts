@@ -740,6 +740,8 @@ export const AppSettings = Schema.Struct({
   postTeamReviews: Schema.Boolean,
   /** What "Run it" on code from outside the team does without asking: `ask` each time, its default, run `safe`ly, or trust it `full`y. */
   runOutside: Schema.optional(Schema.Literals(['ask', 'safe', 'full'])),
+  /** What sending does while an agent is mid-turn: `queue` it for the turn's end, its default, or `steer` it to the agent at once. */
+  sendMidTurn: Schema.optional(Schema.Literals(['queue', 'steer'])),
   /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
   automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
@@ -3407,6 +3409,8 @@ export const SessionSummary = Schema.Struct({
   effort: Schema.NullOr(Schema.String),
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
+  /** Whether a new message waits behind work already claimed, including a turn still preparing its prompt. */
+  accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   turnRunning: Schema.Boolean,
   /** When the turn running started, by the runtime's clock; null between turns. What the wait for its first word is counted from. */
   turnStartedAt: Schema.NullOr(Schema.String),
@@ -3674,6 +3678,8 @@ export const FileDiff = Schema.Struct({
   file: ChangedFile,
   lines: Schema.Array(DiffLine),
   truncated: Schema.Boolean,
+  /** The lines are the whole file, every one of it from its first, unchanged ones too; not one read in hunks. Where it is absent, they are not known to be. */
+  whole: Schema.optional(Schema.Boolean),
 })
 export type FileDiff = typeof FileDiff.Type
 
@@ -3785,6 +3791,8 @@ export type GraphRound = typeof GraphRound.Type
 /** A task's thread: its task and project, the agent working on it, the calls waiting on the person, and a page of its items. */
 export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
+  /** The runtime's placement for a new message, including work between sessions. */
+  accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   /** The complete visual collection, read independently of the thread's report limit. */
   gallery: Schema.optional(EvidenceGallery),
 
@@ -4118,6 +4126,8 @@ export type ConversationView = typeof ConversationView.Type
  */
 export const CoordinatorSnapshot = Schema.Struct({
   threadId: Schema.String,
+  /** The runtime's placement for a new message, including work between sessions. */
+  accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   cursor: Cursor,
   /** What the coordinator used today, since this computer's midnight, of each account it ran on (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
@@ -4323,6 +4333,8 @@ export const CodeText = Schema.Struct({
   from: CodeLine,
   total: Schema.Number,
   cut: Schema.Boolean,
+  /** Asked for as a picture: its bytes in base64 and their kind, with no text. */
+  image: Schema.optional(Schema.Struct({ type: Schema.String, data: Schema.String })),
 })
 export type CodeText = typeof CodeText.Type
 
@@ -4827,11 +4839,19 @@ export const CoreApi = RpcGroup.make(
   /**
    * A file where a thread's agent works, by its path as FindCode named it:
    * as it is now, or at the commit it was when a message was said. Whole,
-   * or past a size, the lines around `line`.
+   * or past a size, the lines around `line`. With `image`, a picture a task's
+   * markdown file names beside it, as it is now: only an image, only from
+   * inside the task's folders, and not past a size.
    */
   call(
     'ReadCode',
-    { threadId: Schema.String, path: Schema.String, commit: Schema.optional(Schema.String), line: Schema.optional(CodeLine) },
+    {
+      threadId: Schema.String,
+      path: Schema.String,
+      commit: Schema.optional(Schema.String),
+      line: Schema.optional(CodeLine),
+      image: Schema.optional(Schema.Boolean),
+    },
     CodeText,
   ),
   /** The project's coordinator thread, made the first time it is asked for. */
@@ -5031,6 +5051,8 @@ export const CoreApi = RpcGroup.make(
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
   /** What "Run it" on code from outside the team does without asking: ask each time, run safely, or trust it fully. */
   command('SetRunOutside', { to: Schema.Literals(['ask', 'safe', 'full']) }, Schema.Void),
+  /** What sending a message does while an agent is mid-turn: queue it, or steer the agent with it at once. */
+  command('SetSendMidTurn', { to: Schema.Literals(['queue', 'steer']) }, Schema.Void),
   /**
    * Saves a preset: a task's parts, team and first lines of its brief (Save as preset), or the parts the coordinator offered;
    * kept to the task's project with `projectOnly`. Its name, as kept.

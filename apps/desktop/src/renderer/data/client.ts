@@ -201,7 +201,11 @@ export interface Client {
     messages: ReadonlyArray<{ readonly itemId?: string; readonly names: ReadonlyArray<string> }>,
   ) => Promise<{ readonly place: CodePlace; readonly messages: ReadonlyArray<{ readonly found: ReadonlyArray<CodeFound> }> }>
   /** A file a thread's agent named, by its path as findCode named it: as it is now, or at the commit it was when a message was said. */
-  readonly readCode: (threadId: string, path: string, at?: { readonly commit?: string; readonly line?: number }) => Promise<CodeText>
+  readonly readCode: (
+    threadId: string,
+    path: string,
+    at?: { readonly commit?: string; readonly line?: number; readonly image?: boolean },
+  ) => Promise<CodeText>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
   /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
@@ -284,6 +288,7 @@ export interface Client {
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
+  readonly setSendMidTurn: (to: 'queue' | 'steer') => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
@@ -870,6 +875,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           path,
           ...(at.commit === undefined ? {} : { commit: at.commit }),
           ...(at.line === undefined ? {} : { line: at.line }),
+          ...(at.image === true ? { image: true } : {}),
         }),
       ),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
@@ -904,6 +910,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
+    setSendMidTurn: (to) => command((commandId) => api.SetSendMidTurn({ commandId, to })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     joinChanges: (taskId, change, into) =>

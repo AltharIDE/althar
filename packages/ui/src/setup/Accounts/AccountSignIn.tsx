@@ -526,7 +526,7 @@ function GitHubChoice({
           </Button>
           <LinkButton onClick={() => setEnterprise(true)}>Use a GitHub Enterprise address…</LinkButton>
         </div>
-        <p className={s.hint}>GitHub will ask you to authorize OpenCode. Usage is on your Copilot subscription.</p>
+        <p className={s.hint}>GitHub will ask you to authorize Althar. Usage is on your Copilot subscription.</p>
       </div>
     )
   return (

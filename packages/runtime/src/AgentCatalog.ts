@@ -88,6 +88,7 @@ export class AgentCatalog extends Context.Service<
         const [entry] = Agents.fromRegistry(
           (one) => usingLocated(one, () => installs.locate(one), process.env.FLATPAK_ID),
           config.agentStderr,
+          undefined,
           [definition],
         ).list
         if (entry === undefined) throw new Error('The ACP connection has no transport')

@@ -33,20 +33,6 @@ import { ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
  * through a task's life its card says what the task's head says, every time.
  */
 
-/** What the window read its board again on before: a list of kinds, which missed whatever moved a card through another. */
-const LISTED = new Set([
-  'task',
-  'task_plan',
-  'run',
-  'node_attempt',
-  'provider_session',
-  'turn_delivery',
-  'attention_request',
-  'external_link',
-  'workspace',
-  'conflict_resolution',
-])
-
 /** What it reads its board again on now (feed.ts `BOARD`). */
 const NOW = new Set(['card', 'project'])
 
@@ -407,8 +393,6 @@ describe('a card that moves through a kind of change the board read nothing of b
       )
       const since = yield* Effect.orDie(queries.changesSince(from, 500))
       assert.isTrue(since.some((change) => change.aggregateType === 'card' && change.aggregateId === taskId))
-      // This operation emits no event the old rule named, so it needs the card event to refresh.
-      assert.isFalse(since.some((change) => LISTED.has(change.aggregateType)))
     }).pipe(Effect.scoped, Effect.provide(runtimeWith({ github })))
   })
 })

@@ -39,6 +39,17 @@ import type { ToolAccess } from '../src/ToolServer'
 
 const HOUR = 60 * 60 * 1000
 
+it.live('returns unknown usage when a saved account no longer exists', () =>
+  Effect.gen(function* () {
+    const accounts = yield* Accounts
+    const limits = yield* Limits
+    const account = yield* accounts.add({ agentId: 'codex', name: 'temporary', folder: mkdtempSync(join(tmpdir(), 'althar-usage-')) })
+    yield* accounts.remove(account.id)
+    assert.isTrue(Option.isNone(yield* limits.room(account.id)))
+    assert.isTrue(Option.isNone(yield* limits.outAccount(account.id)))
+  }).pipe(Effect.provide(runtime())),
+)
+
 describe('automatic model selection', () => {
   it.live('does not reuse a failed session’s model while the available models are unknown', () =>
     Effect.gen(function* () {
@@ -783,8 +794,14 @@ describe('a step held for a usage limit, handed over by the person', () => {
       const [queued] = yield* until(cardOf(projectId), (cards) => cards.some((card) => card.taskId === task.taskId && card.queued !== null))
       assert.isNotNull(queued)
       assert.strictEqual((yield* cardOf(projectId)).find((card) => card.taskId === task.taskId)?.waits, null)
-      // The place frees: it carries on, on the agent picked.
-      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: other.task.threadId, body: '[lead:finish]' })
+      // Interrupt the blocker: a finish queued after its indefinitely held turn cannot free its place.
+      yield* until(sessions.running(other.task.threadId), (running) => Option.isSome(running) && running.value.turnRunning)
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: other.task.threadId,
+        body: '[lead:finish]',
+        disposition: 'interrupt_and_continue',
+      })
       const [ready] = yield* until(cardOf(projectId), (cards) =>
         cards.some((card) => card.taskId === task.taskId && card.phase === 'ready'),
       )

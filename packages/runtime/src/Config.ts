@@ -10,12 +10,15 @@ import {
   type AgentDefinition,
   inFlatpakSandbox,
   type SessionOptions,
+  nativeAgent,
+  type NativeProvider,
   type Transport,
   usingLocated,
 } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
+import { Copilot } from './Copilot'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
@@ -165,6 +168,9 @@ export interface RuntimeOptions {
   readonly betweenAgents?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
+  /** Althar's public OAuth app ID for native Copilot; falls back to its own GitHub app ID. */
+  readonly copilotClientId?: string
+  readonly copilotEnterpriseClientIds?: Readonly<Record<string, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
   readonly githubApp?: string
   /**
@@ -353,16 +359,18 @@ export class Agents extends Context.Service<
    * outside review still loads none of the repository's config or hooks and
    * uses git's untrusted-copy settings (`readingUntrusted`).
    */
-  static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs> =>
+  static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs | Copilot> =>
     Layer.effect(
       Agents,
       Effect.gen(function* () {
         const installs = yield* Installs
+        const copilot = yield* Copilot
         // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
         // line the person runs names the app that carries it (`usingLocated`).
         return Agents.fromRegistry(
           (definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID),
           stderr,
+          (accountId) => copilot.provider(accountId),
         )
       }),
     )
@@ -374,6 +382,7 @@ export class Agents extends Context.Service<
   static readonly fromRegistry = (
     located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition,
     stderr?: AgentStderr,
+    nativeCopilot?: (accountId: string) => NativeProvider,
     definitions: ReadonlyArray<AgentDefinition> = Object.values(agents),
   ) => {
     let signedOut: string | undefined
@@ -382,6 +391,30 @@ export class Agents extends Context.Service<
         definition,
         transport: (cwd: string, env: Readonly<Record<string, string>> = {}, options: SessionOptions = {}) => {
           if (options.untrusted === true) signedOut ??= mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
+          if (definition.native === 'copilot') {
+            const provider = nativeCopilot?.(env.ALTHAR_COPILOT_ACCOUNT ?? '') ?? {
+              models: async () => {
+                throw new Error('GitHub Copilot authentication required. Sign in through Althar.')
+              },
+              complete: async () => {
+                throw new Error('GitHub Copilot authentication required. Sign in through Althar.')
+              },
+            }
+            return {
+              _tag: 'InProcess' as const,
+              agent: nativeAgent(provider, {
+                env: {
+                  ...agentGit,
+                  ...(signedOut !== undefined && options.untrusted === true ? { ...withoutSignIns(signedOut), ...readingUntrusted } : {}),
+                  ...env,
+                },
+                ...(options.skills === undefined ? {} : { skills: options.skills }),
+                ...(options.untrusted === undefined ? {} : { untrusted: options.untrusted }),
+                ...(options.offline === undefined ? {} : { offline: options.offline }),
+                ...(options.nativeProcesses === undefined ? {} : { processes: options.nativeProcesses }),
+              }),
+            }
+          }
           const spec = definition.launch(adapterNode())
           const own =
             definition.withoutOwnTools?.({

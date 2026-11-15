@@ -6,11 +6,12 @@ import { join } from 'node:path'
 import type { AcpConnection } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
 import { afterEach, vi } from 'vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 import { until } from '@althar/testing/effect'
 import { Ids, newId } from '@althar/domain'
 import { compatibilityAgentMain } from '@althar/provider-adapters/testing'
+import { connect, externalDefinition } from '@althar/provider-adapters'
 
 import { AgentCatalog } from '../src/AgentCatalog'
 import { Agents } from '../src/Config'
@@ -53,6 +54,39 @@ afterEach(() => {
 })
 
 describe('the person’s saved ACP connections', () => {
+  it.live('keeps native Copilot sessions working beside dynamically registered ACP connections', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const spec = connection()
+        const all = Agents.fromRegistry(undefined, undefined, (accountId) => {
+          assert.strictEqual(accountId, 'native-account')
+          return {
+            models: async () => [{ id: 'native-model', name: 'Native model', context: 128_000, output: 4096, images: false }],
+            complete: async () => ({ text: 'Native Copilot ready', tools: [] }),
+          }
+        })
+        const [external] = Agents.fromRegistry(undefined, undefined, undefined, [externalDefinition({ ...spec, id: 'acp-example' })]).list
+        if (external === undefined) throw new Error('Missing external ACP connection')
+        all.register?.(external)
+        assert.strictEqual((yield* all.get(spec.id)).transport(folder())._tag, 'Process')
+        const native = yield* all.get('copilot-direct')
+        const cwd = folder()
+        const transport = native.transport(cwd, { ALTHAR_COPILOT_ACCOUNT: 'native-account' })
+        assert.strictEqual(transport._tag, 'InProcess')
+        const client = yield* connect({
+          transport,
+          onPermission: () => Effect.die(new Error('This test should not call tools.')),
+        })
+        const session = yield* client.newSession({ cwd, mode: 'ask' })
+        const events = yield* Stream.runCollect(session.prompt('Say ready.'))
+        assert.isTrue(events.some((event) => event._tag === 'AgentMessage' && event.text.includes('Native Copilot ready')))
+        all.remove?.(spec.id)
+        assert.strictEqual((yield* all.get('copilot-direct')).definition.native, 'copilot')
+        assert.strictEqual((yield* Effect.flip(all.get(spec.id)))._tag, 'UnknownAgent')
+      }),
+    ),
+  )
+
   it.live('refuses saves when the runtime has a fixed agent list', () =>
     Effect.gen(function* () {
       const catalog = yield* AgentCatalog

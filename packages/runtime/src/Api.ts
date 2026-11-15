@@ -121,7 +121,7 @@ import { SettingsTools } from './SettingsTools'
 import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
-import { postTeamReviews, Reviews, runOutside, setPostTeamReviews, setRunOutside } from './Reviews'
+import { postTeamReviews, Reviews, runOutside, sendMidTurn, setPostTeamReviews, setRunOutside, setSendMidTurn } from './Reviews'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
 import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
@@ -1031,7 +1031,8 @@ const coreHandlers = CoreApi.toLayer(
       GetCanvas: ({ canvasId }) => api(canvases.get(canvasId)),
       ReadCanvasText: ({ canvasId, version }) => api(canvases.text(canvasId, version)),
       FindCode: ({ threadId, messages }) => api(queries.findCode(threadId, messages)),
-      ReadCode: ({ threadId, path, commit, line }) => api(queries.readCode(threadId, path, commit, line)),
+      ReadCode: ({ threadId, path, commit, line, image }) =>
+        api(image === true ? queries.readCodeImage(threadId, path) : queries.readCode(threadId, path, commit, line)),
       GetFileDiff: ({ taskId, path, untouched }) => api(queries.fileDiff(taskId, path, untouched === true)),
       GetTaskFindings: ({ taskId, review }) => api(queries.findings(taskId, review)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
@@ -1126,6 +1127,7 @@ const coreHandlers = CoreApi.toLayer(
               reviewSeal: yield* reviewSeal,
               postTeamReviews: yield* postTeamReviews,
               runOutside: yield* runOutside,
+              sendMidTurn: yield* sendMidTurn,
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
               agentsAtOnce: {
@@ -1241,6 +1243,7 @@ const coreHandlers = CoreApi.toLayer(
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetRunOutside: ({ commandId, to }) => once(commandId, api(setRunOutside(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       RunIt: ({ commandId, taskId, how }) => once(commandId, api(reviews.runIt({ taskId, ...(how === undefined ? {} : { how }) }))),
       StopRunning: ({ commandId, taskId }) => once(commandId, api(reviews.stopRunning({ taskId, actorId: instance.personId }))),

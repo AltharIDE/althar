@@ -1095,6 +1095,19 @@ describe('settings, through the API', () => {
     ),
   )
 
+  it.live('queues what is sent mid-turn unless the person sets it to steer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'queue')
+        yield* client.SetSendMidTurn({ commandId: commandId(), to: 'steer' })
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'steer')
+        yield* client.SetSendMidTurn({ commandId: commandId(), to: 'queue' })
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'queue')
+      }),
+    ),
+  )
+
   it.live('posts the team’s reviews without asking only once the person turns it on, and takes review drafts’ commands', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1568,6 +1581,20 @@ describe('editors, through the API', () => {
           ],
         )
         assert.deepInclude(yield* client.ReadCode({ threadId: task.threadId, path: 'src/retry.ts' }), { from: 1, total: 3, cut: false })
+        // A picture a markdown file names beside it: the task's own, by its name, and never one out of its folder.
+        mkdirSync(join(worktree, 'docs'))
+        writeFileSync(join(worktree, 'docs', 'flow.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+        writeFileSync(join(worktree, 'docs', 'notes.txt'), 'not a picture')
+        symlinkSync(join(tmpdir(), 'elsewhere.png'), join(worktree, 'docs', 'link.png'))
+        assert.deepStrictEqual((yield* client.ReadCode({ threadId: task.threadId, path: 'docs/flow.png', image: true })).image, {
+          type: 'image/png',
+          data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'),
+        })
+        for (const path of ['docs/notes.txt', 'docs/link.png', 'docs/none.png', '../flow.png'])
+          assert.strictEqual(
+            (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path, image: true }))).message,
+            "That file isn't there any more.",
+          )
         assert.strictEqual(
           (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path: '../outside.ts' }))).message,
           "That file isn't there any more.",
