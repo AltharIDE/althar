@@ -91,7 +91,8 @@ test('going back to an open project shows the screen it kept, where the person l
     const release = await holdRuntime(page)
     await tabs.getByRole('button', { name: /^meridian/ }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await expect(conversation(page)).toContainText(`Message ${said}:`)
+    // What was in view where the person left it: the thread draws only what is near the view (VirtualBlocks).
+    await expect(conversation(page)).toContainText('Message 1:')
     expect(await left.evaluate((element) => element.isConnected && element.checkVisibility())).toBe(true)
     await expect(box).toHaveValue('Half a thought about')
     expect(await scroller(page).evaluate((element) => element.scrollTop)).toBe(400)

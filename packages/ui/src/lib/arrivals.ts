@@ -19,6 +19,15 @@ const OPENING = 400
 /** More than this many at once is the thread drawn afresh. */
 const FRESH = 6
 
+/**
+ * What is drawn again rather than arriving: a block of a long thread drawn as
+ * the person scrolls to it (VirtualBlocks), which was there all along.
+ */
+const drawnAgain = new WeakSet<Element>()
+
+/** Says an element added to a place for arrivals was there before, drawn again as it comes into view: it doesn't rise in. */
+export const arrivesQuietly = (el: Element) => drawnAgain.add(el)
+
 /** Brings in what lands in `ref`'s places for arrivals, from its first moments on. */
 export function useArrivals(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
@@ -36,7 +45,7 @@ export function useArrivals(ref: RefObject<HTMLElement | null>) {
       if (added.length > FRESH) return
       const reduced = reducedMotion()
       for (const el of added) {
-        if (!el.isConnected || replaced.has(el.parentElement!) || ownEntrance(el)) continue
+        if (!el.isConnected || drawnAgain.has(el) || replaced.has(el.parentElement!) || ownEntrance(el)) continue
         el.animate(
           reduced
             ? [{ opacity: 0 }, { opacity: 1 }]

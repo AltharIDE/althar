@@ -1051,6 +1051,7 @@ export function ProjectView({
                                 queued={text.queued}
                                 onAnswerQuestion={model.answerQuestion}
                                 signed={coordinatorSigned}
+                                virtual={coordinator.threadId}
                               />
                               {drafting.shown.map((draft) => (
                                 <DraftingCard
