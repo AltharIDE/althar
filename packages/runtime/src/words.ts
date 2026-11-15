@@ -262,7 +262,7 @@ export const words = (
         const folder = basename(text(error, 'path'))
         switch (text(error, 'reason')) {
           case 'unreadable':
-            return `Althar can’t read ${folder}. Let it in System Settings, then choose it again.`
+            return `Althar can’t read ${folder}. Give it access to the folder, then choose it again.`
           case 'too_wide':
             return `${folder} holds too much to be one project. Choose the folder its code is in.`
           case 'too_many': {

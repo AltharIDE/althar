@@ -166,7 +166,7 @@ describe('a folder that isn’t a repository', () => {
           const read = yield* Effect.flip(readFolder(at))
           assert.deepInclude(read, { _tag: 'FolderRefused', reason: 'unreadable' })
           assert.deepInclude(yield* Effect.flip(prepareFolder(at)), { reason: 'unreadable' })
-          assert.match(words(read, (id) => id).message, /Althar can’t read althar-setup-\w+\. Let it in System Settings/)
+          assert.match(words(read, (id) => id).message, /Althar can’t read althar-setup-\w+\. Give it access to the folder/)
           assert.deepInclude(
             words(read, (id) => id),
             { why: 'unreadable' },
