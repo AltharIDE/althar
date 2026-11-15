@@ -4,7 +4,7 @@ import { userEvent } from 'storybook/test'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MergeButton, type MergeStanding } from '../src/primitives/MergeButton/MergeButton'
-import { landings } from '../src/primitives/MergeFeel/feel'
+import { ANSWERS_WITHIN, landings, notePress, takePress } from '../src/primitives/MergeFeel/feel'
 import { MergeFeel, type MergeFeelStage } from '../src/primitives/MergeFeel/MergeFeel'
 
 /*
@@ -17,13 +17,15 @@ import { MergeFeel, type MergeFeelStage } from '../src/primitives/MergeFeel/Merg
 interface Run {
   target: Element
   frames: Keyframe[]
+  /** Where it was as it began: a ring is gone once it has spread. */
+  within: Element | null
 }
 
 /** Element.animate, recording what it is asked to run. */
 function compositor() {
   const runs: Run[] = []
   const animate = vi.fn(function (this: Element, frames: Keyframe[]) {
-    runs.push({ target: this, frames })
+    runs.push({ target: this, frames, within: this.parentElement?.parentElement ?? null })
     return { cancel: vi.fn(), finished: Promise.resolve() } as unknown as Animation
   })
   Object.defineProperty(HTMLElement.prototype, 'animate', { value: animate, configurable: true, writable: true })
@@ -52,6 +54,8 @@ const lessMotion = () =>
   })
 
 afterEach(() => {
+  // Presses nothing answered are forgotten, as they are a moment later.
+  takePress(performance.now() + 10 * ANSWERS_WITHIN)
   Reflect.deleteProperty(HTMLElement.prototype, 'animate')
   Reflect.deleteProperty(window, 'matchMedia')
   vi.restoreAllMocks()
@@ -175,5 +179,70 @@ describe('Merge, pressed', () => {
     render(<MergeButton onMerge={vi.fn()} standing="merging" />)
     expect(screen.getByRole('status')).toHaveTextContent('Merging')
     expect(runs).toHaveLength(0)
+  })
+})
+
+describe('a board card, merged from its strip', () => {
+  /** Needs you, with Merge on the card's strip, and At work, where the card is the moment it is pressed, merging. */
+  function Lanes() {
+    const [merging, setMerging] = useState(false)
+    return (
+      <>
+        <section>
+          {!merging && (
+            <div>
+              <MergeButton strip onMerge={() => setMerging(true)}>
+                Accept and merge
+              </MergeButton>
+            </div>
+          )}
+        </section>
+        <section>
+          {merging && (
+            <div data-testid="arrived">
+              <MergeFeel stage="merging" ringCard />
+            </div>
+          )}
+        </section>
+      </>
+    )
+  }
+
+  it('rings as it comes to At work, merging, for the press it went with', async () => {
+    const runs = compositor()
+    onScreen()
+    render(<Lanes />)
+    await userEvent.click(screen.getByRole('button', { name: 'Accept and merge' }))
+    const rings = ran(runs, 'ring')
+    expect(rings).toHaveLength(1)
+    expect(rings[0]?.within).toBe(screen.getByTestId('arrived'))
+  })
+
+  it('rings for no card come merging without a press, and once for a press', () => {
+    const runs = compositor()
+    onScreen()
+    render(<Card stage="merging" />)
+    render(
+      <div>
+        <MergeFeel stage="merging" ringCard />
+      </div>,
+    )
+    expect(ran(runs, 'ring')).toHaveLength(0)
+    notePress()
+    for (let i = 0; i < 2; i += 1)
+      render(
+        <div>
+          <MergeFeel stage="merging" ringCard />
+        </div>,
+      )
+    expect(ran(runs, 'ring')).toHaveLength(1)
+  })
+
+  it('forgets a press nothing answered within a moment', () => {
+    notePress(0)
+    expect(takePress(ANSWERS_WITHIN + 1)).toBe(false)
+    notePress(0)
+    expect(takePress(ANSWERS_WITHIN - 1)).toBe(true)
+    expect(takePress(ANSWERS_WITHIN - 1)).toBe(false)
   })
 })

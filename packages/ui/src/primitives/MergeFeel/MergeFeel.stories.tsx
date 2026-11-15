@@ -2,11 +2,12 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useRef, useState } from 'react'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { Board, BoardColumn, BoardList } from '../../board/Board/Board'
 import { BoardCard } from '../../board/BoardCard/BoardCard'
 import { PullChip } from '../../board/BoardCard/Chips'
 import { CODEX } from '../../fixtures/models'
 import { GITHUB } from '../../fixtures/outputs'
-import { ChangeState, CheckState, TaskKind, TaskStatus } from '../../foundations/vocabulary'
+import { BoardLane, ChangeState, CheckState, TaskKind, TaskStatus } from '../../foundations/vocabulary'
 import { ChangeSet } from '../../outputs/ChangeSet/ChangeSet'
 import { SmallChange } from '../../thread/SmallChange/SmallChange'
 import { Button } from '../Button/Button'
@@ -15,9 +16,11 @@ import { MergeFeel, type MergeFeelStage } from './MergeFeel'
 
 /*
  * A merge, felt where it is pressed: the thread's small change, a change on
- * Outputs and a lane of board cards, on a host that takes each into its
- * queue half a second after the press and lands it a few seconds later, or
- * at Land now. Start over plays it again.
+ * Outputs and a board, on a host that takes each into its queue half a
+ * second after the press and lands it a few seconds later, or at Land now.
+ * As on the app's board, a card whose Merge is pressed goes from Needs you
+ * to At work at once, merging, and rings as it comes. Start over plays it
+ * again.
  */
 
 const meta = {
@@ -67,25 +70,57 @@ function useHost() {
   }
 }
 
+/** A board card as the app's board makes it where its merge stands: Needs you with Merge on its strip, At work, Settled. */
+function LaneCard({ card, stage, onMerge }: { card: (typeof LANE)[number]; stage: MergeFeelStage; onMerge: () => void }) {
+  const ready = stage === 'ready'
+  return (
+    <BoardCard
+      data-move={card.id}
+      status={ready ? TaskStatus.Yours : stage === 'merged' ? TaskStatus.Done : TaskStatus.Running}
+      word={ready ? 'Ready to accept' : stage === 'merging' ? 'Merging' : stage === 'queued' ? 'In the merge queue' : 'Merged'}
+      kind={TaskKind.Change}
+      at={card.at}
+      title={card.title}
+      object={<PullChip host={GITHUB} repo="althar" number={card.number} add={card.add} del={card.del} />}
+      // At work while merging: the card answers the press it came with.
+      {...(stage === 'merging' ? { merge: stage } : {})}
+      {...(ready
+        ? {
+            next: (
+              <MergeButton strip aria-label={`Accept and merge #${card.number}`} onMerge={onMerge}>
+                Accept and merge
+              </MergeButton>
+            ),
+          }
+        : {})}
+    />
+  )
+}
+
 function Places({ lands = true }: { lands?: boolean }) {
   const host = useHost()
   const thread = host.stageOf('thread')
   const outputs = host.stageOf('outputs')
   const open = (stage: MergeFeelStage) => stage === 'ready' || stage === 'merging'
+  const lane = (...stages: ReadonlyArray<MergeFeelStage>) => LANE.filter((card) => stages.includes(host.stageOf(card.id)))
+  const cards = (list: ReadonlyArray<(typeof LANE)[number]>) => (
+    <BoardList>
+      {list.map((card) => (
+        <LaneCard key={card.id} card={card} stage={host.stageOf(card.id)} onMerge={() => host.press(card.id, lands)} />
+      ))}
+    </BoardList>
+  )
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 640px) 300px', gap: 32, padding: 32, alignItems: 'start' }}>
-      <div style={{ display: 'grid', gap: 28 }}>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button size="small" onClick={host.again}>
-            Start over
-          </Button>
-          <Button size="small" onClick={host.land}>
-            Land now
-          </Button>
-          <Button size="small" onClick={() => LANE.forEach((card) => host.press(card.id, lands))}>
-            Merge the lane
-          </Button>
-        </div>
+    <div style={{ display: 'grid', gap: 24, padding: 32 }}>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button size="small" onClick={host.again}>
+          Start over
+        </Button>
+        <Button size="small" onClick={host.land}>
+          Land now
+        </Button>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 560px))', gap: 32, alignItems: 'start' }}>
         <SmallChange
           title="Changelog shows 0.9.0’s publish time"
           started={at('17:02')}
@@ -128,34 +163,19 @@ function Places({ lands = true }: { lands?: boolean }) {
             : {})}
         />
       </div>
-      <div style={{ display: 'grid', gap: 10 }}>
-        {LANE.map((card) => {
-          const stage = host.stageOf(card.id)
-          return (
-            <BoardCard
-              key={card.id}
-              status={open(stage) ? TaskStatus.Yours : stage === 'queued' ? TaskStatus.Running : TaskStatus.Done}
-              word={open(stage) ? 'Ready to accept' : stage === 'queued' ? 'In the merge queue' : 'Merged'}
-              kind={TaskKind.Change}
-              at={card.at}
-              title={card.title}
-              object={<PullChip host={GITHUB} repo="althar" number={card.number} add={card.add} del={card.del} />}
-              {...(open(stage) ? { merge: stage } : {})}
-              next={
-                open(stage) && (
-                  <MergeButton
-                    strip
-                    busy={stage === 'merging'}
-                    aria-label={`Accept and merge #${card.number}`}
-                    onMerge={() => host.press(card.id, lands)}
-                  >
-                    Accept and merge
-                  </MergeButton>
-                )
-              }
-            />
-          )
-        })}
+      <div style={{ height: 380, borderRadius: 10, overflow: 'hidden' }}>
+        <Board label="A board, merged from">
+          <BoardColumn lane={BoardLane.Next} count={0} />
+          <BoardColumn lane={BoardLane.Running} count={lane('merging', 'queued').length}>
+            {cards(lane('merging', 'queued'))}
+          </BoardColumn>
+          <BoardColumn lane={BoardLane.Yours} count={lane('ready').length}>
+            {cards(lane('ready'))}
+          </BoardColumn>
+          <BoardColumn lane={BoardLane.Settled} count={lane('merged').length}>
+            {cards(lane('merged'))}
+          </BoardColumn>
+        </Board>
       </div>
     </div>
   )
@@ -176,7 +196,7 @@ export const Felt: Story = {
   },
 }
 
-/** Lands only at Land now: for looking at each step, and at many landing at once. */
+/** Lands only at Land now: for looking at each step, and at many landing at once (press several, then Land now). */
 export const LandsWhenTold: Story = {
   render: () => <Places lands={false} />,
 }

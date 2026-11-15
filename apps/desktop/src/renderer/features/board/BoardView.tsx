@@ -52,6 +52,7 @@ import {
 import { Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
+import { MERGING_STEP } from '../../data/merges'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
@@ -458,7 +459,9 @@ const parentOf = (work: BoardTask, open: (threadId: string) => void): Pick<Board
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
-  const card = withHanded(work, runningCard(work, now, name))
+  const base = withHanded(work, runningCard(work, now, name))
+  // Merge pressed on its strip in Needs you, it is here at once, merging: it answers that press as it comes (MergeFeel).
+  const card = work.step === MERGING_STEP && actions?.merging.has(work.taskId) === true ? { ...base, merge: 'merging' as const } : base
   // Stopped, or its lead not yet started, with a conflict not asked of it: why, in place of its foot, and Resolve now.
   if (work.conflictUnsent != null) return { ...card, ...unsentOf(work, work.conflictUnsent, actions) }
   if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
@@ -963,7 +966,7 @@ const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactN
  * offers to try again. Asking the lead to resolve or fix is words, a link:
  * the card opens its task, where it is told.
  */
-const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | undefined): Pick<Card, 'foot' | 'next' | 'merge'> => {
+const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | undefined): Pick<Card, 'foot' | 'next'> => {
   const standing = standingOf(change)
   const next = standing.next
   const here = actions !== undefined && next !== null && doneHere(next) ? next : null
@@ -1035,8 +1038,6 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
       </FactLine>
     ),
     ...(step === null ? {} : { next: step }),
-    // Its strip is Merge: pressed, the whole card answers.
-    ...(here?.kind === 'merge' ? { merge: actions?.merging.has(work.taskId) === true ? ('merging' as const) : ('ready' as const) } : {}),
   }
 }
 

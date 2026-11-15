@@ -4,14 +4,11 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { Button, type ButtonProps } from '../Button/Button'
 import { Menu, MenuItem } from '../Menu/Menu'
-import { answerPress } from '../MergeFeel/feel'
+import { ANSWERS_WITHIN, answerPress, notePress } from '../MergeFeel/feel'
 import { NextStep } from '../NextStep/NextStep'
 import { SplitButton } from '../SplitButton/SplitButton'
 import { VisuallyHidden } from '../VisuallyHidden/VisuallyHidden'
 import s from './MergeButton.module.css'
-
-/** A press is answered where it was made, as Merging shows in its place: not one that comes long after, pressed elsewhere. */
-const ANSWERS_WITHIN = 1000
 
 export interface MergeButtonText {
   merge: string
@@ -77,18 +74,24 @@ export function MergeButton({
     if (standing !== 'merging' || pressed === null || answer.current === null) return
     if (performance.now() - pressed.at < ANSWERS_WITHIN) answerPress(answer.current, ring.current, check.current)
   }, [standing, pressed])
+  // Each press noted, so a card that moves as it is pressed answers it where it goes (MergeFeel).
+  const press = (width: number, then: (() => void) | undefined) => {
+    const at = performance.now()
+    notePress(at)
+    setPressed({ width, at })
+    then?.()
+  }
   const merge =
     onMerge === undefined
       ? undefined
       : (event: MouseEvent<HTMLButtonElement>) => {
           const el = event.currentTarget
           const whole = el.parentElement?.getAttribute('role') === 'group' ? el.parentElement : el
-          setPressed({ width: whole.offsetWidth, at: performance.now() })
-          onMerge()
+          press(whole.offsetWidth, onMerge)
         }
   const menu = (trigger: ReactElement) => (
     <Menu trigger={trigger} label={t.more} align="end" width={280}>
-      <MenuItem description={t.bypassNote} onSelect={() => onBypassQueue?.()} disabled={button.busy || button.disabled}>
+      <MenuItem description={t.bypassNote} onSelect={() => press(0, onBypassQueue)} disabled={button.busy || button.disabled}>
         {t.withoutQueue}
       </MenuItem>
     </Menu>
@@ -161,7 +164,7 @@ export function MergeButton({
   if (strip)
     return (
       <NextStep
-        onPress={onMerge}
+        onPress={() => press(0, onMerge)}
         signal={variant === 'signal'}
         busy={button.busy}
         disabled={button.disabled}

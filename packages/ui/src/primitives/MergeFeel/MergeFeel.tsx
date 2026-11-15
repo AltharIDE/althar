@@ -1,6 +1,21 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 
-import { arrive, type Box, boxIn, flyIn, holdBack, holdHeight, inView, land, landing, letGo, type Look, ringCard, SIGNAL } from './feel'
+import {
+  arrive,
+  type Box,
+  boxIn,
+  flyIn,
+  holdBack,
+  holdHeight,
+  inView,
+  land,
+  landing,
+  letGo,
+  type Look,
+  ringCard,
+  SIGNAL,
+  takePress,
+} from './feel'
 import s from './MergeFeel.module.css'
 
 /*
@@ -11,7 +26,9 @@ import s from './MergeFeel.module.css'
  * (MergeButton); going into the queue, it goes up as a dot into what in the
  * card says so, `data-merge-target`; landing, that fills with a small burst,
  * loud only for the first of many. Only what changes while the card is open
- * plays: come back to a merged card, and it is merged, still.
+ * plays: come back to a merged card, and it is merged, still. A board card
+ * goes to At work the moment its Merge is pressed: the card it is there,
+ * merging as it comes, answers that press (`takePress`).
  */
 
 /** Where a card's merge stands, as its feel reads it; null where nothing is the person's to merge yet. */
@@ -62,7 +79,7 @@ function play(
   const target = card.querySelector<HTMLElement>('[data-merge-target]')
   const pressed = before === 'ready' || before === 'merging'
   if (stage === 'merging' && before === 'ready') {
-    if (rings) ringCard(card, layer, s.ring)
+    if (rings && takePress()) ringCard(card, layer, s.ring)
     return
   }
   if (stage !== 'queued' && stage !== 'merged') {
@@ -95,7 +112,8 @@ function play(
 /** Plays a merge's steps over the card it is drawn in, last, as the card's merge moves through them. */
 export function MergeFeel({ stage, ringCard: rings = false }: MergeFeelProps) {
   const layer = useRef<HTMLSpanElement>(null)
-  const was = useRef(stage)
+  // Undefined until it has seen the card once.
+  const was = useRef<MergeFeelStage | null | undefined>(undefined)
   const seen = useRef<Seen | null>(null)
   // Before the frame is drawn: what went from the card is still where it was, as far as the person has seen.
   useLayoutEffect(() => {
@@ -104,7 +122,10 @@ export function MergeFeel({ stage, ringCard: rings = false }: MergeFeelProps) {
     if (here == null || card == null) return
     const before = was.current
     was.current = stage
-    if (before !== stage) play(card, here, before, stage, seen.current, rings)
+    // Come merging, as a board card to At work from where its Merge was pressed: it answers the press it went with.
+    if (before === undefined) {
+      if (stage === 'merging' && rings && takePress()) ringCard(card, here, s.ring)
+    } else if (before !== stage) play(card, here, before, stage, seen.current, rings)
     if (stage === 'ready' || stage === 'merging') seen.current = see(card, here, stage, seen.current)
     else seen.current = null
   })

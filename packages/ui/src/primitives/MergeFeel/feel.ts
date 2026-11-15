@@ -31,6 +31,8 @@ const CALM = 3000
 /** Landings this close together came in one read: they settle one after another, down the page. */
 const BATCH = 120
 const STAGGER = 90
+/** A press is answered where it was made, or by the card it went with: not one that comes long after, pressed elsewhere. */
+export const ANSWERS_WITHIN = 1000
 
 export interface Box {
   readonly x: number
@@ -126,6 +128,24 @@ export function answerPress(pressed: HTMLElement, ring: HTMLElement | null, chec
   if (reduce || !moves(pressed)) return
   pressed.animate([{ transform: 'scale(0.94)' }, { transform: 'none' }], GIVE)
   if (ring !== null) spread(ring, pressed.offsetWidth, pressed.offsetHeight, SPREAD.press)
+}
+
+/**
+ * Merge's presses not answered yet by a card that moved as it was pressed: a
+ * board card goes from Needs you to At work at once, and the card it is there
+ * answers the press it went with.
+ */
+const presses: number[] = []
+
+/** Merge pressed, to be answered by the card it moves with, where it moves at once. */
+export function notePress(now = performance.now()) {
+  presses.push(now)
+}
+
+/** Whether Merge was pressed just now with nothing answering it yet: the card that takes it answers it. */
+export function takePress(now = performance.now()): boolean {
+  while (presses.length > 0 && now - (presses[0] ?? now) > ANSWERS_WITHIN) presses.shift()
+  return presses.shift() !== undefined
 }
 
 /** A ring around the whole card, where its whole strip is Merge: a board card's. */
