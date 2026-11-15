@@ -70,6 +70,7 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
         dirs: [
           'packages/connectors',
           'packages/contracts',
+          'packages/transport-node',
           'packages/domain',
           'packages/persistence-sqlite',
           'packages/provider-adapters',
@@ -93,6 +94,7 @@ const LAYOUT: Record<Workflow, { readonly jobs: ReadonlyArray<Group>; readonly e
         dirs: [
           'packages/connectors',
           'packages/contracts',
+          'packages/transport-node',
           'packages/domain',
           'packages/persistence-sqlite',
           'packages/provider-adapters',
@@ -133,7 +135,7 @@ const SMOKE = 'apps/desktop/e2e/smoke.spec.ts'
  * desktop app but its renderer.
  */
 const BY_OS =
-  /^(?:packages\/(?:runtime|provider-adapters|persistence-sqlite|connectors|skills)\/|apps\/cli\/|apps\/desktop\/(?!src\/renderer\/))/
+  /^(?:packages\/(?:runtime|provider-adapters|persistence-sqlite|connectors|skills|transport-node)\/|apps\/cli\/|apps\/desktop\/(?!src\/renderer\/))/
 
 const MODULE = /\.(?:[cm]?[jt]sx?|css)$/
 const SCRIPT = /\.[cm]?jsx?$/

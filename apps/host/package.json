@@ -1,0 +1,45 @@
+{
+  "name": "@althar/host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A persistent Althar home on a personal Linux host.",
+  "license": "Apache-2.0",
+  "bin": {
+    "althar-host": "./dist/althar-host.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "vp build",
+    "release:smoke": "bun run build && node scripts/release-smoke.ts",
+    "start": "node dist/althar-host.js",
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "bun run build && vp test run",
+    "test:coverage": "bun run build && vp test run --coverage",
+    "verify": "bun run check && bun run test:coverage"
+  },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.106.0",
+    "@agentclientprotocol/codex-acp": "2.6.0",
+    "@althar/contracts": "workspace:*",
+    "@althar/persistence-sqlite": "workspace:*",
+    "@althar/provider-adapters": "workspace:*",
+    "@althar/runtime": "workspace:*",
+    "@althar/transport-node": "workspace:*",
+    "effect": "4.0.7",
+    "tar": "7.5.22"
+  },
+  "devDependencies": {
+    "@althar/testing": "workspace:*",
+    "@effect/vitest": "4.0.7",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "5.1.0",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
+    "vite-plus": "1.6.0",
+    "vitest": "5.1.0"
+  },
+  "engines": {
+    "node": "^24.11.0 || >=26.0.0"
+  }
+}
