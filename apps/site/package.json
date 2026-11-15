@@ -13,7 +13,8 @@
     "check": "vp check",
     "test": "vp test run",
     "fix": "vp check --fix",
-    "og": "bun scripts/og.ts"
+    "og": "bun scripts/og.ts",
+    "screens": "bun scripts/screens.ts"
   },
   "dependencies": {
     "@althar/ui": "workspace:*",
