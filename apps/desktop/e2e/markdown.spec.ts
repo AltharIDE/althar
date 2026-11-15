@@ -138,6 +138,8 @@ test('a changed markdown file opens rendered from the change set and from the th
     await page.keyboard.press('m')
     await expect(panel.getByRole('radio', { name: 'Source' })).toBeChecked()
     await expect(panel.getByRole('heading', { name: 'meridian' })).toHaveCount(0)
+    // Source is what the task changed, as a diff: what it took out too.
+    await expect(panel.getByRole('group', { name: 'README.md' })).toContainText('Refunds are paid by hand.')
   } finally {
     await electronApp.close()
   }

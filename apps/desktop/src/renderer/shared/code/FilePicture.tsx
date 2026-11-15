@@ -5,9 +5,9 @@ import { useServices } from '../../data/services'
 import { CODE_FRESH, codeKeys } from './finds'
 
 /*
- * A picture a markdown file names beside it (`![flow](docs/flow.png)`), read from where its thread's agent works, as it is
- * now, and drawn in place of the words that stand for it until it comes (and where it can't: a file that isn't a picture,
- * one out of the task's folder, one the coordinator's default branch has).
+ * A picture a markdown file names beside it (`![flow](docs/flow.png)`), read from where its thread's agent works (a task's
+ * folder as it is now, the coordinator's default branch at the commit its documents are read at), and drawn in place of the
+ * words that stand for it until it comes (and where it can't: a file that isn't a picture, one out of the task's folder).
  */
 
 /** The picture at `path` of a thread's place, or its words while it is read and where it can't be. */

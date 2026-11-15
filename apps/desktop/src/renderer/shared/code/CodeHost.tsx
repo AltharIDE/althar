@@ -89,7 +89,8 @@ const useCodeRead = (threadId: string, found: FoundCode, mode: CodeMode, fresh: 
     queryKey: codeKeys.text(threadId, file?.path ?? '', commit, line),
     queryFn: () =>
       client.readCode(threadId, file?.path ?? '', { ...(commit === null ? {} : { commit }), ...(line === null ? {} : { line }) }),
-    enabled: file !== null && mode !== 'change',
+    // A markdown file's Changes is drawn from its diff, but is the page as it is where that can't be read: its lines are read too.
+    enabled: file !== null && (mode !== 'change' || isMarkdown(file)),
     staleTime: CODE_FRESH,
     gcTime: 5 * 60_000,
     // The panel reads the file again as it opens: it shows the file as it is now.
@@ -257,8 +258,8 @@ function CodePanelOf({
   const [kept, setKept] = useState<{ readonly key: string; readonly mode: CodeMode } | null>(null)
   const mode = kept !== null && kept.key === codeKey(found) ? kept.mode : panelMode(found)
   const read = useCodeRead(threadId, found, mode, true)
-  // What the task changed, for Change, and for a markdown file's Changes, which marks it on the page.
-  const change = useCodeChange(taskId, found, mode === 'change')
+  // What the task changed, for Change, for a markdown file's Changes, which marks it on the page, and for its Source, the diff.
+  const change = useCodeChange(taskId, found, mode === 'change' || mode === 'source')
   const place = useQuery(placeRead(client, threadId)).data
   const { main, open: inEditor } = useCodeEditors(threadId)
   // Where it is among the thread's names, as the thread is drawn: they are drawn before what they open.

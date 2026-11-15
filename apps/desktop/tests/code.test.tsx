@@ -203,11 +203,60 @@ describe('the code a lead names, on a task’s screen', () => {
     fireEvent.keyDown(panel, { key: 'm' })
     await waitFor(() => expect(within(panel).getByRole('radio', { name: 'Source' }).getAttribute('aria-checked')).toBe('true'))
     expect(within(panel).queryByRole('heading', { name: 'Retries' })).toBeNull()
+    // Source is what the task changed, as a diff: the line it replaced, and the one it wrote.
+    expect(within(panel).getByRole('group', { name: 'README.md' })).toBeTruthy()
+    await waitFor(() => expect(panel.textContent).toContain('Tried 2 times.'))
+    expect(panel.textContent).toContain('Tried **3** times.')
     // M goes on to the page as it is, nothing marked.
     fireEvent.keyDown(panel, { key: 'm' })
     expect(await within(panel).findByRole('heading', { name: 'Retries' })).toBeTruthy()
     expect(within(panel).getByRole('radio', { name: 'Rendered' }).getAttribute('aria-checked')).toBe('true')
     expect(within(panel).queryByRole('group', { name: 'Added' })).toBeNull()
+  })
+
+  it('shows a changed markdown file as it is where what the task changed can’t be read, its lines read though nothing had them', async () => {
+    const notes: CodeFound = {
+      kind: 'file',
+      name: 'NOTES.md',
+      path: 'NOTES.md',
+      byName: false,
+      bytes: 20,
+      lines: 2,
+      content: 'text',
+      changed: { add: 1, del: 0 },
+      since: null,
+    }
+    const readCode = vi.fn(async (_threadId: string, path: string) => ({
+      path,
+      text: '# Notes\n\nStill here.\n',
+      from: 1,
+      total: 3,
+      cut: false,
+    }))
+    const getFileDiff = vi.fn(async () => {
+      throw new Error('The diff could not be read.')
+    })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ items: [items.you('Notes?'), items.says('See `NOTES.md`.')] })),
+      findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<{ readonly names: ReadonlyArray<string> }>) => ({
+        place: { kind: 'task' as const, repositories: [{ slug: 'meridian', name: 'meridian', branch: 'althar/add-a-retry' }] },
+        messages: messages.map(() => ({ found: [notes] })),
+      })),
+      readCode,
+      getFileDiff,
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Open NOTES.md' }))
+    const panel = await screen.findByRole('complementary', { name: 'NOTES.md' })
+    expect(
+      within(panel)
+        .getByRole('radio', { name: /Changes/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(await within(panel).findByRole('heading', { name: 'Notes' })).toBeTruthy()
+    expect(getFileDiff).toHaveBeenCalled()
+    expect(readCode).toHaveBeenCalledWith('th1', 'NOTES.md', {})
+    expect(document.querySelector('[aria-busy="true"]')).toBeNull()
   })
 
   it('⌘-press on a name opens it in the editor, without opening it beside', async () => {

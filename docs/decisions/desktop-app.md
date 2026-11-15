@@ -233,8 +233,9 @@ peeks at the lines; pressing it opens the whole file beside the conversation;
   wherever Althar opens a file: the Changes view, and the panel beside the
   conversation. One switch has three ways, M going through them, kept per file:
   Changes, the page with what the task changed marked; Rendered, the page as it
-  is now with nothing marked, to read it; and Source (the diff in Changes; the
-  lines, as they are or as they were said, in the panel). Changes is the default
+  is now with nothing marked, to read it; and Source, the diff where the task
+  changed it (the file's lines where it didn't, or where lines named in it were
+  asked for, and as they were said where they were rewritten since). Changes is the default
   where the task changed it; a file it wrote new has nothing to mark, so it is
   Rendered and Source only, and one it deleted Changes and Source only. The page is the kit's
   `Markdown`, as in the thread, with code, tables, task lists and diagrams as
@@ -254,8 +255,9 @@ peeks at the lines; pressing it opens the whole file beside the conversation;
   path where the task works, so a task of several repositories names it, its
   change and what it links to by their repository. A relative image or link is the file's
   neighbour: its path is resolved from the file's folder, an image is read
-  from where the task works (`ReadCode` with `image`, only an image, only
-  inside the task's folders, not past 8 MB) and drawn in place of its words, and
+  from where the thread's agent works (`ReadCode` with `image`, only an image,
+  not past 8 MB: a task's from inside its folders as they are, the
+  coordinator's from the default branch at the commit its documents are read at) and drawn in place of its words, and
   a link to a file opens it (a file of the change is picked in Changes; another
   opens in the editor; in the panel it opens there). A picture off the machine is
   never fetched: its words stand in.

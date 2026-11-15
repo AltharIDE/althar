@@ -66,6 +66,8 @@ export interface Command {
   readonly first?: boolean
   /** It reaches a remote, as a fetch or a push does: it runs in the network's lane, never holding the computer's. */
   readonly network?: boolean
+  /** What it prints is bytes, such as a picture, not text: it comes back as base64, every byte as it was. */
+  readonly base64?: boolean
 }
 
 /** How many run at once in each lane, the person's and the background's, of the computer's and of the network's: half the cores, from 2 to 8. */
@@ -119,7 +121,7 @@ const start = (job, lane) => {
     done = true
     running.delete(job.id)
     lane.running -= 1
-    answer(job.id, { code: null, signal: null, error: null, ...ended, over, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() })
+    answer(job.id, { code: null, signal: null, error: null, ...ended, over, stdout: Buffer.concat(out).toString(job.base64 ? 'base64' : 'utf8'), stderr: Buffer.concat(err).toString() })
     next()
   }
   try {
@@ -254,6 +256,7 @@ export const startApart = (command: Command, cap = AT_ONCE): Started => {
       max: command.max,
       first: command.first === true,
       network: command.network === true,
+      base64: command.base64 === true,
     },
   })
   return { result, stop: () => at.worker.postMessage({ kind: 'stop', id }) }
@@ -306,7 +309,12 @@ export const startHere = (command: Command): Started => {
     const finish = (ended: Pick<Ended, 'code' | 'signal' | 'error'>) => {
       if (done) return
       done = true
-      resolve({ ...ended, over, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() })
+      resolve({
+        ...ended,
+        over,
+        stdout: Buffer.concat(out).toString(command.base64 === true ? 'base64' : 'utf8'),
+        stderr: Buffer.concat(err).toString(),
+      })
     }
     child.on('error', (error: Error & { readonly code?: string | number }) =>
       finish({ code: null, signal: null, error: { message: error.message, code: error.code ?? null } }),

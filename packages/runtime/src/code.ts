@@ -6,7 +6,7 @@ import type { CodeFile, CodeFound, CodeText } from '@althar/contracts'
 import { Effect } from 'effect'
 
 import { NotFound } from './errors'
-import { git, gitExactly } from './git'
+import { blobBase64, git, gitExactly } from './git'
 import { countLines, inside } from './handed'
 
 /*
@@ -519,15 +519,30 @@ const IMAGE_TYPES: Readonly<Record<string, string>> = {
 export const IMAGE_AT_MOST = 8 * 1024 * 1024
 
 /**
- * A picture a task's markdown file names beside it, as it is now in the task's folder: only an image by its name, only from
- * inside the folders the agent works in (a link out of them is no picture), and not past IMAGE_AT_MOST. Not read from a
- * repository's default branch, where files are read at a commit: the coordinator's pages show a picture's words.
+ * A picture a markdown file names beside it: only an image by its name, and not past IMAGE_AT_MOST. A task's is as it is now
+ * in its folder, only from inside the folders the agent works in (a link out of them is no picture); the coordinator's is
+ * read at the commit of its default branch its documents are read at, from the repository's own objects.
  */
 export const readCodeImage = (place: CodeRoots, path: string): Effect.Effect<CodeText, NotFound> =>
   Effect.gen(function* () {
     const found = codeRootOf(place, path)
     const type = IMAGE_TYPES[(/\.([a-z0-9]+)$/i.exec(path)?.[1] ?? '').toLowerCase()]
-    if (found === null || type === undefined || found.root.commit !== null) return yield* new NotFound({ kind: 'file', id: path })
+    if (found === null || type === undefined) return yield* new NotFound({ kind: 'file', id: path })
+    const { commit } = found.root
+    if (commit !== null) {
+      // A path in the commit's tree, from its top: none that climbs, or starts from the root.
+      const parts = found.path.split('/')
+      if (found.path.startsWith('/') || parts.some((part) => part === '' || part === '.' || part === '..'))
+        return yield* new NotFound({ kind: 'file', id: path })
+      const object = `${commit}:${found.path}`
+      const data = yield* Effect.gen(function* () {
+        if ((yield* git(found.root.path, 'cat-file', '-t', object)) !== 'blob') return null
+        if (Number(yield* git(found.root.path, 'cat-file', '-s', object)) > IMAGE_AT_MOST) return null
+        return yield* blobBase64(found.root.path, object)
+      }).pipe(Effect.orElseSucceed(() => null))
+      if (data === null) return yield* new NotFound({ kind: 'file', id: path })
+      return { path, text: '', from: 1, total: 0, cut: false, image: { type, data } }
+    }
     const real = yield* inside(join(found.root.path, found.path), [found.root.path])
     if (real === null) return yield* new NotFound({ kind: 'file', id: path })
     const info = yield* Effect.promise(() => stat(real).catch(() => null))

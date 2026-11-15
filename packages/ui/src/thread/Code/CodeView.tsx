@@ -1,6 +1,7 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
+import { DiffLineKind } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
 import { CopyButton } from '../../primitives/CopyButton/CopyButton'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
@@ -192,10 +193,13 @@ export const modesOf = (found: FoundCode, t: CodeViewText = codeViewText): Reado
     modes.push({ value: 'change', label: `${t.change} +${found.changed.add} −${found.changed.del}`, tooltip: { label: t.changeTip } })
   }
   // A markdown file is a page first, and what the task changed in it a page with that marked; the rest are its source, as it
-  // is and as it was.
+  // is and as it was. Where the task changed it, its source is that change, as a diff, unless lines named in it were asked for.
   if (isMarkdown(found)) {
     const kbd = { kbd: t.showKey }
-    const sources = modes.filter((mode) => mode.value !== 'change')
+    const diff = found.changed !== null && found.line === undefined
+    const sources = modes
+      .filter((mode) => mode.value !== 'change')
+      .map((mode) => (mode.value === 'now' && diff ? { ...mode, value: 'source' as const } : mode))
     return [
       { value: 'rendered', label: t.rendered, tooltip: { label: t.renderedTip, ...kbd } },
       ...(found.changed === null
@@ -208,8 +212,18 @@ export const modesOf = (found: FoundCode, t: CodeViewText = codeViewText): Reado
             },
           ]),
       ...(sources.length === 0
-        ? [{ value: 'now' as const, label: t.source, tooltip: { label: t.source, ...kbd } }]
-        : sources.map((mode) => (mode.value === 'now' ? { ...mode, label: t.source } : mode))),
+        ? [
+            {
+              value: diff ? ('source' as const) : ('now' as const),
+              label: t.source,
+              tooltip: { label: diff ? t.changeTip : t.source, ...kbd },
+            },
+          ]
+        : sources.map((mode) =>
+            mode.value === 'now' || mode.value === 'source'
+              ? { ...mode, label: t.source, tooltip: { label: diff ? t.changeTip : t.source, ...kbd } }
+              : mode,
+          )),
     ]
   }
   return modes.length > 1 ? modes : []
@@ -453,6 +467,16 @@ function Body({
         <Diff lines={change} label={found.path} path={found.path} fold={4} oldNumbers />
       </div>
     )
+  }
+  // A markdown file's source, where the task changed it: the change, as a diff, its removed lines too.
+  if (mode === 'source') {
+    if (change === undefined) return <Reading />
+    if (change !== null && change.some((line) => line.kind === DiffLineKind.Added || line.kind === DiffLineKind.Removed))
+      return (
+        <div className={s.diff}>
+          <Diff lines={change} label={found.path} path={found.path} fold={4} oldNumbers />
+        </div>
+      )
   }
   if (read === undefined) return <Reading />
   if (read === null)

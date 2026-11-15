@@ -282,6 +282,9 @@ describe('a markdown file in the panel beside the conversation', () => {
 
   it('offers the page first, then it with what the task changed marked, then its source', () => {
     expect(modesOf(decisionFound).map((mode) => mode.label)).toEqual(['Rendered', 'Changes +14 −0', 'Source'])
+    // Its source is what the task changed, as a diff; where lines named in it were asked for, those lines.
+    expect(modesOf(decisionFound).map((mode) => mode.value)).toEqual(['rendered', 'change', 'source'])
+    expect(modesOf({ ...decisionFound, line: 4 }).map((mode) => mode.value)).toEqual(['rendered', 'change', 'now'])
     expect(modesOf({ ...decisionFound, changed: null }).map((mode) => mode.label)).toEqual(['Rendered', 'Source'])
     expect(modesOf(limitsFound).map((mode) => mode.label)).toEqual(['File', 'Change +41 −3'])
   })
@@ -301,6 +304,28 @@ describe('a markdown file in the panel beside the conversation', () => {
     expect(screen.getByRole('radio', { name: /Changes/ })).toBeChecked()
     expect(within(screen.getByRole('group', { name: 'Added' })).getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'flow' })).toHaveAttribute('src', 'x://docs/decisions/flow.png')
+  })
+
+  it('is the diff as Source, with what the task took out, and the file’s lines where its change couldn’t be read', () => {
+    const { unmount } = panel({
+      mode: 'source',
+      read: { ...decisionRead, text: 'Intro.\nAs the plan allows.' },
+      change: [
+        { kind: DiffLineKind.Hunk, text: '@@ -1,2 +1,2 @@' },
+        { kind: DiffLineKind.Context, old: 1, new: 1, text: 'Intro.' },
+        { kind: DiffLineKind.Removed, old: 2, text: 'Twenty a day.' },
+        { kind: DiffLineKind.Added, new: 2, text: 'As the plan allows.' },
+      ],
+      changeWhole: true,
+    })
+    expect(screen.getByRole('radio', { name: 'Source' })).toBeChecked()
+    expect(screen.getByRole('group', { name: decisionFound.path })).toBeInTheDocument()
+    expect(document.body.textContent).toContain('Twenty a day.')
+    expect(document.body.textContent).toContain('As the plan allows.')
+    unmount()
+    panel({ mode: 'source', read: { ...decisionRead, text: 'Intro.\nAs the plan allows.' }, change: null })
+    expect(screen.queryByRole('group', { name: decisionFound.path })).toBeNull()
+    expect(document.body.textContent).toContain('As the plan allows.')
   })
 
   it('is the page as it is, with nothing marked, as Rendered', () => {

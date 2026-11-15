@@ -69,8 +69,12 @@ export interface CodeWhere {
   readonly said?: string
 }
 
-/** How a file is shown: as it is, as it was when the message was said, or what its task changed in it. */
-export type CodeMode = 'rendered' | 'now' | 'then' | 'change'
+/**
+ * How a file is shown: as it is, as it was when the message was said, or what its task changed in it. A markdown file is also
+ * a page (`rendered`), `change` is that page with what changed marked, and `source` its source: what the task changed in it,
+ * as a diff, where it changed it, else its lines as they are.
+ */
+export type CodeMode = 'rendered' | 'now' | 'then' | 'change' | 'source'
 
 export const nameOf = (path: string) => path.replace(/\/$/, '').split('/').pop() ?? path
 
