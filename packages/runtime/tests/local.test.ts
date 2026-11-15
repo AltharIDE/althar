@@ -510,6 +510,12 @@ describe('a Local plan', () => {
       yield* until(spotOf(second.taskId), (spot) => spot.state === 'ready', 'the second task takes the checkout')
       assert.isTrue(Option.isNone(yield* sessions.running(first.threadId)))
       assert.strictEqual(branchOf(root), (yield* spotOf(second.taskId)).branch)
+      const sql = yield* SqlClient.SqlClient
+      assert.lengthOf(
+        yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${first.threadId}
+        AND body LIKE 'Your step isn''t done until%'`,
+        0,
+      )
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { holds: lead })))))
   })
 

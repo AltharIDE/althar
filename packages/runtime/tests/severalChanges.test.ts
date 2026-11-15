@@ -364,6 +364,8 @@ describe('a task with several changes', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const task = yield* opened(working)
+      // This fixture moves and drops its lead's workspaces itself, after the finished lead releases them.
+      yield* (yield* Sessions).stop(task.threadId)
       // The task's first change has its pull request already: two split since are kept together with each other.
       yield* callTool(task.lead, 'start_change', { name: 'Lane colours' })
       yield* callTool(task.lead, 'start_change', { name: 'Lane heights' })

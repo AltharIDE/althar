@@ -10,6 +10,7 @@ import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { git as runGit } from '../src/git'
 import type { Conflict } from '../src/conflicts'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
@@ -409,12 +410,14 @@ describe('a branch merging here, with no pull request', () => {
       const taskId = task?.taskId ?? ''
       const { path } = yield* worktreeOf(taskId)
       const kept = join(mkdtempSync(join(tmpdir(), 'althar-kept-')), 'folder')
-      git(working, 'worktree', 'move', path, kept)
+      // Ready can precede the lead releasing its cwd; move the fixture only once that process has stopped.
+      yield* (yield* Sessions).stop(task?.threadId ?? '')
+      yield* runGit(working, 'worktree', 'move', path, kept)
       moveMainOn(working)
       assert.strictEqual(yield* uncheckedOf(projectId), 'Its folder isn’t on this computer, so Althar can’t merge main into it here.')
       assert.deepStrictEqual(yield* rounds(taskId), [])
       // Back, but with main gone from here: git has nothing to merge it with.
-      git(working, 'worktree', 'move', kept, path)
+      yield* runGit(working, 'worktree', 'move', kept, path)
       git(working, 'branch', '-m', 'main', 'elsewhere')
       yield* (yield* Changes).resolveNow({ taskId }, true)
       yield* until(
