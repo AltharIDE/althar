@@ -1442,18 +1442,18 @@ function LaterScene({ hosts }: { hosts: readonly Host[] }) {
       </>
     ) : (
       <>
-        <Button variant="signal" onClick={() => setMerged(true)}>
-          Merge into main
-        </Button>
         {hosts.length > 0 && (
-          <Menu label="Put it on" trigger={<Button trailingIcon="chevronD">Put it on a host first</Button>}>
+          <Menu label="Push to a new repository on" trigger={<Button trailingIcon="chevronD">Push to…</Button>}>
             {hosts.map((id) => (
               <MenuItem key={id} lead={<BrandMark brand={HOST[id].brand} size={14} />} onSelect={() => setPutting(id)}>
-                {HOST[id].name}
+                A new {HOST[id].thing} on {HOST[id].name}
               </MenuItem>
             ))}
           </Menu>
         )}
+        <Button variant="signal" onClick={() => setMerged(true)}>
+          Merge into main
+        </Button>
       </>
     )
   return (
@@ -1473,9 +1473,9 @@ function LaterScene({ hosts }: { hosts: readonly Host[] }) {
             last
             onJump={noop}
           />
-          <div className={s.walkCard}>
-            <SizeMotion step={putting ?? (merged ? 'merged' : code === null ? 'branch' : 'pr')}>
-              {putting !== null ? (
+          <SizeMotion step={putting ?? (merged ? 'merged' : code === null ? 'branch' : 'pr')}>
+            {putting !== null ? (
+              <div className={s.walkCard}>
                 <HostCard
                   host={putting}
                   onDone={(remote) => {
@@ -1484,16 +1484,16 @@ function LaterScene({ hosts }: { hosts: readonly Host[] }) {
                   }}
                   onBack={() => setPutting(null)}
                 />
-              ) : (
-                <ChangeSet
-                  state={merged ? ChangeState.Merged : ChangeState.Branch}
-                  branch="tidepool/station-picker"
-                  prs={[{ repo: 'tidepool', files: FILES }]}
-                  {...(merged ? { note: 'Merged into main.' } : { actions })}
-                />
-              )}
-            </SizeMotion>
-          </div>
+              </div>
+            ) : (
+              <ChangeSet
+                state={merged ? ChangeState.Merged : ChangeState.Branch}
+                branch="tidepool/station-picker"
+                prs={[{ repo: 'tidepool', files: FILES }]}
+                {...(merged ? { note: 'Merged into main.' } : { actions })}
+              />
+            )}
+          </SizeMotion>
           {code !== null && (
             <AltharLine>
               tidepool is on {HOST[code.host].name} at {code.remote}, with main pushed. Tasks open {HOST[code.host].changes} there.
