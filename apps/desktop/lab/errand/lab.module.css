@@ -1,0 +1,137 @@
+.lab {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+  background: var(--n-1);
+}
+.scene {
+  min-height: 0;
+  display: flex;
+}
+.face {
+  flex: 1;
+  min-width: 0;
+}
+.composer {
+  margin: 0 0 16px;
+  padding: 14px 16px 44px;
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  background: var(--n-0);
+  color: var(--t-4);
+  font-size: 13.5px;
+}
+.bar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--n-2);
+  font-size: 12px;
+}
+.bar button {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--t-2);
+}
+.bar button[aria-pressed='true'] {
+  background: var(--n-0);
+  color: var(--t-1);
+}
+.bar kbd {
+  font-family: var(--mono);
+  color: var(--t-4);
+}
+.gap {
+  flex: 1;
+}
+
+/* where the errand's line sits: under the coordinator's answer, as a notice does */
+.kept {
+  margin-top: 14px;
+}
+.now {
+  color: var(--t-2);
+}
+.asked {
+  color: var(--t-2);
+  font-style: italic;
+}
+.errand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* B: the steps, under the line's words (the divider’s mark is 19px with its gap) */
+.steps {
+  margin: 0;
+  padding: 0 0 0 19px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.steps li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--t-3);
+}
+.mark {
+  flex: none;
+  width: 12px;
+  display: inline-flex;
+  justify-content: center;
+  align-self: center;
+  color: var(--t-3);
+}
+.ring {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid var(--t-4);
+}
+.what {
+  color: var(--t-1);
+  font-weight: 500;
+}
+.done .what,
+.next .what,
+.held .what {
+  color: var(--t-3);
+  font-weight: 400;
+}
+.done .mark {
+  color: var(--t-2);
+}
+.waits {
+  color: var(--t-4);
+}
+.stand {
+  color: var(--t-2);
+}
+
+/* C: the track and its sentence */
+.track {
+  padding-left: 19px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 420px;
+}
+.sentence {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.hold {
+  margin: 0;
+  padding-left: 19px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
