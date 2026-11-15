@@ -23,11 +23,11 @@ const git = (cwd: string, ...args: Array<string>) =>
 const asGit = (path: string) => path.split(sep).join('/')
 
 /** A remote with `main`, a branch and a tag, the person's clone of it, and where the coordinator's copy goes. */
-const place = () => {
+const place = (format?: 'sha256') => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-copies-')))
   const remote = join(home, 'remote.git')
   const seed = join(home, 'seed')
-  git(home, 'init', '-q', '--bare', '-b', 'main', remote)
+  git(home, 'init', '-q', '--bare', '-b', 'main', ...(format === undefined ? [] : [`--object-format=${format}`]), remote)
   git(home, 'clone', '-q', remote, seed)
   writeFileSync(join(seed, 'README.md'), '# Meridian\n')
   git(seed, 'add', '.')
@@ -49,6 +49,21 @@ const place = () => {
 }
 
 describe("the coordinator's copies", () => {
+  it.effect('make SHA-256 copies with the repository’s object format, including the next refresh', () =>
+    Effect.gen(function* () {
+      const { person, copy } = place('sha256')
+      const before = git(person, 'rev-parse', 'HEAD')
+      assert.strictEqual(before.length, 64)
+      for (let refresh = 0; refresh < 2; refresh++) {
+        yield* freshCopy(person, copy, 'main')
+        assert.strictEqual(git(copy, 'rev-parse', '--show-object-format'), 'sha256')
+        assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), before)
+        assert.strictEqual(git(person, 'rev-parse', 'HEAD'), before)
+        assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+      }
+    }),
+  )
+
   for (const marker of ['empty', 'missing record', 'person’s git folder'] as const)
     it.effect(`rebuild a copy with a git marker naming ${marker} without touching the person’s repository`, () =>
       Effect.gen(function* () {
