@@ -280,8 +280,8 @@ function Link({ state }: { state: 'idle' | 'flow' | 'done' }) {
  * action, such as Add back, or a press dragged off and let go). The keyboard
  * opens it from the row's start.
  */
-function useAtPointer() {
-  const [x, setX] = useState<number | null>(null)
+function useAtPointer(reach: number) {
+  const [box, setBox] = useState<{ left: number; width: number } | null>(null)
   const back = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const open = useRef(false)
   const ended = useRef<(() => void) | undefined>(undefined)
@@ -299,18 +299,25 @@ function useAtPointer() {
     [],
   )
   return {
-    style: x === null ? undefined : { left: x - 8, right: 'auto', width: 16 },
+    style: box === null ? undefined : { left: box.left, right: 'auto', width: box.width },
     onPointerDown: (e: PointerEvent<HTMLElement>) => {
+      // What opened from this row is portaled out of it, but React passes its presses up through the row: a press on a model or an
+      // effort in the open picker is not a press on the row, and moving the anchor under an open picker drags it along.
+      if (open.current || !e.currentTarget.contains(e.target as Node)) return
       clearTimeout(back.current)
       const row = e.currentTarget.parentElement?.getBoundingClientRect()
       if (row === undefined) return
-      setX(e.clientX - row.left)
+      // Under the pointer, so the press is on it; its start, where the menu starts, no further along than lets the menu, `reach` wide,
+      // end with the row, not hang out over what lies beside it.
+      const at = e.clientX - row.left
+      const left = Math.max(0, Math.min(at - 8, row.width - reach))
+      setBox({ left, width: at + 8 - left })
       // A menu opens on the press's click, which comes after it lets go: no menu by then, and it's back over the whole row.
       unlisten()
       const end = () => {
         unlisten()
         back.current = setTimeout(() => {
-          if (!open.current) setX(null)
+          if (!open.current) setBox(null)
         }, 0)
       }
       ended.current = end
@@ -321,10 +328,13 @@ function useAtPointer() {
     onOpenChange: (next: boolean) => {
       open.current = next
       clearTimeout(back.current)
-      if (!next) back.current = setTimeout(() => setX(null), 200)
+      if (!next) back.current = setTimeout(() => setBox(null), 200)
     },
   }
 }
+
+/** The model picker's width (328) and a little room. */
+const MENU_REACH = 336
 
 /** A row: its node, its name and the line under it, who does it at its end; and, where it can be changed, what changes it, over it all. */
 function Row({
@@ -336,6 +346,7 @@ function Row({
   under,
   who,
   pick,
+  reach = MENU_REACH,
   out = false,
 }: {
   i: number
@@ -347,10 +358,12 @@ function Row({
   who: ReactNode
   /** What changes it, given where the pointer pressed. */
   pick?: (onOpenChange: (open: boolean) => void) => ReactNode
+  /** How wide its menu is, with a little room: it starts no nearer the row's end than this. */
+  reach?: number
   out?: boolean
 }) {
   const arrives = useArrives()
-  const at = useAtPointer()
+  const at = useAtPointer(reach)
   return (
     <li className={cx(s.item, arrives && s.rises)} style={cssVars({ '--i': i })}>
       {link !== null && <Link state={link} />}
@@ -722,6 +735,7 @@ export function TaskLaunch({
           {endRow && (
             <Row
               i={rows.length}
+              reach={428}
               node={<Node state={endState} mark={<Icon name={hideEnd || end === TaskEnd.PushOnly ? 'branch' : 'pr'} size={17} />} />}
               link={null}
               label={hideEnd ? t.toward : t.endLabel}
