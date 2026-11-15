@@ -1608,7 +1608,7 @@ export const handlers = apiLayer(
           ),
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId)))),
-      HoldPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.hold(planId, actorId)))),
+      HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
       HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, actorId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, actorId, end, worksIn, toward))),

@@ -1548,6 +1548,8 @@ export function TaskView({
                         <SmallChangeOf
                           card={card}
                           named={named}
+                          projectId={snapshot.project.id}
+                          agents={model.agents}
                           busy={model.pending}
                           onMerge={(change) => void model.accept([change])}
                           {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}

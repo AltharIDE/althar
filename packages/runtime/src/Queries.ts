@@ -2665,6 +2665,7 @@ export class Queries extends Context.Service<
                       : {}),
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
+                    ...(field(parameters, 'reviewAfterMerge') === true ? { reviewAfterMerge: true } : {}),
                     // The preset its parts are, which the card's kicker names first (a task is a conversation plus parts).
                     preset:
                       field(parameters, 'smallChange') === true

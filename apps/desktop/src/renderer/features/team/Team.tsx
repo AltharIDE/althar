@@ -38,6 +38,10 @@ export const text = {
   team: (lead: string, review: string | null) => (review === null ? lead : `${lead}, ${review}`),
   reviews: (name: string) => `${name} reviews`,
   noReview: 'no review',
+  /** The board is being read for the task. */
+  reading: 'Reading its team…',
+  /** Where the board couldn't be read: Save's words, which read it again. */
+  again: 'Try again',
   /** The task is no longer available to change. */
   begun: 'This task is no longer available to change.',
   /** A task that has begun: when each change takes effect. */
@@ -66,6 +70,10 @@ export type Teamed = Pick<
  */
 export const canHold = (task: Teamed): boolean => task.plan !== null && (task.phase === 'planned' || task.holdable === true)
 
+/** Whether its team changes with it held: a plan on its countdown, or a small change started with its first step still waiting. */
+const holdsFor = (task: Teamed): boolean =>
+  task.plan !== null && (task.phase === 'planned' || (task.plan.preset === 'Small change' && task.holdable === true))
+
 /**
  * What changing its team does where it stands: `starts`, a plan held or on its countdown, which can start now too; `waits`,
  * started, its first step waiting for a free agent with nothing begun, which only changes; `begun`, at work or after, which
@@ -85,6 +93,43 @@ export const useTeamed = (projectId: string | null, taskId: string | null): Team
   const board = useQuery({ ...reads(client).board(projectId ?? ''), enabled: projectId !== null })
   const task = board.data?.tasks.find((one) => one.taskId === taskId)
   return task === undefined || teamChangeOf(task) === null ? null : task
+}
+
+/**
+ * A task's team dialog, opened from wherever its card or row is: at once, saying it is reading while the board reads, and why
+ * where the board can't be read (with another try) or no longer has the task to change. It becomes the team once it has the
+ * task, and stays once it has, saying so where the team can no longer change.
+ */
+export function TeamOf({
+  projectId,
+  taskId,
+  agents,
+  onClose,
+}: {
+  projectId: string
+  taskId: string
+  agents: ReadonlyArray<AgentStatus>
+  onClose: () => void
+}) {
+  const { client } = useServices()
+  const board = useQuery({ ...reads(client).board(projectId) })
+  const found = board.data?.tasks.find((one) => one.taskId === taskId)
+  const task = found === undefined || teamChangeOf(found) === null ? null : found
+  const [opened, setOpened] = useState(false)
+  useEffect(() => {
+    if (task !== null) setOpened(true)
+  }, [task])
+  if (opened) return <ChangeTeam projectId={projectId} task={task} agents={agents} onClose={onClose} />
+  const failed = board.data === undefined && board.isError
+  return (
+    <TeamDialog
+      task={found?.title ?? ''}
+      steps={[]}
+      onClose={onClose}
+      {...(failed ? { onSave: () => void board.refetch(), text: { save: text.again }, error: messageOf(board.error) } : {})}
+      {...(failed ? {} : { settled: board.data === undefined ? text.reading : found?.phase === 'settled' ? text.settled : text.begun })}
+    />
+  )
 }
 
 /** Its team in a line: who leads, how hard, and who reviews. */
@@ -159,11 +204,17 @@ export function ChangeTeam({
   task,
   agents,
   onClose,
+  onSaved,
+  leadOnly: only = false,
 }: {
   projectId: string
   task: Teamed | null
   agents: ReadonlyArray<AgentStatus>
   onClose: () => void
+  /** The steps the person changed, once saved: where the task is shown, its team reads them at once. */
+  onSaved?: (changed: ReadonlyArray<PlanStep>) => void
+  /** Only the lead changes here: its review reads when it does by another choice (a small change's, after its merge), and isn't shown. */
+  leadOnly?: boolean
 }) {
   const { client, cache } = useServices()
   // The task as it opened: what the dialog shows once it can no longer change.
@@ -173,25 +224,46 @@ export function ChangeTeam({
   const [busy, setBusy] = useState<'save' | 'start' | null>(null)
   const saving = useRef(false)
   const holding = useRef<Promise<void> | null>(null)
+  // Whether its hold took: the task may have begun between the board's reading and the hold reaching the runtime.
+  const [hold, setHold] = useState<'held' | 'lost' | null>(null)
+  const lost = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const firstPlan = first?.plan ?? null
   useEffect(() => {
-    // Its countdown stops while its team is changed: held, it starts when the person says.
-    if (first?.phase === 'planned' && firstPlan !== null && holding.current === null) {
-      holding.current = client.holdPlan(firstPlan.id)
+    // Its countdown stops while its team is changed, and a small change's wait for a free agent or its checkout with it: held, it
+    // starts when the person says. Where the hold finds it begun already, its team changes as a running task's does.
+    if (first !== null && firstPlan !== null && holdsFor(first) && holding.current === null) {
+      holding.current = client.holdPlan(firstPlan.id).then((held) => {
+        lost.current = held === false
+        setHold(held === false ? 'lost' : 'held')
+      })
       void holding.current.catch((failure: unknown) => setError(messageOf(failure)))
     }
   }, [client, first, firstPlan])
   if (first === null || firstPlan === null) return null
   const now = task ?? first
   const plan = now.plan ?? firstPlan
-  const how = task === null ? null : teamChangeOf(task)
+  // A small change whose review reads after its merge keeps that timing: its review is changed from its Review stop, not here.
+  const leadOnly = only || (plan.preset === 'Small change' && plan.reviewAfterMerge === true)
+  const read = task === null ? null : teamChangeOf(task)
+  // What this dialog holds (or is holding) is a held plan, though the board still reads it as at work: a small change waiting for
+  // a place or, Local, its checkout, which the board calls begun. It starts with its new team, and saves as a plan. Found begun
+  // by the hold, it only changes.
+  const heldHere = holdsFor(first) && hold !== 'lost'
+  const how =
+    read === null
+      ? null
+      : hold === 'lost'
+        ? 'begun'
+        : heldHere && (read === 'waits' || (read === 'begun' && task?.holdable === true))
+          ? 'starts'
+          : read
   // A task that has begun changes through ChangeTeam, until it is merged or settled.
-  const begun = how === 'begun' || teamChangeOf(first) === 'begun'
+  const begun = how === 'begun' || (teamChangeOf(first) === 'begun' && !heldHere)
   const gone = how === null
   // A plan made with no review has no review step: a change that can still have one shows it, off, for the person to add.
   const lead = plan.steps.find((step) => step.key === 'implement')
-  const addable = begun && now.kind === 'change' && now.reviewing == null && !plan.steps.some((step) => step.key === 'review')
+  const addable = begun && !leadOnly && now.kind === 'change' && now.reviewing == null && !plan.steps.some((step) => step.key === 'review')
   const given: ReadonlyArray<PlanStep> =
     addable && lead !== undefined
       ? [
@@ -217,10 +289,13 @@ export function ChangeTeam({
     try {
       // Opening the dialog pauses its countdown. That hold must finish before this Start can run.
       await holding.current
-      if (begun) {
+      if (begun || lost.current) {
         // A live session may have moved since this dialog opened. Only the steps the person touched are a new choice.
         const changed = steps.filter((step) => edits[step.key] !== undefined)
-        if (changed.length > 0) await client.changeTeam(now.taskId, changed)
+        if (changed.length > 0) {
+          await client.changeTeam(now.taskId, changed)
+          onSaved?.(changed)
+        }
       } else {
         await client.changePlan(plan.id, steps, ending)
         if (andStart) await client.startPlan(plan.id)
@@ -242,7 +317,7 @@ export function ChangeTeam({
     <TeamDialog
       task={now.title}
       steps={steps
-        .filter((step) => step.key !== 'review' || reviewShown(step))
+        .filter((step) => step.key !== 'review' || (!leadOnly && reviewShown(step)))
         .map((step) => {
           return {
             id: step.key,

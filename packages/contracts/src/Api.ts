@@ -2494,6 +2494,8 @@ export const TaskCard = Schema.Struct({
       worksIn: Schema.optional(WorksIn),
       /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
       preset: Schema.optional(Schema.String),
+      /** Its review reads only once it merges (a small change's, by an explicit request): its review step is then skipped before that, and still has its reviewer. */
+      reviewAfterMerge: Schema.optional(Schema.Boolean),
       /** Why it works where it does, in the coordinator's words, where that isn't the project's default; null otherwise. */
       worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
       /** The task working Local now, which it would wait for there; null where Local is free. */
@@ -4926,8 +4928,8 @@ const ProjectApi = RpcGroup.make(
   ),
   /** Starts a planned task now, rather than when its time runs out. */
   command('StartPlan', { planId: Schema.String }, Schema.Void),
-  /** Holds a planned task: it waits until you start it. */
-  command('HoldPlan', { planId: Schema.String }, Schema.Void),
+  /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
+  command('HoldPlan', { planId: Schema.String }, Schema.Boolean),
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
   command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */

@@ -66,7 +66,7 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
-import { ChangeTeam, teamChangeOf } from '../team/Team'
+import { TeamOf } from '../team/Team'
 import type { SettingsWays } from '../settings/open'
 import { useSendMidTurn } from '../settings/useSendMidTurn'
 import { useFolds } from '../board/folds'
@@ -541,6 +541,8 @@ export function ProjectView({
     queryFn: () => client.listPresets(about ?? undefined),
   }).data
 
+  // The team of a task, open from its row up next or from a small change's card, while it can still change.
+  const [teamFor, setTeamFor] = useState<string | null>(null)
   const actions: CardActions = {
     project: name,
     ...(about === null ? {} : { projectId: about }),
@@ -552,6 +554,7 @@ export function ProjectView({
     onCreateBranch: (planId, steps, end, repositoryId, branch) =>
       void model.changePlanToNewBranch(planId, steps, end, repositoryId, branch),
     onOpen: onTask,
+    onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),
@@ -791,9 +794,6 @@ export function ProjectView({
 
   /** Into the coordinator's composer, from an empty board: beside it, or under it where the conversation is hidden. */
   const talkToCoordinator = () => requestAnimationFrame(() => voice.inputRef.current?.focus())
-  // The team of a plan up next, open from its row, while it can still change.
-  const [teamFor, setTeamFor] = useState<string | null>(null)
-  const teamTask = teamFor === null || lanes === null ? null : (lanes.next.find((one) => one.taskId === teamFor) ?? null)
   /** The first thing that waits on you, in its task. */
   const openYours = () => {
     const first = lanes === null ? null : firstNeedOf(lanes)
@@ -1112,15 +1112,6 @@ export function ProjectView({
                       }}
                       {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                     />
-                    {teamFor !== null && (
-                      <ChangeTeam
-                        key={teamFor}
-                        projectId={projectId}
-                        task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
-                        agents={model.agents}
-                        onClose={() => setTeamFor(null)}
-                      />
-                    )}
                   </>
                 ) : board.error === null ? (
                   <PartPending label={text.boardReading} />
@@ -1134,6 +1125,10 @@ export function ProjectView({
               </div>
             )}
           </div>
+        )}
+        {/* A team opened from a card in the conversation or a row of the board: whichever of them is on show, and before the board is. */}
+        {teamFor !== null && (
+          <TeamOf key={teamFor} projectId={projectId} taskId={teamFor} agents={model.agents} onClose={() => setTeamFor(null)} />
         )}
       </MessageMotion>
     </PageOpenerProvider>
