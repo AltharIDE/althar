@@ -204,3 +204,63 @@
 .coach > span:first-child {
   flex: 1;
 }
+
+/* the route in the button: small, its stops apart, the ones it skips faded */
+.route {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 400;
+}
+.stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  opacity: 0.85;
+}
+.stop[data-skipped] {
+  opacity: 0.4;
+}
+.sep {
+  margin-right: 1px;
+  opacity: 0.7;
+}
+/* Ship and its route on one line: Ship at the start, the route at the end */
+.side {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+.side .route {
+  opacity: 0.9;
+}
+.look {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sideMain > span {
+  flex: 1;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--on-signal) 18%, transparent);
+  line-height: 1;
+}
+/* under way: the stop it is at in bold, the ones ahead faded */
+.stop[data-step='now'],
+.pill[data-step='now'] {
+  font-weight: 650;
+  opacity: 1;
+}
+.stop[data-step='next'],
+.pill[data-step='next'] {
+  opacity: 0.5;
+}

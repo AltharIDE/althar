@@ -16,7 +16,7 @@ import { fakeClient, fakeHost } from '../../tests/fixtures'
 import { servicesFor } from '../../tests/render'
 import { DIRECTIONS, type DirectionKey, LabContext } from './directions'
 import { MOMENTS, momentOf, type Moment } from './moments'
-import { LOOKS, nextLook, setLook, toggleShared, useOnto } from './onto'
+import { LOOKS, type Look, nextLook, setLook, toggleShared, useOnto } from './onto'
 import s from './lab.module.css'
 
 /*
@@ -149,12 +149,18 @@ function Lab() {
           <button type="button" aria-pressed={narrow} onClick={() => setNarrow((on) => !on)}>
             <kbd>N</kbd> Narrow
           </button>
-          {direction === 'b2' &&
-            LOOKS.map((one, index) => (
-              <button key={one.key} type="button" aria-pressed={onto.look === one.key} onClick={() => setLook(one.key)}>
-                {index === 0 && <kbd>S</kbd>} {one.label}
-              </button>
-            ))}
+          {direction === 'b2' && (
+            <label className={s.look}>
+              <kbd>S</kbd>
+              <select value={onto.look} onChange={(event) => setLook(event.target.value as Look)} aria-label="How Ship shows">
+                {LOOKS.map((one) => (
+                  <option key={one.key} value={one.key}>
+                    {one.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {direction === 'b2' && (
             <button type="button" onClick={toggleShared}>
               <kbd>T</kbd> {onto.shared ? 'Shared main' : 'Solo main'}

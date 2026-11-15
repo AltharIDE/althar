@@ -119,6 +119,72 @@ if (mode === 'cards') {
     await page.screenshot({ path: join(out, file), clip: { x: 610, y: 52, width: 646, height: Math.min(748, bottom - 52 + 14) } })
     process.stdout.write(`${file}\n`)
   }
+} else if (mode === 'two') {
+  // The button alone in each two-line look, at three routes, on one sheet.
+  const looks: Array<[string, string]> = [
+    ['twoLine', 'Dots'],
+    ['twoArrows', 'Arrows'],
+    ['twoChevrons', 'Chevrons'],
+    ['twoIcons', 'Icons'],
+    ['twoAll', 'Every stop, skipped ones faded'],
+    ['twoPills', 'Pills'],
+    ['side', 'Route beside Ship'],
+  ]
+  const routes: Array<[string, string]> = [
+    ['review-ready', 'Review, push, ready'],
+    ['review-merge', 'Review to merged'],
+    ['push-merge', 'No review, merged'],
+  ]
+  const cells: string[] = []
+  for (const [look, name] of looks) {
+    const row: string[] = []
+    for (const [route] of routes) {
+      await open('b2', 'held', `&look=${look}&explained=1&route=${route}`)
+      const group = page.locator('[data-lab-scene] article [role="group"]:has(button[aria-label="How far it goes"])').first()
+      const box = await group.boundingBox()
+      if (box === null) continue
+      const shot = await page.screenshot({ clip: { x: box.x - 8, y: box.y - 8, width: box.width + 16, height: box.height + 16 } })
+      row.push(`<img src="data:image/png;base64,${shot.toString('base64')}">`)
+    }
+    cells.push(`<div class="name">${name}</div>${row.join('')}`)
+  }
+  await page.setContent(`<!doctype html><style>
+    body{margin:0;padding:16px;font:12px Inter,system-ui;background:#f6f5f1;color:#26231e}
+    .g{display:grid;grid-template-columns:150px repeat(3,auto);gap:10px 14px;align-items:center;width:max-content}
+    .h{color:#8a8478}.name{font-weight:600}img{display:block;border-radius:6px;background:#fff}
+  </style><div class="g"><div></div>${routes.map(([, r]) => `<div class="h">${r}</div>`).join('')}${cells.join('')}</div>`)
+  await page.locator('.g').screenshot({ path: join(out, 'two-sheet.png') })
+  process.stdout.write('two-sheet.png\n')
+
+  // The same button as Ship runs, review to merged in a project of one.
+  const along: Array<[string, string]> = [
+    ['held', 'Before'],
+    ['reviewing', 'Reviewing'],
+    ['pushing', 'Pushing'],
+    ['readyChecks', 'Checks'],
+  ]
+  const rows: string[] = []
+  for (const [look, name] of looks.filter(([one]) => ['twoArrows', 'twoIcons', 'twoPills', 'side'].includes(one))) {
+    const row: string[] = []
+    for (const [m] of along) {
+      await open('b2', m, `&look=${look}&explained=1&route=review-merge&solo=1`)
+      const box = await page
+        .locator('[data-lab-scene] article [role="group"]:has(button[aria-label="How far it goes"])')
+        .first()
+        .boundingBox()
+      if (box === null) continue
+      const shot = await page.screenshot({ clip: { x: box.x - 8, y: box.y - 8, width: box.width + 16, height: box.height + 16 } })
+      row.push(`<img src="data:image/png;base64,${shot.toString('base64')}">`)
+    }
+    rows.push(`<div class="name">${name}</div>${row.join('')}`)
+  }
+  await page.setContent(`<!doctype html><style>
+    body{margin:0;padding:16px;font:12px Inter,system-ui;background:#f6f5f1;color:#26231e}
+    .g{display:grid;grid-template-columns:120px repeat(4,auto);gap:10px 14px;align-items:center;width:max-content}
+    .h{color:#8a8478}.name{font-weight:600}img{display:block;border-radius:6px;background:#fff}
+  </style><div class="g"><div></div>${along.map(([, a]) => `<div class="h">${a}</div>`).join('')}${rows.join('')}</div>`)
+  await page.locator('.g').screenshot({ path: join(out, 'two-running.png') })
+  process.stdout.write('two-running.png\n')
 } else {
   const [d = 'a', m = 'readyChecks', narrow] = rest
   await open(d, m, narrow === 'narrow' ? '&narrow=1' : '')

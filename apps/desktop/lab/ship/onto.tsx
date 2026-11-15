@@ -5,6 +5,7 @@ import {
   type ChangeSetProps,
   CheckState,
   HoverCard,
+  Icon,
   Menu,
   MenuItem,
   MenuSegments,
@@ -61,15 +62,28 @@ interface State {
 export const LOOKS = [
   { key: 'caption', label: 'Line under' },
   { key: 'twoLine', label: 'Two lines' },
+  { key: 'twoArrows', label: 'Two lines, arrows' },
+  { key: 'twoChevrons', label: 'Two lines, chevrons' },
+  { key: 'twoIcons', label: 'Two lines, icons' },
+  { key: 'twoAll', label: 'Two lines, every stop' },
+  { key: 'twoPills', label: 'Two lines, pills' },
+  { key: 'side', label: 'Route beside Ship' },
   { key: 'track', label: 'Track under' },
   { key: 'coach', label: 'Pointer' },
   { key: 'route', label: 'Route as label' },
 ] as const
 export type Look = (typeof LOOKS)[number]['key']
 
+function routeOf(said: string | null): Route | null {
+  const [first, far] = said?.split('-') ?? []
+  if (far !== 'push' && far !== 'ready' && far !== 'merge') return null
+  return { review: first === 'review', far }
+}
+
 const start: State = {
   mine: { review: true, far: 'merge' },
-  chosen: null,
+  // ?route=review-ready, push-merge and the like: a route chosen for this Ship, for pictures.
+  chosen: routeOf(new URLSearchParams(location.search).get('route')),
   shared: new URLSearchParams(location.search).get('solo') !== '1',
   explained: new URLSearchParams(location.search).get('explained') === '1',
   offer: 'shown',
@@ -184,6 +198,51 @@ const saysOf = ({ review, far }: Route, n: number) => {
   return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')}, then ${parts.at(-1)!}`
 }
 
+/** The looks that put the route on a second line in the button. */
+const TWO = new Set<Look>(['twoLine', 'twoArrows', 'twoChevrons', 'twoIcons', 'twoAll', 'twoPills'])
+
+/** The stops the button names: the checks are the merge's own wait, not a stop of their own. */
+const BUTTON_STOPS = ['Review', 'Push', 'Ready', 'Merge'] as const
+const ICON_OF = { Review: 'search', Push: 'up', Ready: 'pr', Merge: 'after' } as const
+
+/** The route, small, as the look sets it: dots, arrows, chevrons, icons, or every stop with the ones it skips faded. */
+function RouteLine({ stops, look, at }: { stops: ReadonlyArray<string>; look: Look; at?: string }) {
+  const atIndex = at === undefined ? -1 : BUTTON_STOPS.indexOf((at === 'Checks' ? 'Merge' : at) as (typeof BUTTON_STOPS)[number])
+  const shown = look === 'twoAll' ? BUTTON_STOPS : BUTTON_STOPS.filter((one) => stops.includes(one))
+  const between =
+    look === 'twoPills' ? null : look === 'twoLine' ? (
+      <span className={s.sep}>·</span>
+    ) : look === 'twoChevrons' ? (
+      <Icon name="chevron" size={10} className={s.sep} />
+    ) : (
+      <Icon name="arrow" size={10} className={s.sep} />
+    )
+  return (
+    <small className={s.route} aria-label={stops.filter((one) => one !== 'Checks').join(', then ')}>
+      {shown.map((stop, i) => (
+        <span
+          key={stop}
+          className={look === 'twoPills' ? s.pill : s.stop}
+          data-skipped={!stops.includes(stop) || undefined}
+          data-step={
+            atIndex < 0
+              ? undefined
+              : BUTTON_STOPS.indexOf(stop) < atIndex
+                ? 'done'
+                : BUTTON_STOPS.indexOf(stop) === atIndex
+                  ? 'now'
+                  : 'next'
+          }
+        >
+          {i > 0 && between}
+          {look === 'twoIcons' && <Icon name={ICON_OF[stop]} size={11} />}
+          {look === 'twoChevrons' ? stop : stop.toLowerCase()}
+        </span>
+      ))}
+    </small>
+  )
+}
+
 /** Got it: said once, and what Ship does stays a hover or a quiet line away. */
 const gotIt = (
   <Button size="small" onClick={() => set({ explained: true })}>
@@ -210,10 +269,15 @@ function Onto({ n, later = false }: { n: number; later?: boolean }) {
   const label =
     now.look === 'route' ? (
       routeLabel(route)
-    ) : now.look === 'twoLine' ? (
+    ) : now.look === 'side' ? (
+      <span className={s.side}>
+        <b>Ship</b>
+        <RouteLine stops={stops} look="twoArrows" />
+      </span>
+    ) : TWO.has(now.look) ? (
       <span className={s.twoLine}>
         <b>Ship</b>
-        <small>{stops.join(' · ').toLowerCase()}</small>
+        <RouteLine stops={stops} look={now.look} />
       </span>
     ) : (
       'Ship'
@@ -221,7 +285,7 @@ function Onto({ n, later = false }: { n: number; later?: boolean }) {
   const button = (
     <SplitButton
       variant="signal"
-      {...(now.look === 'twoLine' ? { className: s.tallSplit } : {})}
+      {...(TWO.has(now.look) ? { className: s.tallSplit } : now.look === 'side' ? { mainClassName: s.sideMain } : {})}
       onClick={noop}
       moreLabel="How far it goes"
       menu={(trigger) => <HowFar trigger={trigger} route={route} onRoute={(chosen) => set({ chosen })} note={note} n={n} />}
@@ -275,13 +339,25 @@ function Onto({ n, later = false }: { n: number; later?: boolean }) {
 }
 
 /** Under way: greyed, where it is, with how far still changeable and the review skippable, never a Push beside it. */
-function Under({ label, n, skip }: { label: string; n: number; skip: boolean }) {
+function Under({ label, n, skip, at }: { label: string; n: number; skip: boolean; at: string }) {
   const now = useOnto()
   const route = now.chosen ?? smart(now).route
+  const stops = stopsOf(route)
+  // Where Ship's button said its route, the route stays, the stop it is at in bold.
+  const two = TWO.has(now.look) || now.look === 'side'
+  const shown = two ? (
+    <span className={now.look === 'side' ? s.side : s.twoLine}>
+      <b>{label}</b>
+      <RouteLine stops={stops} look={now.look === 'side' ? 'twoArrows' : now.look} at={at} />
+    </span>
+  ) : (
+    label
+  )
   return (
     <SplitButton
       aria-disabled="true"
-      className={s.waitingSplit}
+      className={cx(s.waitingSplit, two && now.look !== 'side' && s.tallSplit)}
+      {...(now.look === 'side' ? { mainClassName: s.sideMain } : {})}
       onClick={noop}
       moreLabel="How far it goes"
       menu={(trigger) => (
@@ -304,10 +380,12 @@ function Under({ label, n, skip }: { label: string; n: number; skip: boolean }) 
         />
       )}
     >
-      {label}
+      {shown}
     </SplitButton>
   )
 }
+
+const cx = (...names: ReadonlyArray<string | false | undefined>) => names.filter(Boolean).join(' ')
 
 /** What they keep choosing, offered as their default; put off, it asks again after twice as many. */
 function Offer() {
@@ -374,10 +452,12 @@ const cardOf = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
       return {
         note: <Track at="Review" />,
         ...(real.review === undefined ? {} : { review: { state: CheckState.Running, by: real.review.by } }),
-        actions: [<Under key="u" label={moment.key === 'reviewing' ? 'Reviewing' : 'Fixing what the review found'} n={n} skip />],
+        actions: [
+          <Under key="u" label={moment.key === 'reviewing' ? 'Reviewing' : 'Fixing what the review found'} n={n} skip at="Review" />,
+        ],
       }
     case 'pushing':
-      return { note: <Track at="Push" />, actions: [<Under key="u" label={`Pushing ${commits(3)}`} n={3} skip={false} />] }
+      return { note: <Track at="Push" />, actions: [<Under key="u" label={`Pushing ${commits(3)}`} n={3} skip={false} at="Push" />] }
     case 'draftChecks':
     case 'draftPassed':
       // Only where it went as far as a push: the next step is the person's, the same control from here.
@@ -390,10 +470,10 @@ const cardOf = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
               </Button>,
             ],
           }
-        : { note: <Track at="Ready" />, actions: [<Under key="u" label="Marking ready" n={3} skip={false} />] }
+        : { note: <Track at="Ready" />, actions: [<Under key="u" label="Marking ready" n={3} skip={false} at="Ready" />] }
     case 'readyChecks':
       return route.far === 'merge'
-        ? { note: <Track at="Checks" />, actions: [<Under key="u" label="Merges once verify passes" n={3} skip={false} />] }
+        ? { note: <Track at="Checks" />, actions: [<Under key="u" label="Merges once verify passes" n={3} skip={false} at="Checks" />] }
         : { note: <Track at="Ready" done status={TaskStatus.Yours} />, ...a(moment, real, hover) }
     case 'requiredPassed':
       return route.far === 'merge'
