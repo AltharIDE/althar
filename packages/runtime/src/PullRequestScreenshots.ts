@@ -13,6 +13,7 @@ import { Connections } from './Connections'
 import { ScreenshotsRefused } from './errors'
 import { evidenceGallery } from './evidenceGallery'
 import { contained } from './Failures'
+import { fitPicture } from './fitPicture'
 import { Instance } from './Instance'
 import { Policies, postsScreenshots } from './Policies'
 import { timestamp } from './records'
@@ -187,18 +188,44 @@ export class PullRequestScreenshots extends Context.Service<
           const upload = on.host.uploadPicture?.bind(on.host)
           if (upload === undefined) return yield* refuse('no_pictures', on.change)
           const uploads: Record<string, string> = { ...kept?.uploads }
+          const notes: Record<string, string> = {}
           for (const shot of posting) {
-            if (uploads[shot.digest] !== undefined) continue
+            if (uploads[shot.digest] !== undefined) {
+              const note = kept?.shown.find((was) => was.digest === shot.digest)?.note
+              if (note !== undefined) notes[shot.digest] = note
+              continue
+            }
             const bytes = yield* artifacts.read(shot.digest)
             if (bytes === null)
               return yield* new ScreenshotsRefused({
                 why: 'unkept',
                 message: `Althar no longer keeps the picture for “${shot.caption}”. Ask the lead to take it again, or leave it out.`,
               })
-            uploads[shot.digest] = yield* upload(on.repository, { bytes, name: shot.name, mediaType: shot.mediaType })
+            const original = { bytes, name: shot.name, mediaType: shot.mediaType }
+            const limit = on.host.capabilities.pictureLimit ?? 10_000_000
+            let fitted = yield* fitPicture(original, limit)
+            if (fitted !== null) {
+              const result = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
+              if (result._tag === 'Success') uploads[shot.digest] = result.success
+              else if ((result.failure.reason === 'rejected' && result.failure.sizeLimit !== undefined) || result.failure.status === 413) {
+                const smaller = Math.min(result.failure.sizeLimit ?? limit / 2, fitted.picture.bytes.byteLength)
+                fitted = yield* fitPicture(original, smaller)
+                if (fitted !== null) {
+                  const retried = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
+                  if (retried._tag === 'Success') uploads[shot.digest] = retried.success
+                  else if (
+                    (retried.failure.reason !== 'rejected' || retried.failure.sizeLimit === undefined) &&
+                    retried.failure.status !== 413
+                  )
+                    return yield* retried.failure
+                }
+              } else return yield* result.failure
+            }
+            if (uploads[shot.digest] === undefined) notes[shot.digest] = `Left out: ${shot.name} could not fit the host's upload limit.`
+            else if (fitted?.note) notes[shot.digest] = fitted.note
             yield* keep(on.linkId, on.projectId, { uploads })
           }
-          return uploads
+          return { uploads, notes }
         })
 
       /**
@@ -239,13 +266,14 @@ export class PullRequestScreenshots extends Context.Service<
               })
             // What is left out is kept first: it holds whatever happens to the rest.
             if (input.leftOut !== undefined) yield* keep(on.linkId, on.projectId, { leftOut })
-            const uploads = yield* uploaded(on, posting, kept)
+            const { uploads, notes } = yield* uploaded(on, posting, kept)
             const head = on.change.headSha
             const shown = posting.map((shot): PostedShot => ({
               key: shot.key,
               caption: shot.caption,
               digest: shot.digest,
               url: uploads[shot.digest] ?? '',
+              ...(notes[shot.digest] === undefined ? {} : { note: notes[shot.digest] }),
               head,
             }))
             // A view shown again as it was keeps the commit it was taken of.

@@ -26,6 +26,7 @@ export const PostedShot = Schema.Struct({
   caption: Schema.String,
   digest: Schema.String,
   url: Schema.String,
+  note: Schema.optional(Schema.String),
   /** The pull request's head when it was posted; null where it wasn't known. */
   head: Schema.NullOr(Schema.String),
 })
@@ -156,7 +157,9 @@ const short = (head: string | null) => (head === null ? null : head.slice(0, 7))
 const SHOWN_WIDTH = 720
 
 const pictureOf = (shot: PostedShot, width = SHOWN_WIDTH) =>
-  `<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${width}">`
+  shot.url === ''
+    ? plain(shot.note ?? 'Left out: this picture could not be uploaded.')
+    : `${shot.note ? `${plain(shot.note)}<br>` : ''}<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${width}">`
 
 /** How wide each picture of a Before | After table shows, so the two fit side by side. */
 const PAIRED_WIDTH = 356

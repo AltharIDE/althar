@@ -2,7 +2,17 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit, Logger, Schema } from 'effect'
 
 import { ConnectorFailed } from '../src/errors'
-import { ETAG_TEXT_KEPT, ETAGS_KEPT, failureOf, makeHttp, PAGES_FOLLOWED, paged, withoutTrailingSlashes } from '../src/http'
+import {
+  messageOf,
+  graphqlFailure,
+  ETAG_TEXT_KEPT,
+  ETAGS_KEPT,
+  failureOf,
+  makeHttp,
+  PAGES_FOLLOWED,
+  paged,
+  withoutTrailingSlashes,
+} from '../src/http'
 import type { Product } from '../src/model'
 import { stubFetch } from './stub'
 
@@ -24,6 +34,21 @@ const failure = <A>(exit: Exit.Exit<A, ConnectorFailed>) => {
   const error = Exit.isFailure(exit) ? exit.cause.reasons.find((reason) => reason._tag === 'Fail') : undefined
   return error !== undefined && error._tag === 'Fail' ? error.error : undefined
 }
+
+it('turns HTML in host JSON and GraphQL errors into plain words and keeps the upload limit', () => {
+  const html = `Yowza that's a big file. <span class="drag-and-drop-error-info"><span class="btn-link">Try again</span> with a file size less than 10MB.</span>`
+  const body = JSON.stringify({ message: 'Validation Failed', errors: [{ message: html }] })
+  const error = failureOf('github', 422, new Headers(), body, 0)
+  assert.strictEqual(error.message, "Validation Failed: Yowza that's a big file. Try again with a file size less than 10MB.")
+  assert.strictEqual(error.sizeLimit, 10_000_000)
+  assert.strictEqual(
+    failureOf('gitlab', 413, new Headers(), JSON.stringify({ message: 'Maximum attachment size is 2 MiB' }), 0).sizeLimit,
+    2 * 1024 * 1024,
+  )
+  assert.strictEqual(messageOf(JSON.stringify({ error: '&lt;b&gt;No &amp; no&lt;/b&gt;' }), 'Error'), 'No & no')
+  assert.strictEqual(graphqlFailure('github', { message: '<b>Denied</b>' }, 200).message, 'Denied')
+  assert.strictEqual(messageOf('<html><body>Bad gateway</body></html>', 'Bad gateway'), 'Bad gateway')
+})
 
 describe('a call to a service', () => {
   it.effect('signs in with the header asked for on each call, and reads the answer', () =>
