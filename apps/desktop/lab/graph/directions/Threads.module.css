@@ -1,0 +1,68 @@
+/* The board, with a request's line drawn over it while one of its cards is pointed at. */
+.threads {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+}
+.over {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 2;
+}
+.board {
+  height: 100%;
+  min-height: 0;
+}
+.line {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  animation: arrive var(--enter) var(--ease) both;
+}
+@keyframes arrive {
+  from {
+    opacity: 0;
+  }
+}
+.met {
+  stroke: var(--t-4);
+}
+.waits {
+  stroke: var(--t-4);
+  stroke-dasharray: 3 4;
+}
+.you {
+  stroke: color-mix(in srgb, var(--signal) 70%, transparent);
+  stroke-dasharray: 3 4;
+}
+.stuck {
+  stroke: color-mix(in srgb, var(--danger) 70%, transparent);
+  stroke-dasharray: 3 4;
+}
+.lit {
+  stroke-width: 1.75;
+}
+.lit.met,
+.lit.waits {
+  stroke: var(--t-2);
+}
+.head_met,
+.head_waits {
+  fill: var(--t-4);
+}
+.head_you {
+  fill: color-mix(in srgb, var(--signal) 70%, transparent);
+}
+.head_stuck {
+  fill: color-mix(in srgb, var(--danger) 70%, transparent);
+}
+
+/* While a card is pointed at, what isn't on its line steps back. */
+.threads :global([data-lane] [data-move]) {
+  transition: opacity var(--enter) var(--ease);
+}
+.threads:global([data-spot]) :global([data-lane] [data-move]:not([data-near])) {
+  opacity: 0.32;
+}
