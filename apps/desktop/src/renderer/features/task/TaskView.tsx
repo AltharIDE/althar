@@ -12,7 +12,6 @@ import {
   AttachPullRequest,
   ChangeView,
   BackCrumb,
-  useTypedTitle,
   Button,
   Delivery,
   DiffLineKind,
@@ -125,6 +124,7 @@ import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
 import { useSearchReveal } from '../finder/revealSearch'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
 import { pictureOf } from '../../shared/code/FilePicture'
@@ -652,7 +652,7 @@ export function TaskView({
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
   // An agent's rename types itself into the title; the person's own shows at once.
-  const typedTitle = useTypedTitle(snapshot?.task.title ?? '')
+  const typedTitle = useTaskTitle(snapshot?.task.id, snapshot?.task.title ?? '')
   if (snapshot === null) {
     return (
       <div className={embedded ? s.aside : s.window}>
@@ -1298,7 +1298,8 @@ export function TaskView({
               <BackCrumb
                 to={snapshot.project.name}
                 kbd="esc"
-                title={typedTitle}
+                title={snapshot.task.title}
+                shown={typedTitle}
                 titleLevel={1}
                 maxLength={TITLE_LENGTH}
                 editing={renaming}

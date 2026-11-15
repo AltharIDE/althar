@@ -4235,6 +4235,9 @@ export const WatchEvent = Schema.Union([
     aggregateId: Schema.String,
     projectId: Schema.NullOr(Schema.String),
     threadId: Schema.NullOr(Schema.String),
+    /** On a task's change that was a rename: the title it was given, and whether an agent (a lead or the coordinator) gave it, not the person. */
+    renamedTo: Schema.optional(Schema.String),
+    renamedByAgent: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     _tag: Schema.Literal('Streaming'),

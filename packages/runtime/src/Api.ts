@@ -728,9 +728,10 @@ export const handlers = apiLayer(
                 Effect.gen(function* () {
                   const batch = yield* queries.changesSince(cursor, 500)
                   if (batch.length === 0) yield* Effect.raceFirst(grown, Effect.sleep(FEED_FALLBACK))
-                  const events: ReadonlyArray<WatchEvent> = batch.map(({ checkpoint, ...change }) => ({
+                  const events: ReadonlyArray<WatchEvent> = batch.map(({ checkpoint, renamedTo, renamedByAgent, ...change }) => ({
                     _tag: 'Changed',
                     ...change,
+                    ...(renamedTo === null ? {} : { renamedTo, renamedByAgent: renamedByAgent === 1 }),
                     ...(checked ? { checkpoint } : {}),
                   }))
                   return [events, Option.some(batch.at(-1)?.cursor ?? cursor)] as const

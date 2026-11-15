@@ -1,17 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { AgentStatus, PlanStep } from '@althar/contracts'
-import {
-  Model,
-  SmallChange,
-  useTypedTitle,
-  type SmallChangeChecks,
-  type SmallChangeReview,
-  type SmallChangeReviewWhen,
-  Problem,
-} from '@althar/ui'
+import { Model, SmallChange, type SmallChangeChecks, type SmallChangeReview, type SmallChangeReviewWhen, Problem } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { useServices } from '../../data/services'
 import { type NameModel, useEffortNames } from '../../shared/modelNames'
 import type { SmallChangeContent } from '../../shared/thread'
@@ -114,7 +107,7 @@ export function SmallChangeOf({
   onShow?: (itemId: string) => void
 }) {
   const { client } = useServices()
-  const title = useTypedTitle(card.title)
+  const title = useTaskTitle(card.taskId, card.title)
   const [error, setError] = useState<string | null>(null)
   // Its team: what the person just saved, laid over what is read until a read of its own says it, or says something else.
   const effortOf = useEffortNames()

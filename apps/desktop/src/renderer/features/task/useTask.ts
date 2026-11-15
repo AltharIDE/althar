@@ -1,4 +1,3 @@
-import { markOwnTitle } from '@althar/ui'
 import { useQuery } from '@tanstack/react-query'
 import { doing, type Doing } from './actions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -735,12 +734,7 @@ export const useTask = (threadId: string): TaskModel => {
       return { abandoned, open }
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
-    rename: (title) =>
-      onTask((taskId) => {
-        // The person's own rename: no agent is at the keys, so every surface shows it at once.
-        markOwnTitle(title.trim())
-        return client.renameTask(taskId, title)
-      }),
+    rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
     attach: async (pullRequest, start) => {
       let done = null as Attachment | null
       await onTask(async (taskId) => {

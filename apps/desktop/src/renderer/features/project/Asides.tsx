@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import type { QueryClient } from '@tanstack/react-query'
 
 import type { BoardSnapshot, BoardTask, PlanStep, ThreadItem, ThreadSnapshot } from '@althar/contracts'
-import { markOwnTitle, type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton, Problem } from '@althar/ui'
+import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton, Problem } from '@althar/ui'
 
 import { type Client, messageOf, newTaskId } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -363,9 +363,7 @@ export function useAsides({
       cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
         current === undefined ? current : { ...current, items: mergeItems(current.items, optimistic.items) },
       )
-      // Its first title is the window's own, not an agent's: it shows at once.
       const titled = asideTitle(words)
-      markOwnTitle(titled)
       await Promise.all([client.renameTask(taskId, titled).catch(() => undefined), sendOn(threadId, said, was, lead)])
       // Keep the person's message on screen until its stored copy arrives. A failed refresh never sends it twice.
       await cache.fetchQuery({ ...reads(client).thread(threadId), staleTime: 0 }).catch(() => undefined)

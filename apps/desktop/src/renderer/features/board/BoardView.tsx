@@ -13,7 +13,6 @@ import {
   BoardCard as KitBoardCard,
   boardCardText,
   type BoardCardProps,
-  useTypedTitle,
   BoardColumn,
   BoardDivider,
   BoardEmpty,
@@ -33,7 +32,7 @@ import {
   MenuItem,
   MergeButton,
   NextLine,
-  NextRow,
+  NextRow as KitNextRow,
   NextStep,
   Outcome,
   PullChip,
@@ -50,7 +49,7 @@ import {
   Wait,
   Problem,
 } from '@althar/ui'
-import { Fragment, type ReactNode, useEffect, useState } from 'react'
+import { type ComponentProps, Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { taskStatusOf } from '../../shared/taskStatus'
@@ -73,6 +72,7 @@ import {
   standingText,
 } from '../../shared/standing'
 import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock, runningCalmly } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
@@ -410,8 +410,13 @@ const findingsOf = (reviewing: ReviewBrief) => {
 
 /** The card's own props, without how it opens. */
 /** The kit's card, its title typed in where an agent renames the task (the person's own rename shows at once). */
-function BoardCard(props: BoardCardProps) {
-  return <KitBoardCard {...props} title={useTypedTitle(props.title)} />
+function BoardCard({ taskId, ...props }: BoardCardProps & { taskId: string }) {
+  return <KitBoardCard {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+/** The kit's queue row, typed in the same way. */
+function NextRow({ taskId, ...props }: ComponentProps<typeof KitNextRow> & { taskId: string }) {
+  return <KitNextRow {...props} title={useTaskTitle(taskId, props.title)} />
 }
 
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
@@ -1160,6 +1165,7 @@ export function BoardView({
     return (
       <NextRow
         key={work.taskId}
+        taskId={work.taskId}
         data-move={work.taskId}
         place={index + 1}
         task={work.slug}
@@ -1301,6 +1307,7 @@ export function BoardView({
           <BoardList>
             {lanes.stopped.map((work) => (
               <BoardCard
+                taskId={work.taskId}
                 key={work.taskId}
                 data-move={work.taskId}
                 {...stoppedCardOf(work, now, actions)}
@@ -1325,6 +1332,7 @@ export function BoardView({
       <BoardColumn lane={BoardLane.Running} count={shown.atWork} filled={shown.running.length > 0}>
         {shown.running.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...runningCardOf(work, now, name, actions)}
@@ -1339,6 +1347,7 @@ export function BoardView({
         {asks.map((ask) =>
           ask.waiting !== null ? (
             <BoardCard
+              taskId={ask.waiting.task.taskId}
               key={ask.waiting.task.taskId}
               data-move={ask.waiting.task.taskId}
               {...waitingCardOf(ask.waiting, name, onSignIn)}
@@ -1357,6 +1366,7 @@ export function BoardView({
         )}
         {lanes.issues.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...issuesCardOf(work)}
@@ -1367,6 +1377,7 @@ export function BoardView({
         ))}
         {lanes.ready.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...readyCardOf(work, actions)}

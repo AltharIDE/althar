@@ -5,14 +5,14 @@ import { reducedMotion } from './motion'
 /*
  * A task an agent renames: its title backspaces, then types the new one, as
  * someone at the keyboard would, on every surface that shows it live (its
- * header, its card on the board, its card in the thread). The surfaces take
- * a plain string, so this hands them the string as far as it has got, with
- * a caret while it goes.
+ * header, its cards). The surfaces take a plain string, so this hands them
+ * the string as far as it has got, with a caret while it goes.
  *
- * Only an agent's rename plays. What this window itself renamed (the
- * person's, or an aside's first title) is marked with ownTitle and shows at
- * once, as does anything under reduced motion, a title first drawn, or a
- * card that only arrives in a lane.
+ * Only an agent's rename plays: the caller says which title an agent gave
+ * the task last (`byAgent`, from the rename's own record), and a title that
+ * is not that one, as the person's own in this window or another, shows at
+ * once. So does anything under reduced motion, a title first drawn (read
+ * from blank), or a card that only arrives in a lane.
  */
 
 const LEAD = 120
@@ -20,21 +20,8 @@ const ERASE = 16
 const BEAT = 160
 const TYPE = 34
 const CARET = '▏'
-/** How long a title this window wrote is known as its own. */
-const OWN_FOR = 15_000
-
-const own = new Map<string, number>()
-
-/** This window is renaming a task to `title`: the person's, not an agent's. Surfaces show it at once. */
-export function markOwnTitle(title: string, now = Date.now()) {
-  for (const [known, until] of own) if (until <= now) own.delete(known)
-  own.set(title, now + OWN_FOR)
-}
-
-const isOwn = (title: string, now = Date.now()) => (own.get(title) ?? 0) > now
-
-/** `title` as it is to be drawn: it changes by itself while an agent's rename plays, and is `title` itself at rest. */
-export function useTypedTitle(title: string): string {
+/** `title` as it is to be drawn: it changes by itself while an agent's rename plays (`byAgent` is that title), and is `title` itself at rest. */
+export function useTypedTitle(title: string, byAgent: string | null = null): string {
   const [text, setText] = useState(title)
   const [typing, setTyping] = useState(false)
   // What is drawn now, without the caret: where a rename starts from, even if another comes before it ends.
@@ -50,7 +37,7 @@ export function useTypedTitle(title: string): string {
       setTyping(false)
       return
     }
-    if (reducedMotion() || isOwn(title)) {
+    if (from === '' || byAgent !== title || reducedMotion()) {
       put(title)
       setTyping(false)
       return
@@ -74,6 +61,8 @@ export function useTypedTitle(title: string): string {
     setTyping(true)
     after(LEAD, () => erase(from.length))
     return () => window.clearTimeout(timer)
+    // The agent's mark is read as the title arrives, and is not a reason to play again when it changes after.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title])
 
   return typing ? text + CARET : text
