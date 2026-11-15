@@ -152,7 +152,7 @@ export const useChanges = (taskId: string | null, first: string | null, moved = 
     }
   }, [client, open, waiting, taskId, path, whole, key])
 
-  useImagesFollow(read?.view)
+  useImagesFollow(read ?? undefined)
   return {
     open,
     selected: path,

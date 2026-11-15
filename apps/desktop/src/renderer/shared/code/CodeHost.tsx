@@ -96,7 +96,7 @@ const useCodeRead = (threadId: string, found: FoundCode, mode: CodeMode, fresh: 
     // The panel reads the file again as it opens: it shows the file as it is now.
     ...(fresh ? { refetchOnMount: 'always' as const } : {}),
   })
-  useImagesFollow(read.data)
+  useImagesFollow(read.dataUpdatedAt)
   return read.isError ? null : read.data
 }
 
@@ -132,7 +132,7 @@ export const useChangedFile = (
     enabled: on && taskId !== null && path !== '',
     refetchOnMount: 'always',
   })
-  useImagesFollow(read.data)
+  useImagesFollow(read.dataUpdatedAt)
   return read.isError ? null : read.data
 }
 
