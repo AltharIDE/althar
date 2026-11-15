@@ -100,6 +100,25 @@ if (mode === 'cards') {
     if (withMenu) await menu()
     await crop(`onto-${m}${extra === '' ? '' : '-solo'}${withMenu ? '-menu' : ''}.png`)
   }
+} else if (mode === 'looks') {
+  // B′'s ways of saying Ship at its button: the first time, and once Got it was said; the track look as Ship runs too.
+  const shots: Array<[string, string, string]> = []
+  for (const look of ['caption', 'twoLine', 'track', 'coach', 'route']) {
+    shots.push([look, 'held', ''], [look, 'held', '&explained=1'])
+  }
+  shots.push(['track', 'reviewing', '&explained=1'], ['track', 'readyChecks', '&explained=1&solo=1'])
+  for (const [look, m, extra] of shots) {
+    await open('b2', m, `&look=${look}${extra}`)
+    const bottom = await page.evaluate((title) => {
+      const card = document.querySelector(`[data-lab-scene] article[aria-label="${title}"]`)
+      const files = card?.querySelector('[class*="files"]')
+      const coach = document.querySelector('[role="note"]')
+      return Math.max(files?.getBoundingClientRect().top ?? 400, coach?.getBoundingClientRect().bottom ?? 0)
+    }, TITLE)
+    const file = `look-${look}-${m}${extra.includes('explained') ? '-after' : ''}.png`
+    await page.screenshot({ path: join(out, file), clip: { x: 610, y: 52, width: 646, height: Math.min(748, bottom - 52 + 14) } })
+    process.stdout.write(`${file}\n`)
+  }
 } else {
   const [d = 'a', m = 'readyChecks', narrow] = rest
   await open(d, m, narrow === 'narrow' ? '&narrow=1' : '')

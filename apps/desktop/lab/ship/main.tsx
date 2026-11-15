@@ -16,7 +16,7 @@ import { fakeClient, fakeHost } from '../../tests/fixtures'
 import { servicesFor } from '../../tests/render'
 import { DIRECTIONS, type DirectionKey, LabContext } from './directions'
 import { MOMENTS, momentOf, type Moment } from './moments'
-import { toggleShared, useOnto } from './onto'
+import { LOOKS, nextLook, setLook, toggleShared, useOnto } from './onto'
 import s from './lab.module.css'
 
 /*
@@ -90,6 +90,7 @@ function Lab() {
       else if (event.key === 'h') setHover((on) => !on)
       else if (event.key === 'n') setNarrow((on) => !on)
       else if (event.key === 't') toggleShared()
+      else if (event.key === 's') nextLook()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -148,6 +149,12 @@ function Lab() {
           <button type="button" aria-pressed={narrow} onClick={() => setNarrow((on) => !on)}>
             <kbd>N</kbd> Narrow
           </button>
+          {direction === 'b2' &&
+            LOOKS.map((one, index) => (
+              <button key={one.key} type="button" aria-pressed={onto.look === one.key} onClick={() => setLook(one.key)}>
+                {index === 0 && <kbd>S</kbd>} {one.label}
+              </button>
+            ))}
           {direction === 'b2' && (
             <button type="button" onClick={toggleShared}>
               <kbd>T</kbd> {onto.shared ? 'Shared main' : 'Solo main'}

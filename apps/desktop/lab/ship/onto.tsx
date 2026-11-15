@@ -1,9 +1,10 @@
-import { type ReactElement, useSyncExternalStore } from 'react'
+import { isValidElement, type ReactElement, useSyncExternalStore } from 'react'
 
 import {
   Button,
   type ChangeSetProps,
   CheckState,
+  HoverCard,
   Menu,
   MenuItem,
   MenuSegments,
@@ -26,7 +27,8 @@ import s from './lab.module.css'
  * for review, or merged), its label the route itself. The route starts from
  * the person's own default, which Althar bends only where the project makes
  * it pointless (main needs someone else's approval: it stops at Ready), and
- * says so. The first time, a line says what Ship does, until Got it. Where the
+ * says so. The first time, Ship's button says what it does, until Got it, in
+ * one of a few looks (LOOKS: S cycles them). Where the
  * person keeps choosing another route, it offers to make that the default,
  * asking again after 3, 6, then 12 more.
  *
@@ -51,14 +53,27 @@ interface State {
   readonly explained: boolean
   /** The offer to make what they keep choosing their default: shown, put off (asks again after twice as many), or taken. */
   readonly offer: 'shown' | 'later' | 'taken'
+  /** How Ship shows at its button: one of LOOKS. */
+  readonly look: Look
 }
+
+/** Ways to say Ship at its button, each with the same arrow beside it. S cycles them. */
+export const LOOKS = [
+  { key: 'caption', label: 'Line under' },
+  { key: 'twoLine', label: 'Two lines' },
+  { key: 'track', label: 'Track under' },
+  { key: 'coach', label: 'Pointer' },
+  { key: 'route', label: 'Route as label' },
+] as const
+export type Look = (typeof LOOKS)[number]['key']
 
 const start: State = {
   mine: { review: true, far: 'merge' },
   chosen: null,
   shared: new URLSearchParams(location.search).get('solo') !== '1',
-  explained: false,
+  explained: new URLSearchParams(location.search).get('explained') === '1',
   offer: 'shown',
+  look: (LOOKS.find((one) => one.key === new URLSearchParams(location.search).get('look'))?.key ?? 'caption') as Look,
 }
 let state = start
 const listeners = new Set<() => void>()
@@ -67,6 +82,8 @@ const set = (change: Partial<State>) => {
   for (const one of listeners) one()
 }
 export const resetOnto = () => set(start)
+export const setLook = (look: Look) => set({ look })
+export const nextLook = () => set({ look: LOOKS[(LOOKS.findIndex((one) => one.key === state.look) + 1) % LOOKS.length]!.key })
 export const toggleShared = () => set({ shared: !state.shared, chosen: null })
 export const useOnto = () =>
   useSyncExternalStore(
@@ -156,21 +173,104 @@ function HowFar({
   )
 }
 
-/** The control before Ship: the route as its label, how far a chevron away. */
-function Onto({ n }: { n: number }) {
+/** What Ship does with this route, in a sentence. */
+const saysOf = ({ review, far }: Route, n: number) => {
+  const parts = [
+    ...(review ? [`reviews the ${commits(n)}`] : []),
+    review ? 'pushes them to PR #820' : `pushes the ${commits(n)} to PR #820`,
+    ...(far === 'push' ? [] : ['marks it ready for review']),
+    ...(far === 'merge' ? ['merges it once verify passes'] : []),
+  ]
+  return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')}, then ${parts.at(-1)!}`
+}
+
+/** Got it: said once, and what Ship does stays a hover or a quiet line away. */
+const gotIt = (
+  <Button size="small" onClick={() => set({ explained: true })}>
+    Got it
+  </Button>
+)
+
+/**
+ * The control before Ship: Ship, with how far a chevron away, and under it, as the look has it, what Ship will do. The first
+ * time, that says it in full until Got it; on a later task, the offer to make what they keep choosing their default.
+ */
+function Onto({ n, later = false }: { n: number; later?: boolean }) {
   const now = useOnto()
   const { route: picked, why } = smart(now)
   const route = now.chosen ?? picked
   const note = now.chosen !== null ? null : why
-  return (
+  const stops = stopsOf(route)
+  const first = !now.explained && !later
+  const says = (
+    <>
+      <b>Ship</b> {saysOf(route, n)}. The arrow changes how far it goes.
+    </>
+  )
+  const label =
+    now.look === 'route' ? (
+      routeLabel(route)
+    ) : now.look === 'twoLine' ? (
+      <span className={s.twoLine}>
+        <b>Ship</b>
+        <small>{stops.join(' · ').toLowerCase()}</small>
+      </span>
+    ) : (
+      'Ship'
+    )
+  const button = (
     <SplitButton
       variant="signal"
+      {...(now.look === 'twoLine' ? { className: s.tallSplit } : {})}
       onClick={noop}
       moreLabel="How far it goes"
       menu={(trigger) => <HowFar trigger={trigger} route={route} onRoute={(chosen) => set({ chosen })} note={note} n={n} />}
     >
-      {routeLabel(route)}
+      {label}
     </SplitButton>
+  )
+  const tip = (
+    <span className={s.tip}>
+      <span>{says}</span>
+      {gotIt}
+    </span>
+  )
+  const under = later ? (
+    <Offer />
+  ) : now.look === 'caption' ? (
+    first ? (
+      tip
+    ) : (
+      <span className={s.caption}>{stops.join(' → ').toLowerCase()}</span>
+    )
+  ) : now.look === 'track' ? (
+    <>
+      <span className={s.preview}>
+        <StepTrack steps={trackOf(stops, -1)} status={TaskStatus.Running} labels />
+      </span>
+      {first && tip}
+    </>
+  ) : now.look === 'coach' ? (
+    first ? (
+      <span className={s.coach} role="note">
+        <span>{says}</span>
+        {gotIt}
+      </span>
+    ) : null
+  ) : first ? (
+    tip
+  ) : null
+  return (
+    <span className={s.ship}>
+      {now.look === 'coach' && !first ? (
+        <HoverCard card={<>{says}</>} placement="below" align="center" width={280}>
+          <span className={s.anchor}>{button}</span>
+        </HoverCard>
+      ) : (
+        button
+      )}
+      {under}
+    </span>
   )
 }
 
@@ -206,24 +306,6 @@ function Under({ label, n, skip }: { label: string; n: number; skip: boolean }) 
     >
       {label}
     </SplitButton>
-  )
-}
-
-/** What Ship does, said the first time, until Got it. */
-function Explain({ n }: { n: number }) {
-  const now = useOnto()
-  const route = now.chosen ?? smart(now).route
-  const steps = stopsOf(route)
-  return (
-    <span className={s.tip}>
-      <span>
-        <b>Ship</b> takes the {commits(n)} toward main: {steps.join(', then ').toLowerCase()}. It stops where you’re needed; the arrow
-        changes how far it goes.
-      </span>
-      <Button size="small" onClick={() => set({ explained: true })}>
-        Got it
-      </Button>
-    </span>
   )
 }
 
@@ -263,14 +345,30 @@ function Track({ at, status = TaskStatus.Running, done = false }: { at: string; 
 
 const routeNow = () => state.chosen ?? smart(state).route
 
+/** With the track look, the track Ship previewed under its button stays there as it runs, the control over it. */
 export const onto = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
+  const card = cardOf(moment, real, hover)
+  if (state.look !== 'track' || !isValidElement(card.note) || card.note.type !== Track) return card
+  const { note, actions, ...rest } = card
+  return {
+    ...rest,
+    actions: [
+      <span key="ship" className={s.ship}>
+        {actions}
+        {note}
+      </span>,
+    ],
+  }
+}
+
+const cardOf = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
   const n = moment.snapshot.task.held?.commits ?? 0
   const route = routeNow()
   switch (moment.key) {
     case 'held':
-      return { ...(state.explained ? {} : { note: <Explain n={n} /> }), actions: [<Onto key="onto" n={n} />] }
+      return { actions: [<Onto key="onto" n={n} />] }
     case 'heldLater':
-      return { note: <Offer />, actions: [<Onto key="onto" n={n} />] }
+      return { actions: [<Onto key="onto" n={n} later />] }
     case 'reviewing':
     case 'settling':
       return {
