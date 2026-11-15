@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 import { DictationSetup, DictationTray } from '@althar/ui'
 
@@ -45,17 +46,21 @@ export const placeLoose = (place: Place) => {
 /** The window's own dictation, mounted once under the tabs. `projectId`: the project whose tab has the window, whose names it spells. */
 export function LooseDictation({ projectId }: { projectId: string | null }) {
   const voice = useDictation(draftKey.loose, { loose: true, projectId, to })
-  // What was said and not placed before the window was closed has no pill to place it from.
+  // What was said and not placed before the window was closed is carried again, written, to place.
   useEffect(() => {
-    setDraftText(draftKey.loose, '')
-    setDraftDictated(draftKey.loose, false)
+    if (draftOf(draftKey.loose).text.trim() === '') {
+      setDraftText(draftKey.loose, '')
+      setDraftDictated(draftKey.loose, false)
+    } else changeSession(draftKey.loose, { away: Date.now() })
   }, [])
   // What couldn't be written down is the pill's to say, with its own Try again.
   const tray = voice.tray?.state.kind === DictationSetup.Failed ? null : voice.tray
   if (tray === null) return null
-  return (
-    <div className={s.dock}>
+  // At the body's end, outside the app's root, so a page in a tab steps aside for it (`cover.ts`).
+  return createPortal(
+    <div className={s.dock} data-state="open">
       <DictationTray {...tray} className={s.tray} />
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -39,9 +39,10 @@ import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabul
  * before stays.
  *
  * ⌘⇧D (Ctrl+Shift+D elsewhere) starts and stops it from anywhere in the
- * window; held down, letting go stops it. Where two composers dictate, the
- * one shown last has it; where none shows (the home, the board, the settings,
- * a page), the window's own loose dictation has it (`Loose.tsx`).
+ * window; held down, letting go stops it. With the cursor in a composer's
+ * field it dictates there; with it anywhere else, composer on screen or not,
+ * the window's own loose dictation has it (`Loose.tsx`), written down unplaced
+ * for the person to place.
  *
  * Asking where things stand happens on the first press, not as the composer
  * shows, so a window that never dictates never starts the speech process.
@@ -69,11 +70,34 @@ export { SHORTCUT }
 /* Held this long, the shortcut is held to talk: letting go stops. */
 const HELD = 500
 
-/* Who hears the shortcut, the one shown last at the end: the composers that dictate, and under them all the window's own, for where none shows (`Loose.tsx`). */
-const claims: Array<{ readonly press: () => void }> = []
+interface Claim {
+  readonly press: () => void
+  /** Whether the shortcut is this composer's now: its field has the cursor, or it is listening. */
+  readonly takes: () => boolean
+}
 
-/** The shortcut, pressed somewhere the window can't hear it (a page beside the conversation): it goes to whoever has it. */
-export const pressDictationShortcut = () => claims.at(-1)?.press()
+/* The composers that dictate, the one shown last at the end, and the window's own (`Loose.tsx`). */
+const composers: Array<Claim> = []
+let windows: Claim | null = null
+
+/**
+ * Who hears the shortcut: the composer that has the cursor, or that listens; and anywhere else, the window's own,
+ * which writes it down unplaced, to be placed where the person chooses. A window without its own leaves it to the
+ * composer shown last.
+ */
+const heardBy = (): Claim | null => composers.findLast((one) => one.takes()) ?? windows ?? composers.at(-1) ?? null
+
+/** The shortcut, pressed somewhere the window can't hear it (a page beside the conversation, the search's action): it goes to whoever has it. */
+export const pressDictationShortcut = () => {
+  // What listens, carried or not, is stopped by it, as `Carried.tsx` does for the key itself.
+  const now = listeningIn()[0]
+  if (now !== undefined) return stopIn(now)
+  heardBy()?.press()
+}
+
+/** Whether what a thread with no composer of its own hears is still there to place: kept carried when what it heard next came to nothing. */
+const keptAway = (thread: string) =>
+  handlesOf(thread).to?.back === null && draftOf(thread).text.trim() !== '' ? sessionOf(thread).away : null
 
 /* A host with no dictation: never called, since its window shows no microphone. */
 const NONE: DictationHost = {
@@ -181,7 +205,7 @@ export const writeIn = async (thread: string, said: Said, now = handlesOf(thread
     // The window forgot the thread's dictation meanwhile: nothing to land in.
     if (handlesOf(thread) !== held) return
     // Nothing was heard: nothing to carry either.
-    if (text === '') return changeSession(thread, { phase: 'idle', interim: '', away: null })
+    if (text === '') return changeSession(thread, { phase: 'idle', interim: '', away: keptAway(thread) })
     const away = held.shown === 0
     setDraftText(thread, inserting(away ? null : (held.field?.current ?? null), sessionOf(thread).at, text))
     // Marked once, and kept through any edits: the agent that reads it is told it was dictated.
@@ -213,7 +237,7 @@ export const stopIn = (thread: string) => {
   if (samples.length < sampleRate * SHORTEST) {
     held.writer?.close()
     held.writer = null
-    return changeSession(thread, { interim: '', phase: 'idle', away: null })
+    return changeSession(thread, { interim: '', phase: 'idle', away: keptAway(thread) })
   }
   void writeIn(thread, { seconds: sessionOf(thread).seconds, samples, sampleRate })
 }
@@ -226,7 +250,7 @@ export const cancelIn = (thread: string) => {
   held.recording = null
   held.writer?.close()
   held.writer = null
-  changeSession(thread, (session) => ({ interim: '', levels: session.levels.map(() => 0), phase: 'idle', away: null }))
+  changeSession(thread, (session) => ({ interim: '', levels: session.levels.map(() => 0), phase: 'idle', away: keptAway(thread) }))
 }
 
 /** The clock while `thread` listens, wherever the person is, and its end at the longest anyone dictates. */
@@ -528,11 +552,13 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
   })
   useEffect(() => {
     if (host.dictation === undefined || !showing) return
-    const me = { press: () => shortcutDown() }
-    // The window's own sits under every composer's: it hears the shortcut only where none shows.
-    if (loose) claims.unshift(me)
-    else claims.push(me)
-    const mine = () => claims.at(-1) === me
+    const me: Claim = {
+      press: () => shortcutDown(),
+      takes: () => sessionOf(key).phase === 'listening' || (inputRef.current !== null && document.activeElement === inputRef.current),
+    }
+    if (loose) windows = me
+    else composers.push(me)
+    const mine = () => heardBy() === me
     const onDown = (event: KeyboardEvent) => {
       if (!mine() || event.key.toLowerCase() !== 'd' || !commandDown(event) || !event.shiftKey || event.altKey) return
       event.preventDefault()
@@ -545,11 +571,13 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
     window.addEventListener('keydown', onDown)
     window.addEventListener('keyup', onUp)
     return () => {
-      claims.splice(claims.indexOf(me), 1)
+      if (loose) {
+        if (windows === me) windows = null
+      } else composers.splice(composers.indexOf(me), 1)
       window.removeEventListener('keydown', onDown)
       window.removeEventListener('keyup', onUp)
     }
-  }, [host.dictation, showing, loose])
+  }, [host.dictation, showing, loose, key, inputRef])
 
   if (host.dictation === undefined) return { dictation: undefined, tray: null, inputRef }
 

@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { DictationPill, type DictationPillPhase } from '@althar/ui'
 
@@ -39,14 +40,18 @@ export function CarriedOver({ here }: { here: string }) {
   return <Carried thread={key} here={here} />
 }
 
-/** At the window's foot, where no composer shows. */
+/**
+ * At the window's foot, where no composer shows. Drawn at the body's end, outside the app's root, so a page in a tab
+ * (a native view laid over the window, ADR-100) steps aside for it as it does for any popover.
+ */
 export function CarriedAtFoot() {
   const { key, here } = useCarrying()
   if (key === null || here !== null) return null
-  return (
-    <div className={s.foot}>
+  return createPortal(
+    <div className={s.foot} data-state="open">
       <Carried thread={key} here={null} />
-    </div>
+    </div>,
+    document.body,
   )
 }
 

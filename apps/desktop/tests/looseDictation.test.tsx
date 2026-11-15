@@ -14,10 +14,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SearchDocument } from '@althar/contracts'
 
 import type { DictationHost, DictationState } from '../src/renderer/data/services'
+import { coveredNow } from '../src/renderer/features/browser/cover'
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
+import { CarriedOver } from '../src/renderer/shared/dictation/Carried'
+import { record } from '../src/renderer/shared/dictation/recorder'
 import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
-import { useDictation } from '../src/renderer/shared/dictation/useDictation'
-import { draftKey, draftOf, forgetDrafts, useDraft } from '../src/renderer/shared/drafts'
+import { cancelIn, pressDictationShortcut, useDictation } from '../src/renderer/shared/dictation/useDictation'
+import { draftKey, draftOf, forgetDrafts, setDraftDictated, setDraftText, useDraft } from '../src/renderer/shared/drafts'
 import { fakeClient, fakeHost, project } from './fixtures'
 import { withServices } from './render'
 
@@ -95,8 +98,22 @@ function Board() {
 /** A screen with a composer, as a task's: dictating where it is. */
 function WithComposer() {
   const [text, setText] = useDraft('thread:th1')
-  const voice = useDictation('thread:th1', { projectId: 'p1' })
-  return <textarea aria-label="Message" ref={voice.inputRef} value={text} onChange={(event) => setText(event.target.value)} />
+  const voice = useDictation('thread:th1', {
+    projectId: 'p1',
+    to: {
+      to: 'The task',
+      back: { kind: 'task', threadId: 'th1' },
+      threadId: 'th1',
+      send: 'Send to the task',
+      take: 'Move it to this task',
+    },
+  })
+  return (
+    <>
+      <textarea aria-label="Message" ref={voice.inputRef} value={text} onChange={(event) => setText(event.target.value)} />
+      <CarriedOver here="thread:th1" />
+    </>
+  )
 }
 
 const root = createRootRoute({
@@ -124,7 +141,7 @@ const windowAt = (path: string, { composer = false, dictation = speech() as Dict
   })
   const host = fakeHost(dictation === undefined ? {} : { dictation })
   withServices(<RouterProvider router={router} />, client, host)
-  return { client, host, dictation }
+  return { client, host, dictation, router }
 }
 
 const SHORTCUT = { key: 'd', metaKey: true, shiftKey: true }
@@ -135,6 +152,7 @@ beforeEach(() => {
   forgetSessions()
   forgetDrafts()
   window.localStorage.clear()
+  vi.mocked(record).mockClear()
 })
 
 describe('dictation from anywhere', () => {
@@ -199,14 +217,80 @@ describe('dictation from anywhere', () => {
     expect(draftOf(draftKey.loose).text).toBe('')
   })
 
-  it('is the composer’s where one shows: what is said lands in it, with nothing carried', async () => {
+  it('is the composer’s where the cursor is in it: what is said lands in it, with nothing carried', async () => {
     windowAt('/projects/p1', { composer: true })
     const box = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' })
+    box.focus()
     press()
     await waitFor(() => expect(screen.queryByRole('group', { name: 'Not placed yet' })).toBeNull())
     press()
     await waitFor(() => expect(box.value).toBe('Check the retry path.'))
     expect(screen.queryByRole('region', { name: 'Not placed yet' })).toBeNull()
+  })
+
+  it('is the window’s where a composer shows but the cursor is elsewhere: placed afterwards, the composer untouched', async () => {
+    windowAt('/projects/p1', { composer: true })
+    const box = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' })
+    expect(document.activeElement).not.toBe(box)
+    press()
+    await screen.findByRole('group', { name: 'Not placed yet' })
+    press()
+    const card = await screen.findByRole('region', { name: 'Not placed yet' })
+    expect(within(card).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).value).toBe('Check the retry path.')
+    expect(box.value).toBe('')
+    // The composer on screen can have it instead.
+    await userEvent.click(within(card).getByRole('button', { name: /^Move it to/ }))
+    await waitFor(() => expect(box.value).toBe('Check the retry path.'))
+    expect(screen.queryByRole('region', { name: 'Not placed yet' })).toBeNull()
+  })
+
+  it('stops what listens, carried from a composer, rather than starting another', async () => {
+    const { router } = windowAt('/projects/p1', { composer: true })
+    const box = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' })
+    box.focus()
+    press()
+    await waitFor(() => expect(record).toHaveBeenCalledTimes(1))
+    await act(async () => await router.navigate({ to: '/settings/$section', params: { section: 'agents' } }))
+    await screen.findByRole('group', { name: 'The task' })
+    // The page's key, or the search's action: it stops the one carried.
+    act(() => pressDictationShortcut())
+    await screen.findByRole('region', { name: 'The task' })
+    expect(record).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps what was said unplaced when a second recording comes to nothing', async () => {
+    windowAt('/')
+    await screen.findByRole('navigation', { name: 'Projects' })
+    press()
+    await screen.findByRole('group', { name: 'Not placed yet' })
+    press()
+    await screen.findByRole('region', { name: 'Not placed yet' })
+    press()
+    await screen.findByRole('group', { name: 'Not placed yet' })
+    act(() => cancelIn(draftKey.loose))
+    const card = await screen.findByRole('region', { name: 'Not placed yet' })
+    expect(within(card).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).value).toBe('Check the retry path.')
+  })
+
+  it('carries what was said and not placed again when the window is reopened', async () => {
+    setDraftText(draftKey.loose, 'Said before the window closed.')
+    setDraftDictated(draftKey.loose, true)
+    windowAt('/')
+    const card = await screen.findByRole('region', { name: 'Not placed yet' })
+    expect(within(card).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).value).toBe('Said before the window closed.')
+  })
+
+  it('draws at the body’s end, where a page in a tab steps aside for it', async () => {
+    windowAt('/')
+    const root = (await screen.findByRole('navigation', { name: 'Projects' })).closest('body > div')
+    const place = { x: 0, y: 0, width: 1000, height: 1000 }
+    // jsdom lays nothing out: its boxes are given.
+    const box = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 100, 400, 200))
+    expect(coveredNow(root, place)).toBe(false)
+    press()
+    await screen.findByRole('group', { name: 'Not placed yet' })
+    expect(coveredNow(root, place)).toBe(true)
+    box.mockRestore()
   })
 
   it('does nothing where the window can’t dictate', async () => {
