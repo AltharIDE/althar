@@ -190,12 +190,17 @@ test('this repository’s own README, written mostly in HTML, opens as GitHub dr
       'src',
       /^data:image\/png;base64,/,
     )
-    await expect(changes.getByRole('heading', { name: 'Tell it what. It picks the team.' })).toBeVisible()
-    await expect(changes.getByRole('note', { name: 'Note' })).toContainText('Early.')
+    // Its sections are headings, whatever the README says of itself now.
+    const sections = [...readme.matchAll(/^## (.+)$/gm)].map((one) => one[1] ?? '')
+    await expect(changes.getByRole('heading', { name: sections[0] ?? '' })).toBeVisible()
+    // Its alert is a callout, with the words it opens on (in bold) and not its marker.
+    const opening = /^> \[!NOTE\]\n> \*\*(.+?)\*\*/m.exec(readme)?.[1] ?? ''
+    await expect(changes.getByRole('note', { name: 'Note' })).toContainText(opening)
+    await expect(changes.getByRole('note', { name: 'Note' })).not.toContainText('[!NOTE]')
     await expect(changes.getByText(/<\/?(p|a|img|picture|table|td)\b/)).toHaveCount(0)
     await still(page)
     await page.screenshot({ path: 'test-results/readme-top.png', scale: 'css', animations: 'disabled' })
-    await changes.getByRole('heading', { name: 'Fall in love with building again.' }).scrollIntoViewIfNeeded()
+    await changes.getByRole('heading', { name: sections[1] ?? '' }).scrollIntoViewIfNeeded()
     await expect(changes.getByRole('img', { name: /The first screen/ })).toHaveAttribute('src', /^data:image\/jpeg;base64,/)
     await page.screenshot({ path: 'test-results/readme-features.png', scale: 'css', animations: 'disabled' })
     await changes.getByRole('note', { name: 'Note' }).scrollIntoViewIfNeeded()

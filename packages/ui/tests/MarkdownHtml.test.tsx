@@ -117,6 +117,9 @@ describe('a markdown file written with HTML', () => {
     expect(container.textContent).not.toContain('[!NOTE]')
     expect(screen.getByRole('note', { name: 'Note' })).toBeInTheDocument()
     expect(container.querySelectorAll('img').length).toBeGreaterThan(10)
-    expect(screen.getByRole('heading', { name: 'Tell it what. It picks the team.' })).toBeInTheDocument()
+    // Its own first section, whatever it says now.
+    const first = /^## (.+)$/m.exec(readme)?.[1]
+    expect(first).toBeDefined()
+    expect(screen.getByRole('heading', { name: first })).toBeInTheDocument()
   })
 })
