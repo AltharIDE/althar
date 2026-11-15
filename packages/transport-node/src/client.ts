@@ -43,4 +43,9 @@ export const apiClient = (connection: ApiConnection) =>
     if (info.position.homeId !== expected.homeId)
       return yield* transportError('HomeMismatch', 'The API endpoint returned history from another home.')
     return { api, info }
-  })
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: '10 seconds',
+      orElse: () => Effect.fail(transportError('HostUnavailable', 'The authenticated home did not answer its API identity check.')),
+    }),
+  )

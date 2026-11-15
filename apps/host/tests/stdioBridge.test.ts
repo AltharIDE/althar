@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { PassThrough } from 'node:stream'
+import { PassThrough, Writable } from 'node:stream'
 
 import { Agents } from '@althar/runtime'
 import { apiClient, receiveBridgeIdentity, streamPort } from '@althar/transport-node'
@@ -10,6 +10,7 @@ import { initializeHome, serveHome, type HomeReady } from '../src/home'
 import { parseOptions } from '../src/options'
 import { serveStdio } from '../src/stdioBridge'
 import { hostStatus } from '../src/status'
+import { runCommand } from '../src/commands'
 import { temporary } from './support'
 
 const fixture = () =>
@@ -32,7 +33,24 @@ const bridge = (profile: string, homeId: string, apiVersion = 1) =>
     const output = new PassThrough()
     const port = streamPort({ readable: output, writable: input })
     yield* Effect.addFinalizer(() => Effect.sync(() => port.close()))
-    const serving = yield* Effect.forkScoped(Effect.exit(serveStdio(profile, homeId, apiVersion, { input, output })))
+    const options = parseOptions(
+      ['connect-stdio', '--profile', profile, '--home-id', homeId, '--client-api-version', String(apiVersion)],
+      {},
+      profile,
+    )
+    const serving = yield* Effect.forkScoped(
+      Effect.exit(
+        runCommand(options, {
+          stdio: { input, output },
+          out: () => {
+            throw new Error('Binary data must use only the protocol stream')
+          },
+          node: process.execPath,
+          entry: '/unused',
+          path: '/usr/bin:/bin',
+        }),
+      ),
+    )
     return { port, serving }
   })
 describe('host SSH stdio bridge', () => {
@@ -90,8 +108,28 @@ describe('host SSH stdio bridge', () => {
         parseOptions(['connect-stdio', '--home-id', `home_${'1'.repeat(32)}`, '--client-api-version', '1', '--json'], {}, '/tmp'),
       )
       assert.throws(() => parseOptions(['status', '--home-id', `home_${'1'.repeat(32)}`], {}, '/tmp'))
+      assert.throws(() => parseOptions(['status', '--client-api-version', '1'], {}, '/tmp'))
+      for (const version of ['invalid', '0', '-1', '1.5', '9007199254740992'])
+        assert.throws(() =>
+          parseOptions(['connect-stdio', '--home-id', `home_${'1'.repeat(32)}`, '--client-api-version', version], {}, '/tmp'),
+        )
       input.destroy()
       output.destroy()
+    }),
+  )
+  it.live('refuses a terminal output and handles a broken protocol writer without leaking errors', () =>
+    Effect.gen(function* () {
+      const input = new PassThrough()
+      const terminal = Object.assign(new PassThrough(), { isTTY: true })
+      assert.strictEqual(
+        (yield* Effect.flip(serveStdio('/unused', `home_${'1'.repeat(32)}`, 1, { input, output: terminal }))).code,
+        'InvalidConfig',
+      )
+      terminal.destroy()
+      const output = new Writable({ write: (_bytes, _encoding, done) => done(new Error('private output failure')) })
+      const failure = yield* Effect.flip(serveStdio('/unused', `home_${'1'.repeat(32)}`, 2, { input, output }))
+      assert.strictEqual(failure.code, 'HostUnavailable')
+      assert.notInclude(failure.message, 'private')
     }),
   )
 })

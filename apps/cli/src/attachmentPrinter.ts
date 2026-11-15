@@ -9,16 +9,22 @@ export const attachmentPrinter = () => {
   let version: number | undefined
   let session: string | undefined
   let attention = new Set<string>()
+  let active: string | undefined
   const remember = (id: string, text: string) => {
     seen.delete(id)
     seen.set(id, text)
     if (seen.size > 500) seen.delete(seen.keys().next().value!)
   }
   const text = (id: string, value: string, prefix = '') => {
+    // With at most 500 entries, even hostile or very long cumulative messages have a fixed cache/output bound.
+    if (value.length > 65_536) value = `${value.slice(0, 65_536)}\n[Item truncated; view its full contents in the desktop.]`
     const before = seen.get(id)
     if (before === value || (before !== undefined && before.startsWith(value))) return ''
     remember(id, value)
-    if (before !== undefined && value.startsWith(before)) return terminalText(value.slice(before.length))
+    const wasActive = active === id
+    active = id
+    if (before !== undefined && value.startsWith(before))
+      return `${wasActive ? '' : '\n[continued] '}${terminalText(value.slice(before.length))}`
     return `\n${before === undefined ? prefix : '[revised] '}${terminalText(value)}`
   }
   return {
@@ -33,6 +39,7 @@ export const attachmentPrinter = () => {
       version = snapshot.conversationVersion
       const state = snapshot.session === null ? 'No agent is running.' : `${snapshot.session.agentName}: ${snapshot.session.state}`
       if (state !== session) {
+        active = undefined
         session = state
         out += `\n● ${terminalText(state)}\n`
       }

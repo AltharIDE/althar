@@ -4,14 +4,7 @@ import { createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import {
-  API_VERSION,
-  ApiError,
-  ClientChallenge,
-  ClientSignature,
-  HomeId,
-  clientChallengeMessage,
-} from '@althar/contracts'
+import { API_VERSION, ApiError, ClientChallenge, ClientSignature, HomeId, clientChallengeMessage } from '@althar/contracts'
 import { Cause, Effect, Layer, Option, Schema, type Scope } from 'effect'
 
 import { connection } from './Api'

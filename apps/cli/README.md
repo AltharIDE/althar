@@ -72,7 +72,7 @@ session start uses a separate deterministic ID too. Prefer `--thread` to join
 an existing task without starting or switching its agent. Commands are never
 automatically replayed. History changes trigger a fresh checked snapshot; a
 disconnected client exits with a visible error. This terminal shows the newest
-100 items and cumulative live text; older history, files and rich evidence
+100 items and cumulative live text, with each item limited to 65,536 characters; older history, full oversized items, files and rich evidence
 remain in the desktop interface.
 
 ## Work on it

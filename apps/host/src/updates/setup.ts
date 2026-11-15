@@ -48,6 +48,10 @@ case "\${1-}" in
     active=$(/usr/bin/readlink -f "$root/active")
     exec "$active/node/bin/node" "$active/dist/althar-host.js" "$@"
     ;;
+  status|connect-stdio)
+    active=$(/usr/bin/readlink -f "$root/active")
+    exec "$active/node/bin/node" "$active/dist/althar-host.js" "$@"
+    ;;
   *) exec "$control/node/bin/node" "$control/dist/althar-host.js" "$@" ;;
 esac
 `

@@ -264,12 +264,57 @@ describe('attached CLI', () => {
     assert.strictEqual(stream('hello'), 'lo')
     assert.strictEqual(stream('hel'), '')
     assert.strictEqual(stream('revised'), '\n[revised] revised')
-    const item = textItem('revised') as ThreadSnapshot['items'][number]
+    const item = textItem('revised') as unknown as ThreadSnapshot['items'][number]
     const snap = snapshot({ items: [item] })
     assert.include(out.snapshot(snap), 'No agent is running')
     assert.strictEqual(out.snapshot(snap), '')
     assert.include(out.snapshot({ ...snap, conversationVersion: 2 }), 'Conversation changed')
     assert.strictEqual(terminalText('a\x1b]52;c;secret\x07\r\nb\t\x9bc'), 'a]52;c;secret\nb\tc')
+  })
+  it('shows tool status, notices, user text and pending questions without replaying them on each refresh', () => {
+    const out = attachmentPrinter()
+    const snap = snapshot({
+      session: { agentName: 'Fixture', state: 'running' } as NonNullable<ThreadSnapshot['session']>,
+      items: [
+        { id: 'user', kind: 'user_message', content: { text: 'Do it' } },
+        { id: 'thought', kind: 'agent_thought', content: { text: 'Thinking' } },
+        { id: 'tool', kind: 'tool_call', content: { title: 'git diff', status: 'pending' } },
+        { id: 'notice', kind: 'notice', content: { title: 'Waiting', description: 'Details' } },
+        { id: 'short-notice', kind: 'notice', content: { title: 'Info', description: null } },
+      ] as unknown as ThreadSnapshot['items'],
+      attention: [{ id: 'attention', title: 'Deploy?', reason: 'Needs approval' }] as unknown as ThreadSnapshot['attention'],
+    })
+    const initial = out.snapshot(snap)
+    for (const word of [
+      'Fixture: running',
+      'You: Do it',
+      '· Thinking',
+      'pending: git diff',
+      'Waiting\nDetails',
+      'Info',
+      'Deploy?',
+      'trusted person client',
+    ])
+      assert.include(initial, word)
+    assert.strictEqual(out.snapshot(snap), '')
+    assert.include(
+      out.snapshot({
+        ...snap,
+        items: [
+          { id: 'tool', kind: 'tool_call', content: { title: 'git diff', status: 'completed' } },
+        ] as unknown as ThreadSnapshot['items'],
+      }),
+      'completed: git diff',
+    )
+    const stream = (id: string, text: string, kind: 'agent_message' | 'agent_thought' = 'agent_message') =>
+      out.streaming({ _tag: 'Streaming', threadId, itemId: id, sequence: 1, kind, agentId: 'codex', text })
+    assert.include(stream('a', 'one', 'agent_thought'), '· one')
+    stream('b', 'two')
+    assert.strictEqual(stream('a', 'one more'), '\n[continued]  more')
+    assert.include(stream('large', 'x'.repeat(100_000)), 'Item truncated')
+    assert.strictEqual(stream('large', 'x'.repeat(200_000)), '')
+    for (let i = 0; i < 501; i++) stream(`item-${i}`, String(i))
+    assert.include(stream('item-0', '0'), '\n0')
   })
   it('bounds input lines and handles split UTF-8 and output closure with backpressure', async () => {
     const bytes = Buffer.from('one\r\né\nlast')
@@ -298,5 +343,7 @@ describe('attached CLI', () => {
     assert.strictEqual(text, 'hello')
     output.destroy()
     assert.include((await Effect.runPromise(Effect.flip(terminalWrite(output, 'ignored')))).message, 'closed')
+    const broken = new Writable({ write: (_bytes, _encoding, done) => done(new Error('private output failure')) })
+    assert.strictEqual((await Effect.runPromise(Effect.flip(terminalWrite(broken, 'hello')))).message, 'Terminal output closed.')
   })
 })

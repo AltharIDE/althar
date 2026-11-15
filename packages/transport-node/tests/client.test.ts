@@ -7,7 +7,8 @@ import { MessageChannel } from 'node:worker_threads'
 import { API_VERSION, ApiError, ConnectionInfo, emitterPort, serverProtocol, type ClientIdentity } from '@althar/contracts'
 import { removeTreeSync } from '@althar/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Deferred, Effect, Fiber, Layer } from 'effect'
+import { TestClock } from 'effect/testing'
 import { Rpc, RpcGroup, RpcServer } from 'effect/rpc'
 
 import { authenticateApiClient, readFrame } from '../src/authentication'
@@ -53,6 +54,26 @@ const pair = () =>
   })
 
 describe('client connection boundaries', () => {
+  it.effect('bounds an authenticated server that never answers the API identity check', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const at = yield* pair()
+        const asked = yield* Deferred.make<void>()
+        yield* Effect.forkScoped(
+          Layer.launch(
+            RpcServer.layer(Mini).pipe(
+              Layer.provide(Mini.toLayer({ GetConnectionInfo: () => Effect.andThen(Deferred.succeed(asked, undefined), Effect.never) })),
+              Layer.provide(serverProtocol(emitterPort(at.channel.port1))),
+            ),
+          ),
+        )
+        const binding = yield* Effect.forkScoped(Effect.flip(apiClient({ port: at.port, identity })))
+        yield* Deferred.await(asked)
+        yield* TestClock.adjust('10 seconds')
+        assert.strictEqual((yield* Fiber.join(binding)).reason, 'HostUnavailable')
+      }),
+    ),
+  )
   it.live('authenticates and binds a real private socket, then closes only that connection', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -118,7 +118,7 @@ describe('the selection', () => {
     const changed = ['packages/transport-node/src/ssh.ts']
     for (const workflow of ['harness', 'windows'] as const) {
       const selected = plan(changed, at, workflow).jobs.flatMap((job) => job.parts)
-      expect(selected.find((part) => part.dir === 'packages/transport-node')).toMatchObject({ check: true, tests: workflow === 'windows' ? 'all' : ['tests/ssh.test.ts'] })
+      expect(selected.find((part) => part.dir === 'packages/transport-node')).toMatchObject({ check: workflow === 'harness', tests: 'all' })
       expect(selected.some((part) => part.dir === 'packages/runtime')).toBe(true)
     }
     expect(plan(changed, at, 'desktop')).toMatchObject({ e2e: true, windowsE2e: true })

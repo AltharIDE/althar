@@ -9,6 +9,8 @@ import { removeTreeSync } from '@althar/testing'
 import { until } from '@althar/testing/effect'
 import { assert, it } from '@effect/vitest'
 import { Context, Effect, Layer } from 'effect'
+import { runAttachment } from '../src/attachment'
+import { Readable } from 'node:stream'
 
 it.live('attaches the built CLI to an already locked profile and disconnects on quit or SIGINT without stopping the home', () =>
   Effect.scoped(
@@ -43,6 +45,19 @@ it.live('attaches the built CLI to an already locked profile and disconnects on 
       }).pipe(Effect.provideContext(context))
       const endpoint = yield* listenLocalApi(profile).pipe(Effect.provideContext(context))
       const { api } = yield* apiClient(yield* openLocalConnection(profile, endpoint.homeId))
+      let inspected = ''
+      yield* runAttachment(
+        { command: 'inspect', target: { kind: 'local', profile, homeId: endpoint.homeId }, json: false },
+        {
+          input: Readable.from([]),
+          write: (text) =>
+            Effect.sync(() => {
+              inspected += text
+            }),
+        },
+      )
+      assert.include(inspected, project.projectId)
+      assert.include(inspected, endpoint.homeId)
       const task = yield* api.CreateTask({ commandId: `cmd_${'1'.repeat(32)}`, projectId: project.projectId, title: 'Keep working' })
       const run = (args: ReadonlyArray<string>) =>
         Effect.gen(function* () {

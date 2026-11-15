@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { generateKeyPairSync } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { promisify } from 'node:util'
@@ -164,6 +164,34 @@ describe('managed update setup', () => {
     writeFileSync(join(at.options.unitDirectory, 'althar-host-update.service'), '[Service]\nExecStart=/unrelated\n', { mode: 0o600 })
     await expect(configureUpdates(at.options, at.commands, at.dependencies)).rejects.toThrow()
     expect(readFileSync(join(at.options.unitDirectory, 'althar-host-update.service'), 'utf8')).toContain('/unrelated')
+  })
+
+  it('uses the active host release for SSH/status even when a newer updater is downloaded, without triggering activation', async () => {
+    const root = temporary()
+    for (const name of ['controller', 'serving']) {
+      const release = join(root, name)
+      mkdirSync(join(release, 'node/bin'), { recursive: true })
+      mkdirSync(join(release, 'dist'))
+      writeFileSync(join(release, 'node/bin/node'), `#!/bin/sh\nprintf '%s\\n' '${name}' "$@"\n`, { mode: 0o700 })
+    }
+    symlinkSync(join(root, 'controller'), join(root, 'current'))
+    symlinkSync(join(root, 'serving'), join(root, 'active'))
+    const launcher = join(root, 'launcher')
+    writeFileSync(launcher, renderLauncher(root), { mode: 0o700 })
+    for (const command of ['status', 'connect-stdio']) {
+      const { stdout } = await promisify(execFile)('/bin/sh', [launcher, command, '--profile', "/literal '$profile"])
+      expect(stdout.split('\n')).toEqual([
+        'serving',
+        join(root, 'serving/dist/althar-host.js'),
+        command,
+        '--profile',
+        "/literal '$profile",
+        '',
+      ])
+      expect(stdout).not.toContain('recover-update')
+    }
+    const { stdout } = await promisify(execFile)('/bin/sh', [launcher, 'update-status'])
+    expect(stdout.split('\n')[0]).toBe('controller')
   })
 
   it.skipIf(!existsSync('/usr/bin/systemd-analyze'))(
