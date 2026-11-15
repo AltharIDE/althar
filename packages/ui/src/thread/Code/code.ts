@@ -100,8 +100,12 @@ export const firstMode = (found: FoundCode): CodeMode => (found.kind === 'file' 
 export const isMarkdown = (found: FoundCode): found is FoundFile =>
   found.kind === 'file' && found.content === 'text' && isMarkdownPath(found.path)
 
-/** How the panel first shows a file: a markdown file as a page, unless the lines named in it are what was asked for. */
-export const panelMode = (found: FoundCode): CodeMode => (isMarkdown(found) && found.line === undefined ? 'rendered' : firstMode(found))
+/**
+ * How the panel first shows a file: a markdown file as a page, with what the task changed in it marked where it changed it,
+ * unless the lines named in it are what was asked for.
+ */
+export const panelMode = (found: FoundCode): CodeMode =>
+  isMarkdown(found) && found.line === undefined ? (found.changed === null ? 'rendered' : 'change') : firstMode(found)
 
 /** The lines to mark in what is shown: those named, followed to where they are now; none past the file's end, nor rewritten. */
 export const markOf = (found: FoundFile, mode: CodeMode): { readonly line: number; readonly end: number } | null => {

@@ -211,15 +211,32 @@ describe('a document in the side panel', () => {
     if (marked === null) throw new Error('whole')
     render(<DocPanel doc={{ path: 'README.md', body: marked.source }} onClose={() => {}} change={README_DIFF} />)
     expect(screen.getAllByRole('group', { name: 'Added' }).length).toBeGreaterThan(0)
-    expect(screen.getByRole('radio', { name: /Rendered/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /Changes/ })).toBeChecked()
     fireEvent.keyDown(screen.getByRole('complementary', { name: 'README.md' }), { key: 'm' })
     expect(screen.getByRole('radio', { name: /Source/ })).toBeChecked()
     expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
     expect(screen.queryByRole('heading', { name: 'Limits and reasons' })).toBeNull()
     // Its source is what the task changed, as a diff.
     expect(screen.getByRole('group', { name: 'README.md' })).toBeInTheDocument()
+    // Rendered is the page as it is, nothing marked.
     fireEvent.click(screen.getByRole('radio', { name: /Rendered/ }))
     expect(screen.getByRole('heading', { name: 'Limits and reasons' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
+  })
+
+  it('has no Changes for a document the task wrote new, which has nothing to mark', () => {
+    render(
+      <DocPanel
+        doc={{ path: 'docs/plan.md', body: '# Plan' }}
+        onClose={() => {}}
+        change={[
+          { kind: DiffLineKind.Hunk, text: '@@ -0,0 +1,1 @@' },
+          { kind: DiffLineKind.Added, new: 1, text: '# Plan' },
+        ]}
+      />,
+    )
+    expect(screen.getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Rendered', 'Source'])
+    expect(screen.getByRole('radio', { name: /Rendered/ })).toBeChecked()
   })
 
   it('opens the file a link names, from its folder', () => {

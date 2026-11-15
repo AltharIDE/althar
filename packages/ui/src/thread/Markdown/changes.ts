@@ -25,6 +25,19 @@ export interface MarkedMarkdown {
 
 const NOTHING: MarkdownMarks = { added: new Set(), removed: new Map() }
 
+/** Whether a marked file has anything marked: a file that is new, or didn't change, has none. */
+export const hasMarks = (marked: MarkedMarkdown | null): marked is MarkedMarkdown =>
+  marked !== null && (marked.marks.added.size > 0 || marked.marks.removed.size > 0)
+
+/** The same file as a page with nothing marked: as it is now, to be read. */
+export const unmarked = (marked: MarkedMarkdown): MarkedMarkdown => ({ source: marked.source, marks: NOTHING })
+
+/** How a markdown file is shown: as a page; as a page with what changed marked; or as its source. */
+export type PageWay = 'rendered' | 'changes' | 'source'
+
+/** The way after this one, as the key goes through them, back to the first after the last. */
+export const nextWay = <Way>(ways: readonly Way[], way: Way): Way => ways[(ways.indexOf(way) + 1) % ways.length] ?? way
+
 /** Where a diff holds its file whole: every line, from the first, so a block can be told from where it stands. */
 const whole = (lines: readonly DiffLine[]): boolean => {
   let old = 0

@@ -187,7 +187,11 @@ describe('the code a lead names, on a task’s screen', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Open README.md' }))
     const panel = await screen.findByRole('complementary', { name: 'README.md' })
     expect(await within(panel).findByRole('heading', { name: 'Retries' })).toBeTruthy()
-    expect(within(panel).getByRole('radio', { name: 'Rendered' }).getAttribute('aria-checked')).toBe('true')
+    expect(
+      within(panel)
+        .getByRole('radio', { name: /Changes/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
     expect(within(panel).getByRole('group', { name: 'Added' })).toBeTruthy()
     expect(within(panel).getByRole('group', { name: 'Removed' }).textContent).toContain('Tried 2 times.')
     expect(client.getFileDiff).toHaveBeenCalledWith('t1', 'README.md')
@@ -199,8 +203,11 @@ describe('the code a lead names, on a task’s screen', () => {
     fireEvent.keyDown(panel, { key: 'm' })
     await waitFor(() => expect(within(panel).getByRole('radio', { name: 'Source' }).getAttribute('aria-checked')).toBe('true'))
     expect(within(panel).queryByRole('heading', { name: 'Retries' })).toBeNull()
+    // M goes on to the page as it is, nothing marked.
     fireEvent.keyDown(panel, { key: 'm' })
     expect(await within(panel).findByRole('heading', { name: 'Retries' })).toBeTruthy()
+    expect(within(panel).getByRole('radio', { name: 'Rendered' }).getAttribute('aria-checked')).toBe('true')
+    expect(within(panel).queryByRole('group', { name: 'Added' })).toBeNull()
   })
 
   it('⌘-press on a name opens it in the editor, without opening it beside', async () => {

@@ -262,7 +262,7 @@ describe('a markdown file in the panel beside the conversation', () => {
       <CodePanel
         found={decisionFound}
         where={where}
-        mode="rendered"
+        mode="change"
         onMode={() => {}}
         read={decisionRead}
         change={decisionChange}
@@ -272,15 +272,16 @@ describe('a markdown file in the panel beside the conversation', () => {
       />,
     )
 
-  it('opens as a page unless the lines named in it are what was asked for', () => {
-    expect(panelMode(decisionFound)).toBe('rendered')
+  it('opens as a page, with what the task changed marked where it changed it, unless the lines named in it are what was asked for', () => {
+    expect(panelMode(decisionFound)).toBe('change')
+    expect(panelMode({ ...decisionFound, changed: null })).toBe('rendered')
     expect(panelMode({ ...decisionFound, line: 4, end: 6 })).toBe('now')
     expect(panelMode(limitsFound)).toBe('now')
     expect(panelMode({ ...decisionFound, content: 'binary' })).toBe('now')
   })
 
-  it('offers the page first, then its source, as it was when said, and what the task changed', () => {
-    expect(modesOf(decisionFound).map((mode) => mode.label)).toEqual(['Rendered', 'Source', 'Change +14 −0'])
+  it('offers the page first, then it with what the task changed marked, then its source', () => {
+    expect(modesOf(decisionFound).map((mode) => mode.label)).toEqual(['Rendered', 'Changes +14 −0', 'Source'])
     expect(modesOf({ ...decisionFound, changed: null }).map((mode) => mode.label)).toEqual(['Rendered', 'Source'])
     expect(modesOf(limitsFound).map((mode) => mode.label)).toEqual(['File', 'Change +41 −3'])
   })
@@ -297,12 +298,51 @@ describe('a markdown file in the panel beside the conversation', () => {
       changeWhole: true,
       markdown: { image: ({ path, alt }) => <img src={`x://${path}`} alt={alt} /> },
     })
-    expect(screen.getByRole('radio', { name: 'Rendered' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /Changes/ })).toBeChecked()
     expect(within(screen.getByRole('group', { name: 'Added' })).getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'flow' })).toHaveAttribute('src', 'x://docs/decisions/flow.png')
   })
 
-  it('marks nothing where what the task changed is only in hunks, though it starts at the first line', () => {
+  it('is the page as it is, with nothing marked, as Rendered', () => {
+    panel({
+      mode: 'rendered',
+      read: { ...decisionRead, text: 'Intro.\n# Plan' },
+      change: [
+        { kind: DiffLineKind.Hunk, text: '@@ -1,1 +1,2 @@' },
+        { kind: DiffLineKind.Context, old: 1, new: 1, text: 'Intro.' },
+        { kind: DiffLineKind.Added, new: 2, text: '# Plan' },
+      ],
+      changeWhole: true,
+    })
+    expect(screen.getByRole('radio', { name: 'Rendered' })).toBeChecked()
+    expect(screen.getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
+  })
+
+  it('is a page with nothing marked for a file the task wrote new, and its diff where only hunks of it could be read', () => {
+    const { unmount } = panel({
+      read: { ...decisionRead, text: '# Plan' },
+      change: [
+        { kind: DiffLineKind.Hunk, text: '@@ -0,0 +1,1 @@' },
+        { kind: DiffLineKind.Added, new: 1, text: '# Plan' },
+      ],
+      changeWhole: true,
+    })
+    expect(screen.getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
+    unmount()
+    panel({
+      change: [
+        { kind: DiffLineKind.Hunk, text: '@@ -40,1 +40,1 @@' },
+        { kind: DiffLineKind.Removed, old: 40, text: 'Twenty a day.' },
+        { kind: DiffLineKind.Added, new: 40, text: 'As the plan allows.' },
+      ],
+    })
+    expect(screen.queryByRole('heading', { name: /Refunds are limited/ })).toBeNull()
+    expect(document.body.textContent).toContain('Twenty a day.')
+  })
+
+  it('marks nothing where what the task changed is only in hunks, though it starts at the first line: Changes is its diff', () => {
     panel({
       read: { ...decisionRead, text: 'Intro.\n# Plan' },
       change: [
@@ -311,8 +351,9 @@ describe('a markdown file in the panel beside the conversation', () => {
         { kind: DiffLineKind.Added, new: 2, text: '# Plan' },
       ],
     })
-    expect(screen.getByRole('heading', { name: 'Plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Plan' })).toBeNull()
     expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
+    expect(document.body.textContent).toContain('# Plan')
   })
 
   it('waits for what the task changed before it shows the page, and shows it as it is where that could not be read', () => {
@@ -333,7 +374,7 @@ describe('a markdown file in the panel beside the conversation', () => {
   })
 
   it('says it could not read the file, as for any other', () => {
-    panel({ read: null })
+    panel({ mode: 'rendered', read: null })
     expect(screen.getByRole('alert')).toHaveTextContent('Couldn’t read this file.')
   })
 })

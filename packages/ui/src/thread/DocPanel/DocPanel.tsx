@@ -8,7 +8,7 @@ import { Segmented } from '../../primitives/Segmented/Segmented'
 import { DiffLineKind } from '../../foundations/vocabulary'
 import { CodeLines } from '../Code/CodeLines'
 import { Diff, type DiffLine } from '../Diff/Diff'
-import { isMarkdownPath, markChanges } from '../Markdown/changes'
+import { hasMarks, isMarkdownPath, markChanges, nextWay, type PageWay } from '../Markdown/changes'
 import { Markdown, type MarkdownFile } from '../Markdown/Markdown'
 import type { DocRef } from '../Shell/Shell'
 import { SidePanel, SidePanelBody, SidePanelTitle, sidePanelText, type SidePanelText } from '../../primitives/SidePanel/SidePanel'
@@ -19,13 +19,15 @@ export interface DocPanelText extends SidePanelText {
   open: string
   /** A document with nothing in it. */
   empty: string
-  /** A markdown file's two ways to show: as a page, or its source. */
+  /** A markdown file's ways to show: as a page; as a page with what the task changed marked; or its source. */
   show: string
   rendered: string
   renderedTip: string
+  changes: string
+  changesTip: string
   source: string
   sourceTip: string
-  /** The key between them. */
+  /** The key through them. */
   showKey: string
   copy?: Partial<CopyButtonText>
 }
@@ -36,7 +38,9 @@ export const docPanelText: DocPanelText = {
   empty: 'Nothing in this document.',
   show: 'Show',
   rendered: 'Rendered',
-  renderedTip: 'As a page, with what the task changed marked',
+  renderedTip: 'As a page',
+  changes: 'Changes',
+  changesTip: 'As a page, with what the task changed marked',
   source: 'Source',
   sourceTip: 'The markdown, as written',
   showKey: 'm',
@@ -63,10 +67,14 @@ export interface DocPanelProps {
 
 export function DocPanel({ doc, onClose, onOpen, loading = false, error, file, change, text }: DocPanelProps) {
   const t = { ...docPanelText, ...text }
-  // A markdown file is a page first, and its source a press away; a document with no file behind it is only its words.
-  const [way, setWay] = useState<'rendered' | 'source'>('rendered')
+  // A markdown file is a page first, with what the task changed in it marked, and as it is, and its source, a press away;
+  // a document with no file behind it is only its words.
+  const [chosen, setWay] = useState<PageWay | null>(null)
   const page = doc.path !== undefined && isMarkdownPath(doc.path)
   const marked = change == null ? null : markChanges(change)
+  const ways: readonly PageWay[] = hasMarks(marked) ? ['rendered', 'changes', 'source'] : ['rendered', 'source']
+  // Its change is marked as it opens, once it is read; until then, and where it has none, it is the page as it is.
+  const way = chosen !== null && ways.includes(chosen) ? chosen : ways.includes('changes') ? 'changes' : 'rendered'
   // Its source is what the task changed in it, as a diff, where it changed it; the file's lines as they are, where it didn't.
   const diff = change?.some((line) => line.kind === DiffLineKind.Added || line.kind === DiffLineKind.Removed) ? change : null
   const keys = (event: KeyboardEvent<HTMLElement>) => {
@@ -74,7 +82,7 @@ export function DocPanel({ doc, onClose, onOpen, loading = false, error, file, c
     const target = event.target as HTMLElement
     if (target.isContentEditable || target.closest('input, textarea, select') !== null) return
     event.preventDefault()
-    setWay(way === 'rendered' ? 'source' : 'rendered')
+    setWay(nextWay(ways, way))
   }
   const name = (doc.path ? doc.path.split('/').pop() : doc.title) ?? ''
   const readable = !loading && error === undefined && doc.body.trim() !== ''
@@ -93,14 +101,15 @@ export function DocPanel({ doc, onClose, onOpen, loading = false, error, file, c
       actions={
         <>
           {page && readable && (
-            <Segmented<'rendered' | 'source'>
+            <Segmented<PageWay>
               label={t.show}
               value={way}
               onChange={setWay}
-              options={[
-                { value: 'rendered', label: t.rendered, tooltip: { label: t.renderedTip, kbd: t.showKey } },
-                { value: 'source', label: t.source, tooltip: { label: t.sourceTip, kbd: t.showKey } },
-              ]}
+              options={ways.map((one) => ({
+                value: one,
+                label: t[one],
+                tooltip: { label: one === 'rendered' ? t.renderedTip : one === 'changes' ? t.changesTip : t.sourceTip, kbd: t.showKey },
+              }))}
             />
           )}
           {readable && <CopyButton value={doc.body} text={t.copy} />}
@@ -132,7 +141,7 @@ export function DocPanel({ doc, onClose, onOpen, loading = false, error, file, c
           <Markdown
             source={marked?.source ?? doc.body}
             size="panel"
-            {...(marked === null ? {} : { marks: marked.marks })}
+            {...(marked === null || way !== 'changes' ? {} : { marks: marked.marks })}
             {...(file === undefined ? {} : { file })}
           />
         ) : (

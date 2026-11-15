@@ -98,7 +98,7 @@ test('a changed markdown file opens rendered from the change set and from the th
       .click()
     await page.getByRole('button', { name: 'Open the diff of README.md' }).click()
     const changes = page.getByRole('dialog', { name: 'Changes' })
-    await expect(changes.getByRole('radio', { name: /Rendered/ })).toBeChecked()
+    await expect(changes.getByRole('radio', { name: /Changes/ })).toBeChecked()
     await expect(changes.getByRole('heading', { name: 'meridian' })).toBeVisible()
     await expect(changes.getByRole('group', { name: 'Added' }).first()).toContainText('partner budget')
     await expect(changes.getByRole('group', { name: 'Removed' })).toContainText('Refunds are paid by hand.')
@@ -106,7 +106,15 @@ test('a changed markdown file opens rendered from the change set and from the th
     await still(page)
     await page.screenshot({ path: 'test-results/markdown-changes.png', scale: 'css', animations: 'disabled' })
 
-    // Source is its diff, a click away; M goes back to the page.
+    // Rendered is the page as it is now, to read: nothing marked, nothing it took out.
+    await changes.getByRole('radio', { name: /Rendered/ }).click()
+    await expect(changes.getByRole('heading', { name: 'meridian' })).toBeVisible()
+    await expect(changes.getByRole('group', { name: 'Added' })).toHaveCount(0)
+    await expect(changes.getByRole('group', { name: 'Removed' })).toHaveCount(0)
+    await still(page)
+    await page.screenshot({ path: 'test-results/markdown-rendered.png', scale: 'css', animations: 'disabled' })
+
+    // Source is its diff, a click away; M goes on, back to the page.
     await changes.getByRole('radio', { name: /Source/ }).click()
     await expect(changes.getByRole('heading', { name: 'meridian' })).toHaveCount(0)
     await expect(changes.getByRole('group', { name: 'README.md' })).toBeVisible()
@@ -120,7 +128,7 @@ test('a changed markdown file opens rendered from the change set and from the th
     await say(page, 'The page is `README.md`.')
     await page.getByRole('button', { name: 'Open README.md' }).last().click()
     const panel = page.getByRole('complementary', { name: 'README.md' })
-    await expect(panel.getByRole('radio', { name: 'Rendered' })).toBeChecked()
+    await expect(panel.getByRole('radio', { name: /Changes/ })).toBeChecked()
     await expect(panel.getByRole('group', { name: 'Added' }).first()).toContainText('partner budget')
     await expect(panel.getByRole('img', { name: 'Refund flow' })).toHaveAttribute('src', /^data:image\/png;base64,/)
     await page.mouse.move(10, 400)

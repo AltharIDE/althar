@@ -85,7 +85,7 @@ describe('a changed markdown file, in the task’s changes', () => {
     expect(await within(view).findByRole('heading', { name: 'Retries' })).toBeTruthy()
     expect(
       within(view)
-        .getByRole('radio', { name: /Rendered/ })
+        .getByRole('radio', { name: /Changes/ })
         .getAttribute('aria-checked'),
     ).toBe('true')
     expect(within(view).getByRole('group', { name: 'Added' }).textContent).toContain('Tried 3 times.')
@@ -95,7 +95,13 @@ describe('a changed markdown file, in the task’s changes', () => {
     expect(picture.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=')
     expect(readCode).toHaveBeenCalledWith('th1', 'docs/flow.png', { image: true })
 
-    // Source is the diff, as any file's; M goes back.
+    // Rendered is the page as it is now, nothing marked.
+    await userEvent.click(within(view).getByRole('radio', { name: /Rendered/ }))
+    expect(within(view).getByRole('heading', { name: 'Retries' })).toBeTruthy()
+    expect(within(view).queryByRole('group', { name: 'Added' })).toBeNull()
+    expect(within(view).queryByRole('group', { name: 'Removed' })).toBeNull()
+
+    // Source is the diff, as any file's; M goes on, back to the page.
     await userEvent.click(within(view).getByRole('radio', { name: /Source/ }))
     expect(within(view).queryByRole('heading', { name: 'Retries' })).toBeNull()
     // Highlighting splits a line into pieces as it lands, so its words are read from the whole.

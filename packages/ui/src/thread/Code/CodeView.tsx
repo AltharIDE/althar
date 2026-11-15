@@ -10,7 +10,7 @@ import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segm
 import { SidePanel } from '../../primitives/SidePanel/SidePanel'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { Diff, type DiffLine } from '../Diff/Diff'
-import { folderOfPath, markChanges } from '../Markdown/changes'
+import { folderOfPath, type MarkdownMarks, markChanges } from '../Markdown/changes'
 import { Markdown } from '../Markdown/Markdown'
 import {
   type CodeMode,
@@ -76,8 +76,11 @@ export interface CodeViewText {
   unchanged: string
   rendered: string
   renderedTip: string
+  /** A markdown file the task changed, as a page with what it changed marked. */
+  changes: string
+  changesTip: string
   source: string
-  /** The key between a markdown file as a page and its source. */
+  /** The key through a markdown file's ways: as a page, with its change marked, and its source. */
   showKey: string
   copy: string
   beside: string
@@ -124,7 +127,9 @@ export const codeViewText: CodeViewText = {
   unreadable: 'Couldn’t read this file.',
   unchanged: 'The task didn’t change this file.',
   rendered: 'Rendered',
-  renderedTip: 'As a page, with what the task changed marked',
+  renderedTip: 'As a page',
+  changes: 'Changes',
+  changesTip: 'As a page, with what the task changed marked',
   source: 'Source',
   showKey: 'm',
   copy: 'Copy path',
@@ -186,14 +191,27 @@ export const modesOf = (found: FoundCode, t: CodeViewText = codeViewText): Reado
     if (modes.length === 0) modes.push({ value: 'now', label: t.file })
     modes.push({ value: 'change', label: `${t.change} +${found.changed.add} −${found.changed.del}`, tooltip: { label: t.changeTip } })
   }
-  // A markdown file is a page first; the rest are its source, as it is, as it was, and what changed.
-  if (isMarkdown(found))
+  // A markdown file is a page first, and what the task changed in it a page with that marked; the rest are its source, as it
+  // is and as it was.
+  if (isMarkdown(found)) {
+    const kbd = { kbd: t.showKey }
+    const sources = modes.filter((mode) => mode.value !== 'change')
     return [
-      { value: 'rendered', label: t.rendered, tooltip: { label: t.renderedTip, kbd: t.showKey } },
-      ...(modes.length === 0
-        ? [{ value: 'now' as const, label: t.source }]
-        : modes.map((mode) => (mode.value === 'now' ? { ...mode, label: t.source } : mode))),
+      { value: 'rendered', label: t.rendered, tooltip: { label: t.renderedTip, ...kbd } },
+      ...(found.changed === null
+        ? []
+        : [
+            {
+              value: 'change' as const,
+              label: `${t.changes} +${found.changed.add} −${found.changed.del}`,
+              tooltip: { label: t.changesTip, ...kbd },
+            },
+          ]),
+      ...(sources.length === 0
+        ? [{ value: 'now' as const, label: t.source, tooltip: { label: t.source, ...kbd } }]
+        : sources.map((mode) => (mode.value === 'now' ? { ...mode, label: t.source } : mode))),
     ]
+  }
   return modes.length > 1 ? modes : []
 }
 
@@ -408,9 +426,28 @@ function Body({
         <p>{found.content === 'binary' ? t.binary(sizeOf(found.bytes)) : t.large(sizeOf(found.bytes))}</p>
       </div>
     )
-  if (mode === 'change') {
+  /** A markdown file as a page: its pictures and links from its folder, and what is marked of its change. */
+  const page = (source: string, marks?: MarkdownMarks) => (
+    <div className={s.page}>
+      <Markdown
+        source={source}
+        size="panel"
+        {...(marks === undefined ? {} : { marks })}
+        file={{
+          folder: folderOfPath(found.path),
+          ...(markdown?.image === undefined ? {} : { image: markdown.image }),
+          open: onGo,
+        }}
+      />
+    </div>
+  )
+  // A markdown file whose change couldn't be read is the page as it is.
+  if (mode === 'change' && !(isMarkdown(found) && change === null)) {
     if (change === undefined) return <Reading />
     if (change === null || change.length === 0) return <div className={s.say}>{t.unchanged}</div>
+    // A markdown file's change is a page with it marked, read from the diff of the whole file; one read in hunks is its diff.
+    const marked = isMarkdown(found) && changeWhole ? markChanges(change) : null
+    if (marked !== null) return page(marked.source, marked.marks)
     return (
       <div className={s.diff}>
         <Diff lines={change} label={found.path} path={found.path} fold={4} oldNumbers />
@@ -424,25 +461,7 @@ function Body({
         <Problem as="div">{t.unreadable}</Problem>
       </div>
     )
-  if (mode === 'rendered') {
-    // What the task changed is marked in it, read from the file's diff: asked for while it is read, and read as it is where it couldn't be.
-    if (found.changed !== null && change === undefined) return <Reading />
-    const marked = found.changed === null || change == null || !changeWhole ? null : markChanges(change)
-    return (
-      <div className={s.page}>
-        <Markdown
-          source={marked?.source ?? read.text}
-          size="panel"
-          {...(marked === null ? {} : { marks: marked.marks })}
-          file={{
-            folder: folderOfPath(found.path),
-            ...(markdown?.image === undefined ? {} : { image: markdown.image }),
-            open: onGo,
-          }}
-        />
-      </div>
-    )
-  }
+  if (mode === 'rendered' || mode === 'change') return page(read.text)
   return (
     <CodeLines
       key={`${found.path}\u0000${mode}`}

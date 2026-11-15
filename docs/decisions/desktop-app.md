@@ -231,9 +231,12 @@ peeks at the lines; pressing it opens the whole file beside the conversation;
   shows, in the kit's syntax inks, which code blocks in messages share.
 - **A markdown file opens rendered.** A `.md` or `.markdown` file is a page
   wherever Althar opens a file: the Changes view, and the panel beside the
-  conversation. Rendered is the default and Source the other way (the diff in
-  Changes; the lines, as they were said or what the task changed, in the
-  panel), one switch with M between them, kept per file. The page is the kit's
+  conversation. One switch has three ways, M going through them, kept per file:
+  Changes, the page with what the task changed marked; Rendered, the page as it
+  is now with nothing marked, to read it; and Source (the diff in Changes; the
+  lines, as they are or as they were said, in the panel). Changes is the default
+  where the task changed it; a file it wrote new has nothing to mark, so it is
+  Rendered and Source only, and one it deleted Changes and Source only. The page is the kit's
   `Markdown`, as in the thread, with code, tables, task lists and diagrams as
   they are there. Where the task changed it, the page says what: blocks with an
   added line are tinted and carry a `+`, what was taken out is drawn where it
@@ -246,8 +249,8 @@ peeks at the lines; pressing it opens the whole file beside the conversation;
   marks the blocks that link through it and shows the old line where it stood;
   a markdown file moved with nothing else changed is read as it is and opens as
   a page. A document an agent handed back opens in the side panel the same way:
-  Rendered or Source (what the task changed, as a diff), what the task changed
-  marked, a link to a file opening on top of it; the file is found by its whole
+  Changes, Rendered or Source (what the task changed, as a diff), a link to a
+  file opening on top of it; the file is found by its whole
   path where the task works, so a task of several repositories names it, its
   change and what it links to by their repository. A relative image or link is the file's
   neighbour: its path is resolved from the file's folder, an image is read

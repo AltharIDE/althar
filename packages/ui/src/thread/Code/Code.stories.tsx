@@ -206,16 +206,19 @@ export const PanelProse: Story = {
   },
 }
 
-/** A markdown file opens rendered, with what the task changed marked; Source is its lines, and Change its diff. */
+/** A markdown file the task changed opens as a page with that marked (Changes); Rendered is the page as it is, and Source its lines. */
 export const PanelMarkdown: Story = {
   args: Peek.args,
   decorators: [beside],
   render: () => <Stateful found={decisionFound} where={TASK} read={decisionRead} change={decisionChange} />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('radio', { name: 'Rendered' })).toBeChecked()
+    await expect(c.getByRole('radio', { name: /Changes/ })).toBeChecked()
     await expect(c.getByRole('heading', { name: /Refunds are limited per merchant/ })).toBeInTheDocument()
     await expect(c.getByRole('group', { name: 'Added' })).toBeInTheDocument()
+    await userEvent.click(c.getByRole('radio', { name: 'Rendered' }))
+    await expect(c.getByRole('heading', { name: /Refunds are limited per merchant/ })).toBeInTheDocument()
+    await expect(c.queryByRole('group', { name: 'Added' })).toBeNull()
     await userEvent.click(c.getByRole('radio', { name: 'Source' }))
     await expect(c.queryByRole('heading', { name: /Refunds are limited per merchant/ })).toBeNull()
   },

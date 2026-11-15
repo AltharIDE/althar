@@ -12,6 +12,8 @@ import {
   type DiffLine,
   DiffLineKind,
   firstMode,
+  modesOf,
+  nextWay,
   type FoundCode,
   isMarkdown,
   lineToOpen,
@@ -255,8 +257,8 @@ function CodePanelOf({
   const [kept, setKept] = useState<{ readonly key: string; readonly mode: CodeMode } | null>(null)
   const mode = kept !== null && kept.key === codeKey(found) ? kept.mode : panelMode(found)
   const read = useCodeRead(threadId, found, mode, true)
-  // What the task changed, for Change and for marking it in a markdown file shown as a page.
-  const change = useCodeChange(taskId, found, mode === 'change' || (mode === 'rendered' && found.kind === 'file' && found.changed !== null))
+  // What the task changed, for Change, and for a markdown file's Changes, which marks it on the page.
+  const change = useCodeChange(taskId, found, mode === 'change')
   const place = useQuery(placeRead(client, threadId)).data
   const { main, open: inEditor } = useCodeEditors(threadId)
   // Where it is among the thread's names, as the thread is drawn: they are drawn before what they open.
@@ -264,10 +266,16 @@ function CodePanelOf({
   const at = placeAmong(names, open)
   const nav = at < 0 ? null : { at: at + 1, of: names.length }
   const keys = (event: KeyboardEvent<HTMLElement>) => {
-    // M: a markdown file as a page, or as its source.
+    // M: through a markdown file's ways, as a page, with what the task changed marked, and as its source.
     if (event.key === 'm' && !event.metaKey && !event.ctrlKey && !event.altKey && isMarkdown(found)) {
       event.preventDefault()
-      setKept({ key: codeKey(found), mode: mode === 'rendered' ? firstMode(found) : 'rendered' })
+      setKept({
+        key: codeKey(found),
+        mode: nextWay(
+          modesOf(found).map((one) => one.value),
+          mode,
+        ),
+      })
       return
     }
     if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || main === undefined || found.kind === 'several') return

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { DiffLineKind } from '../src/foundations/vocabulary'
-import { README_DIFF } from '../src/fixtures/diffs'
+import { NEW_README_DIFF, README_DIFF } from '../src/fixtures/diffs'
 import { ChangeView, type ChangeViewProps, type ViewedFile } from '../src/outputs/ChangeView/ChangeView'
 
 /*
@@ -77,24 +77,38 @@ describe('a markdown file in the change', () => {
   const page = (more: Partial<ChangeViewProps> = {}) =>
     open({ files: MARKDOWN, selected: 'README.md', view: { state: 'ready', lines: README_DIFF, whole: true }, ...more })
 
-  it('opens as a page, with what changed marked, and Source a click away', () => {
+  it('opens as a page, with what changed marked, the page as it is and Source a click away', () => {
     page()
-    expect(screen.getByRole('radio', { name: /Rendered/ })).toBeChecked()
+    expect(screen.getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Rendered', 'Changes', 'Source'])
+    expect(screen.getByRole('radio', { name: /Changes/ })).toBeChecked()
     expect(screen.getByRole('heading', { name: 'Limits and reasons' })).toBeInTheDocument()
     expect(screen.getAllByRole('group', { name: 'Added' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('group', { name: 'Removed' }).length).toBeGreaterThan(0)
+    // Rendered is the page as it is now: nothing marked, and nothing it took out.
+    fireEvent.click(screen.getByRole('radio', { name: /Rendered/ }))
+    expect(screen.getByRole('heading', { name: 'Limits and reasons' })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: 'Added' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Removed' })).toBeNull()
     fireEvent.click(screen.getByRole('radio', { name: /Source/ }))
     expect(screen.queryByRole('heading', { name: 'Limits and reasons' })).toBeNull()
     expect(screen.getByRole('group', { name: 'README.md' })).toBeInTheDocument()
   })
 
-  it('goes between the two on M, and keeps the choice for that file only', () => {
+  it('goes through the three on M, and keeps the choice for that file only', () => {
     const { view } = page()
     fireEvent.keyDown(view, { key: 'm' })
     expect(screen.getByRole('radio', { name: /Source/ })).toBeChecked()
     fireEvent.keyDown(view, { key: 'm', metaKey: true })
     expect(screen.getByRole('radio', { name: /Source/ })).toBeChecked()
     fireEvent.keyDown(view, { key: 'm' })
+    expect(screen.getByRole('radio', { name: /Rendered/ })).toBeChecked()
+    fireEvent.keyDown(view, { key: 'm' })
+    expect(screen.getByRole('radio', { name: /Changes/ })).toBeChecked()
+  })
+
+  it('has no Changes for a markdown file that is new, which has nothing to mark', () => {
+    page({ view: { state: 'ready', lines: NEW_README_DIFF, whole: true } })
+    expect(screen.getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Rendered', 'Source'])
     expect(screen.getByRole('radio', { name: /Rendered/ })).toBeChecked()
   })
 

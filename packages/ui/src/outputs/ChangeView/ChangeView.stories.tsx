@@ -359,13 +359,13 @@ const markdown = {
   },
 } satisfies Story
 
-/** A markdown file opens as a page: what the change added tinted, what it took out drawn where it was, its picture and links beside it. */
+/** A markdown file opens as a page with its change marked: what the change added tinted, what it took out drawn where it was, its picture and links beside it. */
 export const Markdown: Story = {
   ...markdown,
   render: (args) => <Choosing {...args} />,
   play: async ({ canvasElement }) => {
     const body = within(canvasElement.ownerDocument.body)
-    await expect(body.getByRole('radio', { name: /Rendered/ })).toBeChecked()
+    await expect(body.getByRole('radio', { name: /Changes/ })).toBeChecked()
     await expect(body.getByRole('heading', { name: 'Limits and reasons' })).toBeInTheDocument()
     await expect(body.getAllByRole('group', { name: 'Added' }).length).toBeGreaterThan(0)
     await expect(body.getAllByRole('group', { name: 'Removed' }).length).toBeGreaterThan(0)
@@ -374,7 +374,21 @@ export const Markdown: Story = {
   },
 }
 
-/** Source is the diff, as for any file; M goes between the two. */
+/** Rendered is the page as it is now, to read, with nothing marked and nothing it took out. */
+export const MarkdownRendered: Story = {
+  ...markdown,
+  render: (args) => <Choosing {...args} />,
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await userEvent.click(body.getByRole('radio', { name: /Rendered/ }))
+    await expect(body.getByRole('heading', { name: 'Limits and reasons' })).toBeInTheDocument()
+    await expect(body.queryByRole('group', { name: 'Added' })).toBeNull()
+    await expect(body.queryByRole('group', { name: 'Removed' })).toBeNull()
+    await expect(body.getByRole('img', { name: 'How a refund moves' })).toBeInTheDocument()
+  },
+}
+
+/** Source is the diff, as for any file; M goes through the three. */
 export const MarkdownSource: Story = {
   ...markdown,
   render: (args) => <Choosing {...args} />,
@@ -407,8 +421,10 @@ export const MarkdownNewAndGone: Story = {
     const body = within(canvasElement.ownerDocument.body)
     await expect(body.getByRole('heading', { name: 'Retries' })).toBeInTheDocument()
     await expect(body.queryByRole('group', { name: 'Added' })).toBeNull()
+    await expect(body.getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Rendered', 'Source'])
     await userEvent.click(body.getByRole('button', { name: /hosting\.md/ }))
     await expect(body.getByRole('group', { name: 'Removed' })).toBeInTheDocument()
+    await expect(body.getAllByRole('radio').map((radio) => radio.textContent)).toEqual(['Changes', 'Source'])
     await expect(body.getByRole('heading', { name: 'Hosting' })).toBeInTheDocument()
   },
 }
