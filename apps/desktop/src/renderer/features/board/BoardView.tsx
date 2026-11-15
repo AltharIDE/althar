@@ -584,6 +584,8 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
           ...(sendBack === undefined && !merges
             ? {}
             : {
+                // Its strip is Merge: pressed, the whole card answers.
+                ...(merges ? { merge: actions?.merging?.has(work.taskId) === true ? ('merging' as const) : ('ready' as const) } : {}),
                 next: (
                   <>
                     {merges && (
@@ -961,7 +963,7 @@ const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactN
  * offers to try again. Asking the lead to resolve or fix is words, a link:
  * the card opens its task, where it is told.
  */
-const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | undefined): Pick<Card, 'foot' | 'next'> => {
+const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | undefined): Pick<Card, 'foot' | 'next' | 'merge'> => {
   const standing = standingOf(change)
   const next = standing.next
   const here = actions !== undefined && next !== null && doneHere(next) ? next : null
@@ -1033,6 +1035,8 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
       </FactLine>
     ),
     ...(step === null ? {} : { next: step }),
+    // Its strip is Merge: pressed, the whole card answers.
+    ...(here?.kind === 'merge' ? { merge: actions?.merging.has(work.taskId) === true ? ('merging' as const) : ('ready' as const) } : {}),
   }
 }
 
