@@ -1,0 +1,30 @@
+.page { display: grid; grid-template-rows: auto 1fr auto; height: 100vh; background: var(--n-2); color: var(--t-1); }
+.page[data-shot] { height: auto; min-height: 100vh; }
+.head { display: flex; align-items: baseline; gap: 14px; padding: 18px 28px 0; }
+.head h1 { margin: 0; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.head p { margin: 0; font-size: 12.5px; color: var(--t-3); }
+.main { display: flex; flex-direction: column; gap: 22px; padding: 18px 28px 28px; overflow: auto; }
+.row { display: flex; flex-wrap: wrap; gap: 22px 28px; align-items: flex-start; }
+.fig { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.fig figcaption { display: flex; align-items: center; gap: 10px; min-height: 18px; font-size: 12px; color: var(--t-3); }
+.surface { position: relative; border-radius: 10px; }
+.pulse { animation: pulse 900ms ease-out; }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--signal, #6a5cff) 55%, transparent); background: color-mix(in srgb, var(--signal, #6a5cff) 14%, transparent); }
+  100% { box-shadow: 0 0 0 10px transparent; background: transparent; }
+}
+.who { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px 1px 6px; border-radius: 999px; background: var(--n-3); color: var(--t-2); font-size: 11.5px; }
+.who i { width: 6px; height: 6px; border-radius: 50%; background: var(--signal, #6a5cff); animation: beat 700ms ease-in-out infinite alternate; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--signal, #6a5cff); animation: beat 700ms ease-in-out infinite alternate; }
+@keyframes beat { from { opacity: 0.25; } to { opacity: 1; } }
+.lane { width: 300px; }
+.narrow { width: 190px; }
+.wide { width: 900px; max-width: 100%; }
+.thread { width: 560px; }
+.note { margin: 0; font-size: 12px; color: var(--t-3); max-width: 780px; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 10px 20px; border-top: 1px solid var(--line, rgba(128,128,128,.25)); background: var(--n-1, var(--n-2)); }
+.bar button { padding: 4px 10px; border: 0; border-radius: 6px; background: none; color: var(--t-2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.bar button:hover { background: var(--n-3); }
+.bar button[aria-pressed='true'] { background: var(--n-3); color: var(--t-1); font-weight: 600; }
+.bar kbd { font-family: var(--mono); font-size: 11px; color: var(--t-4); margin-right: 4px; }
+.sep { width: 1px; height: 16px; background: var(--line, rgba(128,128,128,.3)); margin: 0 8px; }
