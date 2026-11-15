@@ -3,6 +3,12 @@ import { describe, expect, it } from 'vite-plus/test'
 import { moreRuns, plan } from '../src/stress'
 
 describe('the stress plan', () => {
+  it('repeats CLI and Node transport tests on Windows while keeping the Linux-only host on Linux', () => {
+    const changed = ['apps/cli/tests/attachment.test.ts', 'packages/transport-node/tests/ssh.test.ts', 'apps/host/tests/ssh.test.ts']
+    const planned = plan(changed, 'nightly')
+    expect(planned.linux.parts.map((part) => part.dir)).toEqual(['apps/cli', 'packages/transport-node', 'apps/host'])
+    expect(planned.windows.parts.map((part) => part.dir)).toEqual(['apps/cli', 'packages/transport-node'])
+  })
   it('runs a changed test three times on a pull request, and twenty on Linux and ten on Windows at night', () => {
     const changed = ['packages/runtime/tests/limits.test.ts', 'packages/runtime/src/limits.ts']
     const parts = [{ dir: 'packages/runtime', files: ['tests/limits.test.ts'] }]
