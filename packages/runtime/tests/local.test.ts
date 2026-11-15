@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import { type ActorId, Ids, newId, type ProjectId, type WorksIn } from '@althar/domain'
+import type { ActorId, ProjectId, WorksIn } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { holds } from '@althar/provider-adapters/testing'
 import { Duration, Effect, Layer, Option } from 'effect'
@@ -517,40 +517,6 @@ describe('a Local plan', () => {
         0,
       )
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { holds: lead })))))
-  })
-
-  it.live('gives a settled checkout back when only a system reminder waits on its idle lead', () => {
-    const root = repository()
-    return Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
-      const sessions = yield* Sessions
-      const instance = yield* Instance
-      const projectId = yield* opened(root)
-      const first = yield* started(projectId, 'Dark mode [lead:finish]')
-      yield* until(sessions.busy(first.threadId), (busy) => !busy)
-      const second = yield* started(projectId, 'Fix the login')
-      assert.strictEqual(second.outcome, 'waiting')
-      // A retained reminder whose wake has not been delivered yet, as during shutdown or a delayed turn-end callback.
-      const envelope = yield* Runtime.envelope('thread.send', {})
-      const [next] = yield* sql<{ sequence: number }>`SELECT coalesce(max(sequence), 0) + 1 AS sequence
-        FROM user_inputs WHERE thread_id = ${first.threadId}`
-      yield* sql`INSERT INTO user_inputs ${sql.insert({
-        id: yield* newId(Ids.userInput),
-        projectId,
-        threadId: first.threadId,
-        sequence: next?.sequence ?? 1,
-        commandId: envelope.commandId,
-        disposition: 'after_current',
-        body: 'Your step is not done until you call finish_step.',
-        authorActorId: instance.systemId,
-        state: 'queued',
-        acceptedAt: new Date().toISOString(),
-      })}`
-      yield* merged(first.taskId)
-      yield* until(spotOf(second.taskId), (spot) => spot.state === 'ready', 'the system reminder does not keep the checkout')
-      assert.isTrue(Option.isNone(yield* sessions.running(first.threadId)))
-      assert.strictEqual(branchOf(root), (yield* spotOf(second.taskId)).branch)
-    }).pipe(Effect.provide(withQueries()))
   })
 
   it.live('waits, as answered, for the changes in the checkout it asked about, and takes it once they are committed', () => {

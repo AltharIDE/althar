@@ -156,12 +156,11 @@ export class LeftBehind extends Context.Service<
           }
         })
 
-      /** The person's queued words can open a settled task again; an automatic reminder cannot keep its agent alive. */
+      /** Whether something waits to be said to the agent on the thread: its next turn, which opens its task again. */
       const waitingOn = (threadId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [row] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
-            WHERE i.thread_id = ${threadId} AND i.state = 'queued' AND a.kind = 'person'`
+          const [row] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued'`
           return (row?.n ?? 0) > 0
         })
 
