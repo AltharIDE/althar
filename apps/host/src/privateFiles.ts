@@ -1,7 +1,7 @@
 import { constants } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
-import { dirname } from 'node:path'
+import { dirname, parse, resolve } from 'node:path'
 
 import { fileErrorCode, HostError } from './errors'
 
@@ -15,6 +15,9 @@ const owned = (uid: number) => process.getuid === undefined || uid === process.g
 /** Only the final directory is tightened; never change permissions on an operator's ancestor directories. */
 export const privateDirectory = async (path: string, create = false): Promise<string> => {
   try {
+    // An operator running as root must never tighten / when given a profile,
+    // worktree directory or key parent at the filesystem root.
+    if (create && resolve(path) === parse(resolve(path)).root) throw unsafe()
     if (create) await fs.mkdir(path, { recursive: true, mode: 0o700 })
     const stat = await fs.lstat(path)
     if (!stat.isDirectory() || stat.isSymbolicLink() || !owned(stat.uid)) throw unsafe()

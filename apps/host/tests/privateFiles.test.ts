@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { chmodSync, linkSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
@@ -28,6 +28,7 @@ describe('private durable host files', () => {
   it('tightens only its own directory and refuses non-directories and absent homes', async () => {
     const root = temporary()
     const directory = join(root, 'private')
+    await expect(privateDirectory(parse(root).root, true)).rejects.toMatchObject({ code: 'UnsafePermissions' })
     mkdirSync(directory, { mode: 0o755 })
     await privateDirectory(directory, true)
     expect(statSync(directory).mode & 0o777).toBe(0o700)
