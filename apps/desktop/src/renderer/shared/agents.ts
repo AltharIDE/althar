@@ -79,8 +79,10 @@ export const inLineWords = (place: number) => `${ordinal(place)} in line`
 export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal(place)} in Up next`
 
 /** How busy this computer's agents are, as work that waits for one says it. */
-export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
-  busy > atOnce ? `${busy} agents busy on ${where}, ${atOnce} at a time` : `${busy} of ${atOnce} agents busy on ${where}`
+export const busyWords = ({ busy, atOnce, holders }: Queued, where: string = device.this) => {
+  const count = busy > atOnce ? `${busy} agents busy on ${where}, ${atOnce} at a time` : `${busy} of ${atOnce} agents busy on ${where}`
+  return holders?.length ? `${count}: ${holders.map((holder) => holder.title).join('; ')}` : count
+}
 
 /**
  * The same, short, for a project's tasks on the home, which is this

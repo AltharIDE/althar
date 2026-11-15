@@ -16,8 +16,8 @@ import { Helpers } from '../src/Helpers'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
-import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, items, launches, runtime, until } from './support'
 
@@ -222,6 +222,34 @@ describe('a lead’s helpers', () => {
       const its = now.holders.find((holder) => holder.helper === helper?.threadId)
       assert.strictEqual(its?.taskId, task.taskId)
       assert.isNotTrue(its?.review)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('a helper left behind after its lead finishes holds no place', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      yield* callTool(task.access, 'start_helper', { name: 'Left behind', brief: 'Look around slowly. [lead:slowly]' })
+      const [helper] = yield* until(
+        sql<{ threadId: string }>`SELECT thread_id FROM helpers WHERE task_id = ${task.taskId}`,
+        (rows) => rows.length === 1,
+      )
+      const busy = yield* Busy
+      yield* until(busy.now, (now) => now.holders.some((holder) => holder.helper === helper?.threadId))
+      const sessions = yield* Sessions
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: task.threadId,
+        body: '[lead:finish]',
+        disposition: 'after_current',
+      })
+      yield* until(busy.now, (now) => now.holders.length === 0)
+      // The stale helper session remains observable; it cannot consume agent capacity.
+      const [left] = yield* sql<{ state: string }>`SELECT state FROM helpers WHERE thread_id = ${helper?.threadId ?? ''}`
+      assert.strictEqual(left?.state, 'working')
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

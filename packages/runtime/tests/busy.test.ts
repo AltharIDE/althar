@@ -10,7 +10,6 @@ import { SqlClient } from 'effect/sql'
 
 import { Busy, type Waiter } from '../src/Busy'
 import type { BusyOptions } from '../src/Config'
-import { touchTask } from '../src/cards'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
@@ -552,18 +551,20 @@ describe('Agents at once', () => {
       assert.isFalse((yield* facts(task.taskId)).includes('node_attempt.held'), 'the review never waited for a place')
       const left = yield* sessions.running(task.threadId)
       assert.strictEqual(Option.isSome(left) ? left.value.background.filter((one) => one.ended === null).length : 0, 1)
-      // The server still counts, once, for its task.
-      assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+      // The completed task holds no place, though its preview remains available.
+      yield* idle(task.threadId)
+      yield* busyAt(0)
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('start a task’s waiting work in the place it keeps only by what its lead left running, ahead of what waited longer', () =>
+  it.live('a preview gives no priority over work that waited longer', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
       const busy = yield* Busy
       const task = yield* started(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
       yield* until(attempts(task.taskId), (rows) => rows[0]?.state === 'succeeded')
-      yield* busyAt(1)
+      yield* idle(task.threadId)
+      yield* busyAt(0)
       // Work of another task under way waited first; then the task's own, as a review that waited from before a restart.
       const begun: Array<string> = []
       const waiters = [
@@ -583,7 +584,7 @@ describe('Agents at once', () => {
         (rows) => rows.length === 1,
       )
       yield* Effect.sleep('300 millis')
-      assert.deepStrictEqual(begun, [task.taskId])
+      assert.deepStrictEqual(begun, ['other'])
       assert.strictEqual((yield* busy.now).busy, 1)
     }).pipe(Effect.provide(machine(1))),
   )
@@ -772,72 +773,9 @@ describe('Agents at once', () => {
       assert.isTrue(Option.isNone(yield* sessions.running(first.threadId)))
     }).pipe(Effect.provide(machine(1))),
   )
-
-  it.live('count a lead whose step is done while what it left running still runs, and free its place when that stops', () =>
-    Effect.gen(function* () {
-      const { projectId } = yield* opened
-      const sessions = yield* Sessions
-      const first = yield* started(projectId, 'First', 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
-      // Its step is done and the task ready, but the server it left running still runs: it holds its place.
-      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
-      const running = yield* until(
-        Effect.map(sessions.running(first.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-        (left) => left.length === 1,
-      )
-      const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-      assert.strictEqual(second.outcome, 'waiting')
-      yield* waiting(second.taskId)
-      yield* sessions.stopBackground(first.threadId, running[0]?.id ?? '')
-      yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-    }).pipe(Effect.provide(machine(1))),
-  )
 })
 
-/**
- * A stand-in for `ps`, for agents that are no process here: the tree of every agent is one process whose CPU time rises
- * by a second a reading while `burning`, else stands still; with `churning`, a short-lived worker besides, a new one each reading.
- */
-const fakeCpu = () => {
-  const cpu = { burning: false, churning: false, total: 0, unreadable: false, workers: 0, burstEvery: 0, reads: 0 }
-  const of: NonNullable<BusyOptions['cpuOf']> = (agents) =>
-    Effect.sync(() => {
-      if (cpu.burning) cpu.total += 1_000
-      if (cpu.churning) cpu.workers += 1
-      cpu.reads += 1
-      // A burst of work that a reading finds only now and then: a worker alive at every n-th reading, gone at the rest.
-      const burst = cpu.burstEvery > 0 && cpu.reads % cpu.burstEvery === 0
-      return new Map(
-        agents.map((agent) => [
-          agent.threadId,
-          cpu.unreadable ? null : new Map([[1, cpu.total], ...(cpu.churning || burst ? [[1_000 + cpu.reads, 0] as [number, number]] : [])]),
-        ]),
-      )
-    })
-  return { cpu, of }
-}
-
-/** A machine that runs `n` at once, whose agents' CPU the test sets: read every 50 ms, and quiet for a second before it counts as idle. */
-const withCpu = <A, E, R>(n: number, body: (cpu: ReturnType<typeof fakeCpu>['cpu']) => Effect.Effect<A, E, R>) => {
-  const fake = fakeCpu()
-  return body(fake.cpu).pipe(
-    Effect.provide(machine(n, ':memory:', { cpuOf: fake.of, sample: Duration.millis(50), quiet: Duration.millis(1_000) })),
-  )
-}
-
-/** The lead of a task that served and finished: its step is done, and what it left running is the only thing that may hold its place. */
-const served = (projectId: ProjectId, title: string) =>
-  Effect.gen(function* () {
-    const sessions = yield* Sessions
-    const task = yield* started(projectId, title, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
-    yield* until(attempts(task.taskId), (rows) => rows[0]?.state === 'succeeded')
-    const running = yield* until(
-      Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-      (left) => left.length === 1,
-    )
-    return { ...task, serverId: running[0]?.id ?? '' }
-  })
-
-/** Waits until this many agents are counted at work. */
+/** Waits for the slot count to catch up with a session event. */
 const busyAt = (n: number) =>
   Effect.flatMap(Busy, (busy) =>
     until(
@@ -846,206 +784,78 @@ const busyAt = (n: number) =>
     ),
   )
 
-describe('Agents at once, and what they left running', () => {
-  it.live('take no place for a server left running that sits idle', () =>
-    withCpu(1, () =>
-      Effect.gen(function* () {
-        const { projectId } = yield* opened
-        const sessions = yield* Sessions
-        const first = yield* served(projectId, 'First')
-        // Nothing uses CPU: the server is still there, and takes no place.
-        yield* busyAt(0)
-        const left = yield* sessions.running(first.threadId)
-        assert.strictEqual(Option.isSome(left) ? left.value.background.length : 0, 1)
-        // The next task starts at once, and finishes, though the cap is one.
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        assert.strictEqual(second.outcome, 'running')
-        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-      }),
-    ),
-  )
-
-  it.live('count a test run left running, and say it keeps the place, with what to stop', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        const sessions = yield* Sessions
-        const first = yield* served(projectId, 'First')
-        // Well past the time an idle server stops counting, it still holds its place.
-        yield* Effect.sleep('2200 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        assert.strictEqual(second.outcome, 'waiting')
-        yield* waiting(second.taskId)
-        // The waiting task says who keeps the place: the first, by what it left running, and what to stop.
-        const holders = (yield* cardOf(projectId, second.taskId))?.queued?.holders ?? []
-        assert.deepStrictEqual(
-          holders.map((holder) => [holder.taskId, holder.title, holder.threadId, holder.kept, holder.running.map((left) => left.id)]),
-          [[first.taskId, 'First', first.threadId, true, [first.serverId]]],
-        )
-        yield* sessions.stopBackground(first.threadId, first.serverId)
-        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-      }),
-    ),
-  )
-
-  it.live('keep counting a test run that idles for a moment', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        yield* Effect.sleep('300 millis')
-        // A pause shorter than the quiet it takes to stop counting.
-        cpu.burning = false
-        yield* Effect.sleep('150 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        cpu.burning = true
-        yield* Effect.sleep('1500 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        // Quiet for good, it stops counting.
-        cpu.burning = false
-        yield* busyAt(0)
-      }),
-    ),
-  )
-
-  it.live('keep counting a runner whose short-lived workers end between readings, though no CPU time is left in the tree', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.churning = true
-        const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        // Far past the quiet that frees an idle server's place: each reading finds other workers than the last.
-        yield* Effect.sleep('2500 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        assert.strictEqual(second.outcome, 'waiting')
-        cpu.churning = false
-        yield* busyAt(0)
-      }),
-    ),
-  )
-
-  it.live("tell the waiting task's thread, and the cards, who holds the places as they change, so an open view reads them again", () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        const queries = yield* Queries
-        const first = yield* served(projectId, 'First')
-        const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
-        const third = yield* started(projectId, 'Third', 'Do it. [lead:finish]')
-        yield* waiting(second.taskId)
-        yield* waiting(third.taskId)
-        const holders = (taskId: string) =>
-          Effect.map(cardOf(projectId, taskId), (card) => card?.queued?.holders?.map((holder) => [holder.title, holder.kept]) ?? [])
-        assert.deepStrictEqual(yield* holders(third.taskId), [['First', true]])
-        // The server goes quiet: the second takes the place, and the third, still waiting, is told, on its own thread too.
-        const at = yield* queries.cursor
-        cpu.burning = false
-        yield* working(second.taskId)
-        yield* until(holders(third.taskId), (rows) => rows.length === 1 && rows[0]?.[0] === 'Second')
-        assert.deepStrictEqual(yield* holders(third.taskId), [['Second', false]])
-        const changes = yield* queries.changesSince(at, 100)
-        assert.isTrue(changes.some((change) => change.aggregateType === 'task' && change.threadId === third.threadId))
-        assert.isTrue(first.serverId !== '')
-      }),
-    ),
-  )
-
-  it.live(
-    'keep counting a runner whose bursts are seen only now and then, while they come more often than the quiet, and free it once they stop',
-    () =>
-      withCpu(1, (cpu) =>
-        Effect.gen(function* () {
-          // A worker alive at every 5th reading (250 ms), gone between: the tree is the same idle parent at the rest, for far
-          // longer than the second it takes an idle server to stop counting.
-          cpu.burstEvery = 5
-          const { projectId } = yield* opened
-          yield* served(projectId, 'First')
-          yield* Effect.sleep('2500 millis')
-          assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-          // The bursts stop: nothing shows work for the quiet, and the place frees.
-          cpu.burstEvery = 0
-          yield* busyAt(0)
-        }),
-      ),
-  )
-
-  it.live('count a server again once it starts working', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        yield* busyAt(0)
-        // A request makes it work: it holds its place again, and the next task waits.
-        cpu.burning = true
-        yield* busyAt(1)
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        assert.strictEqual(second.outcome, 'waiting')
-      }),
-    ),
-  )
-
-  it.live('start a waiting task as soon as the server it waits for goes idle, with nothing else happening', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        yield* waiting(second.taskId)
-        // The server goes quiet: no turn ends, no one answers, nothing is stopped.
-        cpu.burning = false
-        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-        // Nothing is left holding a place once it is done and the idle server counts no more.
-        yield* busyAt(0)
-      }),
-    ),
-  )
-
-  it.live('read what the machine says of an agent that is no process, and count it, as it cannot say', () =>
+describe('Agent places belong to work, not previews', () => {
+  it.live('a finished task leaves its preview up without holding a place', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
-      yield* served(projectId, 'First')
-      yield* Effect.sleep('600 millis')
-      assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-      // Telling the clients about a task that isn't there changes nothing.
-      yield* touchTask('missing')
-    }).pipe(Effect.provide(machine(1, ':memory:', { sample: Duration.millis(50), quiet: Duration.millis(100) }))),
+      const sessions = yield* Sessions
+      const first = yield* started(projectId, 'Preview', 'Serve then finish. [lead:serve] [lead:finish]', 'claude-code')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* idle(first.threadId)
+      const left = yield* sessions.running(first.threadId)
+      assert.isTrue(Option.isSome(left) && left.value.background.some((command) => command.ended === null))
+      assert.deepStrictEqual((yield* (yield* Busy).now).holders, [])
+      const second = yield* started(projectId, 'Next', 'Work. [lead:wait]')
+      assert.strictEqual(second.outcome, 'running')
+      yield* working(second.taskId)
+    }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('let a session that ended go from what is read, with what it left running', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        const sessions = yield* Sessions
-        const first = yield* served(projectId, 'First')
-        yield* Effect.sleep('300 millis')
-        yield* sessions.stop(first.threadId)
-        yield* busyAt(0)
-        yield* Effect.sleep('300 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 0)
-      }),
-    ),
+  it.live('completion wakes the queue with its preview still running', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const first = yield* started(projectId, 'Preview', 'Serve and wait. [lead:serve] [lead:wait]', 'claude-code')
+      yield* working(first.taskId)
+      const second = yield* started(projectId, 'Second', 'Work. [lead:wait]')
+      yield* waiting(second.taskId)
+      yield* say(first.threadId, '[lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* working(second.taskId)
+      const live = yield* (yield* Sessions).running(first.threadId)
+      assert.isTrue(Option.isSome(live) && live.value.background.some((command) => command.ended === null))
+    }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('count what it cannot read the CPU of', () =>
-    withCpu(1, (cpu) =>
+  for (const state of ['stopped', 'abandoned'] as const) {
+    it.live(`ignore stale work records after a task is ${state}`, () =>
       Effect.gen(function* () {
-        cpu.unreadable = true
         const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        yield* Effect.sleep('2200 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+        const first = yield* started(projectId, 'Stale', 'Work. [lead:wait]')
+        yield* working(first.taskId)
+        const second = yield* started(projectId, 'Next', 'Work. [lead:wait]')
+        yield* waiting(second.taskId)
+        const sql = yield* SqlClient.SqlClient
+        if (state === 'stopped') yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${first.taskId}`
+        else yield* sql`UPDATE tasks SET state = 'abandoned' WHERE id = ${first.taskId}`
+        const busy = yield* Busy
+        yield* busy.wake
+        yield* working(second.taskId)
+        assert.deepStrictEqual(
+          (yield* busy.now).holders.map((holder) => holder.taskId),
+          [second.taskId],
+        )
+      }).pipe(Effect.provide(machine(1))),
+    )
+
+    it.live(`a ${state} task frees its place and wakes the queue`, () =>
+      Effect.gen(function* () {
+        const { projectId } = yield* opened
+        const tasks = yield* Tasks
+        const first = yield* started(projectId, 'First', 'Work. [lead:wait]')
+        yield* working(first.taskId)
+        const second = yield* started(projectId, 'Second', 'Work. [lead:wait]')
         assert.strictEqual(second.outcome, 'waiting')
-      }),
-    ),
-  )
+        yield* waiting(second.taskId)
+        if (state === 'stopped') yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+        else yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: first.taskId })
+        yield* working(second.taskId)
+        assert.deepStrictEqual(
+          (yield* (yield* Busy).now).holders.map((holder) => holder.taskId),
+          [second.taskId],
+        )
+      }).pipe(Effect.provide(machine(1))),
+    )
+  }
 })
 
 describe('Agents at once, across a restart', () => {

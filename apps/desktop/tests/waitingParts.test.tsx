@@ -150,6 +150,22 @@ describe('what runs, and what waits', () => {
     expect(queuedWords({ busy: 7, atOnce: 6 }, 'this Mac')).toBe('Waiting: 7 agents busy on this Mac, 6 at a time')
   })
 
+  it('names every slot holder in the waiting line', () => {
+    expect(
+      queuedWords(
+        {
+          busy: 2,
+          atOnce: 2,
+          holders: [
+            { taskId: 'a', title: 'Fix checkout', threadId: 'lead', kept: false, running: [] },
+            { taskId: 'b', title: 'Review login', threadId: 'review', kept: false, running: [] },
+          ],
+        },
+        'this computer',
+      ),
+    ).toBe('Waiting: 2 of 2 agents busy on this computer: Fix checkout; Review login')
+  })
+
   it('merges here only the repositories whose branch could be read', () => {
     expect(
       headsOf([
