@@ -152,7 +152,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const [pending, setPending] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const [newest] = useState(newestReads)
+  const [newest] = useState(() => newestReads('head'))
   const changed = useRef({ head: false, cards: false, automations: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
   // What the coordinator's commands have printed so far, while they run.

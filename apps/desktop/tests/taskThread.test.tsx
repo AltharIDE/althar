@@ -143,38 +143,6 @@ describe('a task’s thread', () => {
     expect(open).toHaveBeenCalledWith('th2')
   })
 
-  for (const finished of [true, false])
-    it(
-      finished ? 'keeps completed work open as a quiet round becomes compact' : 'folds work watched live as a quiet round ends',
-      async () => {
-        const work: NonNullable<Round['work']> = {
-          id: 'work:quiet',
-          steps: [{ kind: 'aside', id: 'progress', text: 'Write the test' }],
-          took: '12s',
-          live: !finished,
-          counts: '',
-          doing: null,
-          spent: null,
-        }
-        const before: Round = { ...round('quiet', ''), result: null, live: true, work }
-        const props = { threadId: 'th1', versionOf: () => '' }
-        const show = shown({ ...props, rounds: [before] })
-        const headline = screen.getByRole('button', { name: finished ? /Worked for 12s/ : /Working for 12s/ })
-        await userEvent.click(headline)
-        expect(headline.getAttribute('aria-expanded')).toBe('true')
-        // The work can already say “Worked” before its quiet turn is archived as the compact line.
-        const after = { ...before, live: false, work: { ...work, live: false } }
-        show({ ...props, rounds: [after] })
-        const compact = screen.getByRole('button', { name: /[Ww]orked 12s/ })
-        expect(compact.getAttribute('aria-expanded')).toBe(String(finished))
-        if (!finished) await userEvent.click(compact)
-        expect(compact.getAttribute('aria-expanded')).toBe('true')
-        expect(screen.getByText('Write the test')).toBeTruthy()
-        show({ ...props, rounds: [{ ...after, work: { ...after.work, counts: 'updated its plan' } }] })
-        expect(screen.getByRole('button', { name: /[Ww]orked 12s/ }).getAttribute('aria-expanded')).toBe('true')
-      },
-    )
-
   it('shows a round at work as Codex does: how long, what it said on the way, one line for what it does now; its thinking only opened', async () => {
     const work: NonNullable<Round['work']> = {
       id: 'work:r3',

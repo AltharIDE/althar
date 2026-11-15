@@ -223,13 +223,6 @@ const RoundView = memo(function RoundView({
   onCompact,
   onSignIn,
 }: RoundProps) {
-  const work = block.work
-  const live = work !== null && work.live && !block.answered
-  // The detailed live view and the compact quiet-round line are two presentations of the same disclosure.
-  // Fold once as work ends; a click after that must survive the turn settling and changing presentation.
-  const [disclosure, setDisclosure] = useState({ live, open: false })
-  if (disclosure.live !== live) setDisclosure({ live, open: disclosure.live && !live ? false : disclosure.open })
-  const changeDisclosure = (open: boolean) => setDisclosure({ live, open })
   const versionOf = (whole: string) => versions[whole] ?? ''
   const opens = openFile === undefined ? {} : { openFile }
 
@@ -249,6 +242,7 @@ const RoundView = memo(function RoundView({
   const pictures = (sets: ReadonlyArray<Shown>) =>
     sets.map((shown) => <Gallery key={shown.id} data-item={shown.id} shots={shotsOf(shown.id, shown.pictures)} />)
 
+  const work = block.work
   // A round that said nothing is its line alone, with who worked.
   if (
     block.ack === null &&
@@ -262,8 +256,6 @@ const RoundView = memo(function RoundView({
     return (
       <>
         <WorkLine
-          open={disclosure.open}
-          onOpenChange={changeDisclosure}
           who={model}
           took={work.spent === null ? work.took : duration(work.spent.total)}
           summary={[work.counts, ...(work.spent === null ? [] : [lineOf(work.spent) ?? ''])].filter((words) => words !== '').join(' · ')}
@@ -334,12 +326,10 @@ const RoundView = memo(function RoundView({
     >
       {work !== null && (
         <WorkedFor
-          open={disclosure.open}
-          onOpenChange={changeDisclosure}
           took={work.spent === null ? work.took : duration(work.spent.total)}
           {...(work.spent === null ? {} : { spent: spentWords(work.spent) })}
           {...(work.spent === null || lineOf(work.spent) === undefined ? {} : { most: lineOf(work.spent) })}
-          live={live}
+          live={work.live && !block.answered}
           {...(onTheWay.length === 0
             ? {}
             : {

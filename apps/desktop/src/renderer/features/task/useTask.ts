@@ -313,7 +313,7 @@ export const useTask = (threadId: string): TaskModel => {
   const [mergeFailed, setMergeFailed] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const [newest] = useState(newestReads)
+  const [newest] = useState(() => newestReads('head'))
   const changed = useRef({ head: false, items: new Set<string>() })
   const taskId = snapshot?.task.id ?? null
   const hasChange = (snapshot?.task.changes.length ?? 0) > 0
