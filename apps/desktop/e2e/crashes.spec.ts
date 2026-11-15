@@ -141,11 +141,14 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
     const crashReports = page.getByRole('main').getByRole('switch', { name: 'Crash reports' })
     await expect(crashReports).toHaveAttribute('aria-checked', 'true')
     await crashReports.locator('xpath=ancestor::div[2]').screenshot({ path: 'test-results/crash-reports-settings.png', scale: 'css' })
-    // What the app keeps, which it goes by from the moment it is kept: the window's switch moves before then.
+    // The file can change before its write's promise resumes main. Wait for both the file and main's applied choice;
+    // the window's optimistic switch moves before either, and the next error must belong to the new choice.
     const kept = () => (JSON.parse(readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')) as { crashReports?: boolean }).crashReports
+    const applied = () => page.evaluate(async () => (await window.althar.preferences()) as { crashReports: boolean })
     await crashReports.click()
     await expect(crashReports).toHaveAttribute('aria-checked', 'false')
     await expect.poll(kept).toBe(false)
+    await expect.poll(applied).toMatchObject({ crashReports: false })
     // Usage data has a switch of its own, and its events on their way may still go: only crash reports must not.
     const before = fake.events.length
     // Of two kinds, so neither is taken for the other: a report goes once a launch for each failure.
@@ -163,6 +166,7 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
     await crashReports.click()
     await expect(crashReports).toHaveAttribute('aria-checked', 'true')
     await expect.poll(kept).toBe(true)
+    await expect.poll(applied).toMatchObject({ crashReports: true })
     await thrown('After the switch went on again', 'Error')
     const values = () =>
       fake.events.slice(before).flatMap((event) => (event.event === '$exception' ? [event.properties.$exception_list?.[0]?.value] : []))
