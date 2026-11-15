@@ -217,6 +217,8 @@ export interface SaidStep {
   readonly target: string
   /** The step in a few plain words, as the agent that kept it put it: "Merge the 0.9.0 pull request". */
   readonly says?: string | null | undefined
+  /** The tool's arguments, where they name what it acts on (a tag). */
+  readonly request?: Readonly<Record<string, unknown>> | undefined
   readonly waits: ReadonlyArray<{ readonly kind: string; readonly says?: string | undefined }>
 }
 
@@ -226,15 +228,44 @@ const lower = (text: string) =>
   /^[A-Z][a-z]/.test(text) && !/^[A-Z][a-z]+[A-Z]/.test(text) ? `${text.charAt(0).toLowerCase()}${text.slice(1)}` : text
 const unstop = (text: string) => text.trim().replace(/[.\s]+$/, '')
 
-/** A step's words: the agent's own, else its tool and target made short (Merge pull request #958). */
+/** A tag as a release names it, v0.9.0 or 0.9.0, from the tool's arguments or the end of its target. */
+const tagOf = (step: SaidStep): string | null => {
+  const asked = step.request?.tag
+  if (typeof asked === 'string' && asked.trim() !== '') return asked.trim()
+  return /(?:^|\s)(v?\d+(?:\.\d+)+(?:[-+][\w.]+)?)$/.exec(step.target.trim())?.[1] ?? null
+}
+
+/**
+ * A step's words: the agent's own; else what a known tool does to the thing its target names as people do (#958, v0.9.0, DEV-12);
+ * else the tool alone. A target with no such name (a branch, owner/repo, task:<slug>) is never said: it means nothing to the person.
+ */
 export const stepWords = (step: SaidStep): string => {
   const said = unstop(step.says ?? '')
   if (said !== '') return capital(said)
-  const tool = step.tool
-    .replace(/^mcp__[^_]+__/, '')
-    .replaceAll('_', ' ')
-    .trim()
-  return capital(`${tool} ${shortTarget(subject(step.target))}`.trim())
+  const label = labelOf(subject(step.target))?.label
+  switch (step.tool) {
+    case 'merge_pull_request':
+      return label === undefined ? 'Merge the pull request' : `Merge ${label}`
+    case 'push_tag': {
+      const tag = tagOf(step)
+      return tag === null ? 'Push the tag' : `Tag ${tag}`
+    }
+    case 'publish_release': {
+      const tag = label ?? tagOf(step)
+      return tag === null ? 'Publish the release' : `Publish the ${tag} release`
+    }
+    case 'approve_release_run': {
+      const tag = tagOf(step)
+      return tag === null ? 'Approve the release run' : `Approve the ${tag} release run`
+    }
+    default: {
+      const tool = step.tool
+        .replace(/^mcp__[^_]+__/, '')
+        .replaceAll('_', ' ')
+        .trim()
+      return capital(label === undefined ? tool : `${tool} ${label}`)
+    }
+  }
 }
 
 /** A wait's clause, to follow "once": the agent's words, else the kind Althar knows, else the kind made plain. */
@@ -242,6 +273,10 @@ const waitClause = (wait: SaidStep['waits'][number]): string => {
   const said = unstop(wait.says ?? '')
   if (said !== '') return lower(said.replace(/^(?:once|when|after|until)\s+/i, ''))
   const kind = wait.kind.toLowerCase().replace(/[-\s]+/g, '_')
+  if (kind === 'task_pull_request') return 'its pull request is ready'
+  if (kind === 'post_merge') return 'the checks after the merge pass'
+  if (kind === 'run') return 'its run asks for approval'
+  if (kind === 'draft') return 'its draft is ready'
   if (/check/.test(kind)) return 'its checks pass'
   if (/review|approv/.test(kind)) return 'it’s approved'
   if (/merge_(?:queue|train|line|in_flight)/.test(kind)) return 'its turn to merge comes'

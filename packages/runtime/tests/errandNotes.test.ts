@@ -138,9 +138,30 @@ describe('a kept errand reads in plain words', () => {
 
   it('without the agent’s words, says the tool and target short, and the waits Althar knows', () => {
     const note = keptNote('merge it', [{ tool: 'merge_pull_request', target: PR, waits: [{ kind: 'merge_line' }, { kind: 'checks' }] }])
-    assert.strictEqual(note.title, 'Kept your errand: merge pull request #698 once its turn to merge comes and its checks pass')
+    assert.strictEqual(note.title, 'Kept your errand: merge #698 once its turn to merge comes and its checks pass')
     assert.deepStrictEqual(note.links, [{ label: '#698', url: PR }])
     assert.notMatch(note.title, /merge_line|checks_|AltharIDE/)
+  })
+
+  it('without the agent’s words, never says a target that only a branch or a repository names', () => {
+    const steps = [
+      { ...merge, says: undefined, waits: [{ kind: 'pull_request_opened' }, { kind: 'checks_passed' }] },
+      { ...tag, says: undefined },
+    ]
+    const note = keptNote('Once 0.9.0 is ready and on prs, merge for me then tag', steps)
+    assert.strictEqual(note.title, 'Kept your errand: merge the pull request once it’s open and its checks pass, then tag v0.9.0')
+    assert.notMatch(`${note.title}\n${(note.details ?? '').split('\n').slice(1).join('\n')}`, /AltharIDE|release-prep|althar\//)
+    // A task's pull request, as errands bind it before it exists, and a tag named in the tool's arguments.
+    const task = [
+      { tool: 'merge_pull_request', target: 'task:release-prep-althar-0-9-0', waits: [{ kind: 'task_pull_request' }] },
+      { tool: 'push_tag', target: 'AltharIDE/althar tag', request: { tag: 'v0.9.0' }, waits: [{ kind: 'task_merged' }] },
+    ]
+    assert.strictEqual(
+      keptNote('merge then tag', task).title,
+      'Kept your errand: merge the pull request once its pull request is ready, then tag v0.9.0',
+    )
+    assert.strictEqual(afterStep({ title: 'Merged #958', links: [] }, task[1]).title, 'Merged #958. Next: tag v0.9.0')
+    assert.strictEqual(stillNote(false, null, task[0]).title, 'Errand still waits to merge the pull request once its pull request is ready')
   })
 
   it('names three steps and counts the rest', () => {

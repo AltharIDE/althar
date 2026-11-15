@@ -114,6 +114,7 @@ const said = (step: StepRow): SaidStep => ({
   tool: step.tool,
   target: step.target,
   says: step.says,
+  request: JSON.parse(step.request) as Readonly<Record<string, unknown>>,
   waits: JSON.parse(step.waits) as SaidStep['waits'],
 })
 
