@@ -52,6 +52,24 @@ const refs = new Map([['p1', refOf(project)]])
 const agentName = () => ''
 
 describe('a ready task’s line', () => {
+  it('offers queue bypass only as the explicit secondary action', async () => {
+    const work = task({
+      kind: 'change',
+      change: change({
+        draft: false,
+        canBypassQueue: true,
+        checks: { outcome: 'passed', passed: 1, failed: 0, running: 0, total: 1, failing: [], list: [] },
+      }),
+    })
+    const [need] = needsOf({ calls: [], ready: [work], refs, agentName })
+    const next = vi.fn()
+    render(<>{needLineOf(need!, { onOpen: vi.fn(), onAnswer: vi.fn(), onNext: next })}</>)
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    expect(next).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    expect(next).toHaveBeenCalledWith(work, { kind: 'merge' }, true)
+  })
+
   it('says its commits in no pull request, one or more', () => {
     const merged = change({ state: 'merged' })
     expect(briefOf(task({ change: merged, unshipped: { commits: 1, add: 5, del: 1 } }))).toBe('1 commit in no pull request · +5 −1')
@@ -125,6 +143,33 @@ describe('calls answered here', () => {
     expect(line.getAttribute('aria-describedby')).not.toBeNull()
     expect(within(line).getAllByText('make clean')).toHaveLength(1)
     expect(within(line).getByText(/Never/)).toBeTruthy()
+  })
+})
+
+describe('a stuck step’s line', () => {
+  const stuck = (why: 'signed_out' | 'stalled') =>
+    call('s', '2026-10-07T09:10:00.000Z', {
+      kind: 'stuck',
+      stuck: { step: 'implement', why, detail: null, agentId: 'claude-code', round: 0, open: 0 },
+    })
+
+  it('signs its agent in again where it is signed out, as its task’s card does first', async () => {
+    const [need] = needsOf({ calls: [stuck('signed_out')], answered: [], ready: [], refs, agentName })
+    const onSignIn = vi.fn()
+    const onOpen = vi.fn()
+    render(<>{needLineOf(need!, { onOpen, onAnswer: vi.fn(), onSignIn })}</>)
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(onSignIn).toHaveBeenCalledWith('claude-code')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('opens its task for any other reason, or where the place can’t sign in', () => {
+    const [stalled] = needsOf({ calls: [stuck('stalled')], answered: [], ready: [], refs, agentName })
+    render(<>{needLineOf(stalled!, { onOpen: vi.fn(), onAnswer: vi.fn(), onSignIn: vi.fn() })}</>)
+    expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy()
+    const [signedOut] = needsOf({ calls: [stuck('signed_out')], answered: [], ready: [], refs, agentName })
+    render(<>{needLineOf(signedOut!, { onOpen: vi.fn(), onAnswer: vi.fn() })}</>)
+    expect(screen.getAllByRole('button', { name: 'Open' })).toHaveLength(2)
   })
 })
 

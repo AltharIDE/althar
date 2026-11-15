@@ -22,7 +22,7 @@
   flex: 1;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 8px;
+  gap: 0 5px;
   min-width: 0;
   line-height: 1.5;
 }
@@ -36,8 +36,10 @@
   font-size: 12px;
   color: var(--t-3);
 }
+/* the dot as far from what it follows as from what it leads */
 .todo::before {
-  content: '· ';
+  content: '·';
+  margin-right: 5px;
 }
 
 /* waited on: a ring, quiet; not known: a question, quiet */

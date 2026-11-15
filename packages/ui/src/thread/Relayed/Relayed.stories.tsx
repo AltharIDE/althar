@@ -54,7 +54,6 @@ export const AllStates: Story = {
         { state: 'hover', node: <Relayed {...args} /> },
         { state: 'focus', node: <Relayed {...args} /> },
         { state: 'pressed', node: <Relayed {...args} /> },
-        { state: 'dark', node: <Relayed {...args} />, dark: true },
       ]}
     />
   ),

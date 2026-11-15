@@ -54,6 +54,7 @@ const MARKS: Readonly<Record<AutomationRunState, string | undefined>> = {
   [AutomationRunState.Skipped]: s.markSkipped,
   [AutomationRunState.Running]: s.markRunning,
   [AutomationRunState.Starting]: s.markRunning,
+  [AutomationRunState.NeedsYou]: s.markYours,
 }
 
 /** A run's mark: dark where it made something, light where there was nothing to do, red where it failed, an amber ring where the Mac slept through it, cobalt while it runs. */

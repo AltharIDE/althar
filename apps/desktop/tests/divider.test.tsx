@@ -66,8 +66,8 @@ function Project() {
   )
 }
 
-/** The room the project shows, switched by its room switch. */
-const switchRoom = (name: 'Board' | 'Home') => fireEvent.click(screen.getByRole('radio', { name }))
+/** The conversation hidden, or shown again beside the board, by its key. */
+const toggleConversation = () => fireEvent.keyDown(document.body, { key: 'c' })
 
 const WINDOW = window.innerWidth
 const widen = (width: number) => {
@@ -169,7 +169,7 @@ describe('the divider between the conversation and the board', () => {
     expect([width(), kept()]).toEqual([560, '560'])
   })
 
-  it('is as it was left after a switch of room, where storage won’t keep it too', async () => {
+  it('is as it was left after the conversation is hidden and shown again, where storage won’t keep it too', async () => {
     widen(1400)
     window.localStorage.setItem('althar.both', '500')
     const refused = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
@@ -180,17 +180,17 @@ describe('the divider between the conversation and the board', () => {
     fireEvent.pointerMove(divider(), { pointerId: 1, clientX: 420 })
     fireEvent.pointerUp(divider(), { pointerId: 1, clientX: 420 })
     expect(width()).toBe(420)
-    switchRoom('Board')
+    toggleConversation()
     expect(screen.queryByRole('separator', { name: 'Width of the conversation' })).toBeNull()
-    switchRoom('Home')
+    toggleConversation()
     expect(width()).toBe(420)
 
     // Taken by storage again, it is storage's once more.
     refused.mockRestore()
     fireEvent.doubleClick(divider())
     window.localStorage.setItem('althar.both', '600')
-    switchRoom('Board')
-    switchRoom('Home')
+    toggleConversation()
+    toggleConversation()
     expect(width()).toBe(600)
   })
 })

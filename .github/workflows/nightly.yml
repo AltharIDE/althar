@@ -125,11 +125,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       - env:
           PACKAGES: ${{ matrix.packages }}
@@ -187,12 +182,6 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - if: steps.plan.outputs.any-windows == 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - if: steps.plan.outputs.any-windows == 'true'
         uses: ./.github/actions/electron
       - if: steps.plan.outputs.any-windows == 'true'

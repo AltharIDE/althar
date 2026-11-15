@@ -73,6 +73,11 @@ export const Looking: Story = { args: { repositories: null } }
 /** Nothing found: Choose a folder stays, and there is nothing to find. */
 export const NoneFound: Story = { args: { repositories: [] } }
 
+/** A long path with room for most of it: whole folders give way from its start, the folder it is kept. */
+export const LongPathWithRoom: Story = {
+  args: { repositories: [{ id: 'deep', name: 'api', where: '~/Projects/northwind/platform/services/payments-reconciliation-service' }] },
+}
+
 /** A long path is cut short, whole on hover. */
 export const LongPath: Story = {
   args: {

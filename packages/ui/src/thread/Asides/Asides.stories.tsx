@@ -24,6 +24,7 @@ const meta = {
     current: null,
     onPick: fn(),
     onNew: fn(),
+    onClear: fn(),
     onClearOlder: fn(),
     newKbd: '⌘⇧N',
   },
@@ -45,8 +46,30 @@ export const OnTheCoordinator: Story = {
 /** An aside open. */
 export const AsideOpen: Story = { args: { current: 'a1' } }
 
-/** A new aside being started: its pill first among them. */
-export const Starting: Story = { args: { starting: true } }
+/** A new aside, just started: its one pill, open and first, says it is new until its first words name it. */
+export const Starting: Story = {
+  args: { asides: [{ id: 'a0', title: '' }, ...ASIDES], current: 'a0' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByRole('tab', { name: 'New aside' })).toHaveLength(1)
+    await expect(canvas.getByRole('tab', { name: 'New aside' })).toHaveAttribute('aria-selected', 'true')
+  },
+}
+
+/** Each aside's × clears it, as Delete does on its pill; the open one's shows at rest, the others' on hover. */
+export const Clearing: Story = {
+  args: { current: 'a2' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Clear Name for the refunds export' }))
+    await expect(args.onClear).toHaveBeenCalledWith('a3')
+    canvas.getByRole('tab', { name: /Stripe API/ }).focus()
+    await userEvent.keyboard('{Delete}')
+    await expect(args.onClear).toHaveBeenCalledWith('a2')
+    // The tab is the pill's name alone: its × is beside it, never in it.
+    await expect(canvas.getByRole('tab', { name: 'Name for the refunds export' })).toBeInTheDocument()
+  },
+}
 
 /** Those a week old fold into one pill, which clears them together. */
 export const Older: Story = {
@@ -65,7 +88,7 @@ export const None: Story = { args: { asides: [], older: [] } }
 export const Moves: StoryObj<typeof AsideMoves> = {
   render: () => (
     <div style={{ padding: 16, maxWidth: 520 }}>
-      <AsideMoves onMakeTask={fn()} onClear={fn()} note="Asked 4m ago" />
+      <AsideMoves onMakeTask={fn()} note="Asked 4m ago" />
     </div>
   ),
 }

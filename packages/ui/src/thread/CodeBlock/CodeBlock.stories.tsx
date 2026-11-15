@@ -18,7 +18,6 @@ type Story = StoryObj<typeof meta>
 export const FromAFile: Story = {}
 /** The consumer names the editor it opens. */
 export const NamedEditor: Story = { args: { text: { open: 'Open in VS Code' } } }
-export const Unchanged: Story = { args: { changed: [] } }
 /** A language the built-in colouring does not know: plain, unless the host passes its own highlighter. */
 export const OtherLanguage: Story = {
   args: { lang: 'Python', file: 'scripts/replay.py', line: 1, changed: [], code: 'def replay(day):\n    return run("pnpm replay", day)' },
@@ -29,6 +28,7 @@ export const HostHighlighter: Story = { args: { highlight: (line) => <span style
 export const Loose: Story = {
   args: {
     file: undefined,
+    line: 1,
     changed: [],
     lang: 'Shell',
     code: '# replay yesterday against the branch\npnpm replay --from 2026-09-25 refunds',
@@ -46,7 +46,7 @@ export const AllStates: Story = {
         { state: 'unchanged', node: <CodeBlock {...args} changed={[]} /> },
         {
           state: 'loose',
-          node: <CodeBlock {...args} file={undefined} changed={[]} lang="Shell" code="pnpm replay --from 2026-09-25 refunds" />,
+          node: <CodeBlock {...args} file={undefined} line={1} changed={[]} lang="Shell" code="pnpm replay --from 2026-09-25 refunds" />,
         },
         { state: 'no editor', node: <CodeBlock {...args} onOpen={undefined} /> },
         { state: 'hover', node: <CodeBlock {...args} /> },

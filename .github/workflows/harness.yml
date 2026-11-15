@@ -1,13 +1,14 @@
 name: harness
 
 # On a pull request, and for its entry in the merge queue: the checks and unit tests its change reaches
-# (packages/testing/src/select.ts). In the merge queue, a change that reaches the runtime also runs its whole suite with
-# coverage, gated as after merge, so one that takes the runtime under its thresholds stays out of main. Every test on
+# (packages/testing/src/select.ts). A change that reaches the runtime also reports and gates its whole coverage,
+# on the pull request and again in the merge queue. Its tests and its measured coverage have separate verdicts. Every test on
 # Linux and Windows, and the other packages' coverage, run after merge, in post-merge.yml.
 on:
   # From queue.yml, for a pull request in the merge queue.
   workflow_call:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       [
         'packages/connectors/**',
@@ -29,6 +30,8 @@ on:
         '.github/actions/flaky/**',
         '.github/actions/electron/**',
         '.github/workflows/harness.yml',
+        '.github/scripts/runtime-coverage.py',
+        '.github/scripts/test_runtime_coverage.py',
       ]
 
 permissions:
@@ -51,8 +54,8 @@ jobs:
     outputs:
       jobs: ${{ steps.plan.outputs.jobs }}
       any: ${{ steps.plan.outputs.any }}
-      # Whether the change reaches the runtime, whose coverage the merge queue gates.
-      runtime: ${{ contains(steps.plan.outputs.jobs, '"name":"packages/runtime') }}
+      # Whether the change reaches the runtime, whose coverage is measured on the PR and in the queue.
+      runtime: ${{ steps.plan.outputs.runtime == 'true' || steps.coverage.outputs.changed == 'true' }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -61,14 +64,21 @@ jobs:
       # What the change is: against the pull request's base, or in the merge queue against main, since the build at a
       # group's head merges the whole group when it passes, and so must cover every entry in it.
       - env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_ref }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           if [ -n "$BASE" ] && git fetch --no-tags --depth=1 origin "$BASE"; then
             git diff --name-only --no-renames FETCH_HEAD HEAD > "$RUNNER_TEMP/changed"
           else
             echo '*' > "$RUNNER_TEMP/changed"
           fi
+      - id: coverage
+        run: |
+          if rg -q '^\.github/scripts/(runtime-coverage|test_runtime_coverage)\.py$' "$RUNNER_TEMP/changed"; then
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
       - id: plan
+        env:
+          RUNTIME_COVERAGE: ${{ github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.event.pull_request.draft != true) }}
         run: bun packages/testing/src/select.ts plan harness "$RUNNER_TEMP/changed"
 
   # Each job's packages one after another, every one run even when one before it fails, so a run says all that broke:
@@ -105,13 +115,12 @@ jobs:
       - if: always()
         uses: ./.github/actions/flaky
 
-  # In the merge queue, the runtime's whole suite with coverage, in parts by file as after merge (post-merge.yml): its
-  # branches sit close to the threshold, and a change that took them under it was found only once it was on main. Each
-  # part keeps what it found as a blob report; coverage (packages/runtime) merges them and gates the whole.
+  # Runtime tests stay red when they fail. Each part keeps its coverage with its test blob, even on failure, so the
+  # separate coverage job can measure the whole without calling a failing test a coverage failure.
   coverage-parts:
-    name: coverage (packages/runtime ${{ matrix.shard }})
+    name: runtime tests with coverage (${{ matrix.shard }})
     needs: plan
-    if: github.event_name == 'merge_group' && needs.plan.outputs.runtime == 'true'
+    if: needs.plan.outputs.runtime == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft != true)
     runs-on: ubuntu-24.04
     # A few times a part's usual run, so a hang fails here, not at the limit.
     timeout-minutes: 15
@@ -140,12 +149,20 @@ jobs:
           bun run test:coverage --shard=${{ matrix.shard }} --reporter=default --reporter=blob --reporter=@althar/testing/reporter
           --outputFile.blob=.vitest/blob/part-${{ strategy.job-index }}.json
           --coverage.thresholds.lines=0 --coverage.thresholds.branches=0
+          --coverage.reporter=text --coverage.reporter=json-summary
+      # A measurement beside each blob proves that all four parts produced coverage, not only test results.
+      - if: ${{ !cancelled() }}
+        run: |
+          mkdir -p .vitest/summary
+          cp coverage/coverage-summary.json .vitest/summary/part-${{ strategy.job-index }}.json
       # Kept when tests fail too, so the merged report says all that broke.
       - if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v6
         with:
           name: runtime-coverage-blob-${{ strategy.job-index }}
-          path: packages/runtime/.vitest/blob
+          path: |
+            packages/runtime/.vitest/blob
+            packages/runtime/.vitest/summary
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
@@ -156,7 +173,7 @@ jobs:
   coverage:
     name: coverage (packages/runtime)
     needs: [plan, coverage-parts]
-    if: ${{ !cancelled() && github.event_name == 'merge_group' && needs.plan.outputs.runtime == 'true' }}
+    if: ${{ !cancelled() && needs.plan.outputs.runtime == 'true' && (github.event_name != 'pull_request' || github.event.pull_request.draft != true) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
@@ -176,17 +193,18 @@ jobs:
       - uses: actions/download-artifact@v6
         with:
           pattern: runtime-coverage-blob-*
-          path: packages/runtime/.vitest/blob
+          path: packages/runtime/.vitest
           merge-multiple: true
-      # Tests with an open flaky issue run, but don't fail this job (packages/testing).
-      - uses: ./.github/actions/flaky/quarantine
-      # The parts' results and coverage as one run's, against the thresholds in vite.config.ts.
-      - run: bun run test:coverage --merge-reports=.vitest/blob --reporter=default --reporter=github-actions --reporter=@althar/testing/reporter
-      # A part that stopped before writing its report leaves out its tests, and the merge alone wouldn't say so.
-      - env:
-          PARTS: ${{ needs.coverage-parts.result }}
-        run: |
-          if [ "$PARTS" != success ]; then
-            echo "::error::A part of the runtime's tests didn't pass: $PARTS"
-            exit 1
-          fi
+      - working-directory: ${{ github.workspace }}
+        run: python3 -m unittest discover -s .github/scripts -p 'test_runtime_coverage.py'
+      - run: python3 ../../.github/scripts/runtime-coverage.py parts .vitest
+      # Merging replays test failures too, so its exit code cannot be the coverage verdict. The test jobs above keep
+      # those failures red. Delete any earlier summary: a broken merge must never pass on stale measurements.
+      - run: rm -f coverage/coverage-summary.json
+      - continue-on-error: true
+        run: >-
+          bun run test:coverage --merge-reports=.vitest/blob --reporter=default
+          --coverage.thresholds.lines=0 --coverage.thresholds.branches=0
+          --coverage.reporter=text --coverage.reporter=json-summary
+      # Missing, malformed or partial output fails here. Only the fresh whole measurement decides coverage.
+      - run: python3 ../../.github/scripts/runtime-coverage.py gate .vitest coverage/coverage-summary.json

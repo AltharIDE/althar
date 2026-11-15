@@ -83,7 +83,7 @@ export const CARDS = new Set(['card', 'provider_session', 'attention_request', '
  * Each moves the Automations tab, the page of the automation it is of, and
  * the automation's cards in the coordinator's thread, which say where it stands.
  */
-export const AUTOMATIONS = new Set(['automation', 'automation_occurrence'])
+export const AUTOMATIONS = new Set(['automation', 'automation_occurrence', 'attention_request'])
 
 export interface Feed {
   /** Calls `listener` with every change from now on, until the returned function is called. */
@@ -163,6 +163,12 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
           .getQueryCache()
           .findAll({ predicate: (query) => SETTING_READS.has(String(query.queryKey[0])) })
           .map((query) => ({ key: query.queryKey, offScreen: false })),
+      ]
+    : []),
+  ...(event.aggregateType === 'setting' && event.aggregateId.startsWith('acp-catalog:')
+    ? [
+        { key: keys.agentCatalog, offScreen: false },
+        { key: keys.status, offScreen: true },
       ]
     : []),
   // The project's canvases and the one that changed (ADR-104): a version published, a comment sent or answered, one archived.

@@ -63,7 +63,7 @@ export const pushDetailOf = (failed: Pick<GitFailed, 'stderr' | 'reason' | 'code
 /** How a git command ended, where it failed: past its time, stopped by a signal, or its exit code. */
 export const endedOf = (failed: Pick<GitFailed, 'code' | 'signal' | 'timedOut' | 'timeout'>): string =>
   failed.timedOut === true
-    ? `Stopped after ${secondsOf(failed.timeout)} with no answer.`
+    ? `Stopped waiting after ${secondsOf(failed.timeout)} with no answer.`
     : failed.signal !== undefined
       ? `Stopped by ${failed.signal}.`
       : failed.code !== undefined

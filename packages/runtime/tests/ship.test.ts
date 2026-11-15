@@ -344,6 +344,38 @@ describe('talking to a lead once its plan is done', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('sends nothing where its task becomes a chat while its Ship’s review runs: what waited waits for the next Ship', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[review:pass] [review:wait-later]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* answered(task.threadId, task.turns + 1)
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* until(
+        sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND r.plan_id IS NULL AND n.node_key = 'review'`,
+        (rows) => rows[0]?.state === 'running',
+      )
+      // "Make it a chat", on the person's word to its lead: its review stops, and the Ship it was in ends as a chat does.
+      const said = yield* callTool(yield* leadOf(task), 'change_part', { part: 'preset', preset: 'Chat', why: 'the person asked' })
+      assert.match(said, /made it a Chat: no review, nothing going up until it ships, PR #1 closed, its branch staying/)
+      yield* until(runsOf(task.taskId), (all) => all.every((run) => run.state !== 'running'))
+      // Nothing went up: not the commit that waited, nor a pull request; the one it had is closed, and what waited still waits.
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+      assert.deepStrictEqual(
+        github.changes.map((one) => one.state),
+        ['closed'],
+      )
+      assert.isNotNull(yield* heldAt(task.taskId))
+      assert.strictEqual((yield* results(task.threadId)).at(-1)?.summary, 'Kept here: nothing went up.')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('holds nothing where the turn only answered', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
@@ -541,7 +573,7 @@ describe('a Ship', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('opens the task’s first pull request, a draft, where its plan ended on its branch', () => {
+  it.live('pushes the branch of a task that ends with it, opening nothing, and Open pull request opens its first, a draft', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
       const runs = yield* Runs
@@ -550,14 +582,15 @@ describe('a Ship', () => {
       yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
       yield* answered(task.threadId, task.turns + 1)
       yield* until(heldAt(task.taskId), (at) => at !== null)
+      // Ship sends it up as the task ends: its branch, and no pull request (a task is a conversation plus parts: one that
+      // ends with its branch, as a prototype does or a change that dropped its pull request, stays a branch).
       yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
-      yield* until(
-        Effect.sync(() => github.changes.length),
-        (count) => count === 1,
-      )
-      assert.deepStrictEqual([github.changes[0]?.source, github.changes[0]?.draft], [BRANCH, true])
-      assert.strictEqual(git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD'))
       yield* until(heldAt(task.taskId), (at) => at === null)
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD'))
+      assert.lengthOf(github.changes, 0)
+      // The person opens its pull request on purpose, from its Change card: a draft.
+      yield* runs.publish(task.taskId)
+      assert.deepStrictEqual([github.changes[0]?.source, github.changes[0]?.draft], [BRANCH, true])
       const [card] = yield* until(cards(task.projectId), (all) => all[0]?.change?.number === 1)
       assert.isUndefined(card?.held)
     }).pipe(Effect.provide(runtimeWith(github)))

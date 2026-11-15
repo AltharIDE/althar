@@ -79,10 +79,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Closed: Story = {
-  render: () => <Example />,
-}
-
 /** Changing the effort, making it the default, and switching model. */
 export const ChoosingAnother: Story = {
   render: () => <Example />,
@@ -129,8 +125,7 @@ export const HandingOver: Story = {
 }
 
 /**
- * Each model's room where work on it would start, at its row's end: from a
- * quarter down, until when too. Codex, nearly out, says so beside the chip.
+ * Account usage stays out of the picker, even if an older caller supplies it.
  */
 export const Room: Story = {
   args: {
@@ -146,33 +141,31 @@ export const Room: Story = {
   },
   play: async ({ canvasElement }) => {
     const page = within(document.body)
-    await expect(page.getByText('Side · 62%')).toBeInTheDocument()
-    await expect(page.getByText('3% · until 14:00')).toBeInTheDocument()
+    await expect(page.queryByText('Side · 62%')).toBeNull()
+    await expect(page.queryByText('3% · until 14:00')).toBeNull()
     await expect(page.queryByText('no reading')).toBeNull()
-    await expect(within(canvasElement).getByText('3% left · until 14:00')).toBeInTheDocument()
+    await expect(within(canvasElement).queryByText('3% left · until 14:00')).toBeNull()
   },
 }
 
-/**
- * A model that ended steps without its report this week, once reminded: how
- * many, in faint ink before its room, the rest on hover. Nothing where none.
- */
-export const MissedReports: Story = {
+/** A low plan balance and account never enter the picker. */
+export const CrowdedRow: Story = {
   args: {
     model: OPUS,
-    pinned: [OPUS, model('qwen3-coder'), model('gpt-5.2-codex')],
+    pinned: [OPUS, model('gpt-5.2-codex')],
     defaultOpen: true,
-    room: (x) => (x.runtime === OPUS.runtime ? { left: 62, until: '17:00', account: null } : undefined),
-    missed: (x) => (x.id === 'qwen3-coder' ? 3 : x.id === 'gpt-5.2-codex' ? 1 : undefined),
+    room: (x) => (x.runtime === 'codex' ? { left: 17, until: 'Sat 23:39', account: 'Main' } : undefined),
   },
   play: async () => {
-    const page = within(document.body)
-    await expect(page.getByText('3 missed reports')).toBeInTheDocument()
-    await expect(page.getByText('1 missed report')).toHaveAttribute('title', 'Ended a step without a report this week, even once reminded.')
+    const row = within(document.body).getByRole('radio', { name: /GPT-5.2 Codex/ })
+    const name = within(row).getByText('GPT-5.2 Codex')
+    await expect(within(row).queryByText(/Main|17%|Sat 23:39/)).toBeNull()
+    await expect(name.clientWidth).toBeGreaterThan(0)
+    await expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth)
   },
 }
 
-/** Nearly out, beside the chip: one run in the chip's ink, deeper as it runs down; out says so. */
+/** Even low usage leaves the model chip alone. */
 const nearly = (left: number): Story => ({
   args: {
     model: model('gpt-5.2-codex'),
@@ -181,7 +174,7 @@ const nearly = (left: number): Story => ({
   },
   play: async ({ canvasElement }) => {
     const said = left === 0 ? 'Out · until Mon 11:00' : `${left}% left · until Mon 11:00`
-    await expect(within(canvasElement).getByText(said)).toBeInTheDocument()
+    await expect(within(canvasElement).queryByText(said)).toBeNull()
   },
 })
 export const TenPercentLeft: Story = nearly(10)

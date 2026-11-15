@@ -63,7 +63,6 @@ export const AllStates: Story = {
         { state: 'one finding', node: <Reviewer verdict={Verdict.Changes} findings={[FINDINGS[0] as ReviewerFinding]} /> },
         { state: 'passed', node: <Reviewer verdict={Verdict.Pass} findings={[]} /> },
         { state: 'passed with notes', node: <Reviewer verdict={Verdict.Pass} findings={[FINDINGS[2] as ReviewerFinding]} /> },
-        { state: 'dark', node: <Reviewer verdict={Verdict.Changes} findings={FINDINGS} />, dark: true },
       ]}
     />
   ),

@@ -104,6 +104,9 @@ export const signInEndedWords = 'Its sign-in has ended. Sign it in again in Sett
 /** An agent that couldn't reach its servers: nothing to sign in, the connection to look at. */
 export const unreachableWords = (device: string) => `Its servers can't be reached. Check ${device}'s connection, then try again.`
 
+/** An agent that couldn't start where the folder it starts in is gone: deleted by hand, or a Local task's checkout moved. */
+export const folderGoneWords = (path: string) => `Its folder isn't there any more: ${path}.`
+
 /** An agent that isn't there to start, by the command Althar ran: installing it is the way on. */
 const notInstalledWords = (command: string) =>
   `${command === '' ? 'The agent' : command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
@@ -158,6 +161,7 @@ const own = (line: string): string => redact(line)
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
     case 'StartTimedOut':
+    case 'ModelSwitchedOff':
       return text(error, 'message')
     case 'AgentStartFailed': {
       const command = text(error, 'command')
@@ -298,6 +302,8 @@ export const words = (
         return 'An agent is already working on this task.'
       case 'RetryRefused':
         return 'There is no failed turn or lost connection to try again.'
+      case 'UndoRefused':
+        return `${text(error, 'message')}${Array.isArray(fieldOf(error, 'files')) ? ` ${(fieldOf(error, 'files') as unknown[]).join(', ')}` : ''}`.trim()
       case 'NoSession':
         return 'The task isn’t running.'
       case 'NothingToClear':
@@ -347,7 +353,7 @@ export const words = (
         // git said nothing: what Althar knows of how it ended.
         if (fieldOf(error, 'timedOut') === true) {
           const timeout = fieldOf(error, 'timeout')
-          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped it. Try again.`
+          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped waiting. Try again.`
         }
         const signal = text(error, 'signal')
         if (signal !== '') return `${command} was stopped (${signal}) before it was done. Try again.`
@@ -398,7 +404,7 @@ export const words = (
         if (why === 'unreachable')
           return `Althar couldn’t reach ${where}, so nothing was pushed. Check this computer’s connection, then try again.`
         if (why === 'unanswered')
-          return `${where} didn’t answer in time, so the push was stopped. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
+          return `${where} didn’t answer in time, so Althar stopped waiting for the push. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
         if (why === 'failed') return `Althar couldn’t push to ${where}. What git said is under Details.`
         // The person's own git pushed: signing git in is what puts it right, as connecting doesn't change how it pushes.
         if (host !== '')
@@ -481,6 +487,16 @@ export const words = (
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
+  // Undo names its affected files separately, so the window can open their changes without parsing prose.
+  if (reason === 'UndoRefused') {
+    const files = fieldOf(error, 'files')
+    return {
+      reason,
+      message,
+      ...(text(error, 'why') === '' ? {} : { why: text(error, 'why') }),
+      ...(Array.isArray(files) && files.length > 0 ? { detail: JSON.stringify(files) } : {}),
+    }
+  }
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
@@ -600,7 +616,6 @@ const taskRefused = {
   title_too_long: 'Keep the title to a few words.',
   folder_in_use: 'Something is running in the task’s folder. Stop it, then remove the folder.',
   folder_in_way: 'Something else is where the task’s folder goes. Move it away, then try again.',
-  review_done: 'Its review is done, so its reviewer can’t change.',
   no_lead: 'The task has no lead to change.',
 } as const satisfies Record<TaskRefused['why'], string>
 
@@ -673,6 +688,7 @@ export const expected = new Set([
   'SessionRunning',
   'NoSession',
   'RetryRefused',
+  'UndoRefused',
   'NothingToClear',
   'AttentionClosed',
   'AlwaysNotOffered',
@@ -717,6 +733,8 @@ const fileRefused = {
   unreadable: (name) => `Althar couldn't read ${name}.`,
   missing: (name) => `${name} isn't there any more. Add it again.`,
   nowhere: () => "The task's folder isn't ready yet.",
+  gone: () => 'The task’s worktree and branch are gone, so there is nowhere to put the file.',
+  in_way: () => 'Something else is where the task’s folder goes. Move it away, then send the file again.',
 } as const satisfies Record<FileRefused['reason'], (name: string) => string>
 
 /** Why a project can't be changed so, by reason. */

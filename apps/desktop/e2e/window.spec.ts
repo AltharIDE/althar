@@ -1,11 +1,11 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject } from './support'
+import { launch, openFirstProject, still } from './support'
 
 /*
  * The window's own chrome, as Linux gets it: a menu for its accelerators only
@@ -78,6 +78,52 @@ test('draws the window’s own chrome off a Mac, and its buttons reach the windo
     await page.getByRole('button', { name: 'Close the window' }).click()
     await closed
     await exited
+  } finally {
+    await electronApp.close().catch(() => undefined)
+  }
+})
+
+test('on KDE: one bar, the strip’s, with KDE’s buttons in KWin’s order at its end, after the gear', async () => {
+  test.skip(process.platform !== 'linux', 'the desktops a Linux window sits on')
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const repo = repository(home)
+  // KWin's buttons as the person has them, in the home's own kwinrc: none of this computer's config is read.
+  const config = join(home, '.config')
+  mkdirSync(config, { recursive: true })
+  writeFileSync(join(config, 'kwinrc'), '[org.kde.kdecoration2]\nButtonsOnLeft=MS\nButtonsOnRight=IAX\n')
+  const kde = { XDG_CURRENT_DESKTOP: 'KDE', KDE_FULL_SESSION: 'true', KDE_SESSION_VERSION: '6' }
+  const { electronApp, page } = await launch(
+    home,
+    { ...kde, XDG_CONFIG_HOME: config, XDG_CONFIG_DIRS: join(home, 'xdg') },
+    { scheme: 'system' },
+  )
+  try {
+    await openFirstProject(electronApp, page, repo)
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    // One set of buttons, drawn by the strip (a window with KWin's frame would draw none), in KWin's order: minimize, maximize, close.
+    const strip = page.locator('header').filter({ has: page.getByRole('button', { name: 'Close the window' }) })
+    await expect(strip).toHaveCount(1)
+    const buttons = strip.getByRole('button', { name: /^(Minimize|Maximize|Close) the window$/ })
+    await expect(buttons).toHaveCount(3)
+    expect(await buttons.evaluateAll((all) => all.map((one) => one.getAttribute('aria-label')))).toEqual([
+      'Minimize the window',
+      'Maximize the window',
+      'Close the window',
+    ])
+    // In KDE's manner, at the strip's end, after Althar's gear.
+    await expect(strip.locator('[data-side="end"]')).toHaveClass(/kde/)
+    const gear = (await strip.getByRole('button', { name: 'Althar settings' }).boundingBox())?.x ?? Infinity
+    const minimize = (await strip.getByRole('button', { name: 'Minimize the window' }).boundingBox())?.x ?? -Infinity
+    expect(minimize).toBeGreaterThan(gear)
+
+    for (const scheme of ['light', 'dark'] as const) {
+      await electronApp.evaluate(({ nativeTheme }, source) => {
+        nativeTheme.themeSource = source
+      }, scheme)
+      await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
+      await still(page)
+      await strip.screenshot({ path: `test-results/window-kde-bar-${scheme}.png`, scale: 'css', animations: 'disabled' })
+    }
   } finally {
     await electronApp.close().catch(() => undefined)
   }

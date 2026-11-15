@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import { userEvent } from 'storybook/test'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { OPUS } from '../src/fixtures/models'
 import { SHOT_AFTER, SHOT_BEFORE, SHOT_NOT_KEPT } from '../src/fixtures/shots'
@@ -258,15 +258,27 @@ describe('Relayed', () => {
     render(<Relayed title={null} body="Only the words." />)
     expect(screen.getByText('Only the words.')).toBeInTheDocument()
   })
+
+  it('offers no Show all where the words fit in their three lines', () => {
+    const shown = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(66)
+    const whole = vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(22)
+    try {
+      render(<Relayed title={null} body="They’d like the bar hidden by default." />)
+      expect(screen.queryByRole('button', { name: 'Show all' })).toBeNull()
+    } finally {
+      shown.mockRestore()
+      whole.mockRestore()
+    }
+  })
 })
 
 describe('AltharLine', () => {
-  it('says it by name, warm where it is now the person’s', () => {
-    const { container, rerender } = render(<AltharLine>A conflict.</AltharLine>)
+  it('says it by name, as a problem where something failed', () => {
+    const { rerender } = render(<AltharLine>A conflict.</AltharLine>)
     expect(screen.getByText('Althar')).toBeInTheDocument()
-    expect(container.querySelector('[class*="warning"]')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
     rerender(<AltharLine tone="warning">It couldn’t.</AltharLine>)
-    expect(container.querySelector('[class*="warning"]')).not.toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent('It couldn’t.')
   })
 })
 

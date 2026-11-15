@@ -2,8 +2,9 @@ name: post-merge
 
 # Everything desktop, harness and ui run, after merge, in full: their checks again, every unit test with the coverage
 # gates, the Storybook build, the desktop app's end-to-end run and its packages, and on Windows every unit test and
-# the smoke test. A pull request and the merge queue run only what a change reaches, and on Linux; this is where
-# Windows' unit tests run, within the hour of a merge. site and brand are quick, and still run in full on their own.
+# the smoke test. A pull request and the merge queue run what a change reaches on Linux and, for OS-sensitive work,
+# Windows (windows.yml); this is where
+# the full Windows unit suites run, within the hour of a merge. site and brand are quick, and still run in full on their own.
 # Main may go red for a while; a release can't: release.yml cuts only a commit this workflow passed on, Windows too.
 #
 # Merges in quick succession share a run: one runs, the newest waits, and those between are skipped. When main goes
@@ -16,6 +17,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      bun-cache:
+        description: Windows dependency cache comparison (same tests in every mode)
+        type: choice
+        default: isolated
+        options: [isolated, off, legacy]
 
 permissions:
   contents: read
@@ -23,6 +30,7 @@ permissions:
 
 # Where the test reporters write which tests were flaky, for the Flaky tests step (.github/actions/flaky).
 env:
+  BUN_CACHE_MODE: ${{ inputs.bun-cache || 'isolated' }}
   FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
 
 concurrency:
@@ -266,11 +274,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
@@ -310,11 +313,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine

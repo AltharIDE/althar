@@ -8,6 +8,8 @@
 
 /** When each release was published on GitHub, UTC. The mission's clock starts at 0.1.0's. */
 export const PUBLISHED: Record<string, string> = {
+  '0.9.0': '2026-11-15T14:36:39Z',
+  '0.8.0': '2026-11-13T23:31:00Z',
   '0.7.0': '2026-11-04T20:56:43Z',
   '0.6.0': '2026-10-30T23:31:15Z',
   '0.5.0': '2026-10-20T18:18:17Z',
@@ -19,7 +21,19 @@ export const PUBLISHED: Record<string, string> = {
 }
 
 /** The pictures the highlights are shown with (LogPictures.tsx). */
-export type Picture = 'findings' | 'automations' | 'plans' | 'windows' | 'reviewer' | 'report' | 'run' | 'evidence' | 'plan'
+export type Picture =
+  | 'undo'
+  | 'browser'
+  | 'canvas'
+  | 'findings'
+  | 'automations'
+  | 'plans'
+  | 'windows'
+  | 'reviewer'
+  | 'report'
+  | 'run'
+  | 'evidence'
+  | 'plan'
 
 export interface Highlight {
   /** The feature, named plainly. */
@@ -36,6 +50,28 @@ export interface Highlight {
  * opens the page, so its entry shows the rest and keeps the lead's lines.
  */
 export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
+  '0.9.0': [
+    {
+      title: 'Undo, files and all',
+      why: 'Take back a message you sent a task in its own worktree: it and every reply after it leave the conversation, the files those turns changed go back as they were, and your prompt returns to the draft, to ask again another way.',
+      picture: 'undo',
+      covers: [0],
+    },
+  ],
+  '0.8.0': [
+    {
+      title: 'A browser, built in',
+      why: 'Your task’s app opens beside the conversation. Point at anything on the page and comment on it, and the lead clicks, types and takes screenshots in that same page to check what it built.',
+      picture: 'browser',
+      covers: [0, 1, 2],
+    },
+    {
+      title: 'Canvases',
+      why: 'Leads draw pages, mockups, diagrams and charts beside the conversation. Comment on one, and the next version answers it. Every version stays in the project’s Artifacts.',
+      picture: 'canvas',
+      covers: [3, 4],
+    },
+  ],
   '0.7.0': [
     {
       title: 'Reviews, supercharged',

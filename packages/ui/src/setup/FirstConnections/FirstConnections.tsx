@@ -6,6 +6,7 @@ import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
 import { SizeMotion } from '../../lib/SizeMotion'
 import type { RootProps } from '../../lib/props'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
@@ -119,8 +120,8 @@ export function FirstConnections({
                 </span>
                 <span className={s.name}>{host.service.name}</span>
                 {host.where !== undefined && (
-                  <span className={s.note} title={host.where}>
-                    {host.where}
+                  <span className={s.note}>
+                    <Path path={host.where} />
                   </span>
                 )}
                 <span className={s.end}>

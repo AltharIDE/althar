@@ -2,6 +2,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { HoverCard } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import s from './TaskPreviews.module.css'
 
 /*
@@ -83,11 +84,8 @@ export function DiffersLine({ projects, onUseEverywhere, busy = false, error, te
           {line}
         </span>
       </HoverCard>
-      {error !== undefined && !busy && (
-        <span className={s.failed} role="alert">
-          {error}
-        </span>
-      )}
+      {/* Its Try again stays the same button as Use this, so focus stays on it when a press fails. */}
+      {error !== undefined && !busy && <Problem as="span">{error}</Problem>}
       {onUseEverywhere !== undefined && (
         <LinkButton className={s.use} onClick={busy ? undefined : onUseEverywhere} aria-busy={busy || undefined}>
           {busy ? t.using : error === undefined ? t.use : t.retry}

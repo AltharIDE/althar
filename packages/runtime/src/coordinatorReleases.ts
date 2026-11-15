@@ -12,6 +12,7 @@ import { coordinatorFolderAt } from './coordinatorFolder'
 import { repositoryOf, viaHost } from './coordinatorPullRequests'
 import type { AskedAction, AskedResult, FreshAction } from './Errands'
 import { Instance } from './Instance'
+import { errandTaskPull } from './errandTask'
 import { branchOn, commitsOf, fetchBranch, fetchInto, fetchSpecs, git, PUSHED, pushTo } from './git'
 import { bounded } from './readChecks'
 import { ActionNotPerformed, ToolRefused } from './toolErrors'
@@ -130,13 +131,25 @@ const pushTag = (projectId: string, input: unknown) =>
     if (remove && (move || named !== null))
       return yield* refused('Deleting a tag takes no commit, and doesn’t move it: ask for one of them.')
     const where = repository.path.join('/')
-    const read: Effect.Effect<FreshAction, ToolRefused> = Effect.gen(function* () {
+    const read: Effect.Effect<FreshAction, ToolRefused, Needs> = Effect.gen(function* () {
       const now = yield* viaHost(host.tag(repository, name))
       if (remove)
         return now === null
           ? { state: 'done', answer: `${name} isn’t on ${where}: there is nothing to delete.` }
           : { state: 'absent', head: now.commit }
-      const commit = yield* viaHost(host.commitOf(repository, named ?? repository.defaultBranch))
+      let commit: string
+      if (named?.startsWith('task:')) {
+        const pull = yield* errandTaskPull(projectId, named.slice(5), asked.errand)
+        if (pull === null || pull.change.state !== 'merged')
+          return { state: 'waiting', reason: 'The task’s pull request has not merged yet.' }
+        if (pull.host.product !== host.product || pull.repository.path.join('/') !== where)
+          return yield* refused('The task’s pull request belongs to another repository. Name that repository for the tag.')
+        if (pull.change.mergeCommit == null)
+          return yield* refused(
+            'The code host has not identified this pull request’s landed commit. No tag was pushed; read the pull request again.',
+          )
+        commit = pull.change.mergeCommit
+      } else commit = yield* viaHost(host.commitOf(repository, named ?? repository.defaultBranch))
       if (now === null) return { state: 'absent', head: commit }
       if (now.commit === commit) return { state: 'done', head: commit, answer: `${name} is on ${sha(commit)} already.` }
       if (!move)
@@ -777,12 +790,16 @@ export const releaseTools = (
   return [
     asked(
       'push_tag',
-      "Tags a commit on the code host, on the person's word: the commit their words name (commit: a commit or a branch), or else the default branch's latest. Made by Althar, never forced. A tag already on that commit is done; one on another commit is refused unless they asked to move it (move); delete deletes one. A tag often starts a release's CI. It can't be taken back, so it needs their message in this turn (message) or an open errand's step (errand, step). An errand's step binds target `<owner/repo> tag <tag>` and request {tag, commit?, move?, delete?}, as given, and no head or branch: the commit goes in the request.",
+      "Tags a commit on the code host, on the person's word: the commit their words name (commit: a commit or a branch), or else the default branch's latest. Made by Althar, never forced. A tag already on that commit is done; one on another commit is refused unless they asked to move it (move); delete deletes one. A tag often starts a release's CI. It can't be taken back, so it needs their message in this turn (message) or an open errand's step (errand, step). An errand's step binds target `<owner/repo> tag <tag>` and request {tag, commit?, move?, delete?}, as given, and no head or branch: the commit goes in the request. For a task that will merge later, commit: task:<slug> tags its PR’s exact landed commit, including after the default branch moves; keep it after the merge step with wait {kind: task_merged, target: <slug>}.",
       {
         type: 'object',
         properties: {
           tag: { type: 'string', description: 'The tag: v0.7.0.' },
-          commit: { type: 'string', description: 'The commit, or a branch, it goes on. Leave it out for the default branch’s latest.' },
+          commit: {
+            type: 'string',
+            description:
+              'The commit, or a branch, it goes on. Use task:<slug> for the task’s landed PR commit. Leave it out for the default branch’s latest.',
+          },
           repository: { type: 'string', description: 'The repository, by name. Needed only in a project of several.' },
           move: { type: 'boolean', description: 'Move a tag that is on another commit: only when the person asked to.' },
           delete: { type: 'boolean', description: 'Delete the tag: only when the person asked to.' },

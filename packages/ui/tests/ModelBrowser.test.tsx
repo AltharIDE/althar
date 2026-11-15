@@ -155,12 +155,12 @@ describe('ModelBrowser', () => {
       expect(rows().filter((r) => r.querySelector('[aria-current]'))).toHaveLength(1)
     })
 
-    it('shows a usage column only where a model has a reading, and the agent’s state only where it is off', () => {
+    it('keeps account usage out of the model browser even when an older caller supplies it', () => {
       const runtimes = RUNTIMES.map((r) => (r.id === 'codex' ? { ...r, how: 'signed out' } : r))
       const room = (m: { id: string }) => (m.id === 'claude-opus-5' ? { left: 19, until: null, account: null } : null)
       const { dialog } = open({ runtimes, room })
-      expect(within(dialog).getByText('Usage')).toBeInTheDocument()
-      expect(within(dialog).getByText('19%')).toBeInTheDocument()
+      expect(within(dialog).queryByText('Usage')).toBeNull()
+      expect(within(dialog).queryByText('19%')).toBeNull()
       expect(within(dialog).getAllByText('signed out').length).toBeGreaterThan(0)
     })
 

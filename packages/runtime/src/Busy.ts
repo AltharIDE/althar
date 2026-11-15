@@ -31,8 +31,9 @@ import { Sessions } from './Sessions'
  * while its agent's cache is warm, so an answer soon goes on where it was),
  * then takes none, unless what it left running is at work; nor once the
  * person answered, while an answer kept before waits to be told. The
- * coordinator, the permission judge and the runs Althar makes itself take no
- * place.
+ * coordinator, its asides, the permission judge and the runs Althar makes itself take no
+ * place. An aside's lead starts and takes every turn at once, including after a restart;
+ * once it leaves Scratch it takes a task's place again.
  *
  * Starting an agent on work asks for a place first (`enter`): a plan's first
  * step, the step after it (a review after the lead's, the lead settling
@@ -180,25 +181,36 @@ const agentOf = (key: string): Agent => {
   return key.endsWith(' review') ? { taskId: key.replace(/ review$/, ''), review: true } : { taskId: key }
 }
 
-/**
- * Something waiting, where it stands: its rank, the time it stands at within
- * it (since when it waits, or where the person put it), and whether it is in
- * its project's line: nothing of its task has had an agent yet.
- */
-interface Ranked {
-  readonly waiter: Waiter
+/** Where something waiting stands: its rank, then within it work under way before new work (`tier`), then a time. */
+interface Standing {
   readonly rank: number
-  /** Within its rank: where the person put it, or work under way, before new work that waits as it came. */
+  /** Within its rank: work under way before new work that waits as it came. */
   readonly tier: number
   readonly at: string
+}
+
+/**
+ * Something waiting, where it stands: its rank, its tier, and the time it
+ * stands at within them (since when it waits, or, where the person put its
+ * project's work in an order of their own, that of the place it took there),
+ * and whether it is in its project's line: nothing of its task has had an
+ * agent yet.
+ */
+interface Ranked extends Standing {
+  readonly waiter: Waiter
+  /** Where it stands by its task: an automation's run's is an automation's, unless the person did it. */
+  readonly order: Order
   readonly line: boolean
-  /** Where the person put its task in Up next: it stands at that time, whatever it waits for. */
+  /** The person put its task somewhere in Up next: it stands where its project's order puts it, whatever it waits for. */
   readonly placed: boolean
+  /** Where it would stand had nobody moved anything. */
+  readonly natural: Standing
+  /** Its place in its project's order where the person put that in an order of their own: ties go by it. */
+  readonly nth: number
 }
 
 /** What stands first: by rank, then tier, then the time it stands at. */
-const ahead = (a: { rank: number; tier: number; at: string }, b: { rank: number; tier: number; at: string }) =>
-  a.rank - b.rank || a.tier - b.tier || a.at.localeCompare(b.at)
+const ahead = (a: Standing, b: Standing) => a.rank - b.rank || a.tier - b.tier || a.at.localeCompare(b.at)
 
 /**
  * A project's work that waits for a place, as its board's Up next shows it
@@ -327,6 +339,16 @@ export class Busy extends Context.Service<
       /** How many automations' tasks are at work, of those at work. */
       const automationsAt = (at: ReadonlySet<string>, tasks: ReadonlySet<string>) =>
         new Set([...at].map((key) => agentOf(key).taskId).filter((taskId) => tasks.has(taskId))).size
+      /** Whether a task's helpers take as many places as they may (ADR-087): another waits its turn, however many are free. */
+      const helpersFull = (agent: Agent, at: ReadonlySet<string>) =>
+        agent.helper !== undefined &&
+        [...at].filter((key) => {
+          const one = agentOf(key)
+          return one.taskId === agent.taskId && one.helper !== undefined
+        }).length >= HELPERS_AT_ONCE
+      /** Whether as many automations' runs are at work as may be (ADR-061): another takes no new place. */
+      const automationsFull = (order: Order, at: ReadonlySet<string>, tasks: ReadonlySet<string>) =>
+        order === 'automation' && automationsAt(at, tasks) >= automationsAtOnce
       const cpuOf =
         options.cpuOf ??
         ((agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>) =>
@@ -422,8 +444,16 @@ export class Busy extends Context.Service<
         if (flipped) yield* wake
       })
 
+      const asides = Effect.map(
+        sql<{ id: string }>`SELECT id FROM tasks WHERE shelf = 'scratch'`,
+        (rows) => new Set(rows.map((row) => row.id)),
+      ).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read which tasks are asides', cause), new Set<string>())))
+      const chatting = (agent: Agent, scratch: ReadonlySet<string>) =>
+        agent.review !== true && agent.helper === undefined && scratch.has(agent.taskId)
+
       /** The agents at work now, each once (`at`), and who holds each place (`holders`): a task kept only by what its agents left running holds one. */
       const atWork = Effect.gen(function* () {
+        const scratch = yield* asides
         // What the store says is under way, on the thread it is on: a step of a running run on an agent, a round its lead was
         // asked about, an agent starting.
         const under = yield* sql<{ taskId: string; threadId: string | null; review: number; helper: string | null }>`
@@ -461,6 +491,7 @@ export class Busy extends Context.Service<
         )
         const holders = new Map<string, Holder>()
         const take = (taskId: string, review: boolean, threadId: string | null, kept: boolean, helper?: string) => {
+          if (chatting({ taskId, review, helper }, scratch)) return
           const key = keyOf(taskId, review, helper)
           // What is under way is taken first, so an agent at work in its step or a turn is never kept only by what it left running.
           if (!holders.has(key)) holders.set(key, { taskId, review, threadId, kept, ...(helper === undefined ? {} : { helper }) })
@@ -482,7 +513,8 @@ export class Busy extends Context.Service<
         for (const session of yield* sessions.onTasks) {
           // Left running and idle, it is nothing to wait for; not yet read, it counts.
           const working = session.background && (sampled.get(session.threadId)?.working ?? true)
-          const turning = (session.turnRunning || told.has(session.threadId)) && !asking.has(session.threadId)
+          const turning =
+            (session.turnRunning || (session.acceptingTurns !== false && told.has(session.threadId))) && !asking.has(session.threadId)
           if (working || turning)
             take(session.taskId, session.reviewer, session.threadId, !turning, session.helper ? session.threadId : undefined)
         }
@@ -512,68 +544,94 @@ export class Busy extends Context.Service<
           (rows) => rows.length === 0,
         )
 
+      /** Everything waiting, from every source, and the turns that wait. */
+      const everything = Effect.map(
+        Effect.forEach(sources, (source) =>
+          source.pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what waits for a place', cause), []))),
+        ),
+        (read): ReadonlyArray<Waiter> => [...read.flat(), ...turns.values()],
+      )
+
       /**
-       * Everything waiting, in the order it starts: what the person did, then
-       * work under way, then the line, where the person put it, else what
-       * waited longest first.
+       * What waits, in the order it starts: what the person did, then work
+       * under way, then the line, each what waited longest first. A project
+       * the person put in an order of their own stands in that order, in the
+       * places its work stands at by default, so other projects' work keeps
+       * where it stood (ADR-065).
        */
-      const waiting = Effect.gen(function* () {
-        const all = [
-          ...(yield* Effect.forEach(sources, (source) =>
-            source.pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what waits for a place', cause), []))),
-          )).flat(),
-          ...turns.values(),
-        ]
-        // A task's lead or reviewer waiting stands where the person put its task in Up next; its lead waiting before anything of
-        // its task has had an agent is in the line.
-        const asked = [
-          ...new Set(all.flatMap((waiter) => (waiter.order === 'person' || waiter.helper !== undefined ? [] : [waiter.taskId]))),
-        ]
-        const read =
-          asked.length === 0
-            ? []
-            : yield* sql<{ id: string; lineAt: string | null; untouched: number }>`
-                SELECT k.id, k.line_at, NOT EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id
-                    WHERE h.task_id = k.id AND d.delivered_at IS NOT NULL) AS untouched
-                FROM tasks k WHERE k.id IN (SELECT value FROM json_each(${JSON.stringify(asked)}))`.pipe(
-                Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read the line of what waits', cause), [])),
-              )
-        const line = new Set(read.flatMap((row) => (row.untouched === 1 ? [row.id] : [])))
-        const put = new Map(read.flatMap((row) => (row.lineAt === null ? [] : [[row.id, row.lineAt] as const])))
-        const tasks = yield* automated
-        return all
-          .map((waiter): Ranked => {
-            const theirs = waiter.order !== 'person' && waiter.helper === undefined
+      const rank = (all: ReadonlyArray<Waiter>) =>
+        Effect.gen(function* () {
+          const scratch = yield* asides
+          // A task's lead or reviewer waiting stands where the person put its task in Up next; its lead waiting before anything of
+          // its task has had an agent is in the line.
+          const asked = [
+            ...new Set(all.flatMap((waiter) => (waiter.order === 'person' || waiter.helper !== undefined ? [] : [waiter.taskId]))),
+          ]
+          const read =
+            asked.length === 0
+              ? []
+              : yield* sql<{ id: string; projectId: string; lineAt: string | null; untouched: number }>`
+                  SELECT k.id, k.project_id, k.line_at, NOT EXISTS (SELECT 1 FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id
+                      WHERE h.task_id = k.id AND d.delivered_at IS NOT NULL) AS untouched
+                  FROM tasks k WHERE k.id IN (SELECT value FROM json_each(${JSON.stringify(asked)}))`.pipe(
+                  Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read the line of what waits', cause), [])),
+                )
+          const line = new Set(read.flatMap((row) => (row.untouched === 1 ? [row.id] : [])))
+          const put = new Map(read.flatMap((row) => (row.lineAt === null ? [] : [[row.id, row.lineAt] as const])))
+          const projectOf = new Map(read.map((row) => [row.id, row.projectId] as const))
+          const tasks = yield* automated
+          const each = all.map((waiter) => {
+            // A saved aside waiting from an older build starts at once too, outside the task line.
+            const asked = chatting(waiter, scratch) ? 'person' : waiter.order
+            const theirs = asked !== 'person' && waiter.helper === undefined
             const inLine = theirs && waiter.review !== true && line.has(waiter.taskId)
-            const placedAt = theirs ? put.get(waiter.taskId) : undefined
-            // An automation's run waits after everything else, in the line or not (ADR-061), unless the person put it somewhere.
-            const order = orderIn(waiter.order, waiter.taskId, tasks)
-            return {
-              waiter,
-              line: inLine,
-              placed: placedAt !== undefined,
+            const owes = asked !== 'person' && owed.has(waiter.taskId)
+            // An automation's run waits after everything else, in the line or not (ADR-061).
+            const order = orderIn(asked, waiter.taskId, tasks)
+            const natural: Standing = {
               // Owed its task's place, it stands before all but what the person did; an automation's run, else, after all.
-              rank:
-                waiter.order !== 'person' && owed.has(waiter.taskId)
-                  ? RANK.person + 0.5
-                  : placedAt !== undefined
-                    ? RANK.underway
-                    : order === 'automation'
-                      ? RANK.automation
-                      : RANK[waiter.order],
-              tier: placedAt !== undefined || (!inLine && waiter.order !== 'new') ? 0 : 1,
-              at: placedAt ?? waiter.since,
+              rank: owes ? RANK.person + 0.5 : RANK[order],
+              tier: !inLine && asked !== 'new' ? 0 : 1,
+              at: waiter.since,
             }
+            const lineAt = theirs ? put.get(waiter.taskId) : undefined
+            return { waiter, order, line: inLine, natural, lineAt, project: theirs && !owes ? projectOf.get(waiter.taskId) : undefined }
           })
-          .toSorted(ahead)
-      })
+          const projects = new Map<string, Array<(typeof each)[number]>>()
+          for (const one of each) if (one.project !== undefined) projects.set(one.project, [...(projects.get(one.project) ?? []), one])
+          const slotted = new Map<(typeof each)[number], { readonly standing: Standing; readonly nth: number }>()
+          for (const ours of projects.values()) {
+            if (ours.every((one) => one.lineAt === undefined)) continue
+            const places = ours.map((one) => one.natural).toSorted(ahead)
+            // Within the project, what the person put somewhere stands at its time as work under way does, and what they didn't
+            // where it would.
+            const within = (one: (typeof each)[number]): Standing =>
+              one.lineAt === undefined ? one.natural : { rank: RANK.underway, tier: 0, at: one.lineAt }
+            ours
+              .toSorted((a, b) => ahead(within(a), within(b)) || ahead(a.natural, b.natural))
+              .forEach((one, nth) => slotted.set(one, { standing: places[nth] ?? one.natural, nth }))
+          }
+          return each
+            .map((one): Ranked => {
+              const slot = slotted.get(one)
+              return {
+                waiter: one.waiter,
+                order: one.order,
+                line: one.line,
+                placed: one.lineAt !== undefined,
+                natural: one.natural,
+                ...(slot?.standing ?? one.natural),
+                nth: slot?.nth ?? 0,
+              }
+            })
+            .toSorted((a, b) => ahead(a, b) || a.nth - b.nth)
+        })
+
+      /** Everything waiting, in the order it starts. */
+      const waiting = Effect.flatMap(everything, rank)
 
       /** A task at work, or gone from Up next: where the person put it there no longer stands. */
       const unplace = (taskId: string) => sql`UPDATE tasks SET line_at = NULL WHERE id = ${taskId} AND line_at IS NOT NULL`
-
-      /** Where the person put a task in Up next, if they did: the time it stands at. */
-      const placedAt = (taskId: string) =>
-        Effect.map(sql<{ lineAt: string | null }>`SELECT line_at FROM tasks WHERE id = ${taskId}`, (rows) => rows[0]?.lineAt ?? undefined)
 
       /**
        * Whether a task's agent has a place now: what the person did always has; its agent at work already has; so has
@@ -586,38 +644,37 @@ export class Busy extends Context.Service<
         asked: Order,
       ) =>
         Effect.gen(function* () {
+          if (chatting(agent, yield* asides)) return true
           const key = keyOf(agent.taskId, agent.review, agent.helper)
           const tasks = yield* automated
           const order = orderIn(asked, agent.taskId, tasks)
           if (order === 'person' || at.has(key)) return true
           // Offline, it waits for the computer to be back rather than start into a dead connection.
           if (!(yield* connectivity.online)) return false
-          // A task's helpers take four places at most at once (ADR-087): the rest wait their turn, whatever is free.
-          if (
-            agent.helper !== undefined &&
-            holders.filter((holder) => holder.taskId === agent.taskId && holder.helper !== undefined).length >= HELPERS_AT_ONCE
-          )
-            return false
+          // A task's helpers, or automations' runs, as many at work as may be: it waits its turn, whatever is free.
+          if (helpersFull(agent, at)) return false
           if (agent.helper === undefined && keptPlace(agent.taskId, holders) !== undefined) return true
           const most = (yield* atOnce).count
           // Every place of the number taken, only a small task's lead has room, in the quick lane beyond it.
           const beyond = at.size >= most
           if (beyond && at.size >= roomUpTo(most, agent, yield* smallOf([agent.taskId]))) return false
-          // An automation's run takes a place only while fewer automations than it may have are at work.
-          if (order === 'automation' && automationsAt(at, tasks) >= automationsAtOnce) return false
+          if (automationsFull(order, at, tasks)) return false
           // Work waiting for a place of its own, standing where this does or before it, goes first; what waits on an agent at
-          // work, or is on its way, takes none. In the quick lane, only what could take its place stands before it. Put somewhere
-          // in Up next by the person, this stands there.
-          const queue = yield* waiting
+          // work, or is on its way, takes none, nor what its kind's limit holds back. In the quick lane, only what could take its
+          // place stands before it. This stands after all else of its rank, unless the person put it somewhere in Up next: then
+          // it stands there.
+          const asking: Waiter = { ...agent, order: asked, since: '\uffff', start: Effect.void }
+          const queue = yield* rank([...(yield* everything).filter((one) => waiterKey(one) !== key), asking])
           const small = beyond ? yield* smallOf(queue.map(({ waiter }) => waiter.taskId)) : new Set<string>()
-          const put = agent.helper === undefined ? yield* placedAt(agent.taskId) : undefined
-          const mine =
-            put === undefined ? { rank: RANK[order], tier: order === 'new' ? 1 : 0, at: '￿' } : { rank: RANK.underway, tier: 0, at: put }
+          // Ranked with the rest, it is among them.
+          const mine = queue.find((one) => one.waiter === asking)!
           return !queue.some(
             (one) =>
               waiterKey(one.waiter) !== key &&
               !at.has(waiterKey(one.waiter)) &&
               ahead(one, mine) <= 0 &&
+              !helpersFull(one.waiter, at) &&
+              !automationsFull(one.order, at, tasks) &&
               (!beyond || roomUpTo(most, one.waiter, small) > most),
           )
         })
@@ -645,43 +702,38 @@ export class Busy extends Context.Service<
           const most = (yield* atOnce).count
           const tasks = yield* automated
           const online = yield* connectivity.online
+          const scratch = yield* asides
           // Which of what waits is planned small, read only where every place of the number may be taken: those have the quick lane.
           const small = busy.size + queue.length > most ? yield* smallOf(queue.map(({ waiter }) => waiter.taskId)) : new Set<string>()
           const left: Array<string> = []
           // The tasks whose place kept by what they left running is taken in this look: by one of their work only.
           const taken = new Set<string>()
-          for (const { waiter, placed, rank } of queue) {
+          for (const { waiter, order, placed } of queue) {
             const key = waiterKey(waiter)
             // On its way already: it is counted, and not started twice.
             if (starting.has(key)) continue
             // Offline, only what the person did starts, and what follows on for an agent at work.
-            if (!online && waiter.order !== 'person' && !busy.has(key)) {
+            if (!online && order !== 'person' && !busy.has(key)) {
               left.push(waiter.taskId)
               continue
             }
             // A task's helpers take four places at most at once (ADR-087), however many are free: the rest wait their turn, after a
             // restart too, where what waited is started from here.
-            if (
-              waiter.helper !== undefined &&
-              !busy.has(key) &&
-              [...busy].filter((one) => {
-                const agent = agentOf(one)
-                return agent.taskId === waiter.taskId && agent.helper !== undefined
-              }).length >= HELPERS_AT_ONCE
-            ) {
+            if (!busy.has(key) && helpersFull(waiter, busy)) {
               left.push(waiter.taskId)
               continue
             }
             const kept = taken.has(waiter.taskId) ? undefined : keptPlace(waiter.taskId, holders)
             // Owed its task's place, which its agent has freed since: it takes that place, though others hold every one.
             const back = owed.has(waiter.taskId) && !holders.some((holder) => holder.taskId === waiter.taskId)
-            // Its task's own place, kept or owed, is no new one: an automation's run takes it beyond how many may be at work.
+            // Its task's own place, kept or owed, is no new one: an automation's run takes it beyond how many may be at work. A new
+            // place it takes only while fewer automations than it may have are at work, wherever the person put it in Up next.
             if (
-              waiter.order !== 'person' &&
+              order !== 'person' &&
               !busy.has(key) &&
               kept === undefined &&
               !back &&
-              (busy.size >= roomUpTo(most, waiter, small) || (rank === RANK.automation && automationsAt(busy, tasks) >= automationsAtOnce))
+              (busy.size >= roomUpTo(most, waiter, small) || automationsFull(order, busy, tasks))
             ) {
               left.push(waiter.taskId)
               continue
@@ -692,7 +744,7 @@ export class Busy extends Context.Service<
               taken.add(waiter.taskId)
             }
             owed.delete(waiter.taskId)
-            busy.add(key)
+            if (!chatting(waiter, scratch)) busy.add(key)
             hold(key)
             // Out of Up next: where the person put it no longer stands.
             if (placed) yield* unplace(waiter.taskId)
@@ -929,8 +981,8 @@ export class Busy extends Context.Service<
        * A project's work that waits for a place, in the order it gets one, each task once (ADR-065): its tasks under way, none
        * of whose agents is at work (one with an agent at work is running, and what else of it waits goes on beside that), and
        * its line, the tasks no agent has worked on yet, in one band: what is under way first unless the person put them in an
-       * order of their own. Each with the time it stands at, since when it waits, whether it is in the line, and whether the
-       * person put it where it stands.
+       * order of their own. Each with the time it stands at, since when it waits, whether it is in the line, whether the
+       * person put it where it stands, and where it would stand had nobody moved anything.
        */
       const standingOf = (projectId: string) =>
         Effect.gen(function* () {
@@ -950,11 +1002,11 @@ export class Busy extends Context.Service<
             ? new Set((yield* atWork).holders.flatMap((holder) => (holder.kept ? [] : [holder.taskId])))
             : new Set<string>()
           const seen = new Set<string>()
-          return queue.flatMap(({ waiter, at, placed }) => {
+          return queue.flatMap(({ waiter, at, placed, natural }) => {
             const { taskId } = waiter
             if (!ours.has(taskId) || seen.has(taskId) || (!lined.has(taskId) && working.has(taskId))) return []
             seen.add(taskId)
-            return [{ taskId, at, since: waiter.since, line: lined.has(taskId), placed }]
+            return [{ taskId, at, since: waiter.since, line: lined.has(taskId), placed, natural }]
           })
         })
 
@@ -976,20 +1028,28 @@ export class Busy extends Context.Service<
               const others = band.filter((one) => one.taskId !== taskId)
               const at = Math.max(0, Math.min(others.length, Math.floor(to)))
               const order = [...others.slice(0, at), it, ...others.slice(at)]
-              // Each takes one of the times the band stands at now, in its new order, rising: a task that joins later, waiting
-              // since later, still goes after them all, and the band keeps its place among other projects' work.
+              // What the person put somewhere is the order up to the last task not where it would stand by default; those after
+              // it stand where they would anyway, an automation's run after everything else, and are put nowhere. Back in the
+              // default order, nothing of the project's is the person's, as with oldestFirst.
+              const natural = band.toSorted((a, b) => ahead(a.natural, b.natural))
+              const put = order.findLastIndex((one, i) => one.taskId !== natural[i]?.taskId) + 1
+              // Each put takes one of the times the band stands at now, in its new order, rising: the project's own order. Its
+              // work keeps the places it stands at among other projects' (`rank`), and a task that joins later goes after them.
               const times = [...band.map((one) => one.at), ...(found === undefined ? [it.at] : [])]
               let last = ''
               yield* sql.withTransaction(
-                Effect.forEach(
-                  order,
-                  (one, i) => {
-                    const stands = times[i] ?? one.at
-                    last = stands > last ? stands : after(last)
-                    return sql`UPDATE tasks SET line_at = ${last} WHERE id = ${one.taskId}`
-                  },
-                  { discard: true },
-                ),
+                put === 0
+                  ? Effect.asVoid(sql`UPDATE tasks SET line_at = NULL WHERE project_id = ${task.projectId} AND line_at IS NOT NULL`)
+                  : Effect.forEach(
+                      order,
+                      (one, i) => {
+                        if (i >= put) return sql`UPDATE tasks SET line_at = NULL WHERE id = ${one.taskId} AND line_at IS NOT NULL`
+                        const stands = times[i] ?? one.at
+                        last = stands > last ? stands : after(last)
+                        return sql`UPDATE tasks SET line_at = ${last} WHERE id = ${one.taskId}`
+                      },
+                      { discard: true },
+                    ),
               )
               return order
             }),
@@ -1051,8 +1111,9 @@ export class Busy extends Context.Service<
         order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),
         line: (projectId) =>
           Effect.map(standingOf(projectId), (band): Line => {
-            // What continues first, then the line, each by since when it waits: the order the person hasn't changed.
-            const natural = band.toSorted((a, b) => Number(a.line) - Number(b.line) || a.since.localeCompare(b.since))
+            // The order the person hasn't changed: what continues first, then the line, each by since when it waits, an
+            // automation's run after them all.
+            const natural = band.toSorted((a, b) => ahead(a.natural, b.natural))
             return {
               continuing: band.flatMap((one) => (one.line ? [] : [one.taskId])),
               tasks: band.flatMap((one) => (one.line ? [one.taskId] : [])),

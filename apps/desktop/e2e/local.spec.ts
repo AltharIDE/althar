@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { backToWork, launch, openFirstProject, planTask, projectSettings, shown, still } from './support'
+import { backToWork, launch, openFirstProject, planTask, projectSettings, shown, still, showPanes } from './support'
 
 /*
  * A task that works Local, in the person's own checkout (ADR-091), in a real
@@ -26,6 +26,15 @@ const git = (cwd: string, ...args: Array<string>) =>
 /** The innermost block holding all of `parts`: a card, found by what it shows. */
 const blockWith = (page: Page, ...parts: Array<Locator>) =>
   parts.reduce((block, part) => block.filter({ has: part }), page.locator('div').filter({ visible: true })).last()
+
+/** Photograph a complete plan held still: its real countdown can otherwise start it between the light and dark shots. */
+const holdForShot = async (page: Page) => {
+  await expect(page.getByRole('button', { name: 'Start now', exact: true }).last()).toBeVisible()
+  await page.getByRole('button', { name: 'Hold', exact: true }).last().click()
+  const start = page.getByRole('button', { name: 'Start', exact: true }).last()
+  await expect(start).toBeVisible()
+  return start
+}
 
 /** One part of the window at 1×, light and then dark. */
 const shoot = async (page: Page, part: Locator, name: string) => {
@@ -72,8 +81,9 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await planTask(page, 'Fix the login', '[lead:wait]')
     const worksIn = page.getByRole('radiogroup', { name: 'Works in' }).last()
     await expect(worksIn.getByRole('radio', { name: 'Local' })).toHaveAttribute('aria-checked', 'true')
-    await shoot(page, blockWith(page, worksIn, page.getByRole('button', { name: 'Start now' })), 'plan')
-    await page.getByRole('button', { name: 'Start now' }).last().click()
+    const start = await holdForShot(page)
+    await shoot(page, blockWith(page, worksIn, start), 'plan')
+    await start.click()
 
     // It asks before it takes the checkout, in its thread; nothing switches under the edit.
     await page
@@ -106,15 +116,17 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
     await planTask(page, 'Dark mode for Settings', '[lead:finish]')
     const taken = page.getByText('Waits for Fix the login.').filter({ visible: true }).last()
     await expect(taken).toBeVisible()
+    const startWaiting = await holdForShot(page)
     await shoot(page, blockWith(page, page.getByRole('radiogroup', { name: 'Works in' }), taken), 'plan-taken')
-    await page.getByRole('button', { name: 'Start now' }).last().click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await startWaiting.click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     const next = work.getByRole('region', { name: 'Up next' })
     await expect(next.getByText('After Fix the login')).toBeVisible()
     await expect(next.getByText('Waits for Local', { exact: true })).toBeVisible()
     await expect(next.getByText('Paused', { exact: true })).toHaveCount(0)
-    await expect(work.getByText('Change · Local')).toHaveCount(2)
+    // Change is the usual kind and is no longer repeated on a board row; both tasks still name Local.
+    await expect(work.getByText('Local', { exact: true })).toHaveCount(2)
     await shoot(page, work, 'board')
 
     // The first abandoned: the checkout goes back to main, and the second takes it.
@@ -127,7 +139,7 @@ test('works Local: asks before it takes the checkout, waits for it, and gives it
 
     // The second abandoned too: back on main, with the person's commit, and nothing of theirs stashed.
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     await work.getByText('Dark mode for Settings', { exact: true }).click()
     await abandon(page)
     await expect.poll(() => git(root, 'branch', '--show-current')).toBe('main')

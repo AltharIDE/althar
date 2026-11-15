@@ -18,7 +18,7 @@
 -- node_type: deterministic_action, agent, integration, human_decision, condition, bounded_map, join, verification, compensation, subworkflow, bounded_loop
 -- node_state: pending, ready, running, succeeded, failed, skipped, cancelled, uncertain
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
--- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout
+-- hold_reason: usage_limit, agent_unavailable, machine_busy, checkout, external
 -- thread_kind: coordinator, task, step
 -- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request, review_draft, issue_changes, automation, pictures, task_ask, setting, small_change, model_move, canvas, merge_line
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
@@ -355,7 +355,7 @@ CREATE TABLE threads (
   execution_id TEXT,
   node_key TEXT,
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), waits_for_place TEXT CHECK (waits_for_place GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), view_from INTEGER CHECK (view_from >= 1), earlier_shown INTEGER NOT NULL DEFAULT 0 CHECK (earlier_shown IN (0, 1)),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), waits_for_place TEXT CHECK (waits_for_place GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), view_from INTEGER CHECK (view_from >= 1), earlier_shown INTEGER NOT NULL DEFAULT 0 CHECK (earlier_shown IN (0, 1)), conversation_version INTEGER NOT NULL DEFAULT 1 CHECK (conversation_version >= 1),
   CHECK (
     (kind = 'coordinator' AND owner_actor_id IS NOT NULL AND task_id IS NULL AND execution_id IS NULL AND node_key IS NULL)
     OR (kind = 'task' AND owner_actor_id IS NULL AND task_id IS NOT NULL AND execution_id IS NULL AND node_key IS NULL)
@@ -403,7 +403,7 @@ CREATE TABLE turn_deliveries (
   requested_at TEXT NOT NULL CHECK (requested_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   delivered_at TEXT CHECK (delivered_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   ended_at TEXT CHECK (ended_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT, origin TEXT NOT NULL DEFAULT 'system' CHECK (origin IN ('person', 'news', 'system')), heads TEXT CHECK (json_valid(heads)), timings TEXT CHECK (json_valid(timings)),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), prompt TEXT, origin TEXT NOT NULL DEFAULT 'system' CHECK (origin IN ('person', 'news', 'system')), heads TEXT CHECK (json_valid(heads)), timings TEXT CHECK (json_valid(timings)), checkpoints TEXT CHECK (json_valid(checkpoints)), undone_at TEXT,
   FOREIGN KEY (thread_id, project_id) REFERENCES threads (id, project_id),
   FOREIGN KEY (provider_session_id, project_id) REFERENCES provider_sessions (id, project_id),
   FOREIGN KEY (node_attempt_id, project_id) REFERENCES node_attempts (id, project_id),
@@ -433,7 +433,7 @@ CREATE TABLE thread_items (
   tool_call_id TEXT,
   content TEXT NOT NULL CHECK (json_valid(content)),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), undone_at TEXT,
   UNIQUE (thread_id, sequence),
   CHECK ((kind = 'user_message') = (user_input_id IS NOT NULL)),
   CHECK ((kind = 'tool_call') = (tool_call_id IS NOT NULL)),
@@ -788,7 +788,7 @@ CREATE TABLE change_log (
   aggregate_id TEXT NOT NULL,
   aggregate_revision INTEGER NOT NULL CHECK (aggregate_revision >= 1),
   changed_at TEXT NOT NULL CHECK (changed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
-) STRICT;
+, checkpoint TEXT CHECK (checkpoint IS NULL OR (length(checkpoint) = 32 AND checkpoint NOT GLOB '*[^0-9a-f]*'))) STRICT;
 
 CREATE TABLE command_receipts (
   actor_id TEXT NOT NULL REFERENCES actors (id),
@@ -1357,7 +1357,7 @@ CREATE TABLE errand_steps (
     target_branch TEXT,
     request TEXT NOT NULL CHECK (json_valid(request)),
     waits TEXT NOT NULL CHECK (json_valid(waits)),
-    state TEXT NOT NULL CHECK (state IN ('waiting', 'done')),
+    state TEXT NOT NULL CHECK (state IN ('waiting', 'done')), says TEXT,
     FOREIGN KEY (errand_id, project_id) REFERENCES errands(id, project_id),
     FOREIGN KEY (task_id, project_id) REFERENCES tasks(id, project_id),
     PRIMARY KEY (errand_id, step_key),
@@ -1627,3 +1627,73 @@ CREATE INDEX decisions_answered ON decisions (decided_by_actor_id, decided_at) W
 CREATE INDEX thread_items_setups ON thread_items (kind) WHERE kind = 'setup';
 
 CREATE INDEX thread_items_runs ON thread_items (kind) WHERE kind = 'run';
+
+CREATE TABLE evidence_galleries (
+    thread_id TEXT PRIMARY KEY REFERENCES threads (id) ON DELETE CASCADE,
+    scope TEXT NOT NULL,
+    through_sequence INTEGER NOT NULL CHECK (through_sequence >= 0),
+    handoff INTEGER NOT NULL CHECK (handoff >= 0),
+    shots TEXT NOT NULL CHECK (json_valid(shots))
+  ) STRICT;
+
+CREATE INDEX thread_items_gallery_reports ON thread_items (thread_id, sequence) WHERE kind = 'step_result';
+
+CREATE INDEX turn_delivery_inputs_by_input ON turn_delivery_inputs (user_input_id, delivery_id);
+
+CREATE TABLE turn_undo_recoveries (
+    command_id TEXT PRIMARY KEY NOT NULL,
+    thread_id TEXT NOT NULL REFERENCES threads(id),
+    plans TEXT NOT NULL CHECK (json_valid(plans)),
+    state TEXT NOT NULL CHECK (state IN ('prepared', 'completed', 'recovered'))
+  ) STRICT;
+
+CREATE INDEX turn_undo_recoveries_by_thread_state ON turn_undo_recoveries (thread_id, state);
+
+CREATE UNIQUE INDEX change_log_checkpoints ON change_log(checkpoint);
+
+CREATE TRIGGER change_log_checkpoint AFTER INSERT ON change_log WHEN NEW.checkpoint IS NULL
+    BEGIN UPDATE change_log SET checkpoint = lower(hex(randomblob(16))) WHERE cursor = NEW.cursor; END;
+
+CREATE TABLE runtime_homes (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    id TEXT NOT NULL UNIQUE CHECK (substr(id, 1, 5) = 'home_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
+    device_id TEXT NOT NULL REFERENCES devices(id),
+    person_id TEXT NOT NULL REFERENCES actors(id),
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+  ) STRICT;
+
+CREATE TABLE client_devices (
+    device_id TEXT PRIMARY KEY REFERENCES devices(id),
+    actor_id TEXT NOT NULL REFERENCES actors(id),
+    public_key TEXT NOT NULL UNIQUE CHECK (length(public_key) = 43),
+    role TEXT NOT NULL CHECK (role IN ('paired_device', 'socket')),
+    revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    revoked_at TEXT CHECK (revoked_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+  ) STRICT;
+
+CREATE INDEX client_devices_by_actor ON client_devices(actor_id, device_id);
+
+CREATE INDEX client_devices_active ON client_devices(device_id) WHERE revoked_at IS NULL;
+
+CREATE TABLE api_commands (
+    actor_id TEXT NOT NULL REFERENCES actors(id),
+    command_id TEXT NOT NULL CHECK (substr(command_id, 1, 4) = 'cmd_' AND length(command_id) = 36 AND substr(command_id, 5) NOT GLOB '*[^0-9a-f]*'),
+    home_id TEXT NOT NULL REFERENCES runtime_homes(id),
+    device_id TEXT NOT NULL REFERENCES devices(id),
+    role TEXT NOT NULL CHECK (role IN ('window', 'paired_device', 'socket', 'internal')),
+    method TEXT NOT NULL,
+    request_digest TEXT NOT NULL CHECK (length(request_digest) = 64 AND request_digest NOT GLOB '*[^0-9a-f]*'),
+    runtime_instance_id TEXT NOT NULL REFERENCES runtime_instances(id),
+    state TEXT NOT NULL CHECK (state IN ('pending', 'succeeded', 'failed', 'uncertain')),
+    result TEXT CHECK (result IS NULL OR json_valid(result)),
+    error TEXT CHECK (error IS NULL OR json_valid(error)),
+    received_at TEXT NOT NULL CHECK (received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    completed_at TEXT CHECK (completed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    PRIMARY KEY(actor_id, command_id),
+    CHECK ((state = 'succeeded') = (result IS NOT NULL)),
+    CHECK ((state IN ('failed', 'uncertain')) = (error IS NOT NULL)),
+    CHECK ((state = 'pending') = (completed_at IS NULL))
+  ) STRICT;
+
+CREATE INDEX api_commands_pending ON api_commands(runtime_instance_id) WHERE state = 'pending';

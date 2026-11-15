@@ -19,7 +19,7 @@ import s from './AutomationCard.module.css'
  * An automation as one card, the same wherever it shows: in the
  * coordinator's conversation when it proposes or changes one, and on the
  * automation's own page, where it is how you change it. The plan card's own
- * frame and rows, with the automation's mark (a turning clock) where a
+ * frame, head and foot, with the automation's mark (a turning clock) where a
  * task's card names the task, so it reads at once as not a task. Its rows:
  * when it runs, who leads each run, who reviews it, and what it ends in;
  * what the coordinator changed shows what it was, struck through. In the
@@ -229,14 +229,14 @@ function Was({ value, t }: { value: string; t: AutomationCardText }) {
 /** A row of the card: its mark, its name, who or what, a note, and an action at its end. */
 function Row({ icon, label, who, why, act }: { icon: IconName; label: string; who: ReactNode; why?: ReactNode; act?: ReactNode }) {
   return (
-    <li className={l.step}>
+    <li className={s.row}>
       <span className={s.rowIcon}>
         <Icon name={icon} size={13} />
       </span>
-      <span className={l.label}>{label}</span>
-      <span className={l.who}>{who}</span>
-      <span className={cx(l.why, s.why)}>{why}</span>
-      <span className={l.act}>{act}</span>
+      <span className={s.label}>{label}</span>
+      <span className={s.who}>{who}</span>
+      <span className={s.why}>{why}</span>
+      <span className={s.act}>{act}</span>
     </li>
   )
 }
@@ -272,7 +272,7 @@ function Pick({
         return back
       }}
       trigger={
-        <ActionButton className={l.pick} trailingIcon="chevronD">
+        <ActionButton className={s.pick} trailingIcon="chevronD">
           {shown}
         </ActionButton>
       }
@@ -552,7 +552,7 @@ export function AutomationCard({
           {...(onPromptChange === undefined ? {} : { onPromptChange })}
         />
       </div>
-      <ol className={cx(l.steps, s.rows)}>
+      <ol className={s.rows}>
         <Row
           icon="clock"
           label={t.when}
@@ -599,7 +599,7 @@ export function AutomationCard({
             act={
               review.on
                 ? review.onSkip !== undefined && (
-                    <LinkButton className={l.skip} onClick={review.onSkip}>
+                    <LinkButton className={s.skip} onClick={review.onSkip}>
                       {t.skip}
                     </LinkButton>
                   )

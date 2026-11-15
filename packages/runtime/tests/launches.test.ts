@@ -228,7 +228,8 @@ describe('running the project', () => {
         projectId,
         title: 'Fail fast',
       })
-      const exits = `node -e "console.log('Error: Port 5173 is already in use'); process.exit(3)"`
+      // More than one pipe read: its last line must survive the process exiting before the reader catches up.
+      const exits = `node -e "process.stdout.write('starting\\n'.repeat(20000) + 'Error: Port 5173 is already in use\\n'); process.exitCode = 3"`
       yield* launches.keep({ projectId, run: { command: exits, setup: null }, actorId: instance.personId })
       const started = yield* launches.start({ projectId, taskId: task.taskId, threadId: task.threadId })
       assert.deepInclude(started, { taskId: task.taskId, where: 'Fail fast' })

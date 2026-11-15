@@ -137,7 +137,7 @@ describe('the words for what went wrong, for the refusals the APIâ€™s tests donâ
     // No command to name: git alone.
     assert.strictEqual(
       said({ _tag: 'GitFailed', args: ['-c', 'a=b'], stderr: '', timedOut: true }),
-      'git  got no answer in its time, so Althar stopped it. Try again.',
+      'git  got no answer in its time, so Althar stopped waiting. Try again.',
     )
     assert.strictEqual(
       said({ _tag: 'GitFailed', stderr: '', signal: 'SIGTERM' }),
@@ -154,7 +154,7 @@ describe('the words for what went wrong, for the refusals the APIâ€™s tests donâ
       detail: 'fatal: no\nExit code 128.',
     })
     assert.strictEqual(failed({ signal: 'SIGKILL' }).detail, 'fatal: no\nStopped by SIGKILL.')
-    assert.strictEqual(failed({ timedOut: true, timeout: 30_000 }).detail, 'fatal: no\nStopped after 30 seconds with no answer.')
+    assert.strictEqual(failed({ timedOut: true, timeout: 30_000 }).detail, 'fatal: no\nStopped waiting after 30 seconds with no answer.')
     assert.isUndefined(words({ _tag: 'GitFailed', args: ['fetch'], stderr: ' ', code: 1 }, name).detail)
   })
 

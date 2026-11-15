@@ -1,13 +1,20 @@
-import { screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ThreadItem } from '@althar/contracts'
+import { ApiError, type ThreadItem } from '@althar/contracts'
 
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
-import { change, fakeClient, snapshot } from './fixtures'
-import { withServices } from './render'
+import { SmallChangeOf } from '../src/renderer/features/task/SmallChangeOf'
+import { Card, type CardActions } from '../src/renderer/features/project/Card'
+import type { SmallChangeContent } from '../src/renderer/shared/thread'
+import { act } from 'react'
+
+import { agents, card, change, changed, fakeClient, items, snapshot } from './fixtures'
+import { servicesFor, withServices } from './render'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { ModelMoveOf } from '../src/renderer/features/task/ModelMoveOf'
 
 /*
  * The fast lane on a task's screen (README sections 6 and 7): a small
@@ -17,7 +24,9 @@ import { withServices } from './render'
 
 const when = '2026-11-06T14:03:00.000Z'
 
-const smallChange = (): ThreadItem => ({
+const PASSED = { outcome: 'passed', passed: 2, failed: 0, running: 0, total: 2, failing: [], list: [] } as const
+
+const smallChange = (over: Partial<Extract<ThreadItem, { kind: 'small_change' }>['content']> = {}): ThreadItem => ({
   id: 'i-small',
   sequence: 1,
   agentId: null,
@@ -36,9 +45,12 @@ const smallChange = (): ThreadItem => ({
       { key: 'checks', what: 'Checks pass', at: when, done: true },
       { key: 'merged', what: 'Merged', at: null, done: false },
     ],
-    change: change({ state: 'open', head: 'abc123' }),
+    change: change({ state: 'open', head: 'abc123', checks: PASSED }),
     review: null,
     fullTask: null,
+    reviewer: { agentId: 'codex', model: null },
+    afterMerge: { project: 'major', task: null, holds: 'major' },
+    ...over,
   },
 })
 
@@ -57,18 +69,505 @@ const modelMove = (kept = false): ThreadItem => ({
   },
 })
 
-const Task = () => <TaskView model={useTask('th1')} onBack={vi.fn()} />
+const Task = ({ onOpenTask }: { onOpenTask?: (threadId: string) => void }) => (
+  <TaskView model={useTask('th1')} onBack={vi.fn()} {...(onOpenTask === undefined ? {} : { onOpenTask })} />
+)
+
+describe("a small change's team", () => {
+  const board = (plan: NonNullable<ReturnType<typeof card>['plan']>, phase: 'planned' | 'running' = 'running') => ({
+    cursor: 1,
+    tasks: [{ ...card({ phase, plan }), state: 'open' as const, createdAt: when, settledAt: null, changed: null, here: [] }],
+    calls: [],
+    settledTotal: 0,
+  })
+  const small = {
+    ...card().plan!,
+    startsAt: null,
+    preset: 'Small change',
+    steps: [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, effort: 'low', skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ],
+  }
+  const content = () => {
+    const item = smallChange({ reviewAfterMerge: false })
+    if (item.kind !== 'small_change') throw new Error('Expected a small change')
+    return item.content
+  }
+  const show = (phase: 'planned' | 'running') => {
+    const fake = fakeClient({ getBoard: vi.fn(async () => board(small, phase)) })
+    withServices(
+      <SmallChangeOf
+        card={content()}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    return fake
+  }
+
+  it('offers Change the team… while it is running, and never holds it', async () => {
+    const { client } = show('running')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect(client.holdPlan).not.toHaveBeenCalled()
+    expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
+  })
+
+  it('holds it while its team is changed before it has started, as a planned task is, and starts it from the dialog', async () => {
+    const { client } = show('planned')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await waitFor(() => expect(client.holdPlan).toHaveBeenCalledWith(small.id))
+    await userEvent.click(dialog.getByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith(small.id))
+  })
+
+  it('shows the team the person saved at once, a new reviewer or none', async () => {
+    const { client } = show('running')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('t1', [{ key: 'review', agentId: 'codex', model: null, skipped: true }]),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    // Before the thread reads again, its route agrees: no review stop is left beside "no review".
+    expect(screen.getByText(/no review/)).toBeTruthy()
+    expect(screen.queryByText('Review before Ship')).toBeNull()
+  })
+
+  /** A board that reads its lead's effort as the test says, and tells the window it changed. */
+  const live = (over: Parameters<typeof fakeClient>[0] = {}) => {
+    let effort: string | null = 'low'
+    const make = () =>
+      board({
+        ...small,
+        steps: [{ key: 'implement' as const, agentId: 'claude-code', model: null, effort, skipped: false }, small.steps[1]!],
+      })
+    const fake = fakeClient({ getBoard: vi.fn(async () => make()), ...over })
+    withServices(
+      <SmallChangeOf
+        card={content()}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    return {
+      ...fake,
+      set: (next: string) => {
+        effort = next
+        act(() => fake.emit(changed('card', 't1', 'th1')))
+      },
+    }
+  }
+  const line = () => screen.getByText(/claude-code ·/).textContent
+
+  it('lets a saved lead go once the board reads it, even before the command answers, so a later change shows', async () => {
+    let answer: () => void = () => {}
+    const fake = live({ changeTeam: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))) })
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: /^Implement:/ }))
+    await userEvent.click(await screen.findByRole('radio', { name: /^High$/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(fake.client.changeTeam).toHaveBeenCalled())
+    // The read that says it comes first; then the command answers; then the lead changes again, by the composer or Auto.
+    fake.set('high')
+    await waitFor(() => expect(line()).toMatch(/High/))
+    act(() => answer())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    fake.set('medium')
+    await waitFor(() => expect(line()).toMatch(/Medium/))
+  })
+
+  it('keeps a saved reviewer removal through a read that changes only the lead', async () => {
+    const fake = live()
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    fake.set('high')
+    await waitFor(() => expect(line()).toMatch(/High/))
+    expect(screen.getByText(/no review/)).toBeTruthy()
+    expect(screen.queryByText('Review before Ship')).toBeNull()
+  })
+
+  it('names who leads from the next turn, as the board reads it, not only the plan its card was made from', async () => {
+    const lead = { key: 'implement' as const, agentId: 'codex', model: null, effort: 'high', skipped: false }
+    const fake = fakeClient({ getBoard: vi.fn(async () => board({ ...small, steps: [lead, small.steps[1]!] })) })
+    withServices(
+      <SmallChangeOf
+        card={content()}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    expect(await screen.findByText(/^codex/)).toBeTruthy()
+    expect(screen.queryByText(/^claude-code/)).toBeNull()
+  })
+
+  it('leaves a review that reads after the merge to its Review stop: the dialog changes only its lead', async () => {
+    const afterMerge = smallChange({ reviewAfterMerge: true })
+    if (afterMerge.kind !== 'small_change') throw new Error('Expected a small change')
+    const fake = fakeClient({ getBoard: vi.fn(async () => board(small, 'running')) })
+    withServices(
+      <SmallChangeOf
+        card={afterMerge.content}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect(dialog.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: /^Review:/ })).toBeNull()
+    expect(dialog.queryByRole('button', { name: 'Add a review' })).toBeNull()
+  })
+})
+
+describe("a small change's card in the coordinator's thread", () => {
+  const actions = (onChangeTeam: (taskId: string) => void): CardActions => ({
+    project: 'meridian',
+    agents,
+    agentName: (id) => id ?? '',
+    onStart: vi.fn(),
+    onHold: vi.fn(),
+    onChange: vi.fn(),
+    onCreateBranch: vi.fn(),
+    onOpen: vi.fn(),
+    onChangeTeam,
+    onStopBackground: vi.fn(),
+  })
+  const running = (preset: string) => card({ phase: 'running', plan: { ...card().plan!, startsAt: null, preset } })
+
+  it('offers Change the team… from the card, with no need to open the task', async () => {
+    const onChangeTeam = vi.fn()
+    withServices(<Card card={running('Small change')} actions={actions(onChangeTeam)} />, fakeClient().client)
+    await userEvent.click(screen.getByRole('button', { name: 'Change the team…' }))
+    expect(onChangeTeam).toHaveBeenCalledWith('t1')
+  })
+
+  it('offers nothing of the kind on another task, which has its row and its menu', () => {
+    withServices(<Card card={running('Change')} actions={actions(vi.fn())} />, fakeClient().client)
+    expect(screen.queryByRole('button', { name: 'Change the team…' })).toBeNull()
+  })
+})
+
+describe('a small change before the runtime knows its final route', () => {
+  const show = (over: Partial<SmallChangeContent>) => {
+    const item = smallChange(over)
+    if (item.kind !== 'small_change') throw new Error('Expected a small change')
+    const { client } = fakeClient()
+    const onMerge = vi.fn()
+    withServices(
+      <SmallChangeOf
+        card={item.content}
+        named={(id, model) => ({ id: id ?? '', name: model ?? id ?? '', short: model ?? id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={onMerge}
+      />,
+      client,
+    )
+    return { client, onMerge }
+  }
+
+  it.each([
+    { change: null },
+    { change: change({ checks: null }) },
+    { change: change({ checks: { ...PASSED, outcome: 'none', total: 2 } }) },
+    { change: change({ head: null, checks: PASSED }) },
+    { change: change({ queued: true, checks: { ...PASSED, outcome: 'running', running: 1 } }) },
+  ])('offers no merge until its head and checks are known: $change', (over) => {
+    show({ ...over, steps: [] })
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+  })
+
+  it('offers a known head with no checks to run, and says there is no review where none was picked', async () => {
+    const { onMerge } = show({
+      change: change({ head: 'head', checks: { ...PASSED, outcome: 'none', total: 0 } }),
+      reviewer: null,
+      steps: [{ key: 'changed', what: 'Changed a line', at: when, done: true }],
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Merge' }))
+    expect(onMerge).toHaveBeenCalledWith({ head: 'head', url: 'https://github.com/meridian/api/pull/12' })
+    expect(screen.queryByText('After merge')).toBeNull()
+  })
+
+  it('can put a review back even when the project defaults to none', async () => {
+    const { client } = show({ afterMerge: { project: 'none', task: 'none', holds: 'none' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /After it merges/ }))
+    expect(client.setReviewAfterMerge).toHaveBeenCalledWith('t1', 'review')
+  })
+
+  it('holds a full task while its review is being read, even when no navigation to it was supplied', () => {
+    show({ fullTask: { taskId: 'review', threadId: 'th-review', slug: 'review', title: 'Review the change' }, reviewBefore: undefined })
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(screen.getByText('Reading')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'See findings' })).toBeNull()
+  })
+})
 
 describe('the fast lane on a task’s screen', () => {
-  it('merges a small change as the header does, and makes it a full task', async () => {
+  it.each(['none', 'major'] as const)('only enables deferred review on an explicit choice when the project rule is %s', async (project) => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ items: [smallChange({ afterMerge: { project, task: 'none', holds: 'none' } })] })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
+    expect(client.setReviewAfterMerge).not.toHaveBeenCalled()
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /After it merges/ }))
+    await waitFor(() => expect(client.setReviewAfterMerge).toHaveBeenCalledWith('t1', project === 'none' ? 'review' : null))
+    expect(screen.getByText('After merge')).toBeTruthy()
+    expect(client.makeItAFullTask).not.toHaveBeenCalled()
+  })
+
+  it.each(['unknown', 'reported none', 'not yet reported'] as const)(
+    'a Small change without a reviewer respects %s checks and proposes no review',
+    async (state) => {
+      const checks =
+        state === 'unknown' ? null : { ...PASSED, outcome: 'none' as const, passed: 0, total: state === 'reported none' ? 0 : 2 }
+      const { client } = fakeClient({
+        getThread: vi.fn(async () =>
+          snapshot({
+            items: [
+              smallChange({
+                reviewAfterMerge: false,
+                reviewer: null,
+                change: change({ state: 'open', head: 'abc123', checks }),
+              }),
+            ],
+          }),
+        ),
+      })
+      withServices(<Task />, client)
+      await userEvent.hover(await screen.findByText('Small change', { exact: true }))
+      expect(await screen.findByText(/no reviewer configured/)).toBeTruthy()
+      expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
+      expect(screen.queryByText('After merge')).toBeNull()
+      expect(client.setReviewAfterMerge).not.toHaveBeenCalled()
+      if (state === 'reported none') {
+        await userEvent.click(screen.getByRole('button', { name: 'Merge' }))
+        await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12'))
+      } else expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    },
+  )
+
+  it('merges a small change as the header does, and moves its review from its stop', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [smallChange()] })) })
     withServices(<Task />, client)
     expect(await screen.findByText('The Run menu says Strat')).toBeTruthy()
-    expect(screen.getByText(/Sonnet, no plan, reviewed after it merges/)).toBeTruthy()
+    expect(screen.getByText('1 line in RunMenu.tsx', { exact: false })).toBeTruthy()
+    expect(screen.getByText('After merge')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Merge' }))
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12'))
-    await userEvent.click(screen.getByRole('button', { name: 'Make it a full task' }))
+    // No review: at once, the route ends at Merge.
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /No review/ }))
+    await waitFor(() => expect(client.setReviewAfterMerge).toHaveBeenCalledWith('t1', 'none'))
+    expect(screen.queryByText('After merge')).toBeNull()
+    // Before it merges makes it a full task.
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /Before it merges/ }))
     await waitFor(() => expect(client.makeItAFullTask).toHaveBeenCalledWith('t1'))
+    expect(screen.getByText('Before merge')).toBeTruthy()
+  })
+
+  it('goes back, with a line, where moving its review fails', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ items: [smallChange()] })),
+      setReviewAfterMerge: vi.fn(async () => {
+        throw new Error('The runtime is away.')
+      }),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /No review/ }))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    expect(screen.getByText('After merge')).toBeTruthy()
+  })
+
+  it('says what its review after the merge found, without listing it', async () => {
+    const merged = smallChange({
+      change: change({ state: 'merged', head: 'abc123', checks: PASSED }),
+      reviewAfter: { state: 'found', findings: 2, at: when, item: 'i-verdict' },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [merged] })) })
+    withServices(<Task />, client)
+    expect(await screen.findByText('2 found')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'See findings' })).toBeTruthy()
+  })
+
+  it('holds Merge on a full task until its own review comes back clear, and keeps it after the merge', async () => {
+    const full = { taskId: 't2', slug: 'review-the-run-menu', threadId: 'th2', title: 'Review: The Run menu says Strat' }
+    let card = smallChange()
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ items: [card] })),
+      getThreadItem: vi.fn(async () => card),
+    })
+    const onOpenTask = vi.fn()
+    withServices(<Task onOpenTask={onOpenTask} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /Before it merges/ }))
+    await waitFor(() => expect(client.makeItAFullTask).toHaveBeenCalledWith('t1'))
+    // Chosen, before the card is read again: Merge waits.
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    const refresh = async (next: ThreadItem) => {
+      card = next
+      act(() => emit(changed('thread_item', 'i-small', 'th1')))
+      await act(async () => {})
+    }
+    // Its review task reading it.
+    await refresh(smallChange({ fullTask: full, reviewBefore: { state: 'running', findings: 0, at: null } }))
+    expect(await screen.findByText('Reading')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    // It found something: Merge still waits, and See findings opens the review task.
+    await refresh(smallChange({ fullTask: full, reviewBefore: { state: 'found', findings: 2, at: when } }))
+    expect(await screen.findByText('2 found')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'See findings' }))
+    expect(onOpenTask).toHaveBeenCalledWith('th2')
+    // Clear: Merge.
+    await refresh(smallChange({ fullTask: full, reviewBefore: { state: 'clear', findings: 0, at: when } }))
+    expect(await screen.findByRole('button', { name: 'Merge' })).toBeTruthy()
+    // Merged: still the full task's review, not one after the merge, and its review task still opens.
+    await refresh(
+      smallChange({
+        change: change({ state: 'merged', head: 'abc123', checks: PASSED }),
+        review: full,
+        fullTask: full,
+        reviewBefore: { state: 'clear', findings: 0, at: when },
+      }),
+    )
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull())
+    expect(screen.getByText('Full task')).toBeTruthy()
+    expect(screen.getByText('Nothing found')).toBeTruthy()
+    expect(screen.queryByText('After merge')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(onOpenTask).toHaveBeenLastCalledWith('th2')
+  })
+
+  it('keeps the review task of a merged full task where only review names it', async () => {
+    const full = { taskId: 't2', slug: 'review-the-run-menu', threadId: 'th2', title: 'Review: The Run menu says Strat' }
+    const merged = smallChange({ change: change({ state: 'merged', head: 'abc123', checks: PASSED }), review: full, fullTask: null })
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [merged] })) })
+    const onOpenTask = vi.fn()
+    withServices(<Task onOpenTask={onOpenTask} />, client)
+    expect(await screen.findByText('Full task')).toBeTruthy()
+    expect(screen.queryByText('After merge')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(onOpenTask).toHaveBeenCalledWith('th2')
+  })
+
+  it('brings its review report into view from See findings, reading an earlier page for it', async () => {
+    const report = {
+      ...items.step({ step: 'review', verdict: 'changes_requested', summary: 'Two things in the usage card.' }),
+      id: 'i-verdict',
+      sequence: 2,
+    }
+    const card = smallChange({
+      change: change({ state: 'merged', head: 'abc123', checks: PASSED }),
+      reviewAfter: { state: 'found', findings: 2, at: when, item: 'i-verdict' },
+    })
+    const later = { ...items.you('Thanks'), sequence: 200 }
+    const getThread = vi.fn(async (_id: string, page?: { before?: number }) =>
+      page?.before === undefined ? snapshot({ items: [card, later], earlier: true }) : snapshot({ items: [report], earlier: false }),
+    )
+    const { client } = fakeClient({ getThread })
+    const scrolled = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+    withServices(<Task />, client)
+    expect(screen.queryByText('Two things in the usage card.')).toBeNull()
+    await userEvent.click(await screen.findByRole('button', { name: 'See findings' }))
+    await waitFor(() => expect(getThread).toHaveBeenCalledWith('th1', expect.objectContaining({ before: expect.any(Number) })))
+    await waitFor(() => expect(document.querySelector('[data-item="i-verdict"], [data-items~="i-verdict"]')).not.toBeNull())
+    await waitFor(() => expect(scrolled).toHaveBeenCalled())
+    scrolled.mockRestore()
+  })
+
+  it('keeps a newly labelled Small change’s review before Ship without suggesting an extra review', async () => {
+    const item = smallChange()
+    if (item.kind !== 'small_change') throw new Error('not a small change')
+    const before: ThreadItem = {
+      ...item,
+      content: {
+        ...item.content,
+        skips: ['no countdown', 'reviewed before it ships'],
+        reviewAfterMerge: false,
+        reviewBefore: { state: 'clear', findings: 0, at: when },
+        steps: [...item.content.steps, { key: 'review', what: 'Reviewed before Ship', at: when, done: true }],
+      },
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [before] })) })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Reviewed before Ship')).toBeTruthy()
+    expect(screen.getByText('Small change')).toBeTruthy()
+    expect(screen.queryByText('Full task')).toBeNull()
+    expect(screen.queryByText('After merge')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Merge' })).toBeTruthy()
+    expect(client.makeItAFullTask).not.toHaveBeenCalled()
+    expect(client.setReviewAfterMerge).not.toHaveBeenCalled()
+  })
+
+  for (const what of ['Review skipped', 'Review failed', 'Review waiting', 'Review needs attention', 'Review stopped']) {
+    it(`shows a before-Ship ${what.toLowerCase()} outcome truthfully in the redesigned card`, async () => {
+      const item = smallChange()
+      if (item.kind !== 'small_change') throw new Error('not a small change')
+      const waiting = what === 'Review waiting' || what === 'Review needs attention'
+      const before = smallChange({
+        reviewAfterMerge: false,
+        ...(waiting ? {} : { reviewBefore: { state: 'stopped', findings: 0, at: when } }),
+        steps: [...item.content.steps, { key: 'review', what, at: waiting ? null : when, done: false }],
+      })
+      const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [before] })) })
+      withServices(<Task />, client)
+      expect(await screen.findByText(what)).toBeTruthy()
+      expect(screen.queryByText('Reading')).toBeNull()
+      expect(screen.queryByText('Nothing found')).toBeNull()
+      expect(screen.queryByText('After merge')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
+      if (what === 'Review skipped') expect(screen.getByRole('button', { name: 'Merge' })).toBeTruthy()
+      else expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    })
+  }
+
+  it('keeps actual after-merge debt visible on a Small change configured for before-Ship review', async () => {
+    const card = smallChange({
+      reviewAfterMerge: false,
+      change: change({ state: 'merged', head: 'abc123', checks: PASSED }),
+      reviewAfter: { state: 'clear', findings: 0, at: when, item: 'i-verdict' },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [card] })) })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Nothing found')).toBeTruthy()
+    expect(screen.queryByText('Reviewed before Ship')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review' })).toBeNull()
   })
 
   it('keeps the model Auto moved from, and undoes the keep', async () => {
@@ -82,8 +581,60 @@ describe('the fast lane on a task’s screen', () => {
   it('puts a kept move again from Undo', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot({ items: [modelMove(true)] })) })
     withServices(<Task />, client)
-    expect(await screen.findByText(/Back on Claude Opus for this task/)).toBeTruthy()
+    expect(await screen.findByText(/Claude Opus from the next turn/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
     await waitFor(() => expect(client.undoTheModelMove).toHaveBeenCalledWith('i-move'))
+  })
+})
+
+describe('a kept model before the runtime answers', () => {
+  const named = (id: string | null, model?: string | null) => ({
+    id: id ?? '',
+    name: model ?? '',
+    short: model ?? '',
+    runtime: id ?? '',
+    efforts: [],
+  })
+
+  it('holds Keep across a pending call and stale reads, then accepts the confirmed value', async () => {
+    let finish!: () => void
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve
+    })
+    const { client } = fakeClient({ keepTheModel: vi.fn(() => pending) })
+    const services = servicesFor(client)
+    const show = (kept: boolean) => {
+      const item = modelMove(kept)
+      if (item.kind !== 'model_move') throw new Error('Expected a model move')
+      return (
+        <ServicesProvider value={services}>
+          <ModelMoveOf move={item.content} itemId={item.id} named={named} />
+        </ServicesProvider>
+      )
+    }
+    const view = render(show(false))
+    await userEvent.click(screen.getByRole('button', { name: 'Keep opus' }))
+    expect(screen.getByText('opus from the next turn.')).toBeTruthy()
+    view.rerender(show(false))
+    expect(screen.getByText('opus from the next turn.')).toBeTruthy()
+    await act(async () => finish())
+    expect(screen.getByText('opus from the next turn.')).toBeTruthy()
+    view.rerender(show(true))
+    view.rerender(show(false))
+    expect(screen.getByRole('button', { name: 'Keep opus' })).toBeTruthy()
+  })
+
+  it('takes back a failed Keep with an error beside the choice', async () => {
+    const { client } = fakeClient({
+      keepTheModel: vi.fn(async () => {
+        throw new ApiError({ reason: 'Busy', message: 'Could not save the choice.' })
+      }),
+    })
+    const item = modelMove()
+    if (item.kind !== 'model_move') throw new Error('Expected a model move')
+    withServices(<ModelMoveOf move={item.content} itemId={item.id} named={named} />, client)
+    await userEvent.click(screen.getByRole('button', { name: 'Keep opus' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not save the choice.')
+    expect(screen.getByRole('button', { name: 'Keep opus' })).toBeTruthy()
   })
 })

@@ -5,6 +5,7 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Artifacts } from '../src/Artifacts'
+import { evidenceGallery } from '../src/evidenceGallery'
 import { Policies } from '../src/Policies'
 import { PullRequestScreenshots } from '../src/PullRequestScreenshots'
 import { Queries } from '../src/Queries'
@@ -15,6 +16,7 @@ import { words } from '../src/words'
 import { HOST, hosted, until } from './support'
 
 import { ask, cards, connect, pushByHand, runtimeWith, tipOf } from './changesSupport'
+import { RECORDING_GIF } from './recording'
 
 /*
  * A task's screenshots on its pull request (ADR-077): the ones its Outputs
@@ -106,6 +108,59 @@ const commentSaying = (github: FakeService, words: string) =>
 const comments = (github: FakeService) => github.commentsOn(1).filter((comment) => comment.body.includes(SCREENSHOTS_MARK))
 
 describe('a task’s screenshots on its pull request', () => {
+  it.live('keeps all twelve feature views when a follow-up adds a GIF, uploading each digest only once', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId, url } = yield* opened(github, working)
+      const screenshots = yield* PullRequestScreenshots
+      const picture = yield* firstPicture(threadId)
+      const place = { projectId, threadId }
+      yield* addItem(place, 'step_result', {
+        step: 'implement',
+        gallery: { mode: 'replace' },
+        evidence: Array.from({ length: 12 }, (_, i) => ({
+          kind: 'screenshot',
+          view: `Screen ${i + 1}`,
+          caption: `Screen ${i + 1}`,
+          picture,
+        })),
+      })
+      yield* screenshots.post({ taskId, url, leftOut: [] })
+      assert.lengthOf(github.uploads, 1)
+      const gif = yield* (yield* Artifacts).put(RECORDING_GIF)
+      assert.isNotNull(gif)
+      yield* addItem(place, 'step_result', {
+        step: 'settle',
+        gallery: { mode: 'patch' },
+        evidence: [
+          {
+            kind: 'recording',
+            view: 'Panel opening',
+            caption: 'Panel opening',
+            picture: {
+              sha256: gif?.sha256,
+              mediaType: 'image/gif',
+              name: 'opening.gif',
+              bytes: RECORDING_GIF.length,
+              width: 240,
+              height: 100,
+            },
+          },
+        ],
+      })
+      yield* screenshots.post({ taskId, url })
+      assert.lengthOf((yield* evidenceGallery(threadId)).shots, 13)
+      assert.include(comments(github)[0]?.body ?? '', 'Screen 12')
+      assert.include(comments(github)[0]?.body ?? '', 'Panel opening')
+      assert.lengthOf(github.uploads, 2)
+      assert.strictEqual(github.uploads[1]?.mediaType, 'image/gif')
+      yield* screenshots.post({ taskId, url })
+      assert.lengthOf(github.uploads, 2)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('accepts host timestamps without milliseconds and clears a previous failure on retry', () => {
     const { working, bare } = hosted()
     const fake = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })

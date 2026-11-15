@@ -6,8 +6,8 @@ import { Connections } from './Connections'
 import { NotFound } from './errors'
 import { addReadCopy } from './git'
 import { LAST_MESSAGE_REVIEWING } from './lastMessage'
-import { logForLead, readLog } from './checkLogs'
-import { checksLine, checksOf, commentLine, reviewLine, standing } from './pullRequestWords'
+import { LOGS_TO_LEAD, logForLead, readLog } from './checkLogs'
+import { checksLine, checksOf, commentLine, descriptionWords, reviewLine, standing } from './pullRequestWords'
 
 /*
  * What every part of Althar knows of a review task (docs/architecture/06,
@@ -18,8 +18,7 @@ import { checksLine, checksOf, commentLine, reviewLine, standing } from './pullR
  * so, and read_pull_request reads it the pull request's own words.
  */
 
-/** How many failed checks' logs a reading of the pull request gives, and how much of what people said: its latest. */
-export const LOGS_SHOWN = 2
+/** How much of what people said a reading of the pull request gives: its latest. */
 export const SAID_SHOWN = 40
 
 /** Someone else's pull request, as a review task keeps it. */
@@ -113,7 +112,7 @@ export const reviewBrief = (task: { readonly cwd: string; readonly review: Revie
         : `You only read: read files, search, and run commands that only look, such as git diff and git log. You run nothing of the pull request: no install, no build, no tests, no scripts; Althar refuses them for this task.${review.outside ? ' You have no network either: what you know of it comes from its code here and from read_pull_request.' : ''} Where the person says to run it, call run_it: it asks them how far to trust its code, and you're started again as they say.`,
     "Read what it says, what people said on it, and how its checks went with Althar's read_pull_request tool.",
     "Look for what would make it wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the repository doesn't ask for. Then call Althar's draft_review tool once: your verdict (approve, changes, or comment), a summary of a few lines saying what it does and what you found, and your comments, each on a line of the change as it now reads (a file's path and a line number in the new file), with what is wrong or worth saying and its severity (blocking, major, minor or nit).",
-    "Nothing reaches the code host until the person posts it from the draft's card, where they keep or drop each comment and choose the verdict: yours is a suggestion. You don't post, comment or push yourself, and gh can't. Once drafted, say in a sentence or two what you found; the person reads the card for the rest. Asked for more, draft again: the card shows your latest draft.",
+    "Your review stays in the draft's card until the person posts it, keeping or dropping each comment and choosing the verdict: yours is a suggestion. When the person explicitly asks you to post it, call post_review with their message ID from read_turn; on this review task it takes your latest draft, updates its card and settles the task. Never post on your own initiative. Once drafted, say in a sentence or two what you found; the person reads the card for the rest. Asked for more, draft again: the card shows your latest draft.",
     LAST_MESSAGE_REVIEWING,
   ]
 }
@@ -140,11 +139,11 @@ export const readReviewed = (review: ReviewOf) =>
       lines.push(
         `Its head is ${now.headSha.slice(0, 12)} now; your copy holds ${review.head.slice(0, 12)}, as Althar fetched it. Review what you have, and say so in your summary.`,
       )
-    lines.push(now.body.trim() === '' ? 'It has no description.' : `Its description:\n${now.body.trim()}`)
+    lines.push(descriptionWords(now.body) ?? 'It has no description.')
     if (now.headSha !== null) {
       const checks = yield* host.checks(repository, now.headSha)
       lines.push(checksLine(checksOf(now.headSha, checks)))
-      for (const check of checks.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_SHOWN))
+      for (const check of checks.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD))
         lines.push(logForLead(yield* readLog(host, repository, check)))
     }
     const activity = yield* host.activity(repository, review.number, null)

@@ -6,6 +6,7 @@ import { cx } from '../../lib/cx'
 import { branchNameable } from '../../primitives/BranchSelect/BranchSelect'
 import { Button } from '../../primitives/Button/Button'
 import { Popover } from '../../primitives/Popover/Popover'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './RunPlace.module.css'
@@ -141,8 +142,10 @@ export interface RunPlaceProps {
   places: readonly RunPlace[]
   /** What the remote has to run on, pull requests first; null while Althar asks it. */
   remote: readonly BranchChoice[] | null
-  /** A line at its foot: why it lists less than it might, as the remote out of reach; or what picking a branch does. */
+  /** A line at its foot: what picking a branch does. */
   note?: string
+  /** Why it lists less than it might, as the remote out of reach: at its foot, said as a problem, in place of the note. */
+  problem?: string
   /**
    * Makes a branch the remote doesn't have, from `createFrom`: a row, last,
    * for a name typed that no branch has; one for each of `repositories`
@@ -214,6 +217,7 @@ export function RunPlacePicker({
   places,
   remote,
   note,
+  problem,
   searching = false,
   query,
   defaultQuery = '',
@@ -253,6 +257,7 @@ export function RunPlacePicker({
         places={places}
         remote={remote}
         {...(note === undefined ? {} : { note })}
+        {...(problem === undefined ? {} : { problem })}
         searching={searching}
         {...(query === undefined ? {} : { query })}
         defaultQuery={defaultQuery}
@@ -288,6 +293,7 @@ function Places({
   places,
   remote,
   note,
+  problem,
   searching,
   query,
   defaultQuery,
@@ -562,7 +568,13 @@ function Places({
         )}
         {typed && remote !== null && !searching && rows.length === 0 && <p className={s.quiet}>{t.none(words.trim())}</p>}
       </div>
-      {note !== undefined && <p className={s.note}>{note}</p>}
+      {problem !== undefined ? (
+        <div className={s.note}>
+          <Problem size="small">{problem}</Problem>
+        </div>
+      ) : (
+        note !== undefined && <p className={s.note}>{note}</p>
+      )}
     </div>
   )
 }

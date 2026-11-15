@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import type { PermissionRequest } from '@althar/provider-adapters'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -358,7 +359,7 @@ describe('the coordinator, a trusted reader in its own copies', () => {
       assert.strictEqual(search(rawInput), 'allow', JSON.stringify(rawInput))
     // A review's lead is as it was: it reads anything but the person's keys.
     assert.strictEqual(read('read', join(home, 'other', 'sentinel.txt'), false), 'allow')
-    rmSync(home, { recursive: true, force: true })
+    removeTreeSync(home)
   })
 
   it('reads git’s credential store in no role, by any tool', () => {

@@ -36,20 +36,6 @@ export const Long: Story = {
 }
 /* The same, plain, as before diffs were coloured: what Long is measured against. */
 export const LongPlain: Story = { args: { ...Long.args, path: undefined } }
-export const Dark: Story = {
-  globals: { theme: 'dark' },
-  render: (args) => (
-    <States
-      size="thread"
-      cells={[
-        { state: 'tsx', node: <Diff {...args} lines={TSX_DIFF} path="RefundForm.tsx" fold={3} oldNumbers /> },
-        { state: 'css', node: <Diff {...args} lines={CSS_DIFF} path="RefundForm.module.css" /> },
-        { state: 'comment across the change', node: <Diff {...args} lines={COMMENT_DIFF} path="limit.ts" /> },
-      ]}
-    />
-  ),
-}
-export const OnlyAdded: Story = { args: { lines: ROUTER_DIFF.filter((l) => l.kind !== DiffLineKind.Removed) } }
 
 export const AllStates: Story = {
   render: (args) => (

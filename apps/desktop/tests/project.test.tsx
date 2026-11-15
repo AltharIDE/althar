@@ -25,7 +25,7 @@ import {
   streamed,
 } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
-import { useSettingsOf, withServices } from './render'
+import { useSettingsOf, withServices, pickLayout } from './render'
 
 function Project({
   onTask = vi.fn(),
@@ -97,6 +97,22 @@ function WithSettings() {
       settings={useSettingsOf('p1')}
     />
   )
+}
+
+/**
+ * The home's layout as ⋯ says it, the menu opened and closed again: the conversation, the board, and the conversation on
+ * the right, each on or off, and fixed where it can't be changed.
+ */
+const layout = async () => {
+  await userEvent.click(await screen.findByRole('button', { name: 'More' }))
+  const menu = await screen.findByRole('menu', { name: 'More' })
+  const state = ['Conversation', 'Board', 'Conversation on the right'].map((name) => {
+    const item = within(menu).getByRole('menuitemcheckbox', { name })
+    return `${item.getAttribute('aria-checked') === 'true' ? 'on' : 'off'}${item.getAttribute('aria-disabled') === 'true' ? ', fixed' : ''}`
+  })
+  await userEvent.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('menu', { name: 'More' })).toBeNull())
+  return state
 }
 
 describe('running the project, with no agent', () => {
@@ -205,31 +221,48 @@ describe('running the project, with no agent', () => {
 })
 
 describe('the project’s bar', () => {
-  it('keeps the parts the coordinator offers as a preset, by its name, with one press', async () => {
+  it('offers a task’s parts as a preset on its card: kept by the name given, or not offered again', async () => {
     const parts = {
       workspace: 'worktree' as const,
       checked: 'none' as const,
-      end: 'draft' as const,
+      end: 'none' as const,
       shelf: 'board' as const,
-      lead: 'claude-code/opus',
+      lead: 'codex/large',
       reviewer: null,
       brief: '',
     }
-    const offer = items.notice(
-      {
-        source: 'runtime',
-        title: 'You set up these parts twice. Keep them as a preset?',
-        description: 'opus change: a worktree, no review, a draft pull request, led by opus.',
-        offer: { kind: 'preset', name: 'opus change', parts },
-      },
-      null,
-    )
-    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [offer] })) })
+    const offered = items.card(card({ presetOffer: { name: 'No review, no PR', parts } }), 'c1')
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [offered] })) })
     withServices(<WithSettings />, client)
-    await screen.findByText('You set up these parts twice. Keep them as a preset?')
-    await userEvent.click(await screen.findByRole('button', { name: 'Keep it as “opus change”' }))
-    await waitFor(() => expect(client.savePreset).toHaveBeenCalledWith({ name: 'opus change', parts }))
-    expect(await screen.findByText('Kept as “opus change”: Settings has your presets.')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Keep as a preset' }))
+    const name = await screen.findByLabelText('Preset name')
+    expect(name).toHaveProperty('value', 'No review, no PR')
+    await userEvent.clear(name)
+    await userEvent.type(name, 'Codex alone')
+    await userEvent.click(screen.getByRole('button', { name: 'Keep' }))
+    await waitFor(() => expect(client.savePreset).toHaveBeenCalledWith({ name: 'Codex alone', parts, taskId: 't1', asNew: true }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Keep as a preset' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Don’t offer again' }))
+    await waitFor(() => expect(client.declinePresetOffer).toHaveBeenCalledWith('t1'))
+  })
+
+  it('says what a task’s card kept as a preset, and Undo removes it', async () => {
+    const kept = items.card(
+      card({
+        presetOffer: {
+          name: 'No review, no PR',
+          parts: { workspace: 'worktree', checked: 'none', end: 'none', shelf: 'board', lead: 'codex/large', reviewer: null, brief: '' },
+          kept: { id: 'pst_1', name: 'Codex alone' },
+        },
+      }),
+      'c1',
+    )
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [kept] })) })
+    withServices(<WithSettings />, client)
+    expect(await screen.findByText('Kept as Codex alone')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(client.removePreset).toHaveBeenCalledWith('pst_1'))
   })
 
   it('draws a review the coordinator offered as its line, naming the task, and Add puts its reviewer on', async () => {
@@ -261,32 +294,121 @@ describe('the project’s bar', () => {
     await screen.findByText('Add a review of “Harden the prototype”?')
     await userEvent.click(await screen.findByRole('button', { name: 'Add gpt-5.2-codex' }))
     await waitFor(() =>
-      expect(client.changeTeam).toHaveBeenCalledWith('r', [
-        ...task.plan.steps,
-        { key: 'review', agentId: 'codex', model: null, skipped: false },
-      ]),
+      expect(client.changeTeam).toHaveBeenCalledWith('r', [{ key: 'review', agentId: 'codex', model: null, skipped: false }]),
     )
   })
 
-  it('steps through the views by b, never while typing, and has no button to start a task', async () => {
+  it('hides and shows the conversation by c and the board by b, keeps one showing, never while typing, and has no button to start a task', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     const view = withServices(<Project />, client)
-    const checked = () => screen.getAllByRole('radio').find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent
-    await waitFor(() => expect(checked()).toMatch(/^Home/))
-    ;(document.activeElement as HTMLElement | null)?.blur()
+    expect(await layout()).toEqual(['on', 'on', 'off'])
     await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Conversation/)
+    expect(await layout()).toEqual(['on, fixed', 'off', 'off, fixed'])
+    // The only pane showing stays.
+    await userEvent.keyboard('c')
+    expect(await layout()).toEqual(['on, fixed', 'off', 'off, fixed'])
     await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Board/)
-    await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Home/)
-    await userEvent.keyboard('b')
-    expect(checked()).toMatch(/^Conversation/)
-    await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'b')
-    expect(checked()).toMatch(/^Conversation/)
+    expect(await layout()).toEqual(['on', 'on', 'off'])
+    await userEvent.keyboard('c')
+    expect(await layout()).toEqual(['off', 'on, fixed', 'off, fixed'])
+    // Home stays on whichever panes show.
+    expect(screen.getByRole('radio', { name: 'Home' }).getAttribute('aria-checked')).toBe('true')
+    // Hidden, the conversation leaves its composer under the board, where a c is only a letter.
+    await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'c')
+    expect(await layout()).toEqual(['off', 'on, fixed', 'off, fixed'])
     // A task starts by telling the coordinator; nothing else starts one.
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     view.unmount()
+  })
+
+  it('puts the conversation on the board’s right from ⋯ while both show, kept for the window', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    const view = withServices(<Project />, client)
+    await pickLayout('Conversation on the right')
+    expect(window.localStorage.getItem('althar.swapped')).toBe('true')
+    // The divider is the conversation's left edge now.
+    expect(screen.getByRole('separator', { name: 'Width of the conversation' }).className).toMatch(/start/)
+    expect(await layout()).toEqual(['on', 'on', 'on'])
+    // One pane alone has no sides: the choice stays as it was, and can't be changed.
+    await pickLayout('Board')
+    expect(await layout()).toEqual(['on, fixed', 'off', 'on, fixed'])
+    expect(window.localStorage.getItem('althar.swapped')).toBe('true')
+    window.localStorage.removeItem('althar.swapped')
+    view.unmount()
+  })
+
+  it('sends from the composer under the board, and brings the conversation back for the answer', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project room={Room.Board} />, client)
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator/ })
+    expect(screen.queryByRole('region', { name: 'Conversation' })).toBeNull()
+    await userEvent.type(composer, 'What needs me?{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    expect(await screen.findByRole('region', { name: 'Conversation' })).toBeTruthy()
+    expect(await layout()).toEqual(['on', 'on', 'off'])
+  })
+
+  it('tells the coordinator from under the board while a new aside is open, and brings the coordinator back for the answer', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'New aside' }))
+    expect(await screen.findByRole('textbox', { name: /Ask on the side/ })).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('c')
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator/ })
+    await userEvent.type(composer, 'What needs me?{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ threadId: coordinatorSnapshot().threadId })))
+    expect(client.send).toHaveBeenCalledTimes(1)
+    expect(await layout()).toEqual(['on', 'on', 'off'])
+    expect(screen.queryByRole('textbox', { name: /Ask on the side/ })).toBeNull()
+    expect(screen.getByRole('textbox', { name: /Tell the coordinator/ })).toBeTruthy()
+  })
+
+  it('tells the coordinator from under the board while an aside is open, and brings the coordinator back, not the aside', async () => {
+    const aside = {
+      ...card(),
+      state: 'open' as const,
+      createdAt: '2026-11-11T11:00:00.000Z',
+      settledAt: null,
+      changed: null,
+      here: [],
+      taskId: 'a1',
+      threadId: 'th-a1',
+      title: 'A quick question',
+      phase: 'ready' as const,
+      scratch: true,
+    }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot()),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [aside], calls: [], settledTotal: 0 })),
+    })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('tab', { name: /A quick question/ }))
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: /Tell the coordinator/ })).toBeNull())
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    await userEvent.keyboard('c')
+    const composer = await screen.findByRole('textbox', { name: /Tell the coordinator/ })
+    await userEvent.type(composer, 'What needs me?{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ threadId: coordinatorSnapshot().threadId })))
+    expect(client.send).not.toHaveBeenCalledWith(expect.objectContaining({ threadId: 'th-a1' }))
+    expect(await screen.findByRole('region', { name: 'Conversation' })).toBeTruthy()
+    // The coordinator's own conversation is back, with its composer, not the aside's.
+    expect(await screen.findByRole('tab', { name: 'Coordinator', selected: true })).toBeTruthy()
+    expect(screen.getByRole('textbox', { name: /Tell the coordinator/ })).toBeTruthy()
+  })
+
+  it('goes back to the home as it was left, from another view, or by showing a pane from ⋯', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
+    withServices(<Project room={Room.Board} />, client)
+    const views = await screen.findByRole('radiogroup', { name: 'View' })
+    await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
+    expect(await layout()).toEqual(['off', 'off', 'off, fixed'])
+    await userEvent.click(within(views).getByRole('radio', { name: 'Home' }))
+    expect(await layout()).toEqual(['off', 'on, fixed', 'off, fixed'])
+    await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
+    await pickLayout('Conversation')
+    expect(await layout()).toEqual(['on', 'on', 'off'])
   })
 
   it('opens on Home where no view was named or kept', async () => {
@@ -306,8 +428,9 @@ describe('the project’s bar', () => {
       within(views)
         .getAllByRole('radio')
         .map((radio) => radio.textContent),
-    ).toEqual(['Home', 'Conversation', 'Board', 'Automations', 'Artifacts', 'Settings'])
-    await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
+    ).toEqual(['Home', 'Automations', 'Artifacts', 'Settings'])
+    // The conversation hidden, the board alone is the home's layout, kept too.
+    await pickLayout('Conversation')
     expect(onRoomChange).toHaveBeenLastCalledWith(Room.Board)
     // Its settings are a view too, kept like the others to open on again.
     await userEvent.click(within(views).getByRole('radio', { name: 'Settings' }))
@@ -346,8 +469,8 @@ describe('the Talk room', () => {
     withServices(<Project room={Room.Talk} onTask={onTask} />, client)
     await screen.findByRole('heading', { name: 'meridian', level: 1 })
     // Its header's ⋯ says what it is made of, never where it is on this computer.
-    await userEvent.click(await screen.findByRole('button', { name: 'Made of' }))
-    const made = await screen.findByRole('menu', { name: 'Made of' })
+    await userEvent.click(await screen.findByRole('button', { name: 'More' }))
+    const made = await screen.findByRole('menu', { name: 'More' })
     expect(
       within(made)
         .getAllByRole('menuitem')
@@ -355,7 +478,7 @@ describe('the Talk room', () => {
     ).toEqual([expect.stringMatching(/^meridian-api/), expect.stringMatching(/^meridian-web/), expect.stringMatching(/^meridian-infra/)])
     expect(screen.queryByText(/\/code\/meridian/)).toBeNull()
     await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(screen.queryByRole('menu', { name: 'Made of' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'More' })).toBeNull())
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked for/ })).toBeTruthy()
@@ -509,7 +632,8 @@ describe('the Talk room', () => {
         null,
       ),
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    // Skipping the review is in its dropdown, the whole row, still open.
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
         'pln1',
@@ -646,7 +770,9 @@ describe('the Talk room', () => {
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
     expect(client.holdPlan).toHaveBeenCalledWith('pln1')
-    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    // Skipping the review is in its dropdown, the whole row.
+    await userEvent.click(screen.getByRole('button', { name: /^Review: / }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
         'pln1',
@@ -684,7 +810,9 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('button', { name: 'Lead for this task: Claude Opus High' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
     // Skipping the review keeps it.
-    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    // Skipping the review is in its dropdown, the whole row.
+    await userEvent.click(screen.getByRole('button', { name: /^Review: / }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip the review' }))
     await waitFor(() =>
       expect(client.changePlan).toHaveBeenLastCalledWith(
         'pln1',
@@ -1012,7 +1140,8 @@ describe('the Talk room', () => {
       act(() => emit({ _tag: 'Context', threadId: 'thc', used: 100_000, size: 1_000_000 }))
       expect(await screen.findByRole('button', { name: 'Context 10% used' })).toBeTruthy()
       act(() => {
-        emit(changed('thread_item', 'i9', 'thc'))
+        // An id of its own, which the fixtures' counted ids (i1, i2…) never meet.
+        emit(changed('thread_item', 'changed-item', 'thc'))
         emit(changed('provider_session', 's1', 'thc'))
         emit(changed('user_input', 'u1', 'thc'))
         emit(changed('run', 'r1', 'th1'))
@@ -1021,15 +1150,120 @@ describe('the Talk room', () => {
         emit(streamed('x', 'Not here', 'th1'))
       })
       await vi.advanceTimersByTimeAsync(50)
-      await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledTimes(3))
-      expect(
-        vi
-          .mocked(client.getThreadItem)
-          .mock.calls.map(([, itemId]) => itemId)
-          .toSorted(),
-      ).toEqual(['c1', 'i9', queued.id].toSorted())
+      await waitFor(() =>
+        expect(
+          vi
+            .mocked(client.getThreadItem)
+            .mock.calls.map(([, itemId]) => itemId)
+            .toSorted(),
+        ).toEqual(['c1', 'changed-item', queued.id].toSorted()),
+      )
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
       await waitFor(() => expect(screen.queryByText('Queued')).toBeNull())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it.each([false, true])('keeps a mid-turn send queued while the runtime accepts it (turnRunning=%s)', async (turnRunning) => {
+    let accept: () => void = () => undefined
+    const sent = new Promise<void>((resolve) => (accept = resolve))
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({ accepting: 'queued', session: { ...session, accepting: 'queued', turnRunning }, items: [] }),
+      ),
+      send: vi.fn(async () => sent),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    const box = await screen.findByRole('textbox', { name: /^(Add to the queue|Tell Claude Code|Tell the coordinator)/ })
+    await userEvent.type(box, 'Then the changelog.{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    const queue = screen.getByRole('region', { name: /queued/i })
+    expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+    expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+    await act(async () => accept())
+  })
+
+  it('corrects a stale now-prediction into the queue without a second copy', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const idle = coordinatorSnapshot({ session: { ...session, accepting: 'now', turnRunning: false }, accepting: 'now', items: [] })
+      const stored = {
+        ...items.you('Then the changelog.', { state: 'queued', interrupting: false }),
+        sequence: (idle.items.at(-1)?.sequence ?? 0) + 1,
+      }
+      const getCoordinator = vi.fn(async () => idle)
+      const { client, emit } = fakeClient({
+        getCoordinator,
+        getThreadItem: vi.fn(async () => stored),
+        send: vi.fn(async () => undefined),
+      })
+      withServices(<Project room={Room.Talk} />, client)
+      const box = await screen.findByRole('textbox', { name: /^(Add to the queue|Tell Claude Code|Tell the coordinator)/ })
+      await userEvent.type(box, 'Then the changelog.{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalled())
+      expect(screen.queryByRole('region', { name: /queued/i })).toBeNull()
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      const move = screen.getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')
+      expect(move).toMatch(/^message:sending:/)
+      getCoordinator.mockImplementation(async () => ({
+        ...idle,
+        accepting: 'queued' as const,
+        session: { ...session, accepting: 'queued', turnRunning: true },
+      }))
+      act(() => {
+        emit(changed('thread_item', stored.id, 'thc'))
+        emit(changed('turn_delivery', 'd1', 'thc'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      const queue = await screen.findByRole('region', { name: /queued/i })
+      expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      expect(within(queue).getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')).toBe(move)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('corrects a stale queued-prediction into the thread without a second copy', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const busy = coordinatorSnapshot({ session: { ...session, accepting: 'queued', turnRunning: true }, accepting: 'queued', items: [] })
+      const stored = {
+        ...items.you('Then the changelog.', { state: 'delivered', interrupting: false }),
+        sequence: (busy.items.at(-1)?.sequence ?? 0) + 1,
+      }
+      const getCoordinator = vi.fn(async () => busy)
+      const { client, emit } = fakeClient({
+        getCoordinator,
+        getThreadItem: vi.fn(async () => stored),
+        send: vi.fn(async () => undefined),
+      })
+      withServices(<Project room={Room.Talk} />, client)
+      const box = await screen.findByRole('textbox', { name: /^(Add to the queue|Tell Claude Code|Tell the coordinator)/ })
+      await userEvent.type(box, 'Then the changelog.{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalled())
+      const queue = screen.getByRole('region', { name: /queued/i })
+      expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+      const move = within(queue).getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')
+      expect(move).toMatch(/^message:sending:/)
+      getCoordinator.mockImplementation(async () => ({
+        ...busy,
+        accepting: 'now' as const,
+        session: { ...session, accepting: 'now', turnRunning: false },
+      }))
+      act(() => {
+        emit(changed('thread_item', stored.id, 'thc'))
+        emit(changed('turn_delivery', 'd1', 'thc'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      await waitFor(() => expect(screen.queryByRole('region', { name: /queued/i })).toBeNull())
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      expect(screen.getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')).toBe(move)
     } finally {
       vi.useRealTimers()
     }

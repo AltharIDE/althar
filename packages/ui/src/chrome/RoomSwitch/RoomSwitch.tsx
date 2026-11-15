@@ -3,14 +3,15 @@ import { Room } from '../../foundations/vocabulary'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 
 /*
- * The project window's only navigation: home (the conversation and the board side
- * by side), the conversation, the board, its automations, its artifacts, or the project's
- * settings in their place. A dot says the conversation has news while you are
- * elsewhere, and a violet one that something waits on you there: an
- * automation that paused itself, or something in the settings, such as a
- * connection to sign in again. What waits on you in the work isn't the
- * board's: the chip beside it says it, whichever view is on. A task has no
- * place here: it takes the window, and its bar goes back with a BackCrumb.
+ * The project window's only navigation: home (the conversation and the board,
+ * either or both, as its layout says: PaneLayout), its automations,
+ * its artifacts, or the project's settings in their place. A dot says the
+ * conversation has news while you are elsewhere, and a violet one that
+ * something waits on you there: an automation that paused itself, or
+ * something in the settings, such as a connection to sign in again. What
+ * waits on you in the work isn't the board's: the chip beside it says it,
+ * whichever view is on. A task has no place here: it takes the window, and
+ * its bar goes back with a BackCrumb.
  * In the app the views are a project's header's faces (ProjectHeader), drawn
  * from roomOptions; the switch on its own is for a bar of its own.
  * The shortcuts are the consumer's to bind; the switch names them.
@@ -40,7 +41,11 @@ export const roomSwitchText: RoomSwitchText = {
   yours: 'needs you',
 }
 
-const ROOMS = [Room.Both, Room.Talk, Room.Board, Room.Automations, Room.Artifacts, Room.Settings] as const
+/** The views it offers: the home, with either pane or both, is one. */
+const ROOMS = [Room.Both, Room.Automations, Room.Artifacts, Room.Settings] as const
+
+/** The view a switch shows as on: the home, with either pane or both. */
+export const roomFace = (room: Room): Room => (room === Room.Talk || room === Room.Board ? Room.Both : room)
 
 export interface RoomSwitchProps {
   value: Room
@@ -67,7 +72,7 @@ export function roomOptions({ news, needsYou, automationsNeedYou, text }: RoomOp
   const t = { ...roomSwitchText, ...text }
   const yours = (room: Room) => (room === Room.Settings && needsYou === true) || (room === Room.Automations && automationsNeedYou === true)
   const dotOf = (room: Room): Pick<SegmentedOption<Room>, 'dot' | 'dotLabel'> =>
-    room === Room.Talk && news === true ? { dot: 'new', dotLabel: t.news } : yours(room) ? { dot: 'yours', dotLabel: t.yours } : {}
+    room === Room.Both && news === true ? { dot: 'new', dotLabel: t.news } : yours(room) ? { dot: 'yours', dotLabel: t.yours } : {}
   return ROOMS.map((room, i) => {
     const key = t.key(i + 1)
     return {
@@ -85,7 +90,7 @@ export function RoomSwitch({ value, onChange, news, needsYou, automationsNeedYou
   return (
     <Segmented
       label={t.label}
-      value={value}
+      value={roomFace(value)}
       onChange={onChange}
       className={className}
       options={roomOptions({

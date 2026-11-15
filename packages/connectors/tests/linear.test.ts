@@ -133,7 +133,7 @@ describe('Linear', () => {
                   projectMilestone: { id: 'milestone-beta', name: 'Beta' },
                   cycle: { number: 42, name: 'Hardening' },
                   parent: { identifier: 'MER-200', title: 'Refunds' },
-                  dueDate: '2026-11-30',
+                  dueDate: '2025-11-30',
                   estimate: 3,
                 }),
               },
@@ -147,7 +147,7 @@ describe('Linear', () => {
         milestone: { id: 'milestone-beta', name: 'Beta' },
         cycle: 'Hardening',
         parent: { key: 'MER-200', title: 'Refunds' },
-        due: '2026-11-30',
+        due: '2025-11-30',
         estimate: 3,
       })
       // Linear has neither: absent, not none.
@@ -974,7 +974,7 @@ describe('Linear', () => {
           cycle: { id: 'cycle-42', name: 'Cycle 42' },
           parent: { id: 'uuid-200', ref: 'MER-200', key: 'MER-200' },
           estimate: 3,
-          due: '2026-11-30',
+          due: '2025-11-30',
           title: 'Refunds, rate-limited',
           description: 'Refunds go through the limiter.',
         })
@@ -995,7 +995,7 @@ describe('Linear', () => {
             cycleId: 'cycle-42',
             parentId: 'uuid-200',
             estimate: 3,
-            dueDate: '2026-11-30',
+            dueDate: '2025-11-30',
             description: 'Refunds go through the limiter.',
             addedLabelIds: ['label-bug'],
             removedLabelIds: ['label-payments'],
@@ -1224,7 +1224,7 @@ describe('Linear', () => {
           cycle: { id: 'cycle-42', name: 'Hardening' },
           parent: { id: 'uuid-200', ref: 'MER-200', key: 'MER-200' },
           estimate: 3,
-          due: '2026-11-30',
+          due: '2025-11-30',
         },
       })
       assert.deepStrictEqual(variablesOf(sent[0]), {
@@ -1239,7 +1239,7 @@ describe('Linear', () => {
           cycleId: 'cycle-42',
           parentId: 'uuid-200',
           estimate: 3,
-          dueDate: '2026-11-30',
+          dueDate: '2025-11-30',
         },
       })
       // A milestone alone puts it in the milestone's project; nothing taken off a new issue is said.

@@ -27,6 +27,19 @@ const GROUPS: { title: string; swatches: Swatch[] }[] = [
     ],
   },
   {
+    title: 'Roles',
+    swatches: [
+      { name: '--paper', note: 'fields, cards and chosen options on a raised sheet' },
+      { name: '--hover-paper', note: 'a row the pointer or the keys are on' },
+      { name: '--pressed-paper', note: 'that row, pressed' },
+      { name: '--chip', note: 'a small fill that holds words: code, a key' },
+      { name: '--well', note: 'a recess in a card' },
+      { name: '--tile', note: 'a small square that holds a glyph on a sheet' },
+      { name: '--ink-fill', note: 'the ink as a fill' },
+      { name: '--signal-fill', note: 'violet that carries words' },
+    ],
+  },
+  {
     title: 'Ink',
     swatches: [
       { name: '--t-1', note: 'primary' },
@@ -122,9 +135,6 @@ const meta = { title: 'Foundations/Tokens', component: Colours } satisfies Meta<
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Colour: Story = {}
-export const Typography: Story = { render: () => <Type /> }
-export const ShadowsAndRadii: Story = { render: () => <Materials /> }
 export const AllStates: Story = {
   name: 'All',
   render: () => (

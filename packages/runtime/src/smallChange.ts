@@ -4,13 +4,12 @@ import type { PlanStep } from './Runs'
 
 /*
  * The fast lane: a change of a few lines takes one step, on a lighter model,
- * starts without the plan's countdown, and is reviewed after it merges
- * instead of before (README section 6, the person's note of 6 November: a
+ * starts without the plan's countdown, and keeps its configured review
+ * before Ship unless the person explicitly chose another timing (README section 6, the person's note of 6 November: a
  * one-line fix took about 40 minutes).
  *
- * A small change is what its plan says: `reviewAfterMerge`, one step to
- * implement, and a review step that names who reviews it once it merged,
- * skipped so nothing waits on it before the merge. The card the thread shows
+ * A small change is what its plan says: `smallChange`, independently of its
+ * reviewer. Older explicit after-merge plans are still recognized. The card the thread shows
  * is read from the task as it stands, so it never goes stale: its steps are
  * the plan's start, the lead's report, the pull request's checks and merge,
  * and the review task its merge starts.
@@ -26,8 +25,10 @@ export const smallChangeOf = (parameters: string | null | undefined) => {
     return undefined
   }
   if (typeof read !== 'object' || read === null) return undefined
-  const kept = read as { readonly reviewAfterMerge?: unknown; readonly steps?: unknown }
-  if (kept.reviewAfterMerge !== true || !Array.isArray(kept.steps)) return undefined
+  const kept = read as { readonly smallChange?: unknown; readonly reviewAfterMerge?: unknown; readonly steps?: unknown }
+  // Older explicit after-merge configurations retain their card. New size labels carry no timing decision.
+  if ((kept.smallChange !== true && !(kept.smallChange === undefined && kept.reviewAfterMerge === true)) || !Array.isArray(kept.steps))
+    return undefined
   const steps = kept.steps.filter(
     (step): step is PlanStep =>
       typeof step === 'object' && step !== null && 'key' in step && (step.key === 'implement' || step.key === 'review'),
@@ -35,31 +36,43 @@ export const smallChangeOf = (parameters: string | null | undefined) => {
   const implement = steps.find((step) => step.key === 'implement' && step.skipped !== true)
   if (implement === undefined) return undefined
   const review = steps.find((step) => step.key === 'review')
-  return { implement, review: review ?? null }
+  return { implement, review: review ?? null, afterMerge: kept.reviewAfterMerge === true }
 }
 
 /**
- * The steps a small change's plan holds: one to implement it, on the model
- * and effort the coordinator picked, and the reviewer its merge starts, which
- * it names and skips (nothing waits on it first).
+ * A small change keeps its configured reviewer before Ship. Size changes neither the reviewer nor when it reads.
  */
 export const smallChangeSteps = (input: {
   readonly lead: Omit<PlanStep, 'key' | 'skipped'>
   readonly review: Omit<PlanStep, 'key' | 'skipped'> | null
 }): ReadonlyArray<PlanStep> => [
   { key: 'implement', ...input.lead, skipped: false },
-  ...(input.review === null ? [] : [{ key: 'review' as const, ...input.review, skipped: true }]),
+  ...(input.review === null ? [] : [{ key: 'review' as const, ...input.review, skipped: false }]),
 ]
 
 /**
- * What a small change leaves out, in the short lines its card says: no plan to read, and the review after the merge, as what
- * holds of its project's rule and its own word says it (afterMergeReview.ts): only major findings back, any, or no review.
+ * Its card's short lines: no countdown and its configured review timing. An explicitly chosen after-merge review keeps
+ * the project's rule and the task's own override.
  */
-export const smallChangeSkips = (review: PlanStep | null, holds: AfterMergeRule = 'major'): ReadonlyArray<string> => [
-  'no plan',
+export const smallChangeSkips = (
+  review: PlanStep | null,
+  holds: AfterMergeRule = 'major',
+  afterMerge = review?.skipped === true,
+): ReadonlyArray<string> => [
+  afterMerge ? 'no plan' : 'no countdown',
   ...(review === null
     ? []
-    : [holds === 'none' ? 'no review' : holds === 'all' ? 'reviewed after it merges' : 'reviewed after it merges, major findings only']),
+    : [
+        afterMerge
+          ? holds === 'none'
+            ? 'no review'
+            : holds === 'all'
+              ? 'reviewed after it merges'
+              : 'reviewed after it merges, major findings only'
+          : review.skipped
+            ? 'no review'
+            : 'reviewed before it ships',
+      ]),
 ]
 
 /**
@@ -81,4 +94,31 @@ export const changedWords = (input: {
   if (count !== null && count > 1) return one(count, 'file')
   if (lines !== null && lines > 0) return one(lines, 'line')
   return 'the code'
+}
+
+/** The actual outcome of a before-Ship pass, without treating a skipped or stopped pass as a completed review. */
+export const beforeShipReviewStep = (
+  review:
+    | { readonly state: string; readonly endedAt: string | null; readonly verdict: string | null; readonly skipped: number | null }
+    | undefined,
+) => {
+  const done = review?.state === 'succeeded' && review.verdict !== null
+  const what = done
+    ? 'Reviewed before Ship'
+    : review === undefined
+      ? 'Review before Ship'
+      : review.state === 'admitted' || review.state === 'running'
+        ? 'Reviewing before Ship'
+        : review.state === 'held'
+          ? 'Review waiting'
+          : review.state === 'waiting_attention'
+            ? 'Review needs attention'
+            : review.state === 'failed'
+              ? 'Review failed'
+              : review.state === 'cancelled' && review.skipped === 1
+                ? 'Review skipped'
+                : review.state === 'succeeded'
+                  ? 'Review ended'
+                  : 'Review stopped'
+  return { key: 'review' as const, what, at: review?.endedAt ?? null, done }
 }

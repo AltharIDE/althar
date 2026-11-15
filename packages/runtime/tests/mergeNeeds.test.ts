@@ -172,6 +172,13 @@ describe('What merging a change needs, as one list (DEV-204)', () => {
     it('commits the person pushes are crossed; ones that go up on their own are waited on; a parted branch is crossed', () => {
       assert.deepStrictEqual(pushed({ unpushed: 2 }), { kind: 'pushed', state: 'unmet', have: 2 })
       assert.deepStrictEqual(pushed({ unpushed: 2, pushing: { held: null } }), { kind: 'pushed', state: 'waiting', have: 2 })
+      // Held for Ship, Ship sends them: said so, not as a push of the person's nor as going up.
+      assert.deepStrictEqual(pushed({ unpushed: 2, pushing: { held: 'Held for Ship', ship: true } }), {
+        kind: 'pushed',
+        state: 'unmet',
+        have: 2,
+        said: '2 commits not shipped',
+      })
       assert.deepStrictEqual(pushed({ diverged: { kind: 'moved', local: 1, onPullRequest: 1 } }), { kind: 'pushed', state: 'unmet' })
       assert.deepStrictEqual(pushed({ unpushed: 2, localHead: null }), { kind: 'pushed', state: 'met' })
     })
@@ -230,5 +237,12 @@ describe('What merging a change needs, as one list (DEV-204)', () => {
     // Kept before Althar read them, or one the host doesn't read: no list.
     assert.isUndefined(changeOf({ ...kept, rules: undefined }, 'github', true)?.needs)
     assert.isUndefined(changeOf({ ...kept, rules: { needs: 'nonsense' } }, 'github', true)?.needs)
+    for (const canBypassQueue of [true, false]) {
+      assert.strictEqual(changeOf({ ...kept, rules: { ...kept.rules, canBypassQueue } }, 'github', true)?.canBypassQueue, canBypassQueue)
+    }
+    assert.isUndefined(changeOf(kept, 'github', true)?.canBypassQueue)
+    assert.isUndefined(
+      changeOf({ ...kept, state: 'merged', rules: { ...kept.rules, canBypassQueue: true } }, 'github', true)?.canBypassQueue,
+    )
   })
 })

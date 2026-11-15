@@ -12,6 +12,7 @@ const kind = <const B extends string>(prefix: string, brand: Parameters<typeof S
 })
 
 export const Ids = {
+  home: kind('home', 'HomeId'),
   device: kind('dev', 'DeviceId'),
   actor: kind('act', 'ActorId'),
   project: kind('proj', 'ProjectId'),
@@ -71,6 +72,8 @@ export const Ids = {
 
 export type IdKind = keyof typeof Ids
 
+export const HomeId = Ids.home.schema
+export type HomeId = typeof HomeId.Type
 export const DeviceId = Ids.device.schema
 export type DeviceId = typeof DeviceId.Type
 export const ActorId = Ids.actor.schema

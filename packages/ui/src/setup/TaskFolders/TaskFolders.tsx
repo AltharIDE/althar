@@ -6,6 +6,7 @@ import { Button } from '../../primitives/Button/Button'
 import { Caret } from '../../primitives/Fold/Fold'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Popover } from '../../primitives/Popover/Popover'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Select } from '../../primitives/Select/Select'
 import { SettingRow } from '../Preferences/Preferences'
 import s from './TaskFolders.module.css'
@@ -397,11 +398,7 @@ export function TaskFolders({
                 </Button>
               )}
             </span>
-            {error !== undefined && (
-              <p className={s.error} role="alert">
-                {error}
-              </p>
-            )}
+            {error !== undefined && <Problem size="small">{error}</Problem>}
           </div>
         )
       }

@@ -279,11 +279,16 @@ describe('the window’s watch', () => {
     await settle()
     expect(client.getAutomations).toHaveBeenCalledTimes(3)
     expect(pages().slice(4).toSorted()).toEqual(['auto1', 'auto2'])
+    // A task's call opened or answered changes whether its automation needs the person.
+    emit(changed('attention_request', 'attn1', 't1', 'p1'))
+    await settle()
+    expect(client.getAutomations).toHaveBeenCalledTimes(4)
+    expect(pages().slice(6).toSorted()).toEqual(['auto1', 'auto2'])
     for (const stop of showing) stop()
     // Off screen, only marked for the next visit.
     emit(changed('automation', 'auto1', null, 'p1'))
     await settle()
-    expect(client.getAutomations).toHaveBeenCalledTimes(3)
+    expect(client.getAutomations).toHaveBeenCalledTimes(4)
     expect(cache.getQueryState(keys.automations('p1'))?.isInvalidated).toBe(true)
     expect(cache.getQueryState(keys.automation('auto1'))?.isInvalidated).toBe(true)
   })

@@ -5,6 +5,7 @@ import { type DiffLine, DiffLineKind, type FileView, type ViewedFinding, worstFi
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
+import { useImagesFollow } from '../../shared/code/finds'
 
 /*
  * A task's change, over the whole window: whether it's open, the file you're
@@ -131,7 +132,16 @@ export const useChanges = (taskId: string | null, first: string | null, moved = 
     const diff = whole ? client.getFileDiff(taskId, path, true) : client.getFileDiff(taskId, path)
     diff.then(
       (read) => {
-        if (current) setRead({ key, view: { state: 'ready', lines: read.lines.map(lineOf), truncated: read.truncated } })
+        if (current)
+          setRead({
+            key,
+            view: {
+              state: 'ready',
+              lines: read.lines.map(lineOf),
+              truncated: read.truncated,
+              ...(read.whole === true ? { whole: true } : {}),
+            },
+          })
       },
       (error: unknown) => {
         if (current) setRead({ key, view: { state: 'failed', message: messageOf(error) } })
@@ -142,6 +152,7 @@ export const useChanges = (taskId: string | null, first: string | null, moved = 
     }
   }, [client, open, waiting, taskId, path, whole, key])
 
+  useImagesFollow(read ?? undefined)
   return {
     open,
     selected: path,

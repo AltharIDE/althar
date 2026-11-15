@@ -1,10 +1,11 @@
+/* what stops, goes and stays, then why it didn't go */
+.body {
+  display: grid;
+  gap: 14px;
+}
 .list {
   display: grid;
   gap: 6px;
   margin: 0;
   padding-left: 18px;
-}
-.error {
-  margin: 12px 0 0;
-  color: var(--danger);
 }

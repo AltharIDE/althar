@@ -121,9 +121,23 @@ describe('what runs, and what waits', () => {
         startedAt: '2026-10-10T09:00:00.000Z',
         ended: null,
       },
-      NOW,
+      't2',
     )
-    expect(card).toEqual({ where: 'main', command: 'bun test', since: '5m' })
+    expect(card).toEqual({ where: 'main', command: 'bun test' })
+  })
+
+  it('leaves out where a run runs in its own task’s thread, whose header says it', () => {
+    const run = {
+      launchId: 'proc_1',
+      taskId: 't1',
+      where: 'Fix the login timeout',
+      command: 'bun run dev',
+      url: null,
+      startedAt: NOW,
+      ended: null,
+    }
+    expect(runCardOf(run, 't1')).toMatchObject({ where: 'Fix the login timeout', ownThread: true })
+    expect(runCardOf(run)).not.toHaveProperty('ownThread')
   })
 
   it('says how many of a project’s tasks wait, and for how many agents', () => {

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, startTask, toConversation } from './support'
+import { launch, openFirstProject, shown, startTask, toConversation } from './support'
 
 /*
  * Files and folders added to a message, in a real window with the fake
@@ -80,7 +80,7 @@ test('sends a PDF, a log and a folder to the coordinator and to a lead, which op
     await expect(page.getByRole('list', { name: '1 attachment to send' }).getByText('refund-spec.pdf', { exact: true })).toBeVisible()
     await startTask(page, 'Fix the refunds layout')
     await expect(
-      page.getByText(/saw files: refund-spec\.pdf \(linked, application\/pdf, 43 B\): %PDF-1\.4 Refunds share/).first(),
+      shown(page, /saw files: refund-spec\.pdf \(linked, application\/pdf, 43 B\): %PDF-1\.4 Refunds share/).first(),
     ).toBeVisible()
     await expect(page.getByRole('list', { name: /to send/ })).toHaveCount(0)
 

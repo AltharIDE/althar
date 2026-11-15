@@ -1,6 +1,8 @@
 /* The agents not on this computer, quieter than those on it: a tile each, two to a line where there is room, their marks in the column of the rows above. */
 .away {
   container-type: inline-size;
+  /* as a container it can't take its width from what it holds, so it fills what it is in */
+  width: 100%;
 }
 .title {
   margin: 0 0 4px;
@@ -8,9 +10,11 @@
   font-weight: 550;
   color: var(--t-3);
 }
+/* tiles side by side keep one top line, whichever says more */
 .tiles {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   column-gap: 32px;
   margin: 0;
   padding: 0 16px;
@@ -24,9 +28,9 @@
 .tile {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-rows: minmax(32px, auto);
   align-items: center;
   column-gap: 12px;
-  min-height: 38px;
   padding: 3px 0;
 }
 .mark {
@@ -54,9 +58,8 @@
   color: var(--t-2);
   white-space: nowrap;
 }
+/* why it couldn't come, under its name */
 .failed {
   grid-column: 2 / -1;
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--danger);
+  padding-bottom: 4px;
 }

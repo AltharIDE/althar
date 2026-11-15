@@ -29,11 +29,13 @@ export { platformTrees, type ProcessTrees, type StopReport } from './processTree
  * The environment variables a child inherits from Althar (docs/architecture
  * 07: an allowlist, never the whole environment). Provider API keys are not on
  * it: one could decide which account pays, over the plan the sign-in check
- * reported. Code-host sign-ins and the SSH agent are inherited (ADR-097).
+ * reported. Code-host sign-ins and the SSH agent are inherited (ADR-097), as
+ * are ANTHROPIC_BASE_URL and OPENAI_BASE_URL, which point agents at a local
+ * replay server (ADEMark) when set.
  * Althar's own secrets and provider API keys are still excluded.
  */
 const INHERITED =
-  /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TMP|TEMP|LANG|LANGUAGE|TERM|TZ|COLORTERM|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|LC_[A-Z_]+|XDG_[A-Z_]+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy|GH_(TOKEN|ENTERPRISE_TOKEN|CONFIG_DIR|HOST)|GITHUB_(TOKEN|ENTERPRISE_TOKEN)|GLAB_(TOKEN|CONFIG_DIR)|GITLAB_(TOKEN|ACCESS_TOKEN|HOST)|SSH_AUTH_SOCK|SSH_AGENT_PID|SSH_ASKPASS|GIT_(SSH|SSH_COMMAND|ASKPASS|CONFIG_GLOBAL|CONFIG_SYSTEM|CONFIG_NOSYSTEM))$/
+  /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TMP|TEMP|LANG|LANGUAGE|TERM|TZ|COLORTERM|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|LC_[A-Z_]+|XDG_[A-Z_]+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy|GH_(TOKEN|ENTERPRISE_TOKEN|CONFIG_DIR|HOST)|GITHUB_(TOKEN|ENTERPRISE_TOKEN)|GLAB_(TOKEN|CONFIG_DIR)|GITLAB_(TOKEN|ACCESS_TOKEN|HOST)|(ANTHROPIC|OPENAI)_BASE_URL|SSH_AUTH_SOCK|SSH_AGENT_PID|SSH_ASKPASS|GIT_(SSH|SSH_COMMAND|ASKPASS|CONFIG_GLOBAL|CONFIG_SYSTEM|CONFIG_NOSYSTEM))$/
 
 export const childEnvironment = (
   spec: LaunchSpec,

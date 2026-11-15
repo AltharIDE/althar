@@ -12,7 +12,8 @@ import type { AgentDefinition, LaunchSpec } from './registry'
  * stands: the page to approve in the browser, a one-time code to type on
  * another, a code pasted back, done and who as, or why it stopped.
  *
- * Three kinds, as the agents offer them:
+ * Four kinds, as the agents offer them:
+ * Native Copilot's device flow runs in the runtime, without a child process.
  * - Claude Code's `claude auth login` opens the browser itself and comes back
  *   to its own callback; it also prints a page that ends in a code, which it
  *   reads from stdin, for a browser that can't reach back.
@@ -30,6 +31,10 @@ export type SignInWay = 'browser' | 'device'
 
 /** How an agent's sign-in runs inside Althar, where it can. */
 export type InAppSignIn =
+  | {
+      readonly kind: 'copilot-device'
+      readonly ways: ReadonlyArray<SignInWay>
+    }
   | {
       readonly kind: 'claude-login'
       readonly ways: ReadonlyArray<SignInWay>
@@ -72,6 +77,7 @@ export interface SignInFlowHandle {
 
 export interface SignInFlowOptions {
   readonly way: SignInWay
+  readonly host?: string
   readonly node?: string
   /** The account's home, as the agent's environment points at it; none for its usual folder. */
   readonly home?: Readonly<Record<string, string>>
@@ -123,7 +129,7 @@ export const startSignInFlow = (
   options: SignInFlowOptions,
 ): SignInFlowHandle | null => {
   const inApp = agent.signIn.inApp
-  if (inApp === undefined || !inApp.ways.includes(options.way)) return null
+  if (inApp === undefined || inApp.kind === 'copilot-device' || !inApp.ways.includes(options.way)) return null
   const node = options.node ?? adapterNode()
   const spec = inApp.run(node)
   // Its own environment too, for an agent started as a session is (ACP's `authenticate`), and a temporary folder of its own where it asks.

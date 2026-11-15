@@ -398,6 +398,24 @@ describe('the Settings tab', () => {
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
   })
 
+  it('looks again at once for an agent the person installed themselves', async () => {
+    let installed = false
+    const status = vi.fn(async () => ({
+      apiVersion: 1,
+      appVersion: '0.0.0',
+      agents: installed ? agents : withoutOpenCode,
+    }))
+    const { client } = fakeClient({ status })
+    withServices(<Settings />, client, fakeHost())
+    await userEvent.click(await screen.findByRole('tab', { name: /OpenCode/ }))
+    const install = screen.getByRole('region', { name: 'OpenCode isn’t on this Mac' })
+    // Installed in Terminal meanwhile: Check again finds it without the window going away and back.
+    installed = true
+    await userEvent.click(within(install).getByRole('button', { name: 'Check again' }))
+    expect(status).toHaveBeenLastCalledWith({ recheck: true })
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'OpenCode isn’t on this Mac' })).toBeNull())
+  })
+
   it('downloads an agent in its tab, says why a download stopped, and opens the page of one only its maker installs', async () => {
     let installing = false
     let finish: () => void = () => {}

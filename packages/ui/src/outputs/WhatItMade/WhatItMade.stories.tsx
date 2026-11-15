@@ -80,6 +80,27 @@ export const SeventySixPictures: Story = {
 }
 /** Nothing to look at: what it is, and what it checked. */
 export const NoPictures: Story = { args: { shots: [] } }
+
+export const AmendedFeature: Story = {
+  args: {
+    shots: [
+      ...Array.from({ length: 12 }, (_, i) => ({
+        ...SHOTS[i % SHOTS.length]!,
+        id: `screen-${i}`,
+        caption: `Feature screen ${i + 1}`,
+        note: 'From an earlier update',
+      })),
+      ...Array.from({ length: 3 }, (_, i) => ({
+        ...SHOTS[0]!,
+        id: `detail-${i}`,
+        caption: ['The amended panel', 'Button focus', 'Button pressed'][i]!,
+      })),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Show all 15' }))
+  },
+}
 /** Its lead said nothing of what it is: its pictures lead. */
 export const PicturesOnly: Story = { args: { story: null, checked: [], unverified: [] } }
 /** What can be done with the pictures, at the end of their heading's row: here, posting them to the pull request. */

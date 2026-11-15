@@ -16,6 +16,21 @@ import { change, fact } from './records'
  * an output (cards.ts), and the person can move any task either way.
  */
 
+/**
+ * Whether a task is an aside: on Scratch. An aside never installs, builds or runs its repository's setup (docs/decisions/tasks.md,
+ * "Asides"): its copy is read as it was made, and work that needs a build makes it a task.
+ */
+export const onScratch = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [task] = yield* sql<{ shelf: string | null }>`SELECT shelf FROM tasks WHERE id = ${taskId}`
+    return task?.shelf === 'scratch'
+  })
+
+/** What an aside's lead is told where it asks for an install, a build or the project running. */
+export const ASIDE_BUILDS =
+  "This is an aside: its copy has nothing installed, and an aside never installs, upgrades dependencies, runs the project's setup or builds, so it answers fast. Answer from what you can read. Where the person's question needs an install, a build, tests run or the project running, tell them it becomes a task, which they make with Make it a task over the composer: its lead gets its worktree set up and runs it."
+
 /** Puts a task on Scratch, or on the board with null, as the person or the coordinator says. */
 export const shelve = (taskId: string, shelf: 'scratch' | null, actorId: ActorId) =>
   Effect.gen(function* () {

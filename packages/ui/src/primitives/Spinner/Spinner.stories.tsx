@@ -9,17 +9,12 @@ const meta = { title: 'Primitives/Spinner', component: Spinner, args: { size: 'm
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Medium: Story = {}
-export const Small: Story = { args: { size: 'small' } }
-export const Large: Story = { args: { size: 'large' } }
-export const OnFill: Story = {
-  args: { tone: 'onFill' },
-  render: (args) => (
-    <span style={{ display: 'inline-flex', padding: 8, borderRadius: 7, background: 'var(--signal)' }}>
-      <Spinner {...args} />
-    </span>
-  ),
-}
+/** On a filled button it takes the button's words' colour: violet, then ink. */
+const fill = (background: string, color: string) => (
+  <span style={{ display: 'inline-flex', padding: 6, borderRadius: 7, background, color }}>
+    <Spinner tone="onFill" />
+  </span>
+)
 
 export const AllStates: Story = {
   render: () => (
@@ -28,15 +23,8 @@ export const AllStates: Story = {
         { state: 'small', node: <Spinner size="small" /> },
         { state: 'medium', node: <Spinner /> },
         { state: 'large', node: <Spinner size="large" /> },
-        {
-          state: 'on fill',
-          node: (
-            <span style={{ display: 'inline-flex', padding: 6, borderRadius: 7, background: 'var(--signal)' }}>
-              <Spinner tone="onFill" />
-            </span>
-          ),
-        },
-        { state: 'on ink', dark: true, node: <Spinner tone="onFill" /> },
+        { state: 'on fill', node: fill('var(--signal-fill)', 'var(--on-signal)') },
+        { state: 'on ink', node: fill('var(--ink-fill)', 'var(--on-ink)') },
       ]}
     />
   ),

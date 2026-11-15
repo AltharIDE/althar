@@ -92,9 +92,10 @@ describe('a reviewer a preset needs and doesn’t name', () => {
     assert.deepInclude(review, { agentId: 'codex', model: 'gpt-6-1-sol', skipped: false })
   })
 
-  it('is read after the merge, skipped in the run, where the preset checks after', () => {
+  it('keeps Small change’s reviewer before Ship; an explicitly after-merge preset still defers it', () => {
     const small = BUILT_IN.find((preset) => preset.name === 'Small change')!.parts
-    assert.deepInclude(reviewerOf([LEAD], [OPUS, SOL], small), { agentId: 'codex', model: 'gpt-6-1-sol', skipped: true })
+    assert.deepInclude(reviewerOf([LEAD], [OPUS, SOL], small), { agentId: 'codex', model: 'gpt-6-1-sol', skipped: false })
+    assert.deepInclude(reviewerOf([LEAD], [OPUS, SOL], { ...small, checked: 'after' }), { skipped: true })
   })
 
   it('keeps the plan’s own where it is another maker’s than the lead’s, with its effort, and replaces one of the lead’s maker', () => {

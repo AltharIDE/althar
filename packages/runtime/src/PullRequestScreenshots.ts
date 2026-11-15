@@ -1,5 +1,5 @@
 import { ConnectorFailed } from '@althar/connectors'
-import { type PictureReport, type ScreenshotNow, type ScreenshotsOnChange, screenshotsNow } from '@althar/contracts'
+import { type ScreenshotNow, type ScreenshotsOnChange } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Scope } from 'effect'
@@ -11,7 +11,7 @@ import { type ChangeSummary, Changes, type OnHost } from './Changes'
 import { RuntimeConfig } from './Config'
 import { Connections } from './Connections'
 import { ScreenshotsRefused } from './errors'
-import { evidenceOf, keptViewsIn } from './evidence'
+import { evidenceGallery } from './evidenceGallery'
 import { contained } from './Failures'
 import { Instance } from './Instance'
 import { Policies, postsScreenshots } from './Policies'
@@ -88,22 +88,8 @@ export class PullRequestScreenshots extends Context.Service<
       const nowOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ id: string; sequence: number; createdAt: string; content: string }>`
-            SELECT i.id, i.sequence, i.created_at, i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task'
-            WHERE t.task_id = ${taskId} AND i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('implement', 'settle')
-            ORDER BY i.sequence`
-          const [made] = yield* sql<{ at: string | null }>`
-            SELECT e.occurred_at AS at FROM record_events e WHERE e.aggregate_type = 'task' AND e.aggregate_id = ${taskId}
-              AND e.type = 'task.made_change' ORDER BY e.sequence DESC LIMIT 1`
-          const reports = rows.map((row): PictureReport => ({
-            id: row.id,
-            sequence: row.sequence,
-            createdAt: row.createdAt,
-            evidence: evidenceOf(parsed(row.content).evidence),
-            ...keptViewsIn(parsed(row.content).keptViews),
-          }))
-          // A task with a pull request is a change: its screenshots are those since it became one.
-          return screenshotsNow(reports, { change: true, since: made?.at ?? null })
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+          return thread === undefined ? [] : (yield* evidenceGallery(thread.id)).shots
         })
 
       /** What Althar keeps of a pull request's screenshots, by its link: nothing before they were first posted. */
@@ -391,15 +377,6 @@ export class PullRequestScreenshots extends Context.Service<
       })
     }),
   )
-}
-
-const parsed = (content: string): { readonly evidence?: unknown; readonly keptViews?: unknown } => {
-  try {
-    const value: unknown = JSON.parse(content)
-    return typeof value === 'object' && value !== null ? value : {}
-  } catch {
-    return {}
-  }
 }
 
 const refuse = (why: 'no_pictures', change: ChangeSummary) =>

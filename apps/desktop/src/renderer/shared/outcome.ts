@@ -1,4 +1,4 @@
-import { screenshotsNow, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
+import { screenshotNote, screenshotsNow, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
 import type { EvidencePiece, GalleryShot } from '@althar/ui'
 
 import { pieceOf, piecesOf } from './evidence'
@@ -10,8 +10,8 @@ import { pieceOf, piecesOf } from './evidence'
  * part that says what it is apart from the rest. A change in several
  * repositories is one task with a pull request in each: what it built says
  * what it is, and each description follows under its repository's name. How it looks now: the
- * pictures of its last state, each view once, as last taken: a later round's
- * replace an earlier one's but for the views it keeps, and a change's are
+ * persistent collection, each view once, as last reported: a later handoff
+ * updates only the views it names, and a change's are
  * never the options the person chose between, as `screenshotsNow` works
  * them out, which the runtime posts to its pull request by too (ADR-077,
  * ADR-079). And what its lead last checked of it, and what
@@ -79,16 +79,19 @@ export const outcomeOf = (snapshot: ThreadSnapshot): Outcome => {
         : splitStory(one ?? whole ?? '')
 
   const rounds = lead.map((item) => piecesOf(item.id, item.content.evidence).filter((piece) => piece.form !== 'picture'))
-  const now = screenshotsNow(
-    lead.map((item) => ({
-      id: item.id,
-      sequence: item.sequence,
-      createdAt: item.createdAt,
-      evidence: item.content.evidence,
-      keptViews: item.content.keptViews,
-    })),
-    { change: task.kind === 'change' || task.changes.length > 0, since: task.madeChangeAt ?? null },
-  )
+  const now =
+    snapshot.gallery?.shots ??
+    screenshotsNow(
+      lead.map((item) => ({
+        id: item.id,
+        sequence: item.sequence,
+        createdAt: item.createdAt,
+        evidence: item.content.evidence,
+        keptViews: item.content.keptViews,
+        gallery: item.content.gallery,
+      })),
+      { change: task.kind === 'change' || task.changes.length > 0, since: task.madeChangeAt ?? null },
+    )
   return {
     story,
     // Full size, each is called by what it shows.
@@ -97,7 +100,19 @@ export const outcomeOf = (snapshot: ThreadSnapshot): Outcome => {
         { kind: 'screenshot', caption: one.caption, picture: one.picture, command: null, exit: null, text: null, dropped: 0 },
         one.id,
       )
-      return piece.form === 'picture' ? [{ ...piece.shot, id: one.id, key: one.key, caption: one.caption, label: one.caption }] : []
+      const note = screenshotNote(one)
+      return piece.form === 'picture'
+        ? [
+            {
+              ...piece.shot,
+              id: one.id,
+              key: one.key,
+              caption: one.caption,
+              label: one.caption,
+              ...(note === undefined ? {} : { note, meta: [note, piece.shot.meta].filter(Boolean).join(' · ') }),
+            },
+          ]
+        : []
     }),
     checked: rounds.findLast((rest) => rest.length > 0) ?? [],
     // The last list it said, even empty: what an earlier step couldn't show, a later one may have.

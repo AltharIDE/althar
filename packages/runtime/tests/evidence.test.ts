@@ -13,6 +13,7 @@ import {
   EVIDENCE_TEXT_KEPT,
   evidenceForReview,
   evidenceOf,
+  saysNothing,
   taskShown,
   textKept,
   unverifiedIn,
@@ -190,6 +191,22 @@ describe('the evidence a lead hands', () => {
     assert.isTrue(text.endsWith('line 3999'))
     assert.strictEqual(dropped + text.split('\n').length, 4000)
     assert.deepStrictEqual(textKept('short'), { text: 'short', dropped: 0 })
+  })
+
+  it('leaves out only a note that says nothing: blank, or "Nothing to show" over a line of why; any note of what it found is kept', () => {
+    const note = (caption: string, text?: string) => ({ kind: 'note' as const, caption, ...(text === undefined ? {} : { text }) })
+    // Nothing to show: kept, it would draw "What it checked · ✓ Nothing to show".
+    assert.isTrue(saysNothing(note(' ', '')))
+    assert.isTrue(saysNothing(note('')))
+    assert.isTrue(saysNothing(note('Nothing to show', 'This was only a greeting, so nothing was changed or checked.')))
+    assert.isTrue(saysNothing(note('No evidence to check')))
+    assert.isTrue(saysNothing(note('There is nothing to verify here')))
+    // What a read-only look found, on a task that changed nothing: kept, whatever its caption begins with.
+    assert.isFalse(saysNothing(note('Where the retry backs off', 'Twice: in the client (client.ts:40) and in the queue.')))
+    assert.isFalse(saysNothing(note('Nothing calls the old webhook', 'git grep finds no caller of sendWebhookV1 outside its tests.')))
+    assert.isFalse(saysNothing(note('No tests cover the retry', 'retry.ts has no test file, and coverage shows 0% for it.')))
+    assert.isFalse(saysNothing(note('Nothing to show', 'x'.repeat(400))))
+    assert.isFalse(saysNothing({ kind: 'command', caption: 'Nothing to show', command: 'true', exit_code: 0, output: '' }))
   })
 })
 

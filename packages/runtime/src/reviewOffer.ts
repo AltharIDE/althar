@@ -19,20 +19,24 @@ export interface OfferFacts {
   readonly open: boolean
   /** Its plan's steps. */
   readonly steps: ReadonlyArray<PlanStep>
-  /** Its plan reads nothing of a review's own: the fast lane's reads after the merge, and a review of another's pull request. */
+  /**
+   * Its plan reads its review only once it merged (the fast lane's): one offered reads it before it ships instead. Kept for
+   * what reads the facts; it no longer keeps an offer back.
+   */
   readonly reviewsAfterMerge: boolean
+  /** A review of another's pull request: it has no work of its own to review. */
   readonly reads: boolean
   /** Its pull requests, open, merged or closed. */
   readonly pulls: ReadonlyArray<{ readonly state: string }>
 }
 
-/** Why a task can't be offered a review: it has one, it is merged or not open, its plan reads none of a review's own. */
+/** Why a task can't be offered a review: it has one, it is merged or not open, it reviews another's pull request. */
 export type NotOffered = 'reviewed' | 'merged' | 'closed' | 'no_review_of_its_own'
 
 /** Whether a task could have a review offered at all, or why not. */
 export const offerable = (facts: OfferFacts): NotOffered | undefined => {
   if (!facts.open) return 'closed'
-  if (facts.reviewsAfterMerge || facts.reads) return 'no_review_of_its_own'
+  if (facts.reads) return 'no_review_of_its_own'
   if (facts.steps.some((step) => step.key === 'review' && !step.skipped)) return 'reviewed'
   // Its change in: the one it shows is the open one, else its latest.
   const shown = facts.pulls.find((one) => one.state === 'open') ?? facts.pulls.at(-1)

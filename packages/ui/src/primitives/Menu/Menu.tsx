@@ -115,6 +115,7 @@ export function Menu({
            * chosen item put it, such as a field to type in.
            */
           inert={!(open ?? shown)}
+          onClick={(event) => event.stopPropagation()}
           /* Its button opens and closes it: pressed as the menu goes, it opens it again, which a dismissal would undo at once. */
           onInteractOutside={(event) => {
             if (event.target instanceof Node && button.current?.contains(event.target)) event.preventDefault()

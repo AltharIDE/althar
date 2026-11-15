@@ -44,7 +44,7 @@ export const Turning: Story = {
 }
 
 export const AllStates: Story = {
-  parameters: statesParameters,
+  parameters: { ...statesParameters, layout: 'padded' },
   render: () => (
     <States
       cells={[

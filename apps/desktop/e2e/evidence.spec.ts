@@ -1,8 +1,10 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { expect, type Locator, test } from '@playwright/test'
+import { artifactPath } from '@althar/runtime/artifacts'
 
 import { repository } from '../tests/repository'
 import { launch, openFirstProject, startTask, still, toConversation } from './support'
@@ -49,6 +51,27 @@ test('shows what the task built and what the lead showed of it: atop its outputs
     await page.screenshot({ path: 'test-results/evidence-lightbox.png' })
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
+
+    // The app's own CSP and image protocol permit decoding a GIF poster, while serving its original animation unchanged.
+    const gif = readFileSync(new URL('../../../packages/ui/src/fixtures/recording.gif', import.meta.url))
+    const digest = createHash('sha256').update(gif).digest('hex')
+    const keptGif = artifactPath(join(home, 'profile', 'artifacts'), digest)
+    mkdirSync(join(keptGif, '..'), { recursive: true })
+    writeFileSync(keptGif, gif)
+    const poster = await page.evaluate(async (url) => {
+      const response = await fetch(url)
+      const type = response.headers.get('content-type')
+      const bitmap = await createImageBitmap(await response.blob())
+      try {
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+        canvas.getContext('2d')?.drawImage(bitmap, 0, 0)
+        const still = await canvas.convertToBlob({ type: 'image/png' })
+        return { type, width: bitmap.width, height: bitmap.height, poster: still.type }
+      } finally {
+        bitmap.close()
+      }
+    }, `althar-picture://shot/${digest}`)
+    expect(poster).toEqual({ type: 'image/gif', width: 240, height: 100, poster: 'image/png' })
 
     // In the conversation, the lead's report is what it said last: what it built, its screenshot large, what it checked
     // and what it couldn't; no card closes the thread (ADR-042).

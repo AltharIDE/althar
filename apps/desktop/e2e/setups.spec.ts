@@ -31,11 +31,50 @@ test('changes a repository’s setup in Running: kept, read back, and a refused 
     await still(page)
     await group.screenshot({ path: '../../test-results/setups-empty.png', scale: 'css' })
 
+    // Observe completion without reading the profile database, which the runtime holds exclusively.
+    await page.evaluate(() => {
+      const state = window as unknown as { setupsKept: number }
+      state.setupsKept = 0
+      const pending = new Set<string>()
+      const watched = new WeakSet<MessagePort>()
+      const packets = (value: unknown): Record<string, unknown>[] =>
+        Array.isArray(value)
+          ? value.flatMap(packets)
+          : typeof value === 'object' && value !== null
+            ? [value as Record<string, unknown>]
+            : []
+      // oxlint-disable-next-line typescript/unbound-method -- applied to the port it was called on
+      const post = MessagePort.prototype.postMessage
+      MessagePort.prototype.postMessage = function (this: MessagePort, ...args: Parameters<MessagePort['postMessage']>) {
+        for (const packet of packets(args[0])) {
+          if (packet._tag !== 'Request' || packet.tag !== 'SetRepository') continue
+          pending.add(String(packet.id))
+          if (watched.has(this)) continue
+          watched.add(this)
+          const answered = (event: MessageEvent<unknown>) => {
+            for (const reply of packets(event.data)) {
+              if (reply._tag !== 'Exit' || !pending.delete(String(reply.requestId))) continue
+              if ((reply.exit as { _tag?: string } | undefined)?._tag === 'Success') state.setupsKept += 1
+              if (state.setupsKept === 2) {
+                MessagePort.prototype.postMessage = post
+                this.removeEventListener('message', answered)
+              }
+            }
+          }
+          this.addEventListener('message', answered)
+        }
+        post.apply(this, args)
+      } as MessagePort['postMessage']
+    })
+
     await commands.click()
     await page.keyboard.type('bun install --frozen-lockfile\nbunx playwright install chromium')
     await files.click()
     await page.keyboard.type('.env\n.env.local')
     await page.keyboard.press('Tab')
+
+    // A reload follows both successful replies, rather than just their optimistic values in the window.
+    await expect.poll(() => page.evaluate(() => (window as unknown as { setupsKept: number }).setupsKept)).toBe(2)
 
     // Away to the work and back, then read afresh: the window starts over and asks the runtime.
     await backToWork(page)

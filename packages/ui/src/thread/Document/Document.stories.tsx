@@ -15,8 +15,6 @@ const SHORT = '# Rate limits on refunds\n\nRefunds draw on the same per-partner 
 type Story = StoryObj<typeof meta>
 
 export const Long: Story = {}
-/** Short enough to show whole. */
-export const Short: Story = { args: { title: 'Next', body: SHORT } }
 
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button:last-of-type', focus: 'button:last-of-type', pressed: 'button:last-of-type' }),

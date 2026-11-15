@@ -7,6 +7,7 @@ import { Button } from '../../primitives/Button/Button'
 import { CopyButton } from '../../primitives/CopyButton/CopyButton'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './ConnectParts.module.css'
@@ -36,9 +37,10 @@ export function ConnectText({ tone = 'body', children, className }: ConnectTextP
 
 /** Something found, with a tick, or what is wrong, in red: GitLab answers at git.halyard.dev. */
 export function ConnectFound({ tone = 'ok', children }: { tone?: 'ok' | 'no'; children: ReactNode }) {
+  if (tone === 'no') return <Problem>{children}</Problem>
   return (
-    <p className={cx(s.found, tone === 'no' && s.foundNo)} role={tone === 'no' ? 'alert' : undefined}>
-      <Icon name={tone === 'ok' ? 'check' : 'close'} size={12} />
+    <p className={s.found}>
+      <Icon name="check" size={12} />
       <span>{children}</span>
     </p>
   )

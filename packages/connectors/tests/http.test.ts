@@ -2,11 +2,23 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Exit, Logger, Schema } from 'effect'
 
 import { ConnectorFailed } from '../src/errors'
-import { ETAG_TEXT_KEPT, ETAGS_KEPT, failureOf, makeHttp, PAGES_FOLLOWED, paged } from '../src/http'
+import { ETAG_TEXT_KEPT, ETAGS_KEPT, failureOf, makeHttp, PAGES_FOLLOWED, paged, withoutTrailingSlashes } from '../src/http'
 import type { Product } from '../src/model'
 import { stubFetch } from './stub'
 
 const Thing = Schema.Struct({ name: Schema.String })
+it('normalizes URL endings while preserving long internal slash runs and non-slash suffixes', () => {
+  for (const [input, expected] of [
+    ['', ''],
+    ['/', ''],
+    ['https://host.test/api/v3///', 'https://host.test/api/v3'],
+    ['https://host.test/api/v3', 'https://host.test/api/v3'],
+  ])
+    assert.strictEqual(withoutTrailingSlashes(input ?? ''), expected)
+  const internal = `https://host.test/${'/'.repeat(100000)}x`
+  assert.strictEqual(withoutTrailingSlashes(internal), internal)
+  assert.strictEqual(withoutTrailingSlashes(`${internal}${'/'.repeat(100000)}`), internal)
+})
 const failure = <A>(exit: Exit.Exit<A, ConnectorFailed>) => {
   assert.isTrue(Exit.isFailure(exit))
   const error = Exit.isFailure(exit) ? exit.cause.reasons.find((reason) => reason._tag === 'Fail') : undefined

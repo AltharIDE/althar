@@ -1,7 +1,7 @@
 .work {
   display: block;
 }
-/* one faint line: it sits back from the words either side */
+/* one quiet line: it sits back from the words either side, small and grey, but still reads */
 .row {
   display: flex;
   align-items: center;
@@ -9,13 +9,17 @@
   max-width: 100%;
   min-height: 22px;
   font-size: 12px;
-  color: var(--t-4);
+  color: var(--t-3);
   text-align: left;
   transition: color var(--fast) var(--ease);
 }
 button.row:hover,
 .work[data-state='open'] .row {
-  color: var(--t-3);
+  color: var(--t-1);
+}
+/* the ring rounds its corners, as every other row's does */
+button.row:focus-visible {
+  border-radius: var(--r-sm);
 }
 .who {
   flex: none;

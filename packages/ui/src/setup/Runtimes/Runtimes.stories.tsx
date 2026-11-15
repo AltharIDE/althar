@@ -26,9 +26,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** A first run: one signed in, one signed out, one not installed. Each says what it needs, and nothing more. */
-export const FirstRun: Story = {}
-
 /** An agent with several accounts lists them under its row (Setup/Accounts). */
 export const WithAccounts: Story = {
   args: {
@@ -40,9 +37,6 @@ export const WithAccounts: Story = {
     await expect(within(canvasElement).getByRole('list', { name: /accounts$/ })).toBeInTheDocument()
   },
 }
-
-/** Once work runs on them: out of usage with the work moved, signed out with tasks waiting (a call of yours), too old, being checked. */
-export const EveryState: Story = { args: { runtimes: EVERY_STATE } }
 
 /* Signing in, and changing your mind: the row follows. */
 function Signing(args: RuntimesProps) {
@@ -140,6 +134,11 @@ export const ReadOnly: Story = {
   args: { runtimes: EVERY_STATE, onSignIn: undefined, onCancel: undefined, onCheck: undefined, onHelp: undefined, onAdd: undefined },
 }
 
+/**
+ * Every state: a first run (one signed in, one signed out, one not installed, each saying what it needs and nothing
+ * more); once work runs on them (out of usage with the work moved, signed out with tasks waiting, too old, being
+ * checked, one that couldn't be); hovered, focused, and narrow.
+ */
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button', focus: 'button', pressed: 'button' }),
   render: (args) => (

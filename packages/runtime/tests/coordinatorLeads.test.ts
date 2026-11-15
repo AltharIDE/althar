@@ -1,7 +1,8 @@
-import { rmSync } from 'node:fs'
+import { removeTreeSync } from '@althar/testing'
+import {} from 'node:fs'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
@@ -65,7 +66,7 @@ describe('a quick task’s lead making it a change', () => {
       // Its agent stopped first, as Windows won't remove the folder a process works in, and tried again while what ended
       // there still holds it a moment.
       yield* (yield* Sessions).stop(task?.threadId ?? '')
-      rmSync(task?.path ?? '', { recursive: true, force: true, maxRetries: 5 })
+      removeTreeSync(task?.path ?? '')
       const lead: ToolAccess = {
         role: 'lead',
         projectId: project.projectId,
@@ -132,9 +133,10 @@ describe('the buttons on a task’s lead, as tools', () => {
         yield* titles(one.threadId),
         "The coordinator changed the lead to Fake claude-code's default model: codex is out. It takes over from its next turn.",
       )
+      // A lead changes its own task's lead too, on the person's word: from its next turn.
       assert.match(
-        yield* callTool(lead, 'change_lead', { task: other.slug, lead: { agent: 'codex' } }),
-        /is your own task: the person changes who leads it/,
+        yield* callTool(lead, 'change_lead', { lead: { agent: 'claude-code' }, why: 'the person asked' }),
+        /^read-the-logs: changed the lead to Fake claude-code's default model\./,
       )
       assert.match(
         yield* callTool(coordinator, 'change_lead', { task: one.slug, lead: { agent: 'nobody' } }),
@@ -147,6 +149,12 @@ describe('the buttons on a task’s lead, as tools', () => {
         "Nothing changed: sketch-the-settings's lead's last turn didn't fail.",
       )
 
+      // Changing the lead answers before its replacement session starts. Compact needs that session, not just the recorded choice.
+      const sessions = yield* Sessions
+      yield* until(
+        Effect.map(sessions.running(one.threadId), (running) => (Option.isSome(running) ? [running.value.agentId] : [])),
+        (agents) => agents[0] === 'claude-code',
+      )
       // Compact, from another task's lead, signed with its task.
       assert.match(yield* callTool(lead, 'compact_lead', { task: one.slug, why: 'its context is full' }), /lead compacts its context/)
       assert.include(yield* titles(one.threadId), 'The lead of “Read the logs” had its lead compact its context: its context is full')

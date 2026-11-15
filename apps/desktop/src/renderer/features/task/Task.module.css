@@ -46,8 +46,6 @@
 
 .failure {
   margin: 0;
-  color: var(--danger);
-  font-size: 13px;
   /* Some say what git said, line by line. */
   white-space: pre-line;
 }

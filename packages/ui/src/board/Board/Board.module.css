@@ -43,8 +43,11 @@
   letter-spacing: -0.01em;
   color: var(--t-1);
 }
+/* the name takes the room, so the count and the chevron keep the end whether a count shows or not */
+.head .title {
+  margin-right: auto;
+}
 .count {
-  margin-left: auto;
   font: 500 11.5px/1 var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--t-3);
@@ -186,14 +189,13 @@ span.you {
 }
 .empty {
   margin: 0;
-  padding: 22px 12px;
   border: 1.5px dashed var(--line-2);
   border-radius: 12px;
   text-align: center;
   font-size: 12px;
   color: var(--t-2);
 }
-/* an empty box that says what will be here: its title, how it gets here, and what starts it */
+/* an empty box says what will be here: its title, how it gets here, and what starts it */
 .says {
   display: flex;
   flex-direction: column;

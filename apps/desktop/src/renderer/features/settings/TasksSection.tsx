@@ -1,20 +1,21 @@
 import {
   newProjectDefaultsText,
   NewProjectDefaults,
-  PlanPreview,
-  PLAN_PREVIEW_SAMPLE,
   PlansAndReviews,
-  RoundsPreview,
   SettingGroup,
-  SettingPreviews,
-  TASK_PREVIEW_SEAL,
+  SettingList,
+  SettingRow,
+  Segmented,
+  Icon,
   DiffersLine,
+  Problem,
 } from '@althar/ui'
 import type { NewProjectDefaultsValue } from '@althar/ui'
 
 import { type DefaultKey, useDifferingProjects } from './useDifferingProjects'
 import { useNewProjectDefaults } from './useNewProjectDefaults'
 import { usePlansAndReviews } from './usePlansAndReviews'
+import { type SendMidTurn, useSendMidTurn } from './useSendMidTurn'
 import s from './Settings.module.css'
 import { text } from './text'
 
@@ -33,26 +34,39 @@ const worded = (key: DefaultKey, value: unknown): string => {
   if (key === 'afterMergeReview')
     return newProjectDefaultsText.afterMergeReview.options[value as NewProjectDefaultsValue['afterMergeReview']].label
   if (key === 'usageLimit') return newProjectDefaultsText.usageLimit.options[value as NewProjectDefaultsValue['usageLimit']].label
+  if (key === 'accountStrategy')
+    return newProjectDefaultsText.accountStrategy.options[value as NewProjectDefaultsValue['accountStrategy']].label
   return String(value)
 }
 
 export function TasksSection() {
   const plans = usePlansAndReviews()
+  const sending = useSendMidTurn()
   const defaults = useNewProjectDefaults()
   const { differing, inEveryProject, busy, failed } = useDifferingProjects(defaults?.value ?? null)
   return (
     <>
       {plans !== null && (
-        <SettingPreviews>
-          <PlanPreview countdown={plans.value.countdown} sample={PLAN_PREVIEW_SAMPLE} />
-          {/* A review and the one check of its fixes, whatever the old rounds setting kept: no fix is reviewed again in whole. */}
-          <RoundsPreview rounds={2} out={plans.value.roundsOut} facts={TASK_PREVIEW_SEAL} />
-        </SettingPreviews>
-      )}
-      {plans !== null && (
         <SettingGroup title={text.everyTask} headingLevel={2}>
           <PlansAndReviews value={plans.value} onChange={plans.set} />
         </SettingGroup>
+      )}
+      {sending !== null && (
+        <SettingList>
+          <SettingRow title={text.sendMidTurnTitle} note={text.sendMidTurnNote} glyph={<Icon name="up" size={15} />}>
+            {() => (
+              <Segmented<SendMidTurn>
+                label={text.sendMidTurnTitle}
+                value={sending.to}
+                onChange={sending.set}
+                options={[
+                  { value: 'queue', label: text.sendMidTurnQueue },
+                  { value: 'steer', label: text.sendMidTurnSteer },
+                ]}
+              />
+            )}
+          </SettingRow>
+        </SettingList>
       )}
       {defaults !== null && (
         <SettingGroup title={text.newProjects} note={text.newProjectsNote} headingLevel={2}>
@@ -74,10 +88,8 @@ export function TasksSection() {
           />
         </SettingGroup>
       )}
-      {(plans?.failed === true || defaults?.failed === true) && (
-        <p role="alert" className={s.failed}>
-          {text.failed}
-        </p>
+      {(plans?.failed === true || defaults?.failed === true || sending?.failed === true) && (
+        <Problem className={s.failed}>{text.failed}</Problem>
       )}
     </>
   )

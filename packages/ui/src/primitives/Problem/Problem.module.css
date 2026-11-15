@@ -1,0 +1,64 @@
+/* the mark on the first line, the words beside it, what fixes it at the end */
+.problem {
+  --mark: 13px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--danger);
+  text-wrap: pretty;
+  /* a long path or address breaks rather than running past the edge */
+  overflow-wrap: anywhere;
+}
+.small {
+  --mark: 12px;
+  gap: 5px;
+  font-size: 11.5px;
+}
+.mark {
+  margin-top: calc((1lh - var(--mark)) / 2);
+}
+.words {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.action {
+  display: inline-flex;
+  flex: none;
+  align-self: center;
+  align-items: center;
+  gap: 8px;
+  margin-block: -2px;
+  color: var(--t-1);
+}
+
+/* on its own: a faint wash, the words in ink so they read easily on it */
+.banner {
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-lg);
+  background: var(--danger-dim);
+}
+.banner .words {
+  color: var(--t-1);
+}
+.banner .mark {
+  color: var(--danger);
+}
+/* with its fix beside it: the first line of words centred on the button, the mark on that line, however many lines follow */
+.banner:has(> .action) {
+  --beside: 26px;
+}
+.banner:has(> .action) .words {
+  padding-block: calc((var(--beside) - 1lh) / 2);
+}
+.banner:has(> .action) .mark {
+  margin-top: calc((var(--beside) - var(--mark)) / 2);
+}
+.banner:has(> .action) .action {
+  align-self: flex-start;
+  margin-block: 0;
+}

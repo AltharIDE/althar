@@ -27,6 +27,7 @@ import {
 
 import { piecesOf, shotsOf } from '../../shared/evidence'
 import { handedBy } from '../../shared/handed'
+import { linkedWords } from '../../shared/noteLinks'
 import { HandedBack } from '../../shared/HandedBack'
 import { useModelNames } from '../../shared/modelNames'
 import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type WorkStep, withoutShotList } from '../../shared/rounds'
@@ -34,7 +35,7 @@ import type { Block, StepResult } from '../../shared/thread'
 import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
 import { CanvasLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
-import { WayOut } from '../../shared/WayOut'
+import { FailedTurn } from '../../shared/WayOut'
 import { PublishedReport, reportText, ReviewReport } from './Reports'
 import { HelperWork } from './HelperWork'
 import s from './TaskThread.module.css'
@@ -115,6 +116,8 @@ type Shared = Omit<ComponentProps<typeof ThreadBlocks>, 'blocks' | 'card' | 'que
 
 export interface TaskThreadProps extends Shared {
   readonly rounds: ReadonlyArray<RoundBlock>
+  /** Complete collection at the latest handoff; older rounds retain their own evidence. */
+  readonly gallery?: { readonly reportId: string; readonly shots: ReadonlyArray<GalleryShot> }
   /** What each document was last changed by, so one handed back is read again after an edit (documentVersions). */
   readonly versionOf: (whole: string) => string
   /** Opens another task, by its thread: one this task's lead started, from the line that says so. */
@@ -189,6 +192,7 @@ interface RoundProps {
   readonly signed?: { readonly voice: string; readonly mark: ReactNode }
   /** The names of its pictures an earlier round showed already: shown small, as retakes. */
   readonly retakes: ReadonlyArray<string>
+  readonly gallery?: ReadonlyArray<GalleryShot>
   /** What each document it hands back was last changed by. */
   readonly versions: Readonly<Record<string, string>>
   readonly threadId: string
@@ -208,6 +212,7 @@ const RoundView = memo(function RoundView({
   model,
   signed,
   retakes,
+  gallery,
   versions,
   threadId,
   worktree,
@@ -266,8 +271,8 @@ const RoundView = memo(function RoundView({
   const report = block.report
   const shown = report === null ? null : shownBy(report)
   const before = new Set(retakes)
-  const fresh = shown?.shots.filter((shot) => !before.has(shotName(shot.caption) ?? shot.id)) ?? []
-  const retaken = shown?.shots.filter((shot) => !fresh.includes(shot)) ?? []
+  const fresh = gallery ?? shown?.shots.filter((shot) => !before.has(shotName(shot.caption) ?? shot.id)) ?? []
+  const retaken = gallery === undefined ? (shown?.shots.filter((shot) => !fresh.includes(shot)) ?? []) : []
   const names = new Set(fresh.flatMap((shot) => shotName(shot.caption) ?? []))
   const showing = shown !== null && (
     <>
@@ -306,6 +311,18 @@ const RoundView = memo(function RoundView({
       at={block.at}
       {...(copy === undefined ? {} : { copy })}
       {...(report === null ? {} : { 'data-item': report.id })}
+      // Every message it shows, so a search can bring the person to the one it found.
+      data-items={[
+        ...new Set(
+          [
+            ...block.parts.flatMap((part) => (part.kind === 'message' ? [part.id] : [])),
+            ack?.id,
+            block.result?.id,
+            block.writing?.id,
+            report?.id,
+          ].filter((id) => id !== undefined),
+        ),
+      ].join(' ')}
     >
       {work !== null && (
         <WorkedFor
@@ -354,18 +371,14 @@ const RoundView = memo(function RoundView({
       {pictures(block.shown.after)}
       <CanvasLines drawn={block.drawn} />
       {block.failed !== null && (
-        <>
-          <AltharLine tone="warning">{block.failed.text}</AltharLine>
-          {block.failed.detail !== undefined && <p className={s.detail}>{block.failed.detail}</p>}
-          {out !== null && (
-            <WayOut
-              failure={block.failed.failure}
-              {...(out.again ? { onTryAgain } : {})}
-              {...(out.compact ? { onCompact } : {})}
-              {...(out.signIn === null ? {} : { onSignIn: () => onSignIn(out.signIn ?? '') })}
-            />
-          )}
-        </>
+        <FailedTurn
+          text={block.failed.text}
+          detail={block.failed.detail}
+          failure={block.failed.failure}
+          {...(out?.again === true ? { onTryAgain } : {})}
+          {...(out?.compact === true ? { onCompact } : {})}
+          {...(out == null || out.signIn === null ? {} : { onSignIn: () => onSignIn(out.signIn ?? '') })}
+        />
       )}
     </Round>
   )
@@ -373,10 +386,24 @@ const RoundView = memo(function RoundView({
 
 /** What the person said, which draws from nothing but itself. */
 const YouView = memo(
-  function YouView({ block, threadId }: { block: Block; threadId: string }) {
-    return <ThreadBlocks threadId={threadId} blocks={[block]} />
+  function YouView({
+    block,
+    threadId,
+    undoable,
+    onUndoFrom,
+  }: {
+    block: Block
+    threadId: string
+    undoable: boolean
+    onUndoFrom?: ((id: string) => void) | undefined
+  }) {
+    return <ThreadBlocks threadId={threadId} blocks={[block]} undoable={undoable ? [block.id] : []} onUndoFrom={onUndoFrom} />
   },
-  (before, after) => before.threadId === after.threadId && same(before.block, after.block),
+  (before, after) =>
+    before.threadId === after.threadId &&
+    before.undoable === after.undoable &&
+    before.onUndoFrom === after.onUndoFrom &&
+    same(before.block, after.block),
 )
 
 /** What the thread says of a task this task's lead started, before its title, which opens it. */
@@ -389,6 +416,7 @@ export function TaskThread({
   started,
   settledOf,
   reviewing = null,
+  gallery,
   stepAction,
   ...shared
 }: TaskThreadProps) {
@@ -440,6 +468,7 @@ export function TaskThread({
         model={modelOf(block.agentId, block.model)}
         {...(shared.signed === undefined ? {} : { signed: shared.signed })}
         retakes={retakes}
+        {...(block.report?.id === gallery?.reportId ? { gallery: gallery?.shots } : {})}
         versions={Object.fromEntries(documentsOf(block).map((whole) => [whole, versionOf(whole)]))}
         threadId={threadId}
         worktree={worktree}
@@ -472,13 +501,13 @@ export function TaskThread({
       case 'althar':
         if (block.task !== undefined && started !== undefined) return <Fragment key={block.id}>{started(block.task)}</Fragment>
         return (
-          <AltharLine key={block.id} tone={block.tone}>
+          <AltharLine key={block.id} tone={block.tone} {...(block.details === undefined ? {} : { details: block.details })}>
             {block.task !== undefined && onOpenTask !== undefined ? (
               <>
                 {STARTED} <LinkButton onClick={() => onOpenTask(block.task?.threadId ?? '')}>{block.task.title}</LinkButton>
               </>
             ) : (
-              block.text
+              linkedWords(block.text, block.links)
             )}
           </AltharLine>
         )
@@ -554,7 +583,15 @@ export function TaskThread({
           </div>
         )
       case 'you':
-        return <YouView key={block.id} block={block} threadId={threadId} />
+        return (
+          <YouView
+            key={block.id}
+            block={block}
+            threadId={threadId}
+            undoable={shared.undoable?.includes(block.id) === true}
+            onUndoFrom={shared.onUndoFrom}
+          />
+        )
       default:
         return <ThreadBlocks key={block.id} {...shared} blocks={[block as Block]} />
     }

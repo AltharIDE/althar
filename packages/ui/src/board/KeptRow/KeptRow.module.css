@@ -20,7 +20,7 @@
   font-size: 11.5px;
   color: var(--t-3);
 }
-/* above the row's own button, stretched over it; shown as the row is hovered or has the focus, always where nothing hovers */
+/* above the row's own button, stretched over it; shown as the row is hovered or has the focus, always where nothing hovers, and while what went wrong asks for it again */
 .done {
   grid-area: done;
   position: relative;
@@ -29,7 +29,8 @@
   transition: opacity var(--fast) var(--ease);
 }
 .row:hover .done,
-.row:focus-within .done {
+.row:focus-within .done,
+.row:has(.error) .done {
   opacity: 1;
 }
 @media (hover: none) {
@@ -41,8 +42,4 @@
   grid-area: error;
   position: relative;
   z-index: 1;
-  margin: 2px 0 0;
-  font-size: 11.5px;
-  line-height: 1.45;
-  color: var(--danger);
 }

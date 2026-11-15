@@ -100,15 +100,18 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
-  it.effect('refuses to review a pull request it didn’t open, without asking Bitbucket', () =>
+  it.effect('reads a pull request for review and refuses self-approval before posting', () =>
     Effect.gen(function* () {
-      const { host, sent } = cloud([])
-      assert.isFalse(host.capabilities.reviews)
-      const read = yield* Effect.flip(host.changeToReview(ace, 552))
-      assert.deepInclude(read, { reason: 'rejected', message: 'Althar can’t review a pull request on this host yet.' })
-      const posted = yield* Effect.flip(host.postReview(ace, 552, { event: 'comment', body: 'b', commit: null, comments: [] }))
+      const { host, sent } = cloud([
+        ['GET', PR, { json: pull() }],
+        ['GET', `${CLOUD}/workspaces/atlassian/members/${encodeURIComponent(vincent.uuid)}`, { json: {} }],
+        ['GET', `${CLOUD}/user`, { json: vincent }],
+      ])
+      assert.isTrue(host.capabilities.reviews)
+      assert.deepInclude(yield* host.changeToReview(ace, 552), { member: true, fork: null, baseSha: 'd00fcf783635' })
+      const posted = yield* Effect.flip(host.postReview(ace, 552, { event: 'approve', body: 'b', commit: null, comments: [] }))
       assert.strictEqual(posted.reason, 'rejected')
-      assert.lengthOf(sent, 0)
+      assert.isTrue(sent.every((one) => one.method === 'GET'))
     }),
   )
 
@@ -1169,6 +1172,15 @@ const whoami = (name: string | null, id?: string): Route => [
 ]
 
 describe('Bitbucket Data Center as a code host', () => {
+  it.effect('reads the landed commit from the merged PR, separately from its source head', () =>
+    Effect.gen(function* () {
+      const { host } = center([['GET', PULL, { json: pr({ state: 'MERGED', properties: { mergeCommit: { id: 'landed' } } }) }]])
+      const seen = yield* host.change(prj, 101)
+      assert.strictEqual(seen.mergeCommit, 'landed')
+      assert.strictEqual(seen.headSha, 'babecafebabecafebabecafebabecafebabecafe')
+    }),
+  )
+
   it.effect('says who it is signed in as, from the header it answers with', () =>
     Effect.gen(function* () {
       const { host, sent } = center([whoami('jcitizen', '101'), ['GET', `${DC}/users?filter=jcitizen&limit=100`, { json: page([jane]) }]])
@@ -1178,7 +1190,7 @@ describe('Bitbucket Data Center as a code host', () => {
         drafts: true,
         checkLogs: false,
         threads: true,
-        reviews: false,
+        reviews: true,
         pictures: false,
         reopen: true,
         rerun: false,
@@ -1193,16 +1205,22 @@ describe('Bitbucket Data Center as a code host', () => {
     }),
   )
 
-  it.effect('refuses to review a pull request it didn’t open, without asking Data Center', () =>
+  it.effect('reads Data Center review metadata, membership and the target commit', () =>
     Effect.gen(function* () {
-      const { host, sent } = center([])
-      const repository = { id: '1', path: ['PRJ', 'my-repo'], defaultBranch: 'main', webUrl: '', canPush: true, merges: [] }
-      assert.strictEqual((yield* Effect.flip(host.changeToReview(repository, 1))).reason, 'rejected')
-      assert.strictEqual(
-        (yield* Effect.flip(host.postReview(repository, 1, { event: 'approve', body: 'b', commit: null, comments: [] }))).reason,
-        'rejected',
-      )
-      assert.lengthOf(sent, 0)
+      const { host } = center([
+        ['GET', `${DC}/projects/PRJ/repos/my-repo/pull-requests/101`, { json: pr() }],
+        [
+          'GET',
+          `${DC}/users?filter=tom&permission=REPO_WRITE&permission.projectKey=PRJ&permission.repositorySlug=my-repo&limit=100`,
+          { json: page([tom]) },
+        ],
+      ])
+      assert.isTrue(host.capabilities.reviews)
+      assert.deepInclude(yield* host.changeToReview(prj, 101), {
+        member: true,
+        fork: null,
+        baseSha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+      })
     }),
   )
 

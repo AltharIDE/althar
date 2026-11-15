@@ -38,6 +38,7 @@ export const text = {
   skipped: 'Skipped',
   running: 'Running',
   starting: 'Starting',
+  needsYou: 'Needs you',
   /* What each run ends in. */
   endNone: `Nothing leaves ${device.this}`,
   endDraft: 'Open a draft pull request',
@@ -241,6 +242,7 @@ export const runWords = (run: AutomationRun): string => {
     case 'skipped':
       return run.reason ?? text.skipped
     case 'running':
+      if (run.task?.needsYou) return what === null ? text.needsYou : `${text.needsYou} · ${what}`
       return what === null ? text.running : `${text.running} · ${what}`
     case 'starting':
       return text.starting
@@ -250,7 +252,7 @@ export const runWords = (run: AutomationRun): string => {
 /** A run as the kit's marks show it. */
 export const markOf = (run: AutomationRun, now: Date = new Date()) => ({
   id: run.id,
-  state: runStateOf(run.state),
+  state: live(run) && run.task?.needsYou ? AutomationRunState.NeedsYou : runStateOf(run.state),
   at: runAt(run.at, now),
   words: runWords(run),
 })
@@ -258,6 +260,9 @@ export const markOf = (run: AutomationRun, now: Date = new Date()) => ({
 /* ---- where it stands -------------------------------------------------------------------- */
 
 const live = (run: AutomationRun | undefined) => run?.state === 'running' || run?.state === 'starting'
+
+/** A run remains under way even after a later scheduled slot was skipped. */
+export const activeRun = (runs: ReadonlyArray<AutomationRun>) => runs.find(live)
 
 /** When a run under way started: its time today, or its day. */
 const since = (run: AutomationRun, now: Date) => (daysFrom(now, new Date(run.at)) === 0 ? clockOf(new Date(run.at)) : runAt(run.at, now))
@@ -280,8 +285,9 @@ export const standingOf = (one: AutomationSummary, allPaused: boolean, now: Date
     return { tone: 'yours', paused: true, words: text.pausedItself, status: text.pausedItself, dot: 'yours' }
   if (one.state !== 'on') return { tone: 'paused', paused: true, words: text.paused, status: text.paused, dot: 'off' }
   if (allPaused) return { tone: 'paused', paused: true, words: text.paused, status: text.allPaused, dot: 'off' }
-  const last = one.latest[0]
+  const last = activeRun(one.latest)
   if (last !== undefined && live(last)) {
+    if (last.task?.needsYou) return { tone: 'yours', paused: false, words: text.needsYou, status: text.needsYou, dot: 'yours' }
     const words = text.runningSince(since(last, now))
     return { tone: 'live', paused: false, words, status: words, dot: 'on' }
   }
@@ -298,7 +304,7 @@ export const inOrder = (all: ReadonlyArray<AutomationSummary>): ReadonlyArray<Au
 
 /** Some automation paused itself, and waits on the person to say what to do. */
 export const needsYou = (all: ReadonlyArray<AutomationSummary>): boolean =>
-  all.some((one) => one.state === 'paused' && one.pausedBy === 'itself')
+  all.some((one) => (one.state === 'paused' && one.pausedBy === 'itself') || activeRun(one.latest)?.task?.needsYou === true)
 
 /* ---- what each run does and ends in -------------------------------------------------------- */
 

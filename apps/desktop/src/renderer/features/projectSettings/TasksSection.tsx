@@ -16,6 +16,7 @@ import {
   SettingRow,
   SettingSwitch,
   TaskEnd,
+  Problem,
 } from '@althar/ui'
 
 import { device } from '../../shared/device'
@@ -30,8 +31,8 @@ import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
 /*
  * How a project's tasks start, go and end (ADR-091, ADR-093): where new tasks
  * start and the branch they work toward in each repository; what happens when
- * an agent's account runs out, and what a small change's review after it
- * merges brings back; then what a finished task makes, drawn as GitHub
+ * an agent's account runs out, and what an explicitly requested review
+ * after merge brings back; then what a finished task makes, drawn as GitHub
  * shows it and following this project's own values: its pull request, how its
  * branch and title are named, and the switches every task follows (what it
  * pushes, posts, resolves and moves along), each with one line on when it acts.
@@ -130,9 +131,9 @@ function SwitchNote({ line, now, failed }: { line?: string; now?: ReactNode; fai
         </>
       )}
       {failed !== null && (
-        <span className={s.failedLine} role="alert">
+        <Problem as="span" size="small" className={s.failedLine}>
           {failed}
-        </span>
+        </Problem>
       )}
     </>
   )
@@ -189,7 +190,7 @@ function WorkToward({ projectId, repositories }: { projectId: string; repositori
   })
 }
 
-/** What a small change's review after it merges brings back, as Settings › Tasks words it for new projects. */
+/** What an explicitly requested review after merge brings back, as Settings › Tasks words it for new projects. */
 function AfterMerge({ model, rule }: { model: ProjectSettingsModel; rule: AfterMergeRule }) {
   const words = newProjectDefaultsText.afterMergeReview
   return (

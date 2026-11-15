@@ -69,6 +69,8 @@ interface Fake {
   readonly portal?: Record<string, string | undefined>
   readonly platform?: string
   readonly cached?: unknown
+  /** How long each probe takes to answer, in ms. */
+  readonly slow?: number
 }
 
 const sourcesOf = (fake: Fake) => {
@@ -85,7 +87,8 @@ const sourcesOf = (fake: Fake) => {
     run: (command, args, timeout) => {
       ran.push({ command, args, timeout })
       const out = fake.prints?.[`${command} ${args.join(' ')}`]
-      return out === undefined ? Promise.reject(new Error('failed')) : Promise.resolve(out)
+      const answer = () => (out === undefined ? Promise.reject(new Error('failed')) : Promise.resolve(out))
+      return fake.slow === undefined ? answer() : new Promise((resolve) => setTimeout(resolve, fake.slow)).then(answer)
     },
     watchPortal: portalOf(fake.portal ?? {}),
     cache: {
@@ -145,7 +148,7 @@ describe('reading the desktop', () => {
     expect(chromeOf(await followed.first(1000), false)).toMatchObject({ layout: { start: [], end: ['close'] }, accent: null })
   })
 
-  it('on KDE: the system’s frame; KWin’s files read as text through the cascade, never by a program', async () => {
+  it('on KDE: one bar, KDE’s buttons in kwinrc’s order; KWin’s files read as text through the cascade, never by a program', async () => {
     const { sources, ran } = sourcesOf({
       env: {
         XDG_CURRENT_DESKTOP: 'KDE',
@@ -161,15 +164,16 @@ describe('reading the desktop', () => {
     })
     const followed = followDesktopChrome(sources)
     const look = await followed.first(1000)
-    expect(chromeOf(look, true)).toMatchObject({ kind: 'frame', family: 'kde' })
-    await settled()
-    expect(followed.current().facts).toMatchObject({ plasmaVersion: 6, kdeDecoration: 'org.kde.breeze', kdeColorScheme: 'BreezeDark' })
-    // Were the window unframed, KDE's buttons in kwinrc's order.
-    expect(chromeOf(followed.current(), false)).toMatchObject({
+    expect(decideChrome(look.facts)).toEqual({ kind: 'drawn', look: 'kde' })
+    // The first window already has kwinrc's order: it waited for the files.
+    expect(chromeOf(look, false)).toMatchObject({
       kind: 'drawn',
       look: 'kde',
+      family: 'kde',
       layout: { start: ['close'], end: ['minimize', 'maximize'] },
     })
+    await settled()
+    expect(followed.current().facts).toMatchObject({ plasmaVersion: 6, kdeDecoration: 'org.kde.breeze', kdeColorScheme: 'BreezeDark' })
     expect(ran).toEqual([])
   })
 
@@ -182,10 +186,163 @@ describe('reading the desktop', () => {
       },
     })
     const followed = followDesktopChrome(sources)
-    expect(decideChrome((await followed.first(1000)).facts).kind).toBe('frame')
+    // The first window waits for xprop's word: it opens bare already.
+    expect(decideChrome((await followed.first(1000)).facts).kind).toBe('bare')
+    expect(ran.map((one) => one.command)).toEqual(['xprop', 'xprop', 'xprop'])
+  })
+
+  const OLD_WM = {
+    'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK: window id # 0x1e00003',
+    'xprop -id 0x1e00003 -notype _NET_WM_NAME': '_NET_WM_NAME = "oldwm"',
+    'xprop -root -notype _NET_SUPPORTED': '_NET_SUPPORTED = _NET_SUPPORTED, _NET_WM_NAME',
+  }
+
+  it('on X11, first launch: the first window waits for whether the window manager moves it, its frame hanging on it', async () => {
+    const { sources } = sourcesOf({
+      env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' },
+      prints: OLD_WM,
+      slow: 30,
+    })
+    const followed = followDesktopChrome(sources)
+    expect(decideChrome((await followed.first(1000)).facts)).toEqual({ kind: 'frame' })
+  })
+
+  it('on X11: the first window waits for xprop past the time it was given for the rest, as main.ts gives it', async () => {
+    const { sources } = sourcesOf({
+      env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' },
+      prints: OLD_WM,
+      slow: 150,
+    })
+    const followed = followDesktopChrome(sources)
+    const started = Date.now()
+    // Each of xprop's two stages takes longer than the whole wait: the window still opens framed, never frameless.
+    expect(decideChrome((await followed.first(100)).facts)).toEqual({ kind: 'frame' })
+    expect(Date.now() - started).toBeGreaterThanOrEqual(250)
+    // And with what the cache kept of a window manager that moved it: xprop's word now, not the cache's.
+    const kept = { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'xfwm4', wmMoves: true } }
+    const stale = followDesktopChrome(
+      sourcesOf({ env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }, prints: OLD_WM, cached: kept, slow: 150 })
+        .sources,
+    )
+    expect(decideChrome((await stale.first(100)).facts)).toEqual({ kind: 'frame' })
+  })
+
+  it('off X11, the first window waits no longer than it was given', async () => {
+    const { sources } = sourcesOf({ env: { XDG_CURRENT_DESKTOP: 'MATE', XDG_SESSION_TYPE: 'wayland' }, slow: 400 })
+    const started = Date.now()
+    await followDesktopChrome(sources).first(50)
+    expect(Date.now() - started).toBeLessThan(300)
+  })
+
+  it('on X11: xprop’s word now over what the cache kept of another window manager, either way', async () => {
+    const env = { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }
+    const keptMoving = { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'xfwm4', wmMoves: true } }
+    const now = followDesktopChrome(sourcesOf({ env, prints: OLD_WM, cached: keptMoving, slow: 10 }).sources)
+    expect(decideChrome((await now.first(1000)).facts)).toEqual({ kind: 'frame' })
+    const keptStill = { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'oldwm', wmMoves: false } }
+    const moving = followDesktopChrome(
+      sourcesOf({
+        env,
+        cached: keptStill,
+        prints: {
+          'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK: window id # 0x1e00003',
+          'xprop -id 0x1e00003 -notype _NET_WM_NAME': '_NET_WM_NAME = "Xfwm4"',
+          'xprop -root -notype _NET_SUPPORTED': '_NET_SUPPORTED = _NET_SUPPORTED, _NET_WM_MOVERESIZE',
+        },
+      }).sources,
+    )
+    expect(decideChrome((await moving.first(1000)).facts)).toMatchObject({ kind: 'drawn' })
+    // No window manager now, where the cache kept one that couldn't move it: one bar.
+    const none = followDesktopChrome(
+      sourcesOf({
+        env,
+        cached: keptStill,
+        prints: {
+          'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK:  not found.',
+          'xprop -root -notype': '_XKB_RULES_NAMES = "evdev", "pc105", "us", "", ""',
+        },
+      }).sources,
+    )
+    expect(decideChrome((await none.first(1000)).facts)).toMatchObject({ kind: 'drawn' })
+  })
+
+  it('on X11 with a window manager from before EWMH: its marks on the root window keep the system’s frame', async () => {
+    const { sources, ran } = sourcesOf({
+      env: { XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' },
+      prints: {
+        'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK:  not found.',
+        'xprop -root -notype': '_MOTIF_WM_INFO = 0x2, 0x1a00005\n_XKB_RULES_NAMES = "evdev", "pc105", "us", "", ""',
+      },
+    })
+    expect(decideChrome((await followDesktopChrome(sources).first(1000)).facts)).toEqual({ kind: 'frame' })
+    expect(ran.map((one) => one.args.join(' '))).toEqual(['-root -notype _NET_SUPPORTING_WM_CHECK', '-root -notype'])
+  })
+
+  it('keeps the window manager’s frame where its double-click on the title bar was set to do something else than maximize', async () => {
+    const first = async (desktop: string, fake: Omit<Fake, 'env'>) =>
+      decideChrome(
+        (
+          await followDesktopChrome(sourcesOf({ env: { XDG_CURRENT_DESKTOP: desktop, XDG_SESSION_TYPE: 'x11' }, ...fake }).sources).first(
+            1000,
+          )
+        ).facts,
+      )
+    const kwinrc = (command: string) => ({
+      files: { '/home/someone/.config/kwinrc': `[Windows]\nTitlebarDoubleClickCommand=${command}\n` },
+    })
+    expect(await first('KDE', kwinrc('Shade'))).toEqual({ kind: 'frame' })
+    expect(await first('KDE', kwinrc('Nothing'))).toEqual({ kind: 'frame' })
+    expect(await first('KDE', kwinrc('Maximize'))).toEqual({ kind: 'drawn', look: 'kde' })
+    const xfwm = (action: string) => ({
+      files: {
+        '/home/someone/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml': `<channel name="xfwm4"><property name="double_click_action" type="string" value="${action}"/></channel>`,
+      },
+    })
+    expect(await first('XFCE', xfwm('shade'))).toEqual({ kind: 'frame' })
+    expect(await first('XFCE', xfwm('maximize'))).toMatchObject({ kind: 'drawn' })
+    const click = (schema: string, value: string) => ({
+      prints: { [`gsettings get ${schema} action-double-click-titlebar`]: `'${value}'\n` },
+    })
+    expect(await first('MATE', click('org.mate.Marco.general', 'toggle_shade'))).toEqual({ kind: 'frame' })
+    expect(await first('MATE', click('org.mate.Marco.general', 'toggle_maximize'))).toMatchObject({ kind: 'drawn' })
+    expect(await first('X-Cinnamon', click('org.cinnamon.desktop.wm.preferences', 'minimize'))).toEqual({ kind: 'frame' })
+    expect(await first('X-Cinnamon', click('org.cinnamon.desktop.wm.preferences', 'toggle-maximize'))).toMatchObject({ kind: 'drawn' })
+    // Unread, the default: maximize, one bar.
+    expect(await first('MATE', {})).toMatchObject({ kind: 'drawn' })
+  })
+
+  it('on X11: keeps, for the next start, that the window manager can’t move a frameless window', async () => {
+    const { sources, written } = sourcesOf({
+      env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' },
+      prints: {
+        'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK: window id # 0x1e00003',
+        'xprop -id 0x1e00003 -notype _NET_WM_NAME': '_NET_WM_NAME = "oldwm"',
+        'xprop -root -notype _NET_SUPPORTED': '_NET_SUPPORTED = _NET_SUPPORTED, _NET_WM_NAME',
+      },
+    })
+    const followed = followDesktopChrome(sources)
+    await followed.first(1000)
     await settled()
-    expect(decideChrome(followed.current().facts).kind).toBe('bare')
-    expect(ran.map((one) => one.command)).toEqual(['xprop', 'xprop'])
+    expect(decideChrome(followed.current().facts)).toEqual({ kind: 'frame' })
+    expect(written).toEqual([{ desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'oldwm', wmMoves: false } }])
+    const next = followDesktopChrome(
+      sourcesOf({ env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11' }, cached: written[0] }).sources,
+    )
+    expect(decideChrome((await next.first(1000)).facts)).toEqual({ kind: 'frame' })
+  })
+
+  it('on X11 with no window manager that says so: nothing known of it, and one bar', async () => {
+    const { sources } = sourcesOf({
+      env: { XDG_SESSION_TYPE: 'x11', DISPLAY: ':99' },
+      prints: { 'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK:  not found.' },
+    })
+    const followed = followDesktopChrome(sources)
+    await followed.first(1000)
+    await settled()
+    expect(chromeOf(followed.current(), false)).toMatchObject({
+      kind: 'drawn',
+      layout: { start: [], end: ['minimize', 'maximize', 'close'] },
+    })
   })
 
   it('takes last time’s findings for the same desktop at once, and none from another', async () => {
@@ -193,9 +350,11 @@ describe('reading the desktop', () => {
     const same = followDesktopChrome(sourcesOf({ env, cached: { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'i3' } } }).sources)
     expect(decideChrome((await same.first(1000)).facts).kind).toBe('bare')
     const other = followDesktopChrome(sourcesOf({ env, cached: { desktop: 'linux|x11|kde|KDE|', facts: { wm: 'i3' } } }).sources)
-    expect(decideChrome((await other.first(1000)).facts).kind).toBe('frame')
+    expect(decideChrome((await other.first(1000)).facts).kind).toBe('drawn')
     const broken = followDesktopChrome(sourcesOf({ env, cached: { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 42 } } }).sources)
-    expect(decideChrome((await broken.first(1000)).facts).kind).toBe('frame')
+    expect(decideChrome((await broken.first(1000)).facts).kind).toBe('drawn')
+    const notMoves = followDesktopChrome(sourcesOf({ env, cached: { desktop: 'linux|x11|xfce|XFCE|', facts: { wmMoves: 'no' } } }).sources)
+    expect(decideChrome((await notMoves.first(1000)).facts).kind).toBe('drawn')
   })
 
   it('on Windows and a Mac: the accent from Electron, and its changes', async () => {
@@ -259,13 +418,110 @@ describe('reading the desktop', () => {
     expect(chromeOf(first, false).layout).toEqual({ start: [], end: ['close'] })
   })
 
-  it('asks gsettings nothing on KDE, whose layout is kwinrc’s, or another desktop that keeps its own', async () => {
-    for (const desktop of ['KDE', 'XFCE', 'X-Cinnamon', 'MATE']) {
+  it('asks gsettings nothing on KDE, whose layout is kwinrc’s, or Xfce, whose is xfconf’s; and not GNOME’s key on another desktop', async () => {
+    for (const desktop of ['KDE', 'XFCE']) {
       const { sources, ran } = sourcesOf({ env: { XDG_CURRENT_DESKTOP: desktop, XDG_SESSION_TYPE: 'wayland' } })
       await followDesktopChrome(sources).first(1000)
       await settled()
       expect(ran.map((one) => one.command)).not.toContain('gsettings')
     }
+    for (const desktop of ['X-Cinnamon', 'MATE']) {
+      const { sources, ran } = sourcesOf({ env: { XDG_CURRENT_DESKTOP: desktop, XDG_SESSION_TYPE: 'wayland' } })
+      await followDesktopChrome(sources).first(1000)
+      await settled()
+      expect(ran.map((one) => one.args.join(' '))).not.toContain('get org.gnome.desktop.wm.preferences button-layout')
+    }
+  })
+
+  it('takes no word of GNOME’s key on a desktop that keeps its own: the portal’s GNOME layout leaves Xfce’s default', async () => {
+    const { sources } = sourcesOf({
+      env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11' },
+      portal: { 'org.gnome.desktop.wm.preferences button-layout': "(<<'appmenu:close'>>,)" },
+    })
+    expect(chromeOf(await followDesktopChrome(sources).first(1000), false).layout).toEqual({
+      start: [],
+      end: ['minimize', 'maximize', 'close'],
+    })
+  })
+
+  const own = (desktop: string, session: string, fake: Omit<Fake, 'env'>) =>
+    followDesktopChrome(sourcesOf({ env: { XDG_CURRENT_DESKTOP: desktop, XDG_SESSION_TYPE: session }, ...fake }).sources)
+      .first(1000)
+      .then((look) => chromeOf(look, false).layout)
+
+  it('reads Cinnamon’s and MATE’s layouts from their own gsettings keys', async () => {
+    expect(
+      await own('X-Cinnamon', 'x11', {
+        prints: { 'gsettings get org.cinnamon.desktop.wm.preferences button-layout': "'close:minimize'\n" },
+      }),
+    ).toEqual({ start: ['close'], end: ['minimize'] })
+    expect(
+      await own('MATE', 'x11', { prints: { 'gsettings get org.mate.Marco.general button-layout': "'menu:minimize,maximize,close'\n" } }),
+    ).toEqual({ start: [], end: ['minimize', 'maximize', 'close'] })
+    // Unread, each one's default.
+    expect(await own('X-Cinnamon', 'x11', {})).toEqual({ start: [], end: ['minimize', 'maximize', 'close'] })
+  })
+
+  it('reads Xfwm4’s, Openbox’s, labwc’s, Wayfire’s and COSMIC’s from their files, the person’s before the system’s', async () => {
+    const xfwm = (value: string) => `<channel name="xfwm4"><property name="button_layout" type="string" value="${value}"/></channel>`
+    expect(
+      await own('XFCE', 'x11', {
+        files: {
+          '/home/someone/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml': '<channel name="xfwm4"/>',
+          '/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml': xfwm('CMH|O'),
+        },
+      }),
+    ).toEqual({ start: ['close', 'maximize', 'minimize'], end: [] })
+    expect(
+      await own('LXDE', 'x11', {
+        files: {
+          '/home/someone/.config/openbox/lxde-rc.xml': '<theme><titleLayout>CLIM</titleLayout></theme>',
+          '/home/someone/.config/openbox/rc.xml': '<theme><titleLayout>NLIMC</titleLayout></theme>',
+        },
+      }),
+    ).toEqual({ start: ['close'], end: ['minimize', 'maximize'] })
+    expect(
+      await own('labwc', 'wayland', {
+        files: { '/home/someone/.config/labwc/rc.xml': '<titlebar><layout>close:iconify</layout></titlebar>' },
+      }),
+    ).toEqual({ start: ['close'], end: ['minimize'] })
+    expect(
+      await own('wayfire', 'wayland', { files: { '/home/someone/.config/wayfire.ini': '[decoration]\nbutton_order = close\n' } }),
+    ).toEqual({ start: [], end: ['close'] })
+    expect(
+      await own('COSMIC', 'wayland', {
+        files: { '/home/someone/.config/cosmic/com.system76.CosmicTk/v1/show_minimize': 'false' },
+      }),
+    ).toEqual({ start: [], end: ['maximize', 'close'] })
+  })
+
+  it('reads the layout where the window manager X11 names keeps it, over the desktop’s own', async () => {
+    const { sources } = sourcesOf({
+      env: { XDG_CURRENT_DESKTOP: 'LXQt', XDG_SESSION_TYPE: 'x11' },
+      prints: {
+        'xprop -root -notype _NET_SUPPORTING_WM_CHECK': '_NET_SUPPORTING_WM_CHECK: window id # 0x1e00003',
+        'xprop -id 0x1e00003 -notype _NET_WM_NAME': '_NET_WM_NAME = "KWin"',
+      },
+      files: {
+        '/home/someone/.config/openbox/lxqt-rc.xml': '<theme><titleLayout>CLIM</titleLayout></theme>',
+        '/home/someone/.config/kwinrc': '[org.kde.kdecoration2]\nButtonsOnLeft=\nButtonsOnRight=AX\n',
+      },
+    })
+    const followed = followDesktopChrome(sources)
+    await followed.first(1000)
+    await settled()
+    expect(chromeOf(followed.current(), false)).toMatchObject({ look: 'kde', layout: { start: [], end: ['maximize', 'close'] } })
+    // Without that word, LXQt's Openbox.
+    const plain = sourcesOf({
+      env: { XDG_CURRENT_DESKTOP: 'LXQt', XDG_SESSION_TYPE: 'x11' },
+      files: {
+        '/home/someone/.config/openbox/lxqt-rc.xml': '<theme><titleLayout>CLIM</titleLayout></theme>',
+      },
+    })
+    expect(chromeOf(await followDesktopChrome(plain.sources).first(1000), false).layout).toEqual({
+      start: ['close'],
+      end: ['minimize', 'maximize'],
+    })
   })
 
   it('settles the first window’s wait after its time even where nothing answers', async () => {

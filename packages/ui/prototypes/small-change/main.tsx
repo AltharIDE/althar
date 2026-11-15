@@ -1,0 +1,168 @@
+import '@fontsource-variable/inter'
+import '@fontsource-variable/jetbrains-mono'
+import '@althar/ui/styles.css'
+
+import { Button, ChangeSet, ChangeState, CheckState } from '@althar/ui'
+import { StrictMode, useEffect, useState } from 'react'
+import { createRoot } from 'react-dom/client'
+
+import { type Direction, REVIEW_MODES, ReviewMode } from './calm'
+import { REAL } from './real'
+import { type SmallState, SOL, STATES } from './states'
+import p from './page.module.css'
+
+/*
+ * The small change's card, a few directions: keys 0 and A–D swap the
+ * direction, R what follows the merge (the project's setting), T the theme, 1–9 and - = pick the state the thread column shows.
+ * The grid draws every state of the direction at once; the column beside it
+ * draws the picked one in a thread, between the plan card and the Change card.
+ * ?d=a&theme=dark&s=3 opens it so; &shot hides the bar, for screenshots;
+ * &only=grid or &only=thread draws one of the two.
+ */
+
+const ALL: readonly Direction[] = [REAL]
+const params = new URLSearchParams(location.search)
+const SHOT = params.has('shot')
+const ONLY = params.get('only')
+const nextMode = (m: ReviewMode): ReviewMode => (m === 'major' ? 'all' : m === 'all' ? 'off' : 'major')
+const STATE_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '=']
+
+/* The card opens the thread; the Change card of another task under it, for the family. */
+function Neighbours({ dir, state }: { dir: Direction; state: SmallState }) {
+  return (
+    <div className={p.thread}>
+      <dir.Card key={dir.key + state.key} state={state} />
+      <ChangeSet
+        state={ChangeState.Ready}
+        prs={[
+          {
+            repo: 'AltharIDE/althar',
+            number: 765,
+            url: 'https://github.com/AltharIDE/althar/pull/765',
+            files: [
+              { path: 'packages/ui/src/composer/ContextRing/ContextRing.tsx', add: 88, del: 61 },
+              { path: 'packages/ui/src/composer/ContextRing/ContextRing.module.css', add: 40, del: 52 },
+              { path: 'packages/ui/tests/ContextRing.test.tsx', add: 120, del: 0 },
+            ],
+          },
+        ]}
+        checks={[
+          { id: 'lint', name: 'lint', state: CheckState.Passed },
+          { id: 'unit', name: 'unit', state: CheckState.Passed },
+        ]}
+        review={{ state: CheckState.Passed, by: [SOL] }}
+        actions={
+          <Button size="small" variant="signal" onClick={() => {}}>
+            Accept and merge
+          </Button>
+        }
+        onReviewDiff={() => {}}
+      />
+    </div>
+  )
+}
+
+function Page() {
+  const [dirKey, setDir] = useState(() => ALL.find((d) => d.key === params.get('d'))?.key ?? 'route')
+  const [mode, setMode] = useState<ReviewMode>(() => {
+    const r = params.get('r')
+    return r === 'all' || r === 'off' ? r : 'major'
+  })
+  const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
+  const [live, setLive] = useState(() => Math.max(0, Number(params.get('s') ?? 5) - 1))
+  const dir = ALL.find((d) => d.key === dirKey) ?? REAL
+  const state = STATES[live] ?? STATES[0]!
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+  useEffect(() => {
+    const url = new URL(location.href)
+    url.searchParams.set('d', dirKey)
+    url.searchParams.set('theme', theme)
+    url.searchParams.set('s', String(live + 1))
+    url.searchParams.set('r', mode)
+    history.replaceState(null, '', url)
+  }, [dirKey, theme, live, mode])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement
+      if (t.closest('textarea, input, [contenteditable]') || e.metaKey || e.ctrlKey || e.altKey) return
+      const key = e.key.toLowerCase()
+      const d = ALL.find((x) => x.letter.toLowerCase() === key)
+      const i = STATE_KEYS.indexOf(key)
+      if (d) setDir(d.key)
+      else if (key === 't') setTheme((x) => (x === 'dark' ? 'light' : 'dark'))
+      else if (key === 'r') setMode(nextMode)
+      else if (i >= 0 && i < STATES.length) setLive(i)
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [])
+
+  return (
+    <ReviewMode.Provider value={mode}>
+      <div className={p.page} data-shot={SHOT || undefined}>
+        <header className={p.head}>
+          <h1>{dir.letter === '0' ? 'Now' : `${dir.letter} · ${dir.name}`}</h1>
+          <p>
+            {dir.idea} <em>{REVIEW_MODES[mode]}.</em>
+          </p>
+        </header>
+        <main className={p.main} data-only={ONLY ?? undefined}>
+          {ONLY !== 'thread' && (
+            <section className={p.grid}>
+              {STATES.map((s, i) =>
+                mode === 'off' && (s.key === 'clean' || s.key === 'findings') ? null : (
+                  <figure key={s.key} className={p.cell} data-live={i === live || undefined}>
+                    <figcaption>
+                      <button type="button" onClick={() => setLive(i)}>
+                        <span>{STATE_KEYS[i]}</span> {mode === 'off' && s.key === 'reviewing' ? 'Merged' : s.label}
+                      </button>
+                    </figcaption>
+                    <dir.Card key={dir.key} state={s} />
+                  </figure>
+                ),
+              )}
+            </section>
+          )}
+          {ONLY !== 'grid' && (
+            <aside className={p.side}>
+              <p className={p.sideHead}>
+                In a thread · <strong>{state.label}</strong>
+              </p>
+              <Neighbours dir={dir} state={state} />
+            </aside>
+          )}
+        </main>
+        {!SHOT && (
+          <nav className={p.bar} aria-label="Directions">
+            {ALL.map((d) => (
+              <button key={d.key} type="button" aria-pressed={d.key === dirKey} onClick={() => setDir(d.key)}>
+                <kbd>{d.letter}</kbd> {d.name}
+              </button>
+            ))}
+            <span className={p.sep} />
+            <span className={p.liveState}>
+              <kbd>1–9 - =</kbd> {state.label}
+            </span>
+            <span className={p.sep} />
+            <button type="button" onClick={() => setMode(nextMode)}>
+              <kbd>R</kbd> {REVIEW_MODES[mode]}
+            </button>
+            <span className={p.sep} />
+            <button type="button" onClick={() => setTheme((x) => (x === 'dark' ? 'light' : 'dark'))}>
+              <kbd>T</kbd> {theme === 'dark' ? 'Dark' : 'Light'}
+            </button>
+          </nav>
+        )}
+      </div>
+    </ReviewMode.Provider>
+  )
+}
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <Page />
+  </StrictMode>,
+)

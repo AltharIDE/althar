@@ -660,9 +660,11 @@ describe('what failed, in full', () => {
       assert.strictEqual(running?.phase, 'running')
       assert.include(yield* notices(running?.threadId ?? ''), 'Running a cancelled check on PR #1 again.')
       // Cancelled again, it is the person's, and isn't run a third time.
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0].change?.checks?.outcome === 'passed')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0].change?.checks?.outcome === 'failed')
       yield* Effect.sleep('500 millis')
       assert.lengthOf(github.reruns, 1)
+      assert.strictEqual(ready?.change?.checks?.failed, 0)
+      assert.lengthOf(fixesOn(bare), 0)
       assert.deepStrictEqual(
         ready?.change?.checks?.list.map((check) => check.state),
         ['passed', 'cancelled'],

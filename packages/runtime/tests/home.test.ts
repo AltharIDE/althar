@@ -107,7 +107,7 @@ describe('the home', () => {
         [true, true],
       )
 
-      // A usage limit or a quiet step the loop dealt with shows; anything else it says in a thread doesn't.
+      // A quiet step the loop dealt with shows; quota and other thread notices don't.
       const place = { projectId: busy.projectId as Parameters<typeof addItem>[0]['projectId'], threadId: working.threadId }
       yield* addItem(place, 'notice', { source: 'runtime', severity: 'warning', title: 'Codex went quiet.', about: 'stall' })
       yield* addItem(place, 'notice', { source: 'runtime', severity: 'info', title: 'Merged into main here.' })

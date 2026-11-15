@@ -50,16 +50,6 @@ export const Closed: Story = {
     await expect(button).toHaveFocus()
   },
 }
-export const OpenBelow: Story = {
-  args: { defaultOpen: true },
-  decorators: [
-    (Story) => (
-      <div style={{ marginTop: -110 }}>
-        <Story />
-      </div>
-    ),
-  ],
-}
 export const OpenAbove: Story = { args: { defaultOpen: true, placement: 'above' } }
 /** Near the edge it flips and shifts to stay on screen. */
 export const AtTheEdge: Story = {

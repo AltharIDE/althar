@@ -6,6 +6,8 @@ import { device } from '../../foundations/device'
 import { SignInWay } from '../../foundations/vocabulary'
 import { ACCOUNTS, FOUND } from '../../fixtures/setup'
 import { States } from '../../storybook/States'
+import { AgentTabList, AgentTabPanel, AgentTabs } from '../AgentTabs/AgentTabs'
+import { ModelSwitches } from '../ModelSwitches/ModelSwitches'
 import { AccountSignIn, type AccountSignInProps, type AccountSignInStep } from './AccountSignIn'
 import { Accounts } from './Accounts'
 
@@ -27,7 +29,11 @@ const meta = {
   title: 'Setup/AccountSignIn',
   component: AccountSignIn,
   parameters: { layout: 'padded' },
-  decorators: [(Story) => <div style={{ maxWidth: 600 }}>{Story()}</div>],
+  decorators: [
+    (Story, { parameters }) => (
+      <div style={{ maxWidth: typeof parameters.maxWidth === 'number' ? parameters.maxWidth : 600 }}>{Story()}</div>
+    ),
+  ],
   render: (args) => <InTheList {...args} />,
   args: {
     agent: 'Codex',
@@ -49,6 +55,39 @@ const meta = {
 } satisfies Meta<typeof AccountSignIn>
 export default meta
 type Story = StoryObj<typeof meta>
+
+export const GitHubCopilot: Story = {
+  args: { agent: 'GitHub Copilot', holds: undefined, ways: { browser: 'GitHub', enterprise: true }, onEnterprise: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Continue with GitHub' }))
+    await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Browser)
+    await expect(c.queryByRole('button', { name: /terminal/i })).not.toBeInTheDocument()
+  },
+}
+
+export const GitHubEnterprise: Story = {
+  args: { agent: 'GitHub Copilot', holds: undefined, ways: { browser: 'GitHub', enterprise: true }, onEnterprise: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Use a GitHub Enterprise address…' }))
+    const field = c.getByRole('textbox', { name: 'GitHub Enterprise address' })
+    await expect(field).toHaveFocus()
+    await userEvent.type(field, 'company.ghe.com')
+    await userEvent.click(c.getByRole('button', { name: /^Continue$/ }))
+    await expect(args.onEnterprise).toHaveBeenCalledWith('company.ghe.com')
+  },
+}
+
+export const GitHubEnterpriseAddressError: Story = {
+  args: {
+    agent: 'GitHub Copilot',
+    holds: undefined,
+    ways: { browser: 'GitHub', enterprise: true },
+    step: { kind: 'choose', enterprise: 'not a host', error: 'Enter your GitHub Enterprise hostname, such as company.ghe.com.' },
+    onEnterprise: fn(),
+  },
+}
 
 /** The ways in: the browser first, the rest as quiet links, and a word on who the browser may still be signed in as. Escape inside cancels. */
 export const Choosing: Story = {
@@ -364,6 +403,37 @@ export const Failed: Story = {
     await userEvent.click(c.getByRole('button', { name: 'Try again' }))
     await expect(args.onBack).toHaveBeenCalled()
   },
+}
+
+/** A long sign-in failure stays in its account column, beside the empty model list. */
+export const CopilotFailed: Story = {
+  parameters: { maxWidth: 900 },
+  args: {
+    agent: 'GitHub Copilot',
+    position: 1,
+    account: { name: 'main' },
+    holds: undefined,
+    ways: { browser: 'GitHub', enterprise: true },
+    step: {
+      kind: 'failed',
+      said: 'Copilot offers no coding models for Althar on this account. Check your plan and your organization’s application policy.',
+    },
+  },
+  render: (args) => (
+    <AgentTabs value="copilot" onValueChange={fn()}>
+      <AgentTabList label="Agents" agents={[{ id: 'copilot', name: args.agent }]} />
+      <AgentTabPanel
+        agent={{ id: 'copilot', name: args.agent, line: 'Althar' }}
+        aside={<ModelSwitches agent={args.agent} models={[]} off={[]} onChange={fn()} />}
+      >
+        <Accounts
+          agent={args.agent}
+          accounts={[{ id: 'main', name: 'main', place: { kind: 'usual' }, state: { kind: 'signedOut' } }]}
+          signIn={{ account: 'main', node: <AccountSignIn {...args} /> }}
+        />
+      </AgentTabPanel>
+    </AgentTabs>
+  ),
 }
 
 /* A sign-in from the browser to a name, as a consumer drives it. */

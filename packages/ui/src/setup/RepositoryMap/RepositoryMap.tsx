@@ -9,6 +9,7 @@ import { repositoryRoleText } from '../../foundations/vocabularyText'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import { below, Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
@@ -466,7 +467,9 @@ export function RepositoryMap({
                   {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
                 />
               </div>
-              <span className={cx(s.where, repository.where === undefined && s.elsewhere)}>{repository.where ?? t.elsewhere}</span>
+              <span className={cx(s.where, repository.where === undefined && s.elsewhere)}>
+                {repository.where === undefined ? t.elsewhere : <Path path={repository.where} />}
+              </span>
               {/* What the wires draw, said: where its work goes. */}
               <VisuallyHidden>{goesWords(repository, hostOf, t)}</VisuallyHidden>
               <div className={s.foot}>
@@ -494,7 +497,9 @@ export function RepositoryMap({
                 <Spinner size="small" />
                 <span className={s.name}>{folder.name}</span>
               </div>
-              <span className={s.where}>{folder.where}</span>
+              <span className={s.where}>
+                <Path path={folder.where} />
+              </span>
               <span className={s.readingNote}>{t.reading}</span>
             </li>
           ))}
@@ -526,7 +531,12 @@ export function RepositoryMap({
                 <div className={s.off}>
                   <p className={s.what}>{t.what[host.reach]}</p>
                   {button !== null && (
-                    <Button size="small" onClick={() => onConnect?.(host.id)}>
+                    // Signing in again waits on the person, in violet, as it does everywhere; connecting one is theirs to choose.
+                    <Button
+                      size="small"
+                      variant={host.reach === HostReach.SignInAgain ? 'signal' : 'default'}
+                      onClick={() => onConnect?.(host.id)}
+                    >
                       {button}
                     </Button>
                   )}
@@ -571,7 +581,7 @@ function HostGroup({ host, level, t, children }: { host: MapHost; level: Heading
           {host.name}
         </Heading>
         {host.instance !== undefined && <span className={s.instance}>{host.instance}</span>}
-        <span className={s.reach}>{reachWords(host, t)}</span>
+        <span className={cx(s.reach, host.reach === HostReach.SignInAgain && s.yours)}>{reachWords(host, t)}</span>
       </div>
       {children}
     </section>

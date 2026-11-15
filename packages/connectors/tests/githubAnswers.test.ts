@@ -68,6 +68,19 @@ const listed = (overrides: Record<string, unknown> = {}) => ({
 const check = (id: string): Check => ({ id, name: 'test', state: 'failed', url: null, summary: null })
 
 describe('GitHub answers that leave things out', () => {
+  it.effect('keeps the landed commit separate from the PR head, and ignores an open PR’s test merge commit', () =>
+    Effect.gen(function* () {
+      for (const merged of [false, true]) {
+        const { host } = github([
+          ['GET', `${REPO}/pulls/12`, { json: pull({ merge_commit_sha: 'landed', merged_at: merged ? '2026-11-15T00:00:00Z' : null }) }],
+        ])
+        const seen = yield* host.change(repository, 12)
+        assert.strictEqual(seen.headSha, 'abc')
+        assert.strictEqual(seen.mergeCommit, merged ? 'landed' : undefined)
+      }
+    }),
+  )
+
   it.effect('says nothing of a pull request’s size where GitHub’s list leaves it out', () =>
     Effect.gen(function* () {
       const { host } = github([['GET', /\/pulls\?state=open&head=meridian%3Aalthar%2Fmer-231$/, { json: [pull()] }]])
@@ -132,7 +145,22 @@ describe('GitHub answers that leave things out', () => {
   it.effect('merges a pull request seen without its head as it is now, without pinning a commit', () =>
     Effect.gen(function* () {
       const { host, sent } = github([
-        ['POST', `${API}/graphql`, { json: { data: { search: { issueCount: 1, nodes: [listed({ headRefOid: null })] } } } }],
+        [
+          'POST',
+          `${API}/graphql`,
+          (request) =>
+            JSON.stringify(request.body).includes('isMergeQueueEnabled')
+              ? {
+                  json: {
+                    data: {
+                      repository: {
+                        pullRequest: { isMergeQueueEnabled: false, isInMergeQueue: false, timelineItems: { nodes: [] } },
+                      },
+                    },
+                  },
+                }
+              : { json: { data: { search: { issueCount: 1, nodes: [listed({ headRefOid: null })] } } } },
+        ],
         ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
         ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', merged_at: '2026-10-13T10:00:00Z' }) }],
       ])

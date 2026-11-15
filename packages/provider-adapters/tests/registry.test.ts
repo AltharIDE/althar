@@ -7,7 +7,7 @@ import { CLI_SIGN_INS, SANDBOX_SECRETS, SECRET_PLACES, secretReadRules } from '.
 
 describe('the agent registry', () => {
   it('ships every bundled adapter where it says', () => {
-    for (const agent of Object.values(agents).filter((entry) => entry.source === 'bundled')) {
+    for (const agent of Object.values(agents).filter((entry) => entry.source === 'bundled' && entry.native === undefined)) {
       const spec = agent.launch('/usr/bin/node')
       assert.strictEqual(spec.command, '/usr/bin/node')
       assert.isTrue(existsSync(spec.args[0] ?? ''), `${agent.id}: ${spec.args[0]}`)
@@ -157,6 +157,7 @@ describe('the agent registry', () => {
         'claude-code': ['claude-plugin', 'meta'],
         codex: ['agents', 'directory'],
         opencode: ['plain', 'env'],
+        'copilot-direct': ['plain', 'env'],
         copilot: 'none',
         junie: 'none',
         grok: 'none',

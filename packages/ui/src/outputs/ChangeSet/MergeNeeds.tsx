@@ -43,8 +43,9 @@ export type MergeNeedKind =
  * counts), `apart` the optional ones; approvals, `have` of `need`, `who`
  * approved or, waiting, who is asked; code owners, who it waits on; changes,
  * who asked for them; conversations, `have` of `need` resolved; up to date,
- * `have` commits behind; pushed, `have` commits left; signatures, `have`
- * unsigned; other, the host's words in `said`.
+ * `have` commits behind; pushed, `have` commits left, and `said` where they
+ * wait for something other than a push; signatures, `have` unsigned; other,
+ * the host's words in `said`.
  */
 export interface MergeNeed {
   kind: MergeNeedKind
@@ -153,13 +154,16 @@ const saidOf = (need: MergeNeed, host: string, target: string): string => {
     case 'draft':
       return state === 'met' ? 'Not a draft' : 'A draft'
     case 'pushed':
+      // Held for Ship, said so: Ship sends them up, not a push.
       return state === 'met'
         ? 'Nothing to push'
-        : state === 'waiting'
-          ? `${commits(have)} going up`
-          : have > 0
-            ? `${commits(have)} not pushed`
-            : 'Its branch has parted from it'
+        : need.said !== undefined
+          ? need.said
+          : state === 'waiting'
+            ? `${commits(have)} going up`
+            : have > 0
+              ? `${commits(have)} not pushed`
+              : 'Its branch has parted from it'
     case 'signatures':
       return state === 'met'
         ? 'Commits signed'

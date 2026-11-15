@@ -75,7 +75,11 @@ export function Turn({ model, voice, mark, at, children, meta, copy, onQuote, ba
 
 /** A paragraph of what the agent said. */
 export function Prose({ children, dim, className }: { children: ReactNode; dim?: boolean; className?: string }) {
-  return <p className={cx(s.prose, dim && s.dim, className)}>{children}</p>
+  return (
+    <p className={cx(s.prose, dim && s.dim, className)} data-thread-preview="">
+      {children}
+    </p>
+  )
 }
 
 /** Class for prose rendered by something else, like a stream. */

@@ -2,6 +2,7 @@ import type { Reporter, SerializedError, TestCase, TestModule, TestRunEndReason,
 
 import { type Flaky, fromRoot, record, said } from './flaky'
 import { type Held, held, issueOf, judge, letThrough, type Quarantine } from './quarantine'
+import { recordTiming } from './timings'
 
 const named = (test: TestCase): Flaky => ({
   runner: 'vitest',
@@ -56,6 +57,7 @@ export default class FlakyReporter implements Reporter {
   }
 
   onTestRunEnd(modules: ReadonlyArray<TestModule>, errors: ReadonlyArray<SerializedError>, reason: TestRunEndReason) {
+    if (!this.#merging) for (const module of modules) recordTiming(module.moduleId, module.diagnostic().duration)
     if (reason !== 'failed') return
     const failed = modules.flatMap((module) => [...module.children.allTests('failed')].map(named))
     // Vitest checks coverage only on a run with no failed test, unless told to on one that fails; a run quarantine

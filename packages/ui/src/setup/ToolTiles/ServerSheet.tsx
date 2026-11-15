@@ -3,11 +3,13 @@ import { type ReactNode, useState } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
+import { Path } from '../../primitives/Path/Path'
 import type { HeadingLevel } from '../../primitives/Heading/Heading'
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ControlDetail } from '../ControlCenter/ControlCenter'
@@ -162,7 +164,7 @@ export function ServerSheet({
         <div className={s.sheet}>
           {server.failed !== null && (
             <SheetFact label={t.lastStart}>
-              <span className={s.danger}>{failedBy === null ? server.failed.why : t.failedIn(nameOf(failedBy), server.failed.why)}</span>
+              <Problem>{failedBy === null ? server.failed.why : t.failedIn(nameOf(failedBy), server.failed.why)}</Problem>
             </SheetFact>
           )}
           <SheetFact label={t.runs}>
@@ -231,11 +233,7 @@ export function ServerSheet({
             </>
           }
         >
-          {removeError !== null && (
-            <p className={s.error} role="alert">
-              {removeError}
-            </p>
-          )}
+          {removeError !== null && <Problem>{removeError}</Problem>}
         </Dialog>
       )}
     </div>
@@ -309,7 +307,9 @@ function FileCard({
         </span>
         <span className={s.fileAgent}>{name}</span>
         <Tooltip label={file.where}>
-          <code className={cx(s.filePath, s.truncate)}>{file.where}</code>
+          <code className={s.filePath}>
+            <Path path={file.where} hover={false} />
+          </code>
         </Tooltip>
       </div>
       {lines === null ? (

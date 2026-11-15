@@ -1,12 +1,14 @@
 import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
-import { Layer } from 'effect'
+import { Context, Layer } from 'effect'
 
 import { startupLayer } from './startup'
 
 import { Accounts } from './Accounts'
+import { AgentCatalog } from './AgentCatalog'
 import { Artifacts } from './Artifacts'
 import { Automations } from './Automations'
 import { AccountSignIns } from './AccountSignIns'
+import { Copilot } from './Copilot'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
@@ -18,6 +20,7 @@ import { IssueChanges } from './IssueChanges'
 import { Helpers } from './Helpers'
 import { IssueDrafts } from './IssueDrafts'
 import { Issues } from './Issues'
+import { IntegrationTools } from './IntegrationTools'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
 import { Live } from './Live'
@@ -57,6 +60,8 @@ import { SignIns } from './SignIns'
 import { Errands } from './Errands'
 import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
+import { ApiCommands } from './ApiCommands'
+import { ClientIdentities } from './ClientIdentities'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
   /** The profile's database file, or `:memory:` for tests. */
@@ -86,6 +91,7 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
  * can't be copied or migrated fails the build, so nothing runs on it.
  */
 export const layer = (options: RuntimeLayerOptions) => {
+  const copilotClientId = options.copilotClientId ?? options.clientIds?.github
   const store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(
     Layer.provideMerge(
       startupLayer(
@@ -100,7 +106,15 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(WebCrypto),
   )
   const base = Layer.mergeAll(
-    ToolServer.layer.pipe(Layer.provideMerge(Errands.layer.pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))))),
+    ToolServer.layer.pipe(
+      Layer.provideMerge(
+        Errands.layer.pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(ApiCommands.layer, ClientIdentities.layer).pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))),
+          ),
+        ),
+      ),
+    ),
     Live.layer,
     startupLayer('modelfacts', ModelFacts.layer),
     Artifacts.layer,
@@ -108,6 +122,14 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry(options.agentStderr)),
+    Layer.provideMerge(
+      Copilot.layer({
+        ...(copilotClientId ? { clientId: copilotClientId } : {}),
+        ...(options.copilotEnterpriseClientIds === undefined ? {} : { enterpriseClientIds: options.copilotEnterpriseClientIds }),
+        ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+        appVersion: options.appVersion,
+      }),
+    ),
     // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
     Layer.provideMerge(
       Installs.layer({ root: options.agentsRoot, fetch: options.fetch, onDevice: options.onDevice, search: options.agentSearch }),
@@ -118,7 +140,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
-  const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(base))
+  const catalog = AgentCatalog.layer.pipe(Layer.provideMerge(base))
+  const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(catalog))
   const able = Layer.mergeAll(
     startupLayer('limits', Limits.layer),
     startupLayer('planusage', PlanUsage.layer),
@@ -179,6 +202,7 @@ export const layer = (options: RuntimeLayerOptions) => {
         TaskActions.layer,
         // The settings, read and changed by the coordinator and leads as the person can (ADR-097).
         SettingsTools.layer,
+        IntegrationTools.layer,
         // The page beside a conversation, read and driven by its lead and the coordinator (ADR-100).
         PageTools.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
@@ -192,6 +216,7 @@ export const layer = (options: RuntimeLayerOptions) => {
         startupLayer('skills', shippedSkillsLayer),
       ).pipe(Layer.provideMerge(automating)),
     ),
+    Layer.tap((services) => Context.get(services, Sessions).recoverQueued),
   )
 }
 

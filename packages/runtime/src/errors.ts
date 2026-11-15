@@ -3,8 +3,8 @@ import { Schema } from 'effect'
 /**
  * A git command failed: what git wrote to stderr, never the command line in
  * its place. Where it wrote nothing, how it ended says why: its exit code, the
- * signal that stopped it, or that it ran past its time and Althar stopped it
- * (`timedOut`, after `timeout` milliseconds). `reason` is for a process or
+ * signal that stopped it, or that it ran past its time and Althar stopped waiting
+ * (`timedOut`, after `timeout` milliseconds), with cancellation requested. `reason` is for a process or
  * output limit Althar itself stopped, never something git wrote.
  */
 export class GitFailed extends Schema.TaggedError<GitFailed>()('GitFailed', {
@@ -85,6 +85,13 @@ export class NothingToClear extends Schema.TaggedError<NothingToClear>()('Nothin
 }) {}
 
 export class RetryRefused extends Schema.TaggedError<RetryRefused>()('RetryRefused', {}) {}
+
+/** Undo could lose newer work, or has no complete checkpoint to restore. */
+export class UndoRefused extends Schema.TaggedError<UndoRefused>()('UndoRefused', {
+  message: Schema.String,
+  files: Schema.Array(Schema.String),
+  why: Schema.optional(Schema.Literals(['edited', 'staged'])),
+}) {}
 
 /** The agent could not be started, or its session could not be set up. */
 export class SessionFailed extends Schema.TaggedError<SessionFailed>()('SessionFailed', {
@@ -316,11 +323,12 @@ export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefus
  * than a message's files may be, a folder of more files than that, more files
  * than a message carries or more bytes all together, one Althar can't read, one kept before that isn't
  * there any more, or one with nowhere to be copied to, as for a task whose
- * folder isn't ready or isn't on this computer. `name` is its own, where
- * Althar knows it.
+ * folder isn't ready or isn't on this computer, or can't come back: its
+ * branch is gone, or something else is in its place. `name` is its own,
+ * where Althar knows it.
  */
 export class FileRefused extends Schema.TaggedError<FileRefused>()('FileRefused', {
-  reason: Schema.Literals(['too_large', 'too_many_files', 'too_many', 'too_much', 'unreadable', 'missing', 'nowhere']),
+  reason: Schema.Literals(['too_large', 'too_many_files', 'too_many', 'too_much', 'unreadable', 'missing', 'nowhere', 'gone', 'in_way']),
   name: Schema.NullOr(Schema.String),
 }) {}
 
@@ -332,22 +340,11 @@ export class FileRefused extends Schema.TaggedError<FileRefused>()('FileRefused'
  * And a finished task isn't done while what its agents left running, such as
  * a page, wouldn't stop. Its folder isn't removed by hand while something
  * runs from it, and doesn't come back where something else is in its place.
- * Its team doesn't change once it merged, nor its reviewer once its review is
- * done, nor without a lead in its plan to change.
+ * Its team doesn't change without a lead in its plan to change.
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals([
-    'merged',
-    'branch_gone',
-    'abandoned',
-    'no_title',
-    'title_too_long',
-    'folder_in_use',
-    'folder_in_way',
-    'review_done',
-    'no_lead',
-  ]),
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long', 'folder_in_use', 'folder_in_way', 'no_lead']),
 }) {}
 
 /** A finished task's folder that couldn't be removed: its last commit couldn't be kept, or something of it is left (ADR-056). */
