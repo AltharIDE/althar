@@ -52,6 +52,7 @@ import {
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { thisDevice } from './device'
+import { AgentCapacity } from './AgentCapacity'
 import { type Account, Accounts } from './Accounts'
 import { CANVAS_BRIEF, keepComments } from './Canvases'
 import { Artifacts } from './Artifacts'
@@ -560,6 +561,7 @@ interface Brief {
 }
 
 type Store =
+  | AgentCapacity
   | Artifacts
   | SqlClient.SqlClient
   | Ledger
@@ -1109,6 +1111,7 @@ export class Sessions extends Context.Service<
       const questions = yield* Questions
       const failures = yield* Failures
       const accounts = yield* Accounts
+      const capacity = yield* AgentCapacity
       const limits = yield* Limits
       const planUsage = yield* PlanUsage
       const sessionsSql = yield* SqlClient.SqlClient
@@ -3221,7 +3224,13 @@ export class Sessions extends Context.Service<
             ...(skills === undefined ? {} : { skills: skills.folder }),
             ...heldSkills,
           }
-          const transport = entry.transport(cwdOf(thread), { ...accounts.env(account), [WORK]: work, ...guarded }, transportOptions)
+          const { count, machine } = yield* capacity.atOnce
+          const testWorkers = Math.max(1, Math.floor(machine.cores / count))
+          const transport = entry.transport(
+            cwdOf(thread),
+            { ...accounts.env(account), [WORK]: work, ...guarded, VITEST_MAX_WORKERS: String(testWorkers) },
+            transportOptions,
+          )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
@@ -3477,6 +3486,7 @@ export class Sessions extends Context.Service<
             requestContext: held,
             skills,
             upFront,
+            testWorkers,
           }
         })
 
@@ -3530,7 +3540,8 @@ export class Sessions extends Context.Service<
         let supervised = false
         return Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext, skills, upFront } = connected
+          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext, skills, upFront, testWorkers } =
+            connected
           // How long it took to start, from its row to now: what its first turn counts as starting or handing over.
           const [made] = yield* sql<{ startedAt: string }>`SELECT started_at FROM provider_sessions WHERE id = ${sessionId}`
           const opened = made === undefined ? 0 : Math.max(0, (yield* Clock.currentTimeMillis) - Date.parse(made.startedAt))
@@ -3574,6 +3585,7 @@ export class Sessions extends Context.Service<
               ...brief,
               text: [
                 brief.text,
+                `Test runs share this machine with other agents. Your session has VITEST_MAX_WORKERS=${testWorkers}: keep that limit, or use fewer workers. Do not unset it or raise it with environment variables or worker flags. Run one test command at a time and workspace packages sequentially; do not start parallel workspace test commands (such as bun --filter '*' test). In Althar, bun run test and bun run verify serialize packages when this variable is set. In other projects, use their sequential runner or run each package separately, and apply the same worker limit to test runners other than Vitest.`,
                 ...(upFront === undefined || asideNow.aside ? [] : [upFrontSaid(upFront)]),
                 ...(skills === undefined || skills.given.length === 0 ? [] : [skillsSaid(skills.given)]),
               ].join('\n\n'),

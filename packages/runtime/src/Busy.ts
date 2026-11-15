@@ -1,10 +1,9 @@
-import { cpus, totalmem } from 'node:os'
-
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, Duration, Effect, Layer, Queue, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { type AtOnceDefault, atOnceFor, clamp } from './atOnce'
+import { type AtOnce, clamp } from './atOnce'
+import { AgentCapacity, AT_ONCE_KEY as KEY } from './AgentCapacity'
 import { automatedTasks } from './automated'
 import { touchTask } from './cards'
 import { RuntimeConfig } from './Config'
@@ -87,18 +86,7 @@ import { Sessions } from './Sessions'
  * card counts it as any work beyond the number: "4 of 4 busy, and 1 more".
  */
 
-/** The settings key the person's own number is kept under; none is kept for the default. */
-const KEY = 'agents_at_once'
-
-/** How many may be at once, and why. */
-export interface AtOnce {
-  /** The person's number, else the default. */
-  readonly count: number
-  /** The person's own number; null where they left the default. */
-  readonly own: number | null
-  /** The default, worked out at this launch from this machine's cores and memory. */
-  readonly machine: AtOnceDefault
-}
+export type { AtOnce } from './atOnce'
 
 /**
  * Where work that waits for a place stands (ADR-037): what the person did,
@@ -231,7 +219,7 @@ export interface Line {
 const after = (at: string) => new Date(Date.parse(at) + 1).toISOString()
 
 /** What Busy reads: the store, the sessions, what happens, its settings, and whether the computer is online. */
-type Reads = SqlClient.SqlClient | Sessions | Live | Ledger | RuntimeConfig | Connectivity
+type Reads = SqlClient.SqlClient | Sessions | Live | Ledger | RuntimeConfig | Connectivity | AgentCapacity
 
 export class Busy extends Context.Service<
   Busy,
@@ -301,6 +289,7 @@ export class Busy extends Context.Service<
       const live = yield* Live
       const connectivity = yield* Connectivity
       const options = (yield* RuntimeConfig).busy ?? {}
+      const { atOnce } = yield* AgentCapacity
       const every = options.every ?? Duration.seconds(5)
       const sampleEvery = options.sample ?? Duration.seconds(2)
       const quiet = Duration.toMillis(options.quiet ?? Duration.seconds(30))
@@ -356,8 +345,6 @@ export class Busy extends Context.Service<
             treeMembers(agents.flatMap((agent) => (agent.pid === null ? [] : [agent.pid]))),
             (used) => new Map(agents.map((agent) => [agent.threadId, agent.pid === null ? null : (used.get(agent.pid) ?? null)])),
           ))
-      // Worked out once a launch: the machine doesn't change while Althar runs.
-      const machine = atOnceFor(options.machine ?? { cores: cpus().length, memory: totalmem() })
       const scope = yield* Effect.scope
       const lock = Semaphore.makeUnsafe(1)
       const wakes = yield* Queue.sliding<void>(1)
@@ -404,12 +391,6 @@ export class Busy extends Context.Service<
       >()
 
       const wake = Queue.offer(wakes, undefined).pipe(Effect.asVoid)
-
-      const atOnce = Effect.gen(function* () {
-        const [kept] = yield* sql<{ value: string }>`SELECT value FROM settings WHERE key = ${KEY}`
-        const own = kept === undefined || !/^\d+$/.test(kept.value) ? null : clamp(Number(kept.value))
-        return { count: own ?? machine.count, own, machine } satisfies AtOnce
-      })
 
       /**
        * Reads the CPU of what sessions left running, and keeps whether each is at work. A server that sits idle isn't:
