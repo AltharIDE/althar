@@ -11,8 +11,16 @@ const Step = Schema.Struct({
   target: Schema.String,
   head: Schema.optional(Schema.String),
   branch: Schema.optional(Schema.String),
+  says: Schema.optional(Schema.String),
   request: Schema.Record(Schema.String, Schema.Unknown),
-  waits: Schema.Array(Schema.Struct({ kind: Schema.String, target: Schema.String, since: Schema.optional(Schema.String) })),
+  waits: Schema.Array(
+    Schema.Struct({
+      kind: Schema.String,
+      target: Schema.String,
+      since: Schema.optional(Schema.String),
+      says: Schema.optional(Schema.String),
+    }),
+  ),
 })
 const Kept = Schema.Struct({ message: Schema.String, steps: Schema.Array(Step) })
 const Changed = Schema.Struct({ errand: Schema.String, message: Schema.optional(Schema.String), reason: Schema.optional(Schema.String) })
@@ -34,7 +42,7 @@ export const errandTools = (errands: typeof Errands.Service): ReadonlyArray<Tool
   {
     name: 'keep_errand',
     description:
-      'Keep what the person asked for later, from a message id in this turn. Each ordered step binds its tool, semantic arguments, target, head, branch, task and what it waits on. Only the window or a paired device gives the person’s word. No action happens now.',
+      'Keep what the person asked for later, from a message id in this turn. Each ordered step binds its tool, semantic arguments, target, head, branch, task and what it waits on. Give each step says, the step in a few plain words for the person ("Merge the 0.9.0 pull request", "Tag v0.9.0"), and each wait says, what it waits for after "once" ("it’s open", "its checks pass"): the thread shows those, never the tool, kind or branch. Only the window or a paired device gives the person’s word. No action happens now.',
     input: {
       type: 'object',
       properties: {
@@ -50,12 +58,13 @@ export const errandTools = (errands: typeof Errands.Service): ReadonlyArray<Tool
               target: { type: 'string' },
               head: { type: 'string' },
               branch: { type: 'string' },
+              says: { type: 'string' },
               request: { type: 'object' },
               waits: {
                 type: 'array',
                 items: {
                   type: 'object',
-                  properties: { kind: { type: 'string' }, target: { type: 'string' }, since: { type: 'string' } },
+                  properties: { kind: { type: 'string' }, target: { type: 'string' }, since: { type: 'string' }, says: { type: 'string' } },
                   required: ['kind', 'target'],
                 },
               },

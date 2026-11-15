@@ -10,6 +10,7 @@ import { createRoot } from 'react-dom/client'
 
 import { Icon, LiveDot, StepTrack, TaskFace, TaskStatus, Thread, ThreadDivider, ThreadShellProvider, TrackStep } from '@althar/ui'
 
+import { afterStep, keptNote, type SaidStep, stepNote, type StepNote, why } from '../../../../packages/runtime/src/errandNotes'
 import { ServicesProvider } from '../../src/renderer/data/services'
 import { blocksOf } from '../../src/renderer/shared/thread'
 import { ThreadBlocks } from '../../src/renderer/shared/ThreadBlocks'
@@ -34,7 +35,7 @@ const HOLD = 'you asked to wait for the changelog'
 
 const directions = [
   { key: 'today', kbd: '0', label: 'Today' },
-  { key: 'a', kbd: 'A', label: 'One line' },
+  { key: 'a', kbd: 'A', label: 'Calm lines (built)' },
   { key: 'b', kbd: 'B', label: 'Checklist' },
   { key: 'c', kbd: 'C', label: 'Track' },
 ] as const
@@ -135,32 +136,35 @@ function Blocks({ of }: { of: ReadonlyArray<ThreadItem> }) {
  * The kept line says the ask once, in words, its own words folded under it; each step's note after (#901) says where it
  * stands now. Nothing changes in place: the last line is where it is.
  */
-const keptA = (minutes: number) =>
-  placed(
-    items.notice(
-      {
-        source: 'runtime',
-        title: `Kept your errand: merge the 0.9.0 pull request once it’s open and its checks pass, then tag ${TAG}`,
-        details: `You said: “${ASKED}”\n\n1. Merge the 0.9.0 pull request: waits for it to open, then for its checks to pass\n2. Tag ${TAG}: waits for the merge`,
-      } as never,
-      null,
-    ),
-    minutes,
-  )
+const MERGE: SaidStep = {
+  tool: 'merge_pull_request',
+  target: PR_URL,
+  says: 'Merge the 0.9.0 pull request',
+  waits: [
+    { kind: 'pull_request_opened', says: 'it’s open' },
+    { kind: 'checks_passed', says: 'its checks pass' },
+  ],
+}
+const TAG_STEP: SaidStep = { tool: 'push_tag', target: `AltharIDE/althar ${TAG}`, says: `Tag ${TAG}`, waits: [{ kind: 'merged' }] }
+
+/** A line as the runtime says it (Errands.ts), from the runtime's own words for it (errandNotes.ts). */
+const noted = (note: StepNote, minutes: number) =>
+  placed(items.notice({ source: 'runtime', title: note.title, links: note.links, details: note.details } as never, null), minutes)
+
+const keptA = (minutes: number) => noted(keptNote(ASKED, [MERGE, TAG_STEP]), minutes)
 
 const notesA = (stand: Stand): ReadonlyArray<ThreadItem> => {
-  const opened = runtime(`${PR} opened; waiting for its checks`, 12)
+  const merged = afterStep(stepNote('merge_pull_request', PR_URL, {}, JSON.stringify({ status: 200, body: { merged: true } })), TAG_STEP)
   switch (stand) {
     case 'waiting':
-      return []
     case 'checks':
-      return [opened]
+      return []
     case 'partway':
-      return [opened, runtime(`Merged ${PR}; tagging ${TAG} next`, 3)]
+      return [noted(merged, 3)]
     case 'done':
-      return [opened, runtime(`Merged ${PR}`, 3), runtime(`Tagged ${TAG}. Errand done`, 2)]
+      return [noted(merged, 3), noted(afterStep(stepNote('push_tag', TAG_STEP.target, {}, `Tagged ${TAG}`), undefined), 2)]
     case 'paused':
-      return [opened, runtime(`Errand on hold before merging ${PR}: ${HOLD}`, 5)]
+      return [runtime(`Errand on hold: ${why(HOLD)}`, 5)]
   }
 }
 

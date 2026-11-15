@@ -7,7 +7,7 @@ import { Cause, Context, Crypto, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchTask } from './cards'
-import { failedNote, stepNote, type StepNote } from './errandNotes'
+import { afterStep, failedNote, keptNote, type SaidStep, stepNote, type StepNote, stillNote, why } from './errandNotes'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
 import { outward } from './outward'
@@ -32,9 +32,17 @@ export interface ErrandStep {
   readonly target: string
   readonly head?: string | undefined
   readonly branch?: string | undefined
+  /** The step in a few plain words for the person, as the agent put it ("Merge the 0.9.0 pull request"): what the thread says. */
+  readonly says?: string | undefined
   /** The tool's semantic arguments, without the word/errand reference. Bound exactly when kept. */
   readonly request: Readonly<Record<string, unknown>>
-  readonly waits: ReadonlyArray<{ readonly kind: string; readonly target: string; readonly since?: string | undefined }>
+  /** What it waits on; each wait's `says` is what the person reads after "once" ("it’s open"). */
+  readonly waits: ReadonlyArray<{
+    readonly kind: string
+    readonly target: string
+    readonly since?: string | undefined
+    readonly says?: string | undefined
+  }>
 }
 
 /** A read made now by the implementing tool, never the last poll's news. */
@@ -96,9 +104,21 @@ interface StepRow {
   readonly targetBranch: string | null
   readonly request: string
   readonly waits: string
+  readonly says: string | null
   readonly state: string
   readonly position: number
 }
+
+/** A step as kept, for the lines the person reads. */
+const said = (step: StepRow): SaidStep => ({
+  tool: step.tool,
+  target: step.target,
+  says: step.says,
+  waits: JSON.parse(step.waits) as SaidStep['waits'],
+})
+
+/** The reason kept when the person calls an errand off, which the agents read: their line says only that it is. */
+const CALLED_OFF = 'The person called it off.'
 
 type Store = SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto
 const refused = (message: string) => new ToolRefused({ message })
@@ -291,7 +311,10 @@ export class Errands extends Context.Service<
               actorId: instance.systemId,
               payload: { reason },
             })
-            yield* say(row, `Errand ${state}: ${reason ?? row.words}`)
+            // The last step's note says the errand is done.
+            if (state === 'paused') yield* say(row, `Errand on hold: ${why(reason)}`)
+            else if (state === 'cancelled')
+              yield* say(row, reason === CALLED_OFF || reason === null ? 'Errand called off' : `Errand called off: ${why(reason)}`)
           }),
         )
       const stepsOf = (id: string) => sql<StepRow>`SELECT * FROM errand_steps WHERE errand_id = ${id} ORDER BY position`
@@ -332,7 +355,7 @@ export class Errands extends Context.Service<
             }
             yield* sql`INSERT INTO errands ${sql.insert({ ...row, createdAt: at, newsAt: at })}`
             for (const [index, step] of steps.entries())
-              yield* sql`INSERT INTO errand_steps ${sql.insert({ errandId: id, projectId: access.projectId, stepKey: step.key, position: index + 1, tool: step.tool, taskId: step.taskId ?? null, target: step.target, head: step.head ?? null, targetBranch: step.branch ?? null, request: stable(step.request), waits: stable(step.waits), state: 'waiting' })}`
+              yield* sql`INSERT INTO errand_steps ${sql.insert({ errandId: id, projectId: access.projectId, stepKey: step.key, position: index + 1, tool: step.tool, taskId: step.taskId ?? null, target: step.target, says: step.says ?? null, head: step.head ?? null, targetBranch: step.branch ?? null, request: stable(step.request), waits: stable(step.waits), state: 'waiting' })}`
             yield* fact({
               projectId: row.projectId,
               aggregateType: 'errand',
@@ -342,10 +365,7 @@ export class Errands extends Context.Service<
               actorId: instance.systemId,
               payload: { messageId, steps },
             })
-            yield* say(
-              row,
-              `Kept an errand: ${JSON.stringify(words)}. ${steps.map((s) => `${s.tool.replaceAll('_', ' ')} ${s.target}${s.head === undefined ? '' : ` at ${s.head}`}; waits on ${s.waits.map((w) => `${w.kind} ${w.target}`).join(', ')}`).join('; ')}.`,
-            )
+            yield* say(row, keptNote(words, steps))
             return id
           }),
         )
@@ -430,9 +450,13 @@ export class Errands extends Context.Service<
                   const note = stepNote(tool, action.target, action.request, answer)
                   if (errand !== undefined && step !== undefined) {
                     yield* sql`UPDATE errand_steps SET state = 'done' WHERE errand_id = ${errand.id} AND step_key = ${step.stepKey}`
-                    if (kept.saidAt === null) yield* say(errand, note)
-                    if (errand.state !== 'done' && (yield* stepsOf(errand.id)).every((s) => s.state === 'done'))
+                    const next = (yield* stepsOf(errand.id)).find((s) => s.state !== 'done')
+                    if (kept.saidAt === null) yield* say(errand, afterStep(note, next === undefined ? undefined : said(next)))
+                    if (errand.state !== 'done' && next === undefined) {
                       yield* set(errand, 'done', null)
+                      // Its last step's note said so; where that was said before, the errand ending still gets its line.
+                      if (kept.saidAt !== null) yield* say(errand, 'Errand done')
+                    }
                   } else if (kept.saidAt === null)
                     yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', noteContent(note))
                   yield* change('mutation_receipts', kept.id, { saidAt: yield* timestamp })
@@ -634,7 +658,7 @@ export class Errands extends Context.Service<
                   actorId: instance.systemId,
                   payload: { messageId, words },
                 })
-                yield* say(row, `Errand resumed: ${JSON.stringify(row.words)}. The person said ${JSON.stringify(words)}.`)
+                yield* say(row, `Errand resumed: you said “${words.trim()}”`)
                 return 'Resumed the errand on the person’s word.'
               }),
             ),
@@ -645,7 +669,7 @@ export class Errands extends Context.Service<
               yield* word(access, messageId)
               const row = yield* owned(access, id)
               if (row.state === 'done' || row.state === 'cancelled') return `This errand is ${row.state}.`
-              yield* set(row, 'cancelled', 'The person called it off.')
+              yield* set(row, 'cancelled', CALLED_OFF)
               return 'Called off the errand.'
             }),
           ),
@@ -680,10 +704,8 @@ export class Errands extends Context.Service<
                     (row.remindedAt !== null && Date.parse(at) - Date.parse(row.remindedAt) < 86_400_000)
                   )
                     continue
-                  yield* say(
-                    row,
-                    `Errand still waits: ${row.reason ?? steps.map((s) => `${s.target}: ${waitsLine(s.waits)}`).join('; ')}. Asked: ${JSON.stringify(row.words)}.`,
-                  )
+                  const first = steps[0]
+                  yield* say(row, stillNote(row.state === 'paused', row.reason, first === undefined ? undefined : said(first)))
                   yield* change('errands', row.id, { remindedAt: at })
                 }
               }),

@@ -210,3 +210,104 @@ export const failedNote = (
   const links = link === null ? shown.links : [link, ...shown.links.filter((one) => one.label !== link.label)]
   return { title: shown.text, links }
 }
+
+/** A step as the person reads it: what it does, and what it waits for, in Althar's words where the agent left none. */
+export interface SaidStep {
+  readonly tool: string
+  readonly target: string
+  /** The step in a few plain words, as the agent that kept it put it: "Merge the 0.9.0 pull request". */
+  readonly says?: string | null | undefined
+  readonly waits: ReadonlyArray<{ readonly kind: string; readonly says?: string | undefined }>
+}
+
+const capital = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
+/** Lower-cased to go mid-sentence, unless it starts with a name or an acronym (PR, GitHub). */
+const lower = (text: string) =>
+  /^[A-Z][a-z]/.test(text) && !/^[A-Z][a-z]+[A-Z]/.test(text) ? `${text.charAt(0).toLowerCase()}${text.slice(1)}` : text
+const unstop = (text: string) => text.trim().replace(/[.\s]+$/, '')
+
+/** A step's words: the agent's own, else its tool and target made short (Merge pull request #958). */
+export const stepWords = (step: SaidStep): string => {
+  const said = unstop(step.says ?? '')
+  if (said !== '') return capital(said)
+  const tool = step.tool
+    .replace(/^mcp__[^_]+__/, '')
+    .replaceAll('_', ' ')
+    .trim()
+  return capital(`${tool} ${shortTarget(subject(step.target))}`.trim())
+}
+
+/** A wait's clause, to follow "once": the agent's words, else the kind Althar knows, else the kind made plain. */
+const waitClause = (wait: SaidStep['waits'][number]): string => {
+  const said = unstop(wait.says ?? '')
+  if (said !== '') return lower(said.replace(/^(?:once|when|after|until)\s+/i, ''))
+  const kind = wait.kind.toLowerCase().replace(/[-\s]+/g, '_')
+  if (/check/.test(kind)) return 'its checks pass'
+  if (/review|approv/.test(kind)) return 'it’s approved'
+  if (/merge_(?:queue|train|line|in_flight)/.test(kind)) return 'its turn to merge comes'
+  if (/merged/.test(kind)) return 'it’s merged'
+  if (/open/.test(kind)) return 'it’s open'
+  if (/release|publish/.test(kind)) return 'it’s published'
+  return wait.kind.replaceAll('_', ' ').trim()
+}
+
+/** What a step waits for, as "once it’s open and its checks pass"; empty where it waits on nothing. */
+export const waitsWords = (step: SaidStep): string => {
+  const clauses = [...new Set(step.waits.map(waitClause).filter((clause) => clause !== ''))]
+  return clauses.length === 0 ? '' : `once ${list(clauses)}`
+}
+
+const withWaits = (step: SaidStep, words = stepWords(step)) => {
+  const waits = waitsWords(step)
+  return waits === '' ? words : `${words} ${waits}`
+}
+
+/** Each step's target that has a label, where the line names it. */
+const linksIn = (line: string, steps: ReadonlyArray<SaidStep>): ReadonlyArray<NoteLink> => {
+  const links: Array<NoteLink> = []
+  for (const step of steps) {
+    const link = labelOf(subject(step.target))
+    if (link !== null && line.includes(link.label) && !links.some((one) => one.label === link.label)) links.push(link)
+  }
+  return links
+}
+
+/** How many steps the kept line names before it counts the rest. */
+const NAMED_MOST = 3
+
+/**
+ * The line Althar says when it keeps an errand: its steps in plain words, in order, with what the first waits for (each later one
+ * waits for the one before). The person's own words and every step with its waits fold under it.
+ */
+export const keptNote = (words: string, steps: ReadonlyArray<SaidStep>): StepNote => {
+  const [first, ...rest] = steps
+  if (first === undefined) return { title: 'Kept your errand', links: [] }
+  const named = rest.slice(0, NAMED_MOST - 1).map((step) => lower(stepWords(step)))
+  const more = rest.length - named.length
+  const then = [...named, ...(more > 0 ? [`${more} more ${more === 1 ? 'step' : 'steps'}`] : [])].map((step) => `, then ${step}`).join('')
+  const full = `Kept your errand: ${lower(withWaits(first))}${then}`
+  const title = full.length <= TITLE_MOST ? full : `${full.slice(0, full.lastIndexOf(' ', TITLE_MOST - 1)).trimEnd()}…`
+  const details = [`You said: “${words.trim()}”`, '', ...steps.map((step, at) => `${at + 1}. ${withWaits(step)}`)].join('\n')
+  return { title, links: linksIn(title, steps), details: trimmed(details, DETAILS_MOST) }
+}
+
+/** A step's note, said where its errand stands after it: the step that comes next, or that the errand is done. */
+export const afterStep = (note: StepNote, next: SaidStep | undefined): StepNote => {
+  const said = unstop(note.title)
+  const title = next === undefined ? `${said}. Errand done` : `${said}. Next: ${lower(stepWords(next))}`
+  const links = [
+    ...note.links,
+    ...linksIn(title, next === undefined ? [] : [next]).filter((one) => !note.links.some((own) => own.label === one.label)),
+  ]
+  return { ...note, title, links }
+}
+
+/** Why an errand is held or called off, to follow a colon: the reason without its stop, lower-cased where it starts a sentence. */
+export const why = (reason: string | null, otherwise = 'it waits for your word'): string => lower(unstop(reason ?? '') || otherwise)
+
+/** Where an errand still waits, for its daily reminder: its first step to go and what that waits for, or why it is on hold. */
+export const stillNote = (paused: boolean, reason: string | null, step: SaidStep | undefined): StepNote => {
+  if (paused) return { title: `Errand still on hold: ${why(reason)}`, links: [] }
+  const line = step === undefined ? 'Errand still waits' : `Errand still waits to ${lower(withWaits(step))}`
+  return { title: line, links: step === undefined ? [] : linksIn(line, [step]) }
+}

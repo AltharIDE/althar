@@ -235,7 +235,10 @@ describe('the person’s word through the tool boundary', () => {
       const items = yield* s.sql<{
         content: string
       }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId} AND kind = 'notice'`
-      assert.isTrue(items.some((i) => i.content.includes('Kept an errand')))
+      // Said in words, as the person reads them: no tool name, wait kind or head.
+      const kept = items.find((i) => i.content.includes('Kept your errand'))?.content ?? ''
+      assert.include(kept, 'Kept your errand: test asked repo/#1 once its checks pass')
+      assert.notInclude(JSON.parse(kept).title, 'head-a')
       assert.isTrue(items.some((i) => i.content.includes('Errand done')))
     }).pipe(Effect.provide(runtime())),
   )
@@ -533,7 +536,7 @@ describe('the person’s word through the tool boundary', () => {
         content: string
       }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`
       assert.lengthOf(lines, 2)
-      assert.isTrue(lines.some((line) => line.content.includes('checks head-a')))
+      assert.isTrue(lines.some((line) => line.content.includes('once its checks pass')))
       assert.isTrue(lines.every((line) => !line.content.includes('[{')))
     }).pipe(Effect.provide(slowDays())),
   )
