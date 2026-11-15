@@ -77,6 +77,7 @@ const syncDirectory = async (path: string) => {
 export const writePrivate = async (path: string, value: Uint8Array | string, replace: boolean): Promise<boolean> => {
   const temporary = `${path}.${randomBytes(12).toString('hex')}.tmp`
   let handle: fs.FileHandle | undefined
+  let created = true
   try {
     handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
     await handle.writeFile(value)
@@ -88,13 +89,15 @@ export const writePrivate = async (path: string, value: Uint8Array | string, rep
       try {
         await fs.link(temporary, path)
       } catch (error) {
-        if (fileErrorCode(error) === 'EEXIST') return false
-        throw error
+        if (fileErrorCode(error) === 'EEXIST') created = false
+        else throw error
       }
       await fs.unlink(temporary)
     }
     await syncDirectory(dirname(path))
-    return true
+    // A previous attempt may have published successfully but failed its directory
+    // sync. Re-establish durability even when creation finds the destination there.
+    return created
   } finally {
     await handle?.close().catch(() => undefined)
     await fs.rm(temporary, { force: true }).catch(() => undefined)
@@ -102,7 +105,11 @@ export const writePrivate = async (path: string, value: Uint8Array | string, rep
 }
 
 export const removePrivate = async (path: string, maximum: number) => {
-  if ((await readPrivate(path, maximum)) === null) return
-  await fs.unlink(path)
-  await syncDirectory(dirname(path))
+  if ((await readPrivate(path, maximum)) !== null) await fs.unlink(path)
+  // A retry after a failed sync sees an absent file; it still owes the barrier.
+  try {
+    await syncDirectory(dirname(path))
+  } catch (error) {
+    if (fileErrorCode(error) !== 'ENOENT') throw error
+  }
 }

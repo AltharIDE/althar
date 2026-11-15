@@ -20,6 +20,7 @@ describe('private durable host files', () => {
     expect(readdirSync(root)).toEqual(['private'])
     await removePrivate(file, 10)
     await removePrivate(file, 10)
+    await removePrivate(join(root, 'missing/file'), 10)
     expect(await readPrivate(file, 10)).toBeNull()
     await expect(writePrivate(join(root, 'missing/file'), 'value', false)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(readdirSync(root)).toEqual([])
