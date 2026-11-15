@@ -9,6 +9,7 @@ import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents, RuntimeConfig } from './Config'
+import { Copilot } from './Copilot'
 import { NotFound, UnknownAgent } from './errors'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
@@ -89,7 +90,7 @@ const NOT_HOMES = new Set(['.claude-code-router'])
 /** A word quoted for a POSIX shell. */
 const quoted = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`
 
-type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | RuntimeConfig
+type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | RuntimeConfig | Copilot
 type Failure = SqlError.SqlError | Schema.SchemaError | RowNotFound | RevisionConflict
 
 export class Accounts extends Context.Service<
@@ -133,6 +134,7 @@ export class Accounts extends Context.Service<
       const instance = yield* Instance
       const agents = yield* Agents
       const config = yield* RuntimeConfig
+      const copilot = yield* Copilot
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
       const definitionOf = (agentId: string): AgentDefinition | undefined =>
@@ -183,6 +185,25 @@ export class Accounts extends Context.Service<
       const of = (agentId: string) =>
         Effect.gen(function* () {
           const known = yield* rows(agentId)
+          const definition = definitionOf(agentId)
+          if (definition?.native === 'copilot') {
+            if (!known.some((account) => account.home === null)) return known
+            // Native accounts have no external default sign-in. Keep existing IDs and names from the retired engine,
+            // but make that account removable like every account Althar owns; never import the engine's credentials.
+            const sql = yield* SqlClient.SqlClient
+            return yield* sql
+              .withTransaction(
+                Effect.gen(function* () {
+                  for (const account of known.filter((account) => account.home === null)) {
+                    const home = config.accountsRoot === undefined ? usualOf(definition) : join(config.accountsRoot, `${agentId}-usual`)
+                    const revision = yield* change('agent_accounts', account.id, { home })
+                    yield* record(account, 'agent_account.native_owned', revision, { home })
+                  }
+                  return yield* rows(agentId)
+                }),
+              )
+              .pipe(Effect.catchTags({ SchemaError: Effect.die, RowNotFound: Effect.die, RevisionConflict: Effect.die }))
+          }
           if (known.some((account) => account.home === null)) return known
           const sql = yield* SqlClient.SqlClient
           // The agent's usual folder is its first account; who it was seen as before accounts were kept goes with it.
@@ -239,6 +260,7 @@ export class Accounts extends Context.Service<
       const env = (account: Account): Readonly<Record<string, string>> => {
         const definition = definitionOf(account.agentId)
         if (definition === undefined) return {}
+        if (definition.native === 'copilot') return { ALTHAR_COPILOT_ACCOUNT: account.id }
         if (account.home === null && definition.home.managed === true) {
           const home =
             config.accountsRoot === undefined
@@ -374,8 +396,16 @@ export class Accounts extends Context.Service<
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
-              const account = yield* get(accountId)
+              let account = yield* get(accountId)
+              if (account.home === null && definitionOf(account.agentId)?.native === 'copilot') {
+                yield* of(account.agentId)
+                account = yield* get(accountId)
+              }
               if (account.home === null) return yield* new AccountRefused({ reason: 'usual' })
+              if (definitionOf(account.agentId)?.native === 'copilot')
+                yield* copilot
+                  .forget(account.id)
+                  .pipe(Effect.mapError(() => new SignOutFailed({ line: 'Remove this account again in Althar.' })))
               // A folder Althar made is signed out with the agent's own tool, then goes; one another tool made stays its.
               const made = madeHere(account)
               // Anyway, as when the agent's tool is gone: the folder goes even where its sign-out didn't happen.
@@ -445,6 +475,7 @@ export class Accounts extends Context.Service<
  * yet: the person's settings, or other tools' data. Never a sign-in.
  */
 const link = (definition: AgentDefinition, home: string) => {
+  if (definition.native !== undefined) return
   const usual = definition.home.usual(process.env, homedir())
   const names = listing(usual).map((entry) => entry.name)
   for (const name of definition.home.shared(names)) {

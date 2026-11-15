@@ -3154,6 +3154,68 @@ export class Sessions extends Context.Service<
           const web = !offline ? ((yield* policies.current(thread.projectId)).rules.leadsReachWeb ?? true) : false
           const transportOptions: SessionOptions = {
             web,
+            ...(definition.native === 'copilot'
+              ? {
+                  nativeProcesses: {
+                    starting: (command: string) =>
+                      Effect.runPromise(
+                        run(
+                          Effect.gen(function* () {
+                            const id = yield* newId(Ids.process)
+                            yield* sql`INSERT INTO processes ${sql.insert({
+                              id,
+                              projectId: thread.projectId,
+                              deviceId: instance.deviceId,
+                              runtimeInstanceId: instance.id,
+                              providerSessionId: sessionId,
+                              purpose: 'other',
+                              executable: command,
+                              argsRedacted: '[]',
+                              controllerGeneration: 1,
+                              state: 'launching',
+                              launchedAt: yield* timestamp,
+                            })}`
+                            return id
+                          }),
+                        ),
+                      ),
+                    started: (
+                      id: string,
+                      process: { readonly pid: number; readonly osStartedAt?: string; readonly environmentDigest: string },
+                    ) =>
+                      Effect.runPromise(
+                        run(
+                          change('processes', id, {
+                            pid: process.pid,
+                            processGroupId: process.pid,
+                            osStartedAt: process.osStartedAt ?? null,
+                            environmentDigest: process.environmentDigest,
+                            state: 'running',
+                          }).pipe(Effect.asVoid),
+                        ),
+                      ),
+                    stopped: (id: string, report?: { readonly signal: string; readonly survivors: boolean }) =>
+                      Effect.runPromise(
+                        run(
+                          Effect.gen(function* () {
+                            yield* change('processes', id, {
+                              state:
+                                report === undefined
+                                  ? 'unknown'
+                                  : report.survivors
+                                    ? 'running'
+                                    : report.signal === 'none'
+                                      ? 'exited'
+                                      : 'killed',
+                              endedAt: report?.survivors ? null : yield* timestamp,
+                              signal: report?.signal ?? null,
+                            })
+                          }),
+                        ),
+                      ),
+                  },
+                }
+              : {}),
             ...(untrusted ? { untrusted } : {}),
             ...(untrusted && offline ? { offline } : {}),
             ...(skills === undefined ? {} : { skills: skills.folder }),
@@ -3562,8 +3624,8 @@ export class Sessions extends Context.Service<
           // A turn that already started records itself; between turns, this one does.
           running.recording ??= between
           // An agent that doesn't say what it could see: read where it reads, out on the device as a Flatpak's home is the device's by path (ADR-027). A review's lead loads none of the repository's.
-          const launched = definition.launch(adapterNode())
-          if (thread.role === 'task' && thread.review === null && definition.skillFolders !== undefined)
+          if (thread.role === 'task' && thread.review === null && definition.skillFolders !== undefined) {
+            const launched = definition.launch(adapterNode())
             yield* between
               .record({
                 _tag: 'SkillsSeen',
@@ -3577,6 +3639,7 @@ export class Sessions extends Context.Service<
                 ),
               })
               .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the skills an agent could see', cause)))
+          }
           yield* Effect.forkIn(
             run(
               Stream.runForEach(agent.events, (event) =>

@@ -37,7 +37,7 @@ test('shows every agent: those on this computer first, the rest to download or i
     const copilot = rows.getByRole('listitem').filter({ hasText: 'GitHub Copilot' }).first()
     await copilot.getByRole('button', { name: 'Sign in', exact: true }).click()
     await expect(copilot.getByRole('button', { name: 'Continue with GitHub', exact: true })).toBeVisible()
-    await expect(copilot.getByText('GitHub will ask you to authorize OpenCode. Usage is on your Copilot subscription.')).toBeVisible()
+    await expect(copilot.getByText('GitHub will ask you to authorize Althar. Usage is on your Copilot subscription.')).toBeVisible()
     await copilot.getByRole('button', { name: 'Use a GitHub Enterprise address…' }).click()
     await copilot.getByRole('textbox', { name: 'GitHub Enterprise address' }).fill('http://company.ghe.com')
     await copilot.getByRole('button', { name: 'Continue', exact: true }).click()

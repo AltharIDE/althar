@@ -127,7 +127,10 @@ describe('finding an agent’s command', () => {
     expect(codex.launch('node').command).toBe('node')
     found = { command: '/device/codex', whose: 'theirs' }
     expect(codex.signIn.status?.('node')).toMatchObject({ command: '/device/codex', args: ['login', 'status'] })
-    expect(codex.signIn.inApp?.run('node')).toMatchObject({ command: '/device/codex', args: ['app-server'] })
+    const codexLogin = codex.signIn.inApp
+    expect(codexLogin?.kind).toBe('codex-app-server')
+    if (codexLogin?.kind === 'codex-app-server')
+      expect(codexLogin.run('node')).toMatchObject({ command: '/device/codex', args: ['app-server'] })
     expect(codex.signIn.logout?.run('node')).toMatchObject({ command: '/device/codex', args: ['logout'] })
     expect(codex.version?.('node')).toMatchObject({ command: '/device/codex', args: ['--version'] })
     expect(codex.usage?.run('node')).toMatchObject({ command: '/device/codex', args: ['app-server'] })
@@ -191,7 +194,9 @@ describe('finding an agent’s command', () => {
     const pointed = usingLocated(agents['claude-code'], () => ({ command: '/app/claude', whose: 'bundled' }))
     expect(pointed.launch('node').command).toBe('node')
     expect(pointed.signIn.status?.('node').command).toBe('/app/claude')
-    expect(pointed.signIn.inApp?.run('node').command).toBe('/app/claude')
+    const claudeLogin = pointed.signIn.inApp
+    expect(claudeLogin?.kind).toBe('claude-login')
+    if (claudeLogin?.kind === 'claude-login') expect(claudeLogin.run('node').command).toBe('/app/claude')
     expect(pointed.signIn.logout?.run('node').command).toBe('/app/claude')
     expect(pointed.version?.('node').command).toBe('/app/claude')
     expect(pointed.signIn.login).toBe('/app/claude auth login')

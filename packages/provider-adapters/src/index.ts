@@ -1,4 +1,6 @@
 export * from './AgentConnection'
+export * from './native/agent'
+export * from './native/copilot'
 export * from './background'
 export * from './errors'
 export * from './events'

@@ -5,6 +5,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { Agents } from './Config'
+import { Copilot } from './Copilot'
 
 /*
  * Whether each account is signed in, and how that is paid for, from its
@@ -73,12 +74,13 @@ export class SignIns extends Context.Service<
     readonly signedIn: Stream.Stream<SignedIn>
   }
 >()('@althar/runtime/SignIns') {
-  static readonly layer: Layer.Layer<SignIns, never, Agents | Accounts | SqlClient.SqlClient> = Layer.effect(
+  static readonly layer: Layer.Layer<SignIns, never, Agents | Accounts | SqlClient.SqlClient | Copilot> = Layer.effect(
     SignIns,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const agents = yield* Agents
       const accounts = yield* Accounts
+      const copilot = yield* Copilot
       const known = new Map<string, { readonly check: SignInCheck; readonly at: number }>()
       /* Agents found signed in this launch, and what is said as they are. */
       const found = new Set<string>()
@@ -101,7 +103,9 @@ export class SignIns extends Context.Service<
           const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
           if (entry === undefined) return UNKNOWN
           yield* accounts.prepare(of)
-          const checked = yield* afterOpen(signInCheck(entry.definition, adapterNode(), accounts.env(of)))
+          const checked = yield* entry.definition.native === 'copilot'
+            ? copilot.status(of.id)
+            : afterOpen(signInCheck(entry.definition, adapterNode(), accounts.env(of)))
           // As it stands now, not as it stood when this check began: another may have finished meanwhile and said it.
           const before = known.get(of.id)?.check.status
           known.set(of.id, { check: checked, at: yield* Clock.currentTimeMillis })
@@ -181,7 +185,12 @@ export class SignIns extends Context.Service<
           Effect.catch((_: SqlError.SqlError) => Effect.succeed<ReadonlyArray<SignInCheck>>([])),
         )
       return SignIns.of({
-        of: (agentId, recheck = false) => Effect.map(checks(agentId, recheck), (all) => anyOf(all.map((check) => check.status))),
+        of: (agentId, recheck = false) =>
+          Effect.map(checks(agentId, recheck), (all) =>
+            all.length === 0 && agents.list.some((entry) => entry.definition.id === agentId && entry.definition.native === 'copilot')
+              ? 'signed_out'
+              : anyOf(all.map((check) => check.status)),
+          ),
         account,
         providers,
         signedIn: Stream.fromPubSub(arrived),
