@@ -36,6 +36,7 @@ export const keys = {
   /** Where issues can be filed on a tracker connected: its teams. */
   containers: (connectionId: string) => ['containers', connectionId] as const,
   settings: ['settings'] as const,
+  agentCatalog: ['agentCatalog'] as const,
   /** The settings an agent changed last, with who and when: a project's, or (null) Althar's own (ADR-097). */
   settingChanges: (projectId: string | null) => ['settingChanges', projectId] as const,
   /** Every account's plan usage: kept whole as the runtime sends it. */
@@ -98,6 +99,7 @@ export const continued = <S extends ThreadSnapshot | CoordinatorSnapshot>(was: S
   if (was.items.some((item) => item.sequence < first.sequence && !settled(item))) return fresh
   // The view was cleared, opened or restored, or the conversation forgotten, since the pages held were read: they are of another thread.
   if ('view' in was && 'view' in fresh && was.view.version !== fresh.view.version) return fresh
+  if ('conversationVersion' in was && 'conversationVersion' in fresh && was.conversationVersion !== fresh.conversationVersion) return fresh
   return { ...fresh, items: mergeItems(was.items, fresh.items), earlier: was.earlier }
 }
 

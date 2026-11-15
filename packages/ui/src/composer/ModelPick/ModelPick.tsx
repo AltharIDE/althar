@@ -10,7 +10,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Popover } from '../../primitives/Popover/Popover'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import s from './ModelPick.module.css'
-import { type ModelRoom, type ModelRoomText, RoomNote, RoomSaid } from './room'
+import type { ModelRoom, ModelRoomText } from './room'
 
 export interface ModelPickText {
   /** The popover's name. */
@@ -76,7 +76,7 @@ export interface ModelPickProps {
   variant?: 'quiet' | 'field'
   /** Where the list opens: above in a composer, below in a plan. */
   placement?: 'above' | 'below'
-  /** How much room a model has where work on it would start, beneath its name; null where its plan is read by nothing, undefined where there is nothing to say. Once the model in use is nearly out, the chip says so beside itself. */
+  /** @deprecated Account usage belongs in Plan usage and is never displayed by the model picker. */
   room?: (model: ModelInfo) => ModelRoom | null | undefined
   roomText?: Partial<ModelRoomText>
   /** What picking a model would do that needs a yes first, in a sentence. Picking such a model asks, in the list, before `onChange`. */
@@ -111,8 +111,6 @@ export function ModelPick({
   owner,
   variant = 'quiet',
   placement = 'above',
-  room,
-  roomText,
   confirm,
   asking: askingProp,
   defaultAsking = null,
@@ -180,16 +178,12 @@ export function ModelPick({
           }}
           loop
         >
-          {list.map((x) => {
-            const left = room?.(x)
-            return (
-              <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
-                <Model model={x} />
-                {left != null && <RoomNote room={left} text={roomText} className={cx(s.room, x.mark !== undefined && s.roomMarked)} />}
-                <Icon name="check" size={11} className={s.check} />
-              </RadioGroup.Item>
-            )
-          })}
+          {list.map((x) => (
+            <RadioGroup.Item key={x.id} value={x.id} className={cx(s.option, x.id === model.id && s.current)}>
+              <Model model={x} />
+              <Icon name="check" size={11} className={s.check} />
+            </RadioGroup.Item>
+          ))}
         </RadioGroup.Root>
 
         {asking !== null && question !== undefined && (
@@ -284,7 +278,6 @@ export function ModelPick({
           </button>
         )}
       </Popover>
-      <RoomSaid room={room?.(model)} text={roomText} />
     </>
   )
 }

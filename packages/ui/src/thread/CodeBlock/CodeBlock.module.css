@@ -18,11 +18,9 @@
   color: var(--t-3);
 }
 .file {
+  display: flex;
   flex: 0 1 auto;
   min-width: 8ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font: 500 12px var(--mono);
   color: var(--t-1);
 }

@@ -6,7 +6,13 @@
   font-size: 12px;
   color: var(--t-3);
 }
+/* what it says wraps at the column, a long word or address broken where it must be */
+.divider > span:not(.rule) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .divider svg {
+  flex: none;
   color: var(--t-3);
 }
 .rule {
@@ -138,4 +144,12 @@
 }
 .jump:active {
   background: var(--hover-paper);
+}
+
+/* a line with its raw answer folded under it: the fold keeps to the column */
+.withDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }

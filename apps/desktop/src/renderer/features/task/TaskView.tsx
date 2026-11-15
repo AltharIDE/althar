@@ -1,5 +1,7 @@
+import { MessageMotion } from '../../shared/MessageMotion'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { ThreadWaysContext } from '../../shared/ThreadBlocks'
+import { useTurnUndo } from './useTurnUndo'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
@@ -82,6 +84,7 @@ import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
+import { useSendMidTurn } from '../settings/useSendMidTurn'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { coordinatorSigned } from '../../shared/signed'
@@ -123,6 +126,7 @@ import { reveal } from './reveal'
 import { useSearchReveal } from '../finder/revealSearch'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
+import { pictureOf } from '../../shared/code/FilePicture'
 
 /*
  * A task, with its faces under its header, as in the prototype: the
@@ -153,6 +157,7 @@ export const text = {
   noLead: 'No lead yet',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
+  placeholderBusySteer: 'Steer the lead, or add to the queue',
   /** Whose usage the composer's ring says, under the context. */
   usageHeading: 'This task',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
@@ -433,6 +438,7 @@ export function TaskView({
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
+  const steers = useSendMidTurn()?.to === 'steer'
   const [pick, setPick] = useState<Choice | null>(null)
   // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
   const [moving, setMoving] = useState<Choice | null>(null)
@@ -536,6 +542,13 @@ export function TaskView({
     [...files.map((file) => `${file.path}:${file.add}:${file.del}`), ...(model.snapshot?.reports ?? []).map((report) => report.id)].join(
       '\n',
     ),
+  )
+  const turnUndo = useTurnUndo(
+    model,
+    images,
+    (prompt) => setDraft((current) => withQueued(current, prompt)),
+    () => voice.inputRef.current,
+    changes,
   )
   // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
   const { show } = changes
@@ -684,7 +697,7 @@ export function TaskView({
   const busy = session?.turnRunning ?? false
   // A step that waits on the person: its call, not the thread, has the ways on.
   const stuckOpen = snapshot.attention.some((request) => request.kind === 'stuck')
-  const queue = queueShown(session, model.pending)
+  const queue = queueShown(session, model.pending, snapshot?.accepting)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
   // What its lead left running, and what Althar runs of it itself (ADR-096); a run's output is in its card.
@@ -791,6 +804,7 @@ export function TaskView({
   const submit = (body: string, now: boolean) => {
     const own = images.take(receiver)
     if (own === null) return
+    turnUndo.dismiss()
     // The comments made beside the conversation go after the person's words, their crops after the person's own pictures where pictures go.
     const gathered = takeAll(kept)
     const pictures = receiver.takes !== false
@@ -952,7 +966,10 @@ export function TaskView({
       : {}),
     ...(snapshot.task.helpers === undefined ? {} : { stopHelper: (helper: string) => void model.stopHelper(helper) }),
     ...(snapshot.task.lines === undefined ? {} : { shipChange: (change: string) => void model.shipChange(change) }),
-    merge: (change) => (change.head === null ? undefined : void model.accept([{ head: change.head, url: change.url }])),
+    merge: (change, bypassQueue) =>
+      change.head === null
+        ? undefined
+        : void model.accept([{ head: change.head, url: change.url, ...(bypassQueue ? { bypassQueue: true } : {}) }]),
     postReview: (draftId) => void model.postReview(draftId),
     stopLaunch: (id) => void model.stopLaunch(id),
     openUrl: (url) => void window.open(url, '_blank'),
@@ -997,7 +1014,6 @@ export function TaskView({
               },
             }
           : {})}
-        {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         // A prototype, a chat or a quick task made a change in one move: a reviewer on, and its pull request ending.
         {...(snapshot.task.toChange === true ? { onMakeChange: () => void model.makeChange() } : {})}
         // Its parts kept as a preset, named for it; and a chat moved between Scratch and the board, either way.
@@ -1084,9 +1100,10 @@ export function TaskView({
         carried={<CarriedOver here={kept} />}
         // The lines about who answers go on the composer's edge, under the chip, so neither covers the other.
         notice={
-          model.error !== null || conflict !== null || line !== null || aside?.notice != null ? (
+          model.error !== null || conflict !== null || line !== null || aside?.notice != null || turnUndo.notice !== null ? (
             <>
               {aside?.notice}
+              {turnUndo.notice}
               {model.error !== null && (
                 <Problem
                   as="div"
@@ -1152,6 +1169,7 @@ export function TaskView({
         }
         onSubmit={(body) => submit(body, false)}
         onSendNow={(body) => submit(body, true)}
+        steer={steers}
         {...images.props(receiver)}
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
@@ -1169,7 +1187,9 @@ export function TaskView({
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         // An aside's is the coordinator's, in a word: its lead is named in the picker.
-        placeholder={busy ? text.placeholderBusy : embedded ? text.reply : text.placeholder(receiver.name)}
+        placeholder={
+          busy ? (steers ? text.placeholderBusySteer : text.placeholderBusy) : embedded ? text.reply : text.placeholder(receiver.name)
+        }
         meter={contextMeter(session, named, model.compact, { usage: snapshot.usage, heading: text.usageHeading })}
         // Another agent's model hands the task to that agent.
         picker={
@@ -1243,7 +1263,7 @@ export function TaskView({
   return (
     <PageOpenerProvider value={opener}>
       <OpenFinding.Provider value={changes.showFindings}>
-        <div className={embedded ? s.aside : s.window}>
+        <MessageMotion className={embedded ? s.aside : s.window}>
           {/* The bar is the header: the way back and which task, then where it stands, its faces and what it opens. */}
           {!embedded && (
             <TitleBar
@@ -1396,6 +1416,8 @@ export function TaskView({
                         <DocumentPanel
                           key={host.doc.source ?? host.doc.path ?? host.doc.title}
                           threadId={snapshot.threadId}
+                          taskId={snapshot.task.id}
+                          worktree={snapshot.task.worktree}
                           doc={host.doc}
                           version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
                           onClose={host.closeDoc}
@@ -1465,6 +1487,8 @@ export function TaskView({
                       {...(openFile === undefined ? {} : { openFile })}
                       session={session}
                       retryable={snapshot.retryable}
+                      undoable={snapshot.undoable}
+                      onUndoFrom={busy || model.pending ? undefined : turnUndo.ask}
                       project={snapshot.project.name}
                       // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
                       {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
@@ -1524,6 +1548,8 @@ export function TaskView({
                         <SmallChangeOf
                           card={card}
                           named={named}
+                          projectId={snapshot.project.id}
+                          agents={model.agents}
                           busy={model.pending}
                           onMerge={(change) => void model.accept([change])}
                           {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
@@ -1592,6 +1618,7 @@ export function TaskView({
             </TaskFace>
           )}
           {host.lightbox}
+          {turnUndo.dialog}
           {changingTeam && (
             <ChangeTeam projectId={snapshot.project.id} task={teamed} agents={model.agents} onClose={() => setChangingTeam(false)} />
           )}
@@ -1695,6 +1722,10 @@ export function TaskView({
                 ...changes.untouched
                   .filter((path) => !files.some((file) => file.path === path))
                   .map((path) => ({ path, status: 'modified' as const, add: 0, del: 0, untouched: true })),
+                // A refused file can be absent from an older file list, or have been edited back to the task's base.
+                ...turnUndo.reviewFiles
+                  .filter((path) => !files.some((file) => file.path === path) && !changes.untouched.includes(path))
+                  .map((path) => ({ path, status: 'modified' as const, add: 0, del: 0 })),
               ]}
               selected={changes.selected}
               onSelect={changes.select}
@@ -1704,6 +1735,8 @@ export function TaskView({
               view={changes.view}
               onRetry={changes.retry}
               onClose={changes.close}
+              // A markdown file's pictures are read where the task works; a file it links to that isn't in the change opens in the editor.
+              markdown={{ image: pictureOf(snapshot.threadId), ...(openFile === undefined ? {} : { open: openFile }) }}
               // An editor opens the task's folder there, at the file and its first change.
               actions={
                 <OpenIn
@@ -1714,7 +1747,7 @@ export function TaskView({
               }
             />
           )}
-        </div>
+        </MessageMotion>
       </OpenFinding.Provider>
     </PageOpenerProvider>
   )

@@ -55,6 +55,11 @@ export const text = {
   atLoginNote: 'Off, automations run only while Althar is open.',
   pauseAllTitle: 'Pause all automations',
   pauseAllNote: 'Runs under way finish.',
+  /* Tasks. */
+  sendMidTurnTitle: 'When I send while an agent is working',
+  sendMidTurnNote: 'Enter does this one; the other is a click or ⌘Enter away.',
+  sendMidTurnQueue: 'Queue it',
+  sendMidTurnSteer: 'Steer the agent',
   /* Reviews and pull requests. */
   postTeamTitle: 'Post reviews of my team’s pull requests without asking',
   postTeamNote: 'Pull requests from outside the team still wait for you.',

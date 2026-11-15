@@ -26,7 +26,7 @@ export const DEFAULT_KEYS: ReadonlyArray<DefaultKey> = [
   'moveIssues',
   'afterMergeReview',
   'usageLimit',
-  'rotateAccounts',
+  'accountStrategy',
 ]
 
 /** A project's value for a key, as the template says it: no choice of how a task ends is a draft, where Althar is connected. */

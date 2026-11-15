@@ -133,10 +133,6 @@ div.made {
   background: var(--hover-paper);
 }
 .path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font: 12px/1.5 var(--mono);
 }
 .dir {
@@ -167,6 +163,15 @@ div.made {
 .from {
   font: 12px var(--mono);
   color: var(--t-3);
+}
+/* a markdown file's two ways to show, at the head's end */
+.ways {
+  margin-left: auto;
+  align-self: center;
+}
+/* a markdown file as a page, at a reading width; its tints reach into the margin the code has */
+.page {
+  max-width: 78ch;
 }
 .note {
   margin: 0 0 10px;

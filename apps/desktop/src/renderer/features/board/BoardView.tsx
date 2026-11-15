@@ -30,6 +30,7 @@ import {
   KeptRow,
   LinkButton,
   MenuItem,
+  MergeButton,
   NextLine,
   NextRow,
   NextStep,
@@ -132,7 +133,7 @@ export const text = {
   } satisfies Record<TaskStatus, string>,
   /** Why a stopped task's lead stopped, in a card's words, where something says; else the card says nothing more. */
   stoppedBy: stepText.stoppedBy,
-  carryOn: 'Carry on',
+  carryOn: 'Resume',
   carryingOn: 'Telling the lead',
   /** What the lead is told to carry on. */
   carryOnNote: 'Carry on.',
@@ -586,15 +587,17 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
                 next: (
                   <>
                     {merges && (
-                      <NextStep
-                        signal
+                      <MergeButton
+                        strip
                         busy={actions?.merging?.has(work.taskId) ?? false}
-                        doing={doingWords({ kind: 'merge' })}
-                        label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
-                        onPress={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                        aria-label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
+                        onMerge={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                        {...(work.change?.canBypassQueue === true && work.change.unpushed === 0 && work.held === undefined
+                          ? { onBypassQueue: () => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url, true) }
+                          : {})}
                       >
                         {nextWords({ kind: 'merge' })}
-                      </NextStep>
+                      </MergeButton>
                     )}
                     {sendBack !== undefined && (
                       <NextStep
@@ -984,6 +987,18 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   const step =
     next === null || (next.kind === 'fix' && work.checksBack != null) ? null : here === null || actions === undefined ? (
       <NextStep>{nextWords(next)}</NextStep>
+    ) : here.kind === 'merge' ? (
+      <MergeButton
+        strip
+        busy={actions.merging.has(work.taskId)}
+        aria-label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
+        onMerge={() => void actions.merge(work.taskId, change.head ?? '', change.url)}
+        {...(change.canBypassQueue === true
+          ? { onBypassQueue: () => void actions.merge(work.taskId, change.head ?? '', change.url, true) }
+          : {})}
+      >
+        {actions.merging.has(work.taskId) ? doingWords(here) : failed === null ? nextWords(here) : standingText.nextFailed.again}
+      </MergeButton>
     ) : (
       <NextStep
         signal
@@ -1199,7 +1214,7 @@ export function BoardView({
       <BoardColumn
         lane={BoardLane.Next}
         count={shown.upNext}
-        filled={shown.next.length > 0}
+        filled={shown.next.length > 0 || lanes.stopped.length > 0}
         // Chats on Scratch, off the lanes: one chip, opened in place, by their latest exchange; Clear settles one. It heads
         // Up next whether anything waits there or not.
         lead={
@@ -1220,7 +1235,7 @@ export function BoardView({
           />
         }
         // Whenever nothing is in Up next, it says where work comes from.
-        {...(shown.next.length === 0
+        {...(shown.next.length === 0 && lanes.stopped.length === 0
           ? {
               empty: (
                 <BoardEmpty
@@ -1276,6 +1291,20 @@ export function BoardView({
                 })}
           />
         )}
+        {lanes.stopped.length > 0 && (
+          <BoardList>
+            {lanes.stopped.map((work) => (
+              <BoardCard
+                key={work.taskId}
+                data-move={work.taskId}
+                {...stoppedCardOf(work, now, actions)}
+                {...parentOf(work, onOpen)}
+                errands={work.errands}
+                onOpen={() => onOpen(work.threadId)}
+              />
+            ))}
+          </BoardList>
+        )}
         {[halted, forLocal].map(
           (rows, at) =>
             rows.length > 0 && (
@@ -1325,15 +1354,6 @@ export function BoardView({
             key={work.taskId}
             data-move={work.taskId}
             {...issuesCardOf(work)}
-            {...parentOf(work, onOpen)}
-            errands={work.errands}
-            onOpen={() => onOpen(work.threadId)}
-          />
-        ))}
-        {lanes.stopped.map((work) => (
-          <BoardCard
-            key={work.taskId}
-            {...stoppedCardOf(work, now, actions)}
             {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}

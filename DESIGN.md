@@ -22,7 +22,7 @@ Rules marked "prefer" are leanings; follow them unless the screen gives a reason
 - **Line everything up.** Icons with the inputs beside them, and one icon column down a list.
 - **Set code-like values in mono, looking like code:** commands, paths, branches.
 - **Give syntax highlighting real contrast.** Colours you have to squint to tell apart aren't highlighting.
-- **Be quiet by default, louder only where it matters.** Usage shows in the model picker, where it changes a choice, not on every screen.
+- **Be quiet by default, louder only where it matters.** Account quota stays in Plan usage. Model pickers, composers and team summaries show models and effort.
 - **Light is the default appearance; make dark just as polished.** Check both before calling a change done.
 - **Prefer staying inside the warm beige palette.** No panel pops out cooler or brighter than the rest; dark is warm too.
 - **Prefer quiet buttons to heavy black ones.**

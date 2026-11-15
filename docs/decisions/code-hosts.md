@@ -505,6 +505,15 @@ the task settles as done.
 repository allows. A head that moved since is refused, as merging what
 nobody saw; an errand's merge takes the head that went green.
 
+The window's Merge also follows the host's queue by default, including for an
+admin who can bypass it. Where GitHub explicitly permits this viewer to bypass
+branch protections, its secondary menu offers **Merge without queue**. That
+choice checks the permission again and merges only the head shown; a refusal
+stays a refusal. A queued pull request offers the same explicit choice without
+another normal merge. Permission unknown or denied, another host, work waiting
+for Ship, and a settled change offer no bypass. The override belongs to the
+named pull request, never every repository in a stack.
+
 - **Where the branch has the host's own queue** (GitHub's and Bitbucket
   Cloud's merge queues, GitLab's merge trains), the merge goes there, at its head, and the host
   merges once the queue's checks pass. A build the queue sent back is not cleared by

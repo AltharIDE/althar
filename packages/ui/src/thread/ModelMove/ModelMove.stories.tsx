@@ -51,6 +51,6 @@ export const Keeping: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Keep Opus 5.5' }))
-    await expect(c.getByText('Back on Opus 5.5 for this task.')).toBeInTheDocument()
+    await expect(c.getByText('Opus 5.5 from the next turn.')).toBeInTheDocument()
   },
 }

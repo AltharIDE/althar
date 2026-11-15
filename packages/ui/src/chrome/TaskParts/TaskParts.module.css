@@ -350,13 +350,8 @@
 }
 
 .path {
-  overflow: hidden;
   flex: 1;
   color: var(--t-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
 }
 
 .delta {

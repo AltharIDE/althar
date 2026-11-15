@@ -18,12 +18,17 @@ export function ModelMoveOf({ move, itemId, named }: { move: ModelMoveContent; i
   const { client } = useServices()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const act = (work: () => Promise<void>) => {
+  const [choice, setChoice] = useState<boolean | null>(null)
+  // A read confirming the choice hands control back to the stored value.
+  if (choice !== null && choice === move.kept) setChoice(null)
+  const act = (kept: boolean, work: () => Promise<void>) => {
+    setChoice(kept)
     setError(null)
     setBusy(true)
     work().then(
       () => setBusy(false),
       (failure: unknown) => {
+        setChoice(null)
         setBusy(false)
         setError(messageOf(failure))
       },
@@ -38,10 +43,10 @@ export function ModelMoveOf({ move, itemId, named }: { move: ModelMoveContent; i
         percent={move.why.percent}
         window={move.why.window}
         resetsAt={move.why.resetsAt}
-        kept={move.kept}
+        kept={choice ?? move.kept}
         busy={busy}
-        onKeep={() => act(() => client.keepTheModel(itemId))}
-        onUndo={() => act(() => client.undoTheModelMove(itemId))}
+        onKeep={() => act(true, () => client.keepTheModel(itemId))}
+        onUndo={() => act(false, () => client.undoTheModelMove(itemId))}
       />
       {error !== null && <Problem className={s.failure}>That didn’t go through. {error}</Problem>}
     </>

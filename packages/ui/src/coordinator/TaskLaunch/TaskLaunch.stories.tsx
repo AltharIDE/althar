@@ -212,12 +212,12 @@ export const AReview: Story = {
   },
 }
 
-/** The reviewer's model nearly out: its note sits beside the chip, a quiet aside, and the plan still starts. */
+/** The reviewer's usage stays out of its model picker. */
 const reviewerNearly = (left: number): Story => ({
   render: () => <Launch plan={PLAN_ASKED} room={(x) => (x.runtime === CODEX.runtime ? { left, until: '18:05', account: null } : null)} />,
   play: async ({ canvasElement }) => {
     const said = left === 0 ? 'Out · until 18:05' : `${left}% left · until 18:05`
-    await expect(within(canvasElement).getByText(said)).toBeInTheDocument()
+    await expect(within(canvasElement).queryByText(said)).toBeNull()
   },
 })
 export const ReviewerNearlyOut: Story = reviewerNearly(4)

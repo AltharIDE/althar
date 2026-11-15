@@ -134,6 +134,7 @@ const PullAnswer = Schema.Struct({
   // Whether it would merge cleanly, as Data Center last worked it out: `current` false is from before a branch moved.
   properties: Schema.optional(
     Schema.Struct({
+      mergeCommit: Schema.optional(Schema.Struct({ id: Schema.String })),
       mergeResult: Schema.optional(Schema.Struct({ outcome: Schema.String, current: Schema.optional(Schema.Boolean) })),
     }),
   ),
@@ -412,6 +413,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     source: answer.fromRef.displayId,
     target: answer.toRef.displayId,
     headSha: answer.fromRef.latestCommit ?? null,
+    ...(answer.state === 'MERGED' && answer.properties?.mergeCommit !== undefined ? { mergeCommit: answer.properties.mergeCommit.id } : {}),
     author: answer.author == null ? null : personOf(answer.author.user),
     // Data Center counts neither lines nor files on a pull request.
     additions: null,

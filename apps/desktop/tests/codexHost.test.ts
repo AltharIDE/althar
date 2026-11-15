@@ -64,6 +64,9 @@ printf 'GIT_CONFIG_VALUE_1=%s\\n' "\${GIT_CONFIG_VALUE_1-<unset>}"
 printf 'GIT_TERMINAL_PROMPT=%s\\n' "\${GIT_TERMINAL_PROMPT-<unset>}"
 printf 'GIT_DIR=%s\\n' "\${GIT_DIR-<unset>}"
 printf 'GIT_WORK_TREE=%s\\n' "\${GIT_WORK_TREE-<unset>}"
+printf 'ANTHROPIC_BASE_URL=%s\\n' "\${ANTHROPIC_BASE_URL-<unset>}"
+printf 'OPENAI_BASE_URL=%s\\n' "\${OPENAI_BASE_URL-<unset>}"
+printf 'OPENAI_API_KEY=%s\\n' "\${OPENAI_API_KEY-<unset>}"
 printf 'SSH_AUTH_SOCK=%s\\n' "\${SSH_AUTH_SOCK-<unset>}"
 printf 'OPENCODE_CONFIG_CONTENT=%s\\n' "\${OPENCODE_CONFIG_CONTENT-<unset>}"
 if git config --list >/dev/null 2>&1; then echo 'git=ok'; else echo 'git=failed'; fi
@@ -122,6 +125,9 @@ const device = ({ codex = 'bins', deny = false }: At = {}) => {
     GIT_CONFIG_VALUE_1: 'false',
     GIT_TERMINAL_PROMPT: gitPrompt,
     OPENCODE_CONFIG_CONTENT: '{"mcp":{}}',
+    ANTHROPIC_BASE_URL: 'http://127.0.0.1:8787',
+    OPENAI_BASE_URL: 'http://127.0.0.1:8787/v1',
+    OPENAI_API_KEY: 'test-key',
     SSH_AUTH_SOCK: join(sandboxHome, 'agent'),
   }
   return {
@@ -170,6 +176,10 @@ describe.skipIf(process.platform === 'win32')('the Codex host bridge', () => {
     expect(output).toContain(`GIT_WORK_TREE=${realpathSync(at.worktree)}`)
     expect(output).toContain('git=ok')
     expect(output).toContain('SSH_AUTH_SOCK=<unset>')
+    // The replay server's base URLs cross; a provider key doesn't.
+    expect(output).toContain('ANTHROPIC_BASE_URL=http://127.0.0.1:8787')
+    expect(output).toContain('OPENAI_BASE_URL=http://127.0.0.1:8787/v1')
+    expect(output).toContain('OPENAI_API_KEY=<unset>')
     // The device's own home, not the sandbox's.
     expect(output).toContain(`HOME=${at.hostHome}`)
     expect(output).not.toContain(`HOME=${at.sandboxHome}`)

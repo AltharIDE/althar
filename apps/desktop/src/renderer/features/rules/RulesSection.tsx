@@ -8,6 +8,7 @@ import {
   hostOf,
   type ProjectRulesView,
   runsOutside,
+  rotatesAccounts,
   type SandboxEdits,
   type TallyKind,
 } from '@althar/contracts'
@@ -490,6 +491,8 @@ export function TaskRules({
       agentAccounts={agentAccountsOf(model.agents)}
       rotate={rules.rotateAccounts}
       onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
+      accountStrategy={rules.accountStrategy}
+      onAccountStrategyChange={(accountStrategy) => model.change({ accountStrategy, rotateAccounts: rotatesAccounts(accountStrategy) })}
       allowed={rules.onlyAccounts ?? {}}
       onAllowedChange={(agentId, ids) => {
         const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0

@@ -1,4 +1,5 @@
 import type { SearchDocuments } from '@althar/contracts'
+import type { AcpCatalog, AcpConnection } from '@althar/contracts'
 
 import {
   type CanvasDetail,
@@ -95,6 +96,7 @@ import {
   type TaskSummary,
   type ThreadItem,
   type ThreadSnapshot,
+  type UndoTurnResult,
   type TrackerContainer,
   type WatchEvent,
   type Launch,
@@ -199,7 +201,11 @@ export interface Client {
     messages: ReadonlyArray<{ readonly itemId?: string; readonly names: ReadonlyArray<string> }>,
   ) => Promise<{ readonly place: CodePlace; readonly messages: ReadonlyArray<{ readonly found: ReadonlyArray<CodeFound> }> }>
   /** A file a thread's agent named, by its path as findCode named it: as it is now, or at the commit it was when a message was said. */
-  readonly readCode: (threadId: string, path: string, at?: { readonly commit?: string; readonly line?: number }) => Promise<CodeText>
+  readonly readCode: (
+    threadId: string,
+    path: string,
+    at?: { readonly commit?: string; readonly line?: number; readonly image?: boolean },
+  ) => Promise<CodeText>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
   /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
@@ -282,6 +288,7 @@ export interface Client {
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
+  readonly setSendMidTurn: (to: 'queue' | 'steer') => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
@@ -433,6 +440,7 @@ export interface Client {
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
+  readonly undoTurn: (itemId: string) => Promise<UndoTurnResult>
   /** The person's answer to a permission; with `always`, kept in the project's rules by that scope, one of those offered. */
   readonly answer: (input: {
     readonly attentionId: string
@@ -467,7 +475,8 @@ export interface Client {
     readonly taskId?: string
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
-  readonly holdPlan: (planId: string) => Promise<void>
+  /** Whether it was held: false where the task had begun already. */
+  readonly holdPlan: (planId: string) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
   readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
@@ -616,7 +625,7 @@ export interface Client {
    */
   readonly setReviewAfterMerge: (taskId: string, review: 'review' | 'none' | null) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
-  readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now') => Promise<void>
+  readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now', bypassQueue?: boolean) => Promise<void>
   /** Merges a task without a pull request into its repositories' default branches on this Mac, up to the commit the person saw in each. */
   readonly mergeHere: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** Pushes the default branches the task merged into here to their remotes, with the person's own git sign-in. */
@@ -637,6 +646,10 @@ export interface Client {
   readonly getMissedReports: () => Promise<ReadonlyArray<MissedReports>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
+  readonly getAgentCatalog: (refresh?: boolean) => Promise<AcpCatalog>
+  readonly saveAcpConnection: (connection: AcpConnection) => Promise<number>
+  readonly startAcpCheck: (agentId: string) => Promise<number>
+  readonly removeAcpConnection: (agentId: string) => Promise<number>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
   readonly openInEditor: (input: {
     readonly taskId: string
@@ -863,6 +876,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           path,
           ...(at.commit === undefined ? {} : { commit: at.commit }),
           ...(at.line === undefined ? {} : { line: at.line }),
+          ...(at.image === true ? { image: true } : {}),
         }),
       ),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
@@ -897,6 +911,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
+    setSendMidTurn: (to) => command((commandId) => api.SetSendMidTurn({ commandId, to })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     joinChanges: (taskId, change, into) =>
@@ -976,6 +991,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
+    undoTurn: (itemId) => command((commandId) => api.UndoTurn({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
     answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
@@ -1061,9 +1077,16 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
     shapeTask: (taskId, preset) => command((commandId) => api.ShapeTask({ commandId, taskId, preset })),
     setReviewAfterMerge: (taskId, review) => command((commandId) => api.SetReviewAfterMerge({ commandId, taskId, review })),
-    merge: (taskId, head, url, how) =>
+    merge: (taskId, head, url, how, bypassQueue) =>
       command((commandId) =>
-        api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }), ...(how === undefined ? {} : { how }) }),
+        api.Merge({
+          commandId,
+          taskId,
+          head,
+          ...(url === undefined ? {} : { url }),
+          ...(how === undefined ? {} : { how }),
+          ...(bypassQueue === true ? { bypassQueue: true } : {}),
+        }),
       ),
     mergeHere: (taskId, heads) => command((commandId) => api.MergeHere({ commandId, taskId, heads })),
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
@@ -1078,6 +1101,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
+    getAgentCatalog: (refresh = false) => settle(api.GetAgentCatalog({ refresh })),
+    saveAcpConnection: (connection) => command((commandId) => api.SaveAcpConnection({ commandId, connection })),
+    startAcpCheck: (agentId) => command((commandId) => api.CheckAcpConnection({ commandId, agentId })),
+    removeAcpConnection: (agentId) => command((commandId) => api.RemoveAcpConnection({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
     fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),

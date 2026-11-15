@@ -17,11 +17,12 @@ const rows = () =>
   })
 
 describe('the task’s menu', () => {
-  it('skips the review of the work under way', () => {
-    const onSkipReview = vi.fn()
-    render(<TaskMenu defaultOpen onSkipReview={onSkipReview} />)
-    fireEvent.click(menu().getByRole('menuitem', { name: /Skip the review/ }))
-    expect(onSkipReview).toHaveBeenCalledOnce()
+  it('keeps review choices in the team dialog', () => {
+    const onChangeTeam = vi.fn()
+    render(<TaskMenu defaultOpen onChangeTeam={onChangeTeam} />)
+    expect(menu().queryByRole('menuitem', { name: /Skip the review/ })).toBeNull()
+    fireEvent.click(menu().getByRole('menuitem', { name: /Change the team/ }))
+    expect(onChangeTeam).toHaveBeenCalledOnce()
   })
 
   it('groups what moves it on and what you do with it, then its settings, then what stops or ends it', () => {

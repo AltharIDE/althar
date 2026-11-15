@@ -32,6 +32,7 @@ export const WINDOW_ACTIONS = {
   send: { tool: 'message_lead' },
   sendNow: { tool: 'message_lead' },
   takeBack: { person: 'takes back their own message before the lead reads it' },
+  undoTurn: { person: 'restores a delivered chat turn’s files and conversation from a saved checkpoint' },
   interrupt: { tool: 'stop_task' },
   compact: { tool: 'compact_lead' },
   tryAgain: { tool: 'try_again' },

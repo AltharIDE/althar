@@ -105,6 +105,7 @@ describe('a conflict its pull request’s host reports', () => {
       // As the window's interrupt does: the round is handed over, then the lead interrupted.
       yield* (yield* Changes).leadStopped({ threadId }, 'interrupted')
       yield* (yield* Sessions).interrupt(threadId)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt.')
       const said = (yield* notices(threadId)).find((notice) => notice.title === 'The lead resolved the conflict with main, in change.txt.')
       assert.strictEqual(said?.description, 'Not pushed to PR #1.')
       assert.strictEqual((yield* rounds(taskId))[0]?.state, 'resolved')

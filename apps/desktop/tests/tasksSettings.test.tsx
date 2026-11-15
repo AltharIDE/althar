@@ -75,8 +75,8 @@ describe('new projects start with', () => {
     expect(within(page).getByText('Changing one here leaves the projects you have as they are.')).toBeTruthy()
     await choose(page, 'When an account runs out', 'Wait for the reset')
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ usageLimit: 'wait' })
-    await userEvent.click(within(page).getByRole('switch', { name: 'Try an agent’s other accounts first' }))
-    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ rotateAccounts: true })
+    await choose(page, 'Account strategy', 'Most depleted first')
+    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ accountStrategy: 'least_room' })
     await userEvent.click(within(page).getByRole('switch', { name: 'Post screenshots to pull requests automatically' }))
     expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ postScreenshots: true })
     await userEvent.click(within(page).getByRole('switch', { name: 'Move issues along with their tasks' }))
@@ -128,5 +128,22 @@ describe('new projects start with', () => {
     await within(page).findByRole('combobox', { name: 'When a task is done' })
     await waitFor(() => expect(client.getProjectRules).toHaveBeenCalled())
     expect(within(page).queryByRole('button', { name: 'Use this in every project' })).toBeNull()
+  })
+
+  it('offers a saved account strategy to existing projects in the strategy row', async () => {
+    const { client } = fakeClient({
+      getProjectRules: vi.fn(async (projectId: string) => ({
+        ...(await fakeClient().client.getProjectRules(projectId)),
+        resolveConflicts: true,
+      })),
+    })
+    withServices(<Settings section="tasks" />, client)
+    const page = screen.getByRole('main')
+    await within(page).findByRole('combobox', { name: 'Account strategy' })
+    await choose(page, 'Account strategy', 'Random')
+    expect(client.setNewProjectDefaults).toHaveBeenLastCalledWith({ accountStrategy: 'random' })
+    const apply = await within(page).findByRole('button', { name: 'Use this in every project' })
+    await userEvent.click(apply)
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', accountStrategy: 'random' }))
   })
 })

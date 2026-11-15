@@ -1,13 +1,12 @@
 import type { ReactNode } from 'react'
 
 import { type HomeCall, type HomeTask, issuesWordOf } from '@althar/contracts'
-import { Button, type EdgeWork, Fact, LinkButton, NeedLine, type ProjectRef } from '@althar/ui'
+import { Button, type EdgeWork, Fact, LinkButton, MergeButton, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { commandOf, titleOf } from '../../shared/callCommand'
 import { askOf, callKindOf, isUnshipped, kindWords, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
-import { stepText } from '../../shared/steps'
 import {
   doingWords,
   doneHere,
@@ -197,7 +196,6 @@ export const needsOf = ({
   calls,
   answered = [],
   issues = [],
-  stopped = [],
   ready,
   refs,
   agentName,
@@ -209,8 +207,6 @@ export const needsOf = ({
   answered?: ReadonlyArray<AnsweredCall>
   /** Tasks that wait on issues their lead drafted, or changes to their issue, for the person to file or apply. */
   issues?: ReadonlyArray<HomeTask>
-  /** Tasks whose lead stopped with no agent on them, which wait for the person to carry on or abandon, as on the board. */
-  stopped?: ReadonlyArray<HomeTask>
   ready: ReadonlyArray<HomeTask>
   refs: ReadonlyMap<string, ProjectRef>
   agentName: (id: string | null) => string
@@ -281,22 +277,6 @@ export const needsOf = ({
       ? []
       : [{ id: task.taskId, threadId: task.threadId, kind: issuesWordOf(task.issues), project, title: task.title }]
   }),
-  // Stopped, as its card in the board's Needs you says it: the word, and what stopped its lead, where something says.
-  ...stopped.flatMap((task): ReadonlyArray<Need> => {
-    const project = refs.get(task.projectId)
-    if (project === undefined) return []
-    const by = task.stopped?.by
-    return [
-      {
-        id: task.taskId,
-        threadId: task.threadId,
-        kind: kindWords.stopped,
-        project,
-        title: task.title,
-        ...(by == null ? {} : { brief: stepText.stoppedBy[by] }),
-      },
-    ]
-  }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
     // `ready` is the tasks that wait on the person (`readyOf`): a task that finished and isn't a change among them.
@@ -357,7 +337,7 @@ export function needLineOf(
     /** A permission's answers, in place of Deny and Allow once. */
     answers?: (call: HomeCall, project: ProjectRef) => ReactNode
     /** Does a ready change's next thing; without it, its button opens the task to review. */
-    onNext?: (task: HomeTask, next: DoneHere) => void
+    onNext?: (task: HomeTask, next: DoneHere, bypassQueue?: boolean) => void
     /** Whether a task's next thing is under way, so its button says so and waits. */
     doing?: (taskId: string) => boolean
     /** What last failed for a task's push or merge, to say in its line and offer to try again. */
@@ -415,6 +395,20 @@ export function needLineOf(
           here === null ? (
             // Asking the lead to resolve or fix takes the lead: a link into the task, where it is told.
             <LinkButton onClick={open}>{nextWords(ready.next)}</LinkButton>
+          ) : here.kind === 'merge' ? (
+            <MergeButton
+              size="small"
+              aria-label={
+                ready.task.change === null
+                  ? undefined
+                  : labelWords(here, `${ready.task.change.prefix}${ready.task.change.number}`, why !== null)
+              }
+              busy={doing?.(ready.task.taskId) === true}
+              onMerge={() => onNext(ready.task, here)}
+              {...(ready.task.change?.canBypassQueue === true ? { onBypassQueue: () => onNext(ready.task, here, true) } : {})}
+            >
+              {doing?.(ready.task.taskId) === true ? doingWords(here) : why === null ? nextWords(here) : standingText.nextFailed.again}
+            </MergeButton>
           ) : (
             <Button
               size="small"

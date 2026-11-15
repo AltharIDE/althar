@@ -594,14 +594,16 @@ describe('accounts', () => {
     }).pipe(Effect.provide(withAccounts({}, [away])))
   })
 
-  it.live('put one account out of usage, and by default the project doesn’t rotate: another agent takes the step over, on a plan', () => {
+  it.live('puts one account out of usage, and an explicit fixed-account rule moves the step to another agent', () => {
     const back = Date.now() + 60 * 60 * 1000
     return Effect.gen(function* () {
       const accounts = yield* Accounts
       const limits = yield* Limits
       const [usual] = yield* accounts.of('codex')
       yield* accounts.add({ agentId: 'codex', name: 'work', folder: folder('work') })
-      const ran = yield* ranOnCodex()
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      yield* (yield* Policies).setAccounts(project.projectId, { rotate: false }, (yield* Instance).personId)
+      const ran = yield* ranOnCodex(project.projectId)
       assert.match(ran.said, /Fake codex \(main\) ran out of usage [^,]+, until [^.]+\. Fake claude-code takes the work over/)
       assert.deepStrictEqual(
         (yield* sessionsOn(ran.threadId)).map(([agentId]) => agentId),
@@ -674,7 +676,7 @@ describe('accounts', () => {
       }>`SELECT revision FROM policies WHERE project_id = ${project.projectId} ORDER BY revision`
       assert.deepStrictEqual(
         revisions.map((row) => row.revision),
-        [1, 2, 3, 4, 5],
+        [1, 2, 3, 4],
       )
     }).pipe(Effect.provide(withAccounts({ 'codex@usual': { outOfUsage: { until: back } } })))
   })

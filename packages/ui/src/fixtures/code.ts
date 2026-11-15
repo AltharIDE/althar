@@ -144,6 +144,23 @@ export const decisionFound: FoundFile = {
   since: null,
 }
 
+/** What the lead changed in the decision: its title and first lines stand, the rest of it is new, and one line it began with is gone. */
+export const decisionChange: readonly DiffLine[] = [
+  { kind: DiffLineKind.Hunk, text: `@@ -1,5 +1,${decisionRead.total} @@` },
+  ...DECISION.replace(/\n$/, '')
+    .split('\n')
+    .flatMap((text, at): DiffLine[] =>
+      at < 2
+        ? [{ kind: DiffLineKind.Context, old: at + 1, new: at + 1, text }]
+        : at === 2
+          ? [
+              { kind: DiffLineKind.Removed, old: 3, text: 'It is limited per merchant.' },
+              { kind: DiffLineKind.Added, new: 3, text },
+            ]
+          : [{ kind: DiffLineKind.Added, new: at + 1, text }],
+    ),
+]
+
 /** What the lead changed in the limiter: the check's window, and the 429. */
 export const limitsChange: readonly DiffLine[] = [
   { kind: DiffLineKind.Hunk, text: '@@ -20,10 +20,14 @@ export const limitOf' },

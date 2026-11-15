@@ -83,6 +83,37 @@ const silent = {
 }
 
 describe('an account marked out of usage', () => {
+  it.live('uses the last exhausted plan window when the error gives no reset, ignoring spend and expired windows', () =>
+    Effect.gen(function* () {
+      yield* ready
+      const account = yield* codexAccount
+      const limits = yield* Limits
+      const sql = yield* SqlClient.SqlClient
+      const at = ago(MINUTE)
+      yield* limitedAt(account.id, at, from(DAY))
+      yield* sql`UPDATE account_statuses SET windows = '[{"kind":"usage"}]'`
+      const weekly = from(7 * DAY)
+      yield* read(
+        account.id,
+        [
+          { ...window(0, at), resetsAt: from(DAY) },
+          { ...window(0, at, 'weekly'), resetsAt: weekly },
+          { ...window(0, at), spend: true, resetsAt: from(30 * DAY) },
+          { ...window(0, at, 'weekly'), model: 'opus', resetsAt: from(60 * DAY) },
+          { ...window(0, at, 'weekly'), model: 'sonnet', resetsAt: from(90 * DAY) },
+          { ...window(0, at), resetsAt: ago(2 * MINUTE) },
+          { ...window(50, at), resetsAt: from(60 * DAY) },
+        ],
+        at,
+      )
+      assert.deepInclude(Option.getOrNull(yield* limits.outAccount(account.id)), { resetsAt: weekly, until: weekly })
+      // An explicit error reset is authoritative even when an older plan reading says a later time.
+      const explicit = from(2 * DAY)
+      yield* sql`UPDATE account_statuses SET windows = ${JSON.stringify([{ kind: 'usage', resetsAt: explicit }])}`
+      assert.strictEqual(Option.getOrNull(yield* limits.outAccount(account.id))?.resetsAt, explicit)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: silent }))),
+  )
+
   it.live('is usable at once when a reading taken after shows room in every window, where the pickers show it too', () =>
     Effect.gen(function* () {
       const limits = yield* Limits
@@ -308,5 +339,22 @@ describe('the model list, asking the plans again', () => {
       assert.isTrue(Option.isSome(yield* (yield* Limits).outAccount(first!.id)))
       assert.isTrue(Option.isNone(yield* (yield* Limits).outAccount(second.id)))
     }).pipe(Effect.provide(runtime(':memory:', {}, { usage: asking(() => ({ kind: 'failed', message: 'Down.' })) })))
+  })
+
+  it.live('takes a reset account back even while another account keeps the agent usable', () => {
+    homes.length = 0
+    return Effect.gen(function* () {
+      const projectId = yield* ready
+      const accounts = yield* Accounts
+      const [first] = yield* accounts.of('codex')
+      yield* accounts.add({ agentId: 'codex', name: 'Work' })
+      yield* limitedAt(first!.id, ago(MINUTE), from(DAY))
+      const offered = yield* usableModels(projectId)
+      assert.strictEqual(homes.length, 1)
+      assert.isTrue(Option.isNone(yield* (yield* Limits).outAccount(first!.id)))
+      assert.isTrue(offered.some((model) => model.routes.some((route) => route.agentId === 'codex' && route.room?.leftPercent === 80)))
+      yield* usableModels(projectId)
+      assert.strictEqual(homes.length, 1)
+    }).pipe(Effect.provide(runtime(':memory:', {}, { usage: asking(() => reading(80)) })))
   })
 })

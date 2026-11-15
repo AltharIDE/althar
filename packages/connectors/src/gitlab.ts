@@ -119,6 +119,8 @@ const StatusAnswer = Schema.Struct({
 type StatusAnswer = typeof StatusAnswer.Type
 
 const MergeAnswer = Schema.Struct({
+  merge_commit_sha: Schema.optional(Schema.NullOr(Schema.String)),
+  squash_commit_sha: Schema.optional(Schema.NullOr(Schema.String)),
   id: Schema.Number,
   iid: Schema.Number,
   title: Schema.String,
@@ -285,6 +287,7 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
   source: request.source_branch,
   target: request.target_branch,
   headSha: request.sha ?? null,
+  ...(request.state === 'merged' ? { mergeCommit: request.merge_commit_sha ?? request.squash_commit_sha ?? request.sha ?? null } : {}),
   author: request.author == null ? null : personOf(request.author),
   // GitLab counts files, not lines, unless the whole diff is read.
   additions: null,

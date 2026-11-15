@@ -4,7 +4,6 @@ import type { AgentStatus } from '@althar/contracts'
 import { type ModelInfo, ModelBrowser, modelBrowserText, ModelPick, type ModelPickText, modKey } from '@althar/ui'
 
 import { useModels, useSetDefaultEffort, useSetModelBlocked } from '../data/models'
-import { useModelRooms } from '../features/usage/usePlan'
 import {
   catalogOf,
   type Choice,
@@ -26,8 +25,7 @@ import {
  * models, every model of every agent one step away, and how hard it thinks.
  * A model of another agent is that agent taking over: where something runs,
  * the picker asks first while a turn is under
- * way. Each model says how much room its plan has where work on it would
- * start, in the project where given. What the consumer does with the choice
+ * way. What the consumer does with the choice
  * is its own.
  */
 
@@ -50,7 +48,7 @@ export interface ModelChoiceProps {
   onTeam?: () => void
   /** A model it doesn't offer, by key: for a step handed on, the one that failed it. */
   without?: string | null
-  /** The project the pick is for, whose rule for moving work through an agent's accounts says which account each model's room is of. */
+  /** The project this model choice belongs to. */
   projectId?: string
   /** A conversation under way, which another agent's model hands over. */
   handover?: Handover
@@ -77,7 +75,6 @@ export function ModelChoice({
   onOpenChange,
 }: ModelChoiceProps) {
   const known = useModels()
-  const room = useModelRooms(projectId)
   const setDefault = useSetDefaultEffort()
   const prefs = useModelPrefs()
   const [open, setOpen] = useState(false)
@@ -121,7 +118,6 @@ export function ModelChoice({
         {...(onRemove === undefined ? {} : { onRemove })}
         {...(onTeam === undefined ? {} : { onTeam })}
         {...(confirm === undefined ? {} : { confirm })}
-        room={room}
         asking={asking}
         onAskingChange={setAsking}
         open={open}
@@ -173,9 +169,8 @@ export interface ModelsBrowserProps {
  * model's default effort, its room, and the ones switched off, to switch
  * them on again. What picking one does is the consumer's.
  */
-export function ModelsBrowser({ agents, without = null, value, projectId, onPick, onClose }: ModelsBrowserProps) {
+export function ModelsBrowser({ agents, without = null, value, onPick, onClose }: ModelsBrowserProps) {
   const known = useModels()
-  const room = useModelRooms(projectId)
   const setDefault = useSetDefaultEffort()
   const setBlocked = useSetModelBlocked()
   const prefs = useModelPrefs()
@@ -200,7 +195,6 @@ export function ModelsBrowser({ agents, without = null, value, projectId, onPick
       value={value}
       pins={pins}
       defaultEffort={(info) => defaultEffortOf(catalog, info)}
-      room={room}
       onPick={(key) => {
         const picked = every.models.find((info) => info.id === key)
         if (picked !== undefined) onPick(picked)

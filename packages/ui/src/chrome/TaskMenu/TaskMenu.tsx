@@ -7,7 +7,7 @@ import s from './TaskMenu.module.css'
 /*
  * What you can do with a task as a whole, from its bar, by intent. First what
  * moves it on where it stands (start its plan now or change who does it, make a
- * prototype or a chat a change, mark its draft pull request ready, skip the review under way, resume it, reopen it) and what
+ * prototype or a chat a change, mark its draft pull request ready, resume it, reopen it) and what
  * you do with it (rename it, open its folder in an editor, attach a pull
  * request it didn't open). Then its own two settings, changed in place:
  * whether its lead resolves a conflict with the default branch on its own,
@@ -53,7 +53,6 @@ export interface TaskMenuText {
   /** A chat moved off Scratch to the board, or a task to Scratch. */
   toBoard: string
   toScratch: string
-  skipReview: string
   stop: string
   resume: string
   abandon: string
@@ -91,7 +90,6 @@ export const taskMenuText: TaskMenuText = {
   savePreset: 'Save as preset',
   toBoard: 'Move to the board',
   toScratch: 'Move to Scratch',
-  skipReview: 'Skip the review',
   stop: 'Stop the task',
   resume: 'Resume',
   abandon: 'Abandon',
@@ -134,8 +132,6 @@ export interface TaskMenuProps {
   onSavePreset?: () => void
   /** Moves it between Scratch and the board: `to` says which way. */
   shelf?: { readonly to: 'scratch' | 'board'; readonly onMove: () => void }
-  /** Skips the review of the work under way, while it still has one to come or under way. */
-  onSkipReview?: () => void
   onStop?: () => void
   onResume?: () => void
   /** Abandons it; the consumer asks first, since it settles the task. */
@@ -180,7 +176,6 @@ export function TaskMenu({
   onAttach,
   onSavePreset,
   shelf,
-  onSkipReview,
   onStop,
   onResume,
   onAbandon,
@@ -231,11 +226,6 @@ export function TaskMenu({
     onMarkReady && (
       <MenuItem key="ready" icon="pr" onSelect={onMarkReady}>
         {t.markReady}
-      </MenuItem>
-    ),
-    onSkipReview && (
-      <MenuItem key="skip-review" icon="after" onSelect={onSkipReview}>
-        {t.skipReview}
       </MenuItem>
     ),
     onResume && (

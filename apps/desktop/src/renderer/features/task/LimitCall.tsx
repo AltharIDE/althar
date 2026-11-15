@@ -34,13 +34,13 @@ export const limitText = {
    */
   what: (agent: string, resets: string | null, left?: number) =>
     left !== undefined
-      ? `${agent} has ${Math.floor(left)}% of its usage left${resets === null ? '' : `, until ${resets}`}.`
+      ? `Waiting for ${agent}.`
       : resets === null
         ? `${agent} is out of usage.`
         : `${agent} is out of usage until ${resets}.`,
   /** Held for the reset on its own: whose limit, and until when. */
   held: (agent: string, at: string, left?: number) =>
-    left === undefined ? `${agent} is out of usage until ${at}.` : `${agent} has ${Math.floor(left)}% of its usage left, until ${at}.`,
+    left === undefined ? `${agent} is out of usage until ${at}.` : `Waiting for ${agent} until ${at}.`,
   out: (at: string) => `out until ${at}`,
   perUse: 'paid per use',
 }

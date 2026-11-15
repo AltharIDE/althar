@@ -1160,6 +1160,15 @@ const whoami = (name: string | null, id?: string): Route => [
 ]
 
 describe('Bitbucket Data Center as a code host', () => {
+  it.effect('reads the landed commit from the merged PR, separately from its source head', () =>
+    Effect.gen(function* () {
+      const { host } = center([['GET', PULL, { json: pr({ state: 'MERGED', properties: { mergeCommit: { id: 'landed' } } }) }]])
+      const seen = yield* host.change(prj, 101)
+      assert.strictEqual(seen.mergeCommit, 'landed')
+      assert.strictEqual(seen.headSha, 'babecafebabecafebabecafebabecafebabecafe')
+    }),
+  )
+
   it.effect('says who it is signed in as, from the header it answers with', () =>
     Effect.gen(function* () {
       const { host, sent } = center([whoami('jcitizen', '101'), ['GET', `${DC}/users?filter=jcitizen&limit=100`, { json: page([jane]) }]])

@@ -114,6 +114,7 @@ const Strategies = Schema.Struct({
 })
 
 const PullAnswer = Schema.Struct({
+  merge_commit: Schema.optional(Schema.NullOr(Schema.Struct({ hash: Schema.String }))),
   id: Schema.Number,
   title: Schema.String,
   description: Schema.optional(Schema.NullOr(Schema.String)),
@@ -298,6 +299,7 @@ const changeOf = (repository: Repository, pull: PullAnswer, size: Size | null = 
   source: pull.source.branch.name,
   target: pull.destination.branch.name,
   headSha: pull.source.commit?.hash ?? null,
+  ...(pull.state === 'MERGED' && pull.merge_commit != null ? { mergeCommit: pull.merge_commit.hash } : {}),
   author: pull.author == null ? null : personOf(pull.author),
   // Bitbucket counts lines only file by file, in the diff's stat, which only reading one pull request asks for.
   additions: size?.additions ?? null,

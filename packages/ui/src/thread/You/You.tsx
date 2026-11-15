@@ -6,6 +6,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Rhythm } from '../../lib/rhythm'
 import { Spinner } from '../../primitives/Spinner/Spinner'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { useThreadShell, type ImageRef } from '../Shell/Shell'
 import s from './You.module.css'
 
@@ -23,6 +24,7 @@ export interface YouText {
   view: (name: string) => string
   open: (name: string) => string
   showPaste: (name: string) => string
+  undo: string
 }
 
 export const youText: YouText = {
@@ -33,6 +35,7 @@ export const youText: YouText = {
   view: (name) => `View ${name}`,
   open: (name) => `Open ${name}`,
   showPaste: (name) => `Show pasted text, ${name}`,
+  undo: 'Undo from here',
 }
 
 export type YouProps = RootProps<
@@ -48,6 +51,8 @@ export type YouProps = RootProps<
     delivery?: Delivery
     /** The links you pasted, unfurled in the bubble under what you said, so they read as part of the message. */
     unfurl?: ReactNode
+    /** Restores this turn's files and conversation. Offered only for a delivered, checkpointed message. */
+    onUndo?: () => void
     text?: Partial<YouText>
   }
 >
@@ -79,7 +84,18 @@ function Status({ delivery, at, t }: { delivery: Delivery; at?: string; t: YouTe
 const imagesIn = (set: readonly MessageAttachment[]): ImageRef[] => set.flatMap((one) => (one.kind === AttachmentKind.Image ? [one] : []))
 
 /** What you said: a short bubble on the right, with the links you pasted unfurled in it, and above it what you sent with it. */
-export function You({ children, at, attach, onOpenAttachment, delivery = Delivery.Delivered, unfurl, text, className, ...rest }: YouProps) {
+export function You({
+  children,
+  at,
+  attach,
+  onOpenAttachment,
+  delivery = Delivery.Delivered,
+  unfurl,
+  onUndo,
+  text,
+  className,
+  ...rest
+}: YouProps) {
   const t = { ...youText, ...text }
   const queued = delivery === Delivery.Queued
   const said = children !== '' && children != null
@@ -110,6 +126,11 @@ export function You({ children, at, attach, onOpenAttachment, delivery = Deliver
         </div>
       )}
       <span className={s.at}>
+        {onUndo !== undefined && delivery === Delivery.Delivered && (
+          <LinkButton className={s.undo} onClick={onUndo}>
+            {t.undo}
+          </LinkButton>
+        )}
         <Status delivery={delivery} at={at} t={t} />
       </span>
     </article>

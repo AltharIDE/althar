@@ -112,6 +112,7 @@ const spawnGit = (
   env: Readonly<Record<string, string>>,
   input: string | undefined,
   first: boolean,
+  base64 = false,
 ): {
   readonly result: Effect.Effect<GitProcessResult>
   readonly timeout: (milliseconds: number) => GitProcessResult
@@ -131,6 +132,7 @@ const spawnGit = (
     first,
     // A fetch or a push waits on the network, in a lane of its own: never what a read of the repository waits behind.
     network: reachesRemote(args),
+    ...(base64 ? { base64 } : {}),
   })
   let ended = false
   let answer: GitProcessResult | undefined
@@ -215,6 +217,16 @@ export const gitOutcome = (
 export const gitExactly = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> =>
   run(60_000, cwd, args, {}, false)
 
+/** A blob's bytes, as base64, every byte as it was: a picture at a commit, which text would spoil. */
+export const blobBase64 = (cwd: string, object: string): Effect.Effect<string, GitFailed> =>
+  runProcess(60_000, cwd, ['cat-file', 'blob', object], {}, undefined, true).pipe(
+    Effect.flatMap((result) =>
+      result.error === null
+        ? Effect.succeed(result.stdout)
+        : Effect.fail(new GitFailed({ args: ['cat-file', 'blob', object], cwd, stderr: result.stderr.trim() })),
+    ),
+  )
+
 /** Exact patch identities, including whitespace, for matching a copied commit sequence after a branch move. */
 export const patchIdsOf = (cwd: string, commits: ReadonlyArray<string>) =>
   Effect.gen(function* () {
@@ -281,10 +293,11 @@ const runProcess = (
   args: ReadonlyArray<string>,
   env: Readonly<Record<string, string>>,
   input: string | undefined,
+  base64 = false,
 ): Effect.Effect<GitProcessResult> =>
   Effect.flatMap(Effect.all([Untouched, Foreground]), ([aside, first]) =>
     Effect.acquireUseRelease(
-      Effect.sync(() => spawnGit(cwd, args, { ...aside, ...env }, input, first)),
+      Effect.sync(() => spawnGit(cwd, args, { ...aside, ...env }, input, first, base64)),
       (running) =>
         Effect.race(
           running.result,

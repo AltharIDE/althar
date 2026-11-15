@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
-import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
+import { type FakeAgentOptions, holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -135,6 +135,7 @@ const start = (task: { readonly taskId: string }, more: Partial<Parameters<Helpe
 describe('starting a lead’s helper', () => {
   it.live('refuses one with no brief, on a change the task doesn’t have, beside one at work there, or with no copy to work in', () => {
     const { working, github } = onGitHub()
+    const held = holds()
     return Effect.gen(function* () {
       const task = yield* opened(working)
       assert.strictEqual(
@@ -147,7 +148,7 @@ describe('starting a lead’s helper', () => {
       )
       // Unnamed, it is a helper; it works until it is stopped.
       assert.match(
-        yield* callTool(task.access, 'start_helper', { name: ' ', brief: 'Look around. [lead:explore]' }),
+        yield* callTool(task.access, 'start_helper', { name: ' ', brief: 'Look around. [lead:slowly]' }),
         /^Started "Helper" on .+, in the worktree of the task’s change\./,
       )
       assert.strictEqual(
@@ -157,7 +158,7 @@ describe('starting a lead’s helper', () => {
       // Another change, named in any case, takes one of its own.
       yield* callTool(task.access, 'start_change', { name: 'Docs' })
       assert.match(
-        yield* callTool(task.access, 'start_helper', { name: 'On docs', brief: 'Look. [lead:explore]', change: 'docs' }),
+        yield* callTool(task.access, 'start_helper', { name: 'On docs', brief: 'Look. [lead:slowly]', change: 'docs' }),
         /^Started "On docs" on .+, in the worktree of “Docs”\./,
       )
       // A change whose folder went has nothing to copy.
@@ -188,7 +189,7 @@ describe('starting a lead’s helper', () => {
         yield* start({ taskId: later.taskId }, { name: 'Early' }),
         'This task has never run, so it has nothing to hand a helper yet.',
       )
-    }).pipe(Effect.provide(runtimeWith(github)))
+    }).pipe(Effect.provide(runtimeWith(github, { 'claude-code': { holds: held } })))
   })
 
   it.live('refuses one past how many may be at work or waiting, and past a task’s life', () => {
