@@ -62,6 +62,7 @@ export function Prototype() {
     url.searchParams.set('d', key)
     if (placed) url.searchParams.set('p', placed)
     else url.searchParams.delete('p')
+    url.searchParams.delete('go')
     history.replaceState(null, '', url)
   }, [key, placed])
   useEffect(() => {
