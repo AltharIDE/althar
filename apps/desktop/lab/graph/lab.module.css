@@ -61,6 +61,35 @@
   gap: 2px;
   flex: none;
 }
+/* A part and its options: its name picks it for the number keys; the one picked shows its option's name. */
+.part {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+  padding: 2px;
+  border-radius: 9px;
+}
+.part.active {
+  background: color-mix(in srgb, var(--n-3) 60%, transparent);
+}
+.bar .partName {
+  padding: 0 6px 0 7px;
+  font-weight: 560;
+  color: var(--t-3);
+}
+.part.active .partName {
+  color: var(--t-1);
+}
+.bar .letter {
+  width: 26px;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+}
+.optionName {
+  padding: 0 8px 0 6px;
+  color: var(--t-2);
+}
 .rule {
   flex: none;
   width: 1px;
@@ -83,9 +112,12 @@
   padding: 0;
   color: var(--t-1);
 }
+.still {
+  opacity: 0.4;
+}
 .clock input[type='range'] {
   appearance: none;
-  width: 180px;
+  width: 140px;
   height: 4px;
   border-radius: 99px;
   background: linear-gradient(to right, var(--t-3) var(--at), var(--track) var(--at));

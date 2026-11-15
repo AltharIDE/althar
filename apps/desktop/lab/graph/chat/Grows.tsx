@@ -5,7 +5,7 @@ import { NextStep, NextSteps } from '@althar/ui'
 import { move, scenario, useWorld } from '../state'
 import { columnsOf, graphOf, type GraphView, lay, type NodeView } from '../view'
 import { Mark, Node, openTask, useWidth, Wires } from '../graph/parts'
-import s from './InThread.module.css'
+import s from './Grows.module.css'
 
 /*
  * A · In the conversation. Where the coordinator answers the request, one

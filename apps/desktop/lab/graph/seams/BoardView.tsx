@@ -1,32 +1,17 @@
 import type { ComponentProps } from 'react'
 
 import { BoardView as AppBoardView } from '../../../src/renderer/features/board/BoardView'
-import { Band } from '../directions/OverBoard'
-import b from '../directions/OverBoard.module.css'
-import { Threads } from '../directions/Threads'
-import { direction, useStore } from '../state'
+import { BoardPart } from '../board'
+import { PlanBeside, useBesideTalk } from '../chat'
 
 export * from '../../../src/renderer/features/board/BoardView'
 
 /*
- * The project's board draws through here: in B with the request's band
- * over its lanes, in D with the request's lines drawn between its cards,
- * and as it is everywhere else.
+ * The project's board draws through here: while a plan is talked over beside
+ * the conversation (chat D), the plan in its place; otherwise the board as
+ * the board option on show draws it.
  */
 export function BoardView(props: ComponentProps<typeof AppBoardView>) {
-  const picked = useStore(direction)
-  if (picked === 'b')
-    return (
-      <div className={b.withBand}>
-        <Band />
-        <AppBoardView {...props} />
-      </div>
-    )
-  if (picked === 'd')
-    return (
-      <Threads>
-        <AppBoardView {...props} />
-      </Threads>
-    )
-  return <AppBoardView {...props} />
+  if (useBesideTalk()) return <PlanBeside />
+  return <BoardPart {...props} />
 }

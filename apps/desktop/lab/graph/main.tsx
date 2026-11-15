@@ -13,17 +13,19 @@ import { ServicesProvider } from '../../src/renderer/data/services'
 import { makeRouter } from '../../src/renderer/router'
 import { fakeHost } from '../../tests/fixtures'
 import { Bar } from './Bar'
-import { boardNow, makeClient, PROJECT, TABS } from './data'
+import { boardNow, COORDINATOR, makeClient, PROJECT, TABS } from './data'
 import { chooseFace } from '../../src/renderer/features/task/chosenFaces'
-import { clock, direction, endNow, moves, playing, router as shared, scenario, scenarioKey, speed } from './state'
+import { plan } from './plan'
+import { clock, endNow, moves, option, playing, router as shared, scenario, scenarioKey, speed, stage } from './state'
 import { taskIdOf } from './view'
 import s from './lab.module.css'
 
 /*
  * The graph lab (README.md): the desktop app's window, whole, in the
- * browser, on a made-up runtime where one request the coordinator split
- * into tasks plays out live. The bar under it swaps where the graph is
- * drawn (A to D), which request plays (2, 6 or 12 tasks), and the clock.
+ * browser, on a made-up runtime where a big request is planned with the
+ * coordinator, launched, and plays out live as the graph of its tasks. The
+ * bar under it swaps the options of each part (Chat, Board, Task), whether
+ * it's planned or launched, which request, and the clock.
  */
 
 window.localStorage.setItem('althar.tabs', JSON.stringify(TABS))
@@ -43,8 +45,8 @@ shared.current = router as unknown as (typeof shared)['current']
 if (new URLSearchParams(window.location.search).get('face') === 'request')
   for (const one of scenario().tasks) chooseFace(taskIdOf(scenario(), one.key), 'request' as 'talk')
 
-// For the shooting script: the clock, held still and set, and where the graph is drawn.
-Object.defineProperty(window, 'graphLab', { configurable: true, value: { clock, playing, direction, moves } })
+// For the shooting script: the clock, held still and set, the options, the stage and the plan.
+Object.defineProperty(window, 'graphLab', { configurable: true, value: { clock, playing, option, stage, moves, plan } })
 
 /* The clock: a minute of work a second, times the speed. At the end it waits a moment and plays again. */
 let last = performance.now()
@@ -84,6 +86,16 @@ const tell = () => {
 }
 clock.subscribe(tell)
 moves.subscribe(tell)
+stage.subscribe(tell)
+plan.subscribe(tell)
+/* The coordinator's conversation, told to the window as it changes: the plan talked over, launched, or drawn by another option. */
+const told = () => {
+  cursor += 1
+  emit({ _tag: 'Changed', cursor, aggregateType: 'thread', aggregateId: COORDINATOR, projectId: PROJECT, threadId: COORDINATOR })
+}
+plan.subscribe(told)
+stage.subscribe(told)
+option.chat.subscribe(told)
 // Another request is another day's work: the window starts again on it.
 scenarioKey.subscribe(() => window.location.reload())
 
@@ -91,12 +103,6 @@ function Lab() {
   useEffect(() => {
     if (window.location.hash === '' || window.location.hash === '#/')
       void router.navigate({ to: '/projects/$projectId', params: { projectId: PROJECT } })
-  }, [])
-  useEffect(() => {
-    document.documentElement.dataset.direction = direction.get()
-    return direction.subscribe(() => {
-      document.documentElement.dataset.direction = direction.get()
-    })
   }, [])
   return (
     <div className={s.lab}>

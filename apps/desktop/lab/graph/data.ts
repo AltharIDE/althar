@@ -13,27 +13,34 @@ import {
   repositories,
   snapshot,
 } from '../../tests/fixtures'
-import { clock, scenario, worldNow } from './state'
+import { chatItems } from './chat/items'
+import { plan, tell } from './plan'
+import { clock, scenario, scenarioKey, stage, worldNow } from './state'
+import { taskItems } from './task/thread'
 import { graphOf, type NodeView, taskIdOf, threadIdOf } from './view'
 
 /*
- * What the made-up runtime says, read from the simulation as it stands:
- * the project, its board, the coordinator's conversation where the request
- * was made and split, and each task's thread. The board moves as the work
- * does; the page tells the window a card changed as each task moves.
+ * What the made-up runtime says, read from the plan and the simulation as
+ * they stand: the project, its board, the coordinator's conversation where
+ * the request was made, talked over and launched, and each task's thread.
+ * Before launch nothing of the request is on the board; after, the board
+ * moves as the work does, and the page tells the window as each card changes.
  */
 
-export const PROJECT = 'p_meridian'
-export const COORDINATOR = 'thc_meridian'
-const REPOSITORY = 'meridian/api'
+export const PROJECT = 'p_lab'
+export const COORDINATOR = 'thc_lab'
+
+/** Althar Cloud is Althar's own work; the other requests are a payments app's. */
+export const projectName = () => (scenarioKey.get() === 'cloud' ? 'althar' : 'meridian')
+const repository = () => (scenarioKey.get() === 'cloud' ? 'althar/althar' : 'meridian/api')
 
 /** A minute of work ago, as a time on the wall: the clock's now is the window's now. */
 export const at = (minute: number) => new Date(Date.now() - (clock.get() - minute) * 60_000).toISOString()
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
 
-const pullUrl = (number: number) => `https://github.com/${REPOSITORY}/pull/${number}`
+const pullUrl = (number: number) => `https://github.com/${repository()}/pull/${number}`
 
-const changeOf = (node: NodeView): ChangeSummary | null => {
+export const changeOf = (node: NodeView): ChangeSummary | null => {
   if (node.pr === null) return null
   const phase = node.now.phase
   const running = phase === 'checks' || phase === 'fixing'
@@ -43,7 +50,7 @@ const changeOf = (node: NodeView): ChangeSummary | null => {
     number: node.spec.pr,
     title: node.spec.title,
     url: pullUrl(node.spec.pr),
-    repository: REPOSITORY,
+    repository: repository(),
     state: phase === 'merged' ? 'merged' : 'open',
     draft: false,
     checks: {
@@ -63,7 +70,7 @@ const changeOf = (node: NodeView): ChangeSummary | null => {
 }
 
 type Phase = BoardTask['phase']
-const phaseOf = (node: NodeView): Phase => {
+export const phaseOf = (node: NodeView): Phase => {
   switch (node.now.phase) {
     case 'waits':
       return 'held'
@@ -85,7 +92,9 @@ const phaseOf = (node: NodeView): Phase => {
   }
 }
 
-const cardOf = (node: NodeView) => {
+const reviewerOf = (node: NodeView) => (node.spec.lead === 'codex' ? 'claude-code' : 'codex')
+
+export const cardOf = (node: NodeView) => {
   const phase = phaseOf(node)
   const s = scenario()
   const startsAt =
@@ -106,7 +115,7 @@ const cardOf = (node: NodeView) => {
             id: `pln_${node.slug}`,
             steps: [
               { key: 'implement', agentId: node.spec.lead, model: node.spec.model, skipped: false },
-              { key: 'review', agentId: node.spec.lead === 'codex' ? 'claude-code' : 'codex', model: null, skipped: false },
+              { key: 'review', agentId: reviewerOf(node), model: null, skipped: false },
             ],
             startsAt,
             reason: null,
@@ -138,7 +147,7 @@ const callOf = (node: NodeView): BoardCall => {
     id: `call_${node.slug}`,
     kind: 'permission',
     title: `Run ${node.spec.asks?.command ?? ''}`,
-    reason: 'Starting a container asks while the sandbox is on.',
+    reason: 'Reaching outside the sandbox asks while it is on.',
     command: node.spec.asks?.command ?? '',
     stuck: null,
     createdAt: at(node.now.since),
@@ -150,98 +159,80 @@ const callOf = (node: NodeView): BoardCall => {
 }
 
 /* What else the project holds, so the board reads like a day's work. */
-const OTHERS: ReadonlyArray<BoardTask> = [
-  {
-    ...card({
-      taskId: 't_retry-webhooks',
-      threadId: 'th_retry-webhooks',
-      title: 'Retry failed webhooks with backoff',
-      slug: 'retry-webhooks',
-      phase: 'running',
-      kind: 'change',
-      plan: null,
-      step: 'implement',
-      lead: 'claude-code',
-      branch: 'althar/retry-webhooks',
-      startedAt: minutesAgo(26),
-    }),
-    state: 'open',
-    createdAt: minutesAgo(30),
-    settledAt: null,
-    changed: null,
-    here: [],
-  },
-  {
-    ...card({
-      taskId: 't_currency-rounding',
-      threadId: 'th_currency-rounding',
-      title: 'Round refunds in the charge’s currency',
-      slug: 'currency-rounding',
-      phase: 'settled',
-      kind: 'change',
-      plan: null,
-      lead: 'claude-code',
-      branch: 'althar/currency-rounding',
-      change: change({
-        number: 405,
-        title: 'Round refunds in the charge’s currency',
-        state: 'merged',
-        draft: false,
-        url: pullUrl(405),
-        repository: REPOSITORY,
-      }),
-    }),
-    state: 'merged',
-    createdAt: minutesAgo(400),
-    settledAt: minutesAgo(180),
-    changed: null,
-    here: [],
-  },
-  {
-    ...card({
-      taskId: 't_stripe-sdk',
-      threadId: 'th_stripe-sdk',
-      title: 'Upgrade the Stripe SDK to 19',
-      slug: 'stripe-sdk',
-      phase: 'settled',
-      kind: 'change',
-      plan: null,
-      lead: 'codex',
-      branch: 'althar/stripe-sdk',
-      change: change({
-        number: 402,
-        title: 'Upgrade the Stripe SDK to 19',
-        state: 'merged',
-        draft: false,
-        url: pullUrl(402),
-        repository: REPOSITORY,
-      }),
-    }),
-    state: 'merged',
-    createdAt: minutesAgo(600),
-    settledAt: minutesAgo(320),
-    changed: null,
-    here: [],
-  },
-]
+const other = (
+  slug: string,
+  title: string,
+  phase: 'running' | 'settled' | 'ready',
+  lead: 'claude-code' | 'codex',
+  minutes: number,
+  pr?: number,
+): BoardTask => ({
+  ...card({
+    taskId: `t_${slug}`,
+    threadId: `th_${slug}`,
+    title,
+    slug,
+    phase,
+    kind: 'change',
+    plan: null,
+    lead,
+    branch: `althar/${slug}`,
+    ...(phase === 'running' ? { step: 'implement' as const, startedAt: minutesAgo(minutes) } : {}),
+    ...(pr === undefined
+      ? {}
+      : {
+          change: change({
+            number: pr,
+            title,
+            state: phase === 'settled' ? 'merged' : 'open',
+            draft: false,
+            url: pullUrl(pr),
+            repository: repository(),
+          }),
+        }),
+  }),
+  state: phase === 'settled' ? 'merged' : 'open',
+  createdAt: minutesAgo(minutes + 30),
+  settledAt: phase === 'settled' ? minutesAgo(minutes) : null,
+  changed: null,
+  here: [],
+})
 
-const nodesNow = () => graphOf(scenario(), worldNow()).nodes
+const othersOf = (): ReadonlyArray<BoardTask> =>
+  scenarioKey.get() === 'cloud'
+    ? [
+        other('virtualize-the-thread-view', 'Virtualize the thread view', 'running', 'claude-code', 34),
+        other('changelog-0-9-0', 'Changelog shows 0.9.0’s publish time', 'running', 'codex', 12),
+        other('errand-lines-plain-words', 'Errand lines on hold read in plain words', 'settled', 'claude-code', 140, 966),
+        other('small-change-team', 'A small change’s card lets you pick its team', 'settled', 'claude-code', 260, 961),
+        other('landing-gallery', 'A gallery of the app on the landing page', 'settled', 'claude-code', 380, 963),
+      ]
+    : [
+        other('retry-webhooks', 'Retry failed webhooks with backoff', 'running', 'claude-code', 26),
+        other('currency-rounding', 'Round refunds in the charge’s currency', 'settled', 'claude-code', 180, 405),
+        other('stripe-sdk', 'Upgrade the Stripe SDK to 19', 'settled', 'codex', 320, 402),
+      ]
+
+/** The request's tasks as the graph has them, once launched; none while it's planned. */
+export const nodesNow = (): ReadonlyArray<NodeView> => (stage.get() === 'run' ? graphOf(scenario(), worldNow()).nodes : [])
 
 const projectSummary = (): ProjectSummary => {
   const nodes = nodesNow()
+  const others = othersOf()
+  const running = others.filter((one) => one.phase === 'running').length
   return {
     id: PROJECT,
-    name: 'meridian',
-    slug: 'meridian',
+    name: projectName(),
+    slug: projectName(),
     ink: 'teal',
     lastWorkAt: minutesAgo(1),
-    repository: '/Users/balazs/Code/meridian',
-    repositories: ['meridian'],
-    worktrees: '/Users/balazs/Charrette/meridian',
-    tasks: nodes.length + OTHERS.length,
-    running: nodes.filter((one) => one.stand === 'running').length + 1,
+    repository: `/Users/balazs/Code/${projectName()}`,
+    repositories: [projectName()],
+    worktrees: `/Users/balazs/Charrette/${projectName()}`,
+    tasks: nodes.length + others.length,
+    running: nodes.filter((one) => one.stand === 'running').length + running,
     yours: nodes.filter((one) => one.stand === 'yours').length,
-    working: nodes.filter((one) => one.stand === 'running').length + 1,
+    working: nodes.filter((one) => one.stand === 'running').length + running,
     usageLimit: 'move',
     rotateAccounts: false,
     onlyAccounts: null,
@@ -251,63 +242,73 @@ const projectSummary = (): ProjectSummary => {
 
 export const boardNow = (): BoardSnapshot => {
   const nodes = nodesNow()
+  const others = othersOf()
   return {
     cursor: 3,
-    tasks: [...nodes.map(boardTaskOf), ...OTHERS],
+    tasks: [...nodes.map(boardTaskOf), ...others],
     calls: nodes.filter((one) => one.now.phase === 'asks').map(callOf),
-    settledTotal: nodes.filter((one) => one.stand === 'done').length + 2,
+    settledTotal: nodes.filter((one) => one.stand === 'done').length + others.filter((one) => one.phase === 'settled').length,
   }
 }
 
 /** Each item placed at its minute, in order, with an id that holds across reads. */
-const placed = (item: ThreadItem, id: string, sequence: number, minute: number): ThreadItem =>
-  ({ ...item, id, sequence, createdAt: at(minute) }) as ThreadItem
-
-const coordinatorItems = (): ReadonlyArray<ThreadItem> => {
-  const s = scenario()
-  const nodes = nodesNow()
-  return [
-    placed(items.you('Is anything still waiting on the Stripe upgrade?'), 'c_earlier_you', 1, -340),
-    placed(items.says('No: #402 merged this morning and nothing else was waiting for it.'), 'c_earlier_says', 2, -339),
-    placed(items.you(s.asked), 'c_asked', 3, -1),
-    placed(items.says(s.answer), 'c_answer', 4, -0.5),
-    ...nodes.map((node, i) => placed(items.card(cardOf(node)), `card_${node.key}`, 5 + i, -0.4)),
-  ]
+let sequence = 0
+const placed = (item: ThreadItem, id: string, minute: number): ThreadItem => {
+  sequence += 1
+  return { ...item, id, sequence, createdAt: at(minute) } as ThreadItem
 }
+
+/** How a part writes a thread's items: the person's words, an agent's, and the plan's card, each at its minute. */
+export interface Writer {
+  readonly you: (text: string, id: string, minute: number) => ThreadItem
+  readonly says: (text: string, id: string, minute: number, agentId?: string) => ThreadItem
+  /** The plan, as a card in the conversation, drawn by the chat option on show as its kind says (chat/items.ts). */
+  readonly plan: (kind: string, version: number, id: string, minute: number) => ThreadItem
+}
+
+const writer: Writer = {
+  you: (text, id, minute) => placed(items.you(text), id, minute),
+  says: (text, id, minute, agentId = 'claude-code') => placed(items.says(text, agentId), id, minute),
+  plan: (kind, version, id, minute) =>
+    placed(
+      items.card(
+        card({
+          taskId: `plan_${version}`,
+          threadId: COORDINATOR,
+          title: scenario().name,
+          slug: `plan@${kind}@${version}`,
+          phase: 'planned',
+          kind: 'change',
+          plan: null,
+        }),
+      ),
+      id,
+      minute,
+    ),
+}
+
+// In the order of their minutes, numbered so.
+const coordinatorItems = (): ReadonlyArray<ThreadItem> => chatItems(writer).map((item, i) => ({ ...item, sequence: i + 1 }) as ThreadItem)
 
 const threadOf = (threadId: string): ThreadSnapshot => {
   const s = scenario()
   const node = nodesNow().find((one) => threadIdOf(s, one.key) === threadId)
-  if (node === undefined) return snapshot({ threadId, project: { id: PROJECT, name: 'meridian' } })
+  if (node === undefined) return snapshot({ threadId, project: { id: PROJECT, name: projectName() } })
   const base = snapshot()
   const phase = phaseOf(node)
-  const said: ThreadItem[] = [
-    placed(items.you(`${node.spec.title}. Part of: ${s.asked}`), `${threadId}_you`, 1, -0.4),
-    ...(node.now.startedAt === null
-      ? []
-      : [
-          placed(
-            items.says(
-              `I’ll ${node.spec.title.charAt(0).toLowerCase()}${node.spec.title.slice(1)}, then open its pull request.`,
-              node.spec.lead,
-            ),
-            `${threadId}_says`,
-            2,
-            node.now.startedAt,
-          ),
-        ]),
-  ]
+  sequence = 0
+  const said = taskItems(node, writer)
   const one = changeOf(node)
   return snapshot({
     threadId,
-    project: { id: PROJECT, name: 'meridian' },
+    project: { id: PROJECT, name: projectName() },
     task: {
       ...base.task,
       id: taskIdOf(s, node.key),
       title: node.spec.title,
       slug: node.slug,
       branch: `althar/${node.slug}`,
-      worktree: `/Users/balazs/Charrette/meridian/${node.slug}/meridian`,
+      worktree: `/Users/balazs/Charrette/${projectName()}/${node.slug}/${projectName()}`,
       phase,
       state: node.now.phase === 'merged' ? 'settled' : 'active',
       step: phase === 'running' ? (node.now.phase === 'implement' ? 'implement' : 'review') : null,
@@ -317,7 +318,7 @@ const threadOf = (threadId: string): ThreadSnapshot => {
       changes: one === null ? [] : [one],
       steps: [
         { key: 'implement', agentId: node.spec.lead, model: node.spec.model, skipped: false },
-        { key: 'review', agentId: node.spec.lead === 'codex' ? 'claude-code' : 'codex', model: null, skipped: false },
+        { key: 'review', agentId: reviewerOf(node), model: null, skipped: false },
       ],
       lead: { agentId: node.spec.lead, model: node.spec.model, account: null },
       actions: node.now.phase === 'merged' ? [] : ['stop', 'abandon'],
@@ -331,6 +332,13 @@ const threadOf = (threadId: string): ThreadSnapshot => {
     },
     items: said,
   })
+}
+
+/** When the person's next message to the coordinator is, on the lab's clock: just before launch while it's planned. */
+let typed = 0
+const minuteNow = () => {
+  typed += 1
+  return stage.get() === 'plan' ? -1 + typed * 0.01 : clock.get()
 }
 
 export const makeClient = () =>
@@ -348,22 +356,31 @@ export const makeClient = () =>
         calls: boardNow().calls.map((call) => ({ ...call, projectId: PROJECT })),
       }),
     getBoard: async () => boardNow(),
-    getCoordinator: async () =>
-      coordinatorSnapshot({
+    getCoordinator: async () => {
+      const thinking = plan.get().thinking
+      const base = snapshot().session as NonNullable<ThreadSnapshot['session']>
+      return coordinatorSnapshot({
         threadId: COORDINATOR,
-        project: { id: PROJECT, name: 'meridian' },
+        project: { id: PROJECT, name: projectName() },
         host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true },
+        session: { ...base, model: 'claude-opus-5-5', turnRunning: thinking, turnStartedAt: thinking ? minutesAgo(0) : null, held: false },
         items: [...coordinatorItems()],
-      }),
+      })
+    },
     getThread: async (threadId) => threadOf(threadId),
     // A thread on screen reads a changed item on its own: the coordinator's cards, as they stand now.
     getThreadItem: async (threadId: string, itemId: string) => {
-      const items = threadId === COORDINATOR ? coordinatorItems() : threadOf(threadId).items
-      return items.find((one) => one.id === itemId) ?? null
+      const found = threadId === COORDINATOR ? coordinatorItems() : threadOf(threadId).items
+      return found.find((one) => one.id === itemId) ?? null
     },
-    getRepositories: async () => repositories.slice(0, 1).map((one) => ({ ...one, name: 'meridian', path: '/Users/balazs/Code/meridian' })),
+    // What the person tells the coordinator goes to the plan: it answers a moment later, with a new version where it changed it.
+    send: async (input: { threadId: string; body: string }) => {
+      if (input.threadId === COORDINATOR) tell(input.body, minuteNow())
+    },
+    getRepositories: async () =>
+      repositories.slice(0, 1).map((one) => ({ ...one, name: projectName(), path: `/Users/balazs/Code/${projectName()}` })),
     listConnections: async () => ({ ...connectionList, connections: [githubConnection] }),
   } as Partial<Client>)
 
-/** The tabs the window keeps at every load: meridian's, on its board and conversation side by side. */
+/** The tabs the window keeps at every load: the project's, on its board and conversation side by side. */
 export const TABS = { open: [PROJECT], places: {}, rooms: { [PROJECT]: 'both' } }

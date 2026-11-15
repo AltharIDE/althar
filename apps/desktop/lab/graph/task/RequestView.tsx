@@ -6,7 +6,7 @@ import { chooseFace } from '../../../src/renderer/features/task/chosenFaces'
 import { router, scenario, useWorld } from '../state'
 import { graphOf, type GraphView, lay, type NodeView, taskIdOf } from '../view'
 import { Mark, modelOf, Node, useWidth, Wires } from '../graph/parts'
-import s from './OnTaskPage.module.css'
+import s from './RequestView.module.css'
 
 /*
  * C · On a task's page. Each task of a request has a Request view beside

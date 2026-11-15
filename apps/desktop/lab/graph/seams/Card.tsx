@@ -1,21 +1,17 @@
 import type { ComponentProps } from 'react'
 
 import { Card as AppCard } from '../../../src/renderer/features/project/Card'
-import { RequestCard } from '../directions/InThread'
-import { direction, scenario, useStore } from '../state'
+import { PlanInThread } from '../chat'
 
 export * from '../../../src/renderer/features/project/Card'
 
 /*
- * The coordinator's thread draws each task's card through here. In A, the
- * request's tasks are one card, the request's graph, where the first of
- * them was; the rest draw nothing. Everywhere else, each is its own card,
- * as today.
+ * The coordinator's thread draws each card through here: the plan's, which
+ * the lab writes as a card whose slug is `plan@kind@version`, as the chat
+ * option on show draws it; any other as the app does.
  */
 export function Card(props: ComponentProps<typeof AppCard>) {
-  const picked = useStore(direction)
-  const tasks = scenario().tasks
-  const mine = tasks.findIndex((one) => props.card.slug === `${scenario().key}-${one.key}`)
-  if (picked !== 'a' || mine < 0) return <AppCard {...props} />
-  return mine === 0 ? <RequestCard /> : null
+  const [mark, kind, version] = props.card.slug.split('@')
+  if (mark === 'plan' && kind !== undefined) return <PlanInThread kind={kind} version={Number(version)} />
+  return <AppCard {...props} />
 }

@@ -1,18 +1,22 @@
 import { TaskStatus } from '@althar/ui'
 
-import { RequestFace } from '../directions/OnTaskPage'
-import { direction, scenario, worldNow } from '../state'
+import { option, scenario, stage, worldNow } from '../state'
+import { RequestFace } from './RequestView'
 import { graphOf } from '../view'
 
 /*
- * What a task's page takes from the lab, patched into TaskView: in C, a
- * task of the request has a Request view beside Conversation and Outputs
- * (r), which draws the request's graph with the task in it.
+ * What a task's page takes from the lab, patched into TaskView (patches.ts):
+ * a task of the request has a Request view beside Conversation and Outputs
+ * (r), which draws the request's graph with the task in it; and its header
+ * says what it waits for.
  */
 
 /** Whether the task is one of the request's, and C is showing. */
 export const labHasRequest = (slug: string | undefined): boolean =>
-  direction.get() === 'c' && slug !== undefined && scenario().tasks.some((one) => `${scenario().key}-${one.key}` === slug)
+  stage.get() === 'run' &&
+  option.task.get() === 'c' &&
+  slug !== undefined &&
+  scenario().tasks.some((one) => `${scenario().key}-${one.key}` === slug)
 
 /** The views a task's page offers: the request's, after the rest, where it has one. */
 export const labFacesOf = <F extends string>(slug: string, faces: ReadonlyArray<F>): ReadonlyArray<F | 'request'> =>
