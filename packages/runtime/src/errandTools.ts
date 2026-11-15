@@ -1,6 +1,7 @@
 import { Effect, Schema } from 'effect'
 
 import { Errands } from './Errands'
+import { errandWaitKinds } from './errandWaits'
 import type { Tool } from './ToolServer'
 import { ToolRefused } from './toolErrors'
 
@@ -33,8 +34,7 @@ export const errandTools = (errands: typeof Errands.Service): ReadonlyArray<Tool
   },
   {
     name: 'keep_errand',
-    description:
-      'Keep what the person asked for later, from a message id in this turn. Each ordered step binds its tool, semantic arguments, target, head, branch, task and what it waits on. Only the window or a paired device gives the person’s word. No action happens now.',
+    description: `Keep what the person asked for later, from their message id in this turn (read_turn). Steps run in order. taskId accepts any task’s slug or internal id in this project. Each step needs key, tool, target, request (the tool’s semantic arguments only; no message/errand/step), and nonempty waits [{kind, target}]. Watched kinds: ${errandWaitKinds.join(', ')}; other kinds are refused. For "once the task’s PR is ready and green, merge it, then tag its merge commit vX", keep these two steps: {key:"merge",tool:"merge_pull_request",taskId:"<slug>",target:"task:<slug>",request:{},waits:[{kind:"task_pull_request",target:"<slug>"}]} then {key:"tag",tool:"push_tag",taskId:"<slug>",target:"<owner/repo> tag vX",request:{tag:"vX",commit:"task:<slug>"},waits:[{kind:"task_merged",target:"<slug>"}]}. Omit head and branch for these task references: the merge watcher binds the PR when ready, checks its gates, and wakes you with merge_pull_request {errand,step:"merge"}; after that step confirms the merge, the tag watcher wakes you with the tag call. No further person message is needed. For an already known merge, use merge_pull_request on their message and the head you read; it keeps the concrete merge errand for you. Other release steps bind the targets and requests their tools describe: checks/post-merge/required-check-missing target a commit; run targets a tag whose run needs approval; draft targets a tag whose draft exists. merge_line/merge_queue/merge_train/merge_in_flight and checks are the concrete merge watcher’s waits. Only a window or paired-device message gives their word. No action happens while keeping.`,
     input: {
       type: 'object',
       properties: {
@@ -46,7 +46,10 @@ export const errandTools = (errands: typeof Errands.Service): ReadonlyArray<Tool
             properties: {
               key: { type: 'string' },
               tool: { type: 'string' },
-              taskId: { type: 'string' },
+              taskId: {
+                type: 'string',
+                description: 'The task slug from list_tasks/read_task, or its internal id. Any task in this project.',
+              },
               target: { type: 'string' },
               head: { type: 'string' },
               branch: { type: 'string' },
@@ -55,7 +58,7 @@ export const errandTools = (errands: typeof Errands.Service): ReadonlyArray<Tool
                 type: 'array',
                 items: {
                   type: 'object',
-                  properties: { kind: { type: 'string' }, target: { type: 'string' }, since: { type: 'string' } },
+                  properties: { kind: { type: 'string', enum: errandWaitKinds }, target: { type: 'string' }, since: { type: 'string' } },
                   required: ['kind', 'target'],
                 },
               },

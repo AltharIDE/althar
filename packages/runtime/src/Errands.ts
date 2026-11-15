@@ -7,6 +7,7 @@ import { Cause, Context, Crypto, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchTask } from './cards'
+import { errandWaitKinds } from './errandWaits'
 import { failedNote, stepNote, type StepNote } from './errandNotes'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
@@ -295,24 +296,78 @@ export class Errands extends Context.Service<
           }),
         )
       const stepsOf = (id: string) => sql<StepRow>`SELECT * FROM errand_steps WHERE errand_id = ${id} ORDER BY position`
-      const keep = (access: ToolAccess, messageId: string, steps: ReadonlyArray<ErrandStep>) =>
+      const keep = (access: ToolAccess, messageId: string, askedSteps: ReadonlyArray<ErrandStep>) =>
         sql.withTransaction(
           Effect.gen(function* () {
             const words = yield* word(access, messageId)
+            const steps: ErrandStep[] = []
+            for (const step of askedSteps) {
+              if (step.taskId === undefined) {
+                steps.push(step)
+                continue
+              }
+              const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE project_id = ${access.projectId}
+                AND (id = ${step.taskId} OR slug = ${step.taskId})`
+              if (task === undefined) return yield* refused(`This project has no task ${step.taskId}. list_tasks shows them.`)
+              steps.push({ ...step, taskId: task.id })
+            }
             if (steps.length === 0 || new Set(steps.map((s) => s.key)).size !== steps.length)
               return yield* refused('An errand needs steps with distinct keys.')
             for (const step of steps) {
               if (step.target === '' || step.tool === '' || step.key === '' || step.waits.length === 0)
                 return yield* refused('Each step needs a tool, target and what it waits on.')
-              if (step.taskId !== undefined) {
-                const [task] = yield* sql<{
-                  id: string
-                }>`SELECT id FROM tasks WHERE id = ${step.taskId} AND project_id = ${access.projectId}`
-                if (task === undefined || (access.role === 'lead' && access.taskId !== step.taskId))
-                  return yield* refused('The step must concern a task this caller can act on.')
+              if (step.target.startsWith('task:')) {
+                if (
+                  step.tool !== 'merge_pull_request' ||
+                  step.key !== 'merge' ||
+                  step.taskId === undefined ||
+                  step.head !== undefined ||
+                  step.branch !== undefined
+                )
+                  return yield* refused(
+                    'A task PR merge uses key merge, tool merge_pull_request, taskId, target task:<slug>, request {method?, now?}, and no head or branch.',
+                  )
+                const [target] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE project_id = ${access.projectId}
+                  AND (id = ${step.target.slice(5)} OR slug = ${step.target.slice(5)})`
+                if (target?.id !== step.taskId) return yield* refused('The task target must name the same task as taskId.')
+                if (
+                  Object.keys(step.request).some((key) => key !== 'method' && key !== 'now') ||
+                  (step.request.method !== undefined &&
+                    (typeof step.request.method !== 'string' || !['merge', 'squash', 'rebase'].includes(step.request.method))) ||
+                  (step.request.now !== undefined && typeof step.request.now !== 'boolean')
+                )
+                  return yield* refused('A task PR merge request is {method?: "merge" | "squash" | "rebase", now?: boolean}.')
+                if (
+                  step.waits.every((wait) => errandWaitKinds.includes(wait.kind)) &&
+                  step.waits.some((wait) => wait.kind !== 'task_pull_request')
+                )
+                  return yield* refused('A task PR merge waits on task_pull_request, targeting that task’s slug.')
               }
-              if (access.role === 'lead' && step.taskId !== access.taskId)
-                return yield* refused('A lead keeps errands only for its own task.')
+              for (const wait of step.waits) {
+                if (!errandWaitKinds.includes(wait.kind))
+                  return yield* refused(`Althar cannot watch wait kind "${wait.kind}". Watched kinds: ${errandWaitKinds.join(', ')}.`)
+                if (wait.target.trim() === '') return yield* refused('Each wait needs a nonempty target.')
+                if (wait.kind === 'task_pull_request' || wait.kind === 'task_merged') {
+                  const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE project_id = ${access.projectId}
+                    AND (id = ${wait.target} OR slug = ${wait.target})`
+                  if (task === undefined || (step.taskId !== undefined && task.id !== step.taskId))
+                    return yield* refused('The wait must name this step’s task in this project, by slug or id.')
+                  if (wait.kind === 'task_pull_request' && (step.tool !== 'merge_pull_request' || !step.target.startsWith('task:')))
+                    return yield* refused('task_pull_request watches a merge_pull_request step with target task:<slug>.')
+                  if (wait.kind === 'task_merged' && step.tool !== 'push_tag')
+                    return yield* refused('task_merged watches a push_tag step after the task’s merge.')
+                }
+                const releaseKinds: Record<string, ReadonlyArray<string>> = {
+                  push_tag: ['task_merged', 'checks', 'post-merge', 'required-check-missing'],
+                  approve_release_run: ['run'],
+                  publish_release: ['draft'],
+                }
+                const kinds = releaseKinds[step.tool]
+                if (kinds !== undefined && !kinds.includes(wait.kind))
+                  return yield* refused(`Althar cannot watch ${wait.kind} for ${step.tool}. Use: ${kinds.join(', ')}.`)
+                if (['post-merge', 'run', 'draft'].includes(wait.kind) && kinds === undefined)
+                  return yield* refused(`${wait.kind} watches a release step: push_tag, approve_release_run or publish_release.`)
+              }
             }
             // A retry of keeping the same words and steps adopts the existing record.
             const id = `errand_${createHash('sha256')
@@ -400,8 +455,7 @@ export class Errands extends Context.Service<
                 step.target !== action.target ||
                 step.request !== stable(action.request) ||
                 step.head !== (action.head ?? null) ||
-                step.targetBranch !== (action.branch ?? null) ||
-                (access.role === 'lead' && step.taskId !== access.taskId)
+                step.targetBranch !== (action.branch ?? null)
               )
                 return yield* refused('This call does not match the recorded errand step, target, head and arguments.')
               if (errand.state !== 'open' && !(errand.state === 'done' && step.state === 'done'))
@@ -669,6 +723,19 @@ export class Errands extends Context.Service<
                 >`SELECT * FROM errands WHERE project_id = ${projectId} AND state IN ('open', 'paused')`
                 for (const row of rows) {
                   const steps = (yield* stepsOf(row.id)).filter((s) => s.state !== 'done')
+                  const unsupported = steps.flatMap((s) =>
+                    (JSON.parse(s.waits) as Array<{ kind: string }>)
+                      .filter((wait) => !errandWaitKinds.includes(wait.kind))
+                      .map((wait) => wait.kind),
+                  )
+                  if (row.state === 'open' && unsupported.length > 0) {
+                    yield* set(
+                      row,
+                      'paused',
+                      `Althar cannot watch wait kinds: ${[...new Set(unsupported)].join(', ')}. Watched kinds: ${errandWaitKinds.join(', ')}. Keep this errand again with watched waits on the person’s fresh word.`,
+                    )
+                    continue
+                  }
                   const missing = steps.some((s) =>
                     (JSON.parse(s.waits) as Array<{ kind: string; since?: string }>).some(
                       (w) =>
