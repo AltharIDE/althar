@@ -35,7 +35,9 @@ export const sshArguments = (options: SshTarget, homeId?: string): ReadonlyArray
   const program =
     options.launcher === undefined ? '"${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher"' : quote(options.launcher)
   const command = homeId === undefined ? 'status --json' : `connect-stdio --home-id ${quote(homeId)} --client-api-version ${API_VERSION}`
-  const remote = `exec /bin/sh ${program} ${command}${options.profile === undefined ? '' : ` --profile ${quote(options.profile)}`}`
+  const script = `exec /bin/sh ${program} ${command}${options.profile === undefined ? '' : ` --profile ${quote(options.profile)}`}`
+  // Expansion belongs to a known POSIX shell, not the account's possibly non-POSIX login shell.
+  const remote = `exec /bin/sh -c ${quote(script)}`
   return [
     '-T',
     '-oBatchMode=yes',

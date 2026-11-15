@@ -31,7 +31,13 @@ describe('SSH transport arguments', () => {
       expect(command).toBeDefined()
       // Parse with the real POSIX shell while collecting its arguments; no
       // command named by the untrusted path is executed.
-      const text = execFileSync('/bin/sh', ['-c', `${command?.replace(/^exec /, 'set -- ')}; printf '%s\n' "$@"`], {
+      const outer = execFileSync('/bin/sh', ['-c', `${command?.replace(/^exec /, 'set -- ')}; printf '%s\n' "$@"`], {
+        encoding: 'utf8',
+        env: { PATH: '/usr/bin:/bin' },
+      })
+      expect(outer.split('\n').slice(0, 2)).toEqual(['/bin/sh', '-c'])
+      const script = outer.split('\n')[2]!
+      const text = execFileSync('/bin/sh', ['-c', `${script.replace(/^exec /, 'set -- ')}; printf '%s\n' "$@"`], {
         encoding: 'utf8',
         env: { PATH: '/usr/bin:/bin' },
       })
@@ -44,6 +50,31 @@ describe('SSH transport arguments', () => {
         '/profile; $HOME',
         '',
       ])
+    },
+  )
+  it.skipIf(process.platform === 'win32')(
+    'expands the managed launcher inside the explicit POSIX shell and keeps the home path literal',
+    () => {
+      const command = sshArguments({ target: 'my-vps' }).at(-1)!
+      const outer = execFileSync('/bin/sh', ['-c', `${command.replace(/^exec /, 'set -- ')}; printf '%s\n' "$@"`], {
+        encoding: 'utf8',
+        env: { PATH: '/usr/bin:/bin' },
+      }).split('\n')
+      expect(outer.slice(0, 2)).toEqual(['/bin/sh', '-c'])
+      const script = outer[2]!
+      for (const environment of [{ HOME: "/home/quote's $literal" }, { HOME: '/unused', XDG_DATA_HOME: "/data/quote's $literal" }]) {
+        const result = execFileSync('/bin/sh', ['-c', `${script.replace(/^exec /, 'set -- ')}; printf '%s\n' "$@"`], {
+          encoding: 'utf8',
+          env: { PATH: '/usr/bin:/bin', ...environment },
+        }).split('\n')
+        expect(result).toEqual([
+          '/bin/sh',
+          `${'XDG_DATA_HOME' in environment ? environment.XDG_DATA_HOME : `${environment.HOME}/.local/share`}/althar-host-program/launcher`,
+          'status',
+          '--json',
+          '',
+        ])
+      }
     },
   )
   it('refuses option injection, shell fragments and invalid connection fields', () => {
