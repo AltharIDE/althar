@@ -2,7 +2,7 @@ import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, us
 import { createPortal } from 'react-dom'
 import type { QueryClient } from '@tanstack/react-query'
 
-import type { BoardSnapshot, BoardTask, PlanStep, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import type { BoardSnapshot, BoardTask, PlanStep, SearchDocument, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton, Problem } from '@althar/ui'
 
 import { type Client, messageOf, newTaskId } from '../../data/client'
@@ -420,6 +420,27 @@ export function useAsides({
   }
 }
 
+/**
+ * What was said in each conversation of a project, a passage each, the latest first: from the passages the finder's catalog
+ * holds (every public message and report, the latest few thousand across the profile), by the aside's id, or null for the
+ * coordinator's. The search finds a conversation by any of them.
+ */
+export const passagesOf = (
+  documents: ReadonlyArray<SearchDocument>,
+  projectId: string | null,
+): ReadonlyMap<string | null, readonly string[]> => {
+  const said = documents
+    .filter((one) => one.kind === 'said' && one.projectId === projectId)
+    .sort((a, b) => (a.changedAt < b.changedAt ? 1 : a.changedAt > b.changedAt ? -1 : 0))
+  const found = new Map<string | null, string[]>()
+  for (const one of said) {
+    const passages = found.get(one.taskId) ?? []
+    for (const text of [one.title, one.body]) if (text.trim() !== '') passages.push(text)
+    found.set(one.taskId, passages)
+  }
+  return found
+}
+
 /** The heading over the coordinator's conversation, flying an aside that left for the board to its card there. */
 export function AsidesBar({
   scratch,
@@ -431,6 +452,8 @@ export function AsidesBar({
   onClear,
   board,
   now,
+  passages,
+  onSearching,
 }: {
   scratch: ReadonlyArray<BoardTask>
   open: AsideOpen
@@ -444,6 +467,10 @@ export function AsidesBar({
   /** Every task on the board, to tell one that left for the board from one cleared. */
   board: ReadonlyArray<BoardTask>
   now: number
+  /** What was said in each conversation (`passagesOf`), once the window has read it: the titles are found without it. */
+  passages?: ReadonlyMap<string | null, readonly string[]> | undefined
+  /** The search opens or shuts: the window reads what was said as it opens. */
+  onSearching?: ((open: boolean) => void) | undefined
 }) {
   const { recent, older } = asidesOf(scratch, now, {
     open: open.kind === 'coordinator' ? null : open.taskId,
@@ -453,6 +480,7 @@ export function AsidesBar({
   const strip = useRef<HTMLDivElement>(null)
   useFlights(strip, scratch, board)
   const [searching, setSearching] = useState(false)
+  useEffect(() => onSearching?.(searching), [searching, onSearching])
   // ⌘J, from anywhere in the window, opens the search over every conversation, or shuts it. A project kept behind another
   // tab runs no effects (KeptScreens' Activity), so this is the one in front; with its conversation's pane closed, it waits.
   useEffect(() => {
@@ -469,7 +497,8 @@ export function AsidesBar({
   const dated = (one: Aside): Aside => {
     const task = scratch.find((candidate) => candidate.taskId === one.id)
     const at = task === undefined ? '' : ago(task.latest?.at ?? task.createdAt, new Date(now))
-    return at === '' ? one : { ...one, ago: at }
+    const words = passages?.get(one.id)
+    return { ...one, ...(at === '' ? {} : { ago: at }), ...(words === undefined ? {} : { words }) }
   }
   return (
     <AsideTabs
@@ -480,6 +509,7 @@ export function AsidesBar({
       older={older.map(dated)}
       searching={searching}
       onSearchingChange={setSearching}
+      {...(passages?.get(null) === undefined ? {} : { coordinatorWords: passages.get(null)! })}
       searchKbd="⌘J"
       current={open.kind === 'coordinator' ? null : open.taskId}
       onPick={onPick}

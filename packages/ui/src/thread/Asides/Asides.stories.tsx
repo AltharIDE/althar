@@ -6,7 +6,13 @@ import { type Aside, AsideMoves, AsideTabs } from './Asides'
 
 const ASIDES: readonly Aside[] = [
   { id: 'a1', title: 'Retry back-off', said: 'It backs off in the client and in the queue.', ago: '4m ago', running: true },
-  { id: 'a2', title: 'Stripe API version', said: '2024-06-20, pinned in payments/client.ts.', ago: '1h ago' },
+  {
+    id: 'a2',
+    title: 'Stripe API version',
+    said: 'Done.',
+    words: ['Done.', '2024-06-20, pinned in payments/client.ts.', 'Which Stripe API version do the webhook handlers expect?'],
+    ago: '1h ago',
+  },
   { id: 'a3', title: 'Refunds export name', said: 'Refund ledger reads best.', ago: '3h ago' },
   { id: 'a6', title: 'Why the merge queue reruns every check after a rebase onto main', said: 'It reruns them all.', ago: '5h ago' },
 ]
@@ -22,6 +28,7 @@ const meta = {
     mark: <HalftoneMark size={15} rise={false} />,
     asides: ASIDES,
     older: OLDER,
+    coordinatorWords: ['Opened a draft for the retry back-off.', 'Should the nightly reconcile run before the ledger export?'],
     current: null,
     onPick: fn(),
     onNew: fn(),
@@ -93,6 +100,76 @@ export const Searching: Story = {
     await expect(body.getAllByRole('option')).toHaveLength(2)
     await userEvent.keyboard('{Enter}')
     await expect(args.onPick).toHaveBeenCalledWith('a2')
+  },
+}
+
+/** Anything said in a conversation finds it, not only its last line: a word from an earlier message, after a later reply. */
+export const SearchingWhatWasSaid: Story = {
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('tab', { name: /Coordinator/ }))
+    const body = within(canvasElement.ownerDocument.body)
+    const field = await body.findByRole('combobox', { name: 'Search conversations' })
+    // The aside's last words are "Done."; the webhook was asked about before.
+    await userEvent.type(field, 'webhook')
+    // One has it in its name (those by name first), one in what was asked before; New aside at the foot.
+    const found = body.getAllByRole('option')
+    await expect(found).toHaveLength(3)
+    await expect(found[0]).toHaveTextContent('Is the webhook signature checked twice?')
+    const stripe = found[1]!
+    await expect(stripe).toHaveTextContent('Stripe API version')
+    await expect(stripe).toHaveTextContent('do the webhook handlers expect?')
+    await userEvent.click(stripe)
+    await expect(args.onPick).toHaveBeenCalledWith('a2')
+    await userEvent.click(within(canvasElement).getByRole('tab', { name: /Coordinator/ }))
+    // The coordinator's own conversation is found by what was said in it, too.
+    await userEvent.type(await body.findByRole('combobox', { name: 'Search conversations' }), 'reconcile')
+    const coordinator = body.getAllByRole('option')[0]!
+    await expect(coordinator).toHaveTextContent('Coordinator')
+    await expect(coordinator).toHaveTextContent('nightly reconcile')
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onPick).toHaveBeenLastCalledWith(null)
+  },
+}
+
+const MANY: readonly Aside[] = Array.from({ length: 14 }, (_, n) => ({
+  id: `m${n}`,
+  title: `Conversation number ${n + 1}`,
+  ago: `${n + 1}h ago`,
+}))
+
+/** The search opens with the one open in sight, however far down the list it is. */
+export const SearchingFarDown: Story = {
+  args: { asides: MANY, older: [], current: 'm12' },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('tab', { name: /Conversation number 13/ }))
+    const body = within(canvasElement.ownerDocument.body)
+    const field = await body.findByRole('combobox', { name: 'Search conversations' })
+    const list = body.getByRole('listbox')
+    const row = body.getAllByRole('option').find((one) => one.getAttribute('aria-selected') === 'true')!
+    await expect(row).toHaveTextContent('Conversation number 13')
+    await expect(field.getAttribute('aria-activedescendant')).toBe(row.id)
+    const within_ = list.getBoundingClientRect()
+    const at = row.getBoundingClientRect()
+    await expect(at.top).toBeGreaterThanOrEqual(within_.top - 1)
+    await expect(at.bottom).toBeLessThanOrEqual(within_.bottom + 1)
+  },
+}
+
+/** The search as it opens: every conversation, the latest first, the one open marked, those a week old under their own heading. */
+export const SearchOpen: Story = {
+  args: { current: 'a6' },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('tab', { name: /Why the merge queue/ }))
+    await within(canvasElement.ownerDocument.body).findByRole('combobox', { name: 'Search conversations' })
+  },
+}
+
+/** Words typed: those with them in their name first, then those with them in what was said, the passage that matched under. */
+export const SearchResults: Story = {
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('tab', { name: /Coordinator/ }))
+    const field = await within(canvasElement.ownerDocument.body).findByRole('combobox', { name: 'Search conversations' })
+    await userEvent.type(field, 'webhook')
   },
 }
 

@@ -27,6 +27,11 @@ export interface Aside {
   title: string
   /** What was said last, its first line: found by the search, and shown under its name there. */
   said?: string
+  /**
+   * What was said in it, a passage each, the latest first: the search finds a conversation by any of them, and shows the one
+   * that matched. Where the window has them, they are every public passage it holds of the conversation, not only the last.
+   */
+  words?: readonly string[]
   /** How long ago it was last spoken in, as the search says it ("4m"). */
   ago?: string
   /** Its agent is at it now. */
@@ -81,6 +86,8 @@ export type AsideTabsProps = RootProps<
     onClear?: (id: string) => void
     /** Settles the older ones together, from the search. Without it, they can only be opened. */
     onClearOlder?: (ids: readonly string[]) => void
+    /** What was said in the coordinator's conversation, a passage each, the latest first, as an aside's `words`. */
+    coordinatorWords?: readonly string[]
     /** The keys that start one, as +'s tooltip says them. */
     newKbd?: string
     /** The keys that open the search, as it says them; the window owns them, and opens it with `searching`. */
@@ -101,6 +108,7 @@ export function AsideTabs({
   onNew,
   onClear,
   onClearOlder,
+  coordinatorWords,
   newKbd,
   searchKbd,
   searching,
@@ -168,6 +176,7 @@ export function AsideTabs({
             older={older}
             current={current}
             t={t}
+            {...(coordinatorWords === undefined ? {} : { coordinatorWords })}
             {...(searchKbd === undefined ? {} : { kbd: searchKbd })}
             {...(onClearOlder === undefined ? {} : { onClearOlder })}
             onChoose={(id) => {
@@ -260,6 +269,9 @@ interface Row {
   readonly said: Part[] | null
 }
 
+/** A row's key: the conversation it is of. */
+const keyOf = (row: Row) => row.id ?? 'coordinator'
+
 const WORD = /[\p{L}\p{N}]+(?:['’.-][\p{L}\p{N}]+)*/gu
 const begins = (word: string, tokens: readonly string[]) => tokens.some((token) => word.toLowerCase().startsWith(token))
 const holds = (text: string, token: string) => [...text.matchAll(WORD)].some((word) => begins(word[0], [token]))
@@ -290,10 +302,16 @@ const around = (line: string, tokens: readonly string[]): Part[] => {
  * Every conversation, as the search lists it: with nothing typed the coordinator's, the asides latest first, then the older
  * ones; with words typed, those whose name or last words hold every one, those by name first. The new aside at the foot.
  */
-const rowsOf = (asides: readonly Aside[], older: readonly Aside[], t: AsideTabsText, query: string): Row[] => {
+const rowsOf = (
+  asides: readonly Aside[],
+  older: readonly Aside[],
+  coordinatorWords: readonly string[],
+  t: AsideTabsText,
+  query: string,
+): Row[] => {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean)
   const everyone = [
-    { id: null, title: t.coordinator, said: undefined, ago: undefined, running: false, older: false },
+    { id: null, title: t.coordinator, said: coordinatorWords[0], words: coordinatorWords, ago: undefined, running: false, older: false },
     ...asides.map((one) => ({ ...one, older: false })),
     ...older.map((one) => ({ ...one, older: true })),
   ]
@@ -302,8 +320,11 @@ const rowsOf = (asides: readonly Aside[], older: readonly Aside[], t: AsideTabsT
     const name = one.title || t.newAside
     const base = { id: one.id, untitled: one.title === '', running: one.running === true, older: one.older, ago: one.ago }
     const missing = tokens.filter((token) => !holds(name, token))
-    if (missing.length > 0 && (one.said === undefined || !missing.every((token) => holds(one.said ?? '', token)))) continue
-    const said = missing.length === 0 || one.said === undefined ? null : around(one.said, tokens)
+    // What was said in it, the last line first, then the passages the window holds: each word typed in the name or in any.
+    const passages = [...(one.said === undefined ? [] : [one.said]), ...(one.words ?? [])]
+    if (missing.some((token) => !passages.some((passage) => holds(passage, token)))) continue
+    const line = missing.length === 0 ? undefined : passages.find((passage) => missing.some((token) => holds(passage, token)))
+    const said = line === undefined ? null : around(line, tokens)
     found.push({ row: { ...base, name: partsOf(name, tokens), said }, byName: missing.length === 0 })
   }
   if (tokens.length > 0) found.sort((a, b) => Number(b.byName) - Number(a.byName))
@@ -340,6 +361,7 @@ function Search({
   asides,
   older,
   current,
+  coordinatorWords = [],
   t,
   kbd,
   onClearOlder,
@@ -349,23 +371,37 @@ function Search({
   asides: readonly Aside[]
   older: readonly Aside[]
   current: string | null
+  coordinatorWords?: readonly string[]
   t: AsideTabsText
   kbd?: string
   onClearOlder?: (ids: readonly string[]) => void
   onChoose: (id: string | null) => void
 }) {
   const [query, setQuery] = useState('')
-  const [active, setActive] = useState<number | null>(null)
-  const rows = rowsOf(asides, older, t, query)
+  // The row the keys are on, by the conversation it is of: a list that changes under it (a conversation at work moves up, one is
+  // cleared) keeps the keys on the same one while it is there.
+  const [active, setActive] = useState<string | null>(null)
+  const rows = rowsOf(asides, older, coordinatorWords, t, query)
   const typed = query.trim() !== ''
   // With nothing typed, the keys start on the conversation open; with words, on what they found first.
   const here = rows.findIndex((row) => row.id === current)
-  const at = Math.min(active ?? (!typed && here >= 0 ? here : 0), rows.length - 1)
+  const held = active === null ? -1 : rows.findIndex((row) => keyOf(row) === active)
+  const at = held >= 0 ? held : !typed && here >= 0 ? here : 0
   const list = useRef<HTMLDivElement>(null)
   const ids = useId()
+  // The row the keys are on is always in sight: as the search opens on a conversation far down the list, as words filter it,
+  // and as the arrows move. Not for a row the pointer chose, which is under it already.
+  const pointed = useRef<string | null>(null)
+  const atKey = rows[at] === undefined ? null : keyOf(rows[at])
+  useLayoutEffect(() => {
+    if (atKey === null || pointed.current === atKey) return
+    list.current?.querySelector(`#${CSS.escape(`${ids}-${atKey}`)}`)?.scrollIntoView({ block: 'nearest' })
+  }, [atKey, ids])
   const move = (to: number) => {
-    setActive(to)
-    list.current?.querySelector(`#${CSS.escape(`${ids}-${to}`)}`)?.scrollIntoView({ block: 'nearest' })
+    const row = rows[to]
+    if (row === undefined) return
+    pointed.current = null
+    setActive(keyOf(row))
   }
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return
@@ -389,12 +425,13 @@ function Search({
           aria-expanded
           aria-controls={`${ids}-list`}
           aria-autocomplete="list"
-          aria-activedescendant={`${ids}-${at}`}
+          aria-activedescendant={atKey === null ? undefined : `${ids}-${atKey}`}
           autoComplete="off"
           spellCheck={false}
           value={query}
           onChange={(event) => {
             setQuery(event.target.value)
+            pointed.current = null
             setActive(null)
           }}
           onKeyDown={onKeyDown}
@@ -403,7 +440,7 @@ function Search({
       </div>
       <div ref={list} id={`${ids}-list`} role="listbox" aria-label={t.label} className={s.list}>
         {rows.map((row, index) => (
-          <Fragment key={row.id ?? 'coordinator'}>
+          <Fragment key={keyOf(row)}>
             {!typed && row.older && rows[index - 1]?.older !== true && (
               <div className={s.group}>
                 <span>{t.older(older.length)}</span>
@@ -417,14 +454,17 @@ function Search({
             {row.id === 'new' && typed && index === 0 && <p className={s.none}>{t.noneFound(query.trim())}</p>}
             {row.id === 'new' && <div className={s.rule} aria-hidden />}
             <div
-              id={`${ids}-${index}`}
+              id={`${ids}-${keyOf(row)}`}
               role="option"
               aria-selected={index === at}
               data-current={row.id === current || undefined}
               className={s.row}
               onMouseDown={(event) => event.preventDefault()}
               onMouseMove={() => {
-                if (index !== at) setActive(index)
+                if (index !== at) {
+                  pointed.current = keyOf(row)
+                  setActive(keyOf(row))
+                }
               }}
               onClick={() => onChoose(row.id)}
             >

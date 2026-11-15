@@ -4,7 +4,7 @@ import { reveal } from '../task/reveal'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { BoardTask, ThreadItem } from '@althar/contracts'
 
@@ -31,6 +31,7 @@ import { contextMeter } from '../../shared/ContextMeter'
 import { useModels } from '../../data/models'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { catalogRead } from '../finder/catalog'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
@@ -91,6 +92,7 @@ import {
   AsideMoveFailed,
   AsideQuote,
   AsidesBar,
+  passagesOf,
   AskInAside,
   asidesText,
   COORDINATOR,
@@ -377,6 +379,12 @@ export function ProjectView({
   }, [togglePane])
   // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
+  // What was said in every conversation, for the bar's search: read as it opens (the finder's catalog, kept a moment), the
+  // titles being found at once without it.
+  const [asideSearching, setAsideSearching] = useState(false)
+  const catalogClient = useServices().client
+  const said = useQuery({ ...catalogRead(catalogClient), enabled: asideSearching }).data
+  const passages = useMemo(() => (said === undefined ? undefined : passagesOf(said, about)), [said, about])
   const draftOf = draftKey.coordinator(about ?? '')
   const [draft, setDraft] = useDraft(draftOf)
   // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
@@ -952,6 +960,8 @@ export function ProjectView({
                         onClear={asides.clear}
                         board={seen?.tasks ?? []}
                         now={Date.parse(now)}
+                        passages={passages}
+                        onSearching={setAsideSearching}
                       />
                     )}
                     {aside.kind === 'aside' ? (
