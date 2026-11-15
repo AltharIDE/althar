@@ -1,8 +1,8 @@
 import { Popover as P } from 'radix-ui'
-import { type PointerEvent, type ReactElement, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type PointerEvent, type ReactElement, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
 
 import { cx } from '../../lib/cx'
-import { radixSide, type OverlayAlign, type OverlayPlacement } from '../../lib/overlay'
+import { OverlayBoundary, radixSide, type OverlayAlign, type OverlayPlacement } from '../../lib/overlay'
 import s from './Popover.module.css'
 
 /*
@@ -71,6 +71,7 @@ export function Popover({
   hover = false,
   className,
 }: PopoverProps) {
+  const boundary = useContext(OverlayBoundary)
   const [own, setOwn] = useState(defaultOpen ?? false)
   const shown = open ?? own
   const change = (next: boolean) => {
@@ -130,6 +131,7 @@ export function Popover({
           align={align}
           sideOffset={6}
           collisionPadding={8}
+          {...(boundary === null ? {} : { collisionBoundary: boundary })}
           className={cx('ch-root', s.panel, padded && s.padded, className)}
           style={width ? { width } : undefined}
           onEscapeKeyDown={(e) => {

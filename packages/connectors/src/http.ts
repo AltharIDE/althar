@@ -176,15 +176,32 @@ const wordsOf = (said: unknown): string => {
 /** Bitbucket Cloud's error: a message, and what it is about, in words or, for missing scopes, as data. */
 const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optional(Schema.Unknown) })
 
+/** Host errors are text, including HTML embedded inside a JSON message. Remove markup before decoding escaped text. */
+export const plainError = (value: string): string =>
+  value
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>|<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, ' ')
+    .replace(/<\/?[a-z][a-z0-9-]*(?:\s[^<>]*|\s*\/?)>/gi, ' ')
+    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_, code: string) => {
+      const n = code[0]?.toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : Number(code)
+      return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : ''
+    })
+    .replace(
+      /&(lt|gt|amp|quot|apos|nbsp);/gi,
+      (_, name: string) => ({ lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ' })[name.toLowerCase()] ?? '',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MESSAGE_KEPT)
+
 /** What a service said went wrong, from its JSON body or a line of plain words (Trello's), or the status's own words. */
-export const messageOf = (body: string, fallback: string): string => {
+const rawMessageOf = (body: string, fallback: string): string => {
   let json: unknown
   try {
     json = JSON.parse(body)
   } catch {
     // Not JSON: a line of plain words is the service's own; a page, or nothing, and the status says it.
     const said = body.trim()
-    return said !== '' && !said.startsWith('<') && !said.includes('\n') ? said.slice(0, MESSAGE_KEPT) : fallback
+    return said !== '' && !said.startsWith('<') && !said.includes('\n') ? said : fallback
   }
   // JSON of another shape says nothing Althar can read: the status says it.
   const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(ErrorBody)(json))
@@ -197,15 +214,17 @@ export const messageOf = (body: string, fallback: string): string => {
         ? first.message
         : undefined
   const said = [wordsOf(parsed.message), detail].filter((part) => part !== undefined && part !== '').join(': ')
-  if (said !== '') return said.slice(0, MESSAGE_KEPT)
-  if (parsed.error_description !== undefined) return parsed.error_description.slice(0, MESSAGE_KEPT)
-  if (typeof parsed.error === 'string') return parsed.error.slice(0, MESSAGE_KEPT)
+  if (said !== '') return said
+  if (parsed.error_description !== undefined) return parsed.error_description
+  if (typeof parsed.error === 'string') return parsed.error
   const nested = Option.getOrUndefined(Schema.decodeUnknownOption(NestedError)(parsed.error))
   const words = [nested?.message, typeof nested?.detail === 'string' ? nested.detail : '']
     .filter((part) => part !== undefined && part !== '')
     .join(': ')
-  return words === '' ? fallback : words.slice(0, MESSAGE_KEPT)
+  return words === '' ? fallback : words
 }
+
+export const messageOf = (body: string, fallback: string): string => plainError(rawMessageOf(body, fallback)) || plainError(fallback)
 
 /** When a rate-limited call may be tried again, from whichever header the service sends. */
 const retryAtOf = (headers: Headers, now: number): string | undefined => {
@@ -246,7 +265,16 @@ export const failureOf = (
           : status >= 500
             ? 'unreachable'
             : 'rejected'
-  return new ConnectorFailed({ product, reason, status, message })
+  const size =
+    /(?:less than|max(?:imum)?(?: allowed)?(?: attachment| file)? ?size(?: is|:)?\s*|exceeds?(?: the)?(?: maximum)?(?: attachment)?(?: size)?(?: of)?)\s*(\d+(?:\.\d+)?)\s*(MiB|MB|KiB|KB)/i.exec(
+      message,
+    )
+  const uploadLimit =
+    size === null
+      ? undefined
+      : Number(size[1]) *
+        (/^m/i.test(size[2] ?? '') ? (/i/i.test(size[2] ?? '') ? 1024 * 1024 : 1_000_000) : /i/i.test(size[2] ?? '') ? 1024 : 1000)
+  return new ConnectorFailed({ product, reason, status, message, ...(uploadLimit === undefined ? {} : { uploadLimit }) })
 }
 
 export const GraphqlError = Schema.Struct({
@@ -271,7 +299,7 @@ export const graphqlFailure = (product: Product, error: typeof GraphqlError.Type
             : /NOT_FOUND|ENTITY_NOT_FOUND/.test(code)
               ? 'not_found'
               : 'rejected'
-  return new ConnectorFailed({ product, reason, message: error.message.slice(0, MESSAGE_KEPT) })
+  return new ConnectorFailed({ product, reason, message: plainError(error.message) || 'The service refused the request' })
 }
 
 class ResponseTooLarge extends Error {

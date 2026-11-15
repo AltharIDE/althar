@@ -47,7 +47,14 @@ export default defineConfig(({ mode }) => ({
         'speech/speech': 'src/speech/speech.ts',
         'connection/connection': 'src/connection/connection.ts',
       },
-      external: ['electron', 'sherpa-onnx-node', 'electron-updater', ...builtinModules, ...builtinModules.map((name) => `node:${name}`)],
+      external: [
+        'sharp',
+        'electron',
+        'sherpa-onnx-node',
+        'electron-updater',
+        ...builtinModules,
+        ...builtinModules.map((name) => `node:${name}`),
+      ],
       output: {
         format: 'es',
         entryFileNames: '[name].js',

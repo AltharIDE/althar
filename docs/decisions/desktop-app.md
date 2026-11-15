@@ -527,6 +527,19 @@ code. The only thing dictation fetches is its model.
   held down, letting go stops it. Leaving the composer while it listens keeps
   it listening in a pill that says whose it is. Once written, it goes to the
   thread it was said in, or into the composer on screen.
+- **Unless the cursor is in a composer's field, the shortcut is the window's.**
+  With it there, the words land in that composer; anywhere else, a composer on
+  screen or none (the home, a board, the settings, a page, a task's outputs),
+  it listens in a thread of its own, carried from the first word, whose pill
+  says "Not placed yet". Written, the person places it (the search box in a
+  choosing mode: a project, for its coordinator, or a task, an aside among
+  them), and it waits in that composer, not sent, marked as dictated; or
+  moves it into the composer they are on, or throws it away. What was said and
+  not placed is kept, and carried again if the window is closed first. It is also in
+  the search's actions with its key, and a page in a tab passes the key on.
+  The key is the one the composers already had: it clashes with nothing
+  macOS, Windows or Linux set, nor with ⌘D (a task's diff) or ⌘⇧C (a
+  comment on a page). Shortcuts are fixed in Althar, so this one is too.
 
 Hosted transcription would be better on accents and noise, but speech would
 leave the machine. Windows on Arm has no build yet.

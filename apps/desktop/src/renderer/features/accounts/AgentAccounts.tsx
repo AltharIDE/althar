@@ -99,7 +99,7 @@ export function AgentSignIn({
         ...(agent.ways.includes('device') ? { code: true } : {}),
         // An agent that signs in only inside Althar has no command for a terminal.
         terminal: agent.login !== '',
-        ...(agent.id === 'copilot-direct' ? { enterprise: true } : {}),
+        ...(agent.id === 'copilot-direct' || agent.id === 'copilot' ? { enterprise: true } : {}),
         found: signIn.found.map((place) => ({ id: place.grant, name: place.name, folder: shortFolder(place.path), from: place.tool })),
         choose: agent.id !== 'copilot-direct',
       }}

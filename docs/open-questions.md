@@ -337,9 +337,12 @@ page.
   Remove.
 - [x] **A shortcut to dictate.** ⌘⇧D starts and stops it; held, letting go
   stops it (ADR-017).
-- [ ] **Dictating from anywhere.** The shortcut works while Althar's window
-  is in front. A global one, from another app into a task, would need the
-  window to come forward first, or the island to take it.
+- [x] **Dictating from anywhere in the window.** The shortcut works on every
+  screen, with or without a composer: with none, it listens in the pill at
+  the window's foot and the person places it afterwards (ADR-017).
+- [ ] **Dictating from outside Althar.** A global shortcut, from another app
+  into a task, would need the window to come forward first, or the island to
+  take it.
 - [ ] **Windows on Arm.** sherpa-onnx has no prebuilt binary for it yet;
   the microphone would not show there until it does.
 

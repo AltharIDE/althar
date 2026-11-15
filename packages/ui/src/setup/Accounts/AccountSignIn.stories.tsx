@@ -25,6 +25,22 @@ const InTheList = (props: AccountSignInProps) => (
   />
 )
 
+const CopilotPanel = ({ owner = 'Althar', ...args }: AccountSignInProps & { owner?: string }) => (
+  <AgentTabs value="copilot" onValueChange={fn()}>
+    <AgentTabList label="Agents" agents={[{ id: 'copilot', name: args.agent }]} />
+    <AgentTabPanel
+      agent={{ id: 'copilot', name: args.agent, line: owner }}
+      aside={<ModelSwitches agent={args.agent} models={[]} off={[]} onChange={fn()} />}
+    >
+      <Accounts
+        agent={args.agent}
+        accounts={[{ id: 'main', name: 'main', place: { kind: 'usual' }, state: { kind: 'signedOut' } }]}
+        signIn={{ account: 'main', node: <AccountSignIn {...args} /> }}
+      />
+    </AgentTabPanel>
+  </AgentTabs>
+)
+
 const meta = {
   title: 'Setup/AccountSignIn',
   component: AccountSignIn,
@@ -419,21 +435,46 @@ export const CopilotFailed: Story = {
       said: 'Copilot offers no coding models for Althar on this account. Check your plan and your organization’s application policy.',
     },
   },
-  render: (args) => (
-    <AgentTabs value="copilot" onValueChange={fn()}>
-      <AgentTabList label="Agents" agents={[{ id: 'copilot', name: args.agent }]} />
-      <AgentTabPanel
-        agent={{ id: 'copilot', name: args.agent, line: 'Althar' }}
-        aside={<ModelSwitches agent={args.agent} models={[]} off={[]} onChange={fn()} />}
-      >
-        <Accounts
-          agent={args.agent}
-          accounts={[{ id: 'main', name: 'main', place: { kind: 'usual' }, state: { kind: 'signedOut' } }]}
-          signIn={{ account: 'main', node: <AccountSignIn {...args} /> }}
-        />
-      </AgentTabPanel>
-    </AgentTabs>
-  ),
+  render: (args) => <CopilotPanel {...args} />,
+}
+
+export const GitHubCopilotCLI: Story = {
+  parameters: { maxWidth: 900 },
+  args: {
+    agent: 'GitHub Copilot CLI',
+    position: 1,
+    account: { name: 'main' },
+    holds: undefined,
+    ways: { terminal: true, enterprise: true },
+    onEnterprise: fn(),
+  },
+  render: (args) => <CopilotPanel {...args} owner="GitHub" />,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Your terminal opens to sign in with GitHub.', { exact: false })).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Continue with GitHub' }))
+    await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Terminal)
+  },
+}
+
+export const GitHubCopilotCLIEnterprise: Story = {
+  ...GitHubCopilotCLI,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Use a GitHub Enterprise address…' }))
+    await userEvent.type(c.getByRole('textbox', { name: 'GitHub Enterprise address' }), 'company.ghe.com')
+    await userEvent.click(c.getByRole('button', { name: /^Continue$/ }))
+    await expect(args.onEnterprise).toHaveBeenCalledWith('company.ghe.com')
+  },
+}
+
+export const GitHubCopilotCLITerminal: Story = {
+  parameters: { maxWidth: 900 },
+  args: {
+    ...GitHubCopilotCLI.args,
+    step: { kind: 'terminal', line: "copilot login --host 'https://company.ghe.com'", opened: false },
+  },
+  render: (args) => <CopilotPanel {...args} owner="GitHub" />,
 }
 
 /* A sign-in from the browser to a name, as a consumer drives it. */

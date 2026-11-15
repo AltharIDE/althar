@@ -6,6 +6,7 @@ import { Rhythm } from '../../lib/rhythm'
 import { AskCard } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
 import { MergeButton } from '../../primitives/MergeButton/MergeButton'
+import { MergeFeel } from '../../primitives/MergeFeel/MergeFeel'
 import { HoverCard } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
@@ -326,7 +327,8 @@ export function SmallChange({
       <ol className={s.route} style={columns}>
         {stops.map((stop) => (
           <li key={stop.key} className={s.stop} data-at={stop.at} data-later={stop.later || undefined}>
-            <span className={s.knot} aria-hidden="true">
+            {/* Merge's knot is where a merge goes once pressed, and fills as it lands. */}
+            <span className={s.knot} aria-hidden="true" data-merge-target={stop.key === 'merge' ? 'knot' : undefined}>
               {stop.at === 'done' && <Icon name="check" size={9} />}
               {stop.at === 'failed' && <Icon name="close" size={9} />}
               {stop.at === 'found' && review.findings < 10 && review.findings}
@@ -376,6 +378,7 @@ export function SmallChange({
           </Button>
         </div>
       ) : null}
+      <MergeFeel stage={merge.state === 'waiting' ? null : merge.state} />
     </AskCard>
   )
 }
