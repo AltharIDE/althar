@@ -199,6 +199,79 @@ describe('the person’s word through the tool boundary', () => {
       }).pipe(Effect.provide(runtime())),
     )
   }
+  for (const role of ['coordinator', 'lead'] as const) {
+    it.live(`${role}: binds another task by slug or id, stores its id, and executes its own errand`, () =>
+      Effect.gen(function* () {
+        const s = yield* setup(role)
+        const other = yield* (yield* Projects).createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId: s.access.projectId as ProjectId,
+          title: 'Release prep',
+          draft: true,
+        })
+        const [task] = yield* s.sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${other.taskId}`
+        const message = yield* s.say()
+        const kept = yield* callTool(s.access, 'keep_errand', { message, steps: [{ ...s.step, taskId: task!.slug }] })
+        assert.match(kept, /^errand_/)
+        assert.strictEqual(yield* s.errands.keep(s.access, message, [{ ...s.step, taskId: other.taskId }]), kept)
+        const [row] = yield* s.sql<{ taskId: string }>`SELECT task_id FROM errand_steps WHERE errand_id = ${kept}`
+        assert.strictEqual(row?.taskId, other.taskId)
+        yield* s.say({ kind: 'internal' })
+        assert.strictEqual(yield* callTool(s.access, 'test_asked', { errandId: kept, step: s.step.key }), 'Did it once.')
+      }).pipe(Effect.provide(runtime())),
+    )
+  }
+
+  it.live('refuses unknown tasks and unwatchable waits atomically, with the kinds it watches', () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const message = yield* s.say()
+      for (const kind of ['pull_request_opened', 'checks_passed', 'merged', 'imaginary']) {
+        const answer = yield* callTool(s.access, 'keep_errand', {
+          message,
+          steps: [s.step, { ...s.step, key: 'later', waits: [{ kind, target: 'release' }] }],
+        })
+        assert.include(answer, `cannot watch wait kind "${kind}"`)
+        assert.include(answer, 'Watched kinds: task_pull_request, task_merged')
+        assert.include(answer, 'checks')
+        assert.lengthOf(yield* s.sql`SELECT id FROM errands`, 0)
+      }
+      assert.include(
+        yield* callTool(s.access, 'keep_errand', { message, steps: [{ ...s.step, taskId: 'missing' }] }),
+        'This project has no task missing',
+      )
+      const foreign = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: foreign.projectId,
+        title: 'Elsewhere',
+        draft: true,
+      })
+      assert.include(
+        yield* callTool(s.access, 'keep_errand', { message, steps: [{ ...s.step, taskId: task.taskId }] }),
+        'This project has no task',
+      )
+      assert.lengthOf(yield* s.sql`SELECT id FROM errands`, 0)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('an old errand with an unwatched kind is paused on the next sweep, with a way to keep it again', () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const id = yield* s.errands.keep(s.access, yield* s.say(), [s.step])
+      // A record from a version that accepted arbitrary wait kinds.
+      yield* s.sql`UPDATE errand_steps SET waits = ${JSON.stringify([{ kind: 'merged', target: 'release-prep' }])} WHERE errand_id = ${id}`
+      yield* s.errands.remind(s.access.projectId)
+      const [row] = yield* s.sql<{ state: string; reason: string }>`SELECT state, reason FROM errands WHERE id = ${id}`
+      assert.strictEqual(row?.state, 'paused')
+      assert.include(row!.reason, 'cannot watch wait kinds: merged')
+      assert.include(row!.reason, 'Watched kinds: task_pull_request, task_merged')
+      assert.include(row!.reason, 'Keep this errand again')
+      assert.include(yield* callTool(s.access, 'test_asked', { errandId: id, step: s.step.key }), 'paused')
+      assert.strictEqual(s.counts().acts, 0)
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('an errand’s step runs in a news turn; only its bound target and arguments; kept and done lines survive', () =>
     Effect.gen(function* () {
       const s = yield* setup('lead')

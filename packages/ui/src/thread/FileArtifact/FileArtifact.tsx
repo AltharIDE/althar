@@ -4,6 +4,7 @@ import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
+import { Path } from '../../primitives/Path/Path'
 import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/CopyButton'
 import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
@@ -106,10 +107,13 @@ export function FileArtifact({
           <span className={s.meta}>
             {path.length > name.length && (
               <>
-                <span className={s.dir}>{path.slice(0, -name.length)}</span> ·{' '}
+                <span className={s.dir}>
+                  <Path path={path.slice(0, -name.length)} />
+                </span>
+                <span className={s.sep}> · </span>
               </>
             )}
-            {facts.join(' · ')}
+            <span className={s.facts}>{facts.join(' · ')}</span>
           </span>
         </span>
         <span className={s.actions}>
