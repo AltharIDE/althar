@@ -71,10 +71,8 @@ export const checkCandidate = async (
   )
   if (
     actual.version !== expected.version ||
-    actual.updaterProtocol !== expected.updaterProtocol ||
     actual.apiVersion !== expected.apiVersion ||
     actual.storage !== expected.storage ||
-    actual.platform !== expected.platform ||
     actual.arch !== expected.arch
   )
     throw new HostError({

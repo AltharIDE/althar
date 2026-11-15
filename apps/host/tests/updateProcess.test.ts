@@ -92,7 +92,6 @@ const alteredBundle = (folder: string, version: string, failStartup = false) => 
 describe.runIf(process.platform === 'linux')('managed host processes', () => {
   it(
     'activates a signed release through the stable launcher, preserves identity/key/data, and recovers a failed subsequent release',
-    { timeout: budget.large },
     async () => {
       const root = temporary()
       const options = parseOptions(
@@ -248,6 +247,7 @@ describe.runIf(process.platform === 'linux')('managed host processes', () => {
       }
       await services.stop('fixture')
     },
+    budget.large,
   )
 })
 

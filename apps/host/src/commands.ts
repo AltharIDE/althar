@@ -173,11 +173,8 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
           ]),
         )
         const after = yield* update(() => loadInstallation(options.updateRoot))
-        if (
-          after.state.transaction !== undefined &&
-          (after.state.transaction.phase !== 'starting' ||
-            !(yield* update(() => controllerAlive(after.state.transaction?.controller ?? { pid: 0, boot: '', started: '' }))))
-        )
+        const pending = after.state.transaction
+        if (pending !== undefined && (pending.phase !== 'starting' || !(yield* update(() => controllerAlive(pending.controller)))))
           return yield* updateError('UpdateRecoveryRequired', 'The update transaction must be recovered before this home starts.')
         return
       }

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { copyDependencies, readReleaseKey } from '../src/updates/bundle'
+import { assembleBundle, copyDependencies, readReleaseKey } from '../src/updates/bundle'
 import { temporary } from './support'
 
 const pkg = (root: string, name: string, dependencies: Record<string, string> = {}) => {
@@ -16,6 +16,27 @@ const pkg = (root: string, name: string, dependencies: Record<string, string> = 
 }
 
 describe('locked host dependency bundles', () => {
+  it('assembles Node, its license, the host entry and locked dependencies into a self-contained private tree', async () => {
+    const root = temporary()
+    const entry = join(root, 'entry.js')
+    const node = join(root, 'node/bin/node')
+    mkdirSync(join(root, 'node/bin'), { recursive: true })
+    writeFileSync(entry, 'host code')
+    writeFileSync(node, 'node binary')
+    writeFileSync(join(root, 'node/LICENSE'), 'Node license')
+    pkg(root, '@agentclientprotocol/claude-agent-acp')
+    pkg(root, '@agentclientprotocol/codex-acp')
+    const destination = join(temporary(), 'release')
+    await assembleBundle({ entry, node, version: '1.2.3' }, destination)
+    expect(readFileSync(join(destination, 'node/bin/node'), 'utf8')).toBe('node binary')
+    expect(readFileSync(join(destination, 'node/LICENSE'), 'utf8')).toBe('Node license')
+    expect(readFileSync(join(destination, 'dist/althar-host.js'), 'utf8')).toBe('host code')
+    expect(JSON.parse(readFileSync(join(destination, 'package.json'), 'utf8'))).toMatchObject({ type: 'module', version: '1.2.3' })
+    await expect(assembleBundle({ entry, node, version: '1.2.3' }, destination)).rejects.toThrow()
+    await expect(
+      assembleBundle({ entry, node, version: '1.2.3', license: join(root, 'missing-license') }, join(temporary(), 'release')),
+    ).rejects.toThrow()
+  })
   it('retains native optional dependencies and omits unavailable or other-platform variants', async () => {
     const root = temporary()
     const a = pkg(root, 'a')

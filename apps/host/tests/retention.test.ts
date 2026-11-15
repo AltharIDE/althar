@@ -8,6 +8,34 @@ import { readState, receipt, saveState, writeJSON } from '../src/updates/store'
 import { updateFixture } from './updateFixture'
 
 describe('bounded updater retention', () => {
+  it('retains a pending recovery snapshot and removes only abandoned staging directories', async () => {
+    const at = await updateFixture()
+    const id = 'f'.repeat(32)
+    await saveState(at.root, {
+      ...(await readState(at.root)),
+      transaction: {
+        id,
+        from: at.oldId,
+        to: at.nextId,
+        phase: 'recovery-required',
+        compatible: false,
+        recoverable: false,
+        controller: { pid: 0, boot: '', started: '' },
+      },
+    })
+    const snapshot = join(at.root, 'snapshots', `${id}.sqlite`)
+    writeFileSync(snapshot, 'pending recovery')
+    utimesSync(snapshot, 0, 0)
+    for (let i = 0; i < 5; i++) writeFileSync(join(at.root, 'snapshots', `${i.toString(16).padStart(32, '0')}.sqlite`), 'history')
+    const staging = join(at.root, `.staging-${id}`)
+    mkdirSync(staging)
+    mkdirSync(join(at.root, 'operator-notes'))
+    await pruneInstallation(at.root)
+    expect(existsSync(snapshot)).toBe(true)
+    expect(readdirSync(join(at.root, 'snapshots'))).toHaveLength(4)
+    expect(existsSync(staging)).toBe(false)
+    expect(existsSync(join(at.root, 'operator-notes'))).toBe(true)
+  })
   it('keeps active, trusted, quarantined, staged and interrupted request references while bounding historical data', async () => {
     const at = await updateFixture()
     const ids = Array.from({ length: 8 }, (_, i) => (i + 16).toString(16).padStart(64, '0'))

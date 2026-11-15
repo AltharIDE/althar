@@ -111,7 +111,7 @@ export interface SetupDependencies {
   readonly source?: BundleSource
   readonly execute?: UpdateExecutor
 }
-const finishSetup = async (options: HostOptions, commands: ServiceCommands) => {
+const finishSetup = async (options: HostOptions, commands: ServiceCommands, execute: UpdateExecutor = executeUpdate) => {
   const installed = await readPrivate(join(options.unitDirectory, `${options.serviceName}.service`), 65_536)
   if (installed === null || !installed.toString().includes(unitQuote(join(options.updateRoot, 'launcher')))) {
     await Effect.runPromise(installService({ ...options, installation: options.updateRoot, start: false }, commands))
@@ -133,7 +133,7 @@ const finishSetup = async (options: HostOptions, commands: ServiceCommands) => {
   const run =
     commands.run ??
     (async (command, args) => {
-      await executeUpdate(command, args)
+      await execute(command, args)
     })
   await run('systemctl', ['--user', 'daemon-reload'])
   await run('systemctl', ['--user', 'enable', '--now', `${options.serviceName}-update.timer`, `${options.serviceName}-update.path`])
@@ -162,8 +162,9 @@ export const configureUpdates = async (given: HostOptions, commands: ServiceComm
   )
     throw updateError('UpdateFailed', 'Keep the program installation separate from the home profile, worktrees and credential files.')
   const existing = await readPrivate(join(root, 'updates.json'), 131_072)
-  const keys = await Promise.all(given.releaseKeys.map(readReleaseKey))
-  for (const key of keys) releaseIdentity(key)
+  const supplied = await Promise.all(given.releaseKeys.map(readReleaseKey))
+  const keys = [...new Map(supplied.map((key) => [releaseIdentity(key), key])).values()]
+  if (keys.length > 8) throw updateError('UpdateFailed', 'At most eight release verification keys can be retained.')
   if (existing !== null) {
     const installation = await loadInstallation(root)
     if (
@@ -181,7 +182,7 @@ export const configureUpdates = async (given: HostOptions, commands: ServiceComm
       automatic: given.automaticUpdates ?? installation.config.automatic,
       ...(given.updateFeed === undefined ? {} : { feed: { kind: 'manifest', url: httpsURL(given.updateFeed).href } }),
     })
-    await finishSetup({ ...given, updateRoot: root, installation: root }, commands)
+    await finishSetup({ ...given, updateRoot: root, installation: root }, commands, dependencies.execute)
     return { root, automatic: given.automaticUpdates ?? installation.config.automatic }
   }
   if (keys.length === 0)
@@ -227,6 +228,6 @@ export const configureUpdates = async (given: HostOptions, commands: ServiceComm
   await writePrivate(join(root, 'launcher'), renderLauncher(root), true)
   await writeJSON(join(root, 'updates.json'), config)
   const options = { ...given, profile, worktrees, updateRoot: root, installation: root }
-  await finishSetup(options, commands)
+  await finishSetup(options, commands, dependencies.execute)
   return { root, automatic: config.automatic }
 }

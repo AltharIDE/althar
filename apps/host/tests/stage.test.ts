@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { c } from 'tar'
@@ -34,6 +34,37 @@ const downloadable = async () => {
 }
 
 describe('release staging without service interruption', () => {
+  it('defers during maintenance and refuses any executable metadata or file-type mismatch', async () => {
+    const at = await updateFixture()
+    const state = await readState(at.root)
+    await saveState(at.root, {
+      ...state,
+      transaction: {
+        id: '1'.repeat(32),
+        from: at.oldId,
+        to: at.nextId,
+        phase: 'stopped',
+        compatible: true,
+        recoverable: true,
+        controller: { pid: 0, boot: '', started: '' },
+      },
+    })
+    await expect(stageUpdate(at.root, at.dependencies)).rejects.toMatchObject({ code: 'UpdateBusy' })
+    const folder = join(at.root, 'releases', at.nextId)
+    for (const change of [
+      { version: '9.0.0' },
+      { updaterProtocol: 2 },
+      { apiVersion: 2 },
+      { storage: 'c'.repeat(64) },
+      { platform: 'darwin' },
+      { arch: at.nextInfo.arch === 'x64' ? 'arm64' : 'x64' },
+    ]) {
+      await expect(checkCandidate(folder, at.nextInfo, async () => JSON.stringify({ ...at.nextInfo, ...change }))).rejects.toThrow()
+    }
+    rmSync(join(folder, 'package.json'))
+    symlinkSync(join(folder, 'node/LICENSE'), join(folder, 'package.json'))
+    await expect(checkCandidate(folder, at.nextInfo, at.dependencies.execute)).rejects.toThrow()
+  })
   it('downloads, extracts, probes and publishes a release while keeping the running code selected', async () => {
     const at = await downloadable()
     expect(await stageUpdate(at.root, { ...at.dependencies, fetch: at.fetch })).toEqual({ state: 'staged', version: '0.1.1' })

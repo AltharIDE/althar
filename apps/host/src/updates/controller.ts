@@ -200,7 +200,6 @@ export const applyStaged = async (
   const controller = await processStamp(process.pid)
   if (controller === null) throw updateError('UpdateFailed', 'The updater process could not be identified for crash recovery.')
   const prepared = await prepareActivation(installation, controller, dependencies, true, allowIncompatible, requestId)
-  if (prepared === undefined) throw updateError('UpdateFailed', 'The candidate was not prepared.')
   const services = dependencies.services ?? systemServices(dependencies.execute)
   try {
     await services.start(installation.config.serviceName)
@@ -283,6 +282,7 @@ export const processRequest = async (root: string, request: UpdateRequest, depen
 }
 /** The generated updater unit holds flock, independently of the host cgroup. */
 export const runUpdateQueue = async (root: string, dependencies: ControllerDependencies = {}) => {
+  await pruneInstallation(root).catch(() => undefined)
   const before = await loadInstallation(root)
   const abandoned = before.state.transaction
   if (abandoned !== undefined) {

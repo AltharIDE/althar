@@ -1,6 +1,7 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
 
 import { describe, expect, it } from 'vitest'
+import { isoAfter } from '@althar/testing'
 
 import { releaseIdentity, verifyRelease, type ReleaseManifest } from '../src/updates/release'
 
@@ -12,7 +13,7 @@ const manifest: ReleaseManifest = {
   version: '0.1.1',
   sequence: 2,
   publishedAt: '2026-11-15T00:00:00Z',
-  expiresAt: '2027-02-15T00:00:00Z',
+  expiresAt: isoAfter(90 * 86_400_000, now),
   platform: 'linux',
   arch: 'x64',
   updaterProtocol: 1,
@@ -64,8 +65,10 @@ describe('authenticated host releases', () => {
     expect(() => verify(signed(), { installedVersion: '1.0.0' })).toThrow()
     expect(() => verify(signed(), { arch: 'arm64' })).toThrow()
     for (const changed of [
-      { expiresAt: '2026-11-14T00:00:00Z' },
-      { publishedAt: '2026-11-16T00:00:00Z' },
+      { expiresAt: isoAfter(-86_400_000, now) },
+      { publishedAt: isoAfter(86_400_000, now) },
+      { expiresAt: 'not an ISO timestamp' },
+      { expiresAt: isoAfter(367 * 86_400_000, now) },
       { updaterProtocol: 2 },
       { version: '01.1.1' },
       { platform: 'darwin' },

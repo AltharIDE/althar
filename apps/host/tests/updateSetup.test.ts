@@ -64,6 +64,74 @@ const fixture = async () => {
 }
 
 describe('managed update setup', () => {
+  it('pins the existing home/service, rotates trusted keys and rejects an invalid trust set before installation', async () => {
+    const at = await fixture()
+    const keys = Array.from({ length: 9 }, (_, i) => {
+      const path = join(at.root, `release-${i}.pub`)
+      writeFileSync(path, generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }))
+      return path
+    })
+    await expect(configureUpdates({ ...at.options, releaseKeys: keys }, at.commands, at.dependencies)).rejects.toMatchObject({
+      code: 'UpdateFailed',
+    })
+    await configureUpdates(at.options, at.commands, at.dependencies)
+    await configureUpdates(
+      { ...at.options, releaseKeys: [keys[0] ?? ''], updateFeed: 'https://updates.example/feed' },
+      at.commands,
+      at.dependencies,
+    )
+    expect((await loadInstallation(at.options.updateRoot)).config.keys).toHaveLength(2)
+    await expect(configureUpdates({ ...at.options, serviceName: 'another-home' }, at.commands, at.dependencies)).rejects.toMatchObject({
+      code: 'UpdateFailed',
+    })
+    await expect(configureUpdates({ ...at.options, releaseKeys: keys.slice(1) }, at.commands, at.dependencies)).rejects.toMatchObject({
+      code: 'UpdateFailed',
+    })
+    const { run: _, ...withoutRunner } = at.commands
+    const calls: ReadonlyArray<string>[] = []
+    await configureUpdates({ ...at.options, releaseKeys: [] }, withoutRunner, {
+      ...at.dependencies,
+      execute: async (_program, args) => {
+        calls.push(args)
+        return ''
+      },
+    })
+    expect(calls.some((args) => args.includes('daemon-reload'))).toBe(true)
+  })
+
+  it('recovers partial setup without replacing unrelated units or starting the host early', async () => {
+    const at = await fixture()
+    let rejectReload = true
+    const calls: ReadonlyArray<string>[] = []
+    const commands = {
+      ...at.commands,
+      run: async (_: string, args: ReadonlyArray<string>) => {
+        calls.push(args)
+        if (rejectReload && args.includes('daemon-reload')) throw new Error('manager unavailable')
+      },
+    }
+    await expect(configureUpdates({ ...at.options, start: true }, commands, at.dependencies)).rejects.toThrow()
+    expect(calls.some((args) => args.includes('--now'))).toBe(false)
+    rejectReload = false
+    await configureUpdates({ ...at.options, start: true }, commands, at.dependencies)
+    expect(calls.at(-1)).toEqual(['--user', 'enable', '--now', 'althar-host.service'])
+    const other = await fixture()
+    await expect(
+      configureUpdates(other.options, other.commands, {
+        ...other.dependencies,
+        assemble: async () => {
+          throw new Error('missing license')
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'UpdateFailed' })
+    let activeCalls = 0
+    await expect(
+      configureUpdates(other.options, other.commands, {
+        ...other.dependencies,
+        services: { ...other.dependencies.services, active: async () => ++activeCalls > 1 },
+      }),
+    ).rejects.toMatchObject({ code: 'UpdateBusy' })
+  })
   it('captures trusted local bootstrap code, preserves credentials/data, installs independent units and defaults to explicit apply', async () => {
     const at = await fixture()
     const key = readFileSync(at.options.keyFile)

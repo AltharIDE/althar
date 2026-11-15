@@ -1,12 +1,17 @@
 import { join } from 'node:path'
 
-import { Effect } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
+import { Agents } from '@althar/runtime'
+import { until } from '@althar/testing/effect'
+import { existsSync, rmSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { runCommand } from '../src/commands'
 import { parseOptions } from '../src/options'
+import { initializeHome } from '../src/home'
+import { reserveDatabase } from '../src/updates/reservation'
 import { recoverBeforeStart, runUpdateQueue } from '../src/updates/controller'
-import { loadInstallation, processStamp, readState, saveState, type Transaction } from '../src/updates/store'
+import { loadInstallation, processStamp, readState, saveState, writeJSON, type Transaction } from '../src/updates/store'
 import { updateFixture } from './updateFixture'
 
 const ioFor = (root: string) => {
@@ -24,6 +29,68 @@ const ioFor = (root: string) => {
   }
 }
 describe('operator update commands', () => {
+  it('configures a real home and repairs a leftover committed reservation on managed service startup', async () => {
+    const at = await updateFixture()
+    rmSync(at.database)
+    const args = [
+      '--profile',
+      at.profile,
+      '--worktrees',
+      at.worktrees,
+      '--key-file',
+      join(at.directory, 'keys/master'),
+      '--installation',
+      at.root,
+      '--service-name',
+      at.config.serviceName,
+    ]
+    const env = { XDG_CONFIG_HOME: join(at.directory, 'config') }
+    const parse = (command: string[]) =>
+      parseOptions(
+        [...command, ...args.slice(0, -2), ...(command[0] === 'configure-updates' ? ['--service-name', at.config.serviceName] : [])],
+        env,
+        at.directory,
+      )
+    const dependencies = {
+      agents: Layer.succeed(Agents, Agents.from([])),
+      agentConfigs: { homeDir: at.directory, folder: join(at.directory, 'agent-sync') },
+    }
+    const home = await Effect.runPromise(initializeHome(parse(['init']), dependencies))
+    await writeJSON(join(at.root, 'updates.json'), { ...at.config, homeId: home.homeId })
+    const { io, output } = ioFor(at.root)
+    const commands = {
+      ...io,
+      entry: join(at.root, 'releases', at.oldId, 'dist/althar-host.js'),
+      run: async () => undefined,
+      updates: at.dependencies,
+    }
+    await Effect.runPromise(runCommand(parse(['configure-updates']), commands, dependencies))
+    expect(output.join('')).toContain('explicit apply')
+    // A crash after healthy-state commit can leave this marker behind; only
+    // the selected managed executable can open storage and clear it after ready.
+    await reserveDatabase(await loadInstallation(at.root), {
+      id: '1'.repeat(32),
+      from: at.oldId,
+      to: at.oldId,
+      phase: 'starting',
+      compatible: true,
+      recoverable: true,
+      controller: { pid: 0, boot: '', started: '' },
+    })
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const service = yield* Effect.forkScoped(runCommand(parse(['serve', '--json']), commands, dependencies))
+          yield* until(
+            Effect.sync(() => output.some((line) => line.includes('"state":"ready"'))),
+            Boolean,
+          )
+          expect(existsSync(join(at.profile, 'althar.sqlite.maintenance'))).toBe(false)
+          yield* Fiber.interrupt(service)
+        }),
+      ),
+    )
+  })
   it('queues/stages/applies explicitly and exposes durable results as JSON', async () => {
     const at = await updateFixture()
     const { io, output } = ioFor(at.root)

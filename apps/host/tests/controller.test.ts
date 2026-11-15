@@ -21,6 +21,80 @@ import { reserveDatabase } from '../src/updates/reservation'
 const dead = { pid: 0, boot: 'previous boot', started: '1' }
 
 describe('controlled host activation and recovery', () => {
+  it('recovers a dead controller once, records its result and never replays an interrupted maintenance request', async () => {
+    for (const compatible of [true, false]) {
+      const at = await updateFixture()
+      const id = '3'.repeat(32)
+      const transaction: Transaction = {
+        id,
+        from: at.oldId,
+        to: at.nextId,
+        phase: 'starting',
+        compatible,
+        recoverable: true,
+        controller: dead,
+      }
+      await reserveDatabase(await loadInstallation(at.root), transaction)
+      await receipt(at.root, { id, state: 'checking', release: at.nextId })
+      await writeJSON(join(at.root, 'requests', `${id}.json`), {
+        id,
+        apply: true,
+        allowIncompatible: false,
+        createdAt: '2026-11-15T12:00:00Z',
+      })
+      await saveState(at.root, { ...(await readState(at.root)), transaction })
+      await runUpdateQueue(at.root, at.dependencies)
+      expect((await readReceipt(at.root, id)).state).toBe(compatible ? 'failed' : 'recovery-required')
+      expect(existsSync(join(at.root, 'requests', `${id}.json`))).toBe(false)
+      if (compatible) expect(at.calls).toEqual(['stop', `start:${at.oldId}`])
+      else expect(at.calls).toEqual(['stop'])
+    }
+  })
+
+  it('records check failures without stopping the service or exposing unknown exception text', async () => {
+    const at = await updateFixture()
+    const id = await requestUpdate(at.root, false, false, at.services)
+    await runUpdateQueue(at.root, {
+      ...at.dependencies,
+      fetch: async () => {
+        throw new Error('private material')
+      },
+    })
+    expect((await readReceipt(at.root, id)).state).toBe('failed')
+    expect(JSON.stringify(await updateStatus(at.root))).not.toContain('private material')
+    expect((await updateStatus(at.root)).lastCheck?.state).toBe('failed')
+    expect(at.calls).toEqual(['kick'])
+  })
+
+  it('rejects a service that starts without authenticated readiness or a durable healthy commit', async () => {
+    for (const status of ['{}', JSON.stringify({ state: 'ready', homeId: HOME_ID, version: '0.1.1' })]) {
+      const at = await updateFixture()
+      const services = { ...at.services, start: async () => undefined }
+      await expect(
+        applyStaged(at.root, false, {
+          ...at.dependencies,
+          services,
+          execute: async (program, args) => (args.includes('status') ? status : at.dependencies.execute(program, args)),
+        }),
+      ).rejects.toMatchObject({ code: 'UpdateFailed' })
+      expect((await readState(at.root)).current).toBe(at.oldId)
+      expect(at.notes()).toEqual(['before update'])
+    }
+  })
+
+  it('refuses missing candidates and unauthenticated bootstrap activation without stopping work', async () => {
+    const at = await updateFixture()
+    const { staged: _, ...state } = await readState(at.root)
+    await saveState(at.root, state)
+    await expect(applyStaged(at.root, false, at.dependencies)).rejects.toMatchObject({ code: 'UpdateFailed' })
+    await saveState(at.root, { ...state, staged: at.oldId })
+    await expect(applyStaged(at.root, false, at.dependencies)).rejects.toMatchObject({ code: 'UpdateFailed' })
+    expect(at.calls).toEqual([])
+    await writeJSON(join(at.root, 'updates.json'), { ...at.config, automatic: true })
+    await recoverBeforeStart(at.root, at.dependencies)
+    expect((await readState(at.root)).transaction).toBeUndefined()
+    await expect(commitReadyRelease(at.root, HOME_ID, at.nextInfo)).rejects.toMatchObject({ code: 'UpdateRecoveryRequired' })
+  })
   it('preserves the home and data through an explicit verified activation', async () => {
     const at = await updateFixture()
     expect(await applyStaged(at.root, false, at.dependencies)).toBe('0.1.1')

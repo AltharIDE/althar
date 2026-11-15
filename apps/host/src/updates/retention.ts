@@ -13,6 +13,11 @@ const newest = async (folder: string, names: ReadonlyArray<string>) => {
 /** Called only by the locked controller. Recovery references always win over age or count. */
 export const pruneInstallation = async (root: string) => {
   const { config, state } = await loadInstallation(root)
+  // A power loss can bypass staging's finally block. No other downloader can
+  // own these directories while this controller holds the installation lock.
+  for (const name of await fs.readdir(root)) {
+    if (/^\.staging-[a-f0-9]{32}$/.test(name)) await fs.rm(join(root, name), { recursive: true, force: true })
+  }
   const retained = new Set([config.bootstrap, state.current, state.active, state.staged, state.failed, state.seen])
   if (state.transaction !== undefined) {
     retained.add(state.transaction.from)

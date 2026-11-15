@@ -18,6 +18,19 @@ import {
 import { updateFixture } from './updateFixture'
 
 describe('private update metadata', () => {
+  it('refuses missing installations, overlapping roots, unsafe feeds and invalid trust anchors', async () => {
+    const at = await updateFixture()
+    await expect(loadInstallation(join(at.directory, 'missing'))).rejects.toMatchObject({ code: 'UpdateNotConfigured' })
+    for (const change of [
+      { profile: at.root },
+      { worktrees: at.root },
+      { feed: { kind: 'manifest', url: 'http://updates.example/feed' } },
+      { keys: ['not a public key'] },
+    ]) {
+      await writeJSON(join(at.root, 'updates.json'), { ...at.config, ...change })
+      await expect(loadInstallation(at.root)).rejects.toThrow()
+    }
+  })
   it('rejects corrupt configuration, substituted release records and unsafe identifiers', async () => {
     const at = await updateFixture()
     const installation = await loadInstallation(at.root)
