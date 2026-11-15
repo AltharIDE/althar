@@ -7,6 +7,7 @@ import { LightUnder } from '../../../shared/lightUnder'
 import { AskOnce } from './AskOnce'
 import { AtWork } from './AtWork'
 import { Connections } from './Connections'
+import { Gallery } from './Gallery'
 import { ALSO, TILES } from './Bento'
 import { Review } from './Review'
 import { EdgeTour } from '../kit/EdgeTour'
@@ -26,7 +27,8 @@ import { stars, WALL } from './wall'
  * reading. The sections open and close on a window: first the night side of
  * the planet, its edge lit cobalt; last the same edge flatter and lower, the
  * dawn coming up along it, over the download. What keeps you in flow is one
- * console, its modules seamed into it by hairlines. Nothing moves but what
+ * console, its modules seamed into it by hairlines. Last before the download,
+ * the app's own screens, in a row to scroll (Gallery). Nothing moves but what
  * the pictures do.
  */
 
@@ -88,6 +90,14 @@ export const SCENE = {
     ),
     lead: 'Althar sits round your Mac’s notch, in whatever you’re doing: point at it to answer a permission or open a pull request, and carry on.',
   },
+  gallery: {
+    title: (
+      <>
+        Take a peek <b>inside.</b>
+      </>
+    ),
+    lead: 'Real screens from the app, on its demo projects.',
+  },
 } as const
 
 /** The last line, by the download: its quiet half, then its heavy one. */
@@ -115,6 +125,7 @@ const STATIONS: Record<Id, { no: string; name: string; km: number }> = {
   flow: { no: '04', name: 'Flow', km: 17 },
   connections: { no: '05', name: 'Connections', km: 10 },
   edge: { no: '06', name: 'Notch', km: 3 },
+  gallery: { no: '07', name: 'Screens', km: 0.5 },
 }
 
 /** A station's stamp, on the rail: its node, its number and name, a rule, and the height it stands at. */
@@ -134,9 +145,9 @@ function Stamp({ id }: { id: Id }) {
 }
 
 /** A station on the wall: its stamp, then its head and its screen, laid out as `layout` says. */
-function Station({ id, layout, children }: { id: Id; layout: 'split' | 'wide' | 'bank' | 'notch'; children: ReactNode }) {
+function Station({ id, layout, children }: { id: Id; layout?: 'split' | 'wide' | 'bank' | 'notch'; children: ReactNode }) {
   return (
-    <section id={id} className={cx(c.station, c[layout])} aria-labelledby={`${id}-h`} data-station="">
+    <section id={id} className={cx(c.station, layout && c[layout])} aria-labelledby={`${id}-h`} data-station="">
       <Stamp id={id} />
       <div className={c.head}>
         <h2 id={`${id}-h`} className={cx(t.title, c.title)}>
@@ -281,8 +292,7 @@ function useRail(main: RefObject<HTMLElement | null>) {
   }, [main])
 }
 
-/** `first` and `last`: what stands before the first station and before the last window (the gallery prototype's places). */
-export function DesktopBody({ first, last }: { first?: ReactNode; last?: ReactNode } = {}) {
+export function DesktopBody() {
   const main = useRef<HTMLElement>(null)
   const lit = useRef<HTMLDivElement>(null)
   const grain = useRef<HTMLDivElement>(null)
@@ -303,7 +313,6 @@ export function DesktopBody({ first, last }: { first?: ReactNode; last?: ReactNo
         <div ref={grain} className={c.wallGrain} />
       </div>
 
-      {first}
       <section id="independent" className={cx(c.station, c.first)} aria-labelledby="independent-h" data-station="">
         <Stamp id="independent" />
         <Window seed={7} className={c.opening}>
@@ -346,7 +355,10 @@ export function DesktopBody({ first, last }: { first?: ReactNode; last?: ReactNo
         </div>
       </Station>
 
-      {last}
+      <Station id="gallery">
+        <Gallery />
+      </Station>
+
       {/* The last window: the planet's edge lower and flatter, the dawn coming up along it, and the download. */}
       <section id="end" className={c.endStation} aria-label="Download Althar">
         <Window seed={11} className={c.closing}>
