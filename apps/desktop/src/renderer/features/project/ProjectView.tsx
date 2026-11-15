@@ -49,7 +49,7 @@ import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
-import { pages } from '../browser/pages'
+import { pages, usePage } from '../browser/pages'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import { ArtifactsView } from '../canvases/ArtifactsView'
 import {
@@ -380,7 +380,15 @@ export function ProjectView({
   const draftOf = draftKey.coordinator(about ?? '')
   const [draft, setDraft] = useDraft(draftOf)
   // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
+  // The room it stepped aside from is kept, so closing the page brings the board back.
+  const before = useRef<Room | null>(null)
   const showTalk = useCallback(() => setRoom(Room.Talk), [])
+  const showTalkForPage = useCallback(() => {
+    setRoom((was) => {
+      if (was !== Room.Talk) before.current = was
+      return Room.Talk
+    })
+  }, [])
   const latestSearch = useRef(model)
   latestSearch.current = model
   useSearchReveal(model.coordinator?.threadId, (itemId) => {
@@ -392,7 +400,15 @@ export function ProjectView({
       return true
     })
   })
-  const opener = useOpener(about, showTalk)
+  const opener = useOpener(about, showTalkForPage)
+  const { where: pageWhere } = usePage(about, useServices().host.pages)
+  useEffect(() => {
+    // The page went from beside the conversation: the right side returns to what was there before it opened.
+    if (pageWhere === 'beside') return
+    const back = before.current
+    before.current = null
+    if (back !== null && pageWhere === null) setRoom((now) => (now === Room.Talk ? back : now))
+  }, [pageWhere])
   const navigate = useNavigate()
   const comments = useComments(draftOf)
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.

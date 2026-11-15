@@ -8,13 +8,25 @@ import { Room } from '@althar/ui'
 
 import type { Client } from '../src/renderer/data/client'
 import { ServicesProvider } from '../src/renderer/data/services'
+import { forgetPages, pages } from '../src/renderer/features/browser/pages'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { hostNameOf, partsOf, trackersOf, trackerUrlOf } from '../src/renderer/features/project/front'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { keys } from '../src/renderer/data/reads'
-import { card, change, changed, connectionList, coordinatorSnapshot, fakeClient, items, streamed } from './fixtures'
+import {
+  card,
+  change,
+  changed,
+  connectionList,
+  coordinatorSnapshot,
+  fakeClient,
+  fakeHost,
+  fakePagesHost,
+  items,
+  streamed,
+} from './fixtures'
 import { servicesFor, useSettingsOf, withServices } from './render'
 
 /*
@@ -540,6 +552,27 @@ describe('a run, in the list Run opens', () => {
     expect(open).toHaveBeenCalledWith('http://localhost:5199/', '_blank')
     open.mockRestore()
     expect(screen.queryByRole('button', { name: /^Running/ })).toBeNull()
+  })
+})
+
+describe('a page beside the coordinator’s conversation', () => {
+  it('gives the right side back to the board when it closes', async () => {
+    forgetPages()
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('See [the docs](https://example.com/docs).')] })),
+    })
+    const host = fakeHost({ pages: fakePagesHost() })
+    render(
+      <ServicesProvider value={servicesFor(client, host)}>
+        <Project room={Room.Both} />
+      </ServicesProvider>,
+    )
+    expect(await screen.findByRole('separator', { name: 'Width of the conversation' })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('link', { name: /the docs/ }))
+    await waitFor(() => expect(screen.queryByRole('separator', { name: 'Width of the conversation' })).toBeNull())
+    expect(pages.where('p1')).toBe('beside')
+    act(() => pages.hide('p1'))
+    expect(await screen.findByRole('separator', { name: 'Width of the conversation' })).toBeTruthy()
   })
 })
 
