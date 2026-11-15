@@ -4739,9 +4739,10 @@ const ProjectApi = RpcGroup.make(
    * commit, where it has no git; its first commit, where it has git and no
    * commit. Refused where it can't be read, is too wide to be one project
    * (the home folder), has too many files, or has repositories inside it.
-   * What this made is taken away where it fails.
+   * What this made is taken away where it fails. `path` is a repository's
+   * root inside the folder chosen, where it is one of several found there.
    */
-  command('PrepareFolder', { grant: Schema.String }, PreparedFolder),
+  command('PrepareFolder', { grant: Schema.String, path: Schema.optional(Schema.String) }, PreparedFolder),
   /** Every repository a code host's connection reaches, last pushed to first. */
   call('ListHostRepositories', { connectionId: Schema.String }, Schema.Array(HostRepository)),
   /** Where a code host's connection can make a repository: its account first, then its organizations, groups or workspaces. */
@@ -4765,8 +4766,9 @@ const ProjectApi = RpcGroup.make(
     ClonedRepository,
   ),
   /**
-   * Puts a project's repository, only on this computer, on a code host: makes
-   * an empty repository there, under `owner`, sets it as `origin`, and pushes
+   * Puts a repository only on this computer on a code host: a project's, or
+   * one in a folder the person chose, before its project is made. Makes an
+   * empty repository there, under `owner`, sets it as `origin`, and pushes
    * the branch checked out, which follows it from then on. Refused where the
    * repository has a remote already, or the host has one of that name. Made
    * and not pushed, trying again pushes to the one made.
@@ -4774,8 +4776,10 @@ const ProjectApi = RpcGroup.make(
   command(
     'PublishRepository',
     {
-      projectId: Schema.String,
-      repositoryId: Schema.String,
+      at: Schema.Union([
+        Schema.Struct({ projectId: Schema.String, repositoryId: Schema.String }),
+        Schema.Struct({ grant: Schema.String, path: Schema.optional(Schema.String) }),
+      ]),
       connectionId: Schema.String,
       owner: RepositoryOwner,
       name: Schema.String,

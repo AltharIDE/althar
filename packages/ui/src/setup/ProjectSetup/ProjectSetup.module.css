@@ -1,0 +1,573 @@
+.ownerName {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+  width: 100%;
+}
+.slash {
+  padding-bottom: 8px;
+  color: var(--t-4);
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+}
+.owner {
+  color: var(--t-3);
+  font-weight: 450;
+}
+
+/* A part of it: its name, and how it's going once Create is pressed. */
+.section {
+  display: grid;
+  gap: 8px;
+}
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+}
+.sectionTitle {
+  margin: 0;
+  color: var(--t-2);
+  font: 500 10.5px/1.2 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tick {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ink-fill);
+  color: var(--n-0);
+  animation: arrive var(--slow) var(--ease-out) both;
+}
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+/* One of a few, as rows on one sheet: the chosen one opens to what it needs. */
+.picks {
+  display: grid;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.pick + .pick,
+.pick + .connectRow,
+.connectRow + .pick,
+.connectRow + .connectRow {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+.pickHead {
+  display: grid;
+  grid-template-columns: 14px 18px auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  text-align: left;
+  border-radius: var(--r-lg);
+}
+.pickHead:hover {
+  background: var(--hover-paper);
+}
+.pickHead:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.dot,
+.dotless {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+.dot {
+  box-shadow: inset 0 0 0 1.5px var(--t-4);
+  transition: box-shadow var(--fast) var(--ease);
+}
+.pickOn .dot {
+  box-shadow: inset 0 0 0 4px var(--ink-fill);
+}
+.pickMark {
+  display: grid;
+  place-items: center;
+  color: var(--t-2);
+}
+.pickTitle {
+  font-size: 13px;
+  font-weight: 540;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.pickNote {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-3);
+  font-size: 12px;
+}
+.pickMore {
+  padding: 0 14px 12px 66px;
+  animation: fade var(--slow) var(--ease-out) both;
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+.connectRow {
+  display: grid;
+  grid-template-columns: 14px 18px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 8px 0 14px;
+}
+.away {
+  opacity: 0.55;
+}
+.hostFields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.nameField {
+  width: 150px;
+}
+.fixed {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 14px;
+  border-radius: var(--r-lg);
+  background: var(--sunk);
+  color: var(--t-2);
+  font-size: 12.5px;
+}
+
+/* Your repositories: found as typed, the one named like the project lit in its colour. */
+.repos {
+  display: grid;
+  gap: 8px;
+}
+.reposBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.find {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-3);
+  cursor: text;
+}
+.find:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.find input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--t-1);
+  font-size: 12.5px;
+}
+.find input::placeholder {
+  color: var(--t-3);
+}
+.find input::-webkit-search-cancel-button {
+  display: none;
+}
+.repoList {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.repo {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.repo:hover {
+  background: var(--hover-paper);
+}
+.repo:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+/* named like the project: lit in the project's own colour, as its mark is */
+.repoLike {
+  background: color-mix(in oklab, var(--ink) 9%, var(--paper));
+}
+.repoLike:hover {
+  background: color-mix(in oklab, var(--ink) 14%, var(--paper));
+}
+.repoOn {
+  box-shadow: inset 0 0 0 1.5px var(--ink);
+}
+.repoMark {
+  display: grid;
+  place-items: center;
+  color: var(--t-1);
+}
+.repoMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+.repoName {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--t-1);
+  font-size: 13.5px;
+  font-weight: 580;
+  white-space: nowrap;
+}
+.repoName > svg {
+  color: var(--t-4);
+}
+.likeTag {
+  padding: 1px 7px;
+  border-radius: 99px;
+  background: color-mix(in oklab, var(--ink) 18%, transparent);
+  color: color-mix(in oklab, var(--ink), var(--t-1) 35%);
+  font-size: 10.5px;
+  font-weight: 560;
+}
+.repoFacts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--t-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.about {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--t-2);
+}
+.repoAct {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  color: var(--t-1);
+  font-size: 12px;
+  font-weight: 540;
+}
+.repoLike .repoAct {
+  background: var(--ink-fill);
+  box-shadow: none;
+  color: var(--n-0);
+}
+.repoActOn,
+.repoLike .repoActOn {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--on-ink);
+}
+.reposQuiet {
+  display: grid;
+  place-items: center;
+  margin: 0;
+  border-radius: var(--r-lg);
+  background: var(--sunk);
+  color: var(--t-3);
+  font-size: 12.5px;
+}
+.connectHosts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+.connectHost {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+  padding: 20px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+  text-align: center;
+}
+.connectHostName {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.connectHostNote {
+  max-width: 180px;
+  margin-bottom: 6px;
+  color: var(--t-3);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Where its code comes from, once chosen. */
+.card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+  text-align: left;
+}
+.cardMark {
+  display: grid;
+  place-items: center;
+  color: var(--t-2);
+}
+.cardMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.cardName {
+  color: var(--t-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+.cardFacts {
+  display: flex;
+  gap: 12px;
+  color: var(--t-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cardChange {
+  font-size: 12px;
+}
+.cardLine {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--t-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.cardLine > svg {
+  flex: none;
+  position: relative;
+  top: 2px;
+  color: var(--t-3);
+}
+.cardBad,
+.cardBad > svg {
+  color: var(--danger);
+}
+/* Cloning: the card fills from the left in the project's colour. */
+.fill {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: var(--ink);
+  transform-origin: left;
+  animation: filling 2.4s var(--ease-out) infinite;
+}
+/* How long a clone takes isn't known: a stretch of colour runs along it, again and again. */
+@keyframes filling {
+  from {
+    transform: translateX(-100%) scaleX(0.4);
+  }
+  to {
+    transform: translateX(100%) scaleX(0.4);
+  }
+}
+
+/* The three ways in, side by side; the one chosen under them. */
+.wayRow {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 8px;
+}
+.way {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  padding: 14px 14px 12px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+  text-align: left;
+  transition:
+    box-shadow var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.way:hover {
+  background: var(--hover-paper);
+}
+.way:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    0 0 0 3px var(--signal);
+}
+.way[aria-checked='true'] {
+  box-shadow: 0 0 0 2px var(--ink-fill);
+}
+/* Clone: lit in the project's colour */
+.wayClone {
+  background: radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--ink) 16%, transparent), transparent 70%), var(--paper);
+}
+.wayClone[aria-checked='true'] {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+.wayArt {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  margin-bottom: 6px;
+  color: var(--t-2);
+}
+.wayMarks {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t-1);
+}
+.wayTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+.wayNote {
+  color: var(--t-3);
+  font-size: 12px;
+}
+.wayBody {
+  display: grid;
+}
+.zone {
+  display: grid;
+  align-content: center;
+  height: 100%;
+  padding: 16px;
+  border-radius: var(--r-lg);
+  background: var(--sunk);
+}
+.zoneEmpty {
+  justify-items: center;
+  gap: 8px;
+  border: 1px dashed var(--line-3);
+  color: var(--t-2);
+}
+.zoneTitle {
+  color: var(--t-1);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.walk {
+  display: grid;
+  align-content: start;
+}
+
+.ways {
+  display: grid;
+  gap: 10px;
+}
+.zoneOver {
+  border-color: var(--ink);
+  background: color-mix(in oklab, var(--ink) 8%, var(--sunk));
+}
+.cardTall {
+  align-items: start;
+}
+.cardName,
+.repoPath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cardFacts > .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.repoPath {
+  min-width: 0;
+}
+.fixedMark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--t-2);
+}
+.reposQuiet {
+  gap: 8px;
+  grid-auto-flow: column;
+  justify-content: center;
+  align-items: center;
+}
+.fieldsError {
+  flex-basis: 100%;
+  margin: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tick,
+  .pickMore {
+    animation: none;
+  }
+  .fill {
+    animation: none;
+    transform: none;
+    opacity: 0.5;
+  }
+}

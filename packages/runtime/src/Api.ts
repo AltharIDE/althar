@@ -309,6 +309,15 @@ export const handlers = apiLayer(
     const folderStore = yield* Effect.context<SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto>()
     const cleanup = yield* FolderCleanup
     const setups = yield* Setups
+    /** A folder the person chose, by its grant, or a path inside it, as the runtime read one there: never a path elsewhere. */
+    const within = (grant: string, path?: string) =>
+      Effect.gen(function* () {
+        const chosen = realpathOf(yield* folders.path(grant))
+        if (path === undefined) return chosen
+        const inside = realpathOf(path)
+        if (inside !== chosen && !inside.startsWith(`${chosen}${sep}`)) return yield* new NotFound({ kind: 'folder', id: path })
+        return inside
+      })
     /** A connection's code host, signed in through it; refused where it is a tracker's, or gone. */
     const codeHostOf = (connectionId: string) =>
       Effect.flatMap(connections.adapters(connectionId), ({ host }) =>
@@ -890,7 +899,8 @@ export const handlers = apiLayer(
             return { grant: yield* folders.allow(made.path), path: made.path }
           }),
         ),
-      PrepareFolder: ({ commandId, grant }) => once(commandId, api(Effect.flatMap(folders.path(grant), (path) => prepareFolder(path)))),
+      PrepareFolder: ({ commandId, grant, path }) =>
+        once(commandId, api(Effect.flatMap(within(grant, path), (root) => prepareFolder(root)))),
       ListHostRepositories: ({ connectionId }) =>
         api(
           Effect.gen(function* () {
@@ -911,17 +921,21 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      PublishRepository: ({ commandId, projectId, repositoryId, connectionId, owner, name, private: hidden }) =>
+      PublishRepository: ({ commandId, at, connectionId, owner, name, private: hidden }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
-              const repository = (yield* projects.repositories(projectId)).find((one) => one.id === repositoryId)
-              if (repository === undefined || repository.path === null) return yield* new NotFound({ kind: 'repository', id: repositoryId })
+              const root =
+                'grant' in at
+                  ? yield* within(at.grant, at.path)
+                  : (yield* projects.repositories(at.projectId)).find((one) => one.id === at.repositoryId)?.path
+              if (root === undefined || root === null)
+                return yield* new NotFound({ kind: 'repository', id: 'repositoryId' in at ? at.repositoryId : '' })
               const { host, info } = yield* connections.adapters(connectionId)
               if (host === undefined) return yield* new NotFound({ kind: 'connection', id: connectionId })
               const published = yield* publishRepository({
-                root: repository.path,
+                root,
                 host,
                 hostName: info.name,
                 owner,
@@ -933,8 +947,9 @@ export const handlers = apiLayer(
                     Effect.orElseSucceed(() => null),
                   ),
               })
-              // Its host is found by its remote from now on, as any repository's is.
-              yield* refreshRemotes(instance.deviceId, { projectId }).pipe(Effect.provideService(SqlClient.SqlClient, sql))
+              // A project's: its host is found by its remote from now on, as any repository's is.
+              if ('projectId' in at)
+                yield* refreshRemotes(instance.deviceId, { projectId: at.projectId }).pipe(Effect.provideService(SqlClient.SqlClient, sql))
               return published
             }),
           ),

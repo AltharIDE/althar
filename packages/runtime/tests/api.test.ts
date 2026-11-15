@@ -3629,8 +3629,7 @@ describe('a project set up where it starts, through the API', () => {
         assert.isNull(only?.host)
         const published = yield* client.PublishRepository({
           commandId: commandId(),
-          projectId: project.id,
-          repositoryId: only?.id ?? '',
+          at: { projectId: project.id, repositoryId: only?.id ?? '' },
           connectionId,
           owner: { id: 'you', name: 'You', kind: 'user' },
           name: 'fresh',
@@ -3647,8 +3646,7 @@ describe('a project set up where it starts, through the API', () => {
         const again = yield* Effect.flip(
           client.PublishRepository({
             commandId: commandId(),
-            projectId: project.id,
-            repositoryId: only?.id ?? '',
+            at: { projectId: project.id, repositoryId: only?.id ?? '' },
             connectionId,
             owner: { id: 'you', name: 'You', kind: 'user' },
             name: 'fresh',
@@ -3656,6 +3654,41 @@ describe('a project set up where it starts, through the API', () => {
           }),
         )
         assert.deepInclude(again, { reason: 'PublishRefused', why: 'has_remote' })
+      }),
+    ),
+  )
+
+  it.live('puts a folder’s repository on the host before its project is made, so the project opens on the host', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, connectionId, bareOf } = yield* setUp()
+        const parent = realpathSync(mkdtempSync(join(tmpdir(), 'althar-parent-')))
+        const folder = join(parent, 'fresh')
+        mkdirSync(folder)
+        writeFileSync(join(folder, 'notes.md'), '# Notes')
+        const chosen = yield* grant(parent)
+        // A repository inside the folder chosen, by its path there: git starts in it, not in the folder around it.
+        yield* client.PrepareFolder({ commandId: commandId(), grant: chosen, path: folder })
+        assert.isFalse(existsSync(join(parent, '.git')))
+        yield* client.PublishRepository({
+          commandId: commandId(),
+          at: { grant: chosen, path: folder },
+          connectionId,
+          owner: { id: 'you', name: 'You', kind: 'user' },
+          name: 'fresh',
+          private: false,
+        })
+        assert.strictEqual(originOf(folder), `${HOST}/you/fresh.git`)
+        assert.strictEqual(
+          execFileSync('git', ['rev-parse', 'main'], { cwd: bareOf('you/fresh'), encoding: 'utf8' }).trim(),
+          execFileSync('git', ['rev-parse', 'HEAD'], { cwd: folder, encoding: 'utf8' }).trim(),
+        )
+        // A path outside the folder chosen is refused, for both.
+        const outside = realpathSync(mkdtempSync(join(tmpdir(), 'althar-outside-')))
+        assert.deepInclude(yield* Effect.flip(client.PrepareFolder({ commandId: commandId(), grant: chosen, path: outside })), {
+          reason: 'NotFound',
+        })
+        assert.isFalse(existsSync(join(outside, '.git')))
       }),
     ),
   )
