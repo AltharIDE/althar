@@ -3,6 +3,7 @@ import { useState } from 'react'
 import type { BoardTask, ChangeSummary, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 import { Button, Field, type PartKind, PartLines, PartShots, Segmented, type TaskPartModel } from '@althar/ui'
 
+import type { MergeStanding } from '../../data/merges'
 import { outcomeOf } from '../../shared/outcome'
 import { productBrand } from '../../shared/products'
 import s from './parts.module.css'
@@ -57,12 +58,16 @@ export const partsText = {
         : checks.running > 0
           ? `${checks.running} running`
           : `${checks.passed} pass`,
-  stands: (change: ChangeSummary) =>
-    change.state === 'merged'
+  stands: (change: ChangeSummary, standing: MergeStanding | null = null) =>
+    change.state === 'merged' || standing === 'merged'
       ? 'Merged'
       : change.state === 'closed'
         ? 'Closed'
-        : `${change.draft ? 'Draft' : 'Open'}${change.checks === null || change.checks.outcome === 'none' ? '' : change.checks.outcome === 'failed' ? ` · ${change.checks.failed} ${change.checks.failed === 1 ? 'check fails' : 'checks fail'}` : change.checks.outcome === 'running' ? ' · checks running' : ' · checks pass'}`,
+        : standing === 'merging'
+          ? 'Merging'
+          : standing === 'queued' || change.queued === true
+            ? 'In the merge queue'
+            : `${change.draft ? 'Draft' : 'Open'}${change.checks === null || change.checks.outcome === 'none' ? '' : change.checks.outcome === 'failed' ? ` · ${change.checks.failed} ${change.checks.failed === 1 ? 'check fails' : 'checks fail'}` : change.checks.outcome === 'running' ? ' · checks running' : ' · checks pass'}`,
   merge: 'Merge',
   /** One of several changes, in its own row: where it stands without a pull request yet. */
   noPullRequest: 'No pull request yet',
@@ -126,6 +131,10 @@ export interface PartsActions {
   readonly openInEditor?: { readonly name: string; readonly open: () => void }
   readonly removeFolder?: () => void
   readonly merge: (change: ChangeSummary, bypassQueue?: boolean) => void
+  /** Where the merge of its pull request at this address stands from the press on: no Merge while it is under way. */
+  readonly mergeStanding?: (url: string) => MergeStanding | null
+  /** Whether it merges later in a press under way, once the one before it lands: no Merge of its own meanwhile. */
+  readonly mergeAwaits?: (url: string) => boolean
   readonly postReview: (draftId: string) => void
   readonly stopLaunch: (id: string) => void
   readonly openUrl: (url: string) => void
@@ -286,9 +295,16 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
   }
   for (const change of task.changes) {
     const failing = change.state === 'open' && change.checks?.outcome === 'failed'
-    const ready = change.state === 'open' && !change.draft && change.checks?.outcome === 'passed' && change.queued !== true
+    const merge = act.mergeStanding?.(change.url) ?? null
+    const ready =
+      merge === null &&
+      act.mergeAwaits?.(change.url) !== true &&
+      change.state === 'open' &&
+      !change.draft &&
+      change.checks?.outcome === 'passed' &&
+      change.queued !== true
     const line = lines.find((one) => one.url === change.url)
-    const standing = change.change?.waitsFor === undefined ? t.stands(change) : t.waitsFor(change.change.waitsFor)
+    const standing = change.change?.waitsFor === undefined || merge !== null ? t.stands(change, merge) : t.waitsFor(change.change.waitsFor)
     parts.push({
       id: `pr:${change.url}`,
       icon: 'pr',
@@ -299,7 +315,9 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
         ? { tone: 'bad' as const, act: { label: t.seeCheck } }
         : ready
           ? { tone: 'you' as const, act: { label: mergeLabel(change), onClick: () => act.merge(change) } }
-          : {}),
+          : merge === 'merging' || merge === 'queued'
+            ? { tone: 'live' as const }
+            : {}),
       facts: [
         [t.title, change.title],
         ...(line === undefined ? [] : lineFacts(line)),

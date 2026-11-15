@@ -85,8 +85,25 @@ export const Ready: Story = {
   },
 }
 
-/** In its target's merge queue. */
-export const Queued: Story = { args: { merge: { state: 'queued', at: null } } }
+/** Merge just pressed: Merging in its place at once, before the runtime answers. */
+export const Merging: Story = {
+  args: { merge: { state: 'merging', at: null } },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('status')).toHaveTextContent('Merging')
+    await expect(c.queryByRole('button', { name: 'Merge' })).not.toBeInTheDocument()
+  },
+}
+
+/** In its target's merge queue: no Merge again. */
+export const Queued: Story = {
+  args: { merge: { state: 'queued', at: null } },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('In the queue')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Merge' })).not.toBeInTheDocument()
+  },
+}
 
 /** Merged, and its review reads what merged. */
 export const Reviewing: Story = {
