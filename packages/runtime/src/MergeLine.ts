@@ -978,7 +978,7 @@ export class MergeLine extends Context.Service<
                 yield* errands.pause(
                   access,
                   entry.errandId,
-                  'Taken out of the merge line with leave_queue: it goes back in on the person’s word.',
+                  'It was taken out of the merge line. It goes back in on the person’s word (resume_errand).',
                 )
                 said.push(`Took ${name} out of Althar’s line for ${entry.branch}: resume_errand puts it back on the person’s word.`)
               }

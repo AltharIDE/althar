@@ -1,6 +1,19 @@
 import { assert, describe, it } from '@effect/vitest'
 
-import { afterStep, DETAILS_MOST, failedNote, keptNote, labelOf, stepNote, stillNote } from '../src/errandNotes'
+import {
+  afterStep,
+  calledOffNote,
+  DETAILS_MOST,
+  failedNote,
+  heldNote,
+  keptNote,
+  labelOf,
+  plainReason,
+  resumedNote,
+  stepNote,
+  stillNote,
+  unwatched,
+} from '../src/errandNotes'
 
 const PR = 'https://github.com/AltharIDE/althar/pull/698'
 /** A host's answer as the tools keep it: its status and a body full of urls, as the person's screencast showed. */
@@ -161,7 +174,10 @@ describe('a kept errand reads in plain words', () => {
       'Kept your errand: merge the pull request once its pull request is ready, then tag v0.9.0',
     )
     assert.strictEqual(afterStep({ title: 'Merged #958', links: [] }, task[1]).title, 'Merged #958. Next: tag v0.9.0')
-    assert.strictEqual(stillNote(false, null, task[0]).title, 'Errand still waits to merge the pull request once its pull request is ready')
+    assert.strictEqual(
+      stillNote(false, null, [task[0]!]).title,
+      'Errand still waits to merge the pull request once its pull request is ready',
+    )
   })
 
   it('names three steps and counts the rest', () => {
@@ -177,12 +193,76 @@ describe('a kept errand reads in plain words', () => {
 
   it('the daily reminder says where it waits, or why it is on hold', () => {
     assert.strictEqual(
-      stillNote(false, null, merge).title,
+      stillNote(false, null, [merge]).title,
       'Errand still waits to merge the 0.9.0 pull request once it’s open and its checks pass',
     )
     assert.strictEqual(
-      stillNote(true, 'You asked to wait for the changelog.', merge).title,
-      'Errand still on hold: you asked to wait for the changelog',
+      stillNote(true, 'You asked to wait for the changelog.', [merge]).title,
+      'Errand still on hold: merge the 0.9.0 pull request — you asked to wait for the changelog. Say go ahead to continue.',
     )
+  })
+})
+
+describe('an errand on hold, called off, resumed or failed reads in plain words', () => {
+  const merge = {
+    tool: 'merge_pull_request',
+    target: 'task:release-prep',
+    says: 'Merge the 0.9.0 pull request',
+    waits: [{ kind: 'merged' }],
+  }
+  const tag = { tool: 'push_tag', target: 'AltharIDE/althar v0.9.0', says: 'Tag v0.9.0', waits: [{ kind: 'task_merged' }] }
+  const watched = ['task_pull_request', 'task_merged', 'merge_line', 'checks']
+
+  it('says the step on hold, why in a phrase, and what to do; never a wait kind or an order to the agent', () => {
+    const reason =
+      'Althar cannot watch wait kinds: merged. Watched kinds: task_pull_request, task_merged, merge_line. Keep this errand again with watched waits on the person’s fresh word.'
+    const note = heldNote([merge, tag], reason, unwatched([merge, tag], watched))
+    assert.strictEqual(
+      note.title,
+      'Errand on hold: merge the 0.9.0 pull request, then tag v0.9.0 — Althar can’t tell when it’s merged. Ask for it again to keep it another way.',
+    )
+    assert.notMatch(note.title, /_|Watched|wait kinds|fresh word/)
+  })
+
+  it('an unwatched kind Althar has no words for still says nothing raw', () => {
+    const odd = { ...merge, waits: [{ kind: 'imaginary_kind' }] }
+    assert.strictEqual(unwatched([odd], watched)?.why, 'Althar can’t tell what it waits for')
+    assert.isUndefined(unwatched([tag], watched))
+  })
+
+  it('an objection reads as the person’s: you, not “the person”, and the agent’s orders left out', () => {
+    assert.strictEqual(plainReason('The person said to wait. It waits for the person’s word.'), 'you said to wait')
+    assert.strictEqual(
+      heldNote([merge], '#12 went back to a draft after the person asked.').title,
+      'Errand on hold: merge the 0.9.0 pull request — #12 went back to a draft after you asked. Say go ahead to continue.',
+    )
+    // Only orders and tool names: no reason to give, so none is made up.
+    assert.strictEqual(
+      heldNote([merge], 'Taken out of the line with leave_queue: resume_errand puts it back.').title,
+      'Errand on hold: merge the 0.9.0 pull request. Say go ahead to continue.',
+    )
+    assert.strictEqual(heldNote([], null).title, 'Errand on hold. Say go ahead to continue.')
+  })
+
+  it('called off by the person names what it was; called off by the world says why', () => {
+    assert.strictEqual(
+      calledOffNote([merge, tag], 'The person called it off.', true).title,
+      'Errand called off: merge the 0.9.0 pull request, then tag v0.9.0',
+    )
+    assert.strictEqual(
+      calledOffNote([merge], '#12 was closed on GitHub, so it isn’t merged.', false).title,
+      'Errand called off: merge the 0.9.0 pull request — #12 was closed on GitHub, so it isn’t merged',
+    )
+  })
+
+  it('resumed says what goes on, not the person’s own words again', () => {
+    assert.strictEqual(resumedNote([merge, tag]).title, 'Errand resumed: merge the 0.9.0 pull request once it’s merged, then tag v0.9.0')
+    assert.strictEqual(resumedNote([]).title, 'Errand resumed')
+  })
+
+  it('a failed step says what it tried in the step’s words, and folds what was meant for the agent', () => {
+    const note = failedNote('merge_pull_request', PR, {}, 'The head moved. Read it again before asking for this action.', false, merge)
+    assert.strictEqual(note.title, 'Couldn’t do this: merge the 0.9.0 pull request — failed: The head moved.')
+    assert.strictEqual(note.details, 'The head moved. Read it again before asking for this action.')
   })
 })
