@@ -1,4 +1,5 @@
 import type { AttachedFile, ConversationView, Picture, ThreadItem } from '@althar/contracts'
+import { notifyManager } from '@tanstack/react-query'
 
 import { text as imagesText } from './images'
 import type { Streamed } from './thread'
@@ -258,14 +259,31 @@ export const withQueued = (draft: string, text: string): string => (draft.trim()
  * so an earlier answer never puts back what a later one replaced. `landed`
  * waits for the newest read of a thing, whichever began last: the one kept.
  */
-export const newestReads = () => {
+export const newestReads = (head?: string) => {
   const begun = new Map<string, { readonly read: number; readonly landed: Promise<void> }>()
+  // A head waits for its associated item reads. Publish them in one notification batch, so new work never
+  // appears with the previous session's idle state, nor a running session with its input still queued.
+  let held: Array<() => void> | null = null
   let reads = 0
   const newest = <A>(key: string, read: Promise<A>, keep: (value: A) => void, fail: (failure: unknown) => void): Promise<void> => {
     reads += 1
     const mine = reads
+    if (key === head) held ??= []
     const landed = read.then((value) => {
-      if (begun.get(key)?.read === mine) keep(value)
+      const commit = () => {
+        if (begun.get(key)?.read === mine) keep(value)
+      }
+      if (key !== head && held !== null) held.push(commit)
+      else if (key === head && begun.get(key)?.read === mine)
+        notifyManager.batch(() => {
+          commit()
+          // A rewritten conversation can start a whole new head read from keep; wait for that one instead.
+          if (begun.get(key)?.read !== mine) return
+          const ready = held
+          held = null
+          for (const item of ready ?? []) item()
+        })
+      else commit()
     }, fail)
     begun.set(key, { read: mine, landed })
     return landed
