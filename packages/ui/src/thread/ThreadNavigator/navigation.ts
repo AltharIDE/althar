@@ -1,6 +1,6 @@
 import { useEffect, useState, type RefObject } from 'react'
 
-import { virtualThreadIn } from '../../lib/virtual'
+import { virtualThreadIn, type VirtualThread } from '../../lib/virtual'
 
 export interface ThreadStop {
   readonly id: string
@@ -57,10 +57,19 @@ export function useThreadNavigation(scroll: RefObject<HTMLElement | null>) {
       }
       setActive(current)
     }
+    // A thread drawn only near the view changes what it holds with nothing drawn changing (a message below, a preview
+    // far above), so it says so: heard for as long as it is the scroller's.
+    let heard: VirtualThread | undefined
+    let stopHearing: (() => void) | undefined
     const read = () => {
       frame = 0
       indexed = []
       const virtual = virtualThreadIn(el)
+      if (virtual !== heard) {
+        stopHearing?.()
+        heard = virtual
+        stopHearing = virtual?.subscribe(schedule)
+      }
       if (virtual !== undefined)
         indexed = virtual
           .stops()
@@ -111,6 +120,7 @@ export function useThreadNavigation(scroll: RefObject<HTMLElement | null>) {
     el.addEventListener('scroll', position, { passive: true })
     return () => {
       cancelAnimationFrame(frame)
+      stopHearing?.()
       mutation.disconnect()
       resize.disconnect()
       el.removeEventListener('scroll', position)

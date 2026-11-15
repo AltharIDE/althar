@@ -318,6 +318,57 @@ describe('a thread drawn only near the view', () => {
     expect(shows('item-295')).toBe(false)
   })
 
+  it('draws every block a selection spans as it is copied, from before the thread to after it', async () => {
+    render(<Column list={blocks(0, 300)} />)
+    await frame()
+    expect(shows('item-0')).toBe(false)
+    expect(shows('item-150')).toBe(false)
+    // Select All: from the page's start to its end, anchored outside any block.
+    const range = document.createRange()
+    range.selectNodeContents(document.body)
+    act(() => {
+      document.getSelection()!.removeAllRanges()
+      document.getSelection()!.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+    expect(shows('item-0')).toBe(false)
+    act(() => {
+      document.dispatchEvent(new Event('copy'))
+    })
+    // Drawn by the time the browser reads the page to copy it, all 300 of them, in order.
+    expect(drawn().filter((text) => text?.startsWith('Block '))).toEqual(blocks(0, 300).map((one) => `Block ${one.id}`))
+    // And kept while the selection stands, however far the view goes.
+    await scrollBy(-scrolled)
+    expect(shows('item-299')).toBe(true)
+    act(() => {
+      document.getSelection()!.removeAllRanges()
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+    await scrollBy(1)
+    expect(shows('item-299')).toBe(false)
+  })
+
+  it('draws only the blocks between where a selection starts and the thread’s end when it runs past it', async () => {
+    render(<Column list={blocks(0, 300)} />)
+    await frame()
+    await scrollBy(-scrolled)
+    await scrollBy(10_000)
+    const range = document.createRange()
+    range.setStart(screen.getByText(`Block ${drawn()[0]!.slice(6)}`).firstChild!, 0)
+    range.setEndAfter(scroller!.parentElement!)
+    act(() => {
+      document.getSelection()!.removeAllRanges()
+      document.getSelection()!.addRange(range)
+    })
+    const start = Number(drawn()[0]!.slice(11))
+    act(() => {
+      document.dispatchEvent(new Event('copy'))
+    })
+    const now = drawn().filter((text) => text?.startsWith('Block '))
+    expect(now).toEqual(blocks(start, 300).map((one) => `Block ${one.id}`))
+    expect(shows('item-0')).toBe(false)
+  })
+
   it('spaces a gap as the block it stands for last, so what follows it is spaced as it would be', async () => {
     const list = blocks(0, 300).map((one, i) => ({ ...one, rhythm: i % 3 === 0 ? 'step' : 'line' }))
     render(<Column list={list} />)
@@ -382,5 +433,25 @@ describe('a navigator over a thread drawn only near the view', () => {
     expect(shows('item-100')).toBe(true)
     expect(topOf('item-100')).toBe(30)
     expect(navigation.querySelectorAll('button')[50]).toHaveAttribute('aria-current', 'location')
+  })
+
+  it('gains the stop of a message that comes below the drawn part, without the view moving', async () => {
+    const { rerender } = render(<Column list={blocks(0, 300)} navigator />)
+    await frame()
+    await frame()
+    const navigation = await screen.findByRole('navigation', { name: 'Conversation navigation' })
+    expect(navigation.querySelectorAll('button')).toHaveLength(150)
+    // Up from the bottom until the window has an end of its own, a message the thread holds below it.
+    await scrollBy(-scrolled)
+    await scrollBy(10_000)
+    expect(shows('item-299')).toBe(false)
+    const at = scrolled
+    // An even-numbered message, which is one the person said: its stop is new, with nothing drawn changing.
+    rerender(<Column list={blocks(0, 301)} navigator />)
+    await frame()
+    await frame()
+    expect(shows('item-300')).toBe(false)
+    expect(scrolled).toBe(at)
+    expect(navigation.querySelectorAll('button')).toHaveLength(151)
   })
 })

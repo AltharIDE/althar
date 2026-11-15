@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 
 import { arrivesQuietly } from '../../lib/arrivals'
 import { registerVirtualThread, type VirtualStop } from '../../lib/virtual'
@@ -19,7 +20,9 @@ import { registerVirtualThread, type VirtualStop } from '../../lib/virtual'
  * What it keeps working: a reply streaming in place, the thread following its
  * bottom (useStickToBottom sees the column grow, as ever), a block that grows
  * (measured again as it does), what the person has selected or has focus in
- * (kept drawn while they do), the navigator's stops and a search or link that
+ * (kept drawn while they do, and every block a selection spans drawn as it is
+ * copied, so Select All copies the whole thread), the navigator's stops and a
+ * search or link that
  * takes the person to an item (`lib/virtual`, which draws its block first).
  */
 
@@ -533,10 +536,13 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
     }
     let focused: string | undefined
     let selected: readonly [string, string] | undefined
+    /** What a copy spanned, drawn whole for it, kept while that selection stays. */
+    let copied: readonly [string, string] | undefined
     const hold = () => {
       const next: Array<readonly [string, string]> = []
       if (focused !== undefined) next.push([focused, focused])
       if (selected !== undefined) next.push(selected)
+      if (copied !== undefined) next.push(copied)
       setHeld((was) => (was.length === next.length && was.every((one, i) => one[0] === next[i]![0] && one[1] === next[i]![1]) ? was : next))
     }
     const onFocus = (event: FocusEvent) => {
@@ -551,9 +557,14 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
     const onSelect = () => {
       const selection = document.getSelection()
       if (selection === null || selection.rangeCount === 0 || selection.isCollapsed) {
-        if (selected === undefined) return
+        if (selected === undefined && copied === undefined) return
         selected = undefined
+        copied = undefined
         return hold()
+      }
+      if (copied !== undefined && !selection.getRangeAt(0).intersectsNode(thread)) {
+        copied = undefined
+        hold()
       }
       const a = blockFor(selection.anchorNode)
       const b = blockFor(selection.focusNode)
@@ -569,9 +580,40 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
       selected = next
       hold()
     }
+    /**
+     * As the person copies, the blocks their selection spans are drawn first, so the browser's own copy, which reads the
+     * page as it stands once this returns, takes every message from the selection's start to its end, not only those near
+     * the view: a selection from before the thread (Select All) or after it spans the thread's whole start or end.
+     */
+    const onCopy = () => {
+      const now = plan.current
+      const selection = document.getSelection()
+      const first = top.current
+      const last = bottom.current
+      if (now === null || first === null || last === null || selection === null || selection.rangeCount === 0 || selection.isCollapsed)
+        return
+      const range = selection.getRangeAt(0)
+      const count = now.keys.length
+      if (count === 0 || !range.intersectsNode(thread)) return
+      let from = range.intersectsNode(first) ? 0 : count
+      let to = range.intersectsNode(last) ? count - 1 : -1
+      for (const [key, els] of elements.current) {
+        if (!els.some((el) => range.intersectsNode(el))) continue
+        const i = now.indexOf.get(key)!
+        from = Math.min(from, i)
+        to = Math.max(to, i)
+      }
+      if (from > to) return
+      let whole = true
+      for (let i = from; i <= to && whole; i++) whole = elements.current.has(now.keys[i]!)
+      if (whole) return
+      copied = [now.keys[from]!, now.keys[to]!]
+      flushSync(hold)
+    }
     thread.addEventListener('focusin', onFocus)
     thread.addEventListener('focusout', onBlur)
     document.addEventListener('selectionchange', onSelect)
+    document.addEventListener('copy', onCopy)
     const unregister = registerVirtualThread(scroller, {
       stops: () => {
         const now = plan.current
@@ -633,6 +675,7 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
       thread.removeEventListener('focusin', onFocus)
       thread.removeEventListener('focusout', onBlur)
       document.removeEventListener('selectionchange', onSelect)
+      document.removeEventListener('copy', onCopy)
       unregister()
     }
     // The handlers read the latest plan and the host's questions from their refs: set up once for the heights kept.

@@ -206,6 +206,23 @@ test('task and coordinator threads scroll back through 400 turns without the tur
       .click()
     await expect(task.getByText('Question 1', { exact: true })).toBeInViewport()
 
+    // Select All and copy, here at the thread's start: the turns far below it, not drawn, are drawn for the copy, so the
+    // clipboard holds the whole thread, from its first question through its middle to its last turn.
+    const middle = `History turn ${TURNS / 2}`
+    await expect(task.getByText(middle, { exact: true })).toHaveCount(0)
+    await expect(task.getByText(`History turn ${TURNS}`, { exact: true })).toHaveCount(0)
+    await task.getByText('Question 1', { exact: true }).click()
+    await page.evaluate(() => document.execCommand('selectAll'))
+    await page.keyboard.press('ControlOrMeta+C')
+    await expect
+      .poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()), { timeout: 20_000 })
+      .toContain(`History turn ${TURNS}`)
+    const copied = await app.electronApp.evaluate(({ clipboard }) => clipboard.readText())
+    expect(copied).toMatch(/^Question 1$/m)
+    expect(copied).toMatch(new RegExp(`^${middle}$`, 'm'))
+    expect(copied).toMatch(new RegExp(`^History turn ${TURNS}$`, 'm'))
+    expect(copied).toMatch(new RegExp(`^Question ${TURNS}$`, 'm'))
+
     // What the scroll-back measured, beside the run's results, for the report.
     await test.info().attach('history', {
       body: JSON.stringify({ coordinatorOpened, taskOpened, coordinatorMoved, taskMoved, coordinatorFrames, taskFrames }),
