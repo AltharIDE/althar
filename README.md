@@ -51,17 +51,17 @@ Review is optional: pick another reviewer, skip it once, or turn it off.
 
 ## One board. No sidebar full of chats.
 
-Up next, running, needs you, settled: every task in the project, whichever lab's agent has it. When one plan runs out of usage, the work moves to another account, on the same thread and the same branch.
+Up next, running, needs you, settled: every task in the project, whichever lab's agent has it. When one plan runs out of usage, the work can move to another account you're signed in to, on the same thread and the same branch.
 
 <img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
 
 ## Bring the agents you already pay for.
 
-Althar runs each one under your own sign-in: your Claude plan, your ChatGPT plan, your keys. No new account, no new bill, nothing of ours between you and the model. When one runs out of usage, the next picks up the same thread, on the same branch.
+Althar runs each one under your own sign-in: your Claude plan, your ChatGPT plan, your keys. No new account, no new bill, nothing of ours between you and the model. When one runs out of usage, another account you're signed in to can pick up the same thread, on the same branch, unless the project keeps to its first account.
 
 Switch labs whenever you like: your projects, their history and their decisions stay with you, on your computer.
 
-The agents below are built in. Other agents that speak the [Agent Client Protocol](https://agentclientprotocol.com) can join from Settings.
+The agents below are built in. Soon, other agents that speak the [Agent Client Protocol](https://agentclientprotocol.com) will join from Settings too.
 
 <table>
   <tr>
@@ -154,8 +154,8 @@ The agents below are built in. Other agents that speak the [Agent Client Protoco
         <source media="(prefers-color-scheme: dark)" srcset=".github/readme/agents/on-the-way-dark.svg" />
         <img src=".github/readme/agents/on-the-way.svg" width="72" alt="Cursor and Gemini CLI" />
       </picture><br />
-      <b>Other ACP agents</b><br />
-      From the ACP registry, such as Cursor, Gemini CLI or Goose, or your own command, once it passes a check that it asks before it acts (<a href="docs/decisions/agents.md#which-agents-join">which, and why</a>)
+      <b>More on the way</b><br />
+      Other ACP agents, from the ACP registry, such as Cursor, Gemini CLI or Goose, or your own command, once each passes a check that it asks before it acts (<a href="docs/decisions/agents.md#which-agents-join">which, and why</a>)
     </td>
   </tr>
 </table>
@@ -170,7 +170,7 @@ The agents below are built in. Other agents that speak the [Agent Client Protoco
 - **Merge line.** Pull requests merge one at a time, in the order you asked, or through the host's own merge queue.
 - **Automations.** Work on a schedule, at set times or every hour, such as a review of each new pull request. It runs on your computer while Althar is open, once you turn it on.
 - **Asks only before what can't be undone.** Agents work without asking about each command; a force push or a push to the default branch waits for you. Your project's rules can ask about more.
-- **Your skills and MCP servers.** Every agent Althar starts gets the skills and MCP servers you set up for your agents.
+- **Your skills and MCP servers.** The skills and MCP servers you set up for your agents reach Althar's agents too, in the roles and projects you pick in Settings.
 - **Voice.** Dictate to the coordinator or any task, transcribed on your computer.
 - **Always in reach.** Round the notch or in the menu bar on a Mac, in the tray on Windows and Linux: answer a permission or open a pull request without leaving what you're in.
 
