@@ -8197,7 +8197,9 @@ export class Runs extends Context.Service<
                 review !== undefined &&
                 (!alike(review, wantedReview) || (before.reviewAfterMerge === true && wantedReview.skipped !== true))))
           if (!leadChanges && !reviewChanges) return {} as TeamChanged
-          const reviewWhen: ReviewerChange = !reviewChanges ? 'now' : merged ? 'next_ship' : yield* reviewerChange(input.taskId)
+          const reviewAt: ReviewerChange = !reviewChanges ? 'now' : merged ? 'next_ship' : yield* reviewerChange(input.taskId)
+          // Removing it ends the current round now; choosing another reviewer takes effect at the next round.
+          const reviewWhen: ReviewerChange = !reviews && reviewAt === 'next_round' ? 'now' : reviewAt
           // A review put on before the work ships, where the plan read it only once it merged (the fast lane): it reads it before now.
           const clearsAfterMerge = reviewChanges && before.reviewAfterMerge === true
           const at = yield* timestamp
@@ -8299,6 +8301,12 @@ export class Runs extends Context.Service<
               }
             }),
           )
+          // No review in the team dialog also ends the review already under way, through the same command as its stuck card.
+          if (reviewChanges && !reviews && reviewWhen !== 'next_ship')
+            yield* skipReview({
+              taskId: input.taskId,
+              envelope: yield* envelope('task.skip_review', { taskId: input.taskId }, undefined, input.actorId),
+            })
           // The lead it has now takes over from its next turn, never in the one it is in.
           const leadWhen =
             leadChanges && wantedLead !== undefined

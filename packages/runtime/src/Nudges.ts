@@ -22,7 +22,7 @@ import { Sessions } from './Sessions'
 /*
  * What reaches the person outside the window (docs/plans/usable.md, work
  * that doesn't need you): a nudge each time something comes to need them,
- * a call, work that stopped, or a task ready to accept, each said by its
+ * a call or a task ready to accept, each said by its
  * kind so the app can keep to what the person wants told; and how many such
  * things wait, for the app's badge. Never for progress. What waits, and how
  * many things that is, is `waitingOn`'s (in contracts), the rule the board's
@@ -143,7 +143,7 @@ export class Nudges extends Context.Service<
        * counts them (`waitingOn`): read from the cards the card watcher
        * keeps, none worked out here. Each call is said as it comes, though a
        * task that waits on several is one thing; a task whose lead stopped
-       * is counted, but nothing is said of it: the person stopped it, or saw
+       * is held Up next and not counted: the person stopped it, or saw
        * it stop where they were.
        */
       const needs = Effect.gen(function* () {

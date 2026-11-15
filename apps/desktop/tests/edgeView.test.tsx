@@ -152,7 +152,7 @@ describe('the edge', () => {
     await userEvent.click(within(stalled).getByRole('button', { name: 'Open' }))
     expect(host.openInWindow).toHaveBeenCalledWith('th4')
     // Stopped, it waits on the person, as on its board: not work in progress.
-    expect(within(screen.getByRole('article', { name: 'Left alone' })).getByText('Stopped')).toBeTruthy()
+    expect(screen.queryByRole('article', { name: 'Left alone' })).toBeNull()
     expect(screen.getByText('2 in progress · 1 held')).toBeTruthy()
   })
 
@@ -291,9 +291,9 @@ describe('the edge', () => {
     await screen.findByRole('button', { name: 'Nothing needs you' })
     tasks = [{ ...running, phase: 'stopped', stopped: { by: 'interrupted', at: '2026-10-07T09:30:00.000Z' } }]
     act(() => emit(changed('card', running.taskId, running.threadId, running.projectId)))
-    expect(await screen.findByRole('button', { name: '1 needs you' })).toBeTruthy()
-    // On its line in the sheet, but nothing beside the notch.
-    expect(within(screen.getByRole('region', { name: 'Althar' })).getAllByText('Stopped')).toHaveLength(1)
+    await waitFor(() => expect(screen.queryByText('Implement')).toBeNull())
+    expect(screen.getByRole('button', { name: 'Nothing needs you' })).toBeTruthy()
+    expect(within(screen.getByRole('region', { name: 'Althar' })).queryByText('Stopped')).toBeNull()
   })
 
   it('opens as the pointer comes onto it, as the main process watches it, and says where it draws', async () => {

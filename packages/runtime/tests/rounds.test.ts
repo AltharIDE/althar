@@ -1257,6 +1257,38 @@ describe('changing the team of a task that has begun', () => {
     }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
   })
 
+  it.live('No review ends the active review through the skip path, and a reviewer can be added back', () => {
+    const { working, github } = onGitHub()
+    const slow = holds()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* start(working, '[lead:finish] [lead:edit] [review:pass] [review:slowly]')
+      const [review] = yield* until(
+        sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${task.taskId} AND kind = 'step' AND node_key = 'review'`,
+        (rows) => rows.length > 0,
+      )
+      yield* until(sessions.running(review?.id ?? ''), (one) => Option.isSome(one) && one.value.turnRunning)
+      const removed = yield* changeTeam(task.taskId, [step('review', 'codex', null, true)])
+      assert.strictEqual(removed.review?.when, 'now')
+      yield* until(sessions.running(review?.id ?? ''), Option.isNone)
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+      const [cancelled] = yield* sql<{ state: string }>`SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+        JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
+        WHERE r.task_id = ${task.taskId} AND n.node_key = 'review' ORDER BY a.rowid DESC LIMIT 1`
+      assert.strictEqual(cancelled?.state, 'cancelled')
+      assert.isTrue((yield* planOf(task.taskId)).steps.find((one) => one.key === 'review')?.skipped)
+      assert.include(
+        (yield* notices(task.threadId)).map((one) => one.title),
+        'The review stopped: skipped, with what it found left open.',
+      )
+      slow.open('[review:slowly]')
+      yield* changeTeam(task.taskId, [step('review', 'codex')])
+      yield* until(results(task.threadId), (all) => all.some((one) => one.step === 'review' && one.verdict === 'pass'))
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+    }).pipe(Effect.provide(runtimeWith(github, ':memory:', { holds: slow })))
+  })
+
   it.live('changes the reviewer in the middle of a review round without stopping it, and the next round has the new one', () => {
     const { working, github } = onGitHub()
     const slow = holds()
