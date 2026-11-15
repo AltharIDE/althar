@@ -8,7 +8,20 @@ import { SqlClient } from 'effect/sql'
 
 import { touchTask } from './cards'
 import { errandWaitKinds } from './errandWaits'
-import { afterStep, failedNote, keptNote, type SaidStep, stepNote, type StepNote, stillNote, why } from './errandNotes'
+import {
+  afterStep,
+  calledOffNote,
+  failedNote,
+  heldNote,
+  keptNote,
+  resumedNote,
+  type SaidStep,
+  stepNote,
+  type StepNote,
+  stillNote,
+  UNWATCHED_REASON,
+  unwatched,
+} from './errandNotes'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
 import { outward } from './outward'
@@ -293,7 +306,13 @@ export class Errands extends Context.Service<
             yield* touchTask(task.taskId)
           }
         })
-      const set = (row: ErrandRow, state: ErrandRow['state'], reason: string | null) =>
+      const set = (
+        row: ErrandRow,
+        state: ErrandRow['state'],
+        reason: string | null,
+        // Only where the errand is held for a wait Althar cannot watch: its line says that in words, not the reason's.
+        plain?: (left: ReadonlyArray<SaidStep>) => ReturnType<typeof unwatched>,
+      ) =>
         sql.withTransaction(
           Effect.gen(function* () {
             const [last] = yield* sql<{
@@ -314,9 +333,10 @@ export class Errands extends Context.Service<
               payload: { reason },
             })
             // The last step's note says the errand is done.
-            if (state === 'paused') yield* say(row, `Errand on hold: ${why(reason)}`)
-            else if (state === 'cancelled')
-              yield* say(row, reason === CALLED_OFF || reason === null ? 'Errand called off' : `Errand called off: ${why(reason)}`)
+            // The person's line says what is left, and why in words they know; the reason itself stays on the errand, for the agents.
+            const left = (yield* stepsOf(row.id)).filter((step) => step.state !== 'done').map(said)
+            if (state === 'paused') yield* say(row, heldNote(left, reason, plain?.(left)))
+            else if (state === 'cancelled') yield* say(row, calledOffNote(left, reason, reason === CALLED_OFF))
           }),
         )
       const stepsOf = (id: string) => sql<StepRow>`SELECT * FROM errand_steps WHERE errand_id = ${id} ORDER BY position`
@@ -595,7 +615,14 @@ export class Errands extends Context.Service<
                   typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
                     ? error.message
                     : 'It did not go through.'
-                const note = failedNote(tool, action.target, action.request, message, !(error instanceof ActionNotPerformed))
+                const note = failedNote(
+                  tool,
+                  action.target,
+                  action.request,
+                  message,
+                  !(error instanceof ActionNotPerformed),
+                  step === undefined ? undefined : said(step),
+                )
                 if (errand !== undefined) yield* say(errand, note)
                 else yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', noteContent(note))
               }).pipe(Effect.catch(() => Effect.void))
@@ -713,7 +740,7 @@ export class Errands extends Context.Service<
                   actorId: instance.systemId,
                   payload: { messageId, words },
                 })
-                yield* say(row, `Errand resumed: you said “${words.trim()}”`)
+                yield* say(row, resumedNote((yield* stepsOf(row.id)).filter((step) => step.state !== 'done').map(said)))
                 return 'Resumed the errand on the person’s word.'
               }),
             ),
@@ -757,7 +784,8 @@ export class Errands extends Context.Service<
                     yield* set(
                       row,
                       'paused',
-                      `Althar cannot watch wait kinds: ${[...new Set(unsupported)].join(', ')}. Watched kinds: ${errandWaitKinds.join(', ')}. Keep this errand again with watched waits on the person’s fresh word.`,
+                      `${UNWATCHED_REASON} ${[...new Set(unsupported)].join(', ')}. Watched kinds: ${errandWaitKinds.join(', ')}. Keep this errand again with watched waits on the person’s fresh word.`,
+                      (left) => unwatched(left, errandWaitKinds),
                     )
                     continue
                   }
@@ -772,8 +800,17 @@ export class Errands extends Context.Service<
                     (row.remindedAt !== null && Date.parse(at) - Date.parse(row.remindedAt) < 86_400_000)
                   )
                     continue
-                  const first = steps[0]
-                  yield* say(row, stillNote(row.state === 'paused', row.reason, first === undefined ? undefined : said(first)))
+                  const left = steps.map(said)
+                  yield* say(
+                    row,
+                    stillNote(
+                      row.state === 'paused',
+                      row.reason,
+                      left,
+                      // Held for a wait it cannot watch, and still: not for another reason it has an unwatched wait beside.
+                      row.reason?.startsWith(UNWATCHED_REASON) === true ? unwatched(left, errandWaitKinds) : undefined,
+                    ),
+                  )
                   yield* change('errands', row.id, { remindedAt: at })
                 }
               }),
