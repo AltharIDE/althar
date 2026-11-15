@@ -40,12 +40,16 @@ it('turns HTML in host JSON and GraphQL errors into plain words and keeps the up
   const body = JSON.stringify({ message: 'Validation Failed', errors: [{ message: html }] })
   const error = failureOf('github', 422, new Headers(), body, 0)
   assert.strictEqual(error.message, "Validation Failed: Yowza that's a big file. Try again with a file size less than 10MB.")
-  assert.strictEqual(error.sizeLimit, 10_000_000)
+  assert.strictEqual(error.uploadLimit, 10_000_000)
   assert.strictEqual(
-    failureOf('gitlab', 413, new Headers(), JSON.stringify({ message: 'Maximum attachment size is 2 MiB' }), 0).sizeLimit,
+    failureOf('gitlab', 413, new Headers(), JSON.stringify({ message: 'Maximum attachment size is 2 MiB' }), 0).uploadLimit,
     2 * 1024 * 1024,
   )
-  assert.strictEqual(messageOf(JSON.stringify({ error: '&lt;b&gt;No &amp; no&lt;/b&gt;' }), 'Error'), 'No & no')
+  assert.strictEqual(
+    messageOf(JSON.stringify({ error: 'Reference &lt;branch&gt; not found &amp; unavailable' }), 'Error'),
+    'Reference <branch> not found & unavailable',
+  )
+  assert.strictEqual(messageOf(JSON.stringify({ message: 'a < b and c > d' }), 'Error'), 'a < b and c > d')
   assert.strictEqual(graphqlFailure('github', { message: '<b>Denied</b>' }, 200).message, 'Denied')
   assert.strictEqual(messageOf('<html><body>Bad gateway</body></html>', 'Bad gateway'), 'Bad gateway')
 })

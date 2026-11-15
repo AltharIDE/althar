@@ -1,5 +1,5 @@
 import type { PictureUpload } from '@althar/connectors'
-import { Duration, Effect, Option } from 'effect'
+import { Duration, Effect } from 'effect'
 
 /** The original stays in Outputs. Only the copy sent to the code host is changed. */
 export const fitPicture = (picture: PictureUpload, limit: number) =>
@@ -26,9 +26,5 @@ export const fitPicture = (picture: PictureUpload, limit: number) =>
       }
       return null
     },
-    catch: () => null,
-  }).pipe(
-    Effect.orElseSucceed(() => null),
-    Effect.timeoutOption(Duration.seconds(60)),
-    Effect.map(Option.getOrNull),
-  )
+    catch: (error) => error,
+  }).pipe(Effect.timeout(Duration.seconds(60)))

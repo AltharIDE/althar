@@ -963,7 +963,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     ...makeGitLabReleases({ http, project, mayNot }),
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
     capabilities: {
-      pictureLimit: (new URL(options.webUrl).hostname === 'gitlab.com' ? 100 : 10) * 1024 * 1024,
+      pictureLimit: 100 * 1024 * 1024,
       drafts: true,
       checkLogs: true,
       threads: true,

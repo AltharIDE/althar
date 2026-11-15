@@ -24,3 +24,10 @@ it.effect('reports that media cannot fit even after reducing it', () =>
     assert.isNull(yield* fitPicture({ bytes: RECORDING_GIF, name: 'motion.gif', mediaType: 'image/gif' }, 1))
   }),
 )
+
+it.effect('reports decoder failures separately from media that cannot fit', () =>
+  Effect.gen(function* () {
+    const error = yield* Effect.flip(fitPicture({ bytes: new Uint8Array(100), name: 'broken.png', mediaType: 'image/png' }, 10))
+    assert.instanceOf(error, Error)
+  }),
+)

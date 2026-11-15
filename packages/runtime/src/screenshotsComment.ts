@@ -91,7 +91,9 @@ export const changedBetween = (
   const now = new Set(posting.map((shot) => shot.key))
   const differ = posting.filter(
     (shot) =>
-      before.get(shot.key)?.digest !== shot.digest || (shot.caption !== undefined && before.get(shot.key)?.caption !== shot.caption),
+      before.get(shot.key)?.url === '' ||
+      before.get(shot.key)?.digest !== shot.digest ||
+      (shot.caption !== undefined && before.get(shot.key)?.caption !== shot.caption),
   ).length
   const gone = shown.filter((shot) => !now.has(shot.key)).length
   return differ + gone
@@ -113,7 +115,13 @@ export const standingOf = (now: ReadonlyArray<ScreenshotNow>, kept: Kept | undef
     // Only the views Outputs still shows: one gone is nothing to leave out.
     leftOut: leftOut.filter((key) => now.some((shot) => shot.key === key)),
     commentUrl: kept?.commentUrl ?? null,
-    failed: kept?.failed ?? null,
+    failed:
+      kept?.failed ??
+      (kept?.shown
+        .filter((shot) => shot.url === '' && posting.some((now) => now.key === shot.key && now.digest === shot.digest))
+        .map((shot) => shot.note ?? `Left out: ${shot.caption}`)
+        .join(' ') ||
+        null),
   }
 }
 

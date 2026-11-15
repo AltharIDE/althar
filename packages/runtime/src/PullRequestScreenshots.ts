@@ -203,25 +203,42 @@ export class PullRequestScreenshots extends Context.Service<
               })
             const original = { bytes, name: shot.name, mediaType: shot.mediaType }
             const limit = on.host.capabilities.pictureLimit ?? 10_000_000
-            let fitted = yield* fitPicture(original, limit)
+            let preparationFailed = false
+            const prepare = (ceiling: number) =>
+              fitPicture(original, ceiling).pipe(
+                Effect.catch((error) =>
+                  Effect.gen(function* () {
+                    preparationFailed = true
+                    yield* Effect.logWarning(`Could not prepare PR picture ${shot.name}`, error)
+                    return null
+                  }),
+                ),
+              )
+            let fitted = yield* prepare(limit)
             if (fitted !== null) {
               const result = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
               if (result._tag === 'Success') uploads[shot.digest] = result.success
-              else if ((result.failure.reason === 'rejected' && result.failure.sizeLimit !== undefined) || result.failure.status === 413) {
-                const smaller = Math.min(result.failure.sizeLimit ?? limit / 2, fitted.picture.bytes.byteLength)
-                fitted = yield* fitPicture(original, smaller)
+              else if (
+                (result.failure.reason === 'rejected' && result.failure.uploadLimit !== undefined) ||
+                result.failure.status === 413
+              ) {
+                const smaller = Math.min(result.failure.uploadLimit ?? limit / 2, fitted.picture.bytes.byteLength)
+                fitted = yield* prepare(smaller)
                 if (fitted !== null) {
                   const retried = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
                   if (retried._tag === 'Success') uploads[shot.digest] = retried.success
                   else if (
-                    (retried.failure.reason !== 'rejected' || retried.failure.sizeLimit === undefined) &&
+                    (retried.failure.reason !== 'rejected' || retried.failure.uploadLimit === undefined) &&
                     retried.failure.status !== 413
                   )
                     return yield* retried.failure
                 }
               } else return yield* result.failure
             }
-            if (uploads[shot.digest] === undefined) notes[shot.digest] = `Left out: ${shot.name} could not fit the host's upload limit.`
+            if (uploads[shot.digest] === undefined)
+              notes[shot.digest] = preparationFailed
+                ? `Left out: ${shot.name}. The image processor could not prepare it. Try again.`
+                : `Left out: ${shot.name} could not fit the host's upload limit.`
             else if (fitted?.note) notes[shot.digest] = fitted.note
             yield* keep(on.linkId, on.projectId, { uploads })
           }
@@ -319,7 +336,11 @@ export class PullRequestScreenshots extends Context.Service<
               leftOut,
               uploads,
               postedAt: new Date(comment.at).toISOString(),
-              failed: null,
+              failed:
+                posted
+                  .filter((shot) => shot.url === '')
+                  .map((shot) => shot.note ?? `Left out: ${shot.caption}`)
+                  .join(' ') || null,
             })
             yield* touchTask(input.taskId)
           }).pipe(
