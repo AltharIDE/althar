@@ -397,8 +397,8 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
       const going = Promise.resolve()
         .then(() => options.mask())
         .then((mask) => {
-          masking = mask
           if (!allowed(accepted)) return
+          masking = mask
           return sender(accepted).captureExceptionImmediate(error, options.installId, {
             ...base,
             // What ended a process is fatal; what one carried on after is an error.
