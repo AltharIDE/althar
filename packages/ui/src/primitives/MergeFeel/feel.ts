@@ -148,9 +148,28 @@ export function takePress(now = performance.now()): boolean {
   return presses.shift() !== undefined
 }
 
-/** A ring around the whole card, where its whole strip is Merge: a board card's. */
+/**
+ * Once it shows where it is: a card going to another lane waits there unseen
+ * while a copy of it travels (ListMotion), so what it plays waits for it to
+ * arrive. Gone meanwhile, or still unseen a while later, nothing plays.
+ */
+function whenShown(el: HTMLElement, then: () => void, within = 1200) {
+  const until = performance.now() + within
+  const look = () => {
+    if (!el.isConnected) return
+    if (getComputedStyle(el).visibility !== 'hidden') then()
+    else if (performance.now() < until) requestAnimationFrame(look)
+  }
+  requestAnimationFrame(look)
+}
+
+/** A ring around the whole card, where its whole strip is Merge: a board card's, as it arrives where it went. */
 export function ringCard(card: HTMLElement, layer: HTMLElement, ringClass: string) {
   if (reducedMotion() || !moves(card)) return
+  whenShown(card, () => spreadAround(card, layer, ringClass))
+}
+
+function spreadAround(card: HTMLElement, layer: HTMLElement, ringClass: string) {
   const grow = SPREAD.card
   const b = boxIn(card, layer)
   const ring = mark(layer, ringClass, { x: b.x - grow, y: b.y - grow, w: b.w + 2 * grow, h: b.h + 2 * grow })

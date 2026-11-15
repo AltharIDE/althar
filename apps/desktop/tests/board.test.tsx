@@ -1268,9 +1268,9 @@ describe('the board', () => {
         const there = (await lane('Running').findByText('Rate-limit refunds')).closest('article')
         expect(lane('Running').getByText('Merging')).toBeTruthy()
         // One ring, around the card where it is now, merging, as the host holds the merge.
-        const rings = runs.filter((run) => String((run.target as HTMLElement).className).includes('ring'))
-        expect(rings).toHaveLength(1)
-        expect(rings[0]?.card).toBe(there)
+        const rings = () => runs.filter((run) => String((run.target as HTMLElement).className).includes('ring'))
+        await waitFor(() => expect(rings()).toHaveLength(1))
+        expect(rings()[0]?.card).toBe(there)
       } finally {
         Reflect.deleteProperty(HTMLElement.prototype, 'animate')
         Reflect.deleteProperty(Element.prototype, 'getAnimations')

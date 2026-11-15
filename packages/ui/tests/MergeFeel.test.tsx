@@ -61,6 +61,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+const frame = () => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())))
+
 const ran = (runs: Run[], what: string) => runs.filter((run) => String((run.target as HTMLElement).className).includes(what))
 
 /** A card with Merge to press while it can be, and Merge's knot, where its merge goes. */
@@ -213,12 +215,11 @@ describe('a board card, merged from its strip', () => {
     onScreen()
     render(<Lanes />)
     await userEvent.click(screen.getByRole('button', { name: 'Accept and merge' }))
-    const rings = ran(runs, 'ring')
-    expect(rings).toHaveLength(1)
-    expect(rings[0]?.within).toBe(screen.getByTestId('arrived'))
+    await waitFor(() => expect(ran(runs, 'ring')).toHaveLength(1))
+    expect(ran(runs, 'ring')[0]?.within).toBe(screen.getByTestId('arrived'))
   })
 
-  it('rings for no card come merging without a press, and once for a press', () => {
+  it('rings for no card come merging without a press, and once for a press', async () => {
     const runs = compositor()
     onScreen()
     render(<Card stage="merging" />)
@@ -227,6 +228,7 @@ describe('a board card, merged from its strip', () => {
         <MergeFeel stage="merging" ringCard />
       </div>,
     )
+    await frame()
     expect(ran(runs, 'ring')).toHaveLength(0)
     notePress()
     for (let i = 0; i < 2; i += 1)
@@ -235,7 +237,24 @@ describe('a board card, merged from its strip', () => {
           <MergeFeel stage="merging" ringCard />
         </div>,
       )
+    await waitFor(() => expect(ran(runs, 'ring')).toHaveLength(1))
+    await frame()
     expect(ran(runs, 'ring')).toHaveLength(1)
+  })
+
+  it('waits to ring a card until it shows where it went, as one travelling between lanes does', async () => {
+    const runs = compositor()
+    onScreen()
+    notePress()
+    const { container } = render(
+      <div style={{ visibility: 'hidden' }}>
+        <MergeFeel stage="merging" ringCard />
+      </div>,
+    )
+    await frame()
+    expect(ran(runs, 'ring')).toHaveLength(0)
+    ;(container.firstElementChild as HTMLElement).style.visibility = ''
+    await waitFor(() => expect(ran(runs, 'ring')).toHaveLength(1))
   })
 
   it('forgets a press nothing answered within a moment', () => {
