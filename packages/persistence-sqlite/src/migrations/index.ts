@@ -1,6 +1,7 @@
 import { SqliteMigrator } from '@effect/sql-sqlite-node'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { statements as clientIdentities } from './0086_client_identities'
 
 import { statements as initial } from './0001_initial'
 import { statements as permissionScopeTurn } from './0002_permission_scope_turn'
@@ -191,6 +192,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0083_external_waits', statements: externalWaits },
   { key: '0084_evidence_galleries', statements: evidenceGalleries },
   { key: '0085_turn_undo', statements: turnUndo },
+  { key: '0086_client_identities', statements: clientIdentities },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
