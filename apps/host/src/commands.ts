@@ -8,6 +8,7 @@ import { HOST_VERSION, initializeHome, serveHome, type HostDependencies } from '
 import { type HostOptions, USAGE } from './options'
 import { installService, runExternal, type ServiceCommands } from './service'
 import { hostStatus } from './status'
+import { serveStdio, type BridgeStreams } from './stdioBridge'
 import {
   commitReadyRelease,
   recoverBeforeStart,
@@ -26,6 +27,7 @@ import { controllerAlive, loadInstallation, processStamp, readReceipt, updateErr
 import { databasePermit } from './updates/reservation'
 
 export interface HostIO extends ServiceCommands {
+  readonly stdio?: BridgeStreams
   readonly out: (text: string) => void
   readonly platform?: NodeJS.Platform
   readonly notifySocket?: string | undefined
@@ -72,6 +74,13 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
               ),
       })
     switch (options.command) {
+      case 'connect-stdio':
+        return yield* serveStdio(
+          options.profile,
+          options.expectedHome ?? '',
+          options.clientApiVersion ?? 0,
+          io.stdio ?? { input: process.stdin, output: process.stdout },
+        )
       case 'release-info':
         return yield* out(releaseInfo(), JSON.stringify(releaseInfo()))
       case 'verify-release': {

@@ -9,6 +9,7 @@ Commands:
   init             Initialize a private profile and a separate encryption key
   serve            Run the home until stopped
   status           Check the running home's private API
+  connect-stdio    Carry a socket-authority API connection over SSH stdio
   install-service  Install a systemd user service
   configure-updates  Configure verified release downloads and managed installation
   update           Check/download a release; --apply explicitly restarts the host
@@ -34,6 +35,8 @@ Options:
   --apply                    Restart into the staged release; may interrupt work
   --allow-incompatible       Explicitly approve an API or storage-format change
   --help                     Show this help
+  --home-id <home_id>         Expected home for connect-stdio
+  --client-api-version <n>    Client API version for connect-stdio
   --version                  Print the host version
 
 Local API access is private and restricted. SSH bootstrap, paired-client
@@ -44,6 +47,7 @@ export interface HostOptions {
     | 'init'
     | 'serve'
     | 'status'
+    | 'connect-stdio'
     | 'install-service'
     | 'configure-updates'
     | 'update'
@@ -79,6 +83,8 @@ export interface HostOptions {
   readonly releaseSequence: number | undefined
   readonly releaseOutput: string
   readonly controllerPid: number | undefined
+  readonly expectedHome: string | undefined
+  readonly clientApiVersion: number | undefined
 }
 
 const invalid = (message: string): never => {
@@ -101,6 +107,8 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   const releaseKeys: string[] = []
   let command: HostOptions['command'] | undefined
   const values = new Set([
+    '--home-id',
+    '--client-api-version',
     '--profile',
     '--worktrees',
     '--key-file',
@@ -116,6 +124,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     '--controller-pid',
   ])
   const commands = new Set([
+    'connect-stdio',
     'init',
     'serve',
     'status',
@@ -163,6 +172,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
         case 'init':
         case 'serve':
         case 'status':
+        case 'connect-stdio':
         case 'install-service':
         case 'configure-updates':
         case 'update':
@@ -179,6 +189,16 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     } else return invalid('Unknown host command or option. Run althar-host --help.')
   }
   command ??= 'help'
+  if (command === 'connect-stdio') {
+    if (
+      !/^home_[a-f0-9]{32}$/.test(flags.get('--home-id') ?? '') ||
+      !Number.isSafeInteger(Number(flags.get('--client-api-version'))) ||
+      Number(flags.get('--client-api-version')) < 1
+    )
+      return invalid('connect-stdio requires --home-id and a positive --client-api-version.')
+    if (switches.has('--json')) return invalid('connect-stdio uses framed binary output, not JSON lines.')
+  } else if (flags.has('--home-id') || flags.has('--client-api-version'))
+    return invalid('Connection identity options require connect-stdio.')
   if (projects.length > 0 && command !== 'init') return invalid('--project is available only during init.')
   if (switches.has('--wait') && command !== 'status' && command !== 'update')
     return invalid('--wait is available only for status or update.')
@@ -242,5 +262,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     releaseSequence,
     releaseOutput: resolve(flags.get('--output') ?? 'out/host'),
     controllerPid,
+    expectedHome: flags.get('--home-id'),
+    clientApiVersion: flags.has('--client-api-version') ? Number(flags.get('--client-api-version')) : undefined,
   }
 }

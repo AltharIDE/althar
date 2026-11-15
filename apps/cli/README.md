@@ -36,6 +36,45 @@ Then type to talk to the agent. Your message waits for the agent's turn to end.
 
 One runtime at a time can use a profile; a second CLI on the same profile stops with `DatabaseInUse`.
 
+## Attach to a running home
+
+The existing folder command above still embeds the runtime. `attach` connects
+to an already running home instead; it never opens its database, checks local
+provider sign-in or owns the home's lifetime. Agents and repositories live on
+the home. Open/provision the project there first.
+
+```bash
+node dist/althar.js inspect --profile /absolute/path/to/profile
+node dist/althar.js inspect --ssh my-vps
+# Verify the printed home identity independently, then list its projects:
+node dist/althar.js inspect --ssh my-vps --home home_<32-hex-digits>
+node dist/althar.js attach --ssh my-vps --home home_<32-hex-digits> --project proj_<32-hex-digits> --task "Retry checkout" --agent codex
+node dist/althar.js attach --ssh my-vps --home home_<32-hex-digits> --thread thr_<32-hex-digits>
+```
+
+For local attachment replace `--ssh … --home …` with `--profile /absolute/path`;
+`--home` can also pin a local profile. SSH uses system OpenSSH and the managed
+host launcher. Configure and verify your host key and noninteractive key/agent
+authentication in a terminal first. Optional `--ssh-config`, `--ssh-port`,
+`--remote-launcher` and `--remote-profile` select an explicit config, port or
+absolute remote paths. No arbitrary remote command is accepted.
+
+**In attached mode `/quit`, EOF, Ctrl-C and SIGTERM disconnect only.** Work
+continues on the home; reattach with the printed thread ID. `/stop` explicitly
+stops the session. `/allow` and `/reject` cannot approve anything: SSH/socket
+authority is not person authority. Answer in the trusted desktop window.
+`/interrupt`, `/model` and `/agent` use the shared versioned command API.
+
+New-task attachment prints a creation command ID before dispatching. If a
+connection fails with an uncertain outcome, use the same `--command-id cmd_…`
+with the same creation options to recover its receipt. The corresponding
+session start uses a separate deterministic ID too. Prefer `--thread` to join
+an existing task without starting or switching its agent. Commands are never
+automatically replayed. History changes trigger a fresh checked snapshot; a
+disconnected client exits with a visible error. This terminal shows the newest
+100 items and cumulative live text; older history, files and rich evidence
+remain in the desktop interface.
+
 ## Work on it
 
 From `apps/cli`:

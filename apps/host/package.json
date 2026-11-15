@@ -25,6 +25,7 @@
     "@althar/persistence-sqlite": "workspace:*",
     "@althar/provider-adapters": "workspace:*",
     "@althar/runtime": "workspace:*",
+    "@althar/transport-node": "workspace:*",
     "effect": "4.0.7",
     "tar": "7.5.22"
   },
