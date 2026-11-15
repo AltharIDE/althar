@@ -6,8 +6,8 @@ import { removeTreeSync } from '@althar/testing'
 import { afterEach } from 'vitest'
 
 const roots: string[] = []
-export const temporary = () => {
-  const root = mkdtempSync(join(tmpdir(), 'althar-host-test-'))
+export const temporary = (base = tmpdir()) => {
+  const root = mkdtempSync(join(base, 'althar-host-test-'))
   roots.push(root)
   return root
 }

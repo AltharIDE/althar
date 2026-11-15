@@ -128,3 +128,20 @@ bun run test tests/process.test.ts --maxWorkers=1
 ```
 
 Both `test` and `test:coverage` build the Node entry first, including when the repository's changed-test stress runner invokes them on a clean checkout. CI's dedicated `host.yml` gates type-aware checks, the build, process/integration tests and at least 90% line and branch coverage on pull requests, in the merge queue and on main. No real service is installed by tests; service manager calls are injected, while the built process, signals, git, database and socket are exercised directly. Real VPS/systemd reboot and real-provider validation must precede a supported personal-host release.
+
+## SSH clients
+
+The running service accepts attached clients through `connect-stdio`, a framed
+noninteractive helper launched over system OpenSSH. It requires an explicit
+`--home-id` and `--client-api-version`; it opens only the private API connection
+and never starts a second runtime. Its stdout is protocol data, not terminal
+text. The private endpoint secret stays on the host. SSH access conveys socket
+authority, so it cannot approve permissions or pair a device.
+
+See the [CLI attachment guide](../cli/README.md#attach-to-a-running-home) for
+inspection, home pinning and task attachment, and the [transport architecture](../../packages/transport-node/ARCHITECTURE.md)
+for lifecycle and protocol limits. Disconnecting the SSH client leaves the
+service and its sessions running. Existing service updates are unchanged: an
+explicit apply restarts the service and disconnects attached clients, which
+check the new host identity/API version when reconnecting. A newer incompatible
+API requires a compatible client before attachment.
