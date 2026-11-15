@@ -1,56 +1,88 @@
 import { useEffect, useState, type RefObject } from 'react'
 
+import { virtualThreadIn } from '../../lib/virtual'
+
 export interface ThreadStop {
-  readonly id: number
-  readonly target: HTMLElement
+  readonly id: string
+  /** The message, where it is drawn: in a thread drawn whole. */
+  readonly target: HTMLElement | null
+  /** Its block's key, in a thread drawn only near the view (VirtualBlocks), which draws it to go there. */
+  readonly key?: string
   readonly prompt: string
   readonly reply: string
 }
 
 const words = (el: Element) => (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 280)
 
-/** Index only the messages rendered in this scroller, including earlier turns once opened. */
+/**
+ * Index the messages in this scroller, including earlier turns once opened: those a thread drawn only near the view holds,
+ * drawn or not, or else those rendered.
+ */
 export function useThreadNavigation(scroll: RefObject<HTMLElement | null>) {
   const [stops, setStops] = useState<readonly ThreadStop[]>([])
-  const [active, setActive] = useState<HTMLElement | null>(null)
+  const [active, setActive] = useState<string | null>(null)
   const [overflow, setOverflow] = useState(false)
   useEffect(() => {
     const el = scroll.current
     if (!el) return
     let frame = 0
     let indexed: ThreadStop[] = []
-    const ids = new WeakMap<HTMLElement, number>()
+    const ids = new WeakMap<HTMLElement, string>()
     let nextId = 0
     const position = () => {
       setOverflow(el.scrollHeight > el.clientHeight + 1)
+      const virtual = virtualThreadIn(el)
+      if (virtual !== undefined) {
+        // The last stop above the edge, by where each is laid out or would be: they come in order.
+        const edge = el.scrollTop + 40
+        let low = 0
+        let high = indexed.length - 1
+        let found = -1
+        while (low <= high) {
+          const mid = (low + high) >> 1
+          const top = virtual.topOf(indexed[mid]!.key ?? '')
+          if (top !== null && top <= edge) {
+            found = mid
+            low = mid + 1
+          } else high = mid - 1
+        }
+        setActive(indexed[Math.max(found, 0)]?.id ?? null)
+        return
+      }
       const edge = el.getBoundingClientRect().top + 40
-      let current = indexed[0]?.target ?? null
+      let current = indexed[0]?.id ?? null
       for (const stop of indexed) {
-        if (stop.target.getBoundingClientRect().top > edge) break
-        current = stop.target
+        if ((stop.target?.getBoundingClientRect().top ?? 0) > edge) break
+        current = stop.id
       }
       setActive(current)
     }
     const read = () => {
       frame = 0
       indexed = []
-      for (const node of el.querySelectorAll<HTMLElement>('[data-thread-prompt], [data-thread-preview]')) {
-        if (node.closest('[hidden], [aria-hidden="true"]')) continue
-        if (node.hasAttribute('data-thread-prompt')) {
-          const id = ids.get(node) ?? nextId++
-          ids.set(node, id)
-          indexed.push({ id, target: node, prompt: words(node.querySelector('[data-thread-preview]') ?? node), reply: '' })
-        } else if (!node.closest('[data-thread-prompt]')) {
-          const stop = indexed.at(-1)
-          if (stop && stop.reply.length < 280)
-            indexed[indexed.length - 1] = { ...stop, reply: `${stop.reply} ${words(node)}`.trim().slice(0, 280) }
+      const virtual = virtualThreadIn(el)
+      if (virtual !== undefined)
+        indexed = virtual
+          .stops()
+          .map((stop) => ({ id: `virtual-${stop.key}`, key: stop.key, target: null, prompt: stop.prompt, reply: stop.reply }))
+      else
+        for (const node of el.querySelectorAll<HTMLElement>('[data-thread-prompt], [data-thread-preview]')) {
+          if (node.closest('[hidden], [aria-hidden="true"]')) continue
+          if (node.hasAttribute('data-thread-prompt')) {
+            const id = ids.get(node) ?? `drawn-${nextId++}`
+            ids.set(node, id)
+            indexed.push({ id, target: node, prompt: words(node.querySelector('[data-thread-preview]') ?? node), reply: '' })
+          } else if (!node.closest('[data-thread-prompt]')) {
+            const stop = indexed.at(-1)
+            if (stop && stop.reply.length < 280)
+              indexed[indexed.length - 1] = { ...stop, reply: `${stop.reply} ${words(node)}`.trim().slice(0, 280) }
+          }
         }
-      }
       setStops((previous) =>
         previous.length === indexed.length &&
         previous.every((one, i) => {
           const next = indexed[i]
-          return next?.target === one.target && next.prompt === one.prompt && next.reply === one.reply
+          return next?.id === one.id && next.target === one.target && next.prompt === one.prompt && next.reply === one.reply
         })
           ? previous
           : indexed,

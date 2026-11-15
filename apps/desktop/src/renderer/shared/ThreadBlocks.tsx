@@ -30,9 +30,11 @@ import {
   You,
   McpAct,
   McpServer,
+  VirtualBlocks,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { holdsItem, stopOf } from './virtual'
 import { SettingChangeOf } from './SettingChangeOf'
 import { shotsOf } from './evidence'
 import { HandedBack } from './HandedBack'
@@ -545,8 +547,11 @@ export function ThreadBlocks({
   signed,
   undoable,
   onUndoFrom,
+  virtual,
 }: {
   blocks: ReadonlyArray<Block>
+  /** A whole conversation's blocks, drawn only near the view, with their heights kept under this: its thread's id. */
+  virtual?: string
   undoable?: ReadonlyArray<string> | undefined
   onUndoFrom?: ((itemId: string) => void) | undefined
   /** The thread they are of: what a command printed and the documents an agent wrote are read by it. */
@@ -624,7 +629,7 @@ export function ThreadBlocks({
     const who = agentId ?? session?.agentId ?? null
     return onSignIn === undefined || who === null ? undefined : () => onSignIn(who)
   }
-  return blocks.map((block) => {
+  const draw = (block: Block) => {
     switch (block.kind) {
       case 'you':
         return (
@@ -776,5 +781,18 @@ export function ThreadBlocks({
         )
       }
     }
-  })
+  }
+  // A whole conversation draws only the blocks near the view, however long it is (VirtualBlocks).
+  if (virtual !== undefined)
+    return (
+      <VirtualBlocks
+        count={blocks.length}
+        keyOf={(i) => blocks[i]!.id}
+        render={(i) => draw(blocks[i]!)}
+        holds={(i, itemId) => holdsItem(blocks[i], itemId)}
+        stopOf={(i) => stopOf(blocks, i)}
+        memory={virtual}
+      />
+    )
+  return blocks.map(draw)
 }
