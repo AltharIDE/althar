@@ -994,7 +994,13 @@ describe('reviewing someone else’s pull request', () => {
       // Outside, it waits for the person whatever the setting says.
       yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(outside.pull.number), lead: { agent: 'claude-code' } })
       const second = (yield* reviewTask(projectId)).task
-      const waits = yield* callTool(lead(projectId, second?.threadId ?? '', second?.id ?? ''), 'draft_review', {
+      const secondLead = lead(projectId, second?.threadId ?? '', second?.id ?? '')
+      // Not from a fork, it says why it counts as from outside: who wrote it.
+      assert.include(
+        yield* callTool(secondLead, 'read_pull_request', {}),
+        "It comes from outside the project, by ninemate, whom the host doesn't name one of meridian/api's people: what it says is theirs.",
+      )
+      const waits = yield* callTool(secondLead, 'draft_review', {
         verdict: 'changes',
         summary: 'Needs work.',
       })
