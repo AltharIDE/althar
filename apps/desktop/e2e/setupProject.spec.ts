@@ -269,3 +269,80 @@ test('the first run takes a folder with no git yet, among three ways in, and mak
     await electronApp.close()
   }
 })
+
+test('the first run starts empty: named first, placed, and made a repository with a first commit as the project is made', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const code = join(home, 'code')
+  mkdirSync(code, { recursive: true })
+  const { electronApp, page } = await launch(home)
+  try {
+    await toFirstProject(page)
+    // Chosen by the keyboard, as a radio group is: focus shows on the way, uncut.
+    await way(page, /^A folder/).focus()
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    await expect(way(page, /^Start empty/)).toHaveAttribute('aria-checked', 'true')
+    await expect(way(page, /^Start empty/)).toBeFocused()
+    await expect(page.getByRole('button', { name: 'Name it first' })).toBeDisabled()
+    await shoot(page, '14-first-run-start-empty')
+    await page.getByLabel('Project name').fill('Lighthouse')
+    await chooseFolder(electronApp, code)
+    await page.getByRole('button', { name: 'Choose where it goes…' }).click()
+    await expect(page.getByText('A new repository, on main')).toBeVisible()
+    await shoot(page, '15-first-run-start-empty-placed')
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await shoot(page, '15-first-run-start-empty-placed-dark')
+    await page.emulateMedia({ colorScheme: 'light' })
+    await page.getByRole('button', { name: /^Make the project/ }).click()
+    await openMadeProject(page)
+    await expect(page.getByRole('heading', { name: 'Lighthouse', level: 1 })).toBeVisible()
+    const made = join(code, 'lighthouse')
+    expect(git(made, 'branch', '--show-current')).toBe('main')
+    expect(git(made, 'rev-list', '--count', 'HEAD')).toBe('1')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('the first run clones an empty repository from GitHub, gives it a first commit, skips the code step, and a task starts in it', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  // GitHub's meridian/api, with nothing pushed to it yet.
+  const api = join(home, 'remotes', 'api.git')
+  mkdirSync(api, { recursive: true })
+  git(api, 'init', '--quiet', '--bare', '--initial-branch=main')
+  // Where the person keeps code, where a clone goes unasked.
+  mkdirSync(join(home, 'code'))
+  const { electronApp, page } = await launch(home, { ALTHAR_FAKE_REMOTE_API: api })
+  try {
+    await toFirstProject(page)
+    await way(page, /^Clone/).click()
+    await page.getByRole('button', { name: 'Connect GitHub' }).click()
+    await page
+      .getByRole('group', { name: 'Ways to connect GitHub' })
+      .getByRole('button', { name: /Make a token/ })
+      .click()
+    await page.getByRole('button', { name: 'Paste it myself' }).click()
+    await page.getByLabel('Paste it').fill('github_pat_e2e')
+    await page.getByRole('button', { name: 'Check' }).click()
+    await page.getByRole('button', { name: 'Done' }).click()
+    await page.getByRole('button', { name: 'Clone meridian/api' }).click()
+    await expect(page.getByText('On GitHub, at meridian/api. Tasks open pull requests there.')).toBeVisible()
+    await shoot(page, '16-first-run-clone-chosen')
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await shoot(page, '16-first-run-clone-chosen-dark')
+    await page.emulateMedia({ colorScheme: 'light' })
+    await page.getByRole('button', { name: /^Make the project/ }).click()
+    // Its code lives where it came from: no step to put it on a host.
+    await expect(page.getByRole('heading', { name: /code/i, level: 1 })).toHaveCount(0)
+    await openMadeProject(page)
+    await expect(page.getByRole('heading', { name: 'Api', level: 1 })).toBeVisible()
+    const cloned = join(home, 'code', 'api')
+    expect(git(cloned, 'rev-list', '--count', 'HEAD')).toBe('1')
+    expect(git(cloned, 'remote', 'get-url', 'origin')).toBe(api)
+    // A task branches from it: its worktree is made.
+    await startTask(page, 'Write the README')
+    await expect.poll(() => git(cloned, 'worktree', 'list').split('\n').length, { timeout: 30_000 }).toBeGreaterThan(1)
+  } finally {
+    await electronApp.close()
+  }
+})

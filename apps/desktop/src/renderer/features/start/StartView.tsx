@@ -416,6 +416,8 @@ function First({
             />
           )
         }
+        // A new repository is named after the project, so the name comes first.
+        naming={way === 'new'}
         name={folderWay || draft === null ? project.name : draft.name}
         onNameChange={(next) => {
           if (folderWay || draft === null) project.rename(next)

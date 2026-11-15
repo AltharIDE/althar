@@ -49,6 +49,8 @@ export const text = {
   orOthers: (names: readonly string[]) => (names.length === 0 ? '' : `Or ${names.join(', or ')}`),
   team: 'Where on it',
   readingTeams: 'Reading…',
+  tryAgain: 'Try again',
+  ownersFailed: (host: string) => `Where it can go on ${host} couldn’t be read.`,
   back: 'Back',
   into: (where: string) => `Into ${where}`,
   chooseWhere: 'Choose where it goes',
@@ -322,7 +324,20 @@ export function SetupSide({
                       onName={setup.onRepoName}
                       visibility={home.private ? 'private' : 'public'}
                       onVisibility={(next) => setup.onPrivate(next === 'private')}
-                      {...(draft.homeError === null ? {} : { error: draft.homeError })}
+                      {...(draft.homeError !== null
+                        ? { error: draft.homeError }
+                        : home.ownersFailed
+                          ? {
+                              error: (
+                                <>
+                                  {text.ownersFailed(host.name)}{' '}
+                                  <Button size="small" variant="quiet" onClick={home.retryOwners}>
+                                    {text.tryAgain}
+                                  </Button>
+                                </>
+                              ),
+                            }
+                          : {})}
                     />
                   </SetupPick>
                 ))}

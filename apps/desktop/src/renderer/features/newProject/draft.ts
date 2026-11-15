@@ -12,7 +12,7 @@ import {
 } from '@althar/contracts'
 
 import { type Client, messageOf, newProjectId } from '../../data/client'
-import { keys } from '../../data/reads'
+import { keys, reads as readsOf } from '../../data/reads'
 import type { Host } from '../../data/services'
 import { shortFolder } from '../../shared/folders'
 import { remoteOf } from '../../shared/remotes'
@@ -94,6 +94,8 @@ export interface DraftClone {
   readonly product: Product | null
   /** Its host's name: GitHub, or the host a URL names. */
   readonly hostName: string
+  /** Its host's address, as a remote names it: github.com. With `remote`, which repository it is. */
+  readonly host: string
   /** A repository main found of the same name, which may be it, on this computer already: added, not cloned, where it is. */
   readonly here: { readonly found: string; readonly where: string } | null
 }
@@ -187,10 +189,11 @@ export interface DraftStore {
 
 /** What making it will do, worked out from the draft and what is connected: the repository put on a host, and where its issues go. */
 export interface DraftPlan {
-  /** The one repository only on this computer, put on a host where `home` says. */
+  /** The one repository only on this computer, put on a host where `home` says; null where it stays here. */
   readonly publish: {
     readonly connectionId: string
-    readonly owner: RepositoryOwner
+    /** Null while where it can go is read: Create reads it, and waits. */
+    readonly owner: RepositoryOwner | null
     readonly name: string
     readonly private: boolean
   } | null
@@ -216,6 +219,14 @@ export interface DraftActions {
 }
 
 const IDLE: DraftSteps = { source: 'idle', home: 'idle', issues: 'idle' }
+
+/** Whether two remotes are one repository: the same host, and the same path there, which code hosts read whatever its case. */
+export const sameRepository = (
+  one: { readonly host: string; readonly remote: string },
+  other: { readonly host: string; readonly remote: string },
+) =>
+  one.host.toLowerCase() === other.host.toLowerCase() &&
+  one.remote.replace(/\.git$/, '').toLowerCase() === other.remote.replace(/\.git$/, '').toLowerCase()
 
 /** The ink a draft's mark is drawn in: the person's, or what the runtime would pick beside the projects there are. */
 export const inkOf = (draft: Draft, projects: ReadonlyArray<ProjectSummary>): ProjectInk =>
@@ -399,7 +410,8 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
     const reading = await client.readFolder(grant).catch(() => null)
     const [found] = reading?.kind === 'repository' ? reading.repositories : []
     const ref = found?.remote === null || found === undefined ? null : remoteOf(found.remote)
-    if (found === undefined || ref === null || ref.path.toLowerCase() !== clone.remote.toLowerCase()) return null
+    // The same repository, on the same host: one of its name on another host is another repository.
+    if (found === undefined || ref === null || !sameRepository({ host: ref.host, remote: ref.path }, clone)) return null
     return {
       path: found.path,
       grant,
@@ -478,6 +490,28 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
         }))
         return null
       }
+      // A repository to put on a host needs its name there, and where it goes: read now where it wasn't yet, before anything is done.
+      let publish = plan.publish
+      if (publish !== null && publish.name === '') {
+        store.change(at.id, (now) => ({ ...now, homeError: 'Give it a name.' }))
+        return null
+      }
+      if (publish !== null && publish.owner === null) {
+        const asked = publish
+        store.change(at.id, (now) => ({ ...now, creating: true, error: null, homeError: null }))
+        const owners = await cache.fetchQuery(readsOf(client).repositoryOwners(asked.connectionId)).catch(() => null)
+        const [first] = owners ?? []
+        if (first === undefined) {
+          store.change(at.id, (now) => ({
+            ...now,
+            creating: false,
+            homeError:
+              owners === null ? 'Where it can go couldn’t be read. Try again.' : 'There’s nowhere it can be made with this account.',
+          }))
+          return null
+        }
+        publish = { ...asked, owner: first }
+      }
       const step = (part: keyof DraftSteps, state: StepState) =>
         store.change(at.id, (now) => ({ ...now, steps: { ...now.steps, [part]: state } }))
       store.change(at.id, (now) => ({
@@ -489,7 +523,7 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
         homeError: null,
         steps: {
           source: 'doing',
-          home: plan.publish === null ? 'idle' : 'waiting',
+          home: publish === null ? 'idle' : 'waiting',
           issues: plan.tracker === null ? 'idle' : 'waiting',
         },
       }))
@@ -508,8 +542,10 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
               return null
             }
             const cloned = await client.cloneRepository(place.grant, clone.from)
+            // An empty repository clones too, with no commit to branch from: it gets its first, as a folder with no commit does.
+            const prepared = await client.prepareFolder(cloned.grant, cloned.path)
             folder = {
-              path: cloned.path,
+              path: prepared.path,
               grant: cloned.grant,
               name: cloned.path.split(/[\\/]/).at(-1) ?? clone.remote,
               where: shortFolder(cloned.path),
@@ -553,12 +589,13 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
 
         // Where its code lives: the one repository only here, put on its host before the project is made, so it opens there.
         const [alone] = kept
-        if (plan.publish !== null && kept.length === 1 && alone !== undefined && alone.remote === null) {
+        if (publish?.owner != null && kept.length === 1 && alone !== undefined && alone.remote === null) {
           step('home', 'doing')
           try {
             const published = await client.publishRepository({
               at: { grant: alone.grant, path: alone.path },
-              ...plan.publish,
+              ...publish,
+              owner: publish.owner,
             })
             const there = { ...alone, remote: published.webUrl }
             kept = [there]

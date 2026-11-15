@@ -218,6 +218,8 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
    * waits on something picked, and the name shows once it is.
    */
   project?: ReactNode
+  /** The name shows before anything is picked: for a way the project is named first, such as a new repository named after it. */
+  naming?: boolean
   /** The project's name as it stands. */
   name: string
   onNameChange: (name: string) => void
@@ -259,6 +261,7 @@ export function Welcome({
   awayText,
   repositories,
   picked,
+  naming = false,
   onPick,
   onAdd,
   onDrop,
@@ -459,7 +462,7 @@ export function Welcome({
                 />
               )}
               {nothing && <Problem>{t.project.nothing}</Problem>}
-              {picked.length > 0 && (
+              {(picked.length > 0 || naming) && (
                 <div className={s.named}>
                   <label htmlFor={nameId} className={s.namedLabel}>
                     {t.project.name}

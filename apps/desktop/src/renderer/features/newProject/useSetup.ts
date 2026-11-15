@@ -13,7 +13,7 @@ import { productBrand } from '../../shared/products'
 import { changesOn, hostnameOf, remoteOf } from '../../shared/remotes'
 import { ago } from '../../shared/time'
 import { serviceBrand, serviceName, serviceOfProduct } from '../connections/ways'
-import type { Draft, DraftClone, DraftHome, DraftIssues, DraftPlan, DraftStore } from './draft'
+import { type Draft, type DraftClone, type DraftHome, type DraftIssues, type DraftPlan, type DraftStore, sameRepository } from './draft'
 
 /*
  * The setup a new project's page shows beside its name, worked out from its
@@ -67,6 +67,9 @@ export interface SetupModel {
         readonly connected: ReadonlyArray<{ readonly id: string; readonly name: string; readonly brand: Brand; readonly thing: string }>
         readonly away: ReadonlyArray<{ readonly service: Service; readonly name: string; readonly brand: Brand; readonly thing: string }>
         readonly owners: ReadonlyArray<RepositoryOwner> | null
+        /** Where it can go couldn't be read: said at its name, with a way to read it again. */
+        readonly ownersFailed: boolean
+        readonly retryOwners: () => void
         readonly owner: string | null
         readonly name: string
         readonly private: boolean
@@ -200,6 +203,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
             pastedConnection === undefined ? { url: draft.query.trim() } : { connectionId: pastedConnection.id, path: ref.path.split('/') },
           product: pastedConnection?.product ?? null,
           hostName: pastedConnection?.name ?? ref.host,
+          host: ref.host,
           here: null,
         }
   const pasted: HostedRepository | null =
@@ -230,6 +234,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
       from: { connectionId: connection.id, path },
       product: connection.product,
       hostName: connection.name,
+      host: hostnameOf(connection.webUrl),
       here: here === undefined ? null : { found: here.id, where: here.where },
     }
   }
@@ -308,10 +313,8 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
       : null
 
   const plan: DraftPlan = {
-    publish:
-      local && homeConnection !== null && owner !== null && repoName.trim() !== ''
-        ? { connectionId: homeConnection, owner, name: repoName.trim(), private: hidden }
-        : null,
+    // A host chosen is a host to put it on, whatever is still being read: only Only on this computer keeps it here.
+    publish: local && homeConnection !== null ? { connectionId: homeConnection, owner, name: repoName.trim(), private: hidden } : null,
     tracker:
       trackerChoice.kind === 'tracker'
         ? { connectionId: trackerChoice.connectionId, container }
@@ -344,6 +347,8 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
           .filter((host) => !host.connected)
           .map((host) => ({ service: host.id as Service, name: host.name, brand: host.brand, thing: host.thing })),
         owners: ownerList,
+        ownersFailed: owners.isError,
+        retryOwners: () => void owners.refetch(),
         owner: owner?.id ?? null,
         name: repoName,
         private: hidden,
@@ -367,7 +372,8 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
       return mine.some((folder) => folder.git === 'none') ? 'Starting git…' : 'Reading its folders…'
     }
     if (draft.steps.home === 'doing' && plan.publish !== null)
-      return `Making ${plan.publish.owner.id}/${plan.publish.name} on ${codeHosts.find((one) => one.id === plan.publish?.connectionId)?.name ?? 'its host'}…`
+      return `Making ${plan.publish.owner?.id ?? '…'}/${plan.publish.name} on ${codeHosts.find((one) => one.id === plan.publish?.connectionId)?.name ?? 'its host'}…`
+    if (draft.steps.home === 'idle' && plan.publish?.owner === null) return 'Reading where it can go…'
     return `Opening ${draft.name.trim()}…`
   })()
   const said = (() => {
@@ -433,7 +439,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
         clone,
         error: null,
         // A clone not cloned yet replaces one cloned before it was made into a project: chosen again, it is cloned again.
-        folders: now.folders.filter((folder) => folder.came !== 'clone' || clone.remote === now.clone?.remote),
+        folders: now.folders.filter((folder) => folder.came !== 'clone' || (now.clone !== null && sameRepository(clone, now.clone))),
         name: now.name.trim() === '' ? (clone.remote.split('/').at(-1) ?? '').replace(/^./, (first) => first.toUpperCase()) : now.name,
       }))
     },

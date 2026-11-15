@@ -368,6 +368,68 @@ describe('where a new project’s code lives', () => {
     expect(publishRepository).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'tidepool-2' }))
   })
 
+  it('waits for where it can go on the host, read as Create is pressed, and puts it there', async () => {
+    let owners: (list: ReadonlyArray<{ id: string; name: string; kind: 'user' }>) => void = () => undefined
+    const listRepositoryOwners = vi.fn(
+      () => new Promise<ReadonlyArray<{ id: string; name: string; kind: 'user' }>>((done) => (owners = done)),
+    )
+    const { client, onCreated } = opened(
+      { listConnections: vi.fn(async () => connected), listRepositoryOwners },
+      { pickFolders: vi.fn(async () => ['grant_local']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    await screen.findByRole('radiogroup', { name: 'Where its code lives' })
+    expect(screen.getByText('Create puts it on GitHub.')).toBeTruthy()
+    await create('Tidepool')
+    expect(client.openProject).not.toHaveBeenCalled()
+    await act(async () => owners([{ id: 'ada', name: 'ada', kind: 'user' }]))
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(client.publishRepository).toHaveBeenCalledWith(expect.objectContaining({ owner: { id: 'ada', name: 'ada', kind: 'user' } }))
+  })
+
+  it('says where it can go couldn’t be read, with a way to read it again, and keeps nothing here in its place', async () => {
+    const listRepositoryOwners = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue([{ id: 'ada', name: 'ada', kind: 'user' }])
+    const { client } = opened(
+      { listConnections: vi.fn(async () => connected), listRepositoryOwners },
+      { pickFolders: vi.fn(async () => ['grant_local']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    const code = await screen.findByRole('radiogroup', { name: 'Where its code lives' })
+    expect(await within(code).findByText(/Where it can go on GitHub couldn’t be read\./)).toBeTruthy()
+    await create('Tidepool')
+    expect(await within(code).findByText('Where it can go couldn’t be read. Try again.')).toBeTruthy()
+    expect(client.publishRepository).not.toHaveBeenCalled()
+    expect(client.openProject).not.toHaveBeenCalled()
+    await userEvent.clear(within(code).getByRole('textbox', { name: 'Name' }))
+    await userEvent.type(within(code).getByRole('textbox', { name: 'Name' }), 'tidepool')
+    await userEvent.click(within(code).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect((within(code).getByRole('textbox', { name: 'Name' }) as HTMLInputElement).value).toBe('tidepool'))
+    await waitFor(() => expect(within(code).queryByRole('button', { name: 'Try again' })).toBeNull())
+  })
+
+  it('asks for a name on the host before anything is done, where it was emptied', async () => {
+    const { client } = opened({ listConnections: vi.fn(async () => connected) }, { pickFolders: vi.fn(async () => ['grant_files']) })
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    const code = await screen.findByRole('radiogroup', { name: 'Where its code lives' })
+    await waitFor(() => expect(within(code).getByRole('textbox', { name: 'Name' })).toBeTruthy())
+    await userEvent.clear(within(code).getByRole('textbox', { name: 'Name' }))
+    await create('Tidepool')
+    expect(await within(code).findByText('Give it a name.')).toBeTruthy()
+    expect(client.prepareFolder).not.toHaveBeenCalled()
+    expect(client.publishRepository).not.toHaveBeenCalled()
+    expect(client.openProject).not.toHaveBeenCalled()
+  })
+
   it('stays only here where the person says, put on nothing', async () => {
     const { client, onCreated } = opened(
       { listConnections: vi.fn(async () => connected) },
@@ -393,6 +455,11 @@ describe('a new project cloned from its host', () => {
       cloneRepository: vi.fn(async () => {
         order.push('clone')
         return { grant: 'grant_tidepool', path: '/Users/me/code/tidepool' }
+      }),
+      // An empty repository clones too: made ready, it gets a first commit to branch from.
+      prepareFolder: vi.fn(async (_grant: string, path?: string) => {
+        order.push('prepare')
+        return { did: 'committed' as const, path: path ?? '', branch: 'main', files: 0 }
       }),
       openProject: vi.fn(async () => {
         order.push('open')
@@ -428,7 +495,33 @@ describe('a new project cloned from its host', () => {
       connectionId: 'conn1',
       container: { id: 'you/tidepool', name: 'you/tidepool' },
     })
-    expect(order).toEqual(['clone', 'open'])
+    expect(client.prepareFolder).toHaveBeenCalledWith('grant_tidepool', '/Users/me/code/tidepool')
+    expect(order).toEqual(['clone', 'prepare', 'open'])
+  })
+
+  it('adds one of its name on this computer in its place only where it is the same repository on the same host', async () => {
+    const tidepool = { id: 'f-tidepool', name: 'tidepool', where: '~/code/tidepool', branch: 'main', worked: Date.now() }
+    for (const [remote, reused] of [
+      ['git@gitlab.com:you/tidepool.git', false],
+      ['git@github.com:You/Tidepool.git', true],
+    ] as const) {
+      const readFolder = vi.fn(async (grant: string) =>
+        grant === 'grant_f-tidepool'
+          ? { kind: 'repository' as const, name: 'tidepool', repositories: [repo('/Users/me/code/tidepool', remote)], project: null }
+          : (readings[grant] ?? readings.grant_ops!),
+      )
+      const { client, onCreated, view } = opened(
+        { listConnections: vi.fn(async () => connected), readFolder },
+        { findRepositories: vi.fn(async () => ({ lookedIn: ['~/code'], repositories: [tidepool] })) },
+      )
+      await named('Tidepool')
+      // Of its name here, it is offered as added; which it is, is known once it is read, as it is made.
+      await userEvent.click(await screen.findByRole('button', { name: 'Add you/tidepool' }))
+      await create('Tidepool')
+      await waitFor(() => expect(onCreated).toHaveBeenCalled())
+      expect(client.cloneRepository).toHaveBeenCalledTimes(reused ? 0 : 1)
+      view.unmount()
+    }
   })
 
   it('clones once: the project not made, Create again opens what was cloned', async () => {
