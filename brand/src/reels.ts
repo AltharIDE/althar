@@ -171,7 +171,7 @@ export const REELS: readonly Reel[] = [
         height: 325,
         density: 2,
         /* the composer in the middle of the frame, rather than at the top of an empty story */
-        css: `body { margin: 0 !important; } #storybook-root, .ch-root { min-height: 100vh; display: flex; align-items: center; justify-content: center; box-sizing: border-box; } .ch-root > * { width: 100%; }`,
+        css: `body { margin: 0 !important; } #storybook-root { min-height: 100vh; display: flex; align-items: center; } .ch-root { width: 100%; }`,
         steps: [{ wait: 5400 }],
       },
     ],

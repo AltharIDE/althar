@@ -74,6 +74,8 @@ const drawPointer = () => {
     'mousemove',
     (e) => {
       const { clientX, clientY } = e as MouseEvent
+      /* a story's own play function sends events too, at the page's corner: only the mouse's are the pointer's */
+      if (!e.isTrusted) return
       pointer.style.transform = `translate(${clientX}px,${clientY}px)`
     },
     true,
@@ -81,6 +83,7 @@ const drawPointer = () => {
   addEventListener(
     'mousedown',
     (e) => {
+      if (!e.isTrusted) return
       const { clientX, clientY } = e as MouseEvent
       const ring = document.createElement('div')
       ring.className = '__ring'
@@ -157,7 +160,10 @@ async function record(reel: Reel, theme: Theme, scene: Scene, dir: string, index
     const { width, height } = scene.region ?? scene
     /* it comes in from the region's lower right, where it is out of the frame */
     const edge = scene.region ? { x: scene.region.x + width + 30, y: scene.region.y + height + 30 } : { x: width - 4, y: height - 4 }
-    rest.set(tab, { x: Math.min(edge.x, scene.width - 2), y: Math.min(edge.y, scene.height - 2) })
+    const start = { x: Math.min(edge.x, scene.width - 2), y: Math.min(edge.y, scene.height - 2) }
+    rest.set(tab, start)
+    /* the real mouse starts there too, or the first frames draw the pointer at the page's corner */
+    await tab.mouse.move(start.x, start.y)
   }
   await tab.waitForTimeout(300)
   const cdp = await tab.context().newCDPSession(tab)
