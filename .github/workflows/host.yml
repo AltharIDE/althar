@@ -82,5 +82,7 @@ jobs:
       - uses: ./.github/actions/flaky/quarantine
       - run: bun run check
       - run: bun run test:coverage --maxWorkers=2
+      - name: Verify a signed portable release with real bundled provider CLIs
+        run: bun run release:smoke
       - if: always()
         uses: ./.github/actions/flaky

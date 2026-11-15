@@ -12,6 +12,13 @@ export class HostError extends Schema.TaggedError<HostError>()('HostError', {
     'UnsupportedPlatform',
     'HostUnavailable',
     'ServiceUnavailable',
+    'UpdateUnavailable',
+    'ReleaseRejected',
+    'UpdateBusy',
+    'UpdateIncompatible',
+    'UpdateRecoveryRequired',
+    'UpdateFailed',
+    'UpdateNotConfigured',
   ]),
   message: Schema.String,
 }) {}

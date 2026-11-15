@@ -10,6 +10,7 @@
   "type": "module",
   "scripts": {
     "build": "vp build",
+    "release:smoke": "bun run build && node scripts/release-smoke.ts",
     "start": "node dist/althar-host.js",
     "check": "vp check",
     "fix": "vp check --fix",
@@ -21,9 +22,11 @@
     "@agentclientprotocol/claude-agent-acp": "0.106.0",
     "@agentclientprotocol/codex-acp": "2.6.0",
     "@althar/contracts": "workspace:*",
+    "@althar/persistence-sqlite": "workspace:*",
     "@althar/provider-adapters": "workspace:*",
     "@althar/runtime": "workspace:*",
-    "effect": "4.0.7"
+    "effect": "4.0.7",
+    "tar": "7.5.22"
   },
   "devDependencies": {
     "@althar/testing": "workspace:*",

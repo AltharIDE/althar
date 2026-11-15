@@ -326,9 +326,15 @@ Client, home and worker exchange protocol versions, build versions and
 capabilities before use. Refuse incompatible commands with a route to
 update; a stale client must not make a home migrate or downgrade its store.
 The app manages signed host updates, backups and rollback of binaries.
-Schema rollback requires restoring a compatible backup. Drain active work
-before a service update; installing a new desktop alone does not restart a
-remote home. Roll out compatible workers before requiring their features.
+The first standalone host checks/downloads/verifies automatically and applies
+explicitly by default. Optional automatic activation happens on the next
+service start before work begins, only for compatible releases. Explicit
+maintenance stops agents; finish active work first. Idle-time application
+needs a real admission/drain barrier and is not implemented. Schema rollback
+may restore a snapshot only during storage-only preparation; after an
+incompatible runtime may have acted, keep data and require a corrected
+release. Installing a new desktop alone does not restart a remote home.
+Roll out compatible workers before requiring their features.
 
 Keep structured logs on both sides with home, host, task, attempt, command
 and event ids. Show connection loss, queue reason, last heartbeat, version,
@@ -394,7 +400,7 @@ remote files/previews, provider validation, pools and workers remain ahead.
 Registered devices currently act for one profile owner; they are not a
 multiplayer permission model. Pricing and entitlements remain separate.
 
-**Host service foundation implemented, 15 Nov 2026:** [`apps/host`](../../../apps/host/README.md) now supplies a persistent Node home, versioned private API, separate-key authenticated encryption, health, restart/signal cleanup and a systemd user service with delivered credentials. This is a trusted single-user process, with co-located agents rather than isolated workers. From-source installation is available; signed distribution, actual VPS/systemd reboot validation, provider headless login/refresh, protected client enrollment, SSH bootstrap and remote files/previews remain phase 1 work. No pools, worker leases, relay or multiplayer authorization are implied.
+**Host service foundation implemented, 15 Nov 2026:** [`apps/host`](../../../apps/host/README.md) now supplies a persistent Node home, versioned private API, separate-key authenticated encryption, health, restart/signal cleanup and a systemd user service with delivered credentials. Signed portable Linux releases and managed updates include independent supervision, verified staging, explicit application by default, optional compatible next-start activation and phase-aware database/code recovery. This is a trusted single-user process, with co-located agents rather than isolated workers. Production signing-key provisioning/publication, actual VPS/systemd reboot validation, provider headless login/refresh, protected client enrollment, SSH bootstrap and remote files/previews remain phase 1 work. No pools, worker leases, relay or multiplayer authorization are implied.
 
 1. **One usable personal Linux host.** Build `apps/host`, sealing, versioned
    private-socket RPC, pairing and SSH bootstrap. Co-locate a remote project

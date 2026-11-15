@@ -67,6 +67,8 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
   readonly database: string
   /** Where the store copies itself before an update migrates it (`backupsIn(profile)`); without it, no copy is made. */
   readonly backups?: string
+  /** An update reservation permit supplied only by the trusted host. */
+  readonly databaseMaintenanceToken?: string
   /** Migrations a test adds after the store's own, such as one that fails. Never in a packaged app. */
   readonly extraMigrations?: ReadonlyArray<Migration>
   /** The agents it may start. The registry's, unless a test gives others. */
@@ -97,6 +99,7 @@ export const layer = (options: RuntimeLayerOptions) => {
         'store',
         Database.layer({
           filename: options.database,
+          ...(options.databaseMaintenanceToken === undefined ? {} : { maintenanceToken: options.databaseMaintenanceToken }),
           ...(options.backups === undefined ? {} : { backups: options.backups }),
           ...(options.extraMigrations === undefined ? {} : { migrations: [...migrations, ...options.extraMigrations] }),
         }),

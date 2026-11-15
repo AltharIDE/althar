@@ -8,6 +8,8 @@ import { parseOptions } from './options'
 let exitCode = 0
 try {
   const options = parseOptions(process.argv.slice(2))
+  const updateLocked = process.env.ALTHAR_HOST_UPDATE_LOCKED
+  const releaseSigningKey = options.command === 'package-release' ? process.env.ALTHAR_HOST_RELEASE_SIGNING_KEY : undefined
   const controls = clearServiceEnvironment(process.env)
   const stop = new AbortController()
   const interrupted = () => stop.abort()
@@ -23,6 +25,8 @@ try {
         entry: resolve(process.argv[1] ?? 'dist/althar-host.js'),
         path: process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin',
         ...controls,
+        updateLocked,
+        releaseSigningKey,
       }).pipe(Effect.provide(Logger.layer([Logger.withConsoleError(Logger.formatJson)]))),
       { signal: stop.signal },
     )

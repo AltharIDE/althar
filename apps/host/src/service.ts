@@ -31,9 +31,11 @@ export const renderService = (options: HostOptions, commands: ServiceCommands): 
   if (![commands.node, commands.entry, options.profile, options.worktrees, options.keyFile].every(isAbsolute))
     throw new HostError({ code: 'InvalidConfig', message: 'The service requires absolute executable, profile and credential paths.' })
   const credential = options.encryptedCredential ?? options.keyFile
-  const start = [commands.node, commands.entry, 'serve', '--profile', options.profile, '--worktrees', options.worktrees]
-    .map((part) => quote(part))
-    .join(' ')
+  const program =
+    options.installation === undefined
+      ? [commands.node, commands.entry, 'serve']
+      : ['/bin/sh', join(options.installation, 'launcher'), 'serve', '--installation', options.installation]
+  const start = [...program, '--profile', options.profile, '--worktrees', options.worktrees].map((part) => quote(part)).join(' ')
   return `${MARKER}
 [Unit]
 Description=Althar project home

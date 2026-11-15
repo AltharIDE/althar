@@ -41,6 +41,8 @@ describe('host command execution', () => {
       NOTIFY_SOCKET: '/run/notify',
       WATCHDOG_USEC: '100',
       WATCHDOG_PID: '123',
+      ALTHAR_HOST_RELEASE_SIGNING_KEY: 'secret signing material',
+      ALTHAR_HOST_UPDATE_LOCKED: '/program',
     }
     assert.strictEqual(clearServiceEnvironment(env).notifySocket, '/run/notify')
     assert.deepStrictEqual(env, { PATH: '/bin' })
@@ -51,6 +53,8 @@ describe('host command execution', () => {
     assert.strictEqual(failureMessage(Cause.fail(new HostError({ code: 'InvalidConfig', message: 'Read the help.' }))).exitCode, 64)
     assert.strictEqual(failureMessage(Cause.fail({ _tag: 'DatabaseInUse' })).exitCode, 75)
     assert.strictEqual(failureMessage(Cause.fail({ _tag: 'MigrationFailed' })).exitCode, 78)
+    assert.strictEqual(failureMessage(Cause.fail({ _tag: 'DatabaseInMaintenance' })).exitCode, 75)
+    assert.strictEqual(failureMessage(Cause.fail({ _tag: 'DatabaseSchemaTooNew' })).exitCode, 78)
     assert.strictEqual(failureMessage(Cause.fail(new HostError({ code: 'HostUnavailable', message: 'Unavailable.' }))).exitCode, 75)
     assert.notInclude(failureMessage(Cause.die(new Error('private token goes here'))).message, 'private token')
   })

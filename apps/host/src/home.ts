@@ -14,7 +14,7 @@ export const HOST_VERSION = metadata.version
 export type HostDependencies = Pick<
   Runtime.RuntimeLayerOptions,
   'agents' | 'connectors' | 'agentSearch' | 'agentConfigs' | 'usage' | 'fetch'
->
+> & { readonly maintenanceToken?: string }
 export interface HomeReady {
   readonly homeId: string
   readonly hostDeviceId: string
@@ -23,8 +23,9 @@ export interface HomeReady {
   readonly pid: number
 }
 
-const runtime = (options: HostOptions, secrets: Layer.Layer<import('@althar/runtime').Secrets>, dependencies: HostDependencies) =>
-  services({
+const runtime = (options: HostOptions, secrets: Layer.Layer<import('@althar/runtime').Secrets>, dependencies: HostDependencies) => {
+  const { maintenanceToken, ...runtimeDependencies } = dependencies
+  return services({
     database: join(options.profile, 'althar.sqlite'),
     backups: join(options.profile, 'backups'),
     worktreeRoot: options.worktrees,
@@ -36,8 +37,10 @@ const runtime = (options: HostOptions, secrets: Layer.Layer<import('@althar/runt
     appVersion: HOST_VERSION,
     deviceName: hostname(),
     secrets,
-    ...dependencies,
+    ...(maintenanceToken === undefined ? {} : { databaseMaintenanceToken: maintenanceToken }),
+    ...runtimeDependencies,
   })
+}
 
 /** Local operator provisioning opens no person-authority socket and starts no input turn. */
 export const initializeHome = (given: HostOptions, dependencies: HostDependencies = {}) =>

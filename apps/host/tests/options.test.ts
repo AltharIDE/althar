@@ -7,6 +7,24 @@ const home = resolve('/home/host-owner')
 const parse = (args: string[], env: NodeJS.ProcessEnv = {}) => parseOptions(args, env, home)
 
 describe('host command configuration', () => {
+  it('defaults to explicit apply and validates update-only controls', () => {
+    const options = parse(['configure-updates', '--release-key', '/trusted/one', '--release-key', '/trusted/two', '--automatic-updates'])
+    assert.isTrue(options.automaticUpdates)
+    assert.deepStrictEqual(options.releaseKeys, ['/trusted/one', '/trusted/two'])
+    assert.isUndefined(parse(['configure-updates']).automaticUpdates)
+    assert.isFalse(parse(['configure-updates', '--manual-updates']).automaticUpdates)
+    assert.isTrue(parse(['update', '--apply', '--allow-incompatible', '--wait']).allowIncompatible)
+    for (const args of [
+      ['serve', '--release-key', '/key'],
+      ['configure-updates', '--automatic-updates', '--manual-updates'],
+      ['update', '--allow-incompatible'],
+      ['serve', '--apply'],
+      ['package-release', '--release-sequence', '0'],
+      ['recover-update', '--controller-pid', '-1'],
+      ['serve', '--release-sequence', '2'],
+    ])
+      assert.throws(() => parse(args))
+  })
   it('uses a profile distinct from the desktop and keeps keys outside it', () => {
     const config = parse(['serve'])
     assert.strictEqual(config.command, 'serve')
