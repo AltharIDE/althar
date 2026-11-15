@@ -29,7 +29,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--live-dot);
+  background: var(--live);
 }
 .pair {
   display: inline-flex;
