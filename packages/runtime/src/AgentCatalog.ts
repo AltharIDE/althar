@@ -353,27 +353,23 @@ export class AgentCatalog extends Context.Service<
   )
 }
 
-export const agentCatalogHandlers = AcpApi.toLayer(
-  Effect.gen(function* () {
-    const catalog = yield* AgentCatalog
-    const recent = new Map<string, Deferred.Deferred<number, ApiError>>()
-    const once = (id: string, work: Effect.Effect<number, ApiError>) =>
-      Effect.suspend(() => {
-        const seen = recent.get(id)
-        if (seen !== undefined) return Deferred.await(seen)
-        const result = Deferred.makeUnsafe<number, ApiError>()
-        recent.set(id, result)
-        const oldest = recent.keys().next().value
-        if (recent.size > 1000 && oldest !== undefined) recent.delete(oldest)
-        return Effect.onExit(work, (exit) =>
-          Exit.hasInterrupts(exit) ? Effect.sync(() => recent.delete(id)) : Deferred.done(result, exit),
-        )
-      })
-    return AcpApi.of({
-      GetAgentCatalog: ({ refresh }) => catalog.read(refresh),
-      SaveAcpConnection: ({ commandId, connection }) => once(commandId, catalog.save(connection)),
-      CheckAcpConnection: ({ commandId, agentId }) => once(commandId, catalog.check(agentId)),
-      RemoveAcpConnection: ({ commandId, agentId }) => once(commandId, catalog.remove(agentId)),
+export const agentCatalogHandlers = Effect.gen(function* () {
+  const catalog = yield* AgentCatalog
+  const recent = new Map<string, Deferred.Deferred<number, ApiError>>()
+  const once = (id: string, work: Effect.Effect<number, ApiError>) =>
+    Effect.suspend(() => {
+      const seen = recent.get(id)
+      if (seen !== undefined) return Deferred.await(seen)
+      const result = Deferred.makeUnsafe<number, ApiError>()
+      recent.set(id, result)
+      const oldest = recent.keys().next().value
+      if (recent.size > 1000 && oldest !== undefined) recent.delete(oldest)
+      return Effect.onExit(work, (exit) => (Exit.hasInterrupts(exit) ? Effect.sync(() => recent.delete(id)) : Deferred.done(result, exit)))
     })
-  }),
-)
+  return AcpApi.of({
+    GetAgentCatalog: ({ refresh }) => catalog.read(refresh),
+    SaveAcpConnection: ({ commandId, connection }) => once(commandId, catalog.save(connection)),
+    CheckAcpConnection: ({ commandId, agentId }) => once(commandId, catalog.check(agentId)),
+    RemoveAcpConnection: ({ commandId, agentId }) => once(commandId, catalog.remove(agentId)),
+  })
+})

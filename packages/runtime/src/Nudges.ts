@@ -1,4 +1,5 @@
 import {
+  type NudgeKind,
   kindWords,
   plainTitle,
   type ReadyTask,
@@ -39,23 +40,8 @@ import { Sessions } from './Sessions'
 /** How long changes are gathered, so a burst is read once. */
 const GATHER = Duration.millis(250)
 
-/** What a nudge is about: an agent asks the person, work stopped and couldn't start again, or a task is ready. */
-export type NudgeKind = 'call' | 'stopped' | 'ready'
-
-export type NudgeEvent =
-  /** Something came to need the person. */
-  | {
-      readonly _tag: 'Nudge'
-      readonly kind: NudgeKind
-      readonly key: string
-      readonly title: string
-      readonly body: string
-      readonly threadId: string
-    }
-  /** How many things wait on the person, across every project. */
-  | { readonly _tag: 'Waiting'; readonly count: number }
-  /** Whether any work runs: a task's run under way, or an agent mid-turn anywhere. */
-  | { readonly _tag: 'Working'; readonly working: boolean }
+export type { NudgeKind } from '@althar/contracts'
+export type NudgeEvent = import('@althar/contracts').AttentionEvent
 
 /** What a step that needs the person is called in a nudge. */
 const STEPS: Readonly<Record<StuckStep['step'], string>> = {
