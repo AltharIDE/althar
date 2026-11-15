@@ -162,6 +162,7 @@ export function ChangeTeam({
   agents,
   onClose,
   onSaved,
+  leadOnly = false,
 }: {
   projectId: string
   task: Teamed | null
@@ -169,6 +170,8 @@ export function ChangeTeam({
   onClose: () => void
   /** The steps the person changed, once saved: where the task is shown, its team reads them at once. */
   onSaved?: (changed: ReadonlyArray<PlanStep>) => void
+  /** Only the lead changes here: its review reads when it does by another choice (a small change's, after its merge), and isn't shown. */
+  leadOnly?: boolean
 }) {
   const { client, cache } = useServices()
   // The task as it opened: what the dialog shows once it can no longer change.
@@ -196,7 +199,7 @@ export function ChangeTeam({
   const gone = how === null
   // A plan made with no review has no review step: a change that can still have one shows it, off, for the person to add.
   const lead = plan.steps.find((step) => step.key === 'implement')
-  const addable = begun && now.kind === 'change' && now.reviewing == null && !plan.steps.some((step) => step.key === 'review')
+  const addable = begun && !leadOnly && now.kind === 'change' && now.reviewing == null && !plan.steps.some((step) => step.key === 'review')
   const given: ReadonlyArray<PlanStep> =
     addable && lead !== undefined
       ? [
@@ -250,7 +253,7 @@ export function ChangeTeam({
     <TeamDialog
       task={now.title}
       steps={steps
-        .filter((step) => step.key !== 'review' || reviewShown(step))
+        .filter((step) => step.key !== 'review' || (!leadOnly && reviewShown(step)))
         .map((step) => {
           return {
             id: step.key,

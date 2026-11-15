@@ -7,6 +7,7 @@ import { ApiError, type ThreadItem } from '@althar/contracts'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { SmallChangeOf } from '../src/renderer/features/task/SmallChangeOf'
+import { Card, type CardActions } from '../src/renderer/features/project/Card'
 import type { SmallChangeContent } from '../src/renderer/shared/thread'
 import { act } from 'react'
 
@@ -130,7 +131,77 @@ describe("a small change's team", () => {
       expect(client.changeTeam).toHaveBeenCalledWith('t1', [{ key: 'review', agentId: 'codex', model: null, skipped: true }]),
     )
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    // Before the thread reads again, its route agrees: no review stop is left beside "no review".
     expect(screen.getByText(/no review/)).toBeTruthy()
+    expect(screen.queryByText('Review before Ship')).toBeNull()
+  })
+
+  it('names who leads from the next turn, as the board reads it, not only the plan its card was made from', async () => {
+    const lead = { key: 'implement' as const, agentId: 'codex', model: null, effort: 'high', skipped: false }
+    const fake = fakeClient({ getBoard: vi.fn(async () => board({ ...small, steps: [lead, small.steps[1]!] })) })
+    withServices(
+      <SmallChangeOf
+        card={content()}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    expect(await screen.findByText(/^codex/)).toBeTruthy()
+    expect(screen.queryByText(/^claude-code/)).toBeNull()
+  })
+
+  it('leaves a review that reads after the merge to its Review stop: the dialog changes only its lead', async () => {
+    const afterMerge = smallChange({ reviewAfterMerge: true })
+    if (afterMerge.kind !== 'small_change') throw new Error('Expected a small change')
+    const fake = fakeClient({ getBoard: vi.fn(async () => board(small, 'running')) })
+    withServices(
+      <SmallChangeOf
+        card={afterMerge.content}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect(dialog.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: /^Review:/ })).toBeNull()
+    expect(dialog.queryByRole('button', { name: 'Add a review' })).toBeNull()
+  })
+})
+
+describe("a small change's card in the coordinator's thread", () => {
+  const actions = (onChangeTeam: (taskId: string) => void): CardActions => ({
+    project: 'meridian',
+    agents,
+    agentName: (id) => id ?? '',
+    onStart: vi.fn(),
+    onHold: vi.fn(),
+    onChange: vi.fn(),
+    onCreateBranch: vi.fn(),
+    onOpen: vi.fn(),
+    onChangeTeam,
+    onStopBackground: vi.fn(),
+  })
+  const running = (preset: string) => card({ phase: 'running', plan: { ...card().plan!, startsAt: null, preset } })
+
+  it('offers Change the team… from the card, with no need to open the task', async () => {
+    const onChangeTeam = vi.fn()
+    withServices(<Card card={running('Small change')} actions={actions(onChangeTeam)} />, fakeClient().client)
+    await userEvent.click(screen.getByRole('button', { name: 'Change the team…' }))
+    expect(onChangeTeam).toHaveBeenCalledWith('t1')
+  })
+
+  it('offers nothing of the kind on another task, which has its row and its menu', () => {
+    withServices(<Card card={running('Change')} actions={actions(vi.fn())} />, fakeClient().client)
+    expect(screen.queryByRole('button', { name: 'Change the team…' })).toBeNull()
   })
 })
 

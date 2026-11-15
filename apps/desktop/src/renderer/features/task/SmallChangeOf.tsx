@@ -44,16 +44,16 @@ function checksOf(card: SmallChangeContent): SmallChangeChecks {
 }
 
 /** When its review reads it: before the merge once it was made a full task, none where its rule or its own word says so. */
-const whenOf = (card: SmallChangeContent): SmallChangeReviewWhen =>
+const whenOf = (card: SmallChangeContent, reviewer: unknown): SmallChangeReviewWhen =>
   (card.fullTask ?? card.review) != null
     ? 'before'
     : card.reviewAfter !== undefined
       ? 'after'
       : card.reviewAfterMerge === false
-        ? card.reviewer === null
+        ? reviewer === null
           ? 'none'
           : 'before'
-        : card.reviewer === null || card.afterMerge?.holds === 'none'
+        : reviewer === null || card.afterMerge?.holds === 'none'
           ? 'none'
           : 'after'
 
@@ -85,10 +85,6 @@ export function SmallChangeOf({
 }) {
   const { client } = useServices()
   const [error, setError] = useState<string | null>(null)
-  // What the person just chose, shown at once until the card read again says it.
-  const [chosen, setChosen] = useState<SmallChangeReviewWhen | null>(null)
-  const kept = whenOf(card)
-  useEffect(() => setChosen(null), [kept])
   // Its team: what the person just saved, laid over the card's until the card read again says the same.
   const effortOf = useEffortNames()
   const teamed = useTeamed(projectId, card.taskId)
@@ -96,6 +92,12 @@ export function SmallChangeOf({
   const [saved, setSaved] = useState<Partial<Record<PlanStep['key'], PlanStep>>>({})
   const seen = JSON.stringify([card.lead, card.reviewer])
   useEffect(() => setSaved({}), [seen])
+  // Its reviewer as it stands, the person's saved word first: the route below follows it, as the team line does.
+  const reviewStep = saved.review === undefined ? card.reviewer : saved.review.skipped ? null : saved.review
+  // What the person just chose, shown at once until the card read again says it.
+  const [chosen, setChosen] = useState<SmallChangeReviewWhen | null>(null)
+  const kept = whenOf(card, reviewStep)
+  useEffect(() => setChosen(null), [kept])
   const change = card.change
   const head = change?.head ?? null
   const merged = change?.state === 'merged'
@@ -151,9 +153,10 @@ export function SmallChangeOf({
       setError(messageOf(failure))
     })
   }
-  const leadStep = saved.implement ?? { agentId: card.lead.agentId, model: card.lead.model, effort: card.lead.effort ?? null }
+  // Who leads from its next turn: the board's reading, which follows a lead changed through the composer or by Auto, not only the plan's.
+  const planned = teamed?.plan?.steps.find((step) => step.key === 'implement')
+  const leadStep = saved.implement ?? planned ?? { agentId: card.lead.agentId, model: card.lead.model, effort: card.lead.effort ?? null }
   const lead = named(leadStep.agentId, leadStep.model)
-  const reviewStep = saved.review === undefined ? card.reviewer : saved.review.skipped ? null : saved.review
   const reviewer = reviewStep == null ? null : named(reviewStep.agentId, reviewStep.model)
   const effort = effortOf(leadStep.agentId, leadStep.model, leadStep.effort ?? null)
   const team = teamLine(`${lead.name}${effort === null ? '' : ` · ${effort}`}`, reviewer === null ? null : reviewer.name)
@@ -182,6 +185,8 @@ export function SmallChangeOf({
       and {holds === 'all' ? 'what it finds comes back here' : 'only something major comes back here'}.
     </>
   )
+  // A review set to read after the merge keeps its timing: only the Review stop changes it, so the dialog leaves it out.
+  const leadOnly = card.reviewAfterMerge === true || after !== undefined
   const item = full === null ? (after?.item ?? null) : null
   return (
     <>
@@ -232,6 +237,7 @@ export function SmallChangeOf({
           task={teamed}
           agents={agents}
           onClose={() => setChangingTeam(false)}
+          {...(leadOnly ? { leadOnly: true } : {})}
           onSaved={(changed) => setSaved((was) => ({ ...was, ...Object.fromEntries(changed.map((step) => [step.key, step])) }))}
         />
       )}
