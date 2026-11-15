@@ -4,6 +4,8 @@ import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
+import { HomeButton } from '../homes/HomeConnections'
+import { showHomes } from '../homes/useHomes'
 import { shownAddress } from '../../../main/browser/addresses'
 import { pages, usePageTabs } from '../browser/pages'
 import { SearchNotice } from '../finder/SearchNotice'
@@ -106,7 +108,7 @@ function TabsBar({
   quick: boolean
   onQuick: (open: boolean) => void
 }) {
-  const { host } = useServices()
+  const { host, client } = useServices()
   const chrome = useWindowChrome()
   const update = useUpdate()
   const online = useOnline()
@@ -143,9 +145,10 @@ function TabsBar({
       onClose={tabs.close}
       onReorder={tabs.reorder}
       onOpen={tabs.open}
-      onNewProject={tabs.newProject}
+      onNewProject={client.connection === undefined ? tabs.newProject : showHomes}
       end={
         <>
+          <HomeButton />
           {load.glance !== null && (
             <LoadMeter load={load.glance} slots={SLOTS} onOpen={load.open} onHide={load.hide} text={loadText.meter} />
           )}
@@ -183,7 +186,7 @@ export function BareBar({ className }: { className?: string }) {
 function BareTitleBar({ className }: { className?: string }) {
   const chrome = useWindowChrome()
   return (
-    <TitleBar {...chrome} className={className}>
+    <TitleBar {...chrome} className={className} end={<HomeButton />}>
       {null}
     </TitleBar>
   )
@@ -198,11 +201,13 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const [usage, setUsage] = useState(false)
   // The quick settings, from the gear at the bar's end, and ⌘, on every screen.
   const [quick, setQuick] = useState(false)
-  const { select, current, newProject, none, openSettings } = tabs
+  const { select, current, newProject: createProject, none, openSettings } = tabs
+  const { client } = useServices()
+  const newProject = client.connection === undefined ? createProject : showHomes
   const { open: settingsOpen, current: onSettings } = tabs.settings
   const open = tabs.tabs.map((tab) => tab.id)
   const order = open.join(' ')
-  const newTab: NewTab = { start: tabs.newProject, made: tabs.made, close: tabs.closeNew }
+  const newTab: NewTab = { start: newProject, made: tabs.made, close: tabs.closeNew }
   // Back to the composer dictation was carried from: the coordinator's conversation, or the task.
   const navigate = useNavigate()
   const back = useCallback(

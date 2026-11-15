@@ -1,4 +1,12 @@
-import type { SearchDocuments } from '@althar/contracts'
+import {
+  API_VERSION,
+  socketCanCall,
+  type ClientIdentity,
+  type ConnectionInfo,
+  type FeedPosition,
+  type SearchDocuments,
+} from '@althar/contracts'
+import { checkedPosition, checkedWatch } from './checkedWatch'
 import type { AcpCatalog, AcpConnection } from '@althar/contracts'
 
 import {
@@ -133,6 +141,7 @@ export type OnePress =
   | { readonly attentionId: string; readonly action: OnePressAction }
 
 export interface Client {
+  readonly connection?: ConnectionInfo
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
   readonly listProjects: () => Promise<ProjectList>
@@ -747,7 +756,12 @@ export interface Client {
    * listening, at first and again after it broke, when what streams only to
    * those listening (an agent's words, a command's output) may have been missed.
    */
-  readonly watch: (listener: (event: WatchEvent) => void, since?: number, onWatching?: () => void) => () => void
+  readonly watch: (
+    listener: (event: WatchEvent) => void,
+    since?: number | FeedPosition,
+    onWatching?: () => void,
+    onReset?: () => void,
+  ) => () => void
   readonly close: () => Promise<void>
 }
 
@@ -827,15 +841,54 @@ const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Prom
 }
 
 /** Connects to the runtime over a port, and keeps the connection until `close`. */
-export const connect = async (port: DomMessagePort): Promise<Client> => {
+export const connect = async (port: DomMessagePort, expected?: ClientIdentity): Promise<Client> => {
   const scope = await Effect.runPromise(Scope.make())
-  const api = await Effect.runPromise(
+  const rawApi = await Effect.runPromise(
     Effect.gen(function* () {
       const protocol = yield* Layer.build(clientProtocol(domPort(port)))
       return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     }).pipe(Scope.provide(scope)),
   )
+  let connection: ConnectionInfo | undefined
+  try {
+    if (expected !== undefined) {
+      connection = await settle(rawApi.GetConnectionInfo({}))
+      if (connection.apiVersion !== API_VERSION)
+        throw new ApiError({
+          reason: 'ApiVersionMismatch',
+          message: 'This home and app use different API versions.',
+          clientVersion: API_VERSION,
+          runtimeVersion: connection.apiVersion,
+        })
+      if (
+        expected.role !== 'socket' ||
+        connection.identity.role !== 'socket' ||
+        connection.identity.homeId !== expected.homeId ||
+        connection.identity.actorId !== expected.actorId ||
+        connection.identity.deviceId !== expected.deviceId
+      )
+        throw new ApiError({ reason: 'AuthenticationFailed', message: 'This connection changed its expected home or authority.' })
+      checkedPosition(connection.position, expected.homeId)
+    }
+  } catch (error) {
+    await Effect.runPromise(Scope.close(scope, Exit.void))
+    throw error
+  }
+  const api =
+    expected === undefined
+      ? rawApi
+      : new Proxy(rawApi, {
+          get(target, tag, receiver): unknown {
+            if (typeof tag === 'string' && tag in target && !socketCanCall(tag))
+              return () =>
+                Effect.fail(
+                  new ApiError({ reason: 'PersonRequired', message: 'This connection cannot do that. Use a trusted person client.' }),
+                )
+            return Reflect.get(target, tag, receiver)
+          },
+        })
   return {
+    ...(connection === undefined ? {} : { connection }),
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
@@ -1138,8 +1191,21 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
     workToward: (taskId, toward) => command((commandId) => api.WorkToward({ commandId, taskId, toward })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
-    watch: (listener, since, onWatching) => {
-      let cursor = since
+    watch: (listener, since, onWatching, onReset) => {
+      if (expected !== undefined) {
+        const position = checkedPosition(since, expected.homeId)
+        const watching = checkedWatch(
+          { watch: (position) => api.WatchFrom({ position }), snapshot: () => api.ListProjects() },
+          expected.homeId,
+          position,
+          listener,
+          onWatching,
+          onReset,
+        )
+        const fiber = Effect.runFork(Effect.catchCause(watching, () => Scope.close(scope, Exit.void)))
+        return () => void Effect.runFork(Fiber.interrupt(fiber))
+      }
+      let cursor = typeof since === 'number' ? since : since?.cursor
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.
       // Said once the watch's request has gone, a moment after it starts, so a read made then comes after it on the port.
       const started = Effect.sync(() => void setTimeout(() => onWatching?.(), 0))
@@ -1159,13 +1225,26 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
 }
 
 /** The port the preload hands the page, once the main process has made it. */
-export const receivePort = (target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window): Promise<DomMessagePort> =>
-  new Promise((resolve) => {
+export const receivePort = (
+  target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window,
+  signal?: AbortSignal,
+): Promise<DomMessagePort> =>
+  new Promise((resolve, reject) => {
+    const aborted = () => {
+      target.removeEventListener('message', onMessage)
+      reject(new Error('The connection was cancelled.'))
+    }
+    if (signal?.aborted === true) {
+      reject(new Error('The connection was cancelled.'))
+      return
+    }
     const onMessage = (event: MessageEvent) => {
       const port = event.ports[0]
       if (event.data !== 'althar:port' || port === undefined) return
       target.removeEventListener('message', onMessage)
+      signal?.removeEventListener('abort', aborted)
       resolve(port)
     }
     target.addEventListener('message', onMessage)
+    signal?.addEventListener('abort', aborted, { once: true })
   })

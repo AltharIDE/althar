@@ -10,7 +10,8 @@ import { createRoot } from 'react-dom/client'
 import { API_VERSION_MISMATCH, ApiError } from '@althar/contracts'
 import { Launch, OpenFailed } from '@althar/ui/screens'
 
-import { receivePort } from './data/client'
+import { hostForHome, receiveHomeConnection } from './data/homeConnection'
+import { HomeConnections } from './features/homes/HomeConnections'
 import { openWindow } from './data/open'
 import { ServicesProvider, type StoreFailure } from './data/services'
 import { QuitDialog } from './features/quit/QuitDialog'
@@ -34,13 +35,6 @@ import { keepWindowErrors } from './shared/windowErrors'
  * whatever it was showing.
  */
 
-/** How long the window waits for the runtime's port before it says it couldn't open. */
-const WAIT_PORT = 15_000
-
-const text = {
-  noRuntime: 'The runtime didn’t start.',
-}
-
 // Light or dark, before anything draws.
 followScheme()
 
@@ -48,14 +42,10 @@ followScheme()
 keepWindowErrors(window.althar)
 
 // Listen before anything else: the port arrives once the page has loaded.
-const port = Promise.race([
-  receivePort(),
-  new Promise<never>((_, reject) => setTimeout(() => reject(new Error(text.noRuntime)), WAIT_PORT)),
-])
 window.althar.startup?.('renderer-entry')
-const opening = port.then((given) => {
+const opening = receiveHomeConnection(window.althar).then(({ port, home }) => {
   window.althar.startup?.('port-received')
-  return openWindow(given, window.althar)
+  return openWindow(port, hostForHome(window.althar, home), home)
 })
 
 /** The first-run welcome plays the full launch; returning profiles and reloads take its quick opening. */
@@ -106,25 +96,34 @@ function Window() {
         host={window.althar}
       />
     )
-  if (failed !== null) return <FailedOpen reason={failed} />
+  if (failed !== null)
+    return (
+      <>
+        <FailedOpen reason={failed} />
+        <HomeConnections host={window.althar} ready={false} />
+      </>
+    )
   return (
-    <Launch
-      ready={opened !== null}
-      quick={openedBefore || opened?.hasProjects === true}
-      onDone={() =>
-        requestAnimationFrame(() => {
-          window.althar.startup?.('first-screen-drawn')
-          opened?.afterOpen()
-        })
-      }
-    >
-      {opened !== null && (
-        <ServicesProvider value={opened.services}>
-          <SystemAccent />
-          <RouterProvider router={opened.router} />
-        </ServicesProvider>
-      )}
-    </Launch>
+    <>
+      <HomeConnections host={window.althar} ready={opened !== null} />
+      <Launch
+        ready={opened !== null}
+        quick={openedBefore || opened?.hasProjects === true}
+        onDone={() =>
+          requestAnimationFrame(() => {
+            window.althar.startup?.('first-screen-drawn')
+            opened?.afterOpen()
+          })
+        }
+      >
+        {opened !== null && (
+          <ServicesProvider value={opened.services}>
+            <SystemAccent />
+            <RouterProvider router={opened.router} />
+          </ServicesProvider>
+        )}
+      </Launch>
+    </>
   )
 }
 

@@ -41,7 +41,12 @@ export default defineConfig(({ mode }) => ({
     target: 'node24',
     sourcemap: true,
     rollupOptions: {
-      input: { 'main/main': 'src/main/main.ts', 'runtime/runtime': 'src/runtime/runtime.ts', 'speech/speech': 'src/speech/speech.ts' },
+      input: {
+        'main/main': 'src/main/main.ts',
+        'runtime/runtime': 'src/runtime/runtime.ts',
+        'speech/speech': 'src/speech/speech.ts',
+        'connection/connection': 'src/connection/connection.ts',
+      },
       external: ['electron', 'sherpa-onnx-node', 'electron-updater', ...builtinModules, ...builtinModules.map((name) => `node:${name}`)],
       output: {
         format: 'es',

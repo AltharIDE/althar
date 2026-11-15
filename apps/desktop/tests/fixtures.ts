@@ -1079,7 +1079,7 @@ export const agentTools: AgentTools = {
 
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
-  const watching: Array<number | undefined> = []
+  const watching: Array<number | import('@althar/contracts').FeedPosition | undefined> = []
   const starts = new Set<() => void>()
   const client: Client = {
     status: vi.fn(async () => status),

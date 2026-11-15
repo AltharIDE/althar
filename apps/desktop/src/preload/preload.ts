@@ -1,4 +1,5 @@
 import { isStartupStage, type StartupStage } from '../startup'
+import { isHomeState, type HomeState } from '../homes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import { doNotTrack } from '../main/appPreferences'
@@ -125,7 +126,38 @@ ipcRenderer.on('althar:page-opened', (_event, owner: string) => {
   for (const listener of pagesOpened) listener(owner)
 })
 
+const homeStates = new Set<(state: HomeState) => void>()
+const homeDialogs = new Set<() => void>()
+ipcRenderer.on('althar:home-state', (_event, value: unknown) => {
+  if (isHomeState(value)) for (const listener of homeStates) listener(value)
+})
+ipcRenderer.on('althar:homes-open', () => {
+  for (const listener of homeDialogs) listener()
+})
+
 contextBridge.exposeInMainWorld('althar', {
+  homes: {
+    state: () => ipcRenderer.invoke('althar:homes-state'),
+    list: () => ipcRenderer.invoke('althar:homes-list'),
+    inspect: (target: unknown) => ipcRenderer.invoke('althar:homes-inspect', target),
+    connect: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-connect', checkId, name),
+    open: (id: string) => ipcRenderer.invoke('althar:homes-open', id),
+    forget: (id: string) => ipcRenderer.invoke('althar:homes-forget', id),
+    cancelCheck: () => ipcRenderer.invoke('althar:homes-cancel'),
+    reconnect: () => ipcRenderer.invoke('althar:homes-reconnect'),
+    onState: (listener: (state: HomeState) => void) => {
+      homeStates.add(listener)
+      return () => {
+        homeStates.delete(listener)
+      }
+    },
+    onOpen: (listener: () => void) => {
+      homeDialogs.add(listener)
+      return () => {
+        homeDialogs.delete(listener)
+      }
+    },
+  },
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
   startup: (stage: string, duration?: number): void => ipcRenderer.send('althar:startup', stage, duration),

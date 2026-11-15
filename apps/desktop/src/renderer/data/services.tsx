@@ -1,4 +1,5 @@
 import type { StartupStage } from '../../startup'
+import type { HomesHost } from '../../homes'
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
@@ -170,6 +171,7 @@ export interface WindowError {
 }
 
 export interface Host {
+  readonly homes?: HomesHost
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */

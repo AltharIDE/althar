@@ -18,10 +18,12 @@ export const setAppMenu = ({
   name,
   checkForUpdates,
   report,
+  homes,
 }: {
   readonly name: string
   readonly checkForUpdates?: () => void
   readonly report: () => void
+  readonly homes?: () => void
 }) => {
   const mac = process.platform === 'darwin'
   const check: ReadonlyArray<MenuItemConstructorOptions> =
@@ -46,7 +48,12 @@ export const setAppMenu = ({
           },
         ]
       : []),
-    { role: 'fileMenu' },
+    homes === undefined
+      ? { role: 'fileMenu' }
+      : {
+          role: 'fileMenu',
+          submenu: [{ label: 'Homes…', accelerator: 'CommandOrControl+Shift+H', click: homes }, { type: 'separator' }, { role: 'close' }],
+        },
     { role: 'editMenu' },
     { role: 'viewMenu' },
     { role: 'windowMenu' },
