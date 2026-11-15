@@ -3621,6 +3621,7 @@ describe('a project set up where it starts, through the API', () => {
         })
         assert.deepStrictEqual(yield* client.PrepareFolder({ commandId: commandId(), grant: yield* grant(folder) }), {
           did: 'started',
+          path: folder,
           branch: 'main',
           files: 2,
         })

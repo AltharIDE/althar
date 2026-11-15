@@ -981,6 +981,13 @@ ipcMain.handle('althar:find-repositories', async () => {
   return forWindow(found, home, foundHere.idOf)
 })
 
+// Where the person lets Althar into a folder the system keeps closed, as macOS keeps Documents and Desktop: false off a Mac, where there's no such place.
+ipcMain.handle('althar:open-folder-access', async () => {
+  if (process.platform !== 'darwin') return false
+  await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders').catch(() => undefined)
+  return true
+})
+
 // Where a clone for a new project goes, as the person knows the place, and a grant for it; null where there is nowhere usual, and the person is asked.
 ipcMain.handle('althar:clone-place', async () => {
   const home = process.env.ALTHAR_CODE_HOME || homedir()

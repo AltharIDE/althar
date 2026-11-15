@@ -67,7 +67,7 @@ const readings: Record<string, FolderReading> = {
 }
 
 function NewProject({ onCreated = vi.fn(), onClose = vi.fn() }: { onCreated?: (id: string) => void; onClose?: () => void }) {
-  return <NewProjectView model={useNewProject()} connections={useConnections()} onCreated={onCreated} onClose={onClose} />
+  return <NewProjectView model={useNewProject()} connections={useConnections()} onCreated={onCreated} onOpen={vi.fn()} onClose={onClose} />
 }
 
 /** The tab, opened on a draft of its own, with a client and host that read the folders above. */
@@ -255,7 +255,7 @@ describe('a new project', () => {
     const dropped = actions.drop([new File([], 'ops')])
     // Shown as being read at once, so it can't be made without it.
     expect(drafts.get()?.reading).toHaveLength(1)
-    expect(await actions.create('clay')).toBeNull()
+    expect(await actions.create('clay', { publish: null, tracker: null })).toBeNull()
     expect(client.openProject).not.toHaveBeenCalled()
     // Closed and another started meanwhile: the grant lands on nothing.
     act(() => drafts.end())
@@ -278,7 +278,19 @@ describe('a new project', () => {
       drafts.change(draft.id, (now) => ({
         ...now,
         name: 'Northwind',
-        folders: [{ path: OPS.path, grant: 'grant_ops', name: 'ops', where: '~/ops', remote: null, project: null, found: null }],
+        folders: [
+          {
+            path: OPS.path,
+            grant: 'grant_ops',
+            name: 'ops',
+            where: '~/ops',
+            remote: null,
+            project: null,
+            found: null,
+            git: 'ready',
+            empty: false,
+          },
+        ],
       })),
     )
     await userEvent.click(screen.getByRole('button', { name: /Create Northwind/ }))

@@ -222,12 +222,15 @@ export function SetupConnectRow({
   note,
   onConnect,
   connect = projectSetupText.connect,
+  action,
 }: {
   brand: Brand
   title: string
   note: string
-  onConnect: () => void
+  onConnect?: () => void
   connect?: string
+  /** In place of Connect: a menu of what to connect, say. */
+  action?: ReactNode
 }) {
   return (
     <div className={s.connectRow}>
@@ -237,9 +240,11 @@ export function SetupConnectRow({
       </span>
       <span className={s.pickTitle}>{title}</span>
       <span className={s.pickNote}>{note}</span>
-      <Button size="small" onClick={onConnect} aria-label={`${connect} ${title}`}>
-        {connect}
-      </Button>
+      {action ?? (
+        <Button size="small" onClick={onConnect} aria-label={`${connect} ${title}`}>
+          {connect}
+        </Button>
+      )}
     </div>
   )
 }
@@ -349,6 +354,11 @@ export function SetupDrop({ onChoose, over, text }: { onChoose: () => void; over
       </Button>
     </div>
   )
+}
+
+/** Room under the three ways for what the one chosen holds; `empty`, a dashed place where nothing is yet. */
+export function SetupZone({ empty, children }: { empty?: boolean; children: ReactNode }) {
+  return <div className={cx(s.zone, empty === true && s.zoneEmpty)}>{children}</div>
 }
 
 /* ---- What was chosen ---- */

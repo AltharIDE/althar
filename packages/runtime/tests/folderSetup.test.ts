@@ -76,7 +76,7 @@ describe('a folder that isn’t a repository', () => {
         'node_modules/x/index.js': '',
       })
       const prepared = yield* prepareFolder(at)
-      assert.deepStrictEqual(prepared, { did: 'started', branch: 'main', files: 4 })
+      assert.deepStrictEqual(prepared, { did: 'started', path: at, branch: 'main', files: 4 })
       assert.strictEqual(git(at, 'branch', '--show-current'), 'main')
       // What holds secrets, and what's installed, stays out; an example of the secrets goes in.
       assert.deepStrictEqual(tracked(at), ['.env.example', '.gitignore', 'README.md', 'src/main.ts'])
@@ -104,7 +104,7 @@ describe('a folder that isn’t a repository', () => {
       const read = yield* readFolder(at)
       assert.deepInclude(read, { kind: 'folder', empty: true, repositories: [] })
       const prepared = yield* prepareFolder(at)
-      assert.deepStrictEqual(prepared, { did: 'started', branch: 'main', files: 1 })
+      assert.deepStrictEqual(prepared, { did: 'started', path: at, branch: 'main', files: 1 })
       // Git knows no one: Althar commits it.
       assert.strictEqual(git(at, 'log', '--format=%an'), 'Althar')
     }),
@@ -186,7 +186,7 @@ describe('a repository with no commit yet', () => {
       git(at, 'init', '--quiet', '--initial-branch=trunk')
       const read = yield* readFolder(at)
       assert.deepInclude(read.repositories[0], { commits: false, branch: 'trunk' })
-      assert.deepStrictEqual(yield* prepareFolder(at), { did: 'committed', branch: 'trunk', files: 1 })
+      assert.deepStrictEqual(yield* prepareFolder(at), { did: 'committed', path: at, branch: 'trunk', files: 1 })
       // No .gitignore is written into a repository of the person's own.
       assert.deepStrictEqual(tracked(at), ['index.html'])
       assert.deepInclude((yield* readFolder(at)).repositories[0], { commits: true })
@@ -201,8 +201,8 @@ describe('a repository with no commit yet', () => {
       git(at, 'add', '--all')
       git(at, 'commit', '--quiet', '-m', 'Mine')
       writeFileSync(join(at, 'pkg/b.ts'), '')
-      assert.deepStrictEqual(yield* prepareFolder(at), { did: 'nothing', branch: 'main', files: 0 })
-      assert.deepStrictEqual(yield* prepareFolder(join(at, 'pkg')), { did: 'nothing', branch: 'main', files: 0 })
+      assert.deepStrictEqual(yield* prepareFolder(at), { did: 'nothing', path: at, branch: 'main', files: 0 })
+      assert.deepStrictEqual(yield* prepareFolder(join(at, 'pkg')), { did: 'nothing', path: at, branch: 'main', files: 0 })
       assert.strictEqual(git(at, 'log', '--format=%s'), 'Mine')
       assert.match(git(at, 'status', '--porcelain'), /\?\? pkg\/b\.ts/)
     }),

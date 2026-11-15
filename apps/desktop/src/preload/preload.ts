@@ -171,6 +171,7 @@ contextBridge.exposeInMainWorld('althar', {
   editorPicture: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:editor-picture', id),
   findRepositories: (): Promise<unknown> => ipcRenderer.invoke('althar:find-repositories'),
   clonePlace: (): Promise<unknown> => ipcRenderer.invoke('althar:clone-place'),
+  openFolderAccess: (): Promise<boolean> => ipcRenderer.invoke('althar:open-folder-access'),
   pickClonePlace: (): Promise<unknown> => ipcRenderer.invoke('althar:pick-clone-place'),
   grantFound: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:grant-found', id),
   playSound: (name: string): Promise<void> => ipcRenderer.invoke('althar:play-sound', name),

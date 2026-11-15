@@ -1096,7 +1096,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       grant: 'grant_made',
       path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     })),
-    prepareFolder: vi.fn(async () => ({ did: 'nothing' as const, branch: 'main', files: 0 })),
+    prepareFolder: vi.fn(async (grant: string, path?: string) => ({
+      did: 'started' as const,
+      path: path ?? `/Users/ada/code/${grant.replace(/^grant_/, '')}`,
+      branch: 'main',
+      files: 1,
+    })),
     listHostRepositories: vi.fn(async (): Promise<ReadonlyArray<HostRepository>> => []),
     listRepositoryOwners: vi.fn(async (): Promise<ReadonlyArray<RepositoryOwner>> => [{ id: 'ada', name: 'ada', kind: 'user' as const }]),
     cloneRepository: vi.fn(async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }) => {
@@ -1491,6 +1496,7 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
   clonePlace: vi.fn(async () => ({ grant: 'grant_code', where: '~/code' })),
+  openFolderAccess: vi.fn(async () => true),
   pickClonePlace: vi.fn(async () => ({ grant: 'grant_elsewhere', where: '~/elsewhere' })),
   onOpen: vi.fn(() => () => {}),
   onStoreFailed: vi.fn(() => () => {}),

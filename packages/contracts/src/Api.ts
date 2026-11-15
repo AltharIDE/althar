@@ -1017,6 +1017,8 @@ export type MadeRepository = typeof MadeRepository.Type
 /** What making a folder ready to be a project's repository did: started git in it, made its first commit, or nothing; on which branch. */
 export const PreparedFolder = Schema.Struct({
   did: Schema.Literals(['started', 'committed', 'nothing']),
+  /** The repository's root: the folder, or the repository it is in. */
+  path: Schema.String,
   branch: Schema.String,
   /** The files its first commit has, where one was made. */
   files: Schema.Number,

@@ -36,6 +36,8 @@ export const IGNORED = ['.DS_Store', 'node_modules/', '.venv/', '__pycache__/', 
 /** What making a folder ready did: started git, made its first commit, or nothing, it had one; and on which branch. */
 export interface Prepared {
   readonly did: 'started' | 'committed' | 'nothing'
+  /** The repository's root. */
+  readonly path: string
   readonly branch: string
   /** The files its first commit has, where this made one. */
   readonly files: number
@@ -110,10 +112,10 @@ export const prepareFolder = (opened: string, most = MOST_FILES): Effect.Effect<
     )
     if (root !== null) {
       const branch = (yield* currentBranch(root)) ?? 'main'
-      if (root !== path || Option.isSome(yield* commitOf(root, 'HEAD').pipe(Effect.option))) return { did: 'nothing', branch, files: 0 }
+      if (root !== path || Option.isSome(yield* commitOf(root, 'HEAD').pipe(Effect.option))) return { did: 'nothing', path: root, branch, files: 0 }
       // A repository with no commit yet: what's in it is its first, on the branch it is on.
       const files = yield* commitWhatIsThere(root, most).pipe(Effect.tapError(() => Effect.ignore(git(root, 'reset', '--quiet'))))
-      return { did: 'committed', branch, files }
+      return { did: 'committed', path: root, branch, files }
     }
     if (tooWide(path)) return yield* new FolderRefused({ reason: 'too_wide', path })
     const ignore = join(path, '.gitignore')
@@ -130,7 +132,7 @@ export const prepareFolder = (opened: string, most = MOST_FILES): Effect.Effect<
           catch: () => new FolderRefused({ reason: 'unreadable', path }),
         })
       const files = yield* commitWhatIsThere(path, most)
-      return { did: 'started' as const, branch: 'main', files }
+      return { did: 'started' as const, path, branch: 'main', files }
     }).pipe(Effect.onError(() => undo))
   })
 
