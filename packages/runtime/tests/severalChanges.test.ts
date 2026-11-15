@@ -1,7 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+
+import { removeTreeSync } from '@althar/testing'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
@@ -21,12 +23,34 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
-const removals = vi.hoisted(() => ({ failures: [] as Array<{ args: ReadonlyArray<string>; stderr: string }> }))
+const removals = vi.hoisted(() => ({ failures: [] as Array<{ args: ReadonlyArray<string>; stderr: string }>, partial: '', injected: 0 }))
 vi.mock('../src/spawner', async (original) => {
   const real = await original<typeof import('../src/spawner')>()
   return {
     ...real,
     startApart: (command: import('../src/spawner').Command, cap?: number) => {
+      if (
+        removals.partial !== '' &&
+        command.command === 'git' &&
+        command.args.includes('worktree') &&
+        command.args.includes('remove') &&
+        !command.args.includes('--force') &&
+        command.args.at(-1) === removals.partial
+      ) {
+        const path = removals.partial
+        removals.partial = ''
+        removals.injected += 1
+        const marker = readFileSync(join(path, '.git'), 'utf8')
+        assert.isTrue(marker.startsWith('gitdir: '))
+        // Reproduce Git's partial Windows cleanup: registration gone, actual files still present.
+        removeTreeSync(resolve(path, marker.slice('gitdir: '.length).trim()))
+        const stderr = `error: failed to delete '${path}': Permission denied\n`
+        removals.failures.push({ args: command.args, stderr })
+        return {
+          result: Promise.resolve({ code: 1, signal: null, error: null, stdout: '', over: false, stderr }),
+          stop: () => undefined,
+        }
+      }
       const running = real.startApart(command, cap)
       if (command.command !== 'git' || !command.args.includes('worktree') || !command.args.includes('remove')) return running
       return {
@@ -380,52 +404,65 @@ describe('a task with several changes', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('keeps two changes together before either ships, and drops one, its branch staying', () => {
-    removals.failures = []
-    const { working, github } = onGitHub()
-    return Effect.gen(function* () {
-      const task = yield* opened(working)
-      // This fixture moves and drops its lead's workspaces itself, after the finished lead releases them.
-      yield* (yield* Sessions).stop(task.threadId)
-      // The task's first change has its pull request already: two split since are kept together with each other.
-      yield* callTool(task.lead, 'start_change', { name: 'Lane colours' })
-      yield* callTool(task.lead, 'start_change', { name: 'Lane heights' })
-      const [first, colours, second] = yield* workspacesOf(task.taskId)
-      writeFileSync(join(second?.path ?? '', 'lanes.txt'), 'taller\n')
-      git(second?.path ?? '', 'add', 'lanes.txt')
-      git(second?.path ?? '', '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'Taller lanes')
-      // Its row in the thread says who split it, so Keep them together offers itself.
-      const started = (yield* items(task.threadId)).findLast(
-        (item) => item.kind === 'notice' && (item.content as { step?: unknown }).step !== undefined,
-      )
-      assert.strictEqual((started?.content as { step?: { by?: string } } | undefined)?.step?.by, 'lead')
-      const together = yield* callTool(task.lead, 'join_changes', { change: 'Lane heights' })
-      assert.include(together, 'Kept “Lane heights” together', `${together}\n${JSON.stringify(removals.failures)}`)
-      // Its commit is on the change that hadn't shipped's branch; its folder went, its branch stays.
-      assert.strictEqual(git(colours?.path ?? '', 'log', '-1', '--format=%s'), 'Taller lanes')
-      assert.isFalse(existsSync(second?.path ?? ''))
-      assert.include(git(working, 'branch', '--list', 'althar/lane-heights'), 'althar/lane-heights')
-      const sql = yield* SqlClient.SqlClient
-      const [joined] = yield* sql<{ state: string }>`SELECT state FROM workspaces WHERE id = ${second?.id ?? ''}`
-      assert.strictEqual(joined?.state, 'cleaned')
+  for (const partiallyRemoved of [false, true])
+    it.live(
+      partiallyRemoved
+        ? 'keeps changes together and drops them after Git already unregistered its worktree but could not delete its folder'
+        : 'keeps two changes together before either ships, and drops one, its branch staying',
+      () => {
+        removals.failures = []
+        removals.partial = ''
+        removals.injected = 0
+        const { working, github } = onGitHub()
+        return Effect.gen(function* () {
+          const task = yield* opened(working)
+          // This fixture moves and drops its lead's workspaces itself, after the finished lead releases them.
+          yield* (yield* Sessions).stop(task.threadId)
+          // The task's first change has its pull request already: two split since are kept together with each other.
+          yield* callTool(task.lead, 'start_change', { name: 'Lane colours' })
+          yield* callTool(task.lead, 'start_change', { name: 'Lane heights' })
+          const [first, colours, second] = yield* workspacesOf(task.taskId)
+          writeFileSync(join(second?.path ?? '', 'lanes.txt'), 'taller\n')
+          git(second?.path ?? '', 'add', 'lanes.txt')
+          git(second?.path ?? '', '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'Taller lanes')
+          // Its row in the thread says who split it, so Keep them together offers itself.
+          const started = (yield* items(task.threadId)).findLast(
+            (item) => item.kind === 'notice' && (item.content as { step?: unknown }).step !== undefined,
+          )
+          assert.strictEqual((started?.content as { step?: { by?: string } } | undefined)?.step?.by, 'lead')
+          if (partiallyRemoved) removals.partial = second?.path ?? assert.fail('no change to join')
+          const together = yield* callTool(task.lead, 'join_changes', { change: 'Lane heights' })
+          assert.include(together, 'Kept “Lane heights” together', `${together}\n${JSON.stringify(removals.failures)}`)
+          assert.strictEqual(removals.injected, partiallyRemoved ? 1 : 0)
+          // Its commit is on the change that hadn't shipped's branch; its folder went, its branch stays.
+          assert.strictEqual(git(colours?.path ?? '', 'log', '-1', '--format=%s'), 'Taller lanes')
+          assert.isFalse(existsSync(second?.path ?? ''))
+          assert.include(git(working, 'branch', '--list', 'althar/lane-heights'), 'althar/lane-heights')
+          const sql = yield* SqlClient.SqlClient
+          const [joined] = yield* sql<{ state: string }>`SELECT state FROM workspaces WHERE id = ${second?.id ?? ''}`
+          assert.strictEqual(joined?.state, 'cleaned')
 
-      // Another, dropped: what it hadn't committed is committed first, and its branch stays.
-      yield* callTool(task.lead, 'start_change', { name: 'Docs' })
-      const docs = (yield* workspacesOf(task.taskId)).find((one) => one.name === 'Docs') ?? assert.fail('no change')
-      writeFileSync(join(docs.path, 'docs.md'), 'half\n')
-      assert.include(yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Docs', why: 'Not needed.' }), 'Dropped “Docs”')
-      assert.isFalse(existsSync(docs.path))
-      assert.strictEqual(git(working, 'log', '-1', '--format=%s', 'althar/docs'), 'Work in progress, as its change was dropped')
-      // Dropped too, the only change left: removing its worktree moves it down to a copy, its branch keeping its work.
-      yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Lane colours', why: 'Done with it.' })
-      const branch = first?.branch ?? ''
-      const head = git(first?.path ?? '', 'rev-parse', 'HEAD')
-      assert.include(yield* callTool(task.lead, 'remove_part', { part: 'workspace', why: 'Only reading now.' }), 'is a copy now')
-      assert.strictEqual(git(first?.path ?? '', 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD')
-      assert.strictEqual(git(working, 'rev-parse', branch), head)
-      assert.isTrue(Option.isSome(Option.some(github)))
-    }).pipe(Effect.provide(runtimeWith(github)))
-  })
+          // Another, dropped: what it hadn't committed is committed first, and its branch stays.
+          yield* callTool(task.lead, 'start_change', { name: 'Docs' })
+          const docs = (yield* workspacesOf(task.taskId)).find((one) => one.name === 'Docs') ?? assert.fail('no change')
+          writeFileSync(join(docs.path, 'docs.md'), 'half\n')
+          assert.include(
+            yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Docs', why: 'Not needed.' }),
+            'Dropped “Docs”',
+          )
+          assert.isFalse(existsSync(docs.path))
+          assert.strictEqual(git(working, 'log', '-1', '--format=%s', 'althar/docs'), 'Work in progress, as its change was dropped')
+          // Dropped too, the only change left: removing its worktree moves it down to a copy, its branch keeping its work.
+          yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Lane colours', why: 'Done with it.' })
+          const branch = first?.branch ?? ''
+          const head = git(first?.path ?? '', 'rev-parse', 'HEAD')
+          assert.include(yield* callTool(task.lead, 'remove_part', { part: 'workspace', why: 'Only reading now.' }), 'is a copy now')
+          assert.strictEqual(git(first?.path ?? '', 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD')
+          assert.strictEqual(git(working, 'rev-parse', branch), head)
+          assert.isTrue(Option.isSome(Option.some(github)))
+        }).pipe(Effect.provide(runtimeWith(github)))
+      },
+    )
 
   it.live('starts a change that waits for another to merge, and brings what merged in once it has', () => {
     const { working, bare, github } = onGitHub()
