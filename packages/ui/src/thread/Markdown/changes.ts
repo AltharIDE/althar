@@ -92,6 +92,35 @@ const showingDefinitions = (lines: readonly string[]): string => {
     .join('\n')
 }
 
+/** Tags that stand alone, and `source`, which draws nothing outside the `<picture>` that holds it. */
+const ALONE = new Set(['img', 'br', 'hr', 'input', 'wbr', 'col', 'source', 'track', 'area', 'embed'])
+
+/**
+ * Whether removed lines hold HTML that can't be drawn as it was: a piece of a tag's inside (`<source …>` of a `<picture>`),
+ * or tags opened and never closed, or closed and never opened. Text with no tags, or whole balanced HTML, can.
+ */
+const fragmentary = (lines: readonly string[]): boolean => {
+  const stack: string[] = []
+  let tags = 0
+  for (const m of lines.join('\n').matchAll(/<(\/?)([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*?(\/?)>/g)) {
+    const name = m[2]!.toLowerCase()
+    tags++
+    if (name === 'source' || name === 'track') return true
+    if (ALONE.has(name) || m[3] === '/') continue
+    if (m[1] === '/') {
+      if (stack.pop() !== name) return true
+    } else stack.push(name)
+  }
+  return tags > 0 && stack.length > 0
+}
+
+/** Lines as code, as they were: a fence longer than any run of backticks in them. */
+const asCode = (lines: readonly string[]): string => {
+  const longest = Math.max(0, ...[...lines.join('\n').matchAll(/`+/g)].map((m) => m[0].length))
+  const fence = '`'.repeat(Math.max(3, longest + 1))
+  return `${fence}html\n${lines.join('\n')}\n${fence}`
+}
+
 /** The file as it is now, from a diff of the whole of it: its context and added lines. */
 export const newTextOf = (lines: readonly DiffLine[]): string =>
   lines
@@ -141,12 +170,12 @@ export const markChanges = (lines: readonly DiffLine[]): MarkedMarkdown | null =
   if (tokens.map((token) => token.raw).join('') !== source) return { source, marks: NOTHING }
   const starts: number[] = []
   let row = 1
-  const blockLines: Array<{ from: number; to: number }> = []
+  const blockLines: Array<{ from: number; to: number; html: boolean }> = []
   for (const token of tokens) {
     const to = row + token.raw.split('\n').length - (token.raw.endsWith('\n') ? 2 : 1)
     if (token.type !== 'space' && token.type !== 'def') {
       starts.push(row)
-      blockLines.push({ from: row, to })
+      blockLines.push({ from: row, to, html: token.type === 'html' })
     }
     row += token.raw.split('\n').length - 1
   }
@@ -169,10 +198,15 @@ export const markChanges = (lines: readonly DiffLine[]): MarkedMarkdown | null =
   }
   const removed = new Map<number, string[]>()
   for (const { after, text } of runs) {
+    // Lines taken out of the middle of an HTML block (a `<source>` of a `<picture>`) change what it draws: it is marked, and they
+    // are shown as the code they were, since no piece of a tag draws on its own.
+    const inside = blockLines.findIndex((block) => block.html && block.from <= after && after < block.to)
+    if (inside >= 0) added.add(inside)
     // Before the first block that starts past the line it follows; after the block it is in the middle of.
     const found = starts.findIndex((start) => start > after)
-    const index = found === -1 ? starts.length : found
-    removed.set(index, [...(removed.get(index) ?? []), showingDefinitions(text)])
+    const index = inside >= 0 ? inside : found === -1 ? starts.length : found
+    const shown = inside >= 0 || fragmentary(text) ? asCode(text) : showingDefinitions(text)
+    removed.set(index, [...(removed.get(index) ?? []), shown])
   }
   return { source, marks: { added, removed } }
 }
