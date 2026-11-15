@@ -186,6 +186,8 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
   const following = useRef(true)
   /** Where the view was last scrolled to, the person's way or the list's own: a move up from it leaves the bottom. */
   const lastTop = useRef(0)
+  /** How far the view was from the bottom as the person or the list last scrolled it: kept, following, as blocks come. */
+  const below = useRef(Number.POSITIVE_INFINITY)
   /** Where to put a block once it is drawn: its key and how far under the scroller's top. */
   const placing = useRef<{ key: string; offset: number } | null>(null)
   /**
@@ -356,9 +358,17 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
     lastTop.current = scroller.scrollTop
   }
 
-  /** At the bottom, where it stays as what is drawn changes, as the thread follows it (useStickToBottom). */
+  const toBottom = (scroller: HTMLElement) => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+
+  /**
+   * Following the bottom, the view stays as near it as it was as what is drawn changes height above it: at it, or a
+   * nudge up from it the person made; and goes to it from further, as on opening (useStickToBottom's rule).
+   */
   const down = (scroller: HTMLElement) => {
-    if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight >= 1) scrollTo(scroller, scroller.scrollHeight)
+    const was = below.current
+    const to = was < SLACK ? was : 0
+    if (Math.abs(toBottom(scroller) - to) >= 1) scrollTo(scroller, scroller.scrollHeight - scroller.clientHeight - to)
+    below.current = toBottom(scroller)
   }
 
   /** Measures what is drawn and lays the gaps from it, keeping what is in view where it is. */
@@ -376,7 +386,15 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
       placing.current = null
       scrollTo(scroller, scroller.scrollTop + first.getBoundingClientRect().top - scroller.getBoundingClientRect().top - wanted.offset)
     }
-    if (following.current) down(scroller)
+    if (following.current)
+      // Once the commit is over, before the frame is drawn: what moves a message in place (ListMotion) reads where each
+      // stands as the commit ends, and the view following the bottom isn't a message moving.
+      queueMicrotask(() => {
+        if (!following.current || !showing(scroller)) return
+        down(scroller)
+        place.current = inView(scroller)
+      })
+    else below.current = toBottom(scroller)
     place.current = inView(scroller)
     const observer = resize.current
     if (observer !== null) {
@@ -392,8 +410,6 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
     if (now === null || !showing(scroller) || top.current === null) return
     const count = now.keys.length
     if (count === 0) return
-    // Following the bottom, the view is there, however late the scroller came to have a size.
-    if (following.current) down(scroller)
     const origin = top.current.getBoundingClientRect().top
     const rect = scroller.getBoundingClientRect()
     const viewTop = rect.top - origin
@@ -471,6 +487,7 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
       if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < SLACK) following.current = true
       else if (scroller.scrollTop < lastTop.current) following.current = false
       lastTop.current = scroller.scrollTop
+      below.current = toBottom(scroller)
       if (showing(scroller)) place.current = inView(scroller)
       later()
     }

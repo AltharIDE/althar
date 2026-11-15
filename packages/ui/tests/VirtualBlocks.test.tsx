@@ -213,6 +213,20 @@ describe('a thread drawn only near the view', () => {
     expect(scrolled).toBe(302 * 100 - VIEW - 100 - 1000)
   })
 
+  it('leaves the bottom a little at a time, as a trackpad scrolls, without being pulled back to it', async () => {
+    const { rerender } = render(<Column list={blocks(0, 300)} />)
+    await frame()
+    const bottom = scrolled
+    for (let i = 0; i < 30; i++) await scrollBy(-40)
+    expect(scrolled).toBe(bottom - 1200)
+    // A nudge up from the bottom stays as it was as the thread grows below it.
+    await scrollBy(1200)
+    await scrollBy(-40)
+    rerender(<Column list={blocks(0, 301)} />)
+    await frame()
+    expect(scrolled).toBe(301 * 100 - VIEW - 40)
+  })
+
   it('keeps the block in view where it was as earlier blocks come before it', async () => {
     const { rerender } = render(<Column list={blocks(100, 300)} />)
     await frame()

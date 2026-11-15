@@ -14,8 +14,9 @@ import { launch, openFirstProject, shown, startTask, still, toConversation } fro
  * exchanges (400 turns) more in both the coordinator's thread and a task's, written to
  * the store while the app is closed. Scrolling towards the top brings each
  * earlier page in by itself, the turn on show stays where it was, and the
- * thread ends at its beginning with no divider above it. A sweep up through
- * the whole rendered thread measures its frames, for the change's report.
+ * thread ends at its beginning with no divider above it, drawing only what
+ * is near the view however much it has read. A sweep up through the whole
+ * thread measures its frames, for the change's report.
  * The screenshots are this change's evidence (test-results/history-*.png).
  */
 
@@ -93,11 +94,27 @@ const scrollTo = (thread: Locator, top: number) =>
  */
 const backToTheStart = async (page: Page, thread: Locator, total: number) => {
   const moved: number[] = []
-  const items = thread.locator('[data-item]')
-  for (let earlier = Math.ceil(total / PAGE) - 1; earlier > 0; earlier--) {
-    const had = await items.count()
+  // The thread draws only what is near the view (VirtualBlocks): an earlier page shows as the column growing above it.
+  const tall = () =>
+    thread.evaluate((element) => {
+      let box = element.parentElement!
+      while (!/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement!
+      return box.scrollHeight
+    })
+  // Its first message, drawn once the thread is read back to its beginning and scrolled there.
+  const first = thread.getByText('Question 1', { exact: true })
+  for (let earlier = Math.ceil(total / PAGE) - 1; earlier > 0 && (await first.count()) === 0; earlier--) {
+    const had = await tall()
+    // Near the top first, as scrolling there would be, so what is in view at the top is drawn before reading back starts.
+    await thread.evaluate((element) => {
+      let box = element.parentElement!
+      while (!/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement!
+      box.scrollTop = box.clientHeight * 1.5
+      return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    })
     const before = await scrollTo(thread, 200)
-    await expect.poll(() => items.count()).toBeGreaterThan(had)
+    // A page came in, here or as the view neared the top; or none was left to.
+    await expect.poll(async () => (await tall()) > had || (await first.count()) > 0).toBe(true)
     await expect(thread.getByText('Loading…')).toHaveCount(0)
     await still(page)
     const after = await thread.locator(`[data-item="${before.id}"]`).evaluate((one) => one.getBoundingClientRect().top)
@@ -187,6 +204,9 @@ test('task and coordinator threads scroll back through 400 turns without the tur
     expect(taskMoved.length).toBeGreaterThanOrEqual(2)
     await expect(task.getByText('Question 1', { exact: true })).toBeAttached()
     await expect(page.getByText('Loading…')).toHaveCount(0)
+    // All of it read, it draws only what is near the view: a few dozen of its 400 turns.
+    expect(taskFrames.items).toBeLessThan(80)
+    expect(coordinatorFrames.items).toBeLessThan(80)
     for (const moved of [...coordinatorMoved, ...taskMoved]) expect(moved).toBeLessThan(2)
   } finally {
     await app.electronApp.close()
