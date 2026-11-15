@@ -351,9 +351,20 @@ describe('an aside opened with +', () => {
           assert.include(work, SANDBOX)
           assert.notInclude(work, 'The thread so far')
           assert.isTrue(work.endsWith('Fix it then.'))
+          // Completion is recorded before Runs queues its missing-report reminder. Let that input arrive first:
+          // prompts preserve send order, so a later reminder would legitimately follow the next person's words.
+          yield* until(
+            store(
+              sqlOf(
+                (sql) => sql<{ body: string }>`SELECT body FROM user_inputs
+              WHERE thread_id = ${aside.threadId} AND sender_kind = 'internal' AND body LIKE 'Your step isn%done%'`,
+              ),
+            ),
+            (rows) => rows.length > 0,
+          )
           // A report reminder can share this turn with the person's words; the full brief must not be repeated.
           const next = yield* said('And the tests?')
-          assert.isTrue(next.endsWith('And the tests?'))
+          assert.isTrue(next.endsWith('And the tests?'), `The delivered prompt was:\n${next}`)
           assert.notInclude(next, WORK)
           assert.notInclude(next, SANDBOX)
           assert.notInclude(next, 'gather evidence')
