@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, mainWindow, openFirstProject, still, startTask } from './support'
+import { launch, mainWindow, openFirstProject, pastTheTour, still, startTask } from './support'
 
 /** Quit asks, as it does for a person: the other specs' apps quit without asking (support.ts). */
 const ASKS = { ALTHAR_QUIT_WITHOUT_ASKING: '0' }
@@ -190,6 +190,31 @@ test('Closing the last window with work running asks once, and quits only when t
     await expect(back.getByRole('navigation', { name: 'Projects' })).toBeVisible()
     await expect(back.getByRole('dialog')).toHaveCount(0)
     expect(child.exitCode).toBeNull()
+  } finally {
+    await quitAnyway(electronApp, child)
+  }
+})
+
+test('reopens when activation arrives while the last window is still closing', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  mkdirSync(join(home, 'profile'))
+  writeFileSync(join(home, 'profile', 'desktop.json'), JSON.stringify({ keepWorkingOnClose: true }))
+  const { electronApp, page, child } = await launch(home, ASKS)
+  try {
+    await pastTheTour(page)
+    await electronApp.evaluate(({ app, BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/renderer/index.html'))
+      if (window === undefined) throw new Error('The main window must be open before closing it.')
+      // A Dock activation can arrive before the closing BrowserWindow has emitted `closed`.
+      window.once('close', () => app.emit('activate'))
+    })
+    await page.close()
+    const reopened = await mainWindow(electronApp)
+    expect(reopened).not.toBe(page)
+    await expect(reopened.getByRole('list', { name: /^Agents on/ })).toBeVisible()
+    await expect(reopened.getByRole('dialog')).toHaveCount(0)
+    expect(child.exitCode).toBeNull()
+    await reopened.screenshot({ path: 'test-results/quit-activate-closing.png', scale: 'css' })
   } finally {
     await quitAnyway(electronApp, child)
   }

@@ -1,7 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { bringForward, focusedLast, openFromEdge } from '../src/main/bringForward'
+import { availableWindows, bringForward, focusedLast, openFromEdge } from '../src/main/bringForward'
 
 describe('bringing a window forward', () => {
+  it('uses another window or opens a new one when the focused window has begun closing but is still tracked', () => {
+    const make = () => ({
+      isMinimized: () => false,
+      restore: () => undefined,
+      showInactive: () => undefined,
+      show: () => undefined,
+      focus: () => undefined,
+    })
+    const first = make()
+    const focused = make()
+    const fresh = make()
+    const windows = new Set([first, focused])
+    const closing = new WeakSet([focused])
+    const raise = () =>
+      bringForward(
+        availableWindows(windows, closing),
+        () => fresh,
+        () => undefined,
+        false,
+      )
+    expect(raise()).toEqual({ window: first, fresh: false })
+    closing.add(first)
+    expect(raise()).toEqual({ window: fresh, fresh: true })
+    // Ownership and closed-event cleanup still see both windows until they actually close.
+    expect([...windows]).toEqual([first, focused])
+  })
+
   it('chooses the last focused window and activates before hiding the sheet', () => {
     const calls: string[] = []
     const make = (name: string) => ({

@@ -13,7 +13,7 @@ import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, theme
 import { CHROME_ARG, decideChrome, type DesktopChrome, parseHexAccent } from './desktop'
 import { chromeOf, FIRST_CHROME_WAIT, type FollowedChrome, followDesktopChrome, systemSources } from './desktopChrome'
 import { keepingAwake } from './awake'
-import { bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
+import { availableWindows, bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
 import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
@@ -462,6 +462,7 @@ app.on('child-process-gone', (_event, details) => {
 
 /* Althar's own windows, apart from the edge's pages. */
 const windows = new Set<BrowserWindow>()
+const closingWindows = new WeakSet<BrowserWindow>()
 let edge: Edge | undefined
 
 /* The pages beside the conversations (browser/pages.ts), once the app is ready. */
@@ -488,7 +489,7 @@ const ownersIn = (said: unknown): ReadonlyArray<string> =>
 
 /** Brings Althar's window forward, a window there is or a new one, from wherever the person is. */
 const bringForward = () => {
-  return raiseWindow(windows, openWindow, () => app.focus({ steal: true }), quiet)
+  return raiseWindow(availableWindows(windows, closingWindows), openWindow, () => app.focus({ steal: true }), quiet)
 }
 
 /** Opens the window on a thread, as a notification or the edge asks. */
@@ -850,6 +851,7 @@ const openWindow = () => {
   }
   windows.add(window)
   window.on('focus', () => focusedLast(windows, window))
+  window.on('close', () => closingWindows.add(window))
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
   window.on('maximize', () => window.webContents.send('althar:maximized', true))
   window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
@@ -1233,7 +1235,7 @@ void ready.then(() => {
   app.on('browser-window-blur', focusChanged)
   focusChanged()
   app.on('activate', () => {
-    if (windows.size === 0) openWindow()
+    if (availableWindows(windows, closingWindows).size === 0) openWindow()
   })
 })
 
