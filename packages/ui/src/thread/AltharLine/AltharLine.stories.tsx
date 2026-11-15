@@ -168,7 +168,7 @@ export const ErrandLines: Story = {
             </AltharLine>
           ),
         },
-        { state: 'done', node: <AltharLine>Merged #958. Next: tag v0.9.0</AltharLine> },
+        { state: 'the last step done: the errand is done', node: <AltharLine>Merged #958. Errand done</AltharLine> },
       ]}
     />
   ),

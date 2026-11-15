@@ -369,6 +369,8 @@ const forThePerson = (reason: string | null): string =>
       .match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) ?? []
   )
     .map((sentence) => sentence.trim())
+    // "A new objection needs the person’s word again" is for the agent, but that there was an objection is the person's to know.
+    .map((sentence) => (/\bobjection\b/i.test(sentence) && forTheAgent(sentence) ? 'There was a new objection.' : sentence))
     .filter((sentence) => sentence !== '' && !forTheAgent(sentence))
     .map((sentence) => sentence.replace(/\bthe person’s\b/gi, 'your').replace(/\bthe person\b/gi, 'you'))
     .join(' ')
@@ -393,6 +395,25 @@ export const unwatched = (
   }
 }
 
+/** The reason Althar itself gives when it holds an errand for a wait it cannot watch; its lines say it in words instead. */
+export const UNWATCHED_REASON = 'Althar cannot watch wait kinds:'
+
+/**
+ * A line of a lead, what the errand is, and why, cut to the longest a line may be. The reason is kept: the steps are cut first,
+ * down to what leaves the reason room. Whatever was cut folds under Details, whole.
+ */
+const compose = (lead: string, what: string, because: string, tail = ''): Omit<StepNote, 'links'> => {
+  const closing = tail === '' ? 0 : tail.length + 2
+  const room = TITLE_MOST - closing
+  const whole = `${lead}${what === '' ? '' : `: ${what}`}${because === '' ? '' : ` — ${because}`}`
+  const join = (head: string) => (tail === '' ? head : `${head}${head.endsWith('…') ? ' ' : '. '}${tail}`)
+  if (whole.length <= room) return { title: join(whole) }
+  const reason = because === '' ? '' : fit(because, Math.max(Math.floor(room / 2), room - lead.length - 2 - what.length - 3))
+  const steps = fit(what, Math.max(room - lead.length - 2 - (reason === '' ? 0 : reason.length + 3), 24))
+  const head = `${lead}${steps === '' ? '' : `: ${steps}`}${reason === '' ? '' : ` — ${reason}`}`
+  return { title: join(fit(head, room)), details: trimmed(join(whole), DETAILS_MOST) }
+}
+
 /**
  * An errand put on hold, in the person's words: what is left of it (the held step first), why in a phrase they know, and what
  * they can do. The reason the agents read stays on the errand, not here.
@@ -403,27 +424,20 @@ export const heldNote = (
   plain?: { readonly why: string; readonly can?: string },
   lead = 'Errand on hold',
 ): StepNote => {
-  const what = inOrder(steps, false)
-  const because = plain?.why ?? plainReason(reason)
-  const can = plain?.can ?? 'Say go ahead to continue.'
-  const head = `${lead}${what === '' ? '' : `: ${what}`}${because === '' ? '' : ` — ${because}`}`
-  const title = `${fit(head, TITLE_MOST - can.length - 2)}. ${can}`
-  return { title, links: linksIn(title, steps) }
+  const line = compose(lead, inOrder(steps, false), plain?.why ?? plainReason(reason), plain?.can ?? 'Say go ahead to continue.')
+  return { ...line, links: linksIn(line.title, steps) }
 }
 
 /** An errand called off: what it was, and why where it was not the person's own word. */
 export const calledOffNote = (steps: ReadonlyArray<SaidStep>, reason: string | null, byPerson: boolean): StepNote => {
-  const what = inOrder(steps, false)
-  const because = byPerson ? '' : plainReason(reason)
-  const title = fit(`Errand called off${what === '' ? '' : `: ${what}`}${because === '' ? '' : ` — ${because}`}`)
-  return { title, links: linksIn(title, steps) }
+  const line = compose('Errand called off', inOrder(steps, false), byPerson ? '' : plainReason(reason))
+  return { ...line, links: linksIn(line.title, steps) }
 }
 
 /** An errand the person set going again: what it goes on with. */
 export const resumedNote = (steps: ReadonlyArray<SaidStep>): StepNote => {
-  const what = inOrder(steps, true)
-  const title = fit(what === '' ? 'Errand resumed' : `Errand resumed: ${what}`)
-  return { title, links: linksIn(title, steps) }
+  const line = compose('Errand resumed', inOrder(steps, true), '')
+  return { ...line, links: linksIn(line.title, steps) }
 }
 
 /** Where an errand still waits, for its daily reminder: its steps to go and what the first waits for, or why it is on hold. */
@@ -434,6 +448,7 @@ export const stillNote = (
   plain?: { readonly why: string; readonly can?: string },
 ): StepNote => {
   if (paused) return heldNote(steps, reason, plain, 'Errand still on hold')
-  const line = steps[0] === undefined ? 'Errand still waits' : fit(`Errand still waits to ${inOrder(steps, true)}`)
-  return { title: line, links: linksIn(line, steps) }
+  const full = steps[0] === undefined ? 'Errand still waits' : `Errand still waits to ${inOrder(steps, true)}`
+  const title = fit(full)
+  return { title, links: linksIn(title, steps), ...(title === full ? {} : { details: trimmed(full, DETAILS_MOST) }) }
 }

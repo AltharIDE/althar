@@ -274,6 +274,15 @@ describe('the person’s word through the tool boundary', () => {
       const title = (JSON.parse(line!.content) as { title: string }).title
       assert.match(title, /^Errand on hold: .* — Althar can’t tell when it’s merged\. Ask for it again to keep it another way\.$/)
       assert.notMatch(title, /_|Watched|wait kinds|fresh word/)
+      // Held for another reason with an unwatched wait on it, the same errand says that reason, not the wait; its reminder too.
+      yield* s.sql`UPDATE errands SET reason = '#958 went back to a draft after the person asked.', news_at = '2000-01-01T00:00:00.000Z', reminded_at = NULL WHERE id = ${id}`
+      yield* s.errands.remind(s.access.projectId)
+      const lines = (yield* s.sql<{
+        content: string
+      }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId} AND kind = 'notice' ORDER BY sequence DESC LIMIT 1`).map(
+        (item) => (JSON.parse(item.content) as { title: string }).title,
+      )
+      assert.match(lines[0]!, /^Errand still on hold: .* — #958 went back to a draft after you asked\. Say go ahead to continue\.$/)
       assert.include(yield* callTool(s.access, 'test_asked', { errandId: id, step: s.step.key }), 'paused')
       assert.strictEqual(s.counts().acts, 0)
     }).pipe(Effect.provide(runtime())),

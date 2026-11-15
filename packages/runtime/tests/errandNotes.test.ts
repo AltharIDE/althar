@@ -265,4 +265,48 @@ describe('an errand on hold, called off, resumed or failed reads in plain words'
     assert.strictEqual(note.title, 'Couldn’t do this: merge the 0.9.0 pull request — failed: The head moved.')
     assert.strictEqual(note.details, 'The head moved. Read it again before asking for this action.')
   })
+
+  it('long step words are cut before the reason is, and the whole line folds under Details', () => {
+    const long = (says: string) => ({
+      tool: 'x',
+      target: 'y',
+      says: `${says} ${'with a great many words about what it does '.repeat(4)}`,
+      waits: [],
+    })
+    const steps = [long('First'), long('Second'), long('Third')]
+    const held = heldNote(steps, '#958 went back to a draft after the person asked.')
+    assert.isAtMost(held.title.length, 240)
+    assert.include(held.title, '#958 went back to a draft after you asked')
+    assert.match(held.title, /Say go ahead to continue\.$/)
+    assert.include(held.details, 'then second with')
+    assert.include(held.details, 'after you asked')
+    const off = calledOffNote(steps, '#958 was closed on GitHub, so it isn’t merged.', false)
+    assert.isAtMost(off.title.length, 240)
+    assert.include(off.title, '#958 was closed on GitHub')
+    assert.isDefined(off.details)
+    // A reason too long for a line is cut itself, never the whole of it.
+    const wordy = heldNote([merge], `${'Someone keeps writing to it and moving it on, '.repeat(8)}so it waits.`)
+    assert.isAtMost(wordy.title.length, 240)
+    assert.include(wordy.title, 'Someone keeps writing')
+    assert.isDefined(wordy.details)
+    assert.isUndefined(heldNote([merge], 'You asked to wait.').details)
+  })
+
+  it('the fallback for an objection with no reason still says there was one', () => {
+    for (const fallback of ['A new objection needs the person’s word again.', 'An objection needs the person’s word again.'])
+      assert.strictEqual(
+        heldNote([merge], fallback).title,
+        'Errand on hold: merge the 0.9.0 pull request — there was a new objection. Say go ahead to continue.',
+      )
+  })
+
+  it('an unwatched wait explains the hold only where it caused it', () => {
+    const waiting = { ...merge, waits: [{ kind: 'merged' }] }
+    // Held for an objection, with an unwatched wait still on the errand: the objection is the reason.
+    assert.strictEqual(
+      heldNote([waiting], '#958 went back to a draft after the person asked.').title,
+      'Errand on hold: merge the 0.9.0 pull request — #958 went back to a draft after you asked. Say go ahead to continue.',
+    )
+    assert.match(stillNote(true, '#958 went back to a draft after the person asked.', [waiting]).title, /went back to a draft/)
+  })
 })
