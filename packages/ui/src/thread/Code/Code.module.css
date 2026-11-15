@@ -28,20 +28,12 @@
 
 /* the folder it is in, after its name: it gives way first, cut from its start, as a path's end says the most */
 .titleFolder {
+  display: flex;
   flex: 0 100 auto;
   min-width: 24px;
   margin-left: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
   font: 400 11.5px/18px var(--mono);
   color: var(--t-3);
-}
-
-.titleFolder bdi {
-  direction: ltr;
 }
 
 /* under the head: its path, where it was read from, and the ways to see it */
@@ -69,22 +61,14 @@
 }
 
 .path {
+  display: flex;
   flex: 0 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
   font: 11.5px/16px var(--mono);
   color: var(--t-3);
 }
 
-.path bdi {
-  direction: ltr;
-}
-
-.path strong {
+.pathName {
   font-weight: 500;
   color: var(--t-2);
 }

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { Path } from '../../primitives/Path/Path'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/CopyButton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -77,8 +78,7 @@ export function CodeBlock({
           <>
             <Icon name="file" size={12} className={s.icon} />
             <span className={s.file}>
-              <span className={s.dir}>{file.slice(0, -name.length)}</span>
-              {name}
+              <Path path={file} dirClassName={s.dir} />
             </span>
             <span className={s.lang}>
               {lang} · {t.lines(line, line + lines.length - 1)}
