@@ -67,14 +67,27 @@ const staged = (path: string) =>
   )
 
 /** Stages everything in the folder git doesn't ignore, then its first commit, refused where what's staged is too much or holds repositories. */
-const commitWhatIsThere = (path: string) =>
+const commitWhatIsThere = (path: string, most: number) =>
   Effect.gen(function* () {
-    yield* git(path, 'add', '--all')
+    // A repository inside with no commit yet git won't stage at all, and names it.
+    yield* git(path, 'add', '--all').pipe(
+      Effect.catchIf(
+        (failed) => /does not have a commit checked out/.test(failed.stderr),
+        (failed) =>
+          Effect.fail(
+            new FolderRefused({
+              reason: 'repositories_inside',
+              path,
+              names: [...failed.stderr.matchAll(/'([^']+?)\/?' does not have a commit checked out/g)].flatMap((found) => found[1] ?? []),
+            }),
+          ),
+      ),
+    )
     const files = yield* staged(path)
     // A folder with a .git of its own, staged as an empty link: its files would be in no commit.
     const inside = files.filter((file) => file.mode === '160000').map((file) => file.path)
     if (inside.length > 0) return yield* new FolderRefused({ reason: 'repositories_inside', path, names: inside })
-    if (files.length > MOST_FILES) return yield* new FolderRefused({ reason: 'too_many', path, count: files.length })
+    if (files.length > most) return yield* new FolderRefused({ reason: 'too_many', path, count: files.length })
     yield* commitFirst(path)
     return files.length
   })
@@ -84,7 +97,7 @@ const commitWhatIsThere = (path: string) =>
  * first commit, where it hasn't them. A folder inside a repository is that
  * repository's, ready or not, and is left as it is.
  */
-export const prepareFolder = (opened: string): Effect.Effect<Prepared, FolderRefused | GitFailed> =>
+export const prepareFolder = (opened: string, most = MOST_FILES): Effect.Effect<Prepared, FolderRefused | GitFailed> =>
   Effect.gen(function* () {
     const path = real(opened)
     const listed = yield* Effect.try({
@@ -99,7 +112,7 @@ export const prepareFolder = (opened: string): Effect.Effect<Prepared, FolderRef
       const branch = (yield* currentBranch(root)) ?? 'main'
       if (root !== path || Option.isSome(yield* commitOf(root, 'HEAD').pipe(Effect.option))) return { did: 'nothing', branch, files: 0 }
       // A repository with no commit yet: what's in it is its first, on the branch it is on.
-      const files = yield* commitWhatIsThere(root).pipe(Effect.tapError(() => Effect.ignore(git(root, 'reset', '--quiet'))))
+      const files = yield* commitWhatIsThere(root, most).pipe(Effect.tapError(() => Effect.ignore(git(root, 'reset', '--quiet'))))
       return { did: 'committed', branch, files }
     }
     if (tooWide(path)) return yield* new FolderRefused({ reason: 'too_wide', path })
@@ -116,7 +129,7 @@ export const prepareFolder = (opened: string): Effect.Effect<Prepared, FolderRef
           try: () => writeFileSync(ignore, IGNORED, { flag: 'wx' }),
           catch: () => new FolderRefused({ reason: 'unreadable', path }),
         })
-      const files = yield* commitWhatIsThere(path)
+      const files = yield* commitWhatIsThere(path, most)
       return { did: 'started' as const, branch: 'main', files }
     }).pipe(Effect.onError(() => undo))
   })
@@ -144,7 +157,7 @@ const free = (path: string) => {
 export const cloneFolderOf = (path: ReadonlyArray<string>) => (path.at(-1) ?? '').replace(/\.git$/, '')
 
 /** Reads git's words for why a clone failed: which of CloneRefused's reasons, and where the person can sign in, for single sign-on. */
-const whyCloneFailed = (stderr: string): { readonly reason: 'sso' | 'not_found' | 'failed'; readonly url?: string } => {
+export const whyCloneFailed = (stderr: string): { readonly reason: 'sso' | 'not_found' | 'failed'; readonly url?: string } => {
   if (/SAML|single sign-on|SSO/i.test(stderr)) {
     const url = /https:\/\/\S+\/sso\S*/.exec(stderr)?.[0]
     return url === undefined ? { reason: 'sso' } : { reason: 'sso', url }

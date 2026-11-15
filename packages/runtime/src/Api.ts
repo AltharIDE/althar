@@ -890,7 +890,7 @@ export const handlers = apiLayer(
             return { grant: yield* folders.allow(made.path), path: made.path }
           }),
         ),
-      PrepareFolder: ({ commandId, grant }) => once(commandId, api(Effect.flatMap(folders.path(grant), prepareFolder))),
+      PrepareFolder: ({ commandId, grant }) => once(commandId, api(Effect.flatMap(folders.path(grant), (path) => prepareFolder(path)))),
       ListHostRepositories: ({ connectionId }) =>
         api(
           Effect.gen(function* () {
