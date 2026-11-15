@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { PageKey, PageLine, PageState, Pointed } from '../src/main/browser/page'
-import type { Host, PagesHost } from '../src/renderer/data/services'
+import type { DictationHost, Host, PagesHost } from '../src/renderer/data/services'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { coveredNow } from '../src/renderer/features/browser/cover'
 import { useOpener } from '../src/renderer/features/browser/opener'
@@ -14,6 +14,8 @@ import { pageRoute } from '../src/renderer/features/browser/route'
 import { rootRoute } from '../src/renderer/root'
 import { PageView } from '../src/renderer/features/browser/PageView'
 import { commentsOf, forgetComments, gather } from '../src/renderer/shared/comments'
+import { CarriedAtFoot } from '../src/renderer/shared/dictation/Carried'
+import { LooseDictation } from '../src/renderer/shared/dictation/Loose'
 import { fakeClient, fakeHost } from './fixtures'
 import { servicesFor } from './render'
 
@@ -25,6 +27,14 @@ import { servicesFor } from './render'
  * draft, and a run's or a link's address opens beside the conversation or
  * in the person's browser, as the person keeps links.
  */
+
+// The window's dictation hears a microphone that heard two seconds of something.
+vi.mock('../src/renderer/shared/dictation/recorder', () => ({
+  record: vi.fn(async () => {
+    const heard = () => ({ samples: new Float32Array(32_000), sampleRate: 16_000 })
+    return { peek: heard, stop: heard, cancel: vi.fn(), use: vi.fn(async () => {}) }
+  }),
+}))
 
 const OWNER = `task_${'a1'.repeat(16)}`
 const PROJECT = `proj_${'b2'.repeat(16)}`
@@ -409,6 +419,38 @@ describe('a comment on the page', () => {
     await userEvent.clear(box)
     await userEvent.type(box, 'Changed{Enter}')
     await waitFor(() => expect(commentsOf(DRAFT)[0]?.note).toBe('Changed'))
+  })
+
+  it('starts dictation from anywhere at the page’s own key, where no composer shows', async () => {
+    const dictation: DictationHost = {
+      state: vi.fn(async () => ({
+        platform: 'darwin',
+        microphone: 'granted' as const,
+        settings: true,
+        model: { name: 'Parakeet', ready: true, got: 1, size: 1, downloading: false },
+      })),
+      allow: vi.fn(async () => true),
+      download: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      remove: vi.fn(async () => {}),
+      prepare: vi.fn(async () => {}),
+      transcribe: vi.fn(async () => ''),
+      openSettings: vi.fn(async () => true),
+      onEvent: vi.fn(() => () => {}),
+    }
+    const fake = fakePages()
+    const host = fakeHost({ pages: fake.host, dictation })
+    shown(fake.host, vi.fn(), host)
+    render(
+      <ServicesProvider value={servicesFor(fakeClient().client, host)}>
+        <LooseDictation projectId={null} />
+        <CarriedAtFoot />
+      </ServicesProvider>,
+    )
+    fake.say(stateOf())
+    await screen.findByRole('complementary', { name: 'Page' })
+    fake.press('dictate')
+    await screen.findByRole('group', { name: 'Not placed yet' })
   })
 
   it('focuses the address at the page’s own key', async () => {
