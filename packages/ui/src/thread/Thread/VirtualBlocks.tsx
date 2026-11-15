@@ -361,10 +361,26 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
   const toBottom = (scroller: HTMLElement) => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
 
   /**
+   * Counts a scroll of the person's own that the list hasn't heard yet, as it is about to move the view: one made in this
+   * frame, whose event comes later. Following the bottom, a move up from it keeps its distance, or leaves it past the
+   * slack; reckoned from the move itself, as what was just drawn may have changed the thread's height.
+   */
+  const hear = (scroller: HTMLElement) => {
+    const moved = lastTop.current - scroller.scrollTop
+    if (!following.current || Math.abs(moved) < 1) return
+    lastTop.current = scroller.scrollTop
+    const was = Math.max(below.current + moved, 0)
+    if (moved > 0 && was >= SLACK) following.current = false
+    below.current = was
+  }
+
+  /**
    * Following the bottom, the view stays as near it as it was as what is drawn changes height above it: at it, or a
    * nudge up from it the person made; and goes to it from further, as on opening (useStickToBottom's rule).
    */
   const down = (scroller: HTMLElement) => {
+    hear(scroller)
+    if (!following.current) return
     const was = below.current
     const to = was < SLACK ? was : 0
     if (Math.abs(toBottom(scroller) - to) >= 1) scrollTo(scroller, scroller.scrollHeight - scroller.clientHeight - to)
@@ -373,6 +389,7 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
 
   /** Measures what is drawn and lays the gaps from it, keeping what is in view where it is. */
   const settle = (scroller: HTMLElement, gaps: ReadonlyArray<HTMLElement>) => {
+    hear(scroller)
     layGaps(gaps)
     // What was in view stays there, unless the thread follows its bottom, where it stays.
     if (!following.current) keep(scroller, place.current)
@@ -497,6 +514,7 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
         ? null
         : new ResizeObserver(() => {
             if (!showing(scroller)) return
+            hear(scroller)
             if (measure()) {
               layGaps(read())
               if (following.current) down(scroller)

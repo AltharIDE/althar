@@ -227,6 +227,26 @@ describe('a thread drawn only near the view', () => {
     expect(scrolled).toBe(301 * 100 - VIEW - 40)
   })
 
+  it('lets a scroll up from the bottom stand when a block grows in the same frame, before its event comes', async () => {
+    render(<Column list={blocks(0, 300)} />)
+    await frame()
+    for (let step = 1; step <= 5; step++) {
+      // The scroller moves; a block far above the view grows, and its size is heard before the scroll is.
+      const to = scrolled - 40
+      scrollTo(to)
+      const grown = document.querySelector<HTMLElement>('[data-item]')!
+      grown.dataset.h = String(Number(grown.dataset.h) + 10)
+      resized()
+      // Within the slack it keeps the person's distance from the bottom; past it, it has left the bottom where they put it.
+      if (40 * step < 90) expect(columnOf().height - VIEW - scrolled).toBe(40 * step)
+      else expect(scrolled).toBe(to)
+      act(() => {
+        fireEvent.scroll(scroller!)
+      })
+      await frame()
+    }
+  })
+
   it('keeps the block in view where it was as earlier blocks come before it', async () => {
     const { rerender } = render(<Column list={blocks(100, 300)} />)
     await frame()

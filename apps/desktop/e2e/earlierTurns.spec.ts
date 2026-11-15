@@ -190,6 +190,21 @@ test('task and coordinator threads scroll back through 400 turns without the tur
     await still(page)
     await page.screenshot({ path: 'test-results/history-task-start.png', scale: 'css' })
     const taskFrames = await sweep(task)
+    // From its latest turn, the navigator takes the person back to the first question, drawn for it.
+    await task.evaluate((element) => {
+      let box = element.parentElement!
+      while (!/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement!
+      box.scrollTop = box.scrollHeight
+    })
+    await expect(task.getByText(`History turn ${TURNS}`, { exact: true })).toBeVisible()
+    await expect(task.getByText('Question 1', { exact: true })).toHaveCount(0)
+    await page
+      .getByRole('navigation', { name: 'Conversation navigation' })
+      .filter({ visible: true })
+      // After the task's brief, its own first stop.
+      .getByRole('button', { name: /^Go to message \d+: Question 1$/ })
+      .click()
+    await expect(task.getByText('Question 1', { exact: true })).toBeInViewport()
 
     // What the scroll-back measured, beside the run's results, for the report.
     await test.info().attach('history', {
