@@ -214,9 +214,7 @@ test('task and coordinator threads scroll back through 400 turns without the tur
     await task.getByText('Question 1', { exact: true }).click()
     await page.evaluate(() => document.execCommand('selectAll'))
     await page.keyboard.press('ControlOrMeta+C')
-    await expect
-      .poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText()), { timeout: 20_000 })
-      .toContain(`History turn ${TURNS}`)
+    await expect.poll(() => app.electronApp.evaluate(({ clipboard }) => clipboard.readText())).toContain(`History turn ${TURNS}`)
     const copied = await app.electronApp.evaluate(({ clipboard }) => clipboard.readText())
     expect(copied).toMatch(/^Question 1$/m)
     expect(copied).toMatch(new RegExp(`^${middle}$`, 'm'))
