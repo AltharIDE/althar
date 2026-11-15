@@ -11,7 +11,7 @@ ADR-001, the repository's engineering target, is in [`ARCHITECTURE.md`](../../AR
 Althar is an Electron app. All of its code is TypeScript, and the runtime needs Node to run the agents' ACP adapters, so one runtime and one web engine was the simplest choice. The cost is a larger download and more memory than Tauri, and Electron's hardening is Althar's job.
 
 - **The runtime runs in an Electron utility process.** The main process starts and supervises it, and hands each window a `MessagePort` to it.
-- **`@althar/runtime` imports nothing from Electron.** It also runs under plain Node for tests and the CLI. What a host gives it, such as secrets, fetch and folder grants, comes in as options. What the host does with usage data and crash reports stays the host's (`apps/desktop/src/runtime/runtime.ts`).
+- **`@althar/runtime` imports nothing from Electron.** It also runs under plain Node for tests, the CLI and the standalone Linux host. What a host gives it, such as secrets, fetch and folder grants, comes in as options. What the host does with usage data and crash reports stays the host's (`apps/desktop/src/runtime/runtime.ts`).
 - **The adapters run on a Node the app ships**, not on Althar's own binary ([agents.md](agents.md#the-node-the-adapters-run-on)).
 
 How the processes fit together is in [architecture 02](../architecture/02-desktop-runtime.md).

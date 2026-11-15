@@ -43,4 +43,14 @@ try {
   process.stderr.write(`${failure.message}\n`)
   exitCode = failure.exitCode
 }
+// A finite command can emit more than a pipe's buffer (for example many provisioned projects).
+// Flush both streams before the explicit process exit, which also ends any third-party handles.
+await Promise.all([
+  new Promise<void>((resolve) => {
+    process.stdout.write('', () => resolve())
+  }),
+  new Promise<void>((resolve) => {
+    process.stderr.write('', () => resolve())
+  }),
+])
 process.exit(exitCode)
