@@ -240,10 +240,9 @@ export const useProject = (projectId: string): ProjectModel => {
   /**
    * The thread's head again: the agent working, the one it would start on.
    * Its items stay as they are, but for those it may have moved on, read after
-   * it and landing before it: what still waits its turn, and what else is
-   * asked. The runtime has a message delivered before it says the turn on it
-   * runs, so the thread never shows the turn running while what it took still
-   * waits in the queue.
+   * it and published with it: what still waits its turn, and what else is
+   * asked. The thread never shows new work under an idle head, nor the turn
+   * running while what it took still waits in the queue.
    */
   const readHead = useCallback(
     (also: Iterable<string> = []) =>
