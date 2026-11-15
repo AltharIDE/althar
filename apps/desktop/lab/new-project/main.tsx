@@ -3,7 +3,7 @@ import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
-import { type CSSProperties, type KeyboardEvent as KeyEvent, type ReactNode, StrictMode, useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent as KeyEvent, type ReactNode, StrictMode, useEffect, useRef, useState } from 'react'
 
 import { createRoot } from 'react-dom/client'
 
@@ -26,6 +26,7 @@ import {
   ConnectChecks,
   ConnectField,
   ConnectFound,
+  ConnectWaiting,
   Composer,
   Field,
   Icon,
@@ -33,12 +34,13 @@ import {
   LinkButton,
   Menu,
   MenuItem,
-  Popover,
   ProjectHeader,
   ProjectInk,
   type ProjectPart,
   ProjectTabs,
   Room,
+  type RuntimeEntry,
+  RuntimeState,
   Segmented,
   Select,
   Spinner,
@@ -48,28 +50,27 @@ import {
   You,
 } from '@althar/ui'
 import { device } from '@althar/ui/device'
-import { NewProject, type NewProjectFolder, repositoryFolder } from '@althar/ui/screens'
+import { NewProject, type NewProjectFolder, repositoryFolder, Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
 import { SizeMotion } from '../../../../packages/ui/src/lib/SizeMotion'
 import s from './lab.module.css'
 
 /*
- * The new-project lab (README.md): a project set up on the New project page
- * itself, in the room its side has. Where its code comes from first, a
- * repository on GitHub or GitLab cloned above all, or a folder on this
- * computer, or nothing yet; then git where it has none, where its code lives
- * and where its issues go, each with a choice made already. Create does all
- * of it in place, each part ticking as it is done, and opens the project
- * ready. A–C are three ways of laying the side out; 1–8 the folder Choose a
- * folder finds; G what is connected; T the theme; R starts again.
+ * The new-project lab (README.md): a project set up where it starts, three
+ * ways in side by side (Clone, a folder, Start empty), on the New project
+ * page's side and in the first run's welcome. A host not connected yet, such
+ * as Bitbucket, connects in place, and its repositories join the list. Then
+ * git where it has none, where its code lives and where its issues go, each
+ * with a choice made already; Create does all of it in place and opens the
+ * project ready. A–B are the two screens; 1–8 the folder Choose a folder
+ * finds; G what is connected; T the theme; R starts again.
  */
 
-const directions = [
-  { key: 'a', label: 'Your repositories first' },
-  { key: 'b', label: 'Three ways in' },
-  { key: 'c', label: 'One sheet' },
+const screens = [
+  { key: 'a', label: 'New project tab' },
+  { key: 'b', label: 'First run' },
 ] as const
-type Direction = (typeof directions)[number]['key']
+type Screen = (typeof screens)[number]['key']
 
 const states = [
   { key: 'none', label: 'Nothing chosen yet' },
@@ -91,6 +92,10 @@ const setups = [
   { key: 'none', label: 'Nothing yet' },
 ] as const
 type Setup = (typeof setups)[number]['key']
+
+/** What the first run does today, before a folder is chosen. */
+const todayFirst =
+  'Today: the first run lists git repositories it finds in ~/code and the like, or Choose a folder…. There’s no clone; its host is connected on the next step, after the project is made.'
 
 /** What each state does in Althar as it is. */
 const today: Record<State, string> = {
@@ -116,10 +121,34 @@ const cx = (...names: Array<string | false | null | undefined>) => names.filter(
 
 /* ---- What's connected, and what's on it ---- */
 
-type Host = 'github' | 'gitlab'
-const HOST: Record<Host, { name: string; brand: Brand; thing: string; issues: string; changes: string }> = {
-  github: { name: 'GitHub', brand: Brand.GitHub, thing: 'repository', issues: 'GitHub Issues', changes: 'pull requests' },
-  gitlab: { name: 'GitLab', brand: Brand.GitLab, thing: 'project', issues: 'GitLab issues', changes: 'merge requests' },
+type Host = 'github' | 'gitlab' | 'bitbucket'
+const HOSTS: readonly Host[] = ['github', 'gitlab', 'bitbucket']
+const HOST: Record<Host, { name: string; brand: Brand; thing: string; issues: string | null; changes: string; owners: string[] }> = {
+  github: {
+    name: 'GitHub',
+    brand: Brand.GitHub,
+    thing: 'repository',
+    issues: 'GitHub Issues',
+    changes: 'pull requests',
+    owners: ['balazs', 'charrette'],
+  },
+  gitlab: {
+    name: 'GitLab',
+    brand: Brand.GitLab,
+    thing: 'project',
+    issues: 'GitLab issues',
+    changes: 'merge requests',
+    owners: ['charrette'],
+  },
+  // Bitbucket's own issues are rarely where a team keeps them: Jira is, so they aren't offered.
+  bitbucket: {
+    name: 'Bitbucket',
+    brand: Brand.Bitbucket,
+    thing: 'repository',
+    issues: null,
+    changes: 'pull requests',
+    owners: ['charrette-studio'],
+  },
 }
 const hostsOf = (setup: Setup): Host[] => (setup === 'all' ? ['github', 'gitlab'] : setup === 'github' ? ['github'] : [])
 const linearOf = (setup: Setup) => setup === 'all'
@@ -212,6 +241,28 @@ const REPOS: readonly Repo[] = [
     issues: 7,
   },
   {
+    id: 'bb-tidepool-api',
+    host: 'bitbucket',
+    remote: 'charrette-studio/tidepool-api',
+    about: 'Station data, served',
+    lang: 'Kotlin',
+    ink: ProjectInk.Plum,
+    pushed: '4 days ago',
+    open: false,
+    issues: 0,
+  },
+  {
+    id: 'bb-brand',
+    host: 'bitbucket',
+    remote: 'charrette-studio/brand-kit',
+    about: 'Logos, type and colours',
+    lang: 'SVG',
+    ink: ProjectInk.Ochre,
+    pushed: 'last month',
+    open: false,
+    issues: 0,
+  },
+  {
     id: 'gh-dotfiles',
     host: 'github',
     remote: 'balazs/dotfiles',
@@ -228,9 +279,10 @@ const nameOf = (remote: string) => remote.split('/').at(-1) ?? remote
 
 /** A repository's URL, pasted: one of the listed, or any other on GitHub or GitLab. */
 const repoOfUrl = (typed: string): Repo | null => {
-  const found = /^(?:https?:\/\/|git@)?(github\.com|gitlab\.com)[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(typed.trim())
+  const found = /^(?:https?:\/\/|git@)?(github\.com|gitlab\.com|bitbucket\.org)[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/i.exec(typed.trim())
   if (found === null) return null
-  const host: Host = found[1]?.toLowerCase() === 'gitlab.com' ? 'gitlab' : 'github'
+  const domain = found[1]?.toLowerCase()
+  const host: Host = domain === 'gitlab.com' ? 'gitlab' : domain === 'bitbucket.org' ? 'bitbucket' : 'github'
   const remote = found[2] ?? ''
   return (
     REPOS.find((r) => r.host === host && r.remote === remote) ?? {
@@ -286,32 +338,37 @@ const gitWords: Record<Exclude<FolderKind, 'unreadable' | 'project'>, string> = 
 
 function useSetup({
   state,
-  setup,
+  hosts,
+  linear,
   name,
   onName,
-  start,
   ink,
   onDone,
+  parts = ['source', 'home', 'issues'],
 }: {
   state: State
-  setup: Setup
+  hosts: readonly Host[]
+  linear: boolean
   name: string
   onName: (name: string) => void
-  start: 'none' | 'like'
   ink: ProjectInk
   onDone: (done: Done) => void
+  /** What Create does: on the first run, only the code; its host and issues come on their own steps. */
+  parts?: readonly Part[]
 }) {
-  const hosts = hostsOf(setup)
   const slug = repositoryFolder(name)
   const like = (repo: Repo) => slug !== '' && nameOf(repo.remote).includes(slug)
-  const [source, setSource] = useState<Source>(() => {
-    if (isFolder(state)) return { kind: 'folder', folder: state }
-    const found = start === 'like' ? REPOS.find((r) => hosts.includes(r.host) && like(r) && r.sso === undefined) : undefined
-    return found === undefined ? { kind: 'none' } : { kind: 'repo', repo: found }
-  })
+  const [source, setSource] = useState<Source>(() => (isFolder(state) ? { kind: 'folder', folder: state } : { kind: 'none' }))
   const [door, setDoor] = useState<Door>(isFolder(state) ? 'folder' : 'clone')
-  const [home, setHome] = useState<Home>(hosts[0] ?? 'here')
-  const [owner, setOwner] = useState('balazs')
+  const [homePick, setHome] = useState<Home | null>(null)
+  const home: Home = homePick !== null && (homePick === 'here' || hosts.includes(homePick)) ? homePick : (hosts[0] ?? 'here')
+  const [ownerPick, setOwner] = useState<string | null>(null)
+  const owner =
+    home === 'here'
+      ? 'balazs'
+      : ownerPick !== null && HOST[home].owners.includes(ownerPick)
+        ? ownerPick
+        : (HOST[home].owners[0] ?? 'balazs')
   const [repoName, setRepoName] = useState(slug === '' ? 'tidepool' : slug)
   const [visible, setVisible] = useState<'private' | 'public'>('private')
   const [issuesPick, setIssuesPick] = useState<Issues | null>(null)
@@ -320,37 +377,40 @@ function useSetup({
   const [failed, setFailed] = useState<ReactNode>(null)
 
   const repo = source.kind === 'repo' ? source.repo : null
-  const codeHost: Host | null = repo !== null ? repo.host : home === 'here' ? null : home
+  // A clone's host is the one it comes from, unknown until it's chosen.
+  const codeHost: Host | null = repo !== null ? repo.host : door === 'clone' || home === 'here' ? null : home
   const remote = repo?.remote ?? `${owner}/${repoName}`
   const folderName = repo === null ? 'tidepool' : nameOf(repo.remote)
   const where =
     repo === null ? (source.kind === 'folder' ? whereOf(source.folder) : '~/code/tidepool') : (repo.here ?? `${CLONES_INTO}/${folderName}`)
-  const issueWays: Issues[] = [...(linearOf(setup) ? ['linear' as const] : []), ...(codeHost === null ? [] : ['host' as const]), 'none']
-  const issuesDefault: Issues = repo !== null && repo.issues > 0 ? 'host' : linearOf(setup) ? 'linear' : 'none'
+  const hostIssues = codeHost !== null && HOST[codeHost].issues !== null
+  const issueWays: Issues[] = [...(linear ? ['linear' as const] : []), ...(hostIssues ? ['host' as const] : []), 'none']
+  const issuesDefault: Issues = repo !== null && repo.issues > 0 && hostIssues ? 'host' : linear ? 'linear' : 'none'
   const issues = issuesPick !== null && issueWays.includes(issuesPick) ? issuesPick : issuesDefault
   const blocked = source.kind === 'folder' && (source.folder === 'unreadable' || source.folder === 'project')
   const teamName = TEAMS.find((t) => t.value === team)?.label ?? ''
 
-  const tasks: Task[] = []
-  if (repo !== null && repo.here === undefined) tasks.push({ part: 'source', text: `Cloning ${repo.remote} into ${where}`, ms: 1700 })
+  const all: Task[] = []
+  if (repo !== null && repo.here === undefined) all.push({ part: 'source', text: `Cloning ${repo.remote} into ${where}`, ms: 1700 })
   if (source.kind === 'folder' && source.folder === 'files')
-    tasks.push({ part: 'source', text: 'Starting git on main', ms: 500 }, { part: 'source', text: 'Committing its 14 files', ms: 600 })
-  if (source.kind === 'folder' && source.folder === 'empty') tasks.push({ part: 'source', text: 'Starting git on main', ms: 600 })
-  if (source.kind === 'folder' && source.folder === 'unborn')
-    tasks.push({ part: 'source', text: 'Committing its 14 files on main', ms: 600 })
-  if (source.kind === 'new') tasks.push({ part: 'source', text: 'Making ~/code/tidepool, with git on main', ms: 600 })
+    all.push({ part: 'source', text: 'Starting git on main', ms: 500 }, { part: 'source', text: 'Committing its 14 files', ms: 600 })
+  if (source.kind === 'folder' && source.folder === 'empty') all.push({ part: 'source', text: 'Starting git on main', ms: 600 })
+  if (source.kind === 'folder' && source.folder === 'unborn') all.push({ part: 'source', text: 'Committing its 14 files on main', ms: 600 })
+  if (source.kind === 'new') all.push({ part: 'source', text: 'Making ~/code/tidepool, with git on main', ms: 600 })
   if (repo === null && codeHost !== null)
-    tasks.push(
+    all.push(
       { part: 'home', text: `Creating ${remote} on ${HOST[codeHost].name}`, ms: 800 },
       { part: 'home', text: `Pushing main to ${remote}`, ms: 700 },
     )
   if (issues === 'linear')
-    tasks.push({
+    all.push({
       part: 'issues',
       text: team === 'new' ? 'Making the Linear team Tidepool (TID)' : `Linking it to ${teamName} in Linear`,
       ms: 700,
     })
-  if (issues === 'host' && codeHost !== null) tasks.push({ part: 'issues', text: `Taking its issues from ${remote}`, ms: 500 })
+  if (issues === 'host' && codeHost !== null) all.push({ part: 'issues', text: `Taking its issues from ${remote}`, ms: 500 })
+
+  const tasks = all.filter((task) => parts.includes(task.part))
 
   /** What Create made, said once in the project. */
   const linesOf = (): string[] => {
@@ -427,6 +487,7 @@ function useSetup({
       const n = nameOf(next.repo.remote)
       onName(n.charAt(0).toUpperCase() + n.slice(1))
     }
+    if ((next.kind === 'folder' || next.kind === 'new') && name.trim() === '') onName('Tidepool')
   }
 
   const folders: NewProjectFolder[] =
@@ -463,7 +524,7 @@ function useSetup({
 
   return {
     hosts,
-    setup,
+    linear,
     ink,
     like,
     source,
@@ -506,6 +567,8 @@ function useSetup({
     folders,
     footNote,
     failed,
+    blocked,
+    lines: linesOf,
     create: () => {
       if (running) return
       if (blocked) {
@@ -611,10 +674,7 @@ function HostFields({ S }: { S: SetupState }) {
         width={124}
         value={S.owner}
         onChange={S.setOwner}
-        options={[
-          { value: 'balazs', label: 'balazs' },
-          { value: 'charrette', label: 'charrette' },
-        ]}
+        options={(S.home === 'here' ? ['balazs'] : HOST[S.home].owners).map((one) => ({ value: one, label: one }))}
       />
       <span className={s.slash}>/</span>
       <Field
@@ -640,7 +700,10 @@ function HostFields({ S }: { S: SetupState }) {
 /** Your repositories on the hosts it's connected to, those named like the project first: each chosen in a press. */
 function Repositories({ S, height, onConnect }: { S: SetupState; height: number; onConnect: (host: Host) => void }) {
   const [typed, setTyped] = useState('')
-  const [only, setOnly] = useState<'all' | Host>('all')
+  const [onlyPick, setOnly] = useState<'all' | Host>('all')
+  const only = onlyPick === 'all' || S.hosts.includes(onlyPick) ? onlyPick : 'all'
+  const [connecting, setConnecting] = useState<Host | null>(null)
+  const away = HOSTS.filter((h) => !S.hosts.includes(h))
   const field = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLUListElement>(null)
   const pasted = repoOfUrl(typed)
@@ -676,7 +739,7 @@ function Repositories({ S, height, onConnect }: { S: SetupState; height: number;
   }
   return (
     <div className={s.repos}>
-      <div className={s.reposBar}>
+      <div className={s.reposBar} style={connecting === null ? undefined : { display: 'none' }}>
         <label className={s.find}>
           <Icon name="search" size={14} />
           <input
@@ -691,28 +754,51 @@ function Repositories({ S, height, onConnect }: { S: SetupState; height: number;
             autoComplete="off"
           />
         </label>
-        {S.hosts.length > 1 && (
+        {S.hosts.length > 1 && connecting === null && (
           <Segmented
             label="Which host"
             value={only}
             onChange={setOnly}
-            options={[
-              { value: 'all', label: 'All' },
-              { value: 'github', label: 'GitHub' },
-              { value: 'gitlab', label: 'GitLab' },
-            ]}
+            options={[{ value: 'all' as const, label: 'All' }, ...S.hosts.map((h) => ({ value: h, label: HOST[h].name }))]}
           />
         )}
+        {S.hosts.length > 0 && away.length > 0 && connecting === null && (
+          <Menu
+            label="Connect a host"
+            trigger={
+              <Button size="small" icon="plus">
+                Connect
+              </Button>
+            }
+          >
+            {away.map((h) => (
+              <MenuItem key={h} lead={<BrandMark brand={HOST[h].brand} size={14} />} onSelect={() => setConnecting(h)}>
+                {HOST[h].name}
+              </MenuItem>
+            ))}
+          </Menu>
+        )}
       </div>
-      {S.hosts.length === 0 && pasted === null ? (
+      {connecting !== null ? (
+        <ConnectWalk
+          host={connecting}
+          height={height}
+          onDone={() => {
+            onConnect(connecting)
+            setOnly(connecting)
+            setConnecting(null)
+          }}
+          onBack={() => setConnecting(null)}
+        />
+      ) : S.hosts.length === 0 && pasted === null ? (
         <div className={s.connectHosts} style={{ height }}>
-          {(['github', 'gitlab'] as const).map((id) => (
+          {HOSTS.map((id) => (
             <div key={id} className={s.connectHost}>
-              <BrandMark brand={HOST[id].brand} size={28} />
+              <BrandMark brand={HOST[id].brand} size={26} />
               <span className={s.connectHostName}>{HOST[id].name}</span>
-              <span className={s.connectHostNote}>Your repositories there, each cloned in a press</span>
-              <Button size="small" variant="signal" onClick={() => onConnect(id)}>
-                Connect {HOST[id].name}
+              <span className={s.connectHostNote}>{id === 'bitbucket' ? 'With an Atlassian API token' : 'In your browser'}</span>
+              <Button size="small" variant={id === 'github' ? 'signal' : 'default'} onClick={() => setConnecting(id)}>
+                Connect
               </Button>
             </div>
           ))}
@@ -769,6 +855,82 @@ function Repositories({ S, height, onConnect }: { S: SetupState; height: number;
           })}
         </ul>
       )}
+    </div>
+  )
+}
+
+/**
+ * A host connected in place, where it was asked for: GitHub and GitLab in the
+ * browser, Bitbucket Cloud with an Atlassian API token and its account's
+ * email, as Althar connects them. Then what it can do, ticked off.
+ */
+function ConnectWalk({ host, height, onDone, onBack }: { host: Host; height?: number; onDone: () => void; onBack: () => void }) {
+  const h = HOST[host]
+  const [email, setEmail] = useState('you@charrette.studio')
+  const [token, setToken] = useState('')
+  const [browser, setBrowser] = useState(false)
+  const ticking = useTicking(
+    host === 'bitbucket'
+      ? [`Signs in as ${email}`, 'Reads charrette-studio’s repositories', 'Opens pull requests and reads their checks']
+      : [`Signs in as ${h.owners[0] ?? 'you'}`, `Reads your ${h.thing === 'project' ? 'projects' : 'repositories'}`, `Opens ${h.changes}`],
+    onDone,
+  )
+  // In the browser, the lab answers for the host after a moment.
+  const start = useRef(ticking.start)
+  useEffect(() => {
+    start.current = ticking.start
+  })
+  useEffect(() => {
+    if (!browser) return
+    const id = setTimeout(() => start.current(), 1300)
+    return () => clearTimeout(id)
+  }, [browser])
+  const bad = token !== '' && !token.startsWith('ATATT')
+  return (
+    <div className={s.walk} style={height === undefined ? undefined : { minHeight: height }}>
+      <ConnectCard brand={h.brand} title={`Connect ${h.name}`} align="start" headingLevel={4}>
+        {ticking.busy ? (
+          <ConnectChecks label="Connecting" items={ticking.items} />
+        ) : host === 'bitbucket' ? (
+          <div className={s.walkFields}>
+            <ConnectField label="Atlassian account email" type="email" value={email} onChange={setEmail} />
+            <ConnectField
+              label="API token"
+              type="password"
+              mono
+              placeholder="ATATT…"
+              value={token}
+              onChange={setToken}
+              onSubmit={() => {
+                if (token !== '' && !bad) ticking.start()
+              }}
+              submit="Connect"
+              focus
+              {...(bad ? { error: 'An Atlassian API token starts with ATATT.' } : {})}
+              hint={
+                <>
+                  With its repository and pull request scopes ticked.{' '}
+                  <LinkButton onClick={() => setToken('ATATT3xFfGF0pRbS')}>Make one on Atlassian</LinkButton>
+                </>
+              }
+            />
+          </div>
+        ) : browser ? (
+          <ConnectWaiting>Waiting for {h.name} in your browser…</ConnectWaiting>
+        ) : null}
+        {!ticking.busy && (
+          <ConnectActions align="start">
+            {host !== 'bitbucket' && !browser && (
+              <Button variant="signal" icon="external" onClick={() => setBrowser(true)}>
+                Sign in on {h.name}
+              </Button>
+            )}
+            <Button variant="quiet" onClick={onBack}>
+              Back
+            </Button>
+          </ConnectActions>
+        )}
+      </ConnectCard>
     </div>
   )
 }
@@ -857,10 +1019,23 @@ function SourceCard({ S, status, onChange }: { S: SetupState; status: Status; on
 
 /** Where its code lives: a new repository on a host it's connected to, or only this computer. */
 function HomePicks({ S, onConnect }: { S: SetupState; onConnect: (host: Host) => void }) {
+  const [connecting, setConnecting] = useState<Host | null>(null)
+  if (connecting !== null)
+    return (
+      <ConnectWalk
+        host={connecting}
+        onDone={() => {
+          onConnect(connecting)
+          S.setHome(connecting)
+          setConnecting(null)
+        }}
+        onBack={() => setConnecting(null)}
+      />
+    )
   return (
     <SizeMotion step={S.home}>
       <div role="radiogroup" aria-label="Where its code lives" className={s.picks}>
-        {(['github', 'gitlab'] as const).map((id) =>
+        {HOSTS.map((id) =>
           S.hosts.includes(id) ? (
             <Pick
               key={id}
@@ -878,7 +1053,7 @@ function HomePicks({ S, onConnect }: { S: SetupState; onConnect: (host: Host) =>
               brand={HOST[id].brand}
               title={HOST[id].name}
               note={`Then a new ${HOST[id].thing} there`}
-              onConnect={() => onConnect(id)}
+              onConnect={() => setConnecting(id)}
             />
           ),
         )}
@@ -905,7 +1080,7 @@ function IssuePicks({ S }: { S: SetupState }) {
             checked={S.issues === 'host'}
             onChoose={() => S.setIssues('host')}
             mark={<BrandMark brand={HOST[host].brand} size={16} />}
-            title={HOST[host].issues}
+            title={HOST[host].issues ?? ''}
             note={S.repo !== null && S.repo.issues > 0 ? `${S.repo.issues} open on ${S.remote}` : `On ${S.remote}`}
           />
         )}
@@ -920,7 +1095,12 @@ function IssuePicks({ S }: { S: SetupState }) {
             <Select variant="filled" label="Linear team" width={260} value={S.team} onChange={S.setTeam} options={TEAMS} />
           </Pick>
         ) : (
-          <ConnectRow brand={Brand.Linear} title="Linear" note="Or Jira, or Trello" onConnect={noop} />
+          <ConnectRow
+            brand={S.codeHost === 'bitbucket' ? Brand.Jira : Brand.Linear}
+            title={S.codeHost === 'bitbucket' ? 'Jira' : 'Linear'}
+            note={S.codeHost === 'bitbucket' ? 'Or Linear, or Trello' : 'Or Jira, or Trello'}
+            onConnect={noop}
+          />
         )}
         <Pick
           checked={S.issues === 'none'}
@@ -954,67 +1134,22 @@ function HomeFixed({ S }: { S: SetupState }) {
   )
 }
 
-/* ---- A: your repositories first; then what the one chosen still needs ---- */
+/* ---- Three ways in, side by side; what's under them keeps its place ---- */
 
-function FirstSide({ S, onConnect }: { S: SetupState; onConnect: (host: Host) => void }) {
-  const chosen = S.source.kind !== 'none'
-  return (
-    <SizeMotion step={chosen ? 'chosen' : 'browse'}>
-      {chosen ? (
-        <div className={s.stack}>
-          <Section title="Code" status={S.status('source')}>
-            <SourceCard S={S} status={S.status('source')} onChange={() => S.choose({ kind: 'none' })} />
-          </Section>
-          <Section title="Where its code lives" status={S.status('home')}>
-            {S.repo === null ? <HomePicks S={S} onConnect={onConnect} /> : <HomeFixed S={S} />}
-          </Section>
-          <Section title="Issues" status={S.status('issues')}>
-            <IssuePicks S={S} />
-          </Section>
-        </div>
-      ) : (
-        <div className={s.stack}>
-          <div className={s.heroHead}>
-            <h2 className={s.hero}>Clone a repository</h2>
-            {S.hosts.length > 0 && (
-              <span className={s.accounts}>
-                {S.hosts.map((id) => (
-                  <span key={id} className={s.account}>
-                    <BrandMark brand={HOST[id].brand} size={12} />
-                    {id === 'github' ? 'balazs, charrette' : 'charrette'}
-                  </span>
-                ))}
-              </span>
-            )}
-          </div>
-          <Repositories S={S} height={316} onConnect={onConnect} />
-          <div className={s.orRow}>
-            <span className={s.or}>or</span>
-            <Button size="small" icon="folder" onClick={S.chooseFolder}>
-              Choose a folder on {here}…
-            </Button>
-            <Button size="small" icon="plus" onClick={() => S.choose({ kind: 'new' })}>
-              Start empty
-            </Button>
-          </div>
-        </div>
-      )}
-    </SizeMotion>
-  )
-}
+const listOf = (names: string[]) => (names.length < 2 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`)
 
-/* ---- B: three ways in, side by side; what's under them keeps its place ---- */
-
-function DoorsSide({ S, onConnect }: { S: SetupState; onConnect: (host: Host) => void }) {
+/** Clone, a folder or Start empty, and under them the one chosen, the same height whichever it is. */
+function Doors({ S, onConnect, height }: { S: SetupState; onConnect: (host: Host) => void; height: number }) {
   const doors: Array<{ id: Door; title: string; note: string; art: ReactNode }> = [
     {
       id: 'clone',
       title: 'Clone',
-      note: S.hosts.length === 0 ? 'From GitHub or GitLab' : `From ${S.hosts.map((h) => HOST[h].name).join(' or ')}`,
+      note: `From ${listOf((S.hosts.length === 0 ? HOSTS : S.hosts).map((h) => HOST[h].name))}`,
       art: (
         <span className={s.doorMarks}>
-          <BrandMark brand={Brand.GitHub} size={22} />
-          <BrandMark brand={Brand.GitLab} size={22} />
+          {HOSTS.map((h) => (
+            <BrandMark key={h} brand={HOST[h].brand} size={20} />
+          ))}
         </span>
       ),
     },
@@ -1023,7 +1158,7 @@ function DoorsSide({ S, onConnect }: { S: SetupState; onConnect: (host: Host) =>
   ]
   const source = S.source
   return (
-    <div className={s.stack}>
+    <>
       <div role="radiogroup" aria-label="Where its code comes from" className={s.doors}>
         {doors.map((door) => (
           <button
@@ -1040,14 +1175,14 @@ function DoorsSide({ S, onConnect }: { S: SetupState; onConnect: (host: Host) =>
           </button>
         ))}
       </div>
-      <div className={s.doorBody}>
+      <div className={s.doorBody} style={{ minHeight: height + 40 }}>
         {S.door === 'clone' ? (
           S.running && source.kind === 'repo' ? (
             <div className={s.zone}>
               <SourceCard S={S} status={S.status('source')} />
             </div>
           ) : (
-            <Repositories S={S} height={196} onConnect={onConnect} />
+            <Repositories S={S} height={height} onConnect={onConnect} />
           )
         ) : (
           <div className={cx(s.zone, source.kind === 'none' && s.zoneEmpty)}>
@@ -1065,6 +1200,14 @@ function DoorsSide({ S, onConnect }: { S: SetupState; onConnect: (host: Host) =>
           </div>
         )}
       </div>
+    </>
+  )
+}
+
+function DoorsSide({ S, onConnect }: { S: SetupState; onConnect: (host: Host) => void }) {
+  return (
+    <div className={s.stack}>
+      <Doors S={S} onConnect={onConnect} height={196} />
       <Section title="Where its code lives" status={S.status('home')}>
         {S.repo === null && S.door !== 'clone' ? <HomePicks S={S} onConnect={onConnect} /> : <HomeFixed S={S} />}
       </Section>
@@ -1075,190 +1218,25 @@ function DoorsSide({ S, onConnect }: { S: SetupState; onConnect: (host: Host) =>
   )
 }
 
-/* ---- C: one sheet, every row chosen already: the repository named like it, a new one on GitHub, Linear ---- */
-
-function RepoField({ S, onConnect }: { S: SetupState; onConnect: (host: Host) => void }) {
-  const [open, setOpen] = useState(false)
-  const repo = S.repo
-  return (
-    <Popover
-      open={open}
-      onOpenChange={setOpen}
-      label="Repositories"
-      width={520}
-      padded={false}
-      trigger={
-        <button type="button" className={cx(s.repoField, repo !== null && S.like(repo) && s.repoLike)}>
-          {repo === null ? (
-            <>
-              <span className={s.doorMarks}>
-                <BrandMark brand={Brand.GitHub} size={18} />
-                <BrandMark brand={Brand.GitLab} size={18} />
-              </span>
-              <span className={s.repoFieldName}>Choose a repository to clone</span>
-            </>
-          ) : (
-            <>
-              <BrandMark brand={HOST[repo.host].brand} size={20} />
-              <span className={s.repoMain}>
-                <span className={s.repoName}>
-                  <span>
-                    <span className={s.owner}>{repo.remote.split('/')[0]}/</span>
-                    {nameOf(repo.remote)}
-                  </span>
-                  {!repo.open && <Icon name="lock" size={11} />}
-                  {S.like(repo) && <span className={s.likeTag}>Named like the project</span>}
-                </span>
-                <span className={s.repoFacts}>
-                  <span className={s.mono}>into {S.where}</span>
-                  {repo.issues > 0 && <span>{repo.issues} open issues</span>}
-                </span>
-              </span>
-            </>
-          )}
-          <Icon name="chevronD" size={14} />
-          {S.status('source') === 'doing' && repo?.here === undefined && <span className={s.fill} aria-hidden="true" />}
-        </button>
-      }
-    >
-      <div className={s.popRepos} style={{ '--ink': `var(--project-${S.ink})` } as CSSProperties}>
-        <Repositories
-          S={{
-            ...S,
-            choose: (next: Source) => {
-              S.choose(next)
-              setOpen(false)
-            },
-          }}
-          height={300}
-          onConnect={onConnect}
-        />
-      </div>
-    </Popover>
-  )
-}
-
-function SheetSide({ S, onConnect }: { S: SetupState; onConnect: (host: Host) => void }) {
-  const host = S.codeHost
-  return (
-    <div className={s.sheet}>
-      <div className={s.sheetRow}>
-        <span className={s.sheetLabel}>
-          Code <StatusMark status={S.status('source')} />
-        </span>
-        <div className={s.sheetControl}>
-          <Segmented
-            label="Where its code comes from"
-            value={S.door}
-            onChange={S.setDoor}
-            options={[
-              { value: 'clone', label: 'Clone' },
-              { value: 'folder', label: 'A folder' },
-              { value: 'new', label: 'Start empty' },
-            ]}
-          />
-          <SizeMotion step={S.door}>
-            {S.door === 'clone' ? (
-              <RepoField S={S} onConnect={onConnect} />
-            ) : S.source.kind === 'none' ? (
-              <Button size="small" icon="folder" onClick={S.chooseFolder}>
-                Choose a folder…
-              </Button>
-            ) : (
-              <SourceCard S={S} status={S.status('source')} {...(S.door === 'folder' ? { onChange: S.chooseFolder } : {})} />
-            )}
-          </SizeMotion>
-        </div>
-      </div>
-      <div className={s.sheetRow}>
-        <span className={s.sheetLabel}>
-          Lives on <StatusMark status={S.status('home')} />
-        </span>
-        <div className={s.sheetControl}>
-          {S.repo !== null || S.door === 'clone' ? (
-            <HomeFixed S={S} />
-          ) : (
-            <SizeMotion step={S.home}>
-              <div className={s.sheetStack}>
-                <div className={s.sheetLine}>
-                  <Select
-                    variant="filled"
-                    label="Where its code lives"
-                    width={190}
-                    value={S.home}
-                    onChange={S.setHome}
-                    options={[
-                      ...S.hosts.map((h) => ({ value: h, label: HOST[h].name })),
-                      { value: 'here' as const, label: `Only on ${here}` },
-                    ]}
-                  />
-                  {S.hosts.length < 2 && (
-                    <LinkButton onClick={() => onConnect(S.hosts.includes('github') ? 'gitlab' : 'github')}>
-                      Connect {S.hosts.includes('github') ? 'GitLab' : 'GitHub or GitLab'}
-                    </LinkButton>
-                  )}
-                </div>
-                {host !== null && <HostFields S={S} />}
-              </div>
-            </SizeMotion>
-          )}
-        </div>
-      </div>
-      <div className={s.sheetRow}>
-        <span className={s.sheetLabel}>
-          Issues <StatusMark status={S.status('issues')} />
-        </span>
-        <div className={s.sheetControl}>
-          <div className={s.sheetLine}>
-            <Select
-              variant="filled"
-              label="Where its issues go"
-              width={190}
-              value={S.issues}
-              onChange={S.setIssues}
-              options={S.issueWays.map((way) => ({
-                value: way,
-                label: way === 'linear' ? 'Linear' : way === 'host' && host !== null ? HOST[host].issues : 'None for now',
-              }))}
-            />
-            {S.issues === 'linear' && (
-              <Select variant="filled" label="Linear team" width={240} value={S.team} onChange={S.setTeam} options={TEAMS} />
-            )}
-            {S.issues === 'host' && S.repo !== null && S.repo.issues > 0 && <span className={s.sheetNote}>{S.repo.issues} open</span>}
-            {!linearOf(S.setup) && <LinkButton>Connect Linear, Jira or Trello</LinkButton>}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /* ---- Step one: the New project page, its side the setup ---- */
 
 function SetupPage({
-  direction,
   state,
-  setup,
+  hosts,
+  linear,
   onDone,
   onConnect,
 }: {
-  direction: Direction
   state: State
-  setup: Setup
+  hosts: readonly Host[]
+  linear: boolean
   onDone: (done: Done) => void
   onConnect: (host: Host) => void
 }) {
   const [name, setName] = useState('Tidepool')
   const [ink, setInk] = useState(INK)
-  const S = useSetup({ state, setup, name, onName: setName, start: direction === 'c' ? 'like' : 'none', ink, onDone })
-  const side =
-    direction === 'a' ? (
-      <FirstSide S={S} onConnect={onConnect} />
-    ) : direction === 'b' ? (
-      <DoorsSide S={S} onConnect={onConnect} />
-    ) : (
-      <SheetSide S={S} onConnect={onConnect} />
-    )
+  const S = useSetup({ state, hosts, linear, name, onName: setName, ink, onDone })
+  const side = <DoorsSide S={S} onConnect={onConnect} />
   return (
     <NewProject
       seed={SEED}
@@ -1452,11 +1430,10 @@ const FILES = [
   { path: 'src/main.ts', add: 22, del: 4 },
 ]
 
-function LaterScene({ setup }: { setup: Setup }) {
+function LaterScene({ hosts }: { hosts: readonly Host[] }) {
   const [code, setCode] = useState<{ host: Host; remote: string } | null>(null)
   const [putting, setPutting] = useState<Host | null>(null)
   const [merged, setMerged] = useState(false)
-  const hosts = hostsOf(setup)
   const actions =
     code !== null ? (
       <>
@@ -1528,35 +1505,102 @@ function LaterScene({ setup }: { setup: Setup }) {
   )
 }
 
+/* ---- The first run: the welcome's project step, three ways in; its host and issues on their own steps ---- */
+
+const AGENTS: RuntimeEntry[] = [
+  { id: 'claude-code', name: 'Claude Code', brand: Brand.Anthropic, state: RuntimeState.Ready, account: 'Signed in' },
+  { id: 'codex', name: 'Codex', brand: Brand.OpenAI, state: RuntimeState.Ready, account: 'Signed in' },
+]
+
+function FirstRun({
+  state,
+  hosts,
+  linear,
+  onConnect,
+  onOpen,
+}: {
+  state: State
+  hosts: readonly Host[]
+  linear: boolean
+  onConnect: (host: Host) => void
+  onOpen: (done: Done) => void
+}) {
+  const [name, setName] = useState('')
+  const [step, setStep] = useState<WelcomeStep>('project')
+  const [made, setMade] = useState(false)
+  const S = useSetup({ state, hosts, linear, name, onName: setName, ink: INK, onDone: () => setMade(true), parts: ['source'] })
+  return (
+    <div className={s.first}>
+      <Welcome
+        step={step}
+        onStepChange={setStep}
+        toured
+        runtimes={AGENTS}
+        repositories={null}
+        picked={S.source.kind === 'none' ? [] : ['chosen']}
+        onPick={noop}
+        onAdd={S.chooseFolder}
+        project={
+          <fieldset className={cx(s.fieldset, s.firstDoors)} disabled={S.running}>
+            <Doors S={S} onConnect={onConnect} height={232} />
+          </fieldset>
+        }
+        name={name}
+        onNameChange={setName}
+        onCreate={S.create}
+        creating={S.running}
+        made={made}
+        {...(S.failed === null ? {} : { error: { step: 'project' as const, said: S.failed } })}
+        // A clone's code lives where it came from: no step for it.
+        {...(S.repo === null ? { hosts: <HomePicks S={S} onConnect={onConnect} /> } : {})}
+        hostConnected
+        trackers={<IssuePicks S={S} />}
+        onOpen={() => onOpen({ lines: S.lines(), host: S.codeHost })}
+        text={{
+          project: { ...welcomeText.project, nothing: 'Choose where its code comes from first.' },
+          code: {
+            ...welcomeText.code,
+            label: 'Code',
+            title: 'Where its code lives',
+            line: `A host gives its tasks pull requests and checks. Without one, finished work merges into main on ${here}.`,
+          },
+        }}
+      />
+    </div>
+  )
+}
+
 /* ---- The lab ---- */
 
 function Lab() {
-  const [direction, setDirection] = useState<Direction>(pick(directions, params.get('d'), 'a'))
+  const [screen, setScreen] = useState<Screen>(pick(screens, params.get('d'), 'a'))
   const [state, setState] = useState<State>(pick(states, params.get('s'), 'none'))
   const [setup, setSetup] = useState<Setup>(pick(setups, params.get('c'), 'all'))
   const [theme, setTheme] = useState(params.get('theme') === 'dark' ? 'dark' : 'light')
   const [done, setDone] = useState<{ scene: string; done: Done } | null>(null)
   const [round, setRound] = useState(0)
+  // Hosts connected along the way, on top of what the bar says: kept until the page starts again.
+  const [joined, setJoined] = useState<{ scene: string; hosts: Host[] }>({ scene: '', hosts: [] })
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
   useEffect(() => {
     const url = new URL(location.href)
     url.search = ''
-    url.searchParams.set('d', direction)
+    url.searchParams.set('d', screen)
     url.searchParams.set('s', state)
     url.searchParams.set('c', setup)
     url.searchParams.set('theme', theme)
     history.replaceState(null, '', url)
-  }, [direction, state, setup, theme])
+  }, [screen, state, setup, theme])
   useEffect(() => {
     const down = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       if (target !== null && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
       const key = event.key.toLowerCase()
-      const d = directions.find((one) => one.key === key)
-      if (d !== undefined) return setDirection(d.key)
+      const d = screens.find((one) => one.key === key)
+      if (d !== undefined) return setScreen(d.key)
       const n = Number(key)
       const st = states[n - 1]
       if (Number.isInteger(n) && st !== undefined) return setState(st.key)
@@ -1568,33 +1612,32 @@ function Lab() {
     return () => window.removeEventListener('keydown', down)
   }, [])
   // Anything changed in the bars starts the page again.
-  const scene = `${direction}-${state}-${setup}-${round}`
+  const scene = `${screen}-${state}-${setup}-${round}`
   const ready = done !== null && done.scene === scene ? done.done : null
+  const extra = joined.scene === scene ? joined.hosts : []
+  const hosts = HOSTS.filter((h) => hostsOf(setup).includes(h) || extra.includes(h))
+  const connect = (host: Host) => setJoined({ scene, hosts: [...extra, host] })
+  const finish = (made: Done) => setDone({ scene, done: made })
   return (
     <div className={s.lab}>
       <main className={s.scene}>
         {state === 'later' ? (
-          <LaterScene key={scene} setup={setup} />
+          <LaterScene key={scene} hosts={hosts} />
         ) : ready !== null ? (
           <ReadyScene key={scene} done={ready} />
+        ) : screen === 'b' ? (
+          <FirstRun key={scene} state={state} hosts={hosts} linear={linearOf(setup)} onConnect={connect} onOpen={finish} />
         ) : (
           <div className={s.page}>
-            <SetupPage
-              key={scene}
-              direction={direction}
-              state={state}
-              setup={setup}
-              onDone={(made) => setDone({ scene, done: made })}
-              onConnect={(host) => setSetup(host === 'github' ? 'github' : 'all')}
-            />
+            <SetupPage key={scene} state={state} hosts={hosts} linear={linearOf(setup)} onDone={finish} onConnect={connect} />
           </div>
         )}
       </main>
       <nav className={s.bars} aria-label="Lab">
         <div className={s.bar}>
-          <span className={s.barName}>Direction</span>
-          {directions.map((one) => (
-            <button key={one.key} type="button" aria-pressed={direction === one.key} onClick={() => setDirection(one.key)}>
+          <span className={s.barName}>Screen</span>
+          {screens.map((one) => (
+            <button key={one.key} type="button" aria-pressed={screen === one.key} onClick={() => setScreen(one.key)}>
               <kbd>{one.key.toUpperCase()}</kbd>
               {one.label}
             </button>
@@ -1627,7 +1670,7 @@ function Lab() {
           ))}
           <kbd>G</kbd>
         </div>
-        <p className={s.caption}>{today[state]}</p>
+        <p className={s.caption}>{screen === 'b' && state === 'none' ? todayFirst : today[state]}</p>
       </nav>
     </div>
   )

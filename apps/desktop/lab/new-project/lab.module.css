@@ -417,7 +417,7 @@
 }
 .connectHosts {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
 }
 .connectHost {
@@ -619,7 +619,7 @@
   font-size: 12px;
 }
 .doorBody {
-  height: 236px;
+  display: grid;
 }
 .zone {
   display: grid;
@@ -767,4 +767,38 @@
   color: var(--t-2);
   line-height: 1.45;
   max-width: 1100px;
+}
+
+/* Connecting a host in place, in the room the list had. */
+.walk {
+  display: grid;
+  align-content: start;
+  padding: 18px 20px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.walkFields {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 420px;
+}
+
+/* The first run: the welcome, filling the scene. */
+.first {
+  position: relative;
+  overflow: clip;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.first > * {
+  flex: 1;
+}
+.firstDoors {
+  /* No project colour yet: the welcome's own. */
+  --ink: var(--signal);
+  display: grid;
+  gap: 14px;
 }

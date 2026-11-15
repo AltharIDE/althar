@@ -212,6 +212,12 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   /** Folders dropped on the window, on the project's step. Without it, a drop does nothing. */
   onDrop?: (files: readonly File[]) => void
   repositoryText?: Partial<RepositoryPickText>
+  /**
+   * In place of the repositories found: the consumer's own way of choosing
+   * where the first project's code comes from, such as a clone. Make still
+   * waits on something picked, and the name shows once it is.
+   */
+  project?: ReactNode
   /** The project's name as it stands. */
   name: string
   onNameChange: (name: string) => void
@@ -225,7 +231,8 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   /** Asks the agents again, after their list couldn't be read: beside the agents' error. */
   onRecheck?: () => void
   /** The code hosts, to connect one: the consumer's list, and its walk in. */
-  hosts: ReactNode
+  /** Where its code is. Without it, as for a clone that came from its host, the step is left out. */
+  hosts?: ReactNode
   /** A code host is connected: the code's step goes on with Continue, not Not now. */
   hostConnected?: boolean
   /** The trackers, to connect one, the same way. Without them, where none can be connected, there is no step for issues. */
@@ -256,6 +263,7 @@ export function Welcome({
   onAdd,
   onDrop,
   repositoryText,
+  project,
   name,
   onNameChange,
   onCreate,
@@ -274,7 +282,7 @@ export function Welcome({
   ...rows
 }: WelcomeProps) {
   const t = { ...welcomeText, ...text }
-  const setup = trackers === undefined ? SETUP.filter((one) => one !== 'issues') : SETUP
+  const setup = SETUP.filter((one) => (one !== 'issues' || trackers !== undefined) && (one !== 'code' || hosts !== undefined))
   const steps: readonly WelcomeStep[] = toured ? setup : [...TOUR, ...setup]
   const [chosen, setStep] = useControlled<WelcomeStep>(stepProp, defaultStep ?? steps[0] ?? 'agents', onStepChange)
   const step: WelcomeStep = steps.includes(chosen) ? chosen : (steps[0] ?? 'agents')
@@ -303,10 +311,11 @@ export function Welcome({
   // Once the project is made, the steps up to it are done with.
   const canGoBack = previous !== undefined && !(made && (previous === 'project' || steps.indexOf(previous) < steps.indexOf('project')))
 
-  // Made, the welcome goes on to where its code is.
+  // Made, the welcome goes on to where its code is, or to its issues where it came from its host.
+  const after = steps[at + 1]
   useEffect(() => {
-    if (made && step === 'project') setStep('code')
-  }, [made, step, setStep])
+    if (made && step === 'project' && after !== undefined) setStep(after)
+  }, [made, step, after, setStep])
 
   // Each step's main button takes the focus as the step arrives, so Return goes on; the project's step is about finding a
   // repository, so its field takes it, where there are any to find.
@@ -437,16 +446,18 @@ export function Welcome({
             ))}
           {step === 'project' && (
             <>
-              <RepositoryPick
-                repositories={repositories}
-                picked={picked}
-                onPick={(id) => {
-                  setNothing(false)
-                  onPick(id)
-                }}
-                onAdd={onAdd}
-                {...(repositoryText === undefined ? {} : { text: repositoryText })}
-              />
+              {project ?? (
+                <RepositoryPick
+                  repositories={repositories}
+                  picked={picked}
+                  onPick={(id) => {
+                    setNothing(false)
+                    onPick(id)
+                  }}
+                  onAdd={onAdd}
+                  {...(repositoryText === undefined ? {} : { text: repositoryText })}
+                />
+              )}
               {nothing && <Problem>{t.project.nothing}</Problem>}
               {picked.length > 0 && (
                 <div className={s.named}>

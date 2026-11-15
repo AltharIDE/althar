@@ -30,30 +30,61 @@ const all =
     for (const act of acts) await act(page)
   }
 const create = press(/^Create Tidepool/, 300)
+const fill =
+  (label: string | RegExp, text: string, wait = 200): Act =>
+  async (page) => {
+    await page.getByLabel(label).first().fill(text)
+    await page.waitForTimeout(wait)
+  }
+const connectBitbucket = all(press('Connect', 400), press('Bitbucket', 500, 'menuitem'))
 const shots: ReadonlyArray<[string, string, Act?]> = [
-  ['01-a-repositories', 'd=a&s=none'],
-  ['02-a-cloned-chosen', 'd=a&s=none', press(/balazs\/tidepool/, 500)],
-  ['03-a-creating', 'd=a&s=none', all(press(/balazs\/tidepool/, 500), create, wait(900))],
-  ['04-a-files-dark', 'd=a&s=files&theme=dark'],
-  ['05-a-files-creating', 'd=a&s=files', all(create, wait(1500))],
-  ['06-a-ready', 'd=a&s=files', all(create, wait(5200))],
-  ['07-a-nothing-connected', 'd=a&s=none&c=none'],
-  ['08-a-sso', 'd=a&s=none', all(press(/charrette\/infra/, 400), create, wait(1400))],
-  ['09-a-unreadable', 'd=a&s=unreadable', all(create, wait(300))],
-  ['10-b-doors', 'd=b&s=none'],
-  ['11-b-cloned-chosen-dark', 'd=b&s=none&theme=dark', press(/balazs\/tidepool/, 500)],
-  ['12-b-folder', 'd=b&s=unborn'],
-  ['13-b-start-empty', 'd=b&s=none', press(/^Start empty/, 500, 'radio')],
-  ['14-c-sheet', 'd=c&s=none'],
-  ['15-c-picker', 'd=c&s=none', press(/balazs\/tidepool/, 500)],
-  ['16-c-folder-dark', 'd=c&s=local&theme=dark'],
-  ['17-c-creating', 'd=c&s=none', all(create, wait(1000))],
-  ['18-c-ready', 'd=c&s=none', all(create, wait(3800))],
-  ['19-project-dark', 'd=a&s=project&theme=dark'],
-  ['20-later-put', 'd=a&s=later', all(press('Put it on a host first', 300), press('GitHub', 500, 'menuitem'))],
+  // The New project tab
+  ['01-tab-clone', 'd=a&s=none'],
+  ['02-tab-connect-menu', 'd=a&s=none', press('Connect', 500)],
+  ['03-tab-bitbucket-token', 'd=a&s=none', connectBitbucket],
+  ['04-tab-bitbucket-bad-token', 'd=a&s=none', all(connectBitbucket, fill('API token', 'abc123', 300))],
+  ['05-tab-bitbucket-checking', 'd=a&s=none', all(connectBitbucket, fill('API token', 'ATATT3xFfGF0', 100), press(/^Connect$/, 700))],
+  ['06-tab-bitbucket-listed', 'd=a&s=none', all(connectBitbucket, fill('API token', 'ATATT3xFfGF0', 100), press(/^Connect$/, 2400))],
+  [
+    '07-tab-bitbucket-chosen-dark',
+    'd=a&s=none&theme=dark',
+    all(connectBitbucket, fill('API token', 'ATATT3xFfGF0', 100), press(/^Connect$/, 2400), press(/tidepool-api/, 500)),
+  ],
+  ['08-tab-files-bitbucket-home', 'd=a&s=files&c=github', press('Connect', 500)],
+  ['09-tab-nothing-connected', 'd=a&s=none&c=none'],
+  // The first run
+  ['10-first-nothing-connected', 'd=b&s=none&c=none'],
+  ['11-first-github-browser', 'd=b&s=none&c=none', press('Connect', 600)],
+  ['12-first-github-listed', 'd=b&s=none&c=none', all(press('Connect', 600), press(/^Sign in on GitHub/, 3400))],
+  [
+    '13-first-chosen-dark',
+    'd=b&s=none&c=none&theme=dark',
+    all(press('Connect', 600), press(/^Sign in on GitHub/, 3400), press(/balazs\/tidepool/, 500)),
+  ],
+  [
+    '14-first-cloning',
+    'd=b&s=none&c=none',
+    all(press('Connect', 600), press(/^Sign in on GitHub/, 3400), press(/balazs\/tidepool/, 400), press('Make the project', 800)),
+  ],
+  [
+    '15-first-issues-after-clone',
+    'd=b&s=none&c=none',
+    all(press('Connect', 600), press(/^Sign in on GitHub/, 3400), press(/balazs\/tidepool/, 400), press('Make the project', 2600)),
+  ],
+  ['16-first-folder', 'd=b&s=files&c=none'],
+  ['17-first-folder-code-step', 'd=b&s=files&c=none', press('Make the project', 1800)],
+  [
+    '18-first-folder-bitbucket',
+    'd=b&s=files&c=none',
+    all(press('Make the project', 1800), async (page) => {
+      await page.getByRole('button', { name: 'Connect', exact: true }).nth(2).click()
+      await page.waitForTimeout(500)
+    }),
+  ],
+  ['19-first-opened', 'd=b&s=files&c=none', all(press('Make the project', 1800), press('Continue', 500), press(/^Open /, 800))],
 ]
 const browser = await chromium.launch()
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 })
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 })
 for (const [name, query, act] of shots) {
   await page.goto(`http://localhost:${port}/?${query}`)
   await page.waitForTimeout(600)
