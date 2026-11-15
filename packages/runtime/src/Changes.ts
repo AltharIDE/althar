@@ -53,6 +53,7 @@ import { ChecksAsked, inspectChecks } from './readChecks'
 import { hostName, logForLead, logPage, LOGS_TO_LEAD, queueDetailOf, readLog } from './checkLogs'
 import { leftByAlthar } from './branchUpdates'
 import { withFolder } from './bringBack'
+import { removeWorktree } from './worktreeRemoval'
 import { Agents, RuntimeConfig } from './Config'
 import { Models } from './Models'
 import { detailsOf, reviewRecordOf, reviewSeal, sealOf, unreviewedNote, unreviewedOf, type SessionNamer } from './pullRequestReview'
@@ -2751,10 +2752,7 @@ export class Changes extends Context.Service<
                   /\/\.git$/,
                   '',
                 )
-                yield* git(root === '' ? into.path : root, 'worktree', 'remove', from.path).pipe(
-                  Effect.catch(() => git(into.path, 'worktree', 'remove', '--force', from.path)),
-                  Effect.ignore,
-                )
+                yield* removeWorktree(root === '' ? into.path : root, from.path)
               }
               yield* goneRow(from, 'workspace.joined', { into: into.id, commits: own.length }, actorId)
             }),
@@ -2824,10 +2822,7 @@ export class Changes extends Context.Service<
                   /\/\.git$/,
                   '',
                 )
-                yield* git(root, 'worktree', 'remove', row.path).pipe(
-                  Effect.catch(() => git(root, 'worktree', 'remove', '--force', row.path)),
-                  Effect.ignore,
-                )
+                yield* removeWorktree(root, row.path)
               }
               yield* goneRow(row, 'workspace.dropped', { committed }, actorId)
             }),

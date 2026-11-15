@@ -204,7 +204,9 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
                 {task.files.length > 0 && (
                   <PartLines
                     lines={[
-                      ...task.files.slice(0, SHOWN).map((file) => [file.path, file.binary ? '' : `+${file.add} −${file.del}`] as const),
+                      ...task.files
+                        .slice(0, SHOWN)
+                        .map((file) => [file.path, file.binary ? '' : `+${file.add} −${file.del}`, 'path'] as const),
                       ...(task.files.length > SHOWN ? [[t.more(task.files.length - SHOWN), ''] as const] : []),
                     ]}
                   />

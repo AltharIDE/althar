@@ -39,7 +39,7 @@ export const kindWords = {
   notShipped: 'Not shipped',
   /** Its lead answered the person, who hasn't read it yet: it waits in Needs you until they open it. */
   replied: 'Replied',
-  /** A task whose lead stopped with no agent on it: it waits for the person to carry on or abandon it. */
+  /** A task whose lead stopped with no agent on it: held Up next until the person resumes it. */
   stopped: 'Stopped',
   /** Issues its lead drafted, for the person to file. */
   issues: 'Issues to file',
@@ -186,7 +186,7 @@ export const standingCalls = <C extends Asked>(
   tasks: ReadonlyArray<{ readonly taskId: string; readonly phase: string | null }>,
   calls: ReadonlyArray<C>,
 ): ReadonlyArray<C> => {
-  const waiting = new Set(tasks.filter((task) => task.phase === 'waiting').map((task) => task.taskId))
+  const waiting = new Set(tasks.filter((task) => task.phase === 'waiting' || task.phase === 'stopped').map((task) => task.taskId))
   const oldest = new Map<string, C>()
   for (const call of calls) {
     if (call.taskId === null || !waiting.has(call.taskId)) continue
@@ -204,7 +204,7 @@ export interface WaitingOn<T, C> {
   readonly issues: ReadonlyArray<T>
   /** Calls no waiting task holds: the coordinator's questions, a held plan's. */
   readonly calls: ReadonlyArray<C>
-  /** Tasks whose lead stopped with no agent on them, for the person to carry on or abandon. */
+  /** Stopped tasks with no open call: held Up next until the person resumes them, outside Needs you. */
   readonly stopped: ReadonlyArray<T>
   /** Work ready for the person: every ready task, but one its host is merging. */
   readonly ready: ReadonlyArray<T>
@@ -215,7 +215,7 @@ export interface WaitingOn<T, C> {
 /**
  * Where each task waits on the person, if it does, from its card and the
  * calls that wait: on a call (its oldest standing for it), on issues to file
- * or apply, stopped, or ready; an aside off all of it. `merging`: tasks the
+ * or apply, or ready; stopped tasks with no call wait Up next; an aside off all of it. `merging`: tasks the
  * person is merging, at work until they settle, as one in its merge queue.
  */
 export const waitingOn = <T extends Placed, C extends Asked>(
@@ -226,7 +226,7 @@ export const waitingOn = <T extends Placed, C extends Asked>(
   const shown = tasks.filter((task) => !isAside(task))
   const standing = standingCalls(shown, calls)
   const held = new Map(standing.flatMap((call) => (call.taskId === null ? [] : [[call.taskId, call] as const])))
-  const waits = shown.filter((task) => task.phase === 'waiting')
+  const waits = shown.filter((task) => task.phase === 'waiting' || (task.phase === 'stopped' && held.has(task.taskId)))
   const waiting = waits.flatMap((task) => {
     const call = held.get(task.taskId)
     return call === undefined ? [] : [{ task, call }]
@@ -238,7 +238,7 @@ export const waitingOn = <T extends Placed, C extends Asked>(
     waiting,
     issues,
     calls: standing.filter((call) => call.taskId === null || !folded.has(call.taskId)),
-    stopped: shown.filter((task) => task.phase === 'stopped'),
+    stopped: shown.filter((task) => task.phase === 'stopped' && !held.has(task.taskId)),
     ready: shown.filter((task) => task.phase === 'ready' && !queuedToMerge(task) && !merging.has(task.taskId)),
     unread: waits.filter((task) => !held.has(task.taskId) && !asked(task)),
   }
@@ -246,7 +246,7 @@ export const waitingOn = <T extends Placed, C extends Asked>(
 
 /** How many things wait on the person, each once: what the board's Needs you, its tab, the home, the edge and the Dock count. */
 export const waitingCount = (on: Omit<WaitingOn<unknown, unknown>, 'unread'>): number =>
-  on.waiting.length + on.issues.length + on.calls.length + on.stopped.length + on.ready.length
+  on.waiting.length + on.issues.length + on.calls.length + on.ready.length
 
 /**
  * How many things wait on the person in each project, by its id, as its board counts them: a project's dot, its tab, its

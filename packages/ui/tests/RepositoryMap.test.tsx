@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MAP_HALYARD, MAP_HOSTS, MAP_MERIDIAN } from '../src/fixtures/setup'
 import { ChangeTarget } from '../src/foundations/vocabulary'
+import { visiblePath } from '../src/primitives/Path/Path'
 import { RepositoryMap, type RepositoryMapProps } from '../src/setup/RepositoryMap/RepositoryMap'
 
 /*
@@ -103,6 +104,32 @@ describe('a fork’s branches', () => {
     expect(wires()).toHaveLength(2)
     expect(screen.getByText('It pushes to balazs/halyard-api on GitHub, and its pull requests open on halyard/api.')).toBeTruthy()
     expect(screen.getByText(NO_PUSH)).toBeTruthy()
+  })
+})
+
+describe('a long folder', () => {
+  /** Draws each folder and the end as monospace text, 7px a character, in a room 190px wide. */
+  const draw = () => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    )
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { width: this.hasAttribute('title') ? 190 : (this.dataset.text ?? '').length * 7 } as DOMRect
+    })
+  }
+  const where = '~/Projects/northwind/platform/services/payments-service'
+
+  it('gives up whole leading folders where it is being read, as where it is read', () => {
+    draw()
+    map({ repositories: [{ ...MAP_MERIDIAN[0]!, where }], reading: [{ id: 'reading', name: 'payments', where }] })
+    const shown = [...document.querySelectorAll(`[title="${where}"]`)].map(visiblePath)
+    expect(shown).toHaveLength(2)
+    expect(shown[0]).toBe('…/services/payments-service')
+    expect(shown[1]).toBe(shown[0])
   })
 })
 

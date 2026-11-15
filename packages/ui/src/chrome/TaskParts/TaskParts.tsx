@@ -3,6 +3,7 @@ import { type ReactNode, useState } from 'react'
 import { Brand } from '../../foundations/brands/brands'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import { MergeButton } from '../../primitives/MergeButton/MergeButton'
 import { KeyValues } from '../../primitives/KeyValues/KeyValues'
@@ -76,15 +77,23 @@ export function PartShots({ shots }: { shots: ReadonlyArray<{ id: string; src: s
   )
 }
 
-/** A part's lines of text, as a changed file or a failing check's last lines show. */
-export function PartLines({ lines, log = false }: { lines: ReadonlyArray<readonly [string, string]>; log?: boolean }) {
+/**
+ * A part's lines, as a changed file or a failing check's last lines show: the
+ * text, what it says beside it, and what it is: a 'path' (shortened by whole
+ * folders where narrow) or 'text' (as it comes). Without one, a line with
+ * something beside it is a path, as a file with its lines is; a binary file,
+ * with nothing beside it, says 'path'.
+ */
+export type PartLine = readonly [text: string, beside: string, kind?: 'path' | 'text']
+
+export function PartLines({ lines, log = false }: { lines: ReadonlyArray<PartLine>; log?: boolean }) {
   if (log) return <pre className={s.log}>{lines.map(([line]) => line).join('\n')}</pre>
   return (
     <ul className={s.files}>
-      {lines.map(([path, delta]) => (
-        <li key={path}>
-          <span className={delta === '' ? s.plain : s.path}>{path}</span>
-          <span className={s.delta}>{delta}</span>
+      {lines.map(([text, beside, kind = beside === '' ? 'text' : 'path']) => (
+        <li key={text}>
+          {kind === 'path' ? <Path path={text} className={s.path} /> : <span className={s.plain}>{text}</span>}
+          <span className={s.delta}>{beside}</span>
         </li>
       ))}
     </ul>

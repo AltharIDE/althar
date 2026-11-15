@@ -32,6 +32,9 @@ export const portalPath = (path: string, uid: number): string =>
 /** What the device's session says: the names every process needs, and only those. */
 const FROM_THE_DEVICE = ['HOME', 'PATH', 'TMPDIR', 'LANG', 'LANGUAGE', 'TZ', 'USER', 'LOGNAME', 'XDG_RUNTIME_DIR'] as const
 
+/** Where the person's replay server (ADEMark) points agents: they cross whenever set, even when the sandbox has the same value, as the device's session doesn't. */
+const BASE_URLS = ['ANTHROPIC_BASE_URL', 'OPENAI_BASE_URL'] as const
+
 /** What an executor set for the agent itself — an account's home, Althar's settings: these cross where they differ from the sandbox's own. */
 const FROM_THE_EXECUTOR = [
   'CODEX_HOME',
@@ -137,6 +140,10 @@ export const relayOut = (
   for (const name of FROM_THE_EXECUTOR) {
     const value = at.env[name]
     if (value !== undefined && value !== facts.ambient[name]) args.push(`--env=${name}=${portalPath(value, facts.uid)}`)
+  }
+  for (const name of BASE_URLS) {
+    const value = at.env[name]
+    if (value !== undefined) args.push(`--env=${name}=${value}`)
   }
   if (at.cwd !== undefined) {
     for (const [name, value] of Object.entries(worktreeEnvironmentAt(at.cwd, facts.uid))) args.push(`--env=${name}=${value}`)

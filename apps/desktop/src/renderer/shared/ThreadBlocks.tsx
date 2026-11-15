@@ -631,6 +631,7 @@ export function ThreadBlocks({
           <You
             key={block.id}
             data-item={block.id}
+            data-move={block.move}
             at={block.at}
             delivery={block.delivery}
             {...(onUndoFrom === undefined || !undoable?.includes(block.id) ? {} : { onUndo: () => onUndoFrom(block.id) })}

@@ -134,3 +134,60 @@ export const FolderLinkedElsewhere: Story = {
 }
 export const FolderLinkedElsewhereDark: Story = { ...FolderLinkedElsewhere, globals: { theme: 'dark' } }
 export const FolderNotRepairedDark: Story = { ...FolderNotRepaired, globals: { theme: 'dark' } }
+/** An errand's lines in the thread, in plain words: kept, on hold (two ways), resumed, a step failing, called off. */
+export const ErrandLines: Story = {
+  render: () => (
+    <States
+      size="thread"
+      cells={[
+        {
+          state: 'on hold: a wait Althar can’t watch',
+          node: (
+            <AltharLine>
+              Errand on hold: tag v0.9.0 — Althar can’t tell when it’s merged. Ask for it again to keep it another way.
+            </AltharLine>
+          ),
+        },
+        {
+          state: 'on hold: two waits it can’t watch',
+          node: (
+            <AltharLine>
+              Errand on hold: merge the 0.9.0 pull request, then tag v0.9.0 — Althar can’t tell when it’s open and its checks pass. Ask for
+              it again to keep it another way.
+            </AltharLine>
+          ),
+        },
+        {
+          state: 'on hold: an objection',
+          node: (
+            <AltharLine>
+              Errand on hold: merge the 0.9.0 pull request, then tag v0.9.0 — #958 went back to a draft after you asked. Say go ahead to
+              continue.
+            </AltharLine>
+          ),
+        },
+        {
+          state: 'resumed',
+          node: <AltharLine>Errand resumed: merge the 0.9.0 pull request once it’s open and its checks pass, then tag v0.9.0</AltharLine>,
+        },
+        {
+          state: 'a step failed',
+          node: <AltharLine tone="warning">Couldn’t do this: merge the 0.9.0 pull request — failed: The head moved.</AltharLine>,
+        },
+        {
+          state: 'called off by the person',
+          node: <AltharLine>Errand called off: merge the 0.9.0 pull request, then tag v0.9.0</AltharLine>,
+        },
+        {
+          state: 'called off, with why',
+          node: (
+            <AltharLine>
+              Errand called off: merge the 0.9.0 pull request, then tag v0.9.0 — #958 was closed on GitHub, so it isn’t merged
+            </AltharLine>
+          ),
+        },
+        { state: 'the last step done: the errand is done', node: <AltharLine>Merged #958. Errand done</AltharLine> },
+      ]}
+    />
+  ),
+}

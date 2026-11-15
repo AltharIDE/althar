@@ -247,6 +247,6 @@ describe('a project’s dot', () => {
       ]),
     ).toEqual([0, 0])
     // A lead stopped with no agent on it waits for the person to carry on or abandon it, as its board says.
-    expect(alike([task({ taskId: 'stop', threadId: 'thp', title: 'Stopped', phase: 'stopped' })])).toEqual([1, 1])
+    expect(alike([task({ taskId: 'stop', threadId: 'thp', title: 'Stopped', phase: 'stopped' })])).toEqual([0, 0])
   })
 })

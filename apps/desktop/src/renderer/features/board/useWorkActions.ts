@@ -77,8 +77,8 @@ export interface WorkActions {
   readonly dismissError: () => void
 }
 
-/** Where a task's card is in Needs you: a call waits on the person, or it stopped, or its work is ready (`lanesOf`). */
-const NEEDS_YOU: ReadonlySet<BoardTask['phase']> = new Set(['waiting', 'stopped', 'ready'])
+/** Where a task's card is in Needs you: a call waits on the person, or its work is ready (`lanesOf`). */
+const NEEDS_YOU: ReadonlySet<BoardTask['phase']> = new Set(['waiting', 'ready'])
 
 /** What the actions act on: the tasks shown, by which a merge that went through shows as merging until it reads so. */
 export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): WorkActions => {

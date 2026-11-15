@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -46,6 +46,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
+import { ClientIdentities } from '../src/ClientIdentities'
 import { listProcesses, marksOf, WORK } from '../src/machine'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
@@ -59,6 +60,20 @@ import { until } from '@althar/testing/effect'
 import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY, ROOMY_DISK } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
+const externalConnection = {
+  id: 'acp-rpc',
+  name: 'RPC agent',
+  command: 'althar-no-such-acp-agent',
+  args: [],
+  mode: 'ask',
+  readerMode: 'read',
+  modeOption: 'mode',
+  modelOption: 'model',
+  effortOption: null,
+  held: {},
+  registryId: null,
+  registryVersion: null,
+}
 
 /** Lines the runtime would have opened in Terminal. */
 const opened: Array<string> = []
@@ -111,12 +126,19 @@ const connected = (
         checksAppear: Duration.zero,
       }),
     )
+    let boundSender: MessageSender = options.sender ?? { kind: 'window' }
+    if (boundSender.kind === 'paired_device') {
+      const publicKey = generateKeyPairSync('ed25519').publicKey.export({ format: 'jwk' }).x
+      if (publicKey === undefined) throw new Error('Missing Ed25519 public key')
+      const registered = yield* Context.get(context, ClientIdentities).register({ name: 'Test phone', publicKey, role: 'paired_device' })
+      boundSender = { kind: 'paired_device', deviceId: registered.deviceId }
+    }
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
     yield* Effect.forkScoped(
       Layer.launch(
         connection(
           emitterPort(channel.port1, (data) => data),
-          options.sender ?? { kind: 'window' },
+          boundSender,
         ),
       ).pipe(Effect.provideContext(context)),
     )
@@ -126,7 +148,7 @@ const connected = (
     const grant = (path: string) => Context.get(context, Folders).allow(path)
     /** Reads or writes the runtime's store directly, for what no client does. */
     const store = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) => effect.pipe(Effect.provideContext(context))
-    return { client, grant, store, context }
+    return { client, grant, store, context, boundSender }
   })
 
 /** The fake agents, with one of them changed: to make what Althar asks of it fail. */
@@ -157,6 +179,56 @@ const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.sess
 const texts = (thread: ThreadSnapshot) => thread.items.map((item) => ('text' in item.content ? item.content.text : item.kind))
 
 describe('the API', () => {
+  it.live('keeps external ACP command retries idempotent through the window RPC, including after removal', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const mutable = Layer.effect(
+          Agents,
+          Effect.map(Agents, (all) => Agents.from(all.list)),
+        ).pipe(Layer.provide(fakeAgents()))
+        const { client } = yield* connected({ agents: mutable })
+        const saveId = commandId()
+        const revision = yield* client.SaveAcpConnection({ commandId: saveId, connection: externalConnection })
+        assert.strictEqual(yield* client.SaveAcpConnection({ commandId: saveId, connection: externalConnection }), revision)
+        assert.strictEqual((yield* client.GetAgentCatalog({})).connections.length, 1)
+        const checkId = commandId()
+        const checking = yield* client.CheckAcpConnection({ commandId: checkId, agentId: externalConnection.id })
+        assert.strictEqual(yield* client.CheckAcpConnection({ commandId: checkId, agentId: externalConnection.id }), checking)
+        const failed = yield* until(client.GetAgentCatalog({}), (read) => read.connections[0]?.state === 'failed')
+        assert.isNotNull(failed.connections[0]?.reason)
+        const removeId = commandId()
+        const removed = yield* client.RemoveAcpConnection({ commandId: removeId, agentId: externalConnection.id })
+        assert.strictEqual(yield* client.RemoveAcpConnection({ commandId: removeId, agentId: externalConnection.id }), removed)
+        assert.strictEqual(yield* client.SaveAcpConnection({ commandId: saveId, connection: externalConnection }), revision)
+        assert.isEmpty((yield* client.GetAgentCatalog({})).connections)
+        const missingId = commandId()
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const error = yield* Effect.flip(client.CheckAcpConnection({ commandId: missingId, agentId: externalConnection.id }))
+          assert.instanceOf(error, ApiError)
+          if (error instanceof ApiError) assert.include(error.message, 'Save the connection')
+        }
+      }),
+    ),
+  )
+
+  it.live('keeps external ACP executable configuration and checks inside the person’s window', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({ sender: { kind: 'socket' } })
+        const calls: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
+          client.GetAgentCatalog({}),
+          client.SaveAcpConnection({ commandId: commandId(), connection: externalConnection }),
+          client.CheckAcpConnection({ commandId: commandId(), agentId: externalConnection.id }),
+          client.RemoveAcpConnection({ commandId: commandId(), agentId: externalConnection.id }),
+        ]
+        for (const call of calls) {
+          const error = yield* Effect.flip(call)
+          assert.instanceOf(error, ApiError)
+          if (error instanceof ApiError) assert.strictEqual(error.reason, 'PersonRequired')
+        }
+      }),
+    ),
+  )
   it.live('Try again refuses visibly when there is no failed turn or ended session', () =>
     Effect.gen(function* () {
       const { client, grant } = yield* connected()
@@ -1031,6 +1103,19 @@ describe('settings, through the API', () => {
     ),
   )
 
+  it.live('queues what is sent mid-turn unless the person sets it to steer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'queue')
+        yield* client.SetSendMidTurn({ commandId: commandId(), to: 'steer' })
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'steer')
+        yield* client.SetSendMidTurn({ commandId: commandId(), to: 'queue' })
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'queue')
+      }),
+    ),
+  )
+
   it.live('posts the team’s reviews without asking only once the person turns it on, and takes review drafts’ commands', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1504,6 +1589,20 @@ describe('editors, through the API', () => {
           ],
         )
         assert.deepInclude(yield* client.ReadCode({ threadId: task.threadId, path: 'src/retry.ts' }), { from: 1, total: 3, cut: false })
+        // A picture a markdown file names beside it: the task's own, by its name, and never one out of its folder.
+        mkdirSync(join(worktree, 'docs'))
+        writeFileSync(join(worktree, 'docs', 'flow.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+        writeFileSync(join(worktree, 'docs', 'notes.txt'), 'not a picture')
+        symlinkSync(join(tmpdir(), 'elsewhere.png'), join(worktree, 'docs', 'link.png'))
+        assert.deepStrictEqual((yield* client.ReadCode({ threadId: task.threadId, path: 'docs/flow.png', image: true })).image, {
+          type: 'image/png',
+          data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'),
+        })
+        for (const path of ['docs/notes.txt', 'docs/link.png', 'docs/none.png', '../flow.png'])
+          assert.strictEqual(
+            (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path, image: true }))).message,
+            "That file isn't there any more.",
+          )
         assert.strictEqual(
           (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path: '../outside.ts' }))).message,
           "That file isn't there any more.",
@@ -3290,7 +3389,7 @@ describe('connection authority', () => {
     it.live(`keeps ${sender.kind} as the source when the person tells a stuck lead what to do`, () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const { client, grant, context, store } = yield* connected({ sender })
+          const { client, grant, context, store, boundSender } = yield* connected({ sender })
           const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
           const task = yield* client.StartTask({
             commandId: commandId(),
@@ -3322,7 +3421,7 @@ describe('connection authority', () => {
             (rows) => rows.length === 1,
           )
           assert.strictEqual(rows[0]?.senderKind, sender.kind)
-          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          assert.strictEqual(rows[0]?.senderDeviceId, boundSender.kind === 'paired_device' ? boundSender.deviceId : null)
           assert.strictEqual(rows[0]?.origin, 'person')
           const turn = JSON.parse(
             yield* Effect.provideContext(
@@ -3343,7 +3442,7 @@ describe('connection authority', () => {
     it.live(`records ${sender.kind} from its connection and delivers its explicit turn origin`, () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const { client, context, store } = yield* connected({ sender })
+          const { client, context, store, boundSender } = yield* connected({ sender })
           // Seed the project internally, since a socket is not allowed to open folders on the person's behalf.
           const project = yield* Effect.provideContext(
             Effect.gen(function* () {
@@ -3382,7 +3481,7 @@ describe('connection authority', () => {
           assert.isTrue(
             rows.every((row) => row.senderKind === sender.kind && row.origin === (sender.kind === 'socket' ? 'system' : 'person')),
           )
-          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          assert.strictEqual(rows[0]?.senderDeviceId, boundSender.kind === 'paired_device' ? boundSender.deviceId : null)
           // The message travelled over RPC and Sessions opened this live delivery; no turn rows are seeded.
           let acts = 0
           const first = rows[0]!

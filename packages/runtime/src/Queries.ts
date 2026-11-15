@@ -92,7 +92,7 @@ import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
 import { documentKept, documentText, outputText } from './reading'
-import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
+import { type CodeRoot, type CodeRoots, findCode, readCode, readCodeImage } from './code'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { folderOf, KEPT } from './bringBack'
@@ -943,6 +943,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
 /** A change from the store's feed, with the thread it belongs to, when it belongs to one. */
 export interface ThreadChange {
   readonly cursor: number
+  readonly checkpoint: string
   readonly aggregateType: string
   readonly aggregateId: string
   readonly projectId: string | null
@@ -1023,6 +1024,7 @@ export class Queries extends Context.Service<
     >
     /** A file there, as findCode named it: as it is now, or at a commit its default branch was at when a message was said. */
     readCode(threadId: string, path: string, commit?: string, line?: number): Effect.Effect<CodeText, SqlError.SqlError | NotFound>
+    readCodeImage(threadId: string, path: string): Effect.Effect<CodeText, SqlError.SqlError | NotFound>
     /** A task's card, as its board shows it: where it stands and what it makes. */
     card(taskId: string): Effect.Effect<TaskCard, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
@@ -1030,7 +1032,7 @@ export class Queries extends Context.Service<
     /** The next page of a project's settled tasks, as cards: the ones settled before `before` (`taskId` breaking a tie), most recent first. */
     olderSettled(projectId: string, before: string, taskId: string): Effect.Effect<ReadonlyArray<BoardSnapshot['tasks'][number]>, unknown>
     /** The home: every project, and across them what waits on the person, what runs, and what the loop did since `since` or they last left it. */
-    home(since?: string): Effect.Effect<HomeSnapshot, unknown>
+    home(since?: string, deviceId?: string): Effect.Effect<HomeSnapshot, unknown>
     /**
      * What waits on the person, across every project not archived: each task the home shows, as the card watcher last worked
      * its card out, and the calls that wait. What the Dock's badge and the notifications go by; it works no card out.
@@ -2663,6 +2665,7 @@ export class Queries extends Context.Service<
                       : {}),
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
+                    ...(field(parameters, 'reviewAfterMerge') === true ? { reviewAfterMerge: true } : {}),
                     // The preset its parts are, which the card's kicker names first (a task is a conversation plus parts).
                     preset:
                       field(parameters, 'smallChange') === true
@@ -3097,13 +3100,13 @@ export class Queries extends Context.Service<
        * what runs, and what the loop did since `since`, or since they last left
        * the home here, or, before they ever did, over the last day.
        */
-      const home = (since?: string) =>
+      const home = (since?: string, deviceId: string = instance.deviceId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const at = yield* cursor
           const [device] = yield* sql<{
             looked: string | null
-          }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${instance.deviceId}`
+          }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${deviceId}`
           const looked = device?.looked ?? null
           const from = since ?? looked ?? new Date((yield* Clock.currentTimeMillis) - FIRST_LOOK).toISOString()
           const { open, tasks } = yield* homeTasks
@@ -3730,8 +3733,12 @@ export class Queries extends Context.Service<
           // Where it stands, from its card, which shows its links too: the header reads those with git, below.
           // Its links are read first and given to it: its kind, and where it opens, depend on its pull requests.
           const links = yield* linksOf(head.taskId)
-          const card: TaskCard | undefined = yield* cardFor(head.taskId, links)
-          const session = yield* sessionOf(threadId)
+          const sessions = yield* Sessions
+          const [found, session, accepting] = yield* Effect.all(
+            [cardFor(head.taskId, links), sessionOf(threadId), sessions.placement(threadId)],
+            { concurrency: 'unbounded' },
+          )
+          const card: TaskCard | undefined = found
           // The last lead that actually started, for its account or a thread that has no plan. A failed replacement isn't its lead.
           const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
             SELECT s.agent_id, s.model, a.name AS account FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
@@ -3801,6 +3808,7 @@ export class Queries extends Context.Service<
             WHERE w.task_id = ${head.taskId} AND w.moving_to IS NOT NULL LIMIT 1`
           return {
             threadId,
+            accepting,
             cursor: at,
             usage,
             project: { id: head.projectId, name: head.projectName },
@@ -3950,7 +3958,7 @@ export class Queries extends Context.Service<
               allowEverything: { task: head.allowEverything === 1, project: head.projectAllows === 1 },
               review: yield* reviewBriefOf(head.taskId),
             },
-            session,
+            session: session === null ? null : { ...session, accepting },
             retryable: yield* (yield* Sessions).retryable(threadId),
             conversationVersion:
               (yield* sql<{ version: number }>`SELECT conversation_version AS version FROM threads WHERE id = ${threadId}`)[0]?.version ??
@@ -4002,13 +4010,15 @@ export class Queries extends Context.Service<
           const mark = yield* markOf(threadId)
           const within = mark === null ? {} : mark.earlierShown ? { until: mark.from } : { from: mark.from }
           // Its cards, the agent on it, the one it would start on and the project's host, read at the same time.
-          const [read, session, suggested, host, view] = yield* Effect.all(
+          const sessions = yield* Sessions
+          const [read, session, suggested, host, view, accepting] = yield* Effect.all(
             [
               pageOf(threadId, { ...page, ...within }),
               sessionOf(threadId),
               coordinators.suggested(projectId),
               hostOf(projectId),
               viewOf(threadId),
+              sessions.placement(threadId),
             ],
             { concurrency: 'unbounded' },
           )
@@ -4026,10 +4036,11 @@ export class Queries extends Context.Service<
           const usage = yield* spendingOf({ threadId, since: midnight.toISOString() }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
+            accepting,
             cursor: at,
             usage,
             project: { id: projectId, name: project.name },
-            session,
+            session: session === null ? null : { ...session, accepting },
             retryable: yield* (yield* Sessions).retryable(threadId),
             suggested,
             items,
@@ -4065,7 +4076,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<ThreadChange>`
-            SELECT c.cursor, c.aggregate_type, c.aggregate_id, c.project_id,
+            SELECT c.cursor, c.checkpoint, c.aggregate_type, c.aggregate_id, c.project_id,
               CASE c.aggregate_type
                 WHEN 'thread' THEN c.aggregate_id
                 WHEN 'thread_item' THEN (SELECT thread_id FROM thread_items WHERE id = c.aggregate_id)
@@ -4268,6 +4279,7 @@ export class Queries extends Context.Service<
         findCode: (threadId, messages) => run(codeFound(threadId, messages)),
         readCode: (threadId, path, commit, line) =>
           run(Effect.flatMap(codeRoots(threadId), (place) => readCode(place, path, commit, line))),
+        readCodeImage: (threadId, path) => run(Effect.flatMap(codeRoots(threadId), (place) => readCodeImage(place, path))),
         card: (taskId) =>
           run(
             Effect.flatMap(cardFor(taskId), (found) =>
@@ -4276,7 +4288,7 @@ export class Queries extends Context.Service<
           ),
         board: (projectId) => run(board(projectId)),
         olderSettled: (projectId, before, taskId) => run(olderSettled(projectId, before, taskId)),
-        home: (since) => run(home(since)),
+        home: (since, deviceId) => run(home(since, deviceId)),
         waiting: run(waiting),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         shown: (threadId, itemId) => run(shown(threadId, itemId)),

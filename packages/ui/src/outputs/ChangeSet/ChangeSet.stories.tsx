@@ -18,6 +18,8 @@ import {
 import { States, statesParameters } from '../../storybook/States'
 import { ChangeState, CheckState } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
+import { MergeButton } from '../../primitives/MergeButton/MergeButton'
+import { visiblePath } from '../../primitives/Path/Path'
 import { ChangeSet, foldersOf, groupsOf } from './ChangeSet'
 
 const accept = fn()
@@ -61,6 +63,31 @@ type Story = StoryObj<typeof meta>
 export const Ready: Story = {}
 /** Alone on the page: the button beside what it acts on, at its own width. */
 export const ReadyAlone: Story = { parameters: { width: ALONE } }
+/** One repository, Accept and merge with its chevron: the split button spans the card like a lone button. */
+export const MergeAlone: Story = {
+  args: {
+    ...ONE_REPO,
+    actions: (
+      <MergeButton variant="signal" onMerge={accept} onBypassQueue={accept}>
+        Accept and merge
+      </MergeButton>
+    ),
+  },
+}
+/** Two actions, the split one beside another: each takes half. */
+export const MergeBesideAnother: Story = {
+  args: {
+    ...ONE_REPO,
+    actions: (
+      <>
+        <Button onClick={open}>Send back</Button>
+        <MergeButton variant="signal" onMerge={accept} onBypassQueue={accept}>
+          Accept and merge
+        </MergeButton>
+      </>
+    ),
+  },
+}
 /** Two reviewers, as a list: GPT-5.2 Codex and Claude Opus 5, each mark beside its own name. */
 export const TwoReviewers: Story = {
   args: { ...CHANGE_READY, review: { state: CheckState.Passed, by: [CODEX, OPUS] } },
@@ -81,6 +108,23 @@ export const ThreeReviewers: Story = {
 export const NarrowReviewers: Story = {
   parameters: { width: 240 },
   args: { ...CHANGE_READY, review: { state: CheckState.Passed, by: [CODEX, OPUS, GEMINI_PRO] } },
+}
+/** Two files on a narrow card: a path gives up whole leading folders, "…/tests/coordinatorTools.test.ts", never part of a name. */
+export const PathsInANarrowCard: Story = {
+  args: {
+    ...CHANGE_READY,
+    prs: [
+      {
+        repo: 'althar',
+        number: 928,
+        url: 'https://github.com/althar/althar/pull/928',
+        files: [
+          { path: 'packages/runtime/src/Coordinator.ts', add: 25, del: 7 },
+          { path: 'packages/runtime/tests/coordinatorTools.test.ts', add: 45, del: 0 },
+        ],
+      },
+    ],
+  },
 }
 /** A draft: its checks still running, said in a line. */
 export const Draft: Story = { args: { ...CHANGE_DRAFT, actions: <Button>Mark ready for review</Button> } }
@@ -322,13 +366,13 @@ export const RefusedHere: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('alert')).toHaveTextContent('Your main checkout has uncommitted changes to middleware.ts.')
-    // Each file's name whole, apart from its folder, which keeps its slash and gives way first; the whole path on hover. Where
-    // there is layout (Storybook, not jsdom), the name isn't cut either.
-    const name = c.getByText('middleware.test.js')
-    await expect(name.previousElementSibling).toHaveTextContent(/^tests\/unit\/$/)
-    await expect(name.closest('[title]')).toHaveAttribute('title', 'tests/unit/middleware.test.js')
-    await expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth)
-    await expect(c.getByText('middleware.ts').previousElementSibling).toBeNull()
+    // Each file's path as folders, from the left, that fit: the folders go whole, never part of a name; the whole path on hover. Where
+    // there is layout (Storybook, not jsdom), it fits its room.
+    const path = c.getByTitle('tests/unit/middleware.test.js')
+    await expect(visiblePath(path)).toMatch(/^(…\/)?(tests\/)?(unit\/)?middleware\.test\.js$/)
+    const shown = path.firstElementChild as HTMLElement
+    await expect(shown.scrollWidth).toBeLessThanOrEqual(shown.clientWidth)
+    await expect(visiblePath(c.getByTitle('middleware.ts'))).toBe('middleware.ts')
   },
 }
 

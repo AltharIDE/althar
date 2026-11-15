@@ -9,6 +9,7 @@ import { repositoryRoleText } from '../../foundations/vocabularyText'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import { below, Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
@@ -454,7 +455,9 @@ export function RepositoryMap({
                   {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
                 />
               </div>
-              <span className={cx(s.where, repository.where === undefined && s.elsewhere)}>{repository.where ?? t.elsewhere}</span>
+              <span className={cx(s.where, repository.where === undefined && s.elsewhere)}>
+                {repository.where === undefined ? t.elsewhere : <Path path={repository.where} />}
+              </span>
               {/* What the wires draw, said: where its work goes. */}
               <VisuallyHidden>{goesWords(repository, hostOf, t)}</VisuallyHidden>
               <div className={s.foot}>
@@ -482,7 +485,9 @@ export function RepositoryMap({
                 <Spinner size="small" />
                 <span className={s.name}>{folder.name}</span>
               </div>
-              <span className={s.where}>{folder.where}</span>
+              <span className={s.where}>
+                <Path path={folder.where} />
+              </span>
               <span className={s.readingNote}>{t.reading}</span>
             </li>
           ))}

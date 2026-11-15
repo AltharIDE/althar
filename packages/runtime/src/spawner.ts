@@ -66,6 +66,8 @@ export interface Command {
   readonly first?: boolean
   /** It reaches a remote, as a fetch or a push does: it runs in the network's lane, never holding the computer's. */
   readonly network?: boolean
+  /** What it prints is bytes, such as a picture, not text: it comes back as base64, every byte as it was. */
+  readonly base64?: boolean
 }
 
 /** How many run at once in each lane, the person's and the background's, of the computer's and of the network's: half the cores, from 2 to 8. */
@@ -119,7 +121,7 @@ const start = (job, lane) => {
     done = true
     running.delete(job.id)
     lane.running -= 1
-    answer(job.id, { code: null, signal: null, error: null, ...ended, over, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() })
+    answer(job.id, { code: null, signal: null, error: null, ...ended, over, stdout: Buffer.concat(out).toString(job.base64 ? 'base64' : 'utf8'), stderr: Buffer.concat(err).toString() })
     next()
   }
   try {
@@ -128,17 +130,30 @@ const start = (job, lane) => {
     running.set(job.id, { stop: () => undefined })
     return finish({ error: { message: String(error && error.message || error), code: error && error.code || null } })
   }
-  const stop = () => {
-    try {
-      if (job.detached && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
-      else child.kill()
-    } catch {
-      child.kill()
-    }
-    // A descendant may keep the pipes after this root exits. Cancel our reads too, so close frees its lane.
+  let stopped = false
+  const closePipes = () => {
     child.stdin.destroy()
     child.stdout.destroy()
     child.stderr.destroy()
+  }
+  child.once('exit', () => { if (stopped) closePipes() })
+  const stop = () => {
+    stopped = true
+    // Windows can know the root is gone before libuv has delivered exit. TerminateProcess then replaces its real code
+    // with a signal: leave that already-dead process alone and let exit release its inherited pipes.
+    let gone = child.exitCode !== null || child.signalCode !== null
+    if (!gone && process.platform === 'win32' && child.pid !== undefined) {
+      try { process.kill(child.pid, 0) } catch (error) { gone = error.code === 'ESRCH' }
+    }
+    try {
+      if (job.detached && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
+      else if (!gone) child.kill()
+    } catch {
+      child.kill()
+    }
+    // A descendant may keep the pipes after this root exits. Wait for Node to record its exit before closing
+    // our reads: on Windows, closing them first can emit close with a null code even when the root exited 0.
+    if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) closePipes()
   }
   running.set(job.id, { stop })
   const collect = (into) => (chunk) => {
@@ -247,6 +262,7 @@ export const startApart = (command: Command, cap = AT_ONCE): Started => {
       max: command.max,
       first: command.first === true,
       network: command.network === true,
+      base64: command.base64 === true,
     },
   })
   return { result, stop: () => at.worker.postMessage({ kind: 'stop', id }) }
@@ -264,17 +280,33 @@ export const startHere = (command: Command): Started => {
     detached: command.detached,
     windowsHide: true,
   })
-  const stop = () => {
-    try {
-      if (command.detached && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
-      else child.kill()
-    } catch {
-      child.kill()
-    }
-    // A descendant may keep the pipes after this root exits. Cancel our reads too, as on the runner thread.
+  let stopped = false
+  const closePipes = () => {
     child.stdin.destroy()
     child.stdout.destroy()
     child.stderr.destroy()
+  }
+  child.once('exit', () => {
+    if (stopped) closePipes()
+  })
+  const stop = () => {
+    stopped = true
+    let gone = child.exitCode !== null || child.signalCode !== null
+    if (!gone && process.platform === 'win32' && child.pid !== undefined) {
+      try {
+        process.kill(child.pid, 0)
+      } catch (error) {
+        gone = (error as NodeJS.ErrnoException).code === 'ESRCH'
+      }
+    }
+    try {
+      if (command.detached && child.pid !== undefined) process.kill(-child.pid, 'SIGTERM')
+      else if (!gone) child.kill()
+    } catch {
+      child.kill()
+    }
+    // As on the runner thread, preserve the root's exit code before closing pipes held by descendants.
+    if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) closePipes()
   }
   const collect = (into: Array<Buffer>) => (chunk: Buffer) => {
     size += chunk.length
@@ -291,7 +323,12 @@ export const startHere = (command: Command): Started => {
     const finish = (ended: Pick<Ended, 'code' | 'signal' | 'error'>) => {
       if (done) return
       done = true
-      resolve({ ...ended, over, stdout: Buffer.concat(out).toString(), stderr: Buffer.concat(err).toString() })
+      resolve({
+        ...ended,
+        over,
+        stdout: Buffer.concat(out).toString(command.base64 === true ? 'base64' : 'utf8'),
+        stderr: Buffer.concat(err).toString(),
+      })
     }
     child.on('error', (error: Error & { readonly code?: string | number }) =>
       finish({ code: null, signal: null, error: { message: error.message, code: error.code ?? null } }),

@@ -6,6 +6,8 @@ import { device } from '../../foundations/device'
 import { SignInWay } from '../../foundations/vocabulary'
 import { ACCOUNTS, FOUND } from '../../fixtures/setup'
 import { States } from '../../storybook/States'
+import { AgentTabList, AgentTabPanel, AgentTabs } from '../AgentTabs/AgentTabs'
+import { ModelSwitches } from '../ModelSwitches/ModelSwitches'
 import { AccountSignIn, type AccountSignInProps, type AccountSignInStep } from './AccountSignIn'
 import { Accounts } from './Accounts'
 
@@ -27,7 +29,11 @@ const meta = {
   title: 'Setup/AccountSignIn',
   component: AccountSignIn,
   parameters: { layout: 'padded' },
-  decorators: [(Story) => <div style={{ maxWidth: 600 }}>{Story()}</div>],
+  decorators: [
+    (Story, { parameters }) => (
+      <div style={{ maxWidth: typeof parameters.maxWidth === 'number' ? parameters.maxWidth : 600 }}>{Story()}</div>
+    ),
+  ],
   render: (args) => <InTheList {...args} />,
   args: {
     agent: 'Codex',
@@ -397,6 +403,37 @@ export const Failed: Story = {
     await userEvent.click(c.getByRole('button', { name: 'Try again' }))
     await expect(args.onBack).toHaveBeenCalled()
   },
+}
+
+/** A long sign-in failure stays in its account column, beside the empty model list. */
+export const CopilotFailed: Story = {
+  parameters: { maxWidth: 900 },
+  args: {
+    agent: 'GitHub Copilot',
+    position: 1,
+    account: { name: 'main' },
+    holds: undefined,
+    ways: { browser: 'GitHub', enterprise: true },
+    step: {
+      kind: 'failed',
+      said: 'Copilot offers no coding models for Althar on this account. Check your plan and your organization’s application policy.',
+    },
+  },
+  render: (args) => (
+    <AgentTabs value="copilot" onValueChange={fn()}>
+      <AgentTabList label="Agents" agents={[{ id: 'copilot', name: args.agent }]} />
+      <AgentTabPanel
+        agent={{ id: 'copilot', name: args.agent, line: 'Althar' }}
+        aside={<ModelSwitches agent={args.agent} models={[]} off={[]} onChange={fn()} />}
+      >
+        <Accounts
+          agent={args.agent}
+          accounts={[{ id: 'main', name: 'main', place: { kind: 'usual' }, state: { kind: 'signedOut' } }]}
+          signIn={{ account: 'main', node: <AccountSignIn {...args} /> }}
+        />
+      </AgentTabPanel>
+    </AgentTabs>
+  ),
 }
 
 /* A sign-in from the browser to a name, as a consumer drives it. */

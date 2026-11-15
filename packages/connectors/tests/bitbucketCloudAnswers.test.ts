@@ -58,6 +58,15 @@ const pull = (overrides: Record<string, unknown> = {}) => ({
 const step = (uuid: string, result: string) => ({ uuid, state: { name: 'COMPLETED', result: { name: result } } })
 
 describe('Bitbucket Cloud answers that leave things out', () => {
+  it.effect('keeps the landed commit separate from the source head', () =>
+    Effect.gen(function* () {
+      const { host } = cloud([['GET', PR, { json: pull({ state: 'MERGED', merge_commit: { hash: 'landed' } }) }]])
+      const seen = yield* host.change(ace, 552)
+      assert.strictEqual(seen.mergeCommit, 'landed')
+      assert.strictEqual(seen.headSha, '7f9d4e6279c8')
+    }),
+  )
+
   it.effect('lists authors known only by their id, or not at all, and an approval said only as a state', () =>
     Effect.gen(function* () {
       const { host } = cloud([

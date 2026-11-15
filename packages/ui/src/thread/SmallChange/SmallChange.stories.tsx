@@ -24,6 +24,8 @@ const meta = {
     review: AFTER,
     explain:
       'Starts at once on Sonnet 5.5, with no plan. You merge it; GPT-6.1 Sol then reads what merged, and only something major comes back here.',
+    team: 'Sonnet 5.5 · Low, GPT-6.1 Sol reviews',
+    onTeam: fn(),
     onMerge: fn(),
     onReview: fn(),
     onFindings: fn(),
@@ -46,6 +48,17 @@ export const BeforeShip: Story = {
     await expect(canvas.getByText('Reviewed before Ship')).toBeInTheDocument()
     await expect(canvas.queryByRole('button', { name: 'Review' })).toBeNull()
     await expect(canvas.queryByText('After merge')).toBeNull()
+  },
+}
+
+/** Its team, with the way to change it, from the moment the card appears: nothing waits on a countdown. */
+export const ChangeTheTeam: Story = {
+  args: { changed: { at: null, words: null }, checks: { ...PASSED, state: 'waiting', at: null }, merge: WAITING },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Sonnet 5.5 · Low, GPT-6.1 Sol reviews')).toBeInTheDocument()
+    await userEvent.click(canvas.getByRole('button', { name: 'Change the team…' }))
+    await expect(args.onTeam).toHaveBeenCalled()
   },
 }
 
