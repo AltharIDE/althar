@@ -353,14 +353,14 @@ export class Limits extends Context.Service<
           const windows = JSON.parse(latest.windows) as ReadonlyArray<{ readonly resetsAt?: string }>
           const errorReset = windows.find((window) => window.resetsAt !== undefined)?.resetsAt
           // Some agents report only that usage ran out. PlanUsage already knows the windows; wait until every exhausted
-          // window has reset, rather than asking the person or retrying during an exhausted week. Keep expired resets in
+          // plan-wide window has reset, rather than asking the person or retrying during an exhausted week. Keep expired resets in
           // this calculation so the same reading clears the limit after a restart, instead of inventing another hour.
           const [reading] =
             errorReset === undefined
               ? yield* sql<{ windows: string }>`SELECT windows FROM plan_usage_readings WHERE account_id = ${account.id}`
               : []
           const resets = (reading === undefined ? [] : (JSON.parse(reading.windows) as ReadonlyArray<UsageWindow>))
-            .filter((window) => window.spend !== true && leftOf(window) <= 0)
+            .filter((window) => window.model === undefined && window.spend !== true && leftOf(window) <= 0)
             .flatMap((window) =>
               window.resetsAt !== undefined && Date.parse(window.resetsAt) > Date.parse(latest.observedAt) ? [window.resetsAt] : [],
             )

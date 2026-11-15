@@ -194,10 +194,27 @@ const reader = (
     keychain: async () => null,
     ...policy,
   })
-  return { read: (sourceId: string, account: UsageAccount) => built.read(sourceId, account, now) }
+  return { read: (sourceId: string, account: UsageAccount, afterLimit = false) => built.read(sourceId, account, now, afterLimit) }
 }
 
 describe('the usage reader', () => {
+  it('refreshes a successful cache after a limit error, while keeping provider backoff', async () => {
+    const home = fakeHome()
+    let reply: Reply = {}
+    const { seen, fetch } = server(() => reply)
+    const r = reader({ fetch })
+    await r.read('codex-chatgpt', codex(home))
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: true })
+    expect(seen).toHaveLength(1)
+    expect(await r.read('codex-chatgpt', codex(home), true)).toMatchObject({ kind: 'usage', stale: false })
+    expect(seen).toHaveLength(2)
+    reply = { status: 429, retryAfter: '3600' }
+    expect(await r.read('codex-chatgpt', codex(home), true)).toMatchObject({ kind: 'fault', waiting: { retryAfter: '3600' } })
+    expect(seen).toHaveLength(3)
+    expect(await r.read('codex-chatgpt', codex(home), true)).toMatchObject({ kind: 'usage', stale: true })
+    expect(seen).toHaveLength(3)
+  })
+
   it('makes one GET to the allowlisted host and path, carrying the token and the account it is for, and reads the windows', async () => {
     const home = fakeHome()
     const { seen, fetch } = server({})

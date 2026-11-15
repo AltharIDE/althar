@@ -99,6 +99,8 @@ describe('an account marked out of usage', () => {
           { ...window(0, at), resetsAt: from(DAY) },
           { ...window(0, at, 'weekly'), resetsAt: weekly },
           { ...window(0, at), spend: true, resetsAt: from(30 * DAY) },
+          { ...window(0, at, 'weekly'), model: 'opus', resetsAt: from(60 * DAY) },
+          { ...window(0, at, 'weekly'), model: 'sonnet', resetsAt: from(90 * DAY) },
           { ...window(0, at), resetsAt: ago(2 * MINUTE) },
           { ...window(50, at), resetsAt: from(60 * DAY) },
         ],

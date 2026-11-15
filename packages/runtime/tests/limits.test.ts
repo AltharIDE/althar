@@ -21,6 +21,7 @@ import { Limits, outWords, whenWords } from '../src/Limits'
 import { Models } from '../src/Models'
 import { Policies, usageLimitOf } from '../src/Policies'
 import { Plans } from '../src/Plans'
+import { PlanUsage } from '../src/PlanUsage'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { type PlanStep, Runs, type StuckAnswer } from '../src/Runs'
@@ -301,73 +302,104 @@ describe('an agent out of usage', () => {
     }).pipe(onTestClock)
   })
 
-  for (const action of ['resume', 'stop', 'abandon'] as const) {
-    it.effect(`uses Plan usage's reset without an error reset after a restart: ${action}`, () => {
-      const back = later()
-      const database = join(mkdtempSync(join(tmpdir(), 'althar-plan-reset-')), 'profile.sqlite')
-      let record = async () => {}
-      const layer = (limited: boolean) =>
-        Queries.layer.pipe(
-          Layer.provideMerge(
-            runtime(
-              database,
-              {},
-              {
-                each: limited
-                  ? {
-                      'claude-code': {
-                        outOfUsage: {
-                          beforeLimit: () => record(),
-                        },
-                      },
-                    }
-                  : {},
-              },
-            ),
-          ),
-        )
-      return Effect.gen(function* () {
-        const kept = yield* Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const { projectId, task, start } = yield* planned([lead('claude-code')])
-          yield* waits(projectId)
-          // The plan reading arrives during the turn, before its error with no reset time.
-          const accountId = yield* usual('claude-code')
-          const observedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
-          record = () =>
-            Effect.runPromise(
-              Effect.gen(function* () {
-                const windows = [{ kind: 'weekly', usedPercent: 100, resetsAt: reset(back), observedAt }]
-                yield* sql`INSERT INTO plan_usage_readings ${sql.insert({ accountId, agentId: 'claude-code', source: 'agent', plan: 'max', windows: JSON.stringify(windows), observedAt })}
-              ON CONFLICT (account_id) DO UPDATE SET windows = excluded.windows, observed_at = excluded.observed_at`
-              }),
-            )
-          yield* start
-          const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
-          assert.strictEqual(held?.waits?.until, reset(back))
-          assert.strictEqual(held?.phase, 'running')
-          assert.isEmpty(yield* sql`SELECT id FROM attention_requests WHERE state = 'open'`)
-          if (action === 'stop') yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: task.taskId })
-          if (action === 'abandon')
-            yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task.taskId })
-          return { projectId, task }
-        }).pipe(Effect.provide(layer(true)))
-        yield* Effect.gen(function* () {
-          // Starting Althar before the reset must not run the task early.
-          if (action === 'resume') assert.strictEqual((yield* cardOf(kept.projectId))[0]?.waits?.until, reset(back))
-          yield* atReset(back)
-          if (action === 'resume') {
-            const [ready] = yield* until(cardOf(kept.projectId), (cards) => cards[0]?.phase === 'ready')
-            assert.strictEqual(ready?.lead, 'claude-code')
-          } else {
-            const sql = yield* SqlClient.SqlClient
-            yield* TestClock.adjust(Duration.seconds(1))
-            const [count] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${kept.task.threadId}`
-            assert.strictEqual(count?.n, 1)
+  for (const agentId of ['claude-code', 'codex']) {
+    for (const action of ['resume', 'stop', 'abandon'] as const) {
+      it.effect(`refreshes ${agentId}'s usage without an error reset and persists the wait across restart: ${action}`, () => {
+        const back = later()
+        const database = join(mkdtempSync(join(tmpdir(), 'althar-plan-reset-')), 'profile.sqlite')
+        let record = async () => {}
+        let limited = false
+        let observedAt = new Date().toISOString()
+        let reads = 0
+        let limitRead = false
+        const reading = () => {
+          reads++
+          return {
+            windows: [{ kind: 'weekly' as const, usedPercent: limited ? 100 : 50, resetsAt: reset(back) }],
+            source: 'agent' as const,
+            observedAt,
           }
-        }).pipe(Effect.provide(layer(false)))
-      }).pipe(onTestClock)
-    })
+        }
+        const layer = (failing: boolean) =>
+          Queries.layer.pipe(
+            Layer.provideMerge(
+              runtime(
+                database,
+                {},
+                {
+                  each: failing ? { [agentId]: { outOfUsage: { beforeLimit: () => record() } } } : {},
+                  usage: {
+                    every: Duration.zero,
+                    // Even a read kept this long must be refreshed when the turn hits its limit.
+                    kept: Duration.hours(1),
+                    readVersion: async () => '2.0.29',
+                    readAgent: async () => ({ kind: 'usage', usage: reading() }),
+                    readEndpoint: async (_source, account, now, afterLimit) => {
+                      if (limited && afterLimit === true) limitRead = true
+                      return account.agent === agentId
+                        ? { kind: 'usage', stale: false, usage: { ...reading(), source: 'endpoint', observedAt: now().toISOString() } }
+                        : { kind: 'none' }
+                    },
+                  },
+                },
+              ),
+            ),
+          )
+        return Effect.gen(function* () {
+          const kept = yield* Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const usage = yield* PlanUsage
+            const clock = yield* Clock.Clock
+            const { projectId, task, start } = yield* planned([lead(agentId)])
+            yield* waits(projectId)
+            yield* usage.now(true)
+            const accountId = yield* usual(agentId)
+            const before = reads
+            record = () =>
+              Effect.runPromise(
+                Effect.gen(function* () {
+                  observedAt = new Date(yield* Clock.currentTimeMillis).toISOString()
+                  // The last event still says 98%. Only the limit-triggered source refresh discovers 100% and its reset.
+                  yield* usage.heard(accountId, agentId, [{ kind: 'weekly', usedPercent: 98, resetsAt: reset(back) }])
+                  limited = true
+                }).pipe(Effect.provideService(Clock.Clock, clock)),
+              )
+            yield* start
+            const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
+            assert.isAbove(reads, before)
+            if (agentId === 'claude-code') assert.isTrue(limitRead)
+            assert.strictEqual(held?.waits?.until, reset(back))
+            assert.strictEqual(held?.phase, 'running')
+            assert.isEmpty(yield* sql`SELECT id FROM attention_requests WHERE state = 'open'`)
+            if (action === 'stop') yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: task.taskId })
+            if (action === 'abandon')
+              yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task.taskId })
+            return { projectId, task }
+          }).pipe(Effect.provide(layer(true)))
+          yield* Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const sessionsOnTask = sql<{ n: number }>`SELECT count(*) AS n FROM provider_sessions WHERE thread_id = ${kept.task.threadId}`
+            if (action === 'resume') assert.strictEqual((yield* cardOf(kept.projectId))[0]?.waits?.until, reset(back))
+            yield* atReset(back)
+            if (action === 'resume') {
+              const [ready] = yield* until(cardOf(kept.projectId), (cards) => cards[0]?.phase === 'ready')
+              assert.strictEqual(ready?.lead, agentId)
+              // Positive control: resuming certainly creates another session, so the cancellation assertions detect a resume.
+              const [count] = yield* until(sessionsOnTask, (rows) => rows[0]?.n === 2)
+              assert.strictEqual(count?.n, 2)
+            } else {
+              yield* TestClock.adjust(Duration.seconds(1))
+              const [count] = yield* sessionsOnTask
+              assert.strictEqual(count?.n, 1)
+              const [run] = yield* sql<{
+                state: string
+              }>`SELECT state FROM runs WHERE task_id = ${kept.task.taskId} ORDER BY rowid DESC LIMIT 1`
+              assert.strictEqual(run?.state, 'suspended')
+            }
+          }).pipe(Effect.provide(layer(false)))
+        }).pipe(onTestClock)
+      })
+    }
   }
 
   it.effect('runs the other held steps at their reset past one it can’t read and one that can’t go on, which waits a while', () => {
