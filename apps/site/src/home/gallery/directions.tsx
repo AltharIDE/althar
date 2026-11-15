@@ -13,12 +13,12 @@ import { ALL, FEW } from './shots'
  * how it moves. A and C play by themselves; B and D move only as you do.
  */
 
-const AS_IT_IS = (
+const REAL = 'Real screens from Althar 0.9, on its demo projects.'
+const PEEK = (
   <>
-    The app, <b>as it is.</b>
+    Take a peek <b>inside.</b>
   </>
 )
-const REAL = 'Real screens from Althar 0.9, on its demo projects.'
 
 /** A · Tabs: one screen large at a time, its name under it in a row of tabs; it moves on by itself until you pick one. */
 export function Tabs({ place }: { place: Place }) {
@@ -26,7 +26,7 @@ export function Tabs({ place }: { place: Place }) {
   const play = usePlay(ref, FEW.length, 'tabs')
   const shot = FEW[play.at] ?? FEW[0]!
   return (
-    <GalleryStation place={place} name="The app" title={AS_IT_IS} lead={REAL}>
+    <GalleryStation place={place} name="The app" title={PEEK} lead={REAL}>
       <div ref={ref} className={g.tabs} {...play.hover}>
         <div id="gallery-panel" className={g.stage} data-light="" role="tabpanel" aria-label={shot.name}>
           {FEW.map((one, k) => (
@@ -62,7 +62,7 @@ export function Strip({ place }: { place: Place }) {
     el.scrollBy({ left: dir * el.clientWidth * 0.7, behavior: still ? 'auto' : 'smooth' })
   }
   return (
-    <GalleryStation place={place} name="Screens" title={AS_IT_IS} lead={REAL}>
+    <GalleryStation place={place} name="Screens" title={PEEK} lead={REAL}>
       <div className={g.stripBox} data-light="">
         <div ref={row} className={g.strip} onScroll={measure}>
           {ALL.map((shot, k) => (
@@ -179,7 +179,7 @@ export function Film({ place }: { place: Place }) {
 export function Wall({ place }: { place: Place }) {
   const [open, setOpen] = useState<{ at: number; from: HTMLElement } | null>(null)
   return (
-    <GalleryStation place={place} name="Screens" title={AS_IT_IS} lead={REAL}>
+    <GalleryStation place={place} name="Screens" title={PEEK} lead={REAL}>
       <div className={g.wall} data-light="">
         {ALL.map((shot, k) => (
           <figure key={shot.id} className={g.tile}>

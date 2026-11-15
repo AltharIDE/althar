@@ -1,34 +1,26 @@
 import automations from '../../../../../brand/export/screenshots/framed/automations.jpg'
-import board from '../../../../../brand/export/screenshots/framed/board.jpg'
 import browser from '../../../../../brand/export/screenshots/framed/browser.jpg'
 import canvas from '../../../../../brand/export/screenshots/framed/canvas.jpg'
-import dictation from '../../../../../brand/export/screenshots/framed/dictation.jpg'
-import firstRun from '../../../../../brand/export/screenshots/framed/first-run.jpg'
 import graph from '../../../../../brand/export/screenshots/framed/graph.jpg'
 import home from '../../../../../brand/export/screenshots/framed/home.jpg'
-import plan from '../../../../../brand/export/screenshots/framed/plan.jpg'
 import projectHome from '../../../../../brand/export/screenshots/framed/project-home.jpg'
-import rules from '../../../../../brand/export/screenshots/framed/project-rules.jpg'
-import review from '../../../../../brand/export/screenshots/framed/review.jpg'
+import reviewCode from '../../../../../brand/export/screenshots/framed/review-code.jpg'
 import automationsWindow from '../../../../../brand/export/screenshots/automations.png'
-import boardWindow from '../../../../../brand/export/screenshots/board.png'
 import browserWindow from '../../../../../brand/export/screenshots/browser.png'
 import canvasWindow from '../../../../../brand/export/screenshots/canvas.png'
-import dictationWindow from '../../../../../brand/export/screenshots/dictation.png'
-import firstRunWindow from '../../../../../brand/export/screenshots/first-run.png'
 import graphWindow from '../../../../../brand/export/screenshots/graph.png'
 import homeWindow from '../../../../../brand/export/screenshots/home.png'
-import planWindow from '../../../../../brand/export/screenshots/plan.png'
 import projectHomeWindow from '../../../../../brand/export/screenshots/project-home.png'
-import reviewWindow from '../../../../../brand/export/screenshots/review.png'
-import rulesWindow from '../../../../../brand/export/screenshots/project-rules.png'
+import reviewCodeWindow from '../../../../../brand/export/screenshots/review-code.png'
 
 /*
  * The brand pack's framed screenshots (brand/export/screenshots/framed): each
- * a window of the app on its demo projects, on the Aurora wallpaper at night,
- * at twice its size; opened whole, the window alone (brand/export/screenshots),
- * to read. Each with its name and one line, and what it shows for someone who
- * can't see it.
+ * a whole window of the app on its demo projects, on the Aurora wallpaper at
+ * night, at twice its size; opened whole, the window alone
+ * (brand/export/screenshots), to read. A few, each a screen someone would open
+ * the app for: a piece of a screen, or one another already holds (the board,
+ * the plan), isn't among them. Each with its name and one line, and what it
+ * shows for someone who can't see it.
  */
 
 export interface Shot {
@@ -62,19 +54,59 @@ export const SHOTS = {
     3808,
     2500,
     'A project',
-    'Ask its coordinator; the tasks it plans fill the board beside you.',
-    'A project in Althar: the conversation with its coordinator, which has planned two tasks, beside its board of tasks up next, running and needing you',
+    'Ask its coordinator. It plans who does the work, and the board fills beside you.',
+    'A project in Althar: asked to fix the VAT rate on EU invoices, the coordinator answers with a plan, Opus 5 implementing and Codex reviewing, starting in 23 seconds; beside it, the board, with two tasks up next, three running and one that needs you',
     { src: projectHomeWindow, w: 3360, h: 2020 },
   ),
-  board: shot(
-    'board',
-    board,
+  graph: shot(
+    'graph',
+    graph,
     3328,
-    2340,
-    'The board',
-    'Every task, across every agent, by where it stands.',
-    'The board: tasks up next, running, needing you and settled, each with its agent and its progress',
-    { src: boardWindow, w: 2880, h: 1800 },
+    1680,
+    'A task as a graph',
+    'One lab builds it, another reviews it, round until it’s clean.',
+    'A task as a graph, a lane for each agent: Opus 5 implements, Codex reviews with two findings, Opus 5 settles them, Codex passes it, and Althar opens draft pull request 1214',
+    { src: graphWindow, w: 2880, h: 1200 },
+  ),
+  review: shot(
+    'review',
+    reviewCode,
+    3328,
+    2280,
+    'Review, in the code',
+    'Each finding under the line it’s about, the worst first.',
+    'A review’s findings open over a task: the changed files, each with its findings, and a blocking finding shown under the lines of code it is about',
+    { src: reviewCodeWindow, w: 2880, h: 1800 },
+  ),
+  browser: shot(
+    'browser',
+    browser,
+    3328,
+    2280,
+    'A browser, built in',
+    'The lead tries what it built in the page beside you.',
+    'A task’s conversation beside its app in the built-in browser: the lead retried a failed refund, and the page confirms it was refunded',
+    { src: browserWindow, w: 2880, h: 1800 },
+  ),
+  canvas: shot(
+    'canvas',
+    canvas,
+    3328,
+    2280,
+    'Canvases',
+    'Pages and mockups the lead draws, a new version for each comment.',
+    'A launch page the lead drew on a canvas, beside the conversation that asked for a bigger, bolder headline',
+    { src: canvasWindow, w: 2880, h: 1800 },
+  ),
+  automations: shot(
+    'automations',
+    automations,
+    3008,
+    2200,
+    'Automations',
+    'Work that starts itself, on a schedule.',
+    'A project’s automations: a Sunday end-to-end run, a morning review, a nightly dependency bump, a Friday changelog and a weekly flaky-test sweep, each with how its last runs went',
+    { src: automationsWindow, w: 2560, h: 1720 },
   ),
   home: shot(
     'home',
@@ -86,122 +118,10 @@ export const SHOTS = {
     'Althar’s home: two things need you, a release to publish and a change ready to accept, beside the list of projects',
     { src: homeWindow, w: 2880, h: 1800 },
   ),
-  plan: shot(
-    'plan',
-    plan,
-    1704,
-    1180,
-    'A plan',
-    'One ask, planned: who leads, who reviews, and what it will cost.',
-    'The coordinator’s plan for a fix: Opus 5 implements, Codex reviews, then a draft pull request; about 25 minutes and a dollar on your subscriptions',
-    { src: planWindow, w: 1480, h: 916 },
-  ),
-  graph: shot(
-    'graph',
-    graph,
-    2944,
-    1264,
-    'A task’s steps',
-    'One lab builds it, another reviews it, and Althar opens the pull request.',
-    'A task’s steps as a graph: Opus 5 implements, Codex reviews with two findings, Opus 5 settles them, Codex passes it, and Althar opens the pull request',
-    { src: graphWindow, w: 2720, h: 1000 },
-  ),
-  browser: shot(
-    'browser',
-    browser,
-    3328,
-    2340,
-    'A browser, built in',
-    'The lead tries what it built in the page beside you.',
-    'A task’s conversation beside its app in the built-in browser: the lead retried a failed refund and the page confirms it',
-    { src: browserWindow, w: 2880, h: 1800 },
-  ),
-  canvas: shot(
-    'canvas',
-    canvas,
-    3328,
-    2340,
-    'Canvases',
-    'Pages and mockups the lead draws, a new version for each comment.',
-    'A launch page the lead drew on a canvas, beside the conversation that asked for a bigger, bolder headline',
-    { src: canvasWindow, w: 2880, h: 1800 },
-  ),
-  review: shot(
-    'review',
-    review,
-    1704,
-    1132,
-    'Review',
-    'Findings from another lab’s models, each fixed or kept with a reason.',
-    'A review’s findings by severity, from Sonnet 5 and Gemini 3 Pro, each fixed by the lead in a later round',
-    { src: reviewWindow, w: 1480, h: 868 },
-  ),
-  automations: shot(
-    'automations',
-    automations,
-    2248,
-    1920,
-    'Automations',
-    'Work that starts itself, on a schedule.',
-    'Automations on a schedule: a morning review, a nightly dependency bump, a Friday changelog and a weekly flaky-test sweep',
-    { src: automationsWindow, w: 1800, h: 1380 },
-  ),
-  rules: shot(
-    'rules',
-    rules,
-    3328,
-    2340,
-    'Rules',
-    'What agents may do, in plain words.',
-    'A project’s rules: what agents never do, ask first, go ahead with, and what their sandbox reaches',
-    { src: rulesWindow, w: 2880, h: 1800 },
-  ),
-  firstRun: shot(
-    'first-run',
-    firstRun,
-    2528,
-    1980,
-    'First run',
-    'The agents you already use, found and signed in.',
-    'Althar’s first run: the agents found on this Mac, each signed in with its plan, and the ones not installed yet',
-    { src: firstRunWindow, w: 2080, h: 1440 },
-  ),
-  dictation: shot(
-    'dictation',
-    dictation,
-    1704,
-    494,
-    'Dictation',
-    'Say it instead of typing it.',
-    'The composer, dictating a message to the lead',
-    { src: dictationWindow, w: 1480, h: 230 },
-  ),
 } satisfies Record<string, Shot>
 
-/** The tabs' few: the screens someone opens the app for, the most telling first. */
-export const FEW: readonly Shot[] = [
-  SHOTS.project,
-  SHOTS.board,
-  SHOTS.home,
-  SHOTS.plan,
-  SHOTS.browser,
-  SHOTS.canvas,
-  SHOTS.review,
-  SHOTS.rules,
-]
+/** Every screen, in the order a task goes, then what's around it: the strip's, the wall's and the tabs'. */
+export const ALL: readonly Shot[] = [SHOTS.project, SHOTS.graph, SHOTS.review, SHOTS.browser, SHOTS.canvas, SHOTS.automations, SHOTS.home]
 
-/** Every screen, in the order a task goes: the strip's and the wall's. */
-export const ALL: readonly Shot[] = [
-  SHOTS.project,
-  SHOTS.board,
-  SHOTS.plan,
-  SHOTS.graph,
-  SHOTS.browser,
-  SHOTS.canvas,
-  SHOTS.review,
-  SHOTS.home,
-  SHOTS.automations,
-  SHOTS.rules,
-  SHOTS.firstRun,
-  SHOTS.dictation,
-]
+/** The tabs' few: all of them, now that they are few. */
+export const FEW: readonly Shot[] = ALL

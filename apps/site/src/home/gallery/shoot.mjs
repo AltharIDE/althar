@@ -65,12 +65,31 @@ const shots = {
     await open('d=b')
     await station('b-strip')
   },
+  'b-end': async () => {
+    await open('d=b')
+    await station('b-strip-tmp', 300)
+    await page.evaluate(() => {
+      const row = [...document.querySelectorAll('#gallery *')].find(
+        (el) => el.scrollWidth > el.clientWidth + 8 && getComputedStyle(el).overflowX === 'auto',
+      )
+      row?.scrollTo({ left: row.scrollWidth, behavior: 'instant' })
+    })
+    await page.waitForTimeout(600)
+    await page.evaluate(() => document.querySelectorAll('#gallery img').forEach((img) => (img.loading = 'eager')))
+    await page.waitForFunction(() => [...document.querySelectorAll('#gallery img')].every((i) => i.complete))
+    await page.waitForTimeout(400)
+    await page.locator('#gallery').screenshot({ path: join(out, 'b-end.png') })
+  },
   'b-open': async () => {
     await open('d=b')
     await station('b-strip-tmp', 300)
-    await page.locator('#gallery button[aria-label^="A browser"]').click()
+    await page.locator('#gallery button[aria-label^="A project"]').click()
     await page.waitForTimeout(700)
     await page.screenshot({ path: join(out, 'b-open.png') })
+  },
+  'b-in-place': async () => {
+    await open('d=b')
+    await view('b-in-place', -160)
   },
   'c-film': async () => {
     await open('d=c')

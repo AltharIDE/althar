@@ -45,7 +45,7 @@ const params = new URLSearchParams(location.search)
 const SHOT = params.has('shot')
 
 export function Prototype() {
-  const [key, setKey] = useState(() => DIRECTIONS.find((d) => d.key === params.get('d'))?.key ?? 'a')
+  const [key, setKey] = useState(() => DIRECTIONS.find((d) => d.key === params.get('d'))?.key ?? 'b')
   const dir = DIRECTIONS.find((d) => d.key === key) ?? DIRECTIONS[1]!
   const [placed, setPlaced] = useState<Place | null>(() => {
     const p = params.get('p')
