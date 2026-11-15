@@ -45,10 +45,10 @@
   color: var(--t-3);
   white-space: nowrap;
 }
-/* the folder gives way first, by whole folders; then the facts, at their end */
+/* the facts give way first, at their end; then the folder, by whole folders */
 .dir {
   display: flex;
-  flex: 0 1000 auto;
+  flex: 0 1 auto;
   min-width: 4ch;
   font: 11px var(--mono);
 }
@@ -57,7 +57,7 @@
   white-space: pre;
 }
 .facts {
-  flex: 0 1 auto;
+  flex: 0 1000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
