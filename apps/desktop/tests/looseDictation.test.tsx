@@ -272,6 +272,23 @@ describe('dictation from anywhere', () => {
     expect(within(card).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).value).toBe('Check the retry path.')
   })
 
+  it('keeps what was said unplaced when a second recording fails to be written and is thrown away', async () => {
+    const { dictation } = windowAt('/')
+    await screen.findByRole('navigation', { name: 'Projects' })
+    press()
+    await screen.findByRole('group', { name: 'Not placed yet' })
+    press()
+    await screen.findByRole('region', { name: 'Not placed yet' })
+    vi.mocked(dictation!.transcribe).mockRejectedValue(new Error('No.'))
+    press()
+    await screen.findByRole('group', { name: 'Not placed yet' })
+    press()
+    const failed = await screen.findByRole('region', { name: 'Not placed yet' })
+    await userEvent.click(within(failed).getByRole('button', { name: 'Throw it away' }))
+    const card = await screen.findByRole('region', { name: 'Not placed yet' })
+    expect(within(card).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).value).toBe('Check the retry path.')
+  })
+
   it('carries what was said and not placed again when the window is reopened', async () => {
     setDraftText(draftKey.loose, 'Said before the window closed.')
     setDraftDictated(draftKey.loose, true)

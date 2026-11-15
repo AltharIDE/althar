@@ -96,7 +96,7 @@ export const pressDictationShortcut = () => {
 }
 
 /** Whether what a thread with no composer of its own hears is still there to place: kept carried when what it heard next came to nothing. */
-const keptAway = (thread: string) =>
+export const keptAway = (thread: string) =>
   handlesOf(thread).to?.back === null && draftOf(thread).text.trim() !== '' ? sessionOf(thread).away : null
 
 /* A host with no dictation: never called, since its window shows no microphone. */

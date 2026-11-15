@@ -8,7 +8,7 @@ import { draftOf, setDraftDictated, setDraftText, useDraftOf } from '../drafts'
 import s from './Carried.module.css'
 import { changeSession, type Destination, handlesOf, sessionOf, useCarrying, useSession } from './sessions'
 import { lengthOf } from './text'
-import { cancelIn, SHORTCUT, stopIn, writeIn } from './useDictation'
+import { cancelIn, keptAway, SHORTCUT, stopIn, writeIn } from './useDictation'
 
 /*
  * Dictation carried with the person once they leave its composer (ADR-017,
@@ -140,7 +140,11 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
       said={failed === null ? '' : lengthOf(failed.seconds)}
       kbd={SHORTCUT}
       onStop={() => stopIn(thread)}
-      onDiscard={() => (phase === 'failed' ? changeSession(thread, { failed: null, away: null }) : cancelIn(thread))}
+      onDiscard={() =>
+        phase === 'failed' // Earlier words said from anywhere and not yet placed stay carried.
+          ? changeSession(thread, { failed: null, away: keptAway(thread) })
+          : cancelIn(thread)
+      }
       {...(to.back === null
         ? {
             // No composer to say it to: it is placed, or thrown away.
