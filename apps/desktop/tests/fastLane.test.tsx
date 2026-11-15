@@ -110,15 +110,22 @@ describe("a small change's team", () => {
     return fake
   }
 
-  it.each(['running', 'planned'] as const)(
-    'says who is on it and offers Change the team… while it is %s, never holding it',
-    async (phase) => {
-      const { client } = show(phase)
-      await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
-      expect(await screen.findByRole('dialog', { name: 'Team' })).toBeTruthy()
-      expect(client.holdPlan).not.toHaveBeenCalled()
-    },
-  )
+  it('offers Change the team… while it is running, and never holds it', async () => {
+    const { client } = show('running')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect(client.holdPlan).not.toHaveBeenCalled()
+    expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
+  })
+
+  it('holds it while its team is changed before it has started, as a planned task is, and starts it from the dialog', async () => {
+    const { client } = show('planned')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await waitFor(() => expect(client.holdPlan).toHaveBeenCalledWith(small.id))
+    await userEvent.click(dialog.getByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith(small.id))
+  })
 
   it('shows the team the person saved at once, a new reviewer or none', async () => {
     const { client } = show('running')

@@ -74,8 +74,6 @@ export const canHold = (task: Teamed): boolean => task.plan !== null && (task.ph
  */
 export const teamChangeOf = (task: Teamed): 'starts' | 'waits' | 'begun' | null => {
   if (task.plan === null) return null
-  // A small change starts at once, with no countdown to stop: its team changes as a begun task's does, and it is never held for it.
-  if (task.phase === 'planned' && task.plan.preset === 'Small change') return 'begun'
   if (task.phase === 'planned' || task.phase === 'held') return 'starts'
   if (task.planWaits === true && task.queued !== null) return 'waits'
   return task.phase === 'drafting' || task.phase === 'settled' ? null : 'begun'
@@ -208,7 +206,7 @@ export function ChangeTeam({
   const firstPlan = first?.plan ?? null
   useEffect(() => {
     // Its countdown stops while its team is changed: held, it starts when the person says.
-    if (first?.phase === 'planned' && teamChangeOf(first) === 'starts' && firstPlan !== null && holding.current === null) {
+    if (first?.phase === 'planned' && firstPlan !== null && holding.current === null) {
       holding.current = client.holdPlan(firstPlan.id)
       void holding.current.catch((failure: unknown) => setError(messageOf(failure)))
     }
