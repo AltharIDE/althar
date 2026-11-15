@@ -276,6 +276,8 @@ export interface CrashReportsOptions {
   readonly app: { readonly version: string; readonly platform: string; readonly arch: string }
   /** Whether the person's switch is on and DO_NOT_TRACK isn't set, asked as each report comes and again before each request goes. */
   readonly allowed: () => boolean
+  /** Changes when consent changes, so delayed preparation and retries cannot outlive an off/on cycle. */
+  readonly generation?: () => number
   /** How a request goes: the app's own network; in tests, one that records it. */
   readonly fetch: NonNullable<PostHogOptions['fetch']>
   /** What hides the person's paths, names and secrets (logs/mask.ts), made as each report goes, with the names as they stand. */
@@ -312,7 +314,10 @@ const said = (name: string, message: string): Error => errorFrom({ name, message
  * asked of the network; every request asks the switch again as it goes.
  */
 export const crashReports = (options: CrashReportsOptions): CrashReports => {
-  let client: PostHog | undefined
+  let client: { readonly generation: number; readonly sender: PostHog } | undefined
+  const clients = new Set<PostHog>()
+  const generation = () => options.generation?.() ?? 0
+  const allowed = (accepted: number) => options.allowed() && generation() === accepted
   const sending = new Set<Promise<void>>()
   const seen = new Set<string>()
   let asked = 0
@@ -357,8 +362,9 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
     }
   }
 
-  const sender = () =>
-    (client ??= new PostHog(options.key, {
+  const sender = (accepted: number) => {
+    if (client?.generation === accepted) return client.sender
+    const sender = new PostHog(options.key, {
       host: options.host,
       disableGeoip: true,
       // No flags, no surveys, no catching on its own, nothing kept on disk: the reports Althar gives it alone.
@@ -370,25 +376,30 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
       ...(options.retryDelay === undefined ? {} : { fetchRetryDelay: options.retryDelay }),
       before_send: (event) => {
         try {
-          return scrub(event)
+          return allowed(accepted) ? scrub(event) : null
         } catch {
           // A report that can't be masked never goes.
           return null
         }
       },
-      fetch: (url, init) => (options.allowed() ? options.fetch(url, init) : Promise.reject(new Error('Crash reports are off.'))),
-    }))
+      fetch: (url, init) => (allowed(accepted) ? options.fetch(url, init) : Promise.reject(new Error('Crash reports are off.'))),
+    })
+    clients.add(sender)
+    client = { generation: accepted, sender }
+    return sender
+  }
 
   const send = (error: Error, process: CrashProcess, how: CrashHow, at?: Date, place: Place = {}) => {
     try {
       if (options.key === '' || options.host === '' || !options.allowed() || !room(how) || asked >= MOST_ASKED) return
+      const accepted = generation()
       asked += 1
       const going = Promise.resolve()
         .then(() => options.mask())
         .then((mask) => {
           masking = mask
-          if (!options.allowed()) return
-          return sender().captureExceptionImmediate(error, options.installId, {
+          if (!allowed(accepted)) return
+          return sender(accepted).captureExceptionImmediate(error, options.installId, {
             ...base,
             // What ended a process is fatal; what one carried on after is an error.
             $exception_level: how === 'defect' || how === 'gone' || how === 'native' ? 'fatal' : 'error',
@@ -433,7 +444,7 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
       send(said('Native crash', `The ${process} process crashed; its minidump stays on this computer.`), process, 'native', at),
     stop: async () => {
       await Promise.race([Promise.all(sending), new Promise((resolve) => setTimeout(resolve, 2_000).unref?.())])
-      await client?.shutdown(1_000).catch(() => undefined)
+      await Promise.all([...clients].map((sender) => sender.shutdown(1_000).catch(() => undefined)))
     },
   }
 }
