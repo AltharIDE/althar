@@ -4,6 +4,8 @@ import { availableWindows, bringForward, focusedLast, openFromEdge } from '../sr
 describe('bringing a window forward', () => {
   it('uses another window or opens a new one when the focused window has begun closing but is still tracked', () => {
     const make = () => ({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false },
       isMinimized: () => false,
       restore: () => undefined,
       showInactive: () => undefined,
@@ -13,7 +15,9 @@ describe('bringing a window forward', () => {
     const first = make()
     const focused = make()
     const fresh = make()
-    const windows = new Set([first, focused])
+    const destroyed = { ...make(), isDestroyed: () => true }
+    const rendererGone = { ...make(), webContents: { isDestroyed: () => true } }
+    const windows = new Set([first, focused, destroyed, rendererGone])
     const closing = new WeakSet([focused])
     const raise = () =>
       bringForward(
@@ -26,7 +30,7 @@ describe('bringing a window forward', () => {
     closing.add(first)
     expect(raise()).toEqual({ window: fresh, fresh: true })
     // Ownership and closed-event cleanup still see both windows until they actually close.
-    expect([...windows]).toEqual([first, focused])
+    expect([...windows]).toEqual([first, focused, destroyed, rendererGone])
   })
 
   it('chooses the last focused window and activates before hiding the sheet', () => {

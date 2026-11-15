@@ -195,30 +195,38 @@ test('Closing the last window with work running asks once, and quits only when t
   }
 })
 
-test('reopens when activation arrives while the last window is still closing', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
-  mkdirSync(join(home, 'profile'))
-  writeFileSync(join(home, 'profile', 'desktop.json'), JSON.stringify({ keepWorkingOnClose: true }))
-  const { electronApp, page, child } = await launch(home, ASKS)
-  try {
-    await pastTheTour(page)
-    await electronApp.evaluate(({ app, BrowserWindow }) => {
-      const window = BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/renderer/index.html'))
-      if (window === undefined) throw new Error('The main window must be open before closing it.')
-      // A Dock activation can arrive before the closing BrowserWindow has emitted `closed`.
-      window.once('close', () => app.emit('activate'))
-    })
-    await page.close()
-    const reopened = await mainWindow(electronApp)
-    expect(reopened).not.toBe(page)
-    await expect(reopened.getByRole('list', { name: /^Agents on/ })).toBeVisible()
-    await expect(reopened.getByRole('dialog')).toHaveCount(0)
-    expect(child.exitCode).toBeNull()
-    await reopened.screenshot({ path: 'test-results/quit-activate-closing.png', scale: 'css' })
-  } finally {
-    await quitAnyway(electronApp, child)
-  }
-})
+for (const phase of ['closing', 'destroyed'] as const)
+  test(`reopens when activation arrives while the last window is ${phase}`, async () => {
+    const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+    mkdirSync(join(home, 'profile'))
+    writeFileSync(join(home, 'profile', 'desktop.json'), JSON.stringify({ keepWorkingOnClose: true }))
+    const { electronApp, page, child } = await launch(home, ASKS)
+    try {
+      await pastTheTour(page)
+      const closed = page.waitForEvent('close')
+      await electronApp.evaluate(({ app, BrowserWindow }, phase) => {
+        const window = BrowserWindow.getAllWindows().find((window) => window.webContents.getURL().includes('/renderer/index.html'))
+        if (window === undefined) throw new Error('The main window must be open before closing it.')
+        // A Dock activation can arrive during native close, or after renderer destruction but before ownership cleanup.
+        if (phase === 'closing') {
+          window.once('close', () => app.emit('activate'))
+          window.close()
+        } else {
+          window.prependOnceListener('closed', () => app.emit('activate'))
+          window.destroy()
+        }
+      }, phase)
+      await closed
+      const reopened = await mainWindow(electronApp)
+      expect(reopened).not.toBe(page)
+      await expect(reopened.getByRole('list', { name: /^Agents on/ })).toBeVisible()
+      await expect(reopened.getByRole('dialog')).toHaveCount(0)
+      expect(child.exitCode).toBeNull()
+      await reopened.screenshot({ path: `test-results/quit-activate-${phase}.png`, scale: 'css' })
+    } finally {
+      await quitAnyway(electronApp, child)
+    }
+  })
 
 test('remembers background closing across launch and reopening, while an explicit Quit still asks', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
