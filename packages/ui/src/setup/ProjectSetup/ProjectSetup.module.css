@@ -537,7 +537,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cardFacts {
+  min-width: 0;
+  overflow: hidden;
+}
+.cardFacts > * {
+  flex: none;
+}
 .cardFacts > .mono {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, connectGitHub, launch, openFirstProject, still } from './support'
+import { chooseFolder, launch, openFirstProject, still } from './support'
 
 /*
  * A project set up where it starts, on the New project page: its code from
@@ -111,25 +111,34 @@ test('clones a repository from GitHub, and puts a new one on GitHub as it is mad
   const harbour = join(home, 'code', 'harbour')
   mkdirSync(harbour, { recursive: true })
   writeFileSync(join(harbour, 'index.html'), '<p>Harbour</p>\n')
-  const places = join(home, 'clones')
-  mkdirSync(places)
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_REMOTE_API: api, ALTHAR_FAKE_REMOTE_HARBOUR: fresh })
   try {
     await openFirstProject(electronApp, page, meridian)
-    await connectGitHub(page)
 
-    // Clone: GitHub's repositories, those named like the project first.
+    // GitHub connected in place, from Clone, where its repositories would be; then they're there.
     await newProject(page, 'Api')
+    await page.getByRole('button', { name: 'Connect GitHub' }).click()
+    await page
+      .getByRole('group', { name: 'Ways to connect GitHub' })
+      .getByRole('button', { name: /Make a token/ })
+      .click()
+    await shoot(page, '06-clone-connecting-in-place')
+    await page.getByRole('button', { name: 'Paste it myself' }).click()
+    await page.getByLabel('Paste it').fill('github_pat_e2e')
+    await page.getByRole('button', { name: 'Check' }).click()
+    await expect(page.getByRole('heading', { name: 'Connected as you' })).toBeVisible()
+    await page.getByRole('button', { name: 'Done' }).click()
     await expect(page.getByRole('button', { name: 'Clone meridian/api' })).toBeVisible()
-    await shoot(page, '06-clone-listed')
+    await shoot(page, '07-clone-listed')
     await page.getByRole('button', { name: 'Clone meridian/api' }).click()
     await expect(page.getByText('On GitHub, at meridian/api. Tasks open pull requests there.')).toBeVisible()
-    await shoot(page, '07-clone-chosen')
-    // Nowhere usual for clones here: the person is asked, and it goes there.
-    await chooseFolder(electronApp, places)
+    await shoot(page, '08-clone-chosen')
+    // Into where the person keeps code, ~/code here, said under the list, and changed there.
+    await expect(page.getByText('Into ~/code')).toBeVisible()
     await page.getByRole('button', { name: /^Create Api/ }).click()
     await expect(page.getByRole('heading', { name: 'Api', level: 1 })).toBeVisible()
-    expect(existsSync(join(places, 'api', 'README.md'))).toBe(true)
+    expect(existsSync(join(home, 'code', 'api', 'README.md'))).toBe(true)
+    expect(git(join(home, 'code', 'api'), 'remote', 'get-url', 'origin')).toBe(api)
 
     // A folder put on GitHub as it is made: a new repository there, pushed and followed.
     await newProject(page, 'Harbour')
@@ -139,9 +148,9 @@ test('clones a repository from GitHub, and puts a new one on GitHub as it is mad
     const code = page.getByRole('radiogroup', { name: 'Where its code lives' })
     await expect(code.getByRole('radio', { name: /A new repository on GitHub/ })).toHaveAttribute('aria-checked', 'true')
     await expect(page.getByText('Create starts git in it and puts it on GitHub.')).toBeVisible()
-    await shoot(page, '08-folder-to-github')
+    await shoot(page, '09-folder-to-github')
     await page.emulateMedia({ colorScheme: 'dark' })
-    await shoot(page, '08-folder-to-github-dark')
+    await shoot(page, '09-folder-to-github-dark')
     await page.emulateMedia({ colorScheme: 'light' })
     await page.getByRole('button', { name: /^Create Harbour/ }).click()
     await expect(page.getByRole('heading', { name: 'Harbour', level: 1 })).toBeVisible()

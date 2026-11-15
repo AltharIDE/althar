@@ -1,7 +1,7 @@
 import { isStartupStage, type StartupStage } from '../startup'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
@@ -994,7 +994,9 @@ ipcMain.handle('althar:clone-place', async () => {
   const places = placesFor(home, process.platform)
   const path = await clonePlaceFor(await findRepositories(places), places)
   const grant = path === null ? null : await allowFolder(path)
-  return path === null || grant === null ? null : { grant, where: shownAt(path, home) }
+  // The place is read with its links followed, as the home may not be (a Mac's /var is /private/var): each is shown from ~.
+  const real = await realpath(home).catch(() => home)
+  return path === null || grant === null ? null : { grant, where: shownAt(path, path.startsWith(real) ? real : home) }
 })
 
 // Another place for it, chosen by the person: as above, or null where they cancel.

@@ -209,6 +209,8 @@ export interface DraftActions {
   readonly addFound: (id: string, shown: { readonly name: string; readonly where: string }) => Promise<void>
   /** Asks where a clone goes, for this draft. */
   readonly chooseCloneInto: () => Promise<void>
+  /** Asks for another folder in place of one; it stays where the person cancels. */
+  readonly replace: (path: string) => Promise<void>
   /** Makes the project, in the ink shown, doing what the plan says; the project, or null when it couldn't. */
   readonly create: (ink: ProjectInk, plan: DraftPlan) => Promise<ProjectSummary | null>
 }
@@ -305,10 +307,10 @@ export const foldersOf = (
     return {
       folders: [
         {
-          path: grant,
+          path: reading.path ?? grant,
           grant,
           name: reading.name,
-          where: shown.where ?? reading.name,
+          where: reading.path === undefined ? (shown.where ?? reading.name) : shortFolder(reading.path),
           remote: null,
           project,
           found: shown.found ?? null,
@@ -361,7 +363,7 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
   const read = async (id: string, key: string, grant: string, shown: Omit<Reading, 'key'>) => {
     try {
       const reading = await client.readFolder(grant)
-      const read = foldersOf(reading, grant, { ...shown, where: shown.where ?? reading.name })
+      const read = foldersOf(reading, grant, shown)
       if ('error' in read) return finish(id, key, (now) => ({ ...now, error: { said: read.error } }))
       finish(id, key, (now) => ({
         ...now,
@@ -443,6 +445,14 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
     },
     addFound: (id, shown) =>
       add(() => host.grantFound(id), { ...shown, found: id }, `Althar couldn’t open ${shown.name}. Choose it with Choose a folder.`),
+    replace: async (path) => {
+      const at = store.get()
+      if (at === null) return
+      const grants = await host.pickFolders()
+      if (grants.length === 0) return
+      store.change(at.id, (now) => ({ ...now, folders: now.folders.filter((folder) => folder.path !== path) }))
+      await Promise.all(grants.map((grant) => read(at.id, begin(at.id, {}), grant, {})))
+    },
     chooseCloneInto: async () => {
       const at = store.get()
       if (at === null) return
@@ -531,7 +541,8 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
         }
         for (const folder of kept) {
           if (folder.git === 'ready') continue
-          const prepared = await client.prepareFolder(folder.grant, folder.path === folder.grant ? undefined : folder.path)
+          // A folder not read for its path (an older runtime's reading) is the grant's own.
+          const prepared = await client.prepareFolder(folder.grant, folder.path.startsWith('grant_') ? undefined : folder.path)
           const ready = { ...folder, path: prepared.path, git: 'ready' as const }
           kept = kept.map((one) => (one.path === folder.path ? ready : one))
           store.change(at.id, (now) => ({ ...now, folders: now.folders.map((one) => (one.path === folder.path ? ready : one)) }))
@@ -544,7 +555,7 @@ export const draftActions = ({ client, host, cache }: { client: Client; host: Ho
           step('home', 'doing')
           try {
             const published = await client.publishRepository({
-              at: { grant: alone.grant, ...(alone.path === alone.grant ? {} : { path: alone.path }) },
+              at: { grant: alone.grant, path: alone.path },
               ...plan.publish,
             })
             const there = { ...alone, remote: published.webUrl }

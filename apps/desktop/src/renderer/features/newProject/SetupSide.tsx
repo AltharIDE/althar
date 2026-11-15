@@ -139,6 +139,7 @@ export function SetupSide({
   creating,
   onChoose,
   onLeaveOut,
+  onReplace,
   onStartFresh,
   onChooseCloneInto,
   onOpenProject,
@@ -149,6 +150,7 @@ export function SetupSide({
   creating: boolean
   onChoose: () => void
   onLeaveOut: (path: string) => void
+  onReplace: (path: string) => void
   onStartFresh: () => void
   onChooseCloneInto: () => void
   onOpenProject: (projectId: string) => void
@@ -248,7 +250,7 @@ export function SetupSide({
               key={folder.path}
               folder={folder}
               several={folders.length > 1}
-              onRemove={() => (folders.length > 1 ? onLeaveOut(folder.path) : onChoose())}
+              onRemove={() => (folders.length > 1 ? onLeaveOut(folder.path) : onReplace(folder.path))}
               onOpen={onOpenProject}
             />
           ))}

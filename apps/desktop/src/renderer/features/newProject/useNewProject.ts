@@ -46,6 +46,8 @@ export interface NewProjectModel {
   readonly leaveOut: (path: string) => void
   /** Asks where a clone goes. */
   readonly chooseCloneInto: () => Promise<void>
+  /** Asks for another folder in place of one. */
+  readonly replace: (path: string) => Promise<void>
   /** Where its code comes from, where it lives and where its issues go. */
   readonly setup: (SetupModel & SetupActions) | null
   /** Makes the project; it, or null when it couldn't. */
@@ -241,6 +243,7 @@ export const useNewProject = (): NewProjectModel => {
       return repository === undefined ? Promise.resolve() : actions.addFound(id, { name: repository.name, where: repository.where })
     },
     chooseCloneInto: actions.chooseCloneInto,
+    replace: actions.replace,
     setup,
     leaveOut: (path) => {
       if (draft !== null)

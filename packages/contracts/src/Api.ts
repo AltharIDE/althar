@@ -1075,6 +1075,8 @@ export const FolderReading = Schema.Struct({
   project: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
   /** A folder that isn't a repository: whether it has nothing in it but what is hidden, as .DS_Store is. */
   empty: Schema.optional(Schema.Boolean),
+  /** A folder that isn't a repository: where it is, as git would be started in it. */
+  path: Schema.optional(Schema.String),
 })
 export type FolderReading = typeof FolderReading.Type
 

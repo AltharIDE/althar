@@ -123,6 +123,7 @@ export function NewProjectView({
             creating={draft.creating}
             onChoose={chooseFolder}
             onLeaveOut={model.leaveOut}
+            onReplace={(path) => void model.replace(path)}
             onStartFresh={() => void model.startFresh()}
             onChooseCloneInto={() => void model.chooseCloneInto()}
             onOpenProject={onOpen}

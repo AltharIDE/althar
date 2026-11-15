@@ -90,6 +90,8 @@ export interface Reading {
   readonly project: { readonly id: string; readonly name: string } | null
   /** A folder that isn't a repository: whether it has nothing in it but what is hidden. */
   readonly empty?: boolean
+  /** A folder that isn't a repository: where it is. */
+  readonly path?: string
 }
 
 /**
@@ -169,7 +171,7 @@ export const readFolder = (opened: string) =>
       const found = yield* rootAt(join(path, entry))
       if (found !== null) repositories.push(yield* describe(found, null))
     }
-    return { kind: 'folder' as const, name: basename(path), repositories, empty: shown.length === 0 }
+    return { kind: 'folder' as const, name: basename(path), repositories, empty: shown.length === 0, path }
   })
 
 export const OpenedProject = Schema.Struct({

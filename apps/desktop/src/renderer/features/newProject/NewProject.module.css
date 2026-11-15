@@ -27,7 +27,11 @@
 .inPlace {
   display: grid;
   justify-items: start;
-  gap: 8px;
+  gap: 10px;
+  padding: 16px 18px 14px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
 }
 .inPlace > :first-child {
   width: 100%;
