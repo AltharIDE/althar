@@ -121,3 +121,29 @@ describe('the explicit choice to merge without a queue', () => {
     expect(screen.queryByRole('menuitem')).not.toBeInTheDocument()
   })
 })
+
+describe('where a pressed merge stands', () => {
+  it.each([
+    ['merging', 'Merging'],
+    ['queued', 'In the queue'],
+    ['merged', 'Merged'],
+  ] as const)('shows %s in its place, with nothing to press again', (standing, words) => {
+    const merge = vi.fn()
+    render(
+      <MergeButton onMerge={merge} standing={standing}>
+        Merge
+      </MergeButton>,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent(words)
+    expect(screen.queryByRole('button', { name: 'Merge' })).not.toBeInTheDocument()
+  })
+
+  it('keeps bypassing the queue a menu away while in it', async () => {
+    const bypass = vi.fn()
+    render(<MergeButton onMerge={vi.fn()} onBypassQueue={bypass} standing="queued" />)
+    expect(screen.getByRole('status')).toHaveTextContent('In the queue')
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    expect(bypass).toHaveBeenCalledOnce()
+  })
+})

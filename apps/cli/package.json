@@ -13,8 +13,8 @@
     "start": "node dist/althar.js",
     "check": "vp check",
     "fix": "vp check --fix",
-    "test": "vp test run",
-    "test:coverage": "vp test run --coverage",
+    "test": "bun run build && vp test run",
+    "test:coverage": "bun run build && vp test run --coverage",
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
@@ -24,6 +24,7 @@
     "@althar/domain": "workspace:*",
     "@althar/provider-adapters": "workspace:*",
     "@althar/runtime": "workspace:*",
+    "@althar/transport-node": "workspace:*",
     "effect": "4.0.7",
     "sharp": "^0.35.5"
   },

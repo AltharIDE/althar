@@ -26,7 +26,7 @@ export default defineConfig({
     overrides: [
       /* The runtime and the packages it uses read the time and wait only through Effect's Clock (lint/clock.js). */
       {
-        files: ['packages/{runtime,domain,contracts,persistence-sqlite,provider-adapters,connectors}/src/**'],
+        files: ['packages/{runtime,domain,contracts,persistence-sqlite,provider-adapters,connectors,transport-node}/src/**'],
         rules: { 'althar/one-clock': 'error' },
       },
       /* But the fake agent, which runs outside any effect, as a process of its own too, and times what a test asks of it. */
@@ -47,7 +47,7 @@ export default defineConfig({
       /* The runtime, what it runs, and the app's main process start no process and copy no folder synchronously (lint/thread.js). */
       {
         files: [
-          'packages/{runtime,domain,contracts,persistence-sqlite,provider-adapters,connectors,skills}/src/**',
+          'packages/{runtime,domain,contracts,persistence-sqlite,provider-adapters,connectors,skills,transport-node}/src/**',
           'apps/desktop/src/{main,preload,runtime,speech,logs}/**',
         ],
         rules: { 'althar/off-the-thread': 'error' },

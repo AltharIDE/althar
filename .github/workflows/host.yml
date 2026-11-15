@@ -1,0 +1,104 @@
+name: host
+
+# The Linux service has process tests against its built Node entry, so its test
+# commands build first. Keep this gate separate from the source-only harness.
+on:
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/host/**'
+      - 'packages/contracts/**'
+      - 'packages/transport-node/**'
+      - 'packages/domain/**'
+      - 'packages/connectors/**'
+      - 'packages/persistence-sqlite/**'
+      - 'packages/provider-adapters/**'
+      - 'packages/runtime/**'
+      - 'packages/skills/**'
+      - 'packages/testing/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'vite.config.ts'
+      - '.bun-version'
+      - '.node-version'
+      - 'lint/**'
+      - 'patches/**'
+      - '.github/actions/electron/**'
+      - '.github/actions/flaky/**'
+      - '.github/workflows/host.yml'
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'apps/host/**'
+      - 'packages/contracts/**'
+      - 'packages/transport-node/**'
+      - 'packages/domain/**'
+      - 'packages/connectors/**'
+      - 'packages/persistence-sqlite/**'
+      - 'packages/provider-adapters/**'
+      - 'packages/runtime/**'
+      - 'packages/skills/**'
+      - 'packages/testing/**'
+      - 'package.json'
+      - 'bun.lock'
+      - 'vite.config.ts'
+      - '.bun-version'
+      - '.node-version'
+      - 'lint/**'
+      - 'patches/**'
+      - '.github/actions/electron/**'
+      - '.github/actions/flaky/**'
+      - '.github/workflows/host.yml'
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  FLAKY_REPORT: ${{ github.workspace }}/flaky.jsonl
+
+concurrency:
+  group: host-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Linux host (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/host
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
+      - uses: ./.github/actions/flaky/quarantine
+      - name: Prepare isolated OpenSSH integration tests
+        run: |
+          if [ ! -x /usr/sbin/sshd ]; then
+            sudo apt-get update
+            sudo apt-get install -y openssh-server
+          fi
+      - run: bun run check
+      - run: bun run test:coverage --maxWorkers=2
+      - name: Verify a signed portable release with real bundled provider CLIs
+        run: bun run release:smoke
+      - if: always()
+        uses: ./.github/actions/flaky
