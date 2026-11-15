@@ -19,6 +19,7 @@ import {
   nearNames,
   parseName,
   readCode,
+  readCodeImage,
 } from '../src/code'
 import { NotFound } from '../src/errors'
 
@@ -284,6 +285,26 @@ describe('reading a file a message names', () => {
           () => true,
         ),
       )
+    }),
+  )
+
+  it.effect('reads a picture a coordinator’s document names at the commit the document is read at, every byte as it was', () =>
+    Effect.gen(function* () {
+      const { root, first, write } = repository()
+      // What the checkout has now, uncommitted, is not what the default branch has.
+      write('brand/mark.png', Buffer.from([1, 2, 3]))
+      const place = onMain(root, first)
+      const mark = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 1])
+      assert.deepStrictEqual((yield* readCodeImage(place, 'brand/mark.png')).image, { type: 'image/png', data: mark.toString('base64') })
+      const refused = (path: string) => Effect.map(Effect.flip(readCodeImage(place, path)), (error) => error instanceof NotFound)
+      for (const path of [
+        'brand/none.png',
+        'brand/../brand/mark.png',
+        '../mark.png',
+        'docs/decisions/048-where-the-runtime-runs.md',
+        'brand',
+      ])
+        assert.isTrue(yield* refused(path), path)
     }),
   )
 

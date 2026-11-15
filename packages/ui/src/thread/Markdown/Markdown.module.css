@@ -176,3 +176,73 @@
     animation: none;
   }
 }
+
+/* a link to a file beside this one: a button that reads as a link */
+.fileLink {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--t-1);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.fileLink:hover {
+  text-decoration-color: currentColor;
+}
+
+/* an image the file names beside it */
+.md img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+/*
+ * what a change marks (changes.ts): a run of added blocks, and what was taken out, drawn as it was. A tint under the text,
+ * reaching into the margin where the sign is, for those who don't tell the tints apart; never a stripe at the edge.
+ */
+.md > .added,
+.md > .removed {
+  position: relative;
+  padding: 8px 12px 8px 18px;
+  margin: 0 -12px 10px -18px;
+  border-radius: 8px;
+}
+.md > .added {
+  background: var(--add-line);
+}
+.md > .removed {
+  background: var(--del-line);
+  color: var(--t-3);
+}
+.added::before,
+.removed::before {
+  position: absolute;
+  top: 8px;
+  left: 5px;
+  font: 600 12px/1.6 var(--mono);
+}
+.added::before {
+  content: '+';
+  color: var(--add-sign);
+}
+.removed::before {
+  content: '\2212';
+  color: var(--del-sign);
+}
+.added > *,
+.removed > * {
+  margin: 0 0 10px;
+}
+.added > :last-child,
+.removed > :last-child {
+  margin-bottom: 0;
+}
+.added > .heading:first-child,
+.removed > .heading:first-child {
+  margin-top: 0;
+}

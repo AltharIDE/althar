@@ -21,6 +21,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/External/External.tsx': 'the row of an external call',
   'thread/NoteDetails/NoteDetails.tsx': 'the Details row of a note, which folds the raw answer under it',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',
+  'thread/Markdown/Markdown.tsx': 'a link in a document to a file, set in its prose as a link, which opens that file',
   'thread/StartedTask/StartedTask.tsx': 'a started task’s chip, the whole of which opens that task',
   'thread/Canvas/CanvasLine.tsx': 'a canvas’s title and version in its line, which opens it beside the conversation',
   'screens/Artifacts/Artifacts.tsx': 'an artifact’s row, the whole of which opens it',
