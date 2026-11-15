@@ -1,13 +1,16 @@
 .split {
   display: inline-flex;
-  flex: none;
 }
+/* in a flex row it sizes like any button: the main half takes what the group is given */
 .split .main {
+  flex: 1 1 auto;
+  justify-content: center;
   border-start-end-radius: 0;
   border-end-end-radius: 0;
 }
 .split .more {
   justify-content: center;
+  flex: none;
   width: 28px;
   padding: 0;
   margin-inline-start: -1px;
