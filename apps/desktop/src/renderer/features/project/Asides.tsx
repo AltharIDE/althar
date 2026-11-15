@@ -6,6 +6,7 @@ import type { BoardSnapshot, BoardTask, PlanStep, ThreadItem, ThreadSnapshot } f
 import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton, Problem } from '@althar/ui'
 
 import { type Client, messageOf, newTaskId } from '../../data/client'
+import { useAgentRenames } from '../../data/agentRenames'
 import { keys, reads } from '../../data/reads'
 import { mergeItems, sending, unsent } from '../../shared/items'
 import { coordinatorSigned } from '../../shared/signed'
@@ -446,6 +447,7 @@ export function AsidesBar({
   board: ReadonlyArray<BoardTask>
   now: number
 }) {
+  const byAgent = useAgentRenames()
   const { recent, older } = asidesOf(scratch, now, {
     open: open.kind === 'coordinator' ? null : open.taskId,
     first,
@@ -458,7 +460,7 @@ export function AsidesBar({
       ref={strip}
       className={s.bar}
       mark={coordinatorSigned.mark}
-      asides={recent}
+      asides={recent.map((one) => ({ ...one, byAgent: byAgent.get(one.id) ?? null }))}
       older={older}
       current={open.kind === 'coordinator' ? null : open.taskId}
       onPick={onPick}

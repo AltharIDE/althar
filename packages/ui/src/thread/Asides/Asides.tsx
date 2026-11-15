@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
+import { useTypedTitle } from '../../lib/typedTitle'
 import type { RootProps } from '../../lib/props'
 import { Icon } from '../../foundations/Icon/Icon'
 import { Button } from '../../primitives/Button/Button'
@@ -28,6 +29,13 @@ export interface Aside {
   said?: string
   /** Its agent is at it now. */
   running?: boolean
+  /** The title an agent last gave it: while that is its title, a rename types itself in (useTypedTitle). */
+  byAgent?: string | null
+}
+
+/** A title as the pill draws it, typed in where an agent renamed it. */
+function Titled({ title, byAgent }: { title: string; byAgent: string | null | undefined }) {
+  return <>{useTypedTitle(title, byAgent ?? null)}</>
 }
 
 export interface AsideTabsText {
@@ -125,7 +133,7 @@ export function AsideTabs({
                 }}
               >
                 {aside.running === true && <LiveDot pulse />}
-                <span className={s.title}>{title}</span>
+                <span className={s.title}>{aside.title === '' ? title : <Titled title={title} byAgent={aside.byAgent} />}</span>
               </button>
               {onClear !== undefined && (
                 <Tooltip label={t.clear}>

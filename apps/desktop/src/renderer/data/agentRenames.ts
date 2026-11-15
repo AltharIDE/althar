@@ -7,15 +7,18 @@ import { useSyncExternalStore } from 'react'
  * while the title it is given is this one (useTypedTitle).
  */
 
-const renames = new Map<string, string>()
+let renames: ReadonlyMap<string, string> = new Map()
 const listeners = new Set<() => void>()
 
 /** A task was renamed: by an agent to `title`, or (`null`) by the person. */
 export function heardRename(taskId: string, title: string, byAgent: boolean) {
   const next = byAgent ? title : null
   if ((renames.get(taskId) ?? null) === next) return
-  if (next === null) renames.delete(taskId)
-  else renames.set(taskId, next)
+  // Replaced, not changed, so what reads the whole map sees it differ.
+  const copy = new Map(renames)
+  if (next === null) copy.delete(taskId)
+  else copy.set(taskId, next)
+  renames = copy
   for (const listener of listeners) listener()
 }
 
@@ -28,5 +31,17 @@ export function useAgentRename(taskId: string | null | undefined): string | null
     },
     () => (taskId == null ? null : (renames.get(taskId) ?? null)),
     () => null,
+  )
+}
+
+/** Every task's last agent title, for a list of tasks: a new map each time one changes. */
+export function useAgentRenames(): ReadonlyMap<string, string> {
+  return useSyncExternalStore(
+    (changed) => {
+      listeners.add(changed)
+      return () => void listeners.delete(changed)
+    },
+    () => renames,
+    () => renames,
   )
 }

@@ -27,7 +27,7 @@ import {
   FactLine,
   FileChips,
   Findings,
-  KeptRow,
+  KeptRow as KitKeptRow,
   LinkButton,
   MenuItem,
   MergeButton,
@@ -36,7 +36,7 @@ import {
   NextStep,
   Outcome,
   PullChip,
-  SettledRow,
+  SettledRow as KitSettledRow,
   ScratchShelf,
   SettleWays,
   StartedBy,
@@ -412,6 +412,15 @@ const findingsOf = (reviewing: ReviewBrief) => {
 /** The kit's card, its title typed in where an agent renames the task (the person's own rename shows at once). */
 function BoardCard({ taskId, ...props }: BoardCardProps & { taskId: string }) {
   return <KitBoardCard {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+/** The kit's settled and kept rows, typed in the same way. */
+function SettledRow({ taskId, ...props }: ComponentProps<typeof KitSettledRow> & { taskId: string }) {
+  return <KitSettledRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+function KeptRow({ taskId, ...props }: ComponentProps<typeof KitKeptRow> & { taskId: string }) {
+  return <KitKeptRow {...props} title={useTaskTitle(taskId, props.title)} />
 }
 
 /** The kit's queue row, typed in the same way. */
@@ -1425,6 +1434,7 @@ export function BoardView({
                 return (
                   <SettledRow
                     key={work.taskId}
+                    taskId={work.taskId}
                     data-move={work.taskId}
                     // Moved into Settled before, or settled before this window looked: drawn there without moving or coming in.
                     {...(arrivesQuietly(work.taskId) ? { 'data-move-seen': '' } : {})}
@@ -1484,6 +1494,7 @@ function Kept({ work, now, onOpen, actions }: { work: BoardTask; now: string; on
   const failed = actions?.failed[work.taskId]
   return (
     <KeptRow
+      taskId={work.taskId}
       data-move={work.taskId}
       title={work.title}
       at={work.keptAt == null ? '' : text.keptAt(ago(work.keptAt, new Date(now)))}

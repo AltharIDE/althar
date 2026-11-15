@@ -91,3 +91,38 @@ describe('a title being typed in, in its crumb', () => {
     expect(onRename).not.toHaveBeenCalled()
   })
 })
+
+describe('an aside tab', () => {
+  it("types in a title an agent renamed, and shows another's at once", async () => {
+    const { render, screen, act: actNow } = await import('@testing-library/react')
+    const { AsideTabs } = await import('../src/thread/Asides/Asides')
+    const tabs = (asides: Array<{ id: string; title: string; byAgent?: string | null }>) => (
+      <AsideTabs
+        mark={null as never}
+        asides={asides}
+        older={[]}
+        current={null}
+        onPick={() => {}}
+        onNew={() => {}}
+        onClear={() => {}}
+        onClearOlder={() => {}}
+      />
+    )
+    const view = render(
+      tabs([
+        { id: 'a', title: 'Fix login' },
+        { id: 'b', title: 'Other' },
+      ]),
+    )
+    view.rerender(
+      tabs([
+        { id: 'a', title: 'Repair sessions', byAgent: 'Repair sessions' },
+        { id: 'b', title: 'Mine', byAgent: null },
+      ]),
+    )
+    expect(screen.queryByText('Mine')).not.toBeNull()
+    expect(screen.queryByText('Repair sessions')).toBeNull()
+    actNow(() => void vi.advanceTimersByTime(5000))
+    expect(screen.queryByText('Repair sessions')).not.toBeNull()
+  })
+})
