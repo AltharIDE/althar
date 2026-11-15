@@ -37,11 +37,12 @@ export class RepositoryRefused extends Schema.TaggedError<RepositoryRefused>()('
  * can't read; one too wide to be one project, the home folder or the disk's
  * root; one with more files than a repository should start with (`count`);
  * one with git repositories inside it already (`names`), which git would
- * take in as empty links; or the folder a clone would go in, there already
+ * take in as empty links; one with a .git git can't read (`broken_repository`),
+ * left as it is; or the folder a clone would go in, there already
  * with something in it.
  */
 export class FolderRefused extends Schema.TaggedError<FolderRefused>()('FolderRefused', {
-  reason: Schema.Literals(['unreadable', 'too_wide', 'too_many', 'repositories_inside', 'taken']),
+  reason: Schema.Literals(['unreadable', 'too_wide', 'too_many', 'repositories_inside', 'broken_repository', 'taken']),
   path: Schema.String,
   count: Schema.optional(Schema.Number),
   names: Schema.optional(Schema.Array(Schema.String)),

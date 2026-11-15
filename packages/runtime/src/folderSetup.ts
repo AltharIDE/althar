@@ -15,8 +15,10 @@ import { cloneInto, commitFirst, commitOf, currentBranch, git, topLevel } from '
  * branches from a commit, so a project's repository needs one. A folder too
  * wide to be one project, the home folder or the disk's root, is refused,
  * as is one with more files than a repository starts with, or with
- * repositories inside it, which git would take in as empty links. What
- * this made is taken away again where it fails, so the folder is as it was.
+ * repositories inside it, which git would take in as empty links, or with a
+ * .git git can't read. What this made is taken away again where it fails,
+ * so the folder is as it was; what was there before never is. What holds
+ * secrets stays out of a first commit made here.
  *
  * And a repository cloned onto this computer from its host, into a folder
  * of its name in the one the person chose: refused where that folder has
@@ -32,6 +34,14 @@ export const MOST_FILES = 20_000
  * are kept in, which must never reach a host.
  */
 export const IGNORED = ['.DS_Store', 'node_modules/', '.venv/', '__pycache__/', '.env', '.env.*', '!.env.example', ''].join('\n')
+
+/**
+ * Files that hold secrets, kept out of a first commit Althar makes whatever
+ * the folder's own ignore rules say, as a first commit may go to a host as
+ * the project is made: .env and its kin (not an example of it), keys and
+ * certificates. They stay in the folder, untracked.
+ */
+export const SECRET = /(?:^|\/)(?:\.env(?:\.(?!example$|sample$|template$)[^/]+)?|[^/]+\.(?:pem|key|p12|pfx)|id_(?:rsa|dsa|ecdsa|ed25519))$/
 
 /** What making a folder ready did: started git, made its first commit, or nothing, it had one; and on which branch. */
 export interface Prepared {
@@ -85,7 +95,11 @@ const commitWhatIsThere = (path: string, most: number) =>
           ),
       ),
     )
-    const files = yield* staged(path)
+    const all = yield* staged(path)
+    // What holds secrets never goes in by itself: taken out of what's staged, each by its literal path.
+    const secrets = all.filter((file) => SECRET.test(file.path)).map((file) => `:(literal)${file.path}`)
+    if (secrets.length > 0) yield* git(path, 'rm', '--cached', '--quiet', '--', ...secrets)
+    const files = all.filter((file) => !SECRET.test(file.path))
     // A folder with a .git of its own, staged as an empty link: its files would be in no commit.
     const inside = files.filter((file) => file.mode === '160000').map((file) => file.path)
     if (inside.length > 0) return yield* new FolderRefused({ reason: 'repositories_inside', path, names: inside })
@@ -106,9 +120,13 @@ export const prepareFolder = (opened: string, most = MOST_FILES): Effect.Effect<
       try: () => readdirSync(path),
       catch: () => new FolderRefused({ reason: 'unreadable', path }),
     })
+    // Not a repository, as git says; any other failure is said as it is, never taken for none.
     const root = yield* topLevel(path).pipe(
       Effect.map(real),
-      Effect.orElseSucceed(() => null),
+      Effect.catchIf(
+        (failed) => /not a git repository/i.test(failed.stderr),
+        () => Effect.succeed(null),
+      ),
     )
     if (root !== null) {
       const branch = (yield* currentBranch(root)) ?? 'main'
@@ -119,8 +137,11 @@ export const prepareFolder = (opened: string, most = MOST_FILES): Effect.Effect<
       return { did: 'committed', path: root, branch, files }
     }
     if (tooWide(path)) return yield* new FolderRefused({ reason: 'too_wide', path })
+    // A .git git can't read is someone's repository, damaged: refused, and never started over or taken away.
+    if (listed.includes('.git')) return yield* new FolderRefused({ reason: 'broken_repository', path })
     const ignore = join(path, '.gitignore')
     const ignoring = !listed.includes('.gitignore')
+    // Only what this made goes again: the .git, not there before, and the .gitignore where it wrote one.
     const undo = Effect.gen(function* () {
       yield* cleanUp(join(path, '.git'), 'where git couldn’t be started')
       if (ignoring) yield* cleanUp(ignore, 'where git couldn’t be started')
@@ -192,8 +213,11 @@ export const cloneRepository = (input: {
     if (!free(path)) return yield* new FolderRefused({ reason: 'taken', path })
     // git clones into an empty folder as well as making one; what it left where it failed goes, the empty folder staying.
     const there = existsSync(path)
+    // What is in it is read as it is taken away, so what the clone had put there by then goes too.
     const undo = there
-      ? Effect.forEach(readdirSafe(path), (entry) => cleanUp(join(path, entry), 'where a clone failed'), { discard: true })
+      ? Effect.suspend(() =>
+          Effect.forEach(readdirSafe(path), (entry) => cleanUp(join(path, entry), 'where a clone failed'), { discard: true }),
+        )
       : cleanUp(path, 'where a clone failed')
     yield* cloneInto(parent, input.folder, input.target).pipe(
       Effect.mapError((failed) => {

@@ -269,6 +269,8 @@ export const words = (
             const count = fieldOf(error, 'count')
             return `${folder} has ${typeof count === 'number' ? count.toLocaleString('en') : 'too many'} files, too many to start a repository with. Choose the folder its code is in.`
           }
+          case 'broken_repository':
+            return `${folder} has a .git that git can’t read. Mend it, or choose another folder.`
           case 'repositories_inside': {
             const names = fieldOf(error, 'names')
             const listed = Array.isArray(names) ? names.filter((one): one is string => typeof one === 'string') : []

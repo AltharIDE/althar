@@ -1,11 +1,12 @@
 import { execFileSync } from 'node:child_process'
+import { type AddressInfo, createServer, type Socket } from 'node:net'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
 import { afterEach, vi } from 'vitest'
 
 import { CloneRefused, FolderRefused, PublishRefused } from '../src/errors'
@@ -86,13 +87,43 @@ describe('a folder that isn’t a repository', () => {
     }),
   )
 
-  it.effect('keeps a .gitignore of its own, as it is', () =>
+  it.effect('keeps a .gitignore of its own, as it is, and what holds secrets out of the commit all the same', () =>
     Effect.gen(function* () {
       as('Dana')
-      const at = folderWith({ '.gitignore': 'build/\n', 'build/out.js': '', 'app.py': '', '.env': 'kept, as its own ignore says nothing' })
-      yield* prepareFolder(at)
+      const at = folderWith({
+        '.gitignore': 'build/\n',
+        'build/out.js': '',
+        'app.py': '',
+        '.env': 'SECRET=1',
+        'config/.env.production': 'SECRET=2',
+        'certs/server.pem': '',
+        '.env.example': 'SECRET=',
+      })
+      const prepared = yield* prepareFolder(at)
+      assert.deepInclude(prepared, { did: 'started', files: 3 })
       assert.strictEqual(readFileSync(join(at, '.gitignore'), 'utf8'), 'build/\n')
-      assert.deepStrictEqual(tracked(at), ['.env', '.gitignore', 'app.py'])
+      assert.deepStrictEqual(tracked(at), ['.env.example', '.gitignore', 'app.py'])
+      // Still in the folder, untracked, as they were.
+      assert.strictEqual(readFileSync(join(at, '.env'), 'utf8'), 'SECRET=1')
+      assert.match(git(at, 'status', '--porcelain'), /\?\? \.env\n/)
+    }),
+  )
+
+  it.effect('with a .git git can’t read is refused, and the .git and its history are left as they were', () =>
+    Effect.gen(function* () {
+      as('Dana')
+      const at = folderWith({ 'app.py': '' })
+      git(at, 'init', '--quiet', '--initial-branch=main')
+      git(at, 'add', '--all')
+      git(at, 'commit', '--quiet', '-m', 'Theirs')
+      const objects = readdirSync(join(at, '.git', 'objects')).toSorted()
+      writeFileSync(join(at, '.git', 'HEAD'), 'garbage\n')
+      const refused = yield* Effect.flip(prepareFolder(at))
+      assert.deepInclude(refused, { reason: 'broken_repository' })
+      assert.match(words(refused, (id) => id).message, /has a \.git that git can’t read\. Mend it, or choose another folder\./)
+      assert.strictEqual(readFileSync(join(at, '.git', 'HEAD'), 'utf8'), 'garbage\n')
+      assert.deepStrictEqual(readdirSync(join(at, '.git', 'objects')).toSorted(), objects)
+      assert.isFalse(existsSync(join(at, '.gitignore')))
     }),
   )
 
@@ -193,6 +224,16 @@ describe('a repository with no commit yet', () => {
     }),
   )
 
+  it.effect('keeps what holds secrets out of its first commit, its own ignore saying nothing of them', () =>
+    Effect.gen(function* () {
+      as('Dana')
+      const at = folderWith({ 'index.html': '', '.env': 'SECRET=1', 'deploy/id_ed25519': 'key', 'deploy/id_ed25519.pub': 'public' })
+      git(at, 'init', '--quiet', '--initial-branch=trunk')
+      assert.deepInclude(yield* prepareFolder(at), { did: 'committed', files: 2 })
+      assert.deepStrictEqual(tracked(at), ['deploy/id_ed25519.pub', 'index.html'])
+    }),
+  )
+
   it.effect('that has a commit, or a folder inside one, is left as it is', () =>
     Effect.gen(function* () {
       as('Dana')
@@ -257,6 +298,32 @@ describe('a clone', () => {
       mkdirSync(join(parent, 'gone'))
       yield* Effect.flip(cloneRepository(gone))
       assert.deepStrictEqual(readdirSync(join(parent, 'gone')), [])
+    }),
+  )
+
+  it.effect('stopped after it wrote something takes that away, and leaves an empty folder that was there as it was', () =>
+    Effect.gen(function* () {
+      // A host that takes the connection and never answers: git has made its .git by then, and waits.
+      const sockets: Array<Socket> = []
+      const server = createServer((socket) => void sockets.push(socket))
+      yield* Effect.promise(() => new Promise<void>((done) => server.listen(0, '127.0.0.1', done)))
+      const { port } = server.address() as AddressInfo
+      const parent = temp()
+      mkdirSync(join(parent, 'held'))
+      const fiber = yield* Effect.forkChild(
+        cloneRepository({
+          parent,
+          remote: 'balazs/held',
+          host: 'GitHub',
+          folder: 'held',
+          target: { url: `http://127.0.0.1:${port}/held.git`, header: null },
+        }),
+      )
+      yield* Effect.promise(() => vi.waitFor(() => assert.include(readdirSync(join(parent, 'held')), '.git'), { timeout: 10_000 }))
+      yield* Fiber.interrupt(fiber)
+      for (const socket of sockets) socket.destroy()
+      server.close()
+      assert.deepStrictEqual(readdirSync(join(parent, 'held')), [])
     }),
   )
 
@@ -327,6 +394,21 @@ describe('a repository put on a host', () => {
       assert.strictEqual(git(root, 'rev-parse', '--abbrev-ref', 'main@{upstream}'), 'origin/main')
       // Nothing to push: the person's own git agrees with the host.
       assert.match(git(root, 'status', '--branch', '--porcelain'), /^## main\.\.\.origin\/main$/m)
+    }),
+  )
+
+  it.effect('as a folder made ready: what holds secrets never reaches it, its own ignore or none', () =>
+    Effect.gen(function* () {
+      for (const files of [
+        { '.gitignore': 'build/\n', 'app.py': '', '.env': 'SECRET=1' },
+        { 'app.py': '', '.env.local': 'SECRET=1' },
+      ]) {
+        const { bare, input } = setUp()
+        const root = folderWith(files)
+        yield* prepareFolder(root)
+        yield* publishRepository({ ...input, root })
+        assert.deepStrictEqual(git(bare, 'ls-tree', '-r', '--name-only', 'main').split('\n').toSorted(), ['.gitignore', 'app.py'])
+      }
     }),
   )
 
