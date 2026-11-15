@@ -281,7 +281,8 @@ function useRail(main: RefObject<HTMLElement | null>) {
   }, [main])
 }
 
-export function DesktopBody() {
+/** `first` and `last`: what stands before the first station and before the last window (the gallery prototype's places). */
+export function DesktopBody({ first, last }: { first?: ReactNode; last?: ReactNode } = {}) {
   const main = useRef<HTMLElement>(null)
   const lit = useRef<HTMLDivElement>(null)
   const grain = useRef<HTMLDivElement>(null)
@@ -302,6 +303,7 @@ export function DesktopBody() {
         <div ref={grain} className={c.wallGrain} />
       </div>
 
+      {first}
       <section id="independent" className={cx(c.station, c.first)} aria-labelledby="independent-h" data-station="">
         <Stamp id="independent" />
         <Window seed={7} className={c.opening}>
@@ -344,6 +346,7 @@ export function DesktopBody() {
         </div>
       </Station>
 
+      {last}
       {/* The last window: the planet's edge lower and flatter, the dawn coming up along it, and the download. */}
       <section id="end" className={c.endStation} aria-label="Download Althar">
         <Window seed={11} className={c.closing}>

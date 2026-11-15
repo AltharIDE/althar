@@ -27,7 +27,13 @@ const PAGES: Record<string, ComponentType> = {
   /** The earlier, enterprise-facing page: kept for the company version, linked from nowhere. */
   '/enterprise': EnterpriseHome,
   /** The link previews, drawn for scripts/og.ts to screenshot: in development only, and not in the build. */
-  ...(import.meta.env.DEV ? { '/og': lazy(() => import('./og/Og').then((m) => ({ default: m.Og }))) } : {}),
+  ...(import.meta.env.DEV
+    ? {
+        '/og': lazy(() => import('./og/Og').then((m) => ({ default: m.Og }))),
+        /** Prototype: a gallery of the app on the homepage, a few directions (home/gallery). Delete once one is picked. */
+        '/gallery': lazy(() => import('./home/gallery/Prototype').then((m) => ({ default: m.Prototype }))),
+      }
+    : {}),
 }
 
 /** The developer page at the root, and the other pages by path. Any other path is the page that isn't there. */

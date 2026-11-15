@@ -1,0 +1,258 @@
+/* Prototype: the gallery's directions, on the cabin's wall (DesktopBody.module.css draws the station, its stamp and head, and lends its inks). Delete once one is picked. */
+
+/* ---- the station: 00 above the first station, or 07 under the last ---- */
+.station { scroll-margin-top: 88px; }
+.station[data-place='top'] { margin-top: 0; margin-bottom: var(--between); }
+/* Under the last: the Notch's rail runs on down to it, and its own fades before the last window. */
+:global(#edge):has(+ .station)::before { -webkit-mask: none; mask: none; }
+.station[data-place='end']::before { -webkit-mask: linear-gradient(#000 60%, transparent); mask: linear-gradient(#000 60%, transparent); }
+
+/* A screen in the wall: one hairline, its fall of shadow, and its light on the wall round it. */
+.stage, .reel {
+  position: relative;
+  overflow: hidden;
+  margin-top: 72px;
+  border-radius: 18px;
+  background: #0b0a08;
+  box-shadow: 0 0 0 1px var(--frame), 0 50px 90px -50px rgba(0, 0, 0, 0.95);
+}
+.tabs, .film, .wall, .stripBox { position: relative; }
+.tabs::before, .film::before {
+  content: '';
+  position: absolute;
+  inset: -18% -14%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(60, 76, 255, 0.11), rgba(60, 76, 255, 0.035) 55%, transparent);
+}
+
+/* ---- A · Tabs: the screens stacked in one frame, the one on fading in over the last ---- */
+.stage { aspect-ratio: 3328 / 2340; }
+.layer { position: absolute; inset: 0; opacity: 0; transition: opacity 520ms var(--ease-out); }
+.layer[data-on] { opacity: 1; }
+.layer img { width: 100%; height: 100%; object-fit: cover; }
+
+/* The rail of stops under it: each named, its line filling as it plays; then Play or Pause. */
+.railRow { display: flex; align-items: flex-start; gap: 18px; margin-top: 24px; }
+.rail { flex: 1; min-width: 0; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+.rail::-webkit-scrollbar { display: none; }
+.stop {
+  flex: 1 1 0;
+  min-width: 92px;
+  display: grid;
+  gap: 12px;
+  padding: 0 0 4px;
+  border: 0;
+  background: none;
+  font: 500 14px/1.25 var(--font);
+  letter-spacing: -0.01em;
+  text-align: left;
+  color: var(--ink-3);
+  cursor: pointer;
+  transition: color var(--fast) ease;
+}
+.stop:hover { color: var(--ink-2); }
+.stop[data-on] { color: #fff; }
+.film .stop { min-width: 72px; }
+.track { position: relative; height: 2px; overflow: hidden; border-radius: 1px; background: var(--hair-2); }
+.stop[data-played] .track { background: rgba(180, 188, 255, 0.42); }
+.fill { position: absolute; inset: 0; transform-origin: left; background: var(--lit); }
+.fill[data-filling] { animation: fill linear both; }
+@keyframes fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.stopName { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.toggle {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-top: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 244, 232, 0.05);
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color var(--fast) ease, background var(--fast) ease;
+}
+.toggle:hover { background: rgba(255, 244, 232, 0.1); color: #fff; }
+
+/* The one on, in a line under the rail; its height kept, so nothing under it moves. */
+.caption { min-height: 1.55em; margin-top: 14px; font-size: 16px; line-height: 1.55; color: rgba(255, 248, 240, 0.64); text-wrap: pretty; }
+.caption b { font-weight: 600; color: #fff; }
+
+/* ---- C · Film: the chapters stacked in one frame of one height, the frame's ground the changelog's; each drawing stands in it as it fits ---- */
+.reel {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  aspect-ratio: 2 / 1;
+  background:
+    radial-gradient(ellipse 60% 55% at 50% 100%, rgba(43, 59, 255, 0.24), rgba(108, 64, 240, 0.08) 55%, transparent 80%),
+    radial-gradient(ellipse 90% 80% at 50% 20%, #1a1511, #120e0b 55%, #0c0907);
+}
+.chapter {
+  grid-area: 1 / 1;
+  display: grid;
+  min-height: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 480ms var(--ease-out), visibility 0s linear 480ms;
+}
+.chapter[data-on] { opacity: 1; visibility: visible; transition: opacity 480ms var(--ease-out), visibility 0s; }
+.chapter > figure { display: flex; flex-direction: column; min-height: 0; border-radius: 0; background: none; box-shadow: none; }
+.chapter[data-align='end'] > figure { justify-content: flex-end; }
+.chapter[data-align='start'] > figure { justify-content: flex-start; }
+.chapter[data-align='center'] > figure { justify-content: center; }
+.chapter[style] > figure { width: calc(var(--fit) * 100%); justify-self: center; }
+.filmCaption { min-height: calc(1.55em * 2); max-width: 46em; }
+
+/* ---- B · Strip: a row of screens running off the page's right edge, scrolled sideways ---- */
+.stripBox { --card-h: clamp(240px, 33vw, 460px); margin: 72px calc(-1 * var(--r)) 0 calc(-1 * var(--l)); }
+.strip {
+  display: flex;
+  gap: 28px;
+  overflow-x: auto;
+  padding: 0 var(--r) 6px var(--l);
+  scroll-padding-inline: var(--l) var(--r);
+  scroll-snap-type: x proximity;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.strip::-webkit-scrollbar { display: none; }
+.card { flex: none; width: min-content; margin: 0; scroll-snap-align: start; }
+.cardPicture { display: block; width: auto; max-width: none; height: var(--card-h); }
+.stripPrev, .stripNext { position: absolute; top: calc(var(--card-h) / 2 - 22px); }
+.stripPrev { left: 28px; }
+.stripNext { right: 28px; }
+.stripPrev[data-off], .stripNext[data-off] { opacity: 0; pointer-events: none; }
+
+/* A screen to open: its hairline, lit when pointed at. */
+.open {
+  display: block;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: #0b0a08;
+  box-shadow: 0 0 0 1px var(--frame), 0 40px 80px -50px rgba(0, 0, 0, 0.95);
+  cursor: zoom-in;
+  transition: box-shadow var(--fast) ease;
+}
+.open:hover { box-shadow: 0 0 0 1px rgba(180, 188, 255, 0.45), 0 0 48px -12px rgba(60, 76, 255, 0.55), 0 40px 80px -50px rgba(0, 0, 0, 0.95); }
+.cardCaption { margin-top: 14px; font-size: 14.5px; line-height: 1.45; color: rgba(255, 248, 240, 0.6); text-wrap: pretty; }
+.cardCaption b { display: block; margin-bottom: 3px; font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; color: #fff; }
+
+/* ---- D · Wall: every screen at its own shape, three across ---- */
+.wall { margin-top: 72px; columns: 3; column-gap: 28px; }
+.tile { margin: 0 0 40px; break-inside: avoid; }
+.tile .open { width: 100%; }
+.tilePicture { display: block; width: 100%; height: auto; }
+
+/* ---- the screen opened whole: grown from the picture it was opened from, with a fade ---- */
+.round {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(28, 26, 23, 0.74);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: inset 0 0 0 1px rgba(255, 244, 232, 0.16), 0 10px 30px -10px rgba(0, 0, 0, 0.8);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity var(--fast) ease, background var(--fast) ease;
+}
+.round:hover { background: rgba(48, 45, 40, 0.9); }
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 64px 96px 40px;
+  background: rgba(7, 6, 5, 0.9);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  outline: none;
+  transition: opacity var(--exit) var(--ease-out);
+}
+.lightbox[data-open] { opacity: 1; transition-duration: var(--enter); }
+.lbFigure { display: grid; justify-items: center; gap: 18px; width: 100%; margin: 0; transform: scale(var(--scale-pop)); transition: transform var(--exit) var(--ease-out); }
+.lightbox[data-open] .lbFigure { transform: none; transition-duration: var(--enter); }
+.lbPicture { display: block; width: auto; height: auto; max-width: min(100%, 1600px); max-height: calc(100svh - 180px); border-radius: 14px; box-shadow: 0 0 0 1px rgba(255, 244, 232, 0.13), 0 60px 120px -40px #000; }
+.lbCaption { max-width: 44em; font-size: 15px; line-height: 1.5; text-align: center; color: rgba(255, 248, 240, 0.64); }
+.lbCaption b { display: block; margin-bottom: 2px; font-weight: 600; color: #fff; }
+.lbPrev, .lbNext { position: absolute; top: 50%; translate: 0 -50%; }
+.lbPrev { left: 28px; }
+.lbNext { right: 28px; }
+.lbClose { position: absolute; top: 20px; right: 28px; }
+@media (prefers-reduced-motion: reduce) {
+  .lbFigure, .lightbox[data-open] .lbFigure { transform: none; }
+}
+
+/* ---- narrower ---- */
+@media (max-width: 1099px) {
+  .stage, .reel, .wall, .stripBox { margin-top: 56px; }
+  .wall { columns: 2; }
+}
+@media (max-width: 700px) {
+  .stage, .reel, .wall, .stripBox { margin-top: 40px; }
+  .stage, .reel { border-radius: 12px; }
+  .reel { grid-template-rows: auto; aspect-ratio: auto; }
+  .chapter > figure, .chapter[style] > figure { width: auto; justify-content: safe flex-end; }
+  .stripBox { --card-h: 210px; }
+  .strip { gap: 18px; }
+  .stripPrev, .stripNext { display: none; }
+  .wall { columns: 1; }
+  .tile { margin-bottom: 32px; }
+  .stop { min-width: 84px; font-size: 13px; }
+  .caption { font-size: 15px; }
+  .lightbox { padding: 16px 12px 84px; }
+  .lbPicture { max-height: calc(100svh - 200px); border-radius: 10px; }
+  .lbPrev, .lbNext { top: auto; bottom: 20px; translate: none; }
+  .lbPrev { left: calc(50% - 56px); }
+  .lbNext { right: calc(50% - 56px); }
+  .lbClose { top: auto; bottom: 20px; right: 16px; }
+}
+
+/* ---- the prototype's bar along the foot: the directions, where it stands, and go to it ---- */
+.bar {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+  font: 400 12px/1.4 var(--font);
+  color: var(--t-2);
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+.bar button {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  color: var(--t-2);
+  cursor: pointer;
+}
+.bar button:hover { background: var(--hover-paper); }
+.bar button:disabled { opacity: 0.4; cursor: default; background: none; }
+.bar button[aria-pressed='true'] { background: var(--n-4); color: var(--t-1); }
+.bar kbd { font-family: var(--mono); font-size: 11px; color: var(--t-4); }
+.sep { flex: none; width: 1px; height: 16px; margin: 0 6px; background: var(--line-2); }
+.idea { overflow: hidden; text-overflow: ellipsis; color: var(--t-3); }
+.barSpace { height: 40px; }
