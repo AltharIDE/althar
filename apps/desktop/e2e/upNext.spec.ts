@@ -58,6 +58,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     // Its card is the last in the conversation, once it is there: the waiting tasks' cards have a Hold of their own. Exactly: the
     // plan up next on the board beside is named for it.
     await expect(shown(page, 'Hold this plan', { exact: true }).last()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Start now', exact: true }).last()).toBeVisible()
     await page.getByRole('button', { name: 'Hold', exact: true }).last().click()
     await expect(page.getByRole('region', { name: 'Conversation' }).getByText('Held', { exact: true })).toBeVisible()
     await planTask(page, 'Plan the release')
