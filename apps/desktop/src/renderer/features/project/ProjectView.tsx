@@ -413,10 +413,15 @@ export function ProjectView({
   })
   const opener = useOpener(about, showTalkForPage)
   const { where: pageWhere } = usePage(about, useServices().host.pages)
+  const wasBeside = useRef(false)
   useEffect(() => {
+    // Only a page that was beside the conversation and went is a close; a view that opens with none is not.
+    const closed = wasBeside.current && pageWhere !== 'beside'
+    wasBeside.current = pageWhere === 'beside'
+    if (!closed) return
     // The page went from beside the conversation: the right side returns to what was there before it opened.
     // A page its window's storage kept, main yet to say it still has it, isn't closed.
-    if (pageWhere === 'beside' || (about !== null && pages.waking(about))) return
+    if (about !== null && pages.waking(about)) return
     let back: Room | null = null
     try {
       const kept = window.localStorage.getItem(beforeKey)

@@ -578,12 +578,13 @@ describe('a page beside the coordinator’s conversation', () => {
   it('brings the board back after the window reloaded with the page open', async () => {
     forgetPages()
     window.localStorage.setItem('althar.before.p1', 'both')
-    const { client } = fakeClient()
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('Ready.')] })) })
     render(
       <ServicesProvider value={servicesFor(client, fakeHost({ pages: fakePagesHost() }))}>
         <Project room={Room.Talk} />
       </ServicesProvider>,
     )
+    await screen.findByText('Ready.')
     act(() => pages.place('p1', 'beside'))
     expect(screen.queryByRole('separator', { name: 'Width of the conversation' })).toBeNull()
     act(() => pages.hide('p1'))
