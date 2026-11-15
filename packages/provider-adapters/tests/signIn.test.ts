@@ -247,7 +247,7 @@ describe('an agent’s homes', () => {
     assert.deepStrictEqual(usual({}), [
       ['CLAUDE_CONFIG_DIR', join('/Users/me', '.claude')],
       ['CODEX_HOME', join('/Users/me', '.codex')],
-      ['XDG_DATA_HOME', join('/Users/me', '.local', 'share', 'althar', 'copilot')],
+      ['ALTHAR_COPILOT_HOME', join('/Users/me', '.local', 'share', 'althar', 'copilot')],
       ['XDG_DATA_HOME', join('/Users/me', '.local', 'share')],
       ['COPILOT_HOME', join('/Users/me', '.copilot')],
       ['JUNIE_HOME', join('/Users/me', '.junie')],
