@@ -11,6 +11,7 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts, SignOutFailed } from '../src/Accounts'
+import { Busy } from '../src/Busy'
 import { type AgentEntry, Agents, RuntimeConfig, type RuntimeOptions } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Limits } from '../src/Limits'
@@ -645,8 +646,10 @@ describe('accounts', () => {
       const launched = Object.entries(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env ?? {}).filter(
         ([key]) => !/^(GIT_CONFIG_|ALTHAR_(GUARD_PASS|GUARD_REPOSITORIES|GUARD_REMOTES|TASK_BRANCH|DEFAULT_BRANCHES)$)/.test(key),
       )
+      const { count, machine } = yield* (yield* Busy).atOnce
       assert.deepStrictEqual(Object.fromEntries(launched), {
         FAKE_HOME: workFolder,
+        VITEST_MAX_WORKERS: String(Math.max(1, Math.floor(machine.cores / count))),
         ALTHAR_WORK: `task:${ran.taskId}`,
       })
       // The usual account is out until its reset; the agent isn't, while work can run.
