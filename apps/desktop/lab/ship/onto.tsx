@@ -76,6 +76,7 @@ interface State {
 /** Ways the friendly modal can go: read only, or with the route set right in it. */
 export const GUIDES = [
   { key: 'path', label: 'Modal: path to read' },
+  { key: 'pathToggle', label: 'Modal: path, Change stops toggle' },
   { key: 'switches', label: 'Modal: a switch a stop' },
   { key: 'tap', label: 'Modal: tap the route' },
   { key: 'pick', label: 'Modal: pick a route' },
@@ -128,7 +129,7 @@ const start: State = {
   intro: (INTROS.find((one) => one.key === new URLSearchParams(location.search).get('intro'))?.key ?? 'modal') as Intro,
   modal: new URLSearchParams(location.search).get('modal') === '1',
   hidden: new URLSearchParams(location.search).get('hidden') === '1',
-  guide: (GUIDES.find((one) => one.key === new URLSearchParams(location.search).get('guide'))?.key ?? 'switches') as Guide,
+  guide: (GUIDES.find((one) => one.key === new URLSearchParams(location.search).get('guide'))?.key ?? 'pathToggle') as Guide,
   page: Number(new URLSearchParams(location.search).get('page') ?? 0),
   pressed: new URLSearchParams(location.search).get('pressed') === '1',
 }

@@ -699,3 +699,15 @@ button.acrossStop:focus-visible {
 .shortMore li[data-skipped] {
   color: var(--t-4);
 }
+/* the path with a toggle: Change stops, over the column its switches come into */
+.changeStops {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: -2px 0 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--t-2);
+}

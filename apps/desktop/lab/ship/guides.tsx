@@ -117,19 +117,44 @@ function Across({ route, n, editable }: { route: Route; n: number; editable: boo
   )
 }
 
-/** A switch a stop: the path you read, each stop turned on or off where it stands. */
-function Switches({ route, n }: { route: Route; n: number }) {
+/**
+ * A switch a stop: the path you read, each stop turned on or off where it stands. With `toggle`, the path reads as it
+ * is, Got it at its end, until Change stops brings the switches in and turns Got it into the press the route makes.
+ */
+function Switches({ route, n, toggle = false }: { route: Route; n: number; toggle?: boolean }) {
   const now = useOnto()
   const stops = stopsOf(route)
+  const [changing, setChanging] = useState(!toggle || new URLSearchParams(location.search).get('changing') === '1')
   return (
     <Dialog
       title="How Ship works"
-      description="Ship takes your work toward main, one stop at a time. Turn any stop off for this Ship."
+      description={
+        toggle
+          ? 'Ship takes your work toward main, one stop at a time, and stops wherever you’re needed.'
+          : 'Ship takes your work toward main, one stop at a time. Turn any stop off for this Ship.'
+      }
       width={500}
       tall
       onClose={close}
-      actions={editActions(route, n)}
+      actions={
+        changing ? (
+          editActions(route, n)
+        ) : (
+          <>
+            {hide}
+            <Button variant="signal" onClick={close}>
+              Got it
+            </Button>
+          </>
+        )
+      }
     >
+      {toggle && (
+        <span className={s.changeStops}>
+          <span aria-hidden="true">Change stops</span>
+          <Switch checked={changing} onChange={setChanging} label="Change stops" />
+        </span>
+      )}
       <ol className={s.guide}>
         {BUTTON_STOPS.map((stop) => {
           const on = stops.includes(stop)
@@ -139,10 +164,15 @@ function Switches({ route, n }: { route: Route; n: number }) {
                 <Icon name={ICON_OF[stop]} size={14} />
               </span>
               <span className={s.guideText}>
-                <b>{stop}</b>
+                <b>
+                  {stop}
+                  {!on && !changing && <span className={s.guideOff}>Off</span>}
+                </b>
                 <span>{guideOf(stop, route, n, now.shared)}</span>
               </span>
-              {stop === 'Push' ? (
+              {!changing ? (
+                <span />
+              ) : stop === 'Push' ? (
                 <span className={s.always}>Always</span>
               ) : (
                 <Switch checked={on} onChange={(next) => set({ chosen: toggled(route, stop, next) })} label={stop} />
@@ -151,7 +181,7 @@ function Switches({ route, n }: { route: Route; n: number }) {
           )
         })}
       </ol>
-      <Whose route={route} />
+      {changing && <Whose route={route} />}
     </Dialog>
   )
 }
@@ -337,6 +367,8 @@ export function GuideOf({ route, n }: { route: Route; n: number }): ReactNode {
   switch (now.guide) {
     case 'switches':
       return <Switches route={route} n={n} />
+    case 'pathToggle':
+      return <Switches route={route} n={n} toggle />
     case 'tap':
       return <Tap route={route} n={n} />
     case 'pick':

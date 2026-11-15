@@ -226,6 +226,16 @@ if (mode === 'cards') {
     process.stdout.write(`${file}\n`)
   }
   const shots: Array<[string, string, (() => Promise<void>) | null]> = [
+    ['pathToggle', '', null],
+    ['pathToggle', 'changing', () => page.click('[role="dialog"] [role="switch"][aria-label="Change stops"]')],
+    [
+      'pathToggle',
+      'changed',
+      async () => {
+        await page.click('[role="dialog"] [role="switch"][aria-label="Change stops"]')
+        await page.click('[role="dialog"] [role="switch"][aria-label="Review"]')
+      },
+    ],
     ['switches', '', null],
     [
       'switches',
