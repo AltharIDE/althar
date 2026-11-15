@@ -556,7 +556,7 @@ const nudged = (event: AttentionEvent) => {
   }
   if (event._tag !== 'Nudge' || typeof event.title !== 'string' || typeof event.body !== 'string' || typeof event.threadId !== 'string')
     return
-  if (!tells(event.kind, preferences) || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
+  if (!tells(event.kind, preferences) || [...localWindows()].some((window) => window.isFocused()) || !Notification.isSupported()) return
   const { threadId } = event
   const notification = new Notification({ title: event.title, body: event.body, ...soundOf(preferences) })
   notification.on('click', () => {
@@ -701,7 +701,7 @@ const startRuntime = () => {
         logs.info('Profile is open in another Althar or the command line', { reason: storeFailure.reason })
       else if (storeFailure !== undefined)
         logs.error('Update couldn’t move the store', { stopped: storeFailure.stopped, reason: storeFailure.reason })
-      for (const window of BrowserWindow.getAllWindows()) connect(window)
+      for (const window of BrowserWindow.getAllWindows()) if (homes.state(window.webContents.id).current.kind === 'local') connect(window)
       return
     }
     if (message.type !== 'folder-allowed' || message.requestId === undefined) return

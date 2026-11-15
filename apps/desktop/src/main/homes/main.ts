@@ -22,6 +22,7 @@ export const startHomeConnections = ({
   readonly log: (message: string) => void
 }) => {
   const connections = new Map<number, ReturnType<typeof connectHomeProcess>>()
+  const children = new Map<Electron.UtilityProcess, Promise<void>>()
   let processes = 0
   const fork = () => {
     if (processes >= 24) throw new Error('Several home connections are closing. Try again shortly.')
@@ -31,9 +32,16 @@ export const startHomeConnections = ({
       env: { ...sshEnvironment(process.env), ...(process.env.FLATPAK_ID === undefined ? {} : { FLATPAK_ID: process.env.FLATPAK_ID }) },
     })
     processes++
-    child.once('exit', () => {
-      processes--
-    })
+    children.set(
+      child,
+      new Promise((resolve) => {
+        child.once('exit', () => {
+          processes--
+          children.delete(child)
+          resolve()
+        })
+      }),
+    )
     // The worker exposes only bounded public errors. Never copy its raw output or SSH diagnostics into app logs.
     child.stdout?.resume()
     child.stderr?.resume()
@@ -116,8 +124,8 @@ export const startHomeConnections = ({
     register: (window: BrowserWindow, home: WindowHome) => {
       const id = window.webContents.id
       controller.register(id, home)
-      window.webContents.on('did-start-navigation', (_event, _url, _inPlace, mainFrame) => {
-        if (mainFrame) {
+      window.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
+        if (mainFrame && !inPlace) {
           controller.navigating(id)
           void stop(id)
         }
@@ -132,6 +140,19 @@ export const startHomeConnections = ({
       }
     },
     connect,
-    stopAll: () => Promise.all([...connections.keys()].map(stop)),
+    stopAll: async () => {
+      controller.stopping()
+      const stopped = Promise.all([...connections.keys()].map(stop))
+      for (const child of children.keys()) {
+        try {
+          child.postMessage({ type: 'disconnect' })
+        } catch {
+          child.kill()
+        }
+      }
+      await Effect.runPromise(Effect.promise(() => Promise.all(children.values())).pipe(Effect.timeoutOption('12 seconds')))
+      for (const child of children.keys()) child.kill()
+      await stopped
+    },
   }
 }

@@ -152,6 +152,32 @@ describe('home confirmations', () => {
     await at.controller.open(1, 'local')
     expect(at.opened.at(-1)).toEqual({ kind: 'local' })
   })
+  it('cancels active checks and refuses new work during shutdown without changing a window’s home', async () => {
+    let signal: AbortSignal | undefined
+    let finish: (value: typeof status) => void = () => {}
+    const controller = homeController({
+      store: homeStore(temporary()),
+      inspect: (_target, stopping) => {
+        signal = stopping
+        return new Promise((done) => {
+          finish = done
+        })
+      },
+      open: () => {
+        throw new Error('No window may open')
+      },
+      changed: () => {},
+    })
+    controller.register(1, { kind: 'ssh', home: remote() })
+    const checking = controller.inspect(1, { target: 'fixture' })
+    controller.stopping()
+    expect(signal?.aborted).toBe(true)
+    finish(status)
+    await expect(checking).rejects.toThrow('expired')
+    await expect(controller.inspect(1, { target: 'fixture' })).rejects.toThrow('closing')
+    await expect(controller.open(1, 'local')).rejects.toThrow('closing')
+    expect(controller.state(1).current.kind).toBe('ssh')
+  })
   it('refuses incompatible hosts before saving and discards late checks after their window closes', async () => {
     const incompatible = fixture(async () => ({ ...status, apiVersion: 2 }))
     await expect(incompatible.controller.inspect(1, { target: 'fixture' })).rejects.toThrow('Update them')

@@ -40,6 +40,10 @@ const notAvailable = () => new Error('This home check expired or belongs to anot
 
 /** Window-scoped, one-use confirmation. A renderer never chooses a home identity or claims paired authority. */
 export const homeController = ({ store, inspect, open, changed, now = Date.now }: HomeControllerOptions) => {
+  let accepting = true
+  const available = () => {
+    if (!accepting) throw new Error('Althar is closing its home connections.')
+  }
   const windows = new Map<number, WindowState>()
   const checks = new Map<string, Pending>()
   const inspecting = new Map<number, AbortController>()
@@ -56,12 +60,20 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
   }
   return {
     state,
+    stopping: () => {
+      accepting = false
+      for (const stop of activeInspections) stop.abort()
+      inspecting.clear()
+      checks.clear()
+    },
     list: store.list,
     register: (owner: number, home: WindowHome) => {
+      available()
       if (windows.has(owner)) throw new Error('This window already belongs to a home.')
       windows.set(owner, { state: { current: home, connection: home.kind === 'local' ? 'local' : 'connecting' }, generation: 0, page: 0 })
     },
     inspect: async (owner: number, value: unknown): Promise<CheckedHome> => {
+      available()
       if (!windows.has(owner)) throw new Error('This window is no longer open.')
       for (const [id, check] of checks) if (check.expires <= now()) checks.delete(id)
       if (activeInspections.size >= 8) throw new Error('Several hosts are being checked. Try again shortly.')
@@ -84,6 +96,7 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
       }
     },
     connect: async (owner: number, checkId: unknown, name: unknown) => {
+      available()
       const label = homeName(name)
       const pending = typeof checkId === 'string' ? checks.get(checkId) : undefined
       if (pending === undefined || pending.owner !== owner || pending.expires <= now() || !windows.has(owner)) throw notAvailable()
@@ -96,9 +109,10 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
         ssh: pending.target,
       })
       // Saving settings may outlive its window, but cannot open a replacement window after the caller closed.
-      if (windows.get(owner)?.page === page) open({ kind: 'ssh', home })
+      if (accepting && windows.get(owner)?.page === page) open({ kind: 'ssh', home })
     },
     open: async (owner: number, id: unknown) => {
+      available()
       if (!windows.has(owner)) throw new Error('This window is no longer open.')
       const page = windows.get(owner)?.page
       if (id === 'local') {
@@ -107,14 +121,16 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
       }
       const home = (await store.list()).find((one) => one.id === id)
       if (home === undefined) throw new Error('This saved home was forgotten. Check its host to connect again.')
-      if (windows.get(owner)?.page === page) open({ kind: 'ssh', home })
+      if (accepting && windows.get(owner)?.page === page) open({ kind: 'ssh', home })
     },
     forget: async (owner: number, id: unknown) => {
+      available()
       if (!windows.has(owner) || typeof id !== 'string' || !/^remote_[0-9a-f]{32}$/.test(id))
         throw new Error('Choose a saved home to forget.')
       await store.forget(id)
     },
     begin: (owner: number): { readonly home: RemoteHome; readonly generation: number } => {
+      available()
       const previous = windows.get(owner)
       if (previous?.state.current.kind !== 'ssh') throw new Error('This window uses its local runtime.')
       const generation = previous.generation + 1
@@ -123,7 +139,7 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
     },
     connected: (owner: number, generation: number, value: unknown): boolean => {
       const previous = windows.get(owner)
-      if (previous === undefined || previous.generation !== generation || previous.state.current.kind !== 'ssh') return false
+      if (!accepting || previous === undefined || previous.generation !== generation || previous.state.current.kind !== 'ssh') return false
       const identity = Schema.decodeUnknownSync(ClientIdentity)(value)
       if (identity.homeId !== previous.state.current.home.homeId || identity.role !== 'socket')
         throw new Error('The home returned an unexpected identity or authority.')
@@ -135,7 +151,7 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
       if (previous === undefined || previous.generation !== generation || previous.state.current.kind !== 'ssh') return
       update(owner, { current: previous.state.current, connection: 'disconnected', problem }, generation)
     },
-    isCurrent: (owner: number, generation: number) => windows.get(owner)?.generation === generation,
+    isCurrent: (owner: number, generation: number) => accepting && windows.get(owner)?.generation === generation,
     navigating: (owner: number) => {
       cancelCheck(owner)
       const previous = windows.get(owner)

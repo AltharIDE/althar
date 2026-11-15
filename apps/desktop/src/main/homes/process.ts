@@ -47,7 +47,11 @@ export const connectHomeProcess = (
         events.connected(message.identity)
       } catch {
         disconnected('The home returned an unexpected identity or authority.')
-        child.postMessage({ type: 'disconnect' })
+        try {
+          child.postMessage({ type: 'disconnect' })
+        } catch {
+          child.kill()
+        }
       }
     }
     if (message.type === 'disconnected')
@@ -61,7 +65,11 @@ export const connectHomeProcess = (
       if (ended) return
       if (!stopping) {
         stopping = true
-        child.postMessage({ type: 'disconnect' })
+        try {
+          child.postMessage({ type: 'disconnect' })
+        } catch {
+          child.kill()
+        }
       }
       const graceful = yield* Effect.promise(() => closed).pipe(Effect.timeoutOption('12 seconds'))
       if (Option.isNone(graceful) && !ended) child.kill()
@@ -113,5 +121,9 @@ export const inspectHomeProcess = (fork: ForkHomeProcess, target: SshHomeTarget,
           'problem' in message && typeof message.problem === 'string' && message.problem.length <= 1024 ? message.problem : undefined,
         )
     })
-    child.postMessage({ type: 'inspect', target })
+    try {
+      child.postMessage({ type: 'inspect', target })
+    } catch {
+      cancel('The host check could not start.')
+    }
   })

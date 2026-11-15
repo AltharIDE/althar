@@ -4,6 +4,7 @@ import type { AgentStatus, ProjectSummary } from '@althar/contracts'
 import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState, Problem } from '@althar/ui'
 import { Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
+import { showHomes } from '../homes/useHomes'
 import { brandOf, pinnedOf } from '../../shared/agents'
 import { useServices } from '../../data/services'
 import { device } from '../../shared/device'
@@ -172,10 +173,28 @@ export function StartView({
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
+  const { client } = useServices()
   const welcoming = useWelcoming()
   // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong; and the
   // welcome while it is on show, over the project made on its way.
   const first = welcoming || (model.projects !== null && model.projects.length === 0) || (model.projects === null && model.error !== null)
+
+  if (client.connection !== undefined) {
+    if (model.projects === null) return <HomePending />
+    if (model.projects.length === 0)
+      return (
+        <div className={s.window}>
+          <BareBar />
+          <main className={s.remoteEmpty}>
+            <h1>No projects on this home yet</h1>
+            <p>Set up a project on the host, then reconnect. SSH access supports existing projects and task conversations.</p>
+            <p>Approvals require a trusted device. File transfers and local previews are unavailable on this connection.</p>
+            <Button onClick={showHomes}>Homes</Button>
+          </main>
+        </div>
+      )
+    return home()
+  }
 
   if (first) return <First model={model} accounts={accounts} onProject={onProject} />
 

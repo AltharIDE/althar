@@ -1,14 +1,93 @@
-.list, .form { display: flex; flex-direction: column; gap: 16px; }
-.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 12px; border-bottom: 1px solid var(--line); }
-.identity { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
-.identity strong { font-size: 13px; font-weight: 500; }
-.mono { font-family: var(--mono); font-size: 12px; color: var(--t-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.note { color: var(--t-3); font-size: 12px; line-height: 1.5; margin: 0; }
-.actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-.field { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--t-2); }
-.check { display: flex; flex-direction: column; gap: 8px; padding: 16px; background: var(--inset); border-radius: var(--r); }
-.check strong { font-size: 13px; font-weight: 500; }
-.check code { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
-.trigger { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; gap: 8px; }
+.list, .form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
 
-.identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.identity {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.identity strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--t-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note {
+  color: var(--t-3);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--t-2);
+}
+
+.check {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: var(--inset);
+  border-radius: var(--r);
+}
+
+.check strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.check code {
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.trigger {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  gap: 8px;
+}
+
+.identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

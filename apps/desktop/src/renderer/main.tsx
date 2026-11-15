@@ -69,6 +69,15 @@ function FailedOpen({ reason }: { reason: string }) {
 }
 
 function Window() {
+  return (
+    <>
+      <HomeConnections host={window.althar} ready />
+      <WindowContent />
+    </>
+  )
+}
+
+function WindowContent() {
   const [opened, setOpened] = useState<Awaited<typeof opening> | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const [mismatch, setMismatch] = useState<ApiError | null>(null)
@@ -100,12 +109,10 @@ function Window() {
     return (
       <>
         <FailedOpen reason={failed} />
-        <HomeConnections host={window.althar} ready={false} />
       </>
     )
   return (
     <>
-      <HomeConnections host={window.althar} ready={opened !== null} />
       <Launch
         ready={opened !== null}
         quick={openedBefore || opened?.hasProjects === true}

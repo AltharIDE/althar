@@ -56,7 +56,7 @@ export function HomesDialog({ homes, onClose }: { homes: HomesHost; onClose: () 
       onClose={onClose}
       {...(adding ? { onBack: () => setAdding(false) } : {})}
       actions={
-        !adding && (
+        adding ? undefined : (
           <>
             <Button onClick={() => setAdding(true)}>Connect a host…</Button>
             <Button onClick={onClose}>Done</Button>
@@ -174,6 +174,7 @@ function ConnectHome({ homes, onDone }: { homes: HomesHost; onDone: () => void }
       .then((value) => {
         if (live.current && generation.current === at) {
           setChecked(value)
+          setAdvanced(false)
           setPending(false)
         }
       })

@@ -28,3 +28,22 @@
   gap: 8px;
 }
 
+
+.remoteEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  max-width: 480px;
+  margin: auto;
+  padding: 32px;
+  color: var(--t-2);
+}
+.remoteEmpty h1 {
+  font-size: 20px;
+  color: var(--t-1);
+}
+.remoteEmpty p {
+  margin: 0;
+  line-height: 1.5;
+}

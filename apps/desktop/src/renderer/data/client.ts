@@ -120,11 +120,11 @@ import { RpcClient } from 'effect/rpc'
  * Effect inside; what it hands the view models is plain promises and a
  * subscription, so they stay ordinary React hooks.
  *
- * Every command gets an id here. When a command's answer doesn't come back
+ * Every command gets an id here. On a local connection, when its answer doesn't come back
  * (the runtime didn't answer, rather than said no), it is tried once more
  * with the same id, and the runtime answers the retry from the first one's
- * receipt instead of doing it twice. `watch` picks up from the last change it
- * heard when its stream breaks.
+ * receipt instead of doing it twice. Remote commands are sent once and never replayed automatically.
+ * A local `watch` picks up after a broken stream; remote watches use checked home positions.
  */
 
 /** What may change of a project's rules at once: any of it. */
@@ -830,7 +830,7 @@ const RETRY_AFTER = Duration.millis(300)
 const REWATCH_AFTER = Duration.seconds(1)
 
 /** A command, under one id however often it is tried: once more when the runtime didn't answer, never when it said no. */
-const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Promise<A> => {
+const retryingCommand = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Promise<A> => {
   const commandId = newCommandId()
   return settle(
     Effect.catchCause(run(commandId), (cause) => {
@@ -847,12 +847,15 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     Effect.gen(function* () {
       const protocol = yield* Layer.build(clientProtocol(domPort(port)))
       return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
-    }).pipe(Scope.provide(scope)),
+    }).pipe(
+      Scope.provide(scope),
+      Effect.onError(() => Scope.close(scope, Exit.void)),
+    ),
   )
   let connection: ConnectionInfo | undefined
   try {
     if (expected !== undefined) {
-      connection = await settle(rawApi.GetConnectionInfo({}))
+      connection = await settle(rawApi.GetConnectionInfo({}).pipe(Effect.timeout('10 seconds')))
       if (connection.apiVersion !== API_VERSION)
         throw new ApiError({
           reason: 'ApiVersionMismatch',
@@ -874,6 +877,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     await Effect.runPromise(Scope.close(scope, Exit.void))
     throw error
   }
+  const command =
+    expected === undefined ? retryingCommand : <A>(run: (id: string) => Effect.Effect<A, unknown>) => settle(run(newCommandId()))
   const api =
     expected === undefined
       ? rawApi
