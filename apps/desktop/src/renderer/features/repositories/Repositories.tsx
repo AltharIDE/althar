@@ -1,4 +1,6 @@
-import type { ConnectionList, ProjectRepository, RepositoryHost } from '@althar/contracts'
+import { useState } from 'react'
+
+import type { ConnectionList, ProjectRepository, RepositoryHost, Service } from '@althar/contracts'
 import { ChangeTarget, HostReach, type MapHost, type MapRepository, RepositoryRole, Problem } from '@althar/ui'
 import { ProjectRepositories } from '@althar/ui/screens'
 
@@ -6,6 +8,8 @@ import { device } from '../../shared/device'
 import { shortFolder } from '../../shared/folders'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { productBrand } from '../../shared/products'
+import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
+import { serviceOfProduct } from '../connections/ways'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
 import { HEADING } from '../projectSettings/sections'
 import s from './Repositories.module.css'
@@ -115,6 +119,8 @@ export function Repositories({
   /** Connects a host the work goes to, over the page: its walk in, or all of them where it is connected. */
   onConnect: (opening: Opening) => void
 }) {
+  // A repository only on this computer being put on a host: which, and through which connection.
+  const [putting, setPutting] = useState<{ readonly repository: string; readonly connection: string } | null>(null)
   const repositories = model.repositories
   if (repositories === null)
     return model.error === null ? <PartPending label={pendingText.page} /> : <Problem className={s.error}>{model.error}</Problem>
@@ -140,9 +146,56 @@ export function Repositories({
         const product = host?.product ?? null
         onConnect(host === undefined || product === null ? 'all' : openingFor(connections, product, host.instance))
       }}
+      {...(model.projectId === null
+        ? {}
+        : { putOnHost: putOnHostIn(model.projectId, repositories, connections, putting, setPutting, onConnect) })}
       {...(model.error === null ? {} : { error: model.error })}
       headingLevel={HEADING.part}
       mapText={text.map}
     />
   )
+}
+
+/** For each repository only on this computer: the hosts it can be put on, and the form that puts it on the one chosen. */
+const putOnHostIn = (
+  projectId: string,
+  repositories: ReadonlyArray<ProjectRepository>,
+  list: ConnectionList | null,
+  putting: { readonly repository: string; readonly connection: string } | null,
+  setPutting: (next: { readonly repository: string; readonly connection: string } | null) => void,
+  onConnect: (opening: Opening) => void,
+) => {
+  const { ready, hosts } = hostChoices(list)
+  const repository = repositories.find((one) => one.id === putting?.repository && one.host === null)
+  const connection = ready.find((one) => one.id === putting?.connection)
+  return {
+    hosts,
+    onPut: (id: string, host: string) => {
+      // A host not connected yet connects first, over the page; then it's offered as the others are.
+      if (ready.some((one) => one.id === host)) setPutting({ repository: id, connection: host })
+      else onConnect({ service: host as Service })
+    },
+    putting:
+      repository === undefined || connection === undefined
+        ? null
+        : {
+            repository: repository.id,
+            form: (
+              <PutOnHost
+                projectId={projectId}
+                repository={repository.id}
+                name={repository.name}
+                branch={repository.branch ?? 'main'}
+                connection={{
+                  id: connection.id,
+                  name: connection.name,
+                  product: connection.product,
+                  thing: thingOn(serviceOfProduct(connection.product)),
+                }}
+                onDone={() => setPutting(null)}
+                onBack={() => setPutting(null)}
+              />
+            ),
+          },
+  }
 }

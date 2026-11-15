@@ -4,10 +4,13 @@ import { useState } from 'react'
 import { ApiError } from '@althar/contracts'
 import { BrandMark, Button, ConnectActions, ConnectCard, NewRepositoryFields, Problem } from '@althar/ui'
 
-import { messageOf } from '../../data/client'
-import { keys, reads } from '../../data/reads'
-import { useServices } from '../../data/services'
-import { productBrand } from '../../shared/products'
+import type { ConnectionList, Product, Service } from '@althar/contracts'
+
+import { messageOf } from '../data/client'
+import { keys, reads } from '../data/reads'
+import { useServices } from '../data/services'
+import { serviceBrand, serviceName, serviceOfProduct } from '../features/connections/ways'
+import { productBrand } from './products'
 import s from './PutOnHost.module.css'
 
 /*
@@ -32,7 +35,7 @@ export interface PutOnHostProps {
   /** Its name, as the new one's is unless the person changes it. */
   name: string
   branch: string
-  connection: { readonly id: string; readonly name: string; readonly product: Parameters<typeof productBrand>[0]; readonly thing: string }
+  connection: { readonly id: string; readonly name: string; readonly product: Product; readonly thing: string }
   onDone: () => void
   onBack: () => void
 }
@@ -114,4 +117,39 @@ export function PutOnHost({ projectId, repository, name, branch, connection, onD
       </ConnectCard>
     </div>
   )
+}
+
+/** The code hosts Althar works with, in the order they're offered. */
+const CODE_HOSTS: ReadonlyArray<Service> = ['github', 'gitlab', 'bitbucket']
+
+/** What a host calls a repository. */
+export const thingOn = (service: Service) => (service === 'gitlab' ? 'project' : 'repository')
+
+/**
+ * The code hosts a repository only on this computer can be put on: each one
+ * connected, by its connection, then each other one, to connect first.
+ */
+export const hostChoices = (list: ConnectionList | null) => {
+  const ready = (list?.connections ?? []).filter(
+    (connection) => connection.state === 'ready' && CODE_HOSTS.includes(serviceOfProduct(connection.product)),
+  )
+  return {
+    ready,
+    hosts: [
+      ...ready.map((connection) => ({
+        id: connection.id,
+        name: connection.name,
+        brand: productBrand(connection.product),
+        thing: thingOn(serviceOfProduct(connection.product)),
+        connected: true,
+      })),
+      ...CODE_HOSTS.filter((service) => !ready.some((connection) => serviceOfProduct(connection.product) === service)).map((service) => ({
+        id: service,
+        name: serviceName(service),
+        brand: serviceBrand(service),
+        thing: thingOn(service),
+        connected: false,
+      })),
+    ],
+  }
 }

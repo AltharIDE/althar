@@ -96,9 +96,9 @@ import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
 import { ConnectPanel } from '../connections/ConnectPanel'
-import { serviceBrand, serviceName, serviceOfProduct } from '../connections/ways'
+import { serviceOfProduct } from '../connections/ways'
 import { reads } from '../../data/reads'
-import { PutOnHost } from './PutOnHost'
+import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
 import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
 import { BackgroundOutput } from './BackgroundOutput'
@@ -1767,9 +1767,6 @@ export function TaskView({
   )
 }
 
-/** The code hosts Althar works with, in the order they're offered. */
-const CODE_HOSTS: ReadonlyArray<Service> = ['github', 'gitlab', 'bitbucket']
-
 /**
  * For a task whose one repository is only on this computer: the hosts it can
  * be put on from its card, those connected by their connection and the rest
@@ -1782,26 +1779,7 @@ const putOnHostOf = (
 ) => {
   const [only] = snapshot.task.here
   if (snapshot.task.here.length !== 1 || only === undefined || only.remote != null) return undefined
-  const ready = (list?.connections ?? []).filter(
-    (connection) => connection.state === 'ready' && CODE_HOSTS.includes(serviceOfProduct(connection.product)),
-  )
-  const thing = (service: Service) => (service === 'gitlab' ? 'project' : 'repository')
-  const hosts = [
-    ...ready.map((connection) => ({
-      id: connection.id,
-      name: connection.name,
-      brand: productBrand(connection.product),
-      thing: thing(serviceOfProduct(connection.product)),
-      connected: true,
-    })),
-    ...CODE_HOSTS.filter((service) => !ready.some((connection) => serviceOfProduct(connection.product) === service)).map((service) => ({
-      id: service,
-      name: serviceName(service),
-      brand: serviceBrand(service),
-      thing: thing(service),
-      connected: false,
-    })),
-  ]
+  const { ready, hosts } = hostChoices(list)
   const chosen = ready.find((connection) => connection.id === put.putting)
   return {
     hosts,
@@ -1817,7 +1795,7 @@ const putOnHostOf = (
           repository={only.repository}
           name={only.name}
           branch={only.branch}
-          connection={{ id: chosen.id, name: chosen.name, product: chosen.product, thing: thing(serviceOfProduct(chosen.product)) }}
+          connection={{ id: chosen.id, name: chosen.name, product: chosen.product, thing: thingOn(serviceOfProduct(chosen.product)) }}
           onDone={put.onEnd}
           onBack={put.onEnd}
         />

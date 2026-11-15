@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch, openFirstProject, startTask, still } from './support'
+import { backToWork, chooseFolder, launch, openFirstProject, projectSettings, startTask, still } from './support'
 
 /*
  * A project set up where it starts, on the New project page: its code from
@@ -75,6 +75,14 @@ test('sets up a project from folders that aren’t repositories yet, and refuses
     expect(git(tidepool, 'ls-files').split('\n').toSorted()).toEqual(['.gitignore', 'README.md', 'src/main.ts'])
     expect(readFileSync(join(tidepool, '.gitignore'), 'utf8')).toContain('.env')
     await shoot(page, '04-folder-files-made')
+
+    // Its settings say its code stays here, and offer to put it on a host, from where it says so.
+    await projectSettings(page, 'Code and issues')
+    await page.getByRole('button', { name: 'Push to…' }).click()
+    await expect(page.getByRole('menuitem', { name: 'Connect GitHub…' })).toBeVisible()
+    await shoot(page, '04b-settings-push-to')
+    await page.keyboard.press('Escape')
+    await backToWork(page)
 
     // An empty folder: said so, and made with a first commit.
     await newProject(page, 'Empty')

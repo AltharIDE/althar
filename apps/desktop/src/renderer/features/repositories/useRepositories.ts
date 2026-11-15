@@ -28,6 +28,8 @@ export interface ReadingFolder {
 }
 
 export interface RepositoriesModel {
+  /** The project's id, for what puts one of its repositories on a host. */
+  readonly projectId: string | null
   readonly project: string | null
   /** Where its tasks' worktrees are, as the person knows the place; null before it has had a task. */
   readonly worktrees: string | null
@@ -150,6 +152,7 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
   )
 
   return {
+    projectId,
     project: summary?.name ?? null,
     worktrees: worktrees === null ? null : shortFolder(worktrees),
     repositories: listed.data ?? null,
