@@ -99,7 +99,7 @@ For key rotation, rerun `configure-updates --release-key /trusted/new-release.pu
 
 Raise the host version, add `release-notes/<version>.md`, merge and wait for main validation, then tag that commit `host-v<version>` (or dispatch from main). Complete real VPS/systemd reboot and provider headless sign-in/refresh validation before publishing the draft manually. Published versions and signed assets are immutable; a corrected build gets a new version and sequence. Expiring unpublished drafts may need a fresh version. Nothing in this change provisions a production key or publishes a release.
 
-`bun run release:smoke` builds a complete portable release using a throwaway signing key, verifies signature/hash and runs its bundled adapters/native CLIs outside the workspace, with no provider credentials. CI runs it on every host verification. It requires an official Node installation with its license file.
+`bun run release:smoke` builds a complete portable release using a throwaway signing key, verifies signature/hash and runs its bundled adapters/native CLIs outside the workspace, with no provider credentials. CI runs it natively on x64 and arm64 on every host verification. It requires an official Node installation with its license file.
 
 ## OS-sealed keys and recovery
 

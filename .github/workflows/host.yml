@@ -62,8 +62,16 @@ concurrency:
 
 jobs:
   verify:
-    name: Linux host
-    runs-on: ubuntu-24.04
+    name: Linux host (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     defaults:
       run:
