@@ -11,14 +11,14 @@ ADR-001, the repository's engineering target, is in [`ARCHITECTURE.md`](../../AR
 Althar is an Electron app. All of its code is TypeScript, and the runtime needs Node to run the agents' ACP adapters, so one runtime and one web engine was the simplest choice. The cost is a larger download and more memory than Tauri, and Electron's hardening is Althar's job.
 
 - **The runtime runs in an Electron utility process.** The main process starts and supervises it, and hands each window a `MessagePort` to it.
-- **`@althar/runtime` imports nothing from Electron.** It also runs under plain Node for tests and the CLI. What a host gives it, such as secrets, fetch and folder grants, comes in as options. What the host does with usage data and crash reports stays the host's (`apps/desktop/src/runtime/runtime.ts`).
+- **`@althar/runtime` imports nothing from Electron.** It also runs under plain Node for tests, the CLI and the standalone Linux host. What a host gives it, such as secrets, fetch and folder grants, comes in as options. What the host does with usage data and crash reports stays the host's (`apps/desktop/src/runtime/runtime.ts`).
 - **The adapters run on a Node the app ships**, not on Althar's own binary ([agents.md](agents.md#the-node-the-adapters-run-on)).
 
 How the processes fit together is in [architecture 02](../architecture/02-desktop-runtime.md).
 
 ## Where the runtime runs, and who may reach it
 
-Today the runtime runs in the app, one per profile. Work outlives the window, but not the app:
+The desktop runs one runtime per profile. Work outlives the window, but not the app:
 
 - **Closing the last window** leaves Althar working on a Mac, and anywhere the person chose to keep it working in the background.
 - **Quit with work under way asks first.** The runtime counts the leads and reviews in a turn, the runs going, and what agents left running. The window then offers to quit, to keep everything working in the background, or to carry on. With nothing at work, Quit just quits.
@@ -38,9 +38,13 @@ Commands carrying `commandId` have durable API admission and receipts shared acr
 
 New clients reconnect with a home, cursor and checkpoint identifying the exact history entry. A restored, missing or divergent history requires a fresh snapshot. The existing desktop's numeric `Watch` remains compatible; remote clients must use snapshot `position` and `WatchFrom`. Native attention now uses the shared typed API. Notifications remain advisory; pending asks are durable in the home.
 
-Not built yet: a persistent headless host, SSH bootstrap, phone pairing, protected mobile key storage, relay transport, worker enrollment and leases, remote filesystem/preview channels, or multiplayer membership and project grants. A socket listener alone does not supply those features.
+**Standalone Linux host, 15 Nov 2026:** [`apps/host`](../../apps/host/README.md) runs the shared runtime under Node with a persistent profile, separate-key authenticated encryption, private API health, signal cleanup and a systemd user unit with credential delivery. A client does not own its lifetime. It is a trusted personal OS-user boundary; same-user agents are not isolated workers. Portable signed Linux releases include Node and locked adapters. The managed updater checks/downloads/verifies automatically and applies explicitly by default; optional compatible activation is on the next service start, before accepting work. Incompatible API/storage updates always need explicit approval. An independent controller reserves storage, snapshots and prepares migrations before starting a candidate. Preparation failures may restore the snapshot; compatible startup failures revert code without discarding newer writes; incompatible post-start failures stay stopped for a corrected release. Older code refuses newer schema records. [The host architecture](../../apps/host/ARCHITECTURE.md#immutable-releases-and-recovery) records ownership, trust and recovery decisions. Production signing-key provisioning, actual release publication and real VPS/provider validation remain release work.
 
-**Proposed:** [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) would let a project live on this computer, on a host the person runs, or on a managed one. It would add a persistent headless host, SSH beside a relay, and pools of workers that take work on leases. It keeps one writer per profile and keeps paired input apart from what a socket or an agent may do. Until it is accepted, the state above is the current one.
+**SSH attachment, 15 Nov 2026:** `@althar/transport-node` supplies private-socket and system OpenSSH clients. The host's `connect-stdio` authenticates locally and forwards socket-authority RPC without exporting the launch secret. The CLI can inspect, create a task in a provisioned project or join an existing thread; disconnecting leaves work running. Expected home/API identity is checked before commands, and feed recovery uses checked positions. OpenSSH installation, key provisioning and host setup remain operator steps. [Transport architecture](../../packages/transport-node/ARCHITECTURE.md) records the protocol and bounds.
+
+Not built yet: SSH installation/bootstrap UX, protected desktop enrollment, phone pairing, protected mobile key storage, relay transport, worker enrollment and leases, remote filesystem/preview channels, or multiplayer membership and project grants. A socket listener alone does not supply those features.
+
+**Proposed:** [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) would let a project live on this computer, on a host the person runs, or on a managed one. It extends the headless foundation with SSH beside a relay, and pools of workers that take work on leases. It keeps one writer per profile and keeps paired input apart from what a socket or an agent may do. Until it is accepted, the state above is the current one.
 
 ## The UI is instant
 
@@ -187,4 +191,6 @@ Not built yet:
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 12 Nov 2026: the window answers while the computer is busy: agents in the background, nothing waiting on the runtime's thread, the store's commits not waiting for the disk, key reads by index, Ship answering once admitted.
 - 13 Nov 2026: the UI is instant: ten rules for what a press shows and what never runs on a thread that answers the person, the bugs they came from, and the lint rules and tests that check them (`althar/press-at-once`, `althar/off-the-thread`).
+- 15 Nov 2026: standalone Linux host lifecycle, unattended encrypted secrets and a supervised user service. Remote enrollment and provider release validation remain ahead.
+- 15 Nov 2026: signed immutable host releases, explicit-by-default managed updates, storage reservations and phase-aware recovery. Next-start automatic activation remains optional; idle-time restart awaits admission/drain support. Owner: repository maintainers; revisit with that barrier or reversible versioned migrations.
 - 14 Nov 2026: shared API identity, private socket attachment, revocable owner devices, durable API command receipts, checked feed positions and native attention. Organization access and commercial entitlements remain separate later work.

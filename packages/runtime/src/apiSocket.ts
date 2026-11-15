@@ -1,19 +1,10 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import * as fs from 'node:fs/promises'
-import { createConnection, createServer, type Socket } from 'node:net'
+import { createServer, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import {
-  API_VERSION,
-  ApiError,
-  ClientChallenge,
-  ClientIdentity,
-  ClientSignature,
-  HomeId,
-  clientChallengeMessage,
-  type PortLike,
-} from '@althar/contracts'
+import { API_VERSION, ApiError, ClientChallenge, ClientSignature, HomeId, clientChallengeMessage } from '@althar/contracts'
 import { Cause, Effect, Layer, Option, Schema, type Scope } from 'effect'
 
 import { connection } from './Api'
@@ -21,14 +12,14 @@ import { ClientIdentities } from './ClientIdentities'
 import { Instance } from './Instance'
 import { MAX_SOCKET_FRAME, socketPort, type SocketPort } from './socketPort'
 
-const AUTH_FRAME_LIMIT = 16 * 1024
+import { AUTH_FRAME_LIMIT, LocalApiEndpoint, readFrame as read } from '@althar/transport-node'
+export { authenticateApiClient, openApiSocket, LocalApiEndpoint, type ClientAuthentication } from '@althar/transport-node'
 const MAX_CONNECTIONS = 32
 const failed = () =>
   new ApiError({
     reason: 'AuthenticationFailed',
     message: 'This connection could not authenticate. Check the home and pair the device again.',
   })
-const closed = () => new ApiError({ reason: 'ConnectionClosed', message: 'The Althar connection closed.' })
 const unavailable = () => new ApiError({ reason: 'SocketUnavailable', message: 'Althar could not open its private API connection.' })
 const Hello = Schema.Struct({
   type: Schema.Literal('Hello'),
@@ -41,69 +32,6 @@ const Hello = Schema.Struct({
   ]),
 })
 const Proof = Schema.Struct({ type: Schema.Literal('Proof'), challenge: ClientChallenge, signature: ClientSignature })
-const Ready = Schema.Struct({ type: Schema.Literal('Authenticated'), identity: ClientIdentity, apiVersion: Schema.Int })
-
-export const LocalApiEndpoint = Schema.Struct({
-  protocol: Schema.Literal(1),
-  homeId: HomeId,
-  apiVersion: Schema.Int,
-  address: Schema.String,
-  /** Private profile file only. Possession grants socket authority, never the person's approval authority. */
-  secret: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
-})
-export type LocalApiEndpoint = typeof LocalApiEndpoint.Type
-
-/** Waits for exactly one handshake frame, releasing both listeners on completion, cancellation or closure. */
-const read = (port: PortLike): Effect.Effect<unknown, ApiError> =>
-  Effect.callback((resume) => {
-    let done = false
-    let stop = () => {}
-    let unclose = () => {}
-    const finish = (value: Effect.Effect<unknown, ApiError>) => {
-      if (done) return
-      done = true
-      stop()
-      unclose()
-      resume(value)
-    }
-    stop = port.listen((message) => finish(Effect.succeed(message)))
-    if (done) stop()
-    else unclose = port.closed?.(() => finish(Effect.fail(closed()))) ?? (() => {})
-    return Effect.sync(() => {
-      stop()
-      unclose()
-    })
-  })
-
-export type ClientAuthentication =
-  | { readonly kind: 'secret'; readonly secret: string }
-  | { readonly kind: 'device'; readonly deviceId: string; readonly sign: (message: string) => Effect.Effect<string, ApiError> }
-
-/** Reusable by a local socket, an SSH-forwarded socket, or a later protected relay channel. */
-export const authenticateApiClient = (port: PortLike, homeId: string, auth: ClientAuthentication, apiVersion = API_VERSION) =>
-  Effect.gen(function* () {
-    port.post({
-      type: 'Hello',
-      protocol: 1,
-      homeId,
-      apiVersion,
-      auth: auth.kind === 'secret' ? auth : { kind: 'device', deviceId: auth.deviceId },
-    })
-    if (auth.kind === 'device') {
-      const challenge = yield* Schema.decodeUnknownEffect(ClientChallenge)(yield* read(port)).pipe(Effect.mapError(failed))
-      if (challenge.homeId !== homeId || challenge.deviceId !== auth.deviceId || challenge.apiVersion !== apiVersion) return yield* failed()
-      port.post({ type: 'Proof', challenge, signature: yield* auth.sign(clientChallengeMessage(challenge)) })
-    }
-    const ready = yield* Schema.decodeUnknownEffect(Ready)(yield* read(port)).pipe(Effect.mapError(failed))
-    if (
-      ready.identity.homeId !== homeId ||
-      ready.apiVersion !== apiVersion ||
-      (auth.kind === 'device' && ready.identity.deviceId !== auth.deviceId) ||
-      (auth.kind === 'secret' && ready.identity.role !== 'socket')
-    )
-      return yield* failed()
-    return ready.identity
-  }).pipe(Effect.timeoutOrElse({ duration: '10 seconds', orElse: () => Effect.fail(failed()) }))
 
 type ConnectionServices = Layer.Services<ReturnType<typeof connection>>
 
@@ -218,22 +146,3 @@ export const listenLocalApi = (profile: string): Effect.Effect<LocalApiEndpoint,
     })
     return endpoint
   }).pipe(Effect.mapError((error) => (error instanceof ApiError ? error : unavailable())))
-
-/** Opens a transport owned by the caller's scope. SSH forwarding can supply the same private-socket address shape. */
-export const openApiSocket = (address: string) =>
-  Effect.acquireRelease(
-    Effect.tryPromise({
-      try: (signal) =>
-        new Promise<SocketPort>((resolve, reject) => {
-          const socket = createConnection({ path: address, signal })
-          socket.once('error', reject)
-          socket.once('connect', () => {
-            const port = socketPort(socket)
-            socket.off('error', reject)
-            resolve(port)
-          })
-        }),
-      catch: unavailable,
-    }),
-    (port) => Effect.sync(() => port.close()),
-  )

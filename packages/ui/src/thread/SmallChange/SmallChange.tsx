@@ -282,7 +282,6 @@ export function SmallChange({
   const adding = choosing && review.when === 'none'
   const columns = { gridTemplateColumns: `repeat(${stops.length + (adding ? 1 : 0)}, minmax(0, 1fr))` }
   const under = (key: Stop['key']) => ({ gridColumn: stops.findIndex((stop) => stop.key === key) + 1 })
-  const ready = merge.state === 'ready' || merge.state === 'merging'
   const found = review.state === 'found' && onFindings !== undefined
   const kicker = full ? t.fullTask : t.kicker
 
@@ -352,17 +351,20 @@ export function SmallChange({
         )}
       </ol>
       {/* What waits on the person sits under its stop: Merge under Merge, See findings under Review. */}
-      {(ready && onMerge !== undefined) || (merge.state === 'queued' && onBypassQueue !== undefined) ? (
+      {/* Pressed, Merge gives its place at once to where the merge stands: never Merge again while its host has it. */}
+      {(merge.state === 'ready' && onMerge !== undefined) ||
+      merge.state === 'merging' ||
+      (merge.state === 'queued' && onBypassQueue !== undefined) ? (
         <div className={s.foot} style={columns}>
           <MergeButton
             size="small"
             variant="signal"
             className={s.act}
             style={under('merge')}
-            busy={busy || merge.state === 'merging'}
+            busy={busy}
             onMerge={onMerge}
             onBypassQueue={onBypassQueue}
-            queued={merge.state === 'queued'}
+            standing={merge.state === 'merging' || merge.state === 'queued' ? merge.state : null}
           >
             {t.merge}
           </MergeButton>

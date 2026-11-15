@@ -13,6 +13,7 @@ on:
       [
         'packages/connectors/**',
         'packages/contracts/**',
+        'packages/transport-node/**',
         'packages/domain/**',
         'packages/persistence-sqlite/**',
         'packages/provider-adapters/**',
@@ -112,6 +113,31 @@ jobs:
           PLAN: ${{ toJSON(matrix) }}
         run: bun packages/testing/src/select.ts run
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
+
+  client-coverage:
+    name: client coverage (${{ matrix.package }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [packages/transport-node, apps/cli]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
+      - uses: ./.github/actions/flaky/quarantine
+      - run: bun run test:coverage --maxWorkers=1
+        working-directory: ${{ matrix.package }}
       - if: always()
         uses: ./.github/actions/flaky
 
