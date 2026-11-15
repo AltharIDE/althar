@@ -13,7 +13,7 @@ import { notices, runtime, task, until } from './support'
 /*
  * An agent run as a process of its own, as real agents are (the fake agent
  * under the id `process`): what Althar reads of its CPU on this machine, to
- * tell a stall from work, and how hard
+ * tell a stall from work and an idle server from one at work, and how hard
  * the machine works when a reading can't tell.
  */
 
@@ -61,26 +61,30 @@ describe('an agent run as its own process', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { stalls: FAST }))),
   )
 
-  it.live('takes no place for a preview left running after its turn, on every platform', () =>
-    Effect.gen(function* () {
-      const busy = yield* Busy
-      const sessions = yield* Sessions
-      const { task: created } = yield* task('Leave it running')
-      yield* sessions.start({ threadId: created.threadId, agentId: 'process' })
-      yield* tell(created.threadId, 'Start the server. [lead:serve]')
-      // Its turn releases the place at once; the preview remains running.
-      yield* until(
-        Effect.map(sessions.running(created.threadId), (running) =>
-          running._tag === 'Some' && running.value.background.length > 0 && !running.value.turnRunning ? [running] : [],
-        ),
-        (rows) => rows.length === 1,
-      )
-      const [idle] = yield* until(
-        Effect.map(busy.now, (now) => (now.busy === 0 ? [now] : [])),
-        (rows) => rows.length === 1,
-      )
-      assert.strictEqual(idle?.busy, 0)
-    }).pipe(Effect.provide(runtime(':memory:'))),
+  // Not on Windows, where the machine is read with no listing of its processes (machine.ts reads `ps`), so what an agent
+  // left running counts until it ends.
+  it.live.skipIf(process.platform === 'win32')(
+    'takes no place with a server it left running that sits idle, its CPU read from the machine',
+    () =>
+      Effect.gen(function* () {
+        const busy = yield* Busy
+        const sessions = yield* Sessions
+        const { task: created } = yield* task('Leave it running')
+        yield* sessions.start({ threadId: created.threadId, agentId: 'process' })
+        yield* tell(created.threadId, 'Start the server. [lead:serve]')
+        // What it left running counts while it is new, then not once it has sat idle.
+        yield* until(
+          Effect.map(sessions.running(created.threadId), (running) =>
+            running._tag === 'Some' && running.value.background.length > 0 && !running.value.turnRunning ? [running] : [],
+          ),
+          (rows) => rows.length === 1,
+        )
+        const [idle] = yield* until(
+          Effect.map(busy.now, (now) => (now.busy === 0 ? [now] : [])),
+          (rows) => rows.length === 1,
+        )
+        assert.strictEqual(idle?.busy, 0)
+      }).pipe(Effect.provide(runtime(':memory:', {}, { busy: { sample: Duration.millis(100), quiet: Duration.millis(500) } }))),
   )
 })
 

@@ -81,7 +81,14 @@ export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal
 /** How busy this computer's agents are, as work that waits for one says it. */
 export const busyWords = ({ busy, atOnce, holders }: Queued, where: string = device.this) => {
   const count = busy > atOnce ? `${busy} agents busy on ${where}, ${atOnce} at a time` : `${busy} of ${atOnce} agents busy on ${where}`
-  return holders?.length ? `${count}: ${holders.map((holder) => holder.title).join('; ')}` : count
+  const tasks = new Map<string, { title: string; count: number }>()
+  for (const holder of holders ?? []) {
+    const task = tasks.get(holder.taskId)
+    if (task === undefined) tasks.set(holder.taskId, { title: holder.title, count: 1 })
+    else task.count += 1
+  }
+  const names = [...tasks.values()].map((task) => (task.count > 1 ? `${task.title} (${task.count})` : task.title))
+  return names.length ? `${count}: ${names.join('; ')}` : count
 }
 
 /**

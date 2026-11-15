@@ -45,6 +45,13 @@ test('says over the composer why the task waits, opens who holds the place, and 
     await still(page)
     await page.screenshot({ path: 'test-results/slots-holders-dark.png', scale: 'css', animations: 'disabled' })
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'))
+    await sizeWindow(electronApp, page, 880, 700)
+    const holderLine = page.getByText(/^Waiting: 1 of 1 agents busy.*Add a retry/).last()
+    await holderLine.scrollIntoViewIfNeeded()
+    await expect(holderLine).toBeVisible()
+    await still(page)
+    await page.screenshot({ path: 'test-results/slots-holders-narrow.png', scale: 'css', animations: 'disabled' })
+    await sizeWindow(electronApp, page, 1440, 900)
 
     // The second in line, opened from the board.
     await showPanes(page, { conversation: false, board: true })

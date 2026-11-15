@@ -24,7 +24,8 @@ import { callTool, callToolAtOnce, repository, runtime, task, turns, until } fro
 
 /**
  * A runtime whose background loops don't wake within the days these tests move the TestClock by: each wake costs real
- * time, so a day at the default cadences (a listen, a stall look and a merge-line look every thirty seconds) takes as long as a minute of waiting on a busy machine.
+ * time, so a day at the default cadences (a sample every two seconds, a listen, a stall look and a merge-line look
+ * every thirty) takes as long as a minute of waiting on a busy machine.
  */
 const slowDays = (database?: string) => {
   const never = Duration.hours(1000)
@@ -32,6 +33,7 @@ const slowDays = (database?: string) => {
     database,
     {},
     {
+      busy: { sample: never },
       listenEvery: never,
       mergeLineEvery: never,
       stalls: { every: never },

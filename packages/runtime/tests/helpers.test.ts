@@ -225,32 +225,85 @@ describe('a lead’s helpers', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  it.live('a helper left behind after its lead finishes holds no place', () => {
+  it.live('a helper in its own turn still holds a place after the lead finishes', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })
     github.addRepository(['meridian', 'api'])
+    const helper = holds()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const task = yield* opened(working)
-      yield* callTool(task.access, 'start_helper', { name: 'Left behind', brief: 'Look around slowly. [lead:slowly]' })
-      const [helper] = yield* until(
+      yield* callTool(task.access, 'start_helper', { name: 'Working', brief: 'Look around slowly. [lead:slowly]' })
+      const [row] = yield* until(
         sql<{ threadId: string }>`SELECT thread_id FROM helpers WHERE task_id = ${task.taskId}`,
         (rows) => rows.length === 1,
       )
-      const busy = yield* Busy
-      yield* until(busy.now, (now) => now.holders.some((holder) => holder.helper === helper?.threadId))
       const sessions = yield* Sessions
+      yield* until(sessions.busy(row?.threadId ?? ''), (busy) => busy)
       yield* sessions.send({
         envelope: yield* Runtime.envelope('thread.send', {}),
         threadId: task.threadId,
         body: '[lead:finish]',
         disposition: 'after_current',
       })
-      yield* until(busy.now, (now) => now.holders.length === 0)
-      // The stale helper session remains observable; it cannot consume agent capacity.
-      const [left] = yield* sql<{ state: string }>`SELECT state FROM helpers WHERE thread_id = ${helper?.threadId ?? ''}`
-      assert.strictEqual(left?.state, 'working')
-    }).pipe(Effect.provide(runtimeWith(github)))
+      yield* until(sessions.busy(task.threadId), (busy) => !busy)
+      const now = yield* (yield* Busy).now
+      assert.isTrue(now.holders.some((holder) => holder.helper === row?.threadId))
+      helper.open('[lead:slowly]')
+      yield* until((yield* Busy).now, (at) => !at.holders.some((holder) => holder.helper === row?.threadId))
+      // A leftover helper row alone is no evidence of a live turn.
+      yield* sql`UPDATE helpers SET state = 'working' WHERE thread_id = ${row?.threadId ?? ''}`
+      assert.isFalse((yield* (yield* Busy).now).holders.some((holder) => holder.helper === row?.threadId))
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(':memory:', { holds: helper }, { connectors: fakeConnectors({ github }), listenEvery: Duration.hours(1) }),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it.live('only four helpers run at once after their lead finishes its turn', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    const helper = holds()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      for (let n = 1; n <= 5; n++)
+        yield* callTool(task.access, 'start_helper', { name: `Worker ${n}`, brief: 'Look around slowly. [lead:slowly]', in_copy: true })
+      const sessions = yield* Sessions
+      yield* until(sessions.busy(task.threadId), (busy) => !busy)
+      const busy = yield* Busy
+      yield* until(busy.now, (now) => now.holders.filter((holder) => holder.helper !== undefined).length === 4)
+      const sql = yield* SqlClient.SqlClient
+      const waiting = yield* until(
+        sql<{
+          state: string
+        }>`SELECT i.state FROM user_inputs i JOIN threads t ON t.id = i.thread_id WHERE t.task_id = ${task.taskId} AND t.node_key LIKE 'helper:%' AND i.state = 'queued'`,
+        (rows) => rows.length === 1,
+      )
+      assert.lengthOf(waiting, 1)
+      assert.strictEqual((yield* busy.now).holders.filter((holder) => holder.helper !== undefined).length, 4)
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(
+              ':memory:',
+              { holds: helper },
+              {
+                busy: { machine: { cores: 80, memory: 128 * 1024 ** 3 } },
+                connectors: fakeConnectors({ github }),
+                listenEvery: Duration.hours(1),
+              },
+            ),
+          ),
+        ),
+      ),
+    )
   })
 
   it.live('carry on after a restart, told so on their thread', () => {
