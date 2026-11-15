@@ -433,7 +433,7 @@ export const recommit = (cwd: string, record: CommitRecord, parents: ReadonlyArr
   )
 
 /** The environment that signs git in to a remote by URL: the header goes through it, so it is in no process's arguments. */
-const signedIn = (target: { readonly header: string | null }): Record<string, string> =>
+export const signedIn = (target: { readonly header: string | null }): Record<string, string> =>
   target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header }
 
 /** The commit a remote's branch is on, asked of the remote by URL, as a push would be: null where it has no such branch, or can't be asked. */
@@ -631,6 +631,16 @@ export const indexStamp = (worktree: string): Effect.Effect<string> =>
 export const startRepository = (path: string): Effect.Effect<void, GitFailed> =>
   Effect.gen(function* () {
     yield* run(60_000, path, ['init', '--quiet', '--initial-branch=main'])
+    yield* commitFirst(path)
+  })
+
+/**
+ * A repository's first commit, of what is staged: the person's, as git
+ * knows them, else Althar's, and never signed, as signing could wait on a
+ * passphrase nobody is asked for. Empty where nothing is staged.
+ */
+export const commitFirst = (path: string): Effect.Effect<void, GitFailed> =>
+  Effect.gen(function* () {
     const known = yield* run(60_000, path, ['var', 'GIT_COMMITTER_IDENT']).pipe(
       Effect.as(true),
       Effect.orElseSucceed(() => false),
@@ -638,10 +648,23 @@ export const startRepository = (path: string): Effect.Effect<void, GitFailed> =>
     yield* run(
       60_000,
       path,
-      ['commit', '--quiet', '--allow-empty', '--no-gpg-sign', '--message', 'Initial commit'],
+      ['commit', '--quiet', '--allow-empty', '--no-gpg-sign', '--no-verify', '--message', 'Initial commit'],
       known ? {} : ALTHAR_IDENTITY,
     )
   })
+
+/** How long a clone may take: a large repository on a slow line takes minutes. */
+export const CLONE_TIMEOUT = 30 * 60_000
+
+/**
+ * Clones a repository by URL into `folder`, a folder in `parent` not there
+ * yet, signed in as a push is: the header goes through git's environment, so
+ * it is in no process's arguments, nor in the clone's config after. Its
+ * `origin` is the URL. The person's own sign-in is used where the header is
+ * null.
+ */
+export const cloneInto = (parent: string, folder: string, target: { readonly url: string; readonly header: string | null }) =>
+  run(CLONE_TIMEOUT, parent, ['clone', '--quiet', '--', target.url, folder], signedIn(target))
 
 /** Whether a local branch exists. */
 export const branchExists = (cwd: string, branch: string) =>

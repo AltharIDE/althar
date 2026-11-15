@@ -32,6 +32,50 @@ export class RepositoryRefused extends Schema.TaggedError<RepositoryRefused>()('
   parent: Schema.String,
 }) {}
 
+/**
+ * A folder Althar won't make a project's repository of as it is: one it
+ * can't read; one too wide to be one project, the home folder or the disk's
+ * root; one with more files than a repository should start with (`count`);
+ * one with git repositories inside it already (`names`), which git would
+ * take in as empty links; or the folder a clone would go in, there already
+ * with something in it.
+ */
+export class FolderRefused extends Schema.TaggedError<FolderRefused>()('FolderRefused', {
+  reason: Schema.Literals(['unreadable', 'too_wide', 'too_many', 'repositories_inside', 'taken']),
+  path: Schema.String,
+  count: Schema.optional(Schema.Number),
+  names: Schema.optional(Schema.Array(Schema.String)),
+}) {}
+
+/**
+ * A repository that couldn't be cloned: its host wants the person signed in
+ * to its organization's single sign-on first (`url`, where they can); it
+ * isn't there, or the sign-in can't see it; or git failed otherwise
+ * (`detail`, its words).
+ */
+export class CloneRefused extends Schema.TaggedError<CloneRefused>()('CloneRefused', {
+  reason: Schema.Literals(['sso', 'not_found', 'failed']),
+  /** The repository, as its host names it: northwind/app. */
+  remote: Schema.String,
+  /** Its host's name: GitHub. */
+  host: Schema.String,
+  url: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+}) {}
+
+/**
+ * A project's repository that can't be put on a host: it has a remote
+ * already (`remote`); one of that name is there already, with something in
+ * it; or it was made there and pushing to it failed (`detail`), which trying
+ * again picks up from.
+ */
+export class PublishRefused extends Schema.TaggedError<PublishRefused>()('PublishRefused', {
+  reason: Schema.Literals(['has_remote', 'taken', 'push_failed']),
+  remote: Schema.String,
+  host: Schema.String,
+  detail: Schema.optional(Schema.String),
+}) {}
+
 /** A task in a project of several repositories that names none, or one the project doesn't have: `choices` are the ones it has. */
 export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()('RepositoriesNeeded', {
   unknown: Schema.Array(Schema.String),

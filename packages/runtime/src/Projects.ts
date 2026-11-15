@@ -22,7 +22,16 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { postCard } from './cards'
 import { RuntimeConfig } from './Config'
 import { branchFor, conventionsOnBase, ruleOf } from './conventions'
-import { BranchNotFound, ChangeRefused, type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
+import {
+  BranchNotFound,
+  ChangeRefused,
+  FolderRefused,
+  type GitFailed,
+  NotARepository,
+  NotFound,
+  ProjectRefused,
+  RepositoriesNeeded,
+} from './errors'
 import { type Fork, forkOf } from './forks'
 import { makeScratch } from './firstWrite'
 import {
@@ -69,6 +78,8 @@ export interface Found {
   readonly name: string
   readonly branch: string | null
   readonly remote: string | null
+  /** Whether it has a commit yet. */
+  readonly commits: boolean
 }
 
 /** What opening a folder would make, read before anything is. */
@@ -77,6 +88,8 @@ export interface Reading {
   readonly name: string
   readonly repositories: ReadonlyArray<Found>
   readonly project: { readonly id: string; readonly name: string } | null
+  /** A folder that isn't a repository: whether it has nothing in it but what is hidden. */
+  readonly empty?: boolean
 }
 
 /**
@@ -109,6 +122,7 @@ const describe = (root: string, folder: string | null) =>
       name: basename(root),
       branch: (yield* currentBranch(root)) ?? null,
       remote: first === undefined ? null : redactUrl(first),
+      commits: (yield* commitOf(root, 'HEAD').pipe(Effect.option)).pipe(Option.isSome),
     } satisfies Found
   })
 
@@ -140,21 +154,22 @@ export const readFolder = (opened: string) =>
             name: basename(path),
             repositories: [yield* describe(root, relative(root, path).split(sep).join('/'))],
           }
-    let entries: ReadonlyArray<string> = []
-    try {
-      entries = readdirSync(path, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
-        .map((entry) => entry.name)
-        .toSorted()
-    } catch {
-      entries = []
-    }
+    // A folder that can't be read is said to be, not taken for one with nothing in it.
+    const listed = yield* Effect.try({
+      try: () => readdirSync(path, { withFileTypes: true }),
+      catch: () => new FolderRefused({ reason: 'unreadable', path }),
+    })
+    const shown = listed.filter((entry) => !entry.name.startsWith('.'))
+    const entries = shown
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .toSorted()
     const repositories: Array<Found> = []
     for (const entry of entries) {
       const found = yield* rootAt(join(path, entry))
       if (found !== null) repositories.push(yield* describe(found, null))
     }
-    return { kind: 'folder' as const, name: basename(path), repositories }
+    return { kind: 'folder' as const, name: basename(path), repositories, empty: shown.length === 0 }
   })
 
 export const OpenedProject = Schema.Struct({
@@ -422,7 +437,7 @@ export class Projects extends Context.Service<
   Projects,
   {
     /** What opening a folder would make, and the project it already is, read without changing anything. */
-    read(path: string): Effect.Effect<Reading, Failure>
+    read(path: string): Effect.Effect<Reading, FolderRefused | Failure>
     /**
      * Opens a folder as a project, or finds the project it already is: the
      * repository it is or is in, or the repositories directly inside it, all
@@ -442,7 +457,7 @@ export class Projects extends Context.Service<
       readonly projectId?: string
       /** The ink the person chose; without it, the runtime's pick. */
       readonly ink?: ProjectInk
-    }): Effect.Effect<OpenedProject, NotARepository | GitFailed | ProjectRefused | Failure>
+    }): Effect.Effect<OpenedProject, NotARepository | FolderRefused | GitFailed | ProjectRefused | Failure>
     /**
      * Creates a task, its thread, and its worktree. A draft is a task the
      * coordinator planned, which starts when its plan does; its worktree is
@@ -532,7 +547,7 @@ export class Projects extends Context.Service<
       projectId: string,
       path: string,
       commandId?: CommandId,
-    ): Effect.Effect<void, NotFound | NotARepository | GitFailed | Failure>
+    ): Effect.Effect<void, NotFound | NotARepository | FolderRefused | GitFailed | Failure>
     /**
      * Leaves a repository out: new tasks can't change it, and the coordinator
      * no longer reads it. Tasks made with it keep it, and nothing in its
