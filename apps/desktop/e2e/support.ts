@@ -2,7 +2,7 @@ import { accessSync, constants, existsSync, mkdirSync, symlinkSync } from 'node:
 import { delimiter, dirname, join } from 'node:path'
 
 import { budget } from '@althar/testing/budget'
-import { _electron as electron, type ElectronApplication, expect, type Page } from '@playwright/test'
+import { _electron as electron, type ElectronApplication, expect, type Locator, type Page } from '@playwright/test'
 
 /* What the end-to-end tests share: the app launched on a profile of its own, with the fake agents, and the person's ways in. */
 
@@ -147,7 +147,9 @@ export const launch = async (
   // Playwright gives the config's times to the browsers it starts, not to an app it launches, whose actions would each have
   // 30 s on any machine: a click, or a wait for the window, takes the medium budget, as an assertion does (playwright.config.ts).
   electronApp.context().setDefaultTimeout(budget.medium)
-  return { electronApp, page: await mainWindow(electronApp) }
+  // Keep the process while the transport is live: process() itself is unavailable after the app quits.
+  const child = electronApp.process()
+  return { electronApp, child, page: await mainWindow(electronApp) }
 }
 
 /** Answers the folder picker with `path`, or several, as if the person chose them. */
@@ -216,6 +218,14 @@ export const still = (page: Page) =>
       document.querySelector('[class*="veil"]') === null &&
       document.getAnimations().every((one) => one.playState !== 'running' || one.effect?.getComputedTiming().endTime === Infinity),
   )
+
+/** Reveal the current node without waiting on one that a streamed update can replace while it settles. */
+export const reveal = async (page: Page, what: Locator) => {
+  await expect(what).toBeVisible()
+  await what.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }))
+  await still(page)
+  await expect(what).toBeInViewport()
+}
 
 /** Sizes Althar's window, and waits until its page is laid out at the new width. */
 export const sizeWindow = async (electronApp: ElectronApplication, page: Page, width: number, height: number) => {
