@@ -2738,7 +2738,11 @@ export class Changes extends Context.Service<
             taskId,
             Effect.gen(function* () {
               if (from.path !== into.path) {
-                yield* removeWorktree(into.path, from.path)
+                const root = (yield* git(from.path, 'rev-parse', '--git-common-dir').pipe(Effect.orElseSucceed(() => ''))).replace(
+                  /\/\.git$/,
+                  '',
+                )
+                yield* removeWorktree(root === '' ? into.path : root, from.path)
               }
               yield* goneRow(from, 'workspace.joined', { into: into.id, commits: own.length }, actorId)
             }),

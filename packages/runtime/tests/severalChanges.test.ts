@@ -404,11 +404,13 @@ describe('a task with several changes', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
-  for (const partiallyRemoved of [false, true])
+  for (const partialRemoval of ['none', 'join', 'drop'] as const)
     it.live(
-      partiallyRemoved
-        ? 'keeps changes together and drops them after Git already unregistered its worktree but could not delete its folder'
-        : 'keeps two changes together before either ships, and drops one, its branch staying',
+      partialRemoval === 'join'
+        ? 'keeps changes together after Git already unregistered the joined worktree but could not delete its folder'
+        : partialRemoval === 'drop'
+          ? 'drops a change after Git already unregistered its worktree but could not delete its folder'
+          : 'keeps two changes together before either ships, and drops one, its branch staying',
       () => {
         removals.failures = []
         removals.partial = ''
@@ -430,10 +432,10 @@ describe('a task with several changes', () => {
             (item) => item.kind === 'notice' && (item.content as { step?: unknown }).step !== undefined,
           )
           assert.strictEqual((started?.content as { step?: { by?: string } } | undefined)?.step?.by, 'lead')
-          if (partiallyRemoved) removals.partial = second?.path ?? assert.fail('no change to join')
+          if (partialRemoval === 'join') removals.partial = second?.path ?? assert.fail('no change to join')
           const together = yield* callTool(task.lead, 'join_changes', { change: 'Lane heights' })
           assert.include(together, 'Kept “Lane heights” together', `${together}\n${JSON.stringify(removals.failures)}`)
-          assert.strictEqual(removals.injected, partiallyRemoved ? 1 : 0)
+          assert.strictEqual(removals.injected, partialRemoval === 'join' ? 1 : 0)
           // Its commit is on the change that hadn't shipped's branch; its folder went, its branch stays.
           assert.strictEqual(git(colours?.path ?? '', 'log', '-1', '--format=%s'), 'Taller lanes')
           assert.isFalse(existsSync(second?.path ?? ''))
@@ -446,10 +448,10 @@ describe('a task with several changes', () => {
           yield* callTool(task.lead, 'start_change', { name: 'Docs' })
           const docs = (yield* workspacesOf(task.taskId)).find((one) => one.name === 'Docs') ?? assert.fail('no change')
           writeFileSync(join(docs.path, 'docs.md'), 'half\n')
-          assert.include(
-            yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Docs', why: 'Not needed.' }),
-            'Dropped “Docs”',
-          )
+          if (partialRemoval === 'drop') removals.partial = docs.path
+          const dropped = yield* callTool(task.lead, 'remove_part', { part: 'workspace', name: 'Docs', why: 'Not needed.' })
+          assert.include(dropped, 'Dropped “Docs”', `${dropped}\n${JSON.stringify(removals.failures)}`)
+          assert.strictEqual(removals.injected, partialRemoval === 'none' ? 0 : 1)
           assert.isFalse(existsSync(docs.path))
           assert.strictEqual(git(working, 'log', '-1', '--format=%s', 'althar/docs'), 'Work in progress, as its change was dropped')
           // Dropped too, the only change left: removing its worktree moves it down to a copy, its branch keeping its work.
