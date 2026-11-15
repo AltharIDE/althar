@@ -23,6 +23,7 @@ import {
 
 import { type Card, a } from './directions'
 import type { Moment } from './moments'
+import { GuideOf } from './guides'
 import s from './lab.module.css'
 
 /*
@@ -66,7 +67,22 @@ interface State {
   /** The friendly modal open, and its quiet way in hidden by the person. */
   readonly modal: boolean
   readonly hidden: boolean
+  /** Which friendly modal: one of GUIDES. M cycles them, opening it. */
+  readonly guide: Guide
+  /** The tour's page. */
+  readonly page: number
 }
+
+/** Ways the friendly modal can go: read only, or with the route set right in it. */
+export const GUIDES = [
+  { key: 'path', label: 'Modal: path to read' },
+  { key: 'switches', label: 'Modal: a switch a stop' },
+  { key: 'tap', label: 'Modal: tap the route' },
+  { key: 'pick', label: 'Modal: pick a route' },
+  { key: 'tour', label: 'Modal: a stop a page' },
+  { key: 'short', label: 'Modal: short' },
+] as const
+export type Guide = (typeof GUIDES)[number]['key']
 
 /** Ways Ship explains itself the first time, in place of a box under it. E cycles them. */
 export const INTROS = [
@@ -112,6 +128,8 @@ const start: State = {
   intro: (INTROS.find((one) => one.key === new URLSearchParams(location.search).get('intro'))?.key ?? 'modal') as Intro,
   modal: new URLSearchParams(location.search).get('modal') === '1',
   hidden: new URLSearchParams(location.search).get('hidden') === '1',
+  guide: (GUIDES.find((one) => one.key === new URLSearchParams(location.search).get('guide'))?.key ?? 'switches') as Guide,
+  page: Number(new URLSearchParams(location.search).get('page') ?? 0),
   pressed: new URLSearchParams(location.search).get('pressed') === '1',
 }
 let state = start
@@ -124,6 +142,8 @@ export const resetOnto = () => set(start)
 export const setLook = (look: Look) => set({ look })
 export const setIntro = (intro: Intro) => set({ intro, explained: false, pressed: false, modal: false, hidden: false })
 export const nextIntro = () => setIntro(INTROS[(INTROS.findIndex((one) => one.key === state.intro) + 1) % INTROS.length]!.key)
+export const setGuide = (guide: Guide) => set({ guide, intro: 'modal', modal: true, explained: true, hidden: false, page: 0 })
+export const nextGuide = () => setGuide(GUIDES[(GUIDES.findIndex((one) => one.key === state.guide) + 1) % GUIDES.length]!.key)
 export const nextLook = () => set({ look: LOOKS[(LOOKS.findIndex((one) => one.key === state.look) + 1) % LOOKS.length]!.key })
 export const toggleShared = () => set({ shared: !state.shared, chosen: null })
 export const useOnto = () =>
@@ -499,7 +519,9 @@ function Onto({ n, later = false }: { n: number; later?: boolean }) {
         button
       )}
       {under}
-      {now.intro === 'modal' && now.modal && <ShipGuide route={route} n={n} shared={now.shared} />}
+      {now.intro === 'modal' &&
+        now.modal &&
+        (now.guide === 'path' ? <ShipGuide route={route} n={n} shared={now.shared} /> : <GuideOf route={route} n={n} />)}
     </span>
   )
 }
@@ -744,3 +766,5 @@ const cardOf = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
       return a(moment, real, hover)
   }
 }
+
+export { BUTTON_STOPS, ICON_OF, commits, guideOf, same, saysOf, set as setOnto, stopWords, stopsOf }

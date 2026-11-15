@@ -214,6 +214,57 @@ if (mode === 'cards') {
     await page.screenshot({ path: join(out, file), clip: { x: 610, y: 52, width: 646, height: Math.min(748, bottom - 52 + 14) } })
     process.stdout.write(`${file}\n`)
   }
+} else if (mode === 'guides') {
+  // Each variant of the friendly modal, the ones you edit in after a press or two, and Ship's button once one closes.
+  const dialog = async (file: string) => {
+    // The ring the dialog's first focus draws when opened from an address, not a click.
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.waitForTimeout(250)
+    const box = await page.locator('[role="dialog"]').boundingBox()
+    if (box === null) throw new Error(`no dialog for ${file}`)
+    await page.screenshot({ path: join(out, file), clip: { x: box.x - 16, y: box.y - 16, width: box.width + 32, height: box.height + 32 } })
+    process.stdout.write(`${file}\n`)
+  }
+  const shots: Array<[string, string, (() => Promise<void>) | null]> = [
+    ['switches', '', null],
+    [
+      'switches',
+      'edited',
+      async () => {
+        await page.click('[role="dialog"] [role="switch"][aria-label="Review"]')
+        await page.click('[role="dialog"] [role="switch"][aria-label="Ready"]')
+      },
+    ],
+    ['tap', '', null],
+    ['tap', 'edited', () => page.click('[role="dialog"] button[aria-pressed]:has-text("Review")')],
+    ['pick', '', null],
+    ['tour', '', null],
+    ['tour', 'last', () => page.click('[role="dialog"] nav button:has-text("Merge")')],
+    ['short', '', null],
+    ['short', 'more', () => page.click('[role="dialog"] button:has-text("What each stop does")')],
+  ]
+  for (const [guide, what, act] of shots) {
+    await open('b2', 'held', `&look=twoAll&intro=modal&explained=1&modal=1&guide=${guide}`)
+    await page.waitForSelector('[role="dialog"]')
+    if (act !== null) await act()
+    await dialog(`guide-${guide}${what === '' ? '' : `-${what}`}.png`)
+  }
+  // Closed after the edit: Ship's button has followed it.
+  await page.click('[role="dialog"] button:has-text("Close")').catch(() => undefined)
+  await open('b2', 'held', '&look=twoAll&intro=modal&explained=1&modal=1&guide=switches')
+  await page.click('[role="dialog"] [role="switch"][aria-label="Review"]')
+  await page.click('[role="dialog"] button:has-text("Close")')
+  await page.waitForTimeout(300)
+  const group = await page
+    .locator('[data-lab-scene] article [role="group"]:has(button[aria-label="How far it goes"])')
+    .first()
+    .boundingBox()
+  if (group !== null)
+    await page.screenshot({
+      path: join(out, 'guide-after.png'),
+      clip: { x: group.x - 12, y: group.y - 12, width: group.width + 24, height: group.height + 56 },
+    })
+  process.stdout.write('guide-after.png\n')
 } else if (mode === 'modal') {
   // The quiet link under Ship, the friendly modal it opens (on two routes), and, hidden, the arrow's menu that keeps it.
   const cardTo = async (file: string) => {
@@ -228,10 +279,11 @@ if (mode === 'cards') {
   }
   await open('b2', 'held', '&look=twoAll&intro=modal')
   await cardTo('modal-link.png')
-  for (const [extra, file] of <Array<[string, string]>>[
+  const opened: Array<[string, string]> = [
     ['', 'modal-open.png'],
     ['&solo=1&route=push-merge', 'modal-open-nr.png'],
-  ]) {
+  ]
+  for (const [extra, file] of opened) {
     await open('b2', 'held', `&look=twoAll&intro=modal&modal=1${extra}`)
     await page.waitForSelector('[role="dialog"]')
     await page.waitForTimeout(300)
