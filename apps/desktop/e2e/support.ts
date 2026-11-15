@@ -230,14 +230,14 @@ export const reveal = async (page: Page, what: Locator) => {
 /** Sizes Althar's window, and waits until its page is laid out at the new width. */
 export const sizeWindow = async (electronApp: ElectronApplication, page: Page, width: number, height: number) => {
   const made = await electronApp.browserWindow(page)
-  const [inner] = await made.evaluate(
+  const inner = await made.evaluate(
     (one, [wide, high]) => {
       one.setSize(wide, high)
       return one.getContentSize()
     },
     [width, height] as const,
   )
-  await page.waitForFunction((wide) => window.innerWidth === wide, inner)
+  await page.waitForFunction(([wide, high]) => window.innerWidth === wide && window.innerHeight === high, inner)
 }
 
 /**
