@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Schema } from 'effect'
+import { AcpCatalog, AcpConnection } from './agentCatalog'
 import { AttentionEvent } from './attention'
 import { Rpc, RpcGroup, RpcMiddleware } from 'effect/rpc'
 import {
@@ -5846,7 +5847,15 @@ const WorkApi = RpcGroup.make(
   ),
 ).middleware(ClientAuthority)
 
-export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi)
+/** External ACP connections share the API's authority boundary, with a small handler group of their own. */
+export const AcpApi = RpcGroup.make(
+  call('GetAgentCatalog', { refresh: Schema.optional(Schema.Boolean) }, AcpCatalog),
+  command('SaveAcpConnection', { connection: AcpConnection }, Schema.Number),
+  command('CheckAcpConnection', { agentId: Schema.String }, Schema.Number),
+  command('RemoveAcpConnection', { agentId: Schema.String }, Schema.Number),
+).middleware(ClientAuthority)
+
+export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi)
 export type Api = typeof Api
 /** Closed handlers capture their services when built; callers cannot accidentally require another client's context. */
 export type ApiHandlers = { readonly [R in RpcGroup.Rpcs<Api> as R['_tag']]: Rpc.ToHandlerFn<R, never> }
@@ -5860,6 +5869,7 @@ export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effec
         WorkApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         ConnectionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof ConnectionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
         AttentionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AttentionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+        AcpApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AcpApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
       ),
     ),
   )

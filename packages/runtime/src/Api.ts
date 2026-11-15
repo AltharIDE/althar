@@ -1,3 +1,4 @@
+import { agentCatalogHandlers } from './AgentCatalog'
 import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -774,6 +775,7 @@ export const handlers = apiLayer(
     )
 
     const implemented: ApiHandlers = {
+      ...(yield* agentCatalogHandlers),
       WatchAttention: () => nudges.events,
       GetConnectionInfo: () =>
         api(

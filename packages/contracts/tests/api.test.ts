@@ -461,6 +461,10 @@ describe('the API', () => {
         const handlers = apiLayer(
           Effect.succeed(
             Api.of({
+              GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),
+              SaveAcpConnection: () => Effect.succeed(1),
+              CheckAcpConnection: () => Effect.succeed(1),
+              RemoveAcpConnection: () => Effect.succeed(1),
               WatchAttention: () => Stream.die('unused'),
               GetConnectionInfo: () => Effect.die('unused'),
               ListClientDevices: () => Effect.die('unused'),
