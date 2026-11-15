@@ -16,7 +16,7 @@ import { fakeClient, fakeHost } from '../../tests/fixtures'
 import { servicesFor } from '../../tests/render'
 import { DIRECTIONS, type DirectionKey, LabContext } from './directions'
 import { MOMENTS, momentOf, type Moment } from './moments'
-import { LOOKS, type Look, nextLook, setLook, toggleShared, useOnto } from './onto'
+import { INTROS, type Intro, LOOKS, type Look, nextIntro, nextLook, setIntro, setLook, toggleShared, useOnto } from './onto'
 import s from './lab.module.css'
 
 /*
@@ -91,6 +91,7 @@ function Lab() {
       else if (event.key === 'n') setNarrow((on) => !on)
       else if (event.key === 't') toggleShared()
       else if (event.key === 's') nextLook()
+      else if (event.key === 'e') nextIntro()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -154,6 +155,18 @@ function Lab() {
               <kbd>S</kbd>
               <select value={onto.look} onChange={(event) => setLook(event.target.value as Look)} aria-label="How Ship shows">
                 {LOOKS.map((one) => (
+                  <option key={one.key} value={one.key}>
+                    {one.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {direction === 'b2' && (
+            <label className={s.look}>
+              <kbd>E</kbd>
+              <select value={onto.intro} onChange={(event) => setIntro(event.target.value as Intro)} aria-label="How Ship explains itself">
+                {INTROS.map((one) => (
                   <option key={one.key} value={one.key}>
                     {one.label}
                   </option>

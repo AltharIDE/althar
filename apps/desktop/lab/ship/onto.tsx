@@ -1,4 +1,4 @@
-import { isValidElement, type ReactElement, useSyncExternalStore } from 'react'
+import { isValidElement, type ReactElement, type ReactNode, useSyncExternalStore } from 'react'
 
 import {
   Button,
@@ -6,12 +6,14 @@ import {
   CheckState,
   HoverCard,
   Icon,
+  LinkButton,
   Menu,
   MenuItem,
   MenuSegments,
   MenuSeparator,
   MenuSwitchItem,
   MergeButton,
+  Popover,
   SplitButton,
   StepTrack,
   TaskStatus,
@@ -56,7 +58,21 @@ interface State {
   readonly offer: 'shown' | 'later' | 'taken'
   /** How Ship shows at its button: one of LOOKS. */
   readonly look: Look
+  /** How Ship explains itself the first time: one of INTROS. */
+  readonly intro: Intro
+  /** Ship pressed the first time, where it explains itself then. */
+  readonly pressed: boolean
 }
+
+/** Ways Ship explains itself the first time, in place of a box under it. E cycles them. */
+export const INTROS = [
+  { key: 'legend', label: 'Legend under the button' },
+  { key: 'press', label: 'On the first press' },
+  { key: 'pointer', label: 'Pointer' },
+  { key: 'link', label: 'Quiet link' },
+  { key: 'banner', label: 'Box under (before)' },
+] as const
+export type Intro = (typeof INTROS)[number]['key']
 
 /** Ways to say Ship at its button, each with the same arrow beside it. S cycles them. */
 export const LOOKS = [
@@ -87,7 +103,9 @@ const start: State = {
   shared: new URLSearchParams(location.search).get('solo') !== '1',
   explained: new URLSearchParams(location.search).get('explained') === '1',
   offer: 'shown',
-  look: (LOOKS.find((one) => one.key === new URLSearchParams(location.search).get('look'))?.key ?? 'caption') as Look,
+  look: (LOOKS.find((one) => one.key === new URLSearchParams(location.search).get('look'))?.key ?? 'twoAll') as Look,
+  intro: (INTROS.find((one) => one.key === new URLSearchParams(location.search).get('intro'))?.key ?? 'legend') as Intro,
+  pressed: new URLSearchParams(location.search).get('pressed') === '1',
 }
 let state = start
 const listeners = new Set<() => void>()
@@ -97,6 +115,8 @@ const set = (change: Partial<State>) => {
 }
 export const resetOnto = () => set(start)
 export const setLook = (look: Look) => set({ look })
+export const setIntro = (intro: Intro) => set({ intro, explained: false, pressed: false })
+export const nextIntro = () => setIntro(INTROS[(INTROS.findIndex((one) => one.key === state.intro) + 1) % INTROS.length]!.key)
 export const nextLook = () => set({ look: LOOKS[(LOOKS.findIndex((one) => one.key === state.look) + 1) % LOOKS.length]!.key })
 export const toggleShared = () => set({ shared: !state.shared, chosen: null })
 export const useOnto = () =>
@@ -250,6 +270,102 @@ const gotIt = (
   </Button>
 )
 
+/** What each stop does on this route, short (a legend's column) or in full (a list), and whether it is skipped. */
+const stopWords = (stop: (typeof BUTTON_STOPS)[number], route: Route, n: number, shared: boolean) => {
+  switch (stop) {
+    case 'Review':
+      return route.review
+        ? { short: 'GPT-6.1 Sol reads them', full: `GPT-6.1 Sol reads the ${commits(n)}; the lead fixes what it finds.`, on: true }
+        : { short: 'Off', full: 'Off: they go up unread.', on: false }
+    case 'Push':
+      return { short: 'To PR #820', full: 'Sent up to PR #820.', on: true }
+    case 'Ready':
+      return route.far === 'push'
+        ? { short: 'Stays a draft', full: 'Off: the pull request stays a draft.', on: false }
+        : { short: 'For review', full: 'Marked ready for review.', on: true }
+    case 'Merge':
+      return route.far === 'merge'
+        ? { short: 'Once verify passes', full: 'Merged once verify, the check main requires, passes.', on: true }
+        : {
+            short: shared ? 'Off: theirs' : 'Off: yours',
+            full: shared ? 'Off: merging is for whoever approves it.' : 'Off: merging stays yours.',
+            on: false,
+          }
+  }
+}
+
+/** Every stop, a row each: what it does, the ones it skips faded. */
+function StopList({ route, n, shared }: { route: Route; n: number; shared: boolean }) {
+  return (
+    <span className={s.stopList}>
+      {BUTTON_STOPS.map((stop) => {
+        const words = stopWords(stop, route, n, shared)
+        return (
+          <span key={stop} className={s.stopRow} data-skipped={!words.on || undefined}>
+            <b>{stop}</b>
+            <span>{words.full}</span>
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+/** The legend: the button unfolds a strip under it, a column a stop, until Got it. */
+function Legend({ route, n, shared }: { route: Route; n: number; shared: boolean }) {
+  return (
+    <span className={s.legend}>
+      {BUTTON_STOPS.map((stop) => {
+        const words = stopWords(stop, route, n, shared)
+        return (
+          <span key={stop} className={s.legendCell} data-skipped={!words.on || undefined}>
+            <b>{stop}</b>
+            <span>{words.short}</span>
+          </span>
+        )
+      })}
+      <span className={s.legendFoot}>
+        <span>The arrow turns stops on and off.</span>
+        <LinkButton onClick={() => set({ explained: true })}>Got it</LinkButton>
+      </span>
+    </span>
+  )
+}
+
+/** A light card pinned under the button, its point at it: the stops, and what closes it. */
+function Pinned({ children }: { children: ReactNode }) {
+  return (
+    <span className={s.pinned} role="note">
+      {children}
+    </span>
+  )
+}
+
+/** A quiet way in, kept: How Ship works, a dot on it until it has been opened. */
+function HowLink({ route, n, shared, unread }: { route: Route; n: number; shared: boolean; unread: boolean }) {
+  return (
+    <span className={s.howLink}>
+      <Popover
+        label="How Ship works"
+        placement="below"
+        align="center"
+        width={330}
+        onOpenChange={(open) => {
+          if (open) set({ explained: true })
+        }}
+        trigger={
+          <Button variant="quiet" size="small">
+            {unread && <span className={s.unread} aria-label="New" />}
+            How Ship works
+          </Button>
+        }
+      >
+        <StopList route={route} n={n} shared={shared} />
+      </Popover>
+    </span>
+  )
+}
+
 /**
  * The control before Ship: Ship, with how far a chevron away, and under it, as the look has it, what Ship will do. The first
  * time, that says it in full until Got it; on a later task, the offer to make what they keep choosing their default.
@@ -286,7 +402,9 @@ function Onto({ n, later = false }: { n: number; later?: boolean }) {
     <SplitButton
       variant="signal"
       {...(TWO.has(now.look) ? { className: s.tallSplit } : now.look === 'side' ? { mainClassName: s.sideMain } : {})}
-      onClick={noop}
+      onClick={() => {
+        if (first && now.intro === 'press') set({ pressed: true })
+      }}
       moreLabel="How far it goes"
       menu={(trigger) => <HowFar trigger={trigger} route={route} onRoute={(chosen) => set({ chosen })} note={note} n={n} />}
     >
@@ -321,9 +439,36 @@ function Onto({ n, later = false }: { n: number; later?: boolean }) {
         {gotIt}
       </span>
     ) : null
-  ) : first ? (
+  ) : now.intro === 'link' ? (
+    <HowLink route={route} n={n} shared={now.shared} unread={first} />
+  ) : !first ? null : now.intro === 'legend' ? (
+    <Legend route={route} n={n} shared={now.shared} />
+  ) : now.intro === 'pointer' ? (
+    <Pinned>
+      <StopList route={route} n={n} shared={now.shared} />
+      <span className={s.pinnedFoot}>
+        <span>The arrow turns stops on and off.</span>
+        <Button size="small" onClick={() => set({ explained: true })}>
+          Got it
+        </Button>
+      </span>
+    </Pinned>
+  ) : now.intro === 'press' ? (
+    now.pressed ? (
+      <Pinned>
+        <StopList route={route} n={n} shared={now.shared} />
+        <span className={s.pinnedFoot}>
+          <LinkButton onClick={() => set({ pressed: false })}>Not now</LinkButton>
+          <Button size="small" variant="signal" onClick={() => set({ explained: true, pressed: false })}>
+            Ship
+          </Button>
+        </span>
+        <span className={s.pinnedNote}>Shown once. After this, Ship goes at once.</span>
+      </Pinned>
+    ) : null
+  ) : (
     tip
-  ) : null
+  )
   return (
     <span className={s.ship}>
       {now.look === 'coach' && !first ? (

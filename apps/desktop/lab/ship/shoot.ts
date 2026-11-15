@@ -185,6 +185,35 @@ if (mode === 'cards') {
   </style><div class="g"><div></div>${along.map(([, a]) => `<div class="h">${a}</div>`).join('')}${rows.join('')}</div>`)
   await page.locator('.g').screenshot({ path: join(out, 'two-running.png') })
   process.stdout.write('two-running.png\n')
+} else if (mode === 'intros') {
+  // Every stop, and each way Ship explains itself the first time; the press after it was pressed, the link opened.
+  const shots: Array<[string, string, string]> = [
+    ['legend', '', ''],
+    ['press', '', ''],
+    ['press', '&pressed=1', 'pressed'],
+    ['pointer', '', ''],
+    ['link', '', ''],
+    ['link', '', 'open'],
+    ['legend', '&solo=1&route=push-merge', 'nr'],
+  ]
+  for (const [intro, extra, what] of shots) {
+    await open('b2', 'held', `&look=twoAll&intro=${intro}${extra}`)
+    if (what === 'open') {
+      await page.click('[data-lab-scene] button:has-text("How Ship works")')
+      await page.waitForTimeout(400)
+    }
+    const bottom = await page.evaluate((title) => {
+      const card = document.querySelector(`[data-lab-scene] article[aria-label="${title}"]`)
+      const files = card?.querySelector('[class*="files"]')
+      const over = [...document.querySelectorAll('[role="note"], [data-radix-popper-content-wrapper]')].map(
+        (one) => one.getBoundingClientRect().bottom,
+      )
+      return Math.max(files?.getBoundingClientRect().top ?? 400, ...over)
+    }, TITLE)
+    const file = `intro-${intro}${what === '' ? '' : `-${what}`}.png`
+    await page.screenshot({ path: join(out, file), clip: { x: 610, y: 52, width: 646, height: Math.min(748, bottom - 52 + 14) } })
+    process.stdout.write(`${file}\n`)
+  }
 } else {
   const [d = 'a', m = 'readyChecks', narrow] = rest
   await open(d, m, narrow === 'narrow' ? '&narrow=1' : '')

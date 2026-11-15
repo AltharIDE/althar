@@ -16,3 +16,7 @@ node lab/ship/shoot.ts whole c requiredPassed narrow # the whole window
 ```
 
 Delete the lab once a direction is picked to build.
+
+## B′ · Onto main
+
+Key 4. The Ship button names every stop (review, push, ready, merge), the ones it skips faded; its arrow turns stops on and off, from the person's own default, which Althar bends where main needs someone else's approval. **S** swaps how the button shows its route, **E** how Ship explains itself the first time (a legend under the button, on the first press, a pointer, a quiet link, or the earlier box), **T** the project between shared and solo. `?look=`, `?intro=`, `?route=review-merge`, `?solo=1`, `?explained=1` and `?pressed=1` open on one. `node lab/ship/shoot.ts two` and `intros` take their pictures.
