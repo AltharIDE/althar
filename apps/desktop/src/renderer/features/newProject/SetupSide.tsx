@@ -149,6 +149,9 @@ export function SetupSide({
   onChooseCloneInto,
   onOpenProject,
   dropping,
+  only,
+  folderWay,
+  minHeight = 196,
 }: {
   setup: SetupModel & SetupActions
   draft: Draft
@@ -161,8 +164,13 @@ export function SetupSide({
   onOpenProject: (projectId: string) => void
   /** A folder is being dragged over the page. */
   dropping: boolean
+  /** Only where its code comes from, as the first run's step for it is: where it lives and its issues are steps of their own. */
+  only?: 'source'
+  /** In place of the folders chosen: the consumer's own, as the first run's list of what this computer has. */
+  folderWay?: ReactNode
+  minHeight?: number
 }) {
-  const height = 196
+  const height = minHeight
   const folders = draft.folders.filter((folder) => folder.came === undefined)
   const madeNew = draft.folders.find((folder) => folder.came === 'new')
   const clone = setup.clone
@@ -246,6 +254,7 @@ export function SetupSide({
         </SetupZone>
       )
     }
+    if (folderWay !== undefined) return folderWay
     if (folders.length === 0 && draft.reading.length === 0) return <SetupDrop onChoose={onChoose} over={dropping} />
     return (
       <SetupZone>
@@ -286,7 +295,7 @@ export function SetupSide({
         <SetupWays way={setup.way} onWay={setup.onWay} hosts={setup.hosts} minHeight={height + 40}>
           {body}
         </SetupWays>
-        {home.kind !== 'none' && (
+        {only === undefined && home.kind !== 'none' && (
           <SetupSection title={text.code} status={setup.statuses.home}>
             {home.kind === 'fixed' ? (
               <SetupFixed mark={home.brand === null ? <Icon name="download" size={14} /> : <BrandMark brand={home.brand} size={14} />}>
@@ -337,80 +346,82 @@ export function SetupSide({
             )}
           </SetupSection>
         )}
-        <SetupSection title={text.issues} status={setup.statuses.issues}>
-          {setup.connecting !== null && issues.away.some((one) => one.service === setup.connecting) ? (
-            <ConnectInPlace service={setup.connecting} onDone={setup.endConnect} />
-          ) : (
-            <SetupPicks label={text.issues}>
-              {issues.host !== null && (
-                <SetupPick
-                  checked={issues.value === 'host'}
-                  onChoose={() => setup.onIssues('host')}
-                  mark={<BrandMark brand={issues.host.brand} size={16} />}
-                  title={issues.host.name}
-                  note={`On ${issues.host.where}`}
-                />
-              )}
-              {issues.trackers.map((tracker) => (
-                <SetupPick
-                  key={tracker.id}
-                  checked={issues.value === tracker.id}
-                  onChoose={() => setup.onIssues(tracker.id)}
-                  mark={<BrandMark brand={tracker.brand} size={16} />}
-                  title={tracker.name}
-                >
-                  <Select
-                    variant="filled"
-                    label={text.team}
-                    width={260}
-                    value={issues.container ?? ''}
-                    onChange={setup.onContainer}
-                    disabled={issues.containers === null}
-                    options={
-                      issues.containers === null
-                        ? [{ value: '', label: text.readingTeams }]
-                        : issues.containers.map((one) => ({ value: one.id, label: one.name }))
+        {only === undefined && (
+          <SetupSection title={text.issues} status={setup.statuses.issues}>
+            {setup.connecting !== null && issues.away.some((one) => one.service === setup.connecting) ? (
+              <ConnectInPlace service={setup.connecting} onDone={setup.endConnect} />
+            ) : (
+              <SetupPicks label={text.issues}>
+                {issues.host !== null && (
+                  <SetupPick
+                    checked={issues.value === 'host'}
+                    onChoose={() => setup.onIssues('host')}
+                    mark={<BrandMark brand={issues.host.brand} size={16} />}
+                    title={issues.host.name}
+                    note={`On ${issues.host.where}`}
+                  />
+                )}
+                {issues.trackers.map((tracker) => (
+                  <SetupPick
+                    key={tracker.id}
+                    checked={issues.value === tracker.id}
+                    onChoose={() => setup.onIssues(tracker.id)}
+                    mark={<BrandMark brand={tracker.brand} size={16} />}
+                    title={tracker.name}
+                  >
+                    <Select
+                      variant="filled"
+                      label={text.team}
+                      width={260}
+                      value={issues.container ?? ''}
+                      onChange={setup.onContainer}
+                      disabled={issues.containers === null}
+                      options={
+                        issues.containers === null
+                          ? [{ value: '', label: text.readingTeams }]
+                          : issues.containers.map((one) => ({ value: one.id, label: one.name }))
+                      }
+                    />
+                  </SetupPick>
+                ))}
+                {issues.away[0] !== undefined && (
+                  <SetupConnectRow
+                    brand={issues.away[0].brand}
+                    title={issues.away[0].name}
+                    note={text.orOthers(issues.away.slice(1).map((one) => one.name))}
+                    action={
+                      <Menu
+                        label={text.connectTracker}
+                        trigger={
+                          <Button size="small" trailingIcon="chevronD">
+                            {text.connect}
+                          </Button>
+                        }
+                      >
+                        {issues.away.map((one) => (
+                          <MenuItem
+                            key={one.service}
+                            lead={<BrandMark brand={one.brand} size={14} />}
+                            onSelect={() => setup.connect(one.service)}
+                          >
+                            {one.name}
+                          </MenuItem>
+                        ))}
+                      </Menu>
                     }
                   />
-                </SetupPick>
-              ))}
-              {issues.away[0] !== undefined && (
-                <SetupConnectRow
-                  brand={issues.away[0].brand}
-                  title={issues.away[0].name}
-                  note={text.orOthers(issues.away.slice(1).map((one) => one.name))}
-                  action={
-                    <Menu
-                      label={text.connectTracker}
-                      trigger={
-                        <Button size="small" trailingIcon="chevronD">
-                          {text.connect}
-                        </Button>
-                      }
-                    >
-                      {issues.away.map((one) => (
-                        <MenuItem
-                          key={one.service}
-                          lead={<BrandMark brand={one.brand} size={14} />}
-                          onSelect={() => setup.connect(one.service)}
-                        >
-                          {one.name}
-                        </MenuItem>
-                      ))}
-                    </Menu>
-                  }
+                )}
+                <SetupPick
+                  checked={issues.value === 'none'}
+                  onChoose={() => setup.onIssues('none')}
+                  mark={<Icon name="close" size={14} />}
+                  title={text.none}
+                  note={text.noneNote}
                 />
-              )}
-              <SetupPick
-                checked={issues.value === 'none'}
-                onChoose={() => setup.onIssues('none')}
-                mark={<Icon name="close" size={14} />}
-                title={text.none}
-                note={text.noneNote}
-              />
-            </SetupPicks>
-          )}
-        </SetupSection>
+              </SetupPicks>
+            )}
+          </SetupSection>
+        )}
       </div>
     </fieldset>
   )

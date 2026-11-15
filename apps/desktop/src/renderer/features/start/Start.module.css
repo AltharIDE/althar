@@ -28,3 +28,16 @@
   gap: 8px;
 }
 
+
+/* The first project, only on this computer, under the hosts to connect: said, with the way to put it on one. */
+.staysHere {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 0;
+  color: var(--t-2);
+  font-size: 12.5px;
+}
+.staysHere > button {
+  margin-left: auto;
+}

@@ -1,10 +1,30 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { type ReactNode, useEffect, useState, useSyncExternalStore } from 'react'
 
 import type { AgentStatus, ProjectSummary } from '@althar/contracts'
-import { Button, CrashReportsLine, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState, Problem } from '@althar/ui'
+import {
+  BrandMark,
+  Button,
+  CrashReportsLine,
+  Icon,
+  keys,
+  Menu,
+  MenuItem,
+  modKey,
+  primaryDown,
+  RepositoryPick,
+  type RuntimeEntry,
+  RuntimeState,
+  Problem,
+} from '@althar/ui'
 import { Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
 import { brandOf, pinnedOf } from '../../shared/agents'
+import { reads } from '../../data/reads'
+import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
+import { type Draft, draftActions, draftsOf, freshDraft, inkOf } from '../newProject/draft'
+import { SetupSide } from '../newProject/SetupSide'
+import { useSetup } from '../newProject/useSetup'
 import { useServices } from '../../data/services'
 import { device } from '../../shared/device'
 import { HomePending } from '../../shared/Pending'
@@ -13,7 +33,7 @@ import { AgentSignIn } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { useConnections } from '../connections/useConnections'
-import { hostsCode, serviceOf } from '../connections/ways'
+import { hostsCode, serviceOf, serviceOfProduct } from '../connections/ways'
 import { BareBar } from '../tabs/TabsFrame'
 import s from './Start.module.css'
 import { useFirstProject } from './useFirstProject'
@@ -34,6 +54,10 @@ import { markToured, toured, useWelcoming, welcome } from './welcome'
 
 export const text = {
   removeAnyway: 'Remove anyway',
+  staysHere: (name: string) => `${name} is only on ${device.this}.`,
+  putOn: 'Put it on a host',
+  pushTo: 'Push to…',
+  newOn: (thing: string, host: string) => `A new ${thing} on ${host}`,
   /** Asks every agent again, after one couldn't be checked. */
   checkAgain: 'Check again',
   /** An agent signed in, on its row in the welcome. */
@@ -184,6 +208,59 @@ export function StartView({
   return home()
 }
 
+/** What the setup reads while the draft is being started: nothing chosen. */
+const HOLDING: Draft = { ...freshDraft(), id: '' }
+
+/**
+ * The first project's one repository, only on this computer: said so, with
+ * the way to put it on a code host from here, as its settings have it.
+ */
+function StaysHere({ projectId }: { projectId: string }) {
+  const { client } = useServices()
+  const connections = useConnections()
+  const repositories = useQuery(reads(client).repositories(projectId)).data ?? null
+  const [putting, setPutting] = useState<string | null>(null)
+  const [only] = repositories ?? []
+  if (repositories === null || repositories.length !== 1 || only === undefined || only.host !== null) return null
+  const { ready, hosts } = hostChoices(connections.list)
+  const chosen = ready.find((connection) => connection.id === putting)
+  if (chosen !== undefined)
+    return (
+      <PutOnHost
+        projectId={projectId}
+        repository={only.id}
+        name={only.name}
+        branch={only.branch ?? 'main'}
+        connection={{ id: chosen.id, name: chosen.name, product: chosen.product, thing: thingOn(serviceOfProduct(chosen.product)) }}
+        onDone={() => setPutting(null)}
+        onBack={() => setPutting(null)}
+      />
+    )
+  if (ready.length === 0) return null
+  return (
+    <p className={s.staysHere}>
+      <Icon name="folder" size={14} />
+      <span>{text.staysHere(only.name)}</span>
+      <Menu
+        label={text.putOn}
+        trigger={
+          <Button size="small" trailingIcon="chevronD">
+            {text.pushTo}
+          </Button>
+        }
+      >
+        {hosts
+          .filter((host) => host.connected)
+          .map((host) => (
+            <MenuItem key={host.id} lead={<BrandMark brand={host.brand} size={14} />} onSelect={() => setPutting(host.id)}>
+              {text.newOn(host.thing, host.name)}
+            </MenuItem>
+          ))}
+      </Menu>
+    </p>
+  )
+}
+
 /** Whether a key was typed into a form of its own, such as an account's key, or into a dialog or menu open over the screen. */
 const theirs = (target: EventTarget | null) =>
   target instanceof Element && target.closest('form, [role="dialog"], [data-radix-popper-content-wrapper]') !== null
@@ -217,8 +294,25 @@ function First({
     return () => welcome.end()
   }, [made])
 
+  // Where its code comes from: a folder, as this computer has them, or a clone, or a new repository, as a new project's page has them.
+  const services = useServices()
+  const store = draftsOf(services.client)
+  const draft = useSyncExternalStore(store.subscribe, store.get)
+  useEffect(() => {
+    if (store.get() === null) store.start()
+  }, [store])
+  const setup = useSetup(draft ?? HOLDING, store, connections.list)
+  const codeHosts = (connections.list?.connections ?? []).filter((connection) => {
+    const service = serviceOf(connections.list?.products ?? [], connection.product)
+    return connection.state === 'ready' && service !== undefined && hostsCode(service)
+  })
+  // A first run starts on a folder of this computer's, unless a code host is connected and there's nothing here to offer.
+  const way = draft?.way ?? (codeHosts.length > 0 && project.candidates !== null && project.candidates.length === 0 ? 'clone' : 'folder')
+  const folderWay = way === 'folder'
   const make = () =>
-    void project.make().then((one) => {
+    void (
+      folderWay || draft === null ? project.make() : draftActions(services).create(inkOf(draft, []), { publish: null, tracker: null })
+    ).then((one) => {
       if (one !== null) setMade(one)
     })
   const open = () => {
@@ -274,23 +368,78 @@ function First({
         onHelp={(id) => openGuide(model, id)}
         repositories={project.candidates}
         repositoryText={words.repositories}
-        picked={project.picked}
+        picked={
+          folderWay
+            ? project.picked
+            : way === 'clone'
+              ? setup.chosen === null
+                ? []
+                : [setup.chosen]
+              : draft?.fresh != null || draft?.folders.some((folder) => folder.came === 'new') === true
+                ? ['fresh']
+                : []
+        }
         onPick={project.toggle}
         onAdd={() => void project.add()}
-        onDrop={(files) => void project.addDropped(files)}
-        name={project.name}
-        onNameChange={project.rename}
+        onDrop={(files) => {
+          if (draft !== null) store.change(draft.id, (now) => ({ ...now, way: 'folder' }))
+          void project.addDropped(files)
+        }}
+        project={
+          draft === null ? undefined : (
+            <SetupSide
+              setup={{ ...setup, way }}
+              draft={draft}
+              creating={project.making || draft.creating}
+              onChoose={() => void project.add()}
+              onLeaveOut={() => undefined}
+              onReplace={() => undefined}
+              onStartFresh={() => void draftActions(services).startFresh()}
+              onChooseCloneInto={() => void draftActions(services).chooseCloneInto()}
+              onOpenProject={() => undefined}
+              dropping={false}
+              only="source"
+              minHeight={232}
+              folderWay={
+                <RepositoryPick
+                  repositories={project.candidates}
+                  picked={project.picked}
+                  onPick={project.toggle}
+                  onAdd={() => void project.add()}
+                  text={words.repositories}
+                />
+              }
+            />
+          )
+        }
+        name={folderWay || draft === null ? project.name : draft.name}
+        onNameChange={(next) => {
+          if (folderWay || draft === null) project.rename(next)
+          else store.change(draft.id, (now) => ({ ...now, name: next }))
+        }}
         onCreate={make}
-        creating={project.making}
+        creating={project.making || draft?.creating === true}
         made={made !== null}
         // Where the runtime didn't answer, asking again is the way on.
         onRecheck={() => void model.recheck()}
-        {...(project.error !== null
+        {...(folderWay && project.error !== null
           ? { error: { step: 'project' as const, said: project.error } }
-          : model.error !== null
-            ? { error: { step: 'agents' as const, said: model.error } }
-            : {})}
-        hosts={<ConnectionsView model={connections} only="hosts" />}
+          : !folderWay && draft?.error != null
+            ? { error: { step: 'project' as const, said: draft.error.said } }
+            : model.error !== null
+              ? { error: { step: 'agents' as const, said: model.error } }
+              : {})}
+        // A clone's code lives where it came from: no step for it. Otherwise, a host to connect, and the project put on it.
+        {...(way === 'clone'
+          ? {}
+          : {
+              hosts: (
+                <>
+                  <ConnectionsView model={connections} only="hosts" />
+                  {made !== null && <StaysHere projectId={made.id} />}
+                </>
+              ),
+            })}
         hostConnected={hostConnected}
         // Issues are a step only where a tracker can be connected; until the list is read, as though one can.
         {...(trackersOffered ? { trackers: <ConnectionsView model={connections} only="trackers" /> } : {})}
