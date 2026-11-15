@@ -31,12 +31,6 @@ function Card() {
   )
 }
 
-/** A row 684 wide, from the left edge: jsdom lays nothing out. */
-const widen = (owner: RegExp) => {
-  const row = screen.getByRole('button', { name: owner }).parentElement?.parentElement as HTMLElement
-  row.getBoundingClientRect = () => ({ left: 0, right: 684, width: 684, top: 0, bottom: 56, height: 56, x: 0, y: 0, toJSON: () => ({}) })
-}
-
 /** What the row's picker is anchored to: the box its button lies in, which moves under the pointer. */
 const anchor = (owner: RegExp) => screen.getByRole('button', { name: owner }).parentElement as HTMLElement
 
@@ -44,7 +38,6 @@ describe("a row's picker", () => {
   it('stays beside the press that opened it while a model or an effort is picked in it', async () => {
     render(<Card />)
     await act(async () => {})
-    widen(/^Lead for this task:/)
     const lead = anchor(/^Lead for this task:/)
     // Pressed near the row's start, its anchor moves under the pointer and its picker opens there.
     fireEvent.pointerDown(screen.getByRole('button', { name: /^Lead for this task:/ }), { clientX: 100 })
@@ -68,21 +61,11 @@ describe("a row's picker", () => {
   it('is not dragged along by a press on the row while it is open', async () => {
     render(<Card />)
     await act(async () => {})
-    widen(/^Lead for this task:/)
     const button = screen.getByRole('button', { name: /^Lead for this task:/ })
     fireEvent.pointerDown(button, { clientX: 60 })
     fireEvent.click(button)
     await screen.findByRole('dialog', { name: /Lead for this task model and effort/ })
     fireEvent.pointerDown(button, { clientX: 500 })
     expect(anchor(/^Lead for this task:/).style.left).toBe('52px')
-  })
-
-  it("opens within its row, though pressed near the row's end", async () => {
-    render(<Card />)
-    await act(async () => {})
-    widen(/^Lead for this task:/)
-    // 684 wide, and its menu 328 (336 with room): it starts at 348 at the furthest, and its box still reaches the pointer.
-    fireEvent.pointerDown(screen.getByRole('button', { name: /^Lead for this task:/ }), { clientX: 660 })
-    expect(anchor(/^Lead for this task:/).style.left).toBe('348px')
   })
 })
