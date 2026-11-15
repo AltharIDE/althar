@@ -3,6 +3,8 @@ import { doing, type Doing } from './actions'
 import { Failure } from './Failure'
 import type { ErrorMore } from './useTask'
 import {
+  BrandMark,
+  type Brand,
   Button,
   ChangeSet,
   ChangeState,
@@ -127,7 +129,8 @@ export const text = {
     const remotes = names.join(' and ')
     if (merged.some((one) => one.ahead > 0))
       return `Into ${into} on ${device.this}. ${remotes} ${names.length > 1 ? 'don’t' : 'doesn’t'} have it yet.`
-    if (merged.every((one) => one.remote === null)) return `Into ${into} on ${device.this}. It has no remote to push to.`
+    // Only on this computer, as the project is: merged is all there is to say.
+    if (merged.every((one) => one.remote === null)) return `Into ${into} on ${device.this}.`
     return `Into ${into}, and pushed to ${remotes}.`
   },
   pushHere: (merged: ReadonlyArray<TaskRepositoryMerged>) => {
@@ -138,6 +141,11 @@ export const text = {
       : 'Push to each remote'
   },
   resolve: 'Ask the lead to resolve it',
+  /** A repository only on this computer, put on a host from its card: the menu of where. */
+  putOn: 'Push to…',
+  putOnLabel: 'Put it on a host',
+  newOn: (thing: string, host: string) => `A new ${thing} on ${host}`,
+  connectFor: (host: string) => `Connect ${host}…`,
   /** A pull request in a sentence, and by name: in a task of several, whose. */
   pullRequest: (change: ChangeSummary, several: boolean) =>
     several ? `${nameOf(change.repository)}’s ${change.noun}` : `the ${change.noun}`,
@@ -223,6 +231,7 @@ export function Outputs({
   refused = null,
   onReplace,
   onBringIn,
+  putOnHost,
 }: {
   snapshot: ThreadSnapshot
   pending: boolean
@@ -241,6 +250,22 @@ export function Outputs({
   onPushBranch: () => void
   /** Opens where the project's code host is connected. */
   onConnect: () => void
+  /**
+   * For a task whose one repository is only on this computer: the code hosts
+   * it can go on (connected, or to connect first), and, once one is chosen,
+   * the form that puts it there, in the branch card's place.
+   */
+  putOnHost?: {
+    readonly hosts: ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly brand: Brand
+      readonly thing: string
+      readonly connected: boolean
+    }>
+    readonly onPut: (id: string) => void
+    readonly putting: ReactNode | null
+  }
   /**
    * Accepts its pull requests: each merged on its host in turn, at the head shown, the next once the one before has landed,
    * stopping at the first refused.
@@ -676,7 +701,29 @@ export function Outputs({
     task.here.length > 0 || branchOnly
       ? (() => {
           const merging = ready && task.here.length > 0 && toShip === 0
+          // Its one repository only on this computer: merged here, unless it's put on a host first, which the card offers quietly.
+          const onlyHere = hostless && task.here.length === 1 && task.here[0]?.remote == null && putOnHost !== undefined
+          if (onlyHere && putOnHost.putting !== null) return putOnHost.putting
           const actions: ReactNode[] = [
+            ...(onlyHere && putOnHost.hosts.length > 0
+              ? [
+                  <Menu
+                    key="put"
+                    label={text.putOnLabel}
+                    trigger={
+                      <Button trailingIcon="chevronD" disabled={doing.mergeHere === acting}>
+                        {text.putOn}
+                      </Button>
+                    }
+                  >
+                    {putOnHost.hosts.map((one) => (
+                      <MenuItem key={one.id} lead={<BrandMark brand={one.brand} size={14} />} onSelect={() => putOnHost.onPut(one.id)}>
+                        {one.connected ? text.newOn(one.thing, one.name) : text.connectFor(one.name)}
+                      </MenuItem>
+                    ))}
+                  </Menu>,
+                ]
+              : []),
             ...(first === undefined && shipAction !== null
               ? [shipAction]
               : opens
@@ -711,7 +758,7 @@ export function Outputs({
               {...(task.branch === null ? {} : { branch: task.branch })}
               {...(connects !== null
                 ? { note: waitsForShip ? text.connectShip(connects) : text.connectFirst(connects) }
-                : hostless
+                : hostless && !onlyHere
                   ? { note: text.noHost(task.here.find((repo) => repo.remote != null)?.remote?.name ?? null) }
                   : {})}
               prs={

@@ -926,10 +926,17 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.gen(function* () {
+              // A project's repository, by its id, or by its slug, as a task's names it.
+              const bySlug =
+                'grant' in at
+                  ? []
+                  : yield* sql<{
+                      id: string
+                    }>`SELECT id FROM repository_bindings WHERE project_id = ${at.projectId} AND slug = ${at.repositoryId} AND detached_at IS NULL`
               const root =
                 'grant' in at
                   ? yield* within(at.grant, at.path)
-                  : (yield* projects.repositories(at.projectId)).find((one) => one.id === at.repositoryId)?.path
+                  : (yield* projects.repositories(at.projectId)).find((one) => one.id === at.repositoryId || one.id === bySlug[0]?.id)?.path
               if (root === undefined || root === null)
                 return yield* new NotFound({ kind: 'repository', id: 'repositoryId' in at ? at.repositoryId : '' })
               const { host, info } = yield* connections.adapters(connectionId)

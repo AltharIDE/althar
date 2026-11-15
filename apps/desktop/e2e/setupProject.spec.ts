@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { chooseFolder, launch, openFirstProject, still } from './support'
+import { chooseFolder, launch, openFirstProject, startTask, still } from './support'
 
 /*
  * A project set up where it starts, on the New project page: its code from
@@ -156,6 +156,72 @@ test('clones a repository from GitHub, and puts a new one on GitHub as it is mad
     await expect(page.getByRole('heading', { name: 'Harbour', level: 1 })).toBeVisible()
     expect(git(fresh, 'rev-parse', 'main')).toBe(git(harbour, 'rev-parse', 'HEAD'))
     expect(git(harbour, 'rev-parse', '--abbrev-ref', 'main@{upstream}')).toBe('origin/main')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('a task finished in a project only on this computer merges here, or puts the project on GitHub from its card', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const meridian = repository(home, 'meridian')
+  // The empty repository the project goes to on GitHub: at its address there, which git pushes to a bare repository of the
+  // test's, as the person's git would to GitHub; its address stays GitHub's, as the project's remote.
+  const remote = join(home, 'remotes', 'meridian.git')
+  git(home, 'init', '--quiet', '--bare', remote)
+  const address = 'https://github.test/you/meridian.git'
+  writeFileSync(join(home, '.gitconfig'), `[url "${remote}"]\n\tpushInsteadOf = ${address}\n`, { flag: 'a' })
+  const { electronApp, page } = await launch(home, { ALTHAR_FAKE_REMOTE_MERIDIAN: address })
+  try {
+    await openFirstProject(electronApp, page, meridian)
+    // GitHub connected in place, from a new project's Clone, then that tab closed: nothing made.
+    await newProject(page, 'Scratch')
+    await page.getByRole('button', { name: 'Connect GitHub' }).click()
+    await page
+      .getByRole('group', { name: 'Ways to connect GitHub' })
+      .getByRole('button', { name: /Make a token/ })
+      .click()
+    await page.getByRole('button', { name: 'Paste it myself' }).click()
+    await page.getByLabel('Paste it').fill('github_pat_e2e')
+    await page.getByRole('button', { name: 'Check' }).click()
+    await page.getByRole('button', { name: 'Done' }).click()
+    // The walk ended, focus is back on the way chosen: the page still has the keyboard, and Escape closes it.
+    await expect(way(page, /^Clone/)).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+
+    await startTask(page, 'Add a station picker', '[lead:edit] [lead:finish]')
+    await page.getByRole('button', { name: /Open task/ }).click()
+    await expect(page.getByText('The task ends on its branch.')).toBeVisible()
+    await page
+      .getByRole('radiogroup', { name: 'Face' })
+      .getByRole('radio', { name: /Outputs/ })
+      .click()
+    const card = page.getByRole('article', { name: 'Add a station picker' })
+    // Nothing says it lacks a host: merging here is the way, and putting it on a host the quiet one beside it.
+    await expect(card.getByRole('button', { name: /^Merge into main on this/ })).toBeVisible()
+    await expect(card.getByText(/No code host/)).toHaveCount(0)
+    const putOn = card.getByRole('button', { name: 'Push to…' })
+    await expect(putOn).toBeVisible()
+    await card.screenshot({ path: 'test-results/setup-10-task-only-here.png', scale: 'css' })
+    await page.emulateMedia({ colorScheme: 'dark' })
+    await still(page)
+    await card.screenshot({ path: 'test-results/setup-10-task-only-here-dark.png', scale: 'css' })
+    await page.emulateMedia({ colorScheme: 'light' })
+
+    // On GitHub from the card: made there, main pushed, and the card opens its pull request there from then.
+    await putOn.click()
+    await page.getByRole('menuitem', { name: 'A new repository on GitHub' }).click()
+    const form = page.getByRole('heading', { name: 'A new repository on GitHub' })
+    await expect(form).toBeVisible()
+    await still(page)
+    await page.screenshot({ path: 'test-results/setup-11-task-put-on-github.png', scale: 'css' })
+    await page.getByRole('button', { name: 'Create and push' }).click()
+    await expect(page.getByRole('button', { name: 'Open a draft pull request' })).toBeVisible()
+    await expect(card.getByRole('button', { name: 'Push to…' })).toHaveCount(0)
+    expect(git(remote, 'rev-parse', 'main')).toBe(git(meridian, 'rev-parse', 'main'))
+    expect(git(meridian, 'config', 'remote.origin.url')).toBe(address)
+    await still(page)
+    await page.screenshot({ path: 'test-results/setup-12-task-on-github.png', scale: 'css' })
   } finally {
     await electronApp.close()
   }

@@ -72,7 +72,12 @@ export const text = {
 }
 
 /** A service's walk in, in place, with a way back to what was there before it. */
-function ConnectInPlace({ service, onDone }: { service: Service; onDone: () => void }) {
+function ConnectInPlace({ service, onDone: ended }: { service: Service; onDone: () => void }) {
+  // Ended, the walk goes, and focus with it: back to the way chosen, so the keyboard still has the page.
+  const onDone = () => {
+    ended()
+    requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-way][aria-checked="true"]')?.focus())
+  }
   const flow = useConnect({ service, onClose: onDone })
   return (
     <div className={s.inPlace}>

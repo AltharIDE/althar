@@ -112,7 +112,8 @@ export const prepareFolder = (opened: string, most = MOST_FILES): Effect.Effect<
     )
     if (root !== null) {
       const branch = (yield* currentBranch(root)) ?? 'main'
-      if (root !== path || Option.isSome(yield* commitOf(root, 'HEAD').pipe(Effect.option))) return { did: 'nothing', path: root, branch, files: 0 }
+      if (root !== path || Option.isSome(yield* commitOf(root, 'HEAD').pipe(Effect.option)))
+        return { did: 'nothing', path: root, branch, files: 0 }
       // A repository with no commit yet: what's in it is its first, on the branch it is on.
       const files = yield* commitWhatIsThere(root, most).pipe(Effect.tapError(() => Effect.ignore(git(root, 'reset', '--quiet'))))
       return { did: 'committed', path: root, branch, files }

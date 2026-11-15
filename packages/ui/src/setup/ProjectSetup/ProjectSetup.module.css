@@ -1,12 +1,11 @@
 .ownerName {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: end;
+  align-items: center;
   gap: 8px;
   width: 100%;
 }
 .slash {
-  padding-bottom: 8px;
   color: var(--t-4);
 }
 

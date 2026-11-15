@@ -4781,6 +4781,7 @@ const ProjectApi = RpcGroup.make(
     'PublishRepository',
     {
       at: Schema.Union([
+        /** A project's repository, by its id, or its slug, as a task's names it. */
         Schema.Struct({ projectId: Schema.String, repositoryId: Schema.String }),
         Schema.Struct({ grant: Schema.String, path: Schema.optional(Schema.String) }),
       ]),
