@@ -7,6 +7,7 @@ import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { vi } from 'vitest'
 
 import { Changes } from '../src/Changes'
 import { Connections } from '../src/Connections'
@@ -19,6 +20,25 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
+
+const removals = vi.hoisted(() => ({ failures: [] as Array<{ args: ReadonlyArray<string>; stderr: string }> }))
+vi.mock('../src/spawner', async (original) => {
+  const real = await original<typeof import('../src/spawner')>()
+  return {
+    ...real,
+    startApart: (command: import('../src/spawner').Command, cap?: number) => {
+      const running = real.startApart(command, cap)
+      if (command.command !== 'git' || !command.args.includes('worktree') || !command.args.includes('remove')) return running
+      return {
+        ...running,
+        result: running.result.then((result) => {
+          if (result.code !== 0) removals.failures.push({ args: command.args, stderr: result.stderr })
+          return result
+        }),
+      }
+    },
+  }
+})
 
 /*
  * A task holds as many changes as it needs (a task is a conversation plus
@@ -361,6 +381,7 @@ describe('a task with several changes', () => {
   })
 
   it.live('keeps two changes together before either ships, and drops one, its branch staying', () => {
+    removals.failures = []
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const task = yield* opened(working)
@@ -379,7 +400,7 @@ describe('a task with several changes', () => {
       )
       assert.strictEqual((started?.content as { step?: { by?: string } } | undefined)?.step?.by, 'lead')
       const together = yield* callTool(task.lead, 'join_changes', { change: 'Lane heights' })
-      assert.include(together, 'Kept “Lane heights” together', together)
+      assert.include(together, 'Kept “Lane heights” together', `${together}\n${JSON.stringify(removals.failures)}`)
       // Its commit is on the change that hadn't shipped's branch; its folder went, its branch stays.
       assert.strictEqual(git(colours?.path ?? '', 'log', '-1', '--format=%s'), 'Taller lanes')
       assert.isFalse(existsSync(second?.path ?? ''))
