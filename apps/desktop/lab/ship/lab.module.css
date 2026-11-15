@@ -48,6 +48,7 @@
 }
 .bar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   padding: 6px 10px;
@@ -61,6 +62,7 @@
   gap: 4px;
 }
 .bar button {
+  white-space: nowrap;
   padding: 4px 10px;
   border-radius: 6px;
   color: var(--t-2);
@@ -374,9 +376,109 @@
   display: flex;
   justify-content: center;
 }
+.howInner {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
 .unread {
+  display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--signal-fill);
+}
+
+/* the friendly modal: the stops as a path, an icon each joined by a line, then how to make it yours */
+.guide {
+  display: grid;
+  gap: 0;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.guideStop {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  padding-bottom: 14px;
+}
+.guideStop:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 28px;
+  bottom: 2px;
+  left: 13.5px;
+  width: 1px;
+  background: var(--line-2);
+}
+.guideIcon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--signal-dim);
+  color: var(--signal-ink);
+}
+.guideStop[data-skipped] .guideIcon {
+  background: var(--n-2);
+  color: var(--t-4);
+}
+.guideText {
+  display: grid;
+  gap: 2px;
+  padding-top: 4px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.guideText b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--t-1);
+  font-weight: 600;
+}
+.guideStop[data-skipped] .guideText {
+  color: var(--t-3);
+}
+.guideOff {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--n-2);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--t-3);
+}
+.guideMine {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  margin: 2px 0 0;
+  padding: 12px;
+  border-radius: var(--r-lg);
+  background: var(--n-2);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.guideMine b {
+  color: var(--t-1);
+  font-weight: 600;
+}
+.guideChevron {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--signal-fill);
+  color: var(--on-signal);
+}
+.guideAfter {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--t-3);
 }

@@ -4,6 +4,7 @@ import {
   Button,
   type ChangeSetProps,
   CheckState,
+  Dialog,
   HoverCard,
   Icon,
   LinkButton,
@@ -62,10 +63,14 @@ interface State {
   readonly intro: Intro
   /** Ship pressed the first time, where it explains itself then. */
   readonly pressed: boolean
+  /** The friendly modal open, and its quiet way in hidden by the person. */
+  readonly modal: boolean
+  readonly hidden: boolean
 }
 
 /** Ways Ship explains itself the first time, in place of a box under it. E cycles them. */
 export const INTROS = [
+  { key: 'modal', label: 'Quiet link, friendly modal' },
   { key: 'legend', label: 'Legend under the button' },
   { key: 'press', label: 'On the first press' },
   { key: 'pointer', label: 'Pointer' },
@@ -104,7 +109,9 @@ const start: State = {
   explained: new URLSearchParams(location.search).get('explained') === '1',
   offer: 'shown',
   look: (LOOKS.find((one) => one.key === new URLSearchParams(location.search).get('look'))?.key ?? 'twoAll') as Look,
-  intro: (INTROS.find((one) => one.key === new URLSearchParams(location.search).get('intro'))?.key ?? 'legend') as Intro,
+  intro: (INTROS.find((one) => one.key === new URLSearchParams(location.search).get('intro'))?.key ?? 'modal') as Intro,
+  modal: new URLSearchParams(location.search).get('modal') === '1',
+  hidden: new URLSearchParams(location.search).get('hidden') === '1',
   pressed: new URLSearchParams(location.search).get('pressed') === '1',
 }
 let state = start
@@ -115,7 +122,7 @@ const set = (change: Partial<State>) => {
 }
 export const resetOnto = () => set(start)
 export const setLook = (look: Look) => set({ look })
-export const setIntro = (intro: Intro) => set({ intro, explained: false, pressed: false })
+export const setIntro = (intro: Intro) => set({ intro, explained: false, pressed: false, modal: false, hidden: false })
 export const nextIntro = () => setIntro(INTROS[(INTROS.findIndex((one) => one.key === state.intro) + 1) % INTROS.length]!.key)
 export const nextLook = () => set({ look: LOOKS[(LOOKS.findIndex((one) => one.key === state.look) + 1) % LOOKS.length]!.key })
 export const toggleShared = () => set({ shared: !state.shared, chosen: null })
@@ -203,6 +210,7 @@ function HowFar({
       >
         Make this my default
       </MenuItem>
+      {now.intro === 'modal' && <MenuItem onSelect={() => set({ modal: true })}>How Ship works</MenuItem>}
     </Menu>
   )
 }
@@ -439,6 +447,18 @@ function Onto({ n, later = false }: { n: number; later?: boolean }) {
         {gotIt}
       </span>
     ) : null
+  ) : now.intro === 'modal' ? (
+    now.hidden ? null : (
+      <span className={s.howLink}>
+        <Button variant="quiet" size="small" onClick={() => set({ modal: true, explained: true })}>
+          <span className={s.howInner}>
+            <Icon name="info" size={13} />
+            How Ship works
+            {first && <span className={s.unread} aria-label="Not opened yet" />}
+          </span>
+        </Button>
+      </span>
+    )
   ) : now.intro === 'link' ? (
     <HowLink route={route} n={n} shared={now.shared} unread={first} />
   ) : !first ? null : now.intro === 'legend' ? (
@@ -479,7 +499,86 @@ function Onto({ n, later = false }: { n: number; later?: boolean }) {
         button
       )}
       {under}
+      {now.intro === 'modal' && now.modal && <ShipGuide route={route} n={n} shared={now.shared} />}
     </span>
+  )
+}
+
+/** What each stop does, said as to a friend: the friendly modal's words, and its icon. */
+const guideOf = (stop: (typeof BUTTON_STOPS)[number], route: Route, n: number, shared: boolean) => {
+  switch (stop) {
+    case 'Review':
+      return route.review
+        ? `A second model, GPT-6.1 Sol, reads your ${commits(n)}. If it finds something, the lead fixes it and it reads again.`
+        : 'Off for this Ship: the commits go up as they are. Handy when you’re sure.'
+    case 'Push':
+      return route.review
+        ? 'Once the review passes, the commits go up to PR #820. Nothing goes up before.'
+        : 'The commits go up to PR #820 straight away.'
+    case 'Ready':
+      return route.far === 'push'
+        ? 'Off for this Ship: the pull request stays a draft, for you to mark ready later.'
+        : 'The pull request is marked ready, so people can review it and GitHub runs every check.'
+    case 'Merge':
+      return route.far === 'merge'
+        ? 'Merged into main as soon as verify, the one check main requires, passes.'
+        : shared
+          ? 'Off here: main needs someone else’s approval, so merging is up to them.'
+          : 'Off for this Ship: merging stays yours, one press when you’re ready.'
+  }
+}
+
+/** The friendly modal: what Ship does, stop by stop, how to make it yours, and a way to hide its link or just close. */
+function ShipGuide({ route, n, shared }: { route: Route; n: number; shared: boolean }) {
+  const stops = stopsOf(route)
+  const close = () => set({ modal: false })
+  return (
+    <Dialog
+      title="How Ship works"
+      description="Ship takes your work toward main, one stop at a time, and stops wherever you’re needed."
+      width={480}
+      tall
+      onClose={close}
+      actions={
+        <>
+          <Button variant="quiet" onClick={() => set({ modal: false, hidden: true })}>
+            Hide this link
+          </Button>
+          <Button variant="signal" onClick={close}>
+            Got it
+          </Button>
+        </>
+      }
+    >
+      <ol className={s.guide}>
+        {BUTTON_STOPS.map((stop) => {
+          const on = stops.includes(stop)
+          return (
+            <li key={stop} className={s.guideStop} data-skipped={!on || undefined}>
+              <span className={s.guideIcon}>
+                <Icon name={ICON_OF[stop]} size={14} />
+              </span>
+              <span className={s.guideText}>
+                <b>
+                  {stop}
+                  {!on && <span className={s.guideOff}>Off</span>}
+                </b>
+                <span>{guideOf(stop, route, n, shared)}</span>
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+      <p className={s.guideMine}>
+        <span className={s.guideChevron}>
+          <Icon name="chevronD" size={12} />
+        </span>
+        <span>
+          <b>Make it yours.</b> The arrow beside Ship turns any stop on or off: skip the review when you’re sure, or stop before merging
+          when a friend should look first. Your choice can become your default there, and this guide stays in that menu.
+        </span>
+      </p>
+    </Dialog>
   )
 }
 

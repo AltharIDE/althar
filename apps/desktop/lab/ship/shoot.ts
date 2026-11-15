@@ -214,6 +214,34 @@ if (mode === 'cards') {
     await page.screenshot({ path: join(out, file), clip: { x: 610, y: 52, width: 646, height: Math.min(748, bottom - 52 + 14) } })
     process.stdout.write(`${file}\n`)
   }
+} else if (mode === 'modal') {
+  // The quiet link under Ship, the friendly modal it opens (on two routes), and, hidden, the arrow's menu that keeps it.
+  const cardTo = async (file: string) => {
+    const bottom = await page.evaluate((title) => {
+      const card = document.querySelector(`[data-lab-scene] article[aria-label="${title}"]`)
+      const files = card?.querySelector('[class*="files"]')
+      const over = [...document.querySelectorAll('[data-radix-popper-content-wrapper]')].map((one) => one.getBoundingClientRect().bottom)
+      return Math.max(files?.getBoundingClientRect().top ?? 400, ...over)
+    }, TITLE)
+    await page.screenshot({ path: join(out, file), clip: { x: 610, y: 52, width: 646, height: Math.min(748, bottom - 52 + 14) } })
+    process.stdout.write(`${file}\n`)
+  }
+  await open('b2', 'held', '&look=twoAll&intro=modal')
+  await cardTo('modal-link.png')
+  for (const [extra, file] of <Array<[string, string]>>[
+    ['', 'modal-open.png'],
+    ['&solo=1&route=push-merge', 'modal-open-nr.png'],
+  ]) {
+    await open('b2', 'held', `&look=twoAll&intro=modal&modal=1${extra}`)
+    await page.waitForSelector('[role="dialog"]')
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: join(out, file) })
+    process.stdout.write(`${file}\n`)
+  }
+  await open('b2', 'held', '&look=twoAll&intro=modal&hidden=1&explained=1')
+  await page.click('[data-lab-scene] button[aria-label="How far it goes"]')
+  await page.waitForTimeout(400)
+  await cardTo('modal-hidden-menu.png')
 } else {
   const [d = 'a', m = 'readyChecks', narrow] = rest
   await open(d, m, narrow === 'narrow' ? '&narrow=1' : '')
