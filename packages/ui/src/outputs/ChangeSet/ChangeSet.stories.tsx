@@ -173,6 +173,14 @@ export const Queued: Story = {
     await expect(within(canvasElement).queryByRole('button', { name: /Accept/ })).not.toBeInTheDocument()
   },
 }
+/** Accept and merge just pressed: Merging in its place at once, until the runtime says queued or merged. */
+export const Merging: Story = {
+  args: { ...ONE_REPO, actions: <MergeButton variant="signal" standing="merging" /> },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('status')).toHaveTextContent('Merging')
+    await expect(within(canvasElement).queryByRole('button', { name: /Accept/ })).not.toBeInTheDocument()
+  },
+}
 /** One pull request: its number is the one link to its host. */
 export const OneRepository: Story = {
   args: ONE_REPO,
