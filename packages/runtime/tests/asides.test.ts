@@ -16,9 +16,14 @@ import { until } from '@althar/testing/effect'
 
 import { connection, services } from '../src/Api'
 import { Busy } from '../src/Busy'
+import { Changes } from '../src/Changes'
 import { Folders } from '../src/Folders'
+import { Instance } from '../src/Instance'
 import { Secrets } from '../src/Secrets'
 import { Setups } from '../src/Setups'
+import { Plans } from '../src/Plans'
+import * as Runtime from '../src/Runtime'
+import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 
@@ -410,6 +415,63 @@ describe('an aside opened with +', () => {
         const [task] = yield* store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${aside.id}`))
         assert.strictEqual(task?.state, 'done')
         assert.isTrue((yield* asks()).every((row) => row.state === 'withdrawn'))
+        const card = (yield* client.GetBoard({ projectId: project.id })).tasks.find((one) => one.taskId === aside.id)
+        assert.strictEqual(card?.phase, 'settled')
+      }),
+    ),
+  )
+
+  it.live('clears an aside when a plan opens between the Done eligibility reads', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store, project } = yield* connected
+        const aside = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Which retry?',
+          description: 'Answer it. [lead:finish] [lead:answered]',
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          chat: true,
+        })
+        yield* until(store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${aside.id}`)), (rows) =>
+          rows.some((row) => row.state === 'succeeded'),
+        )
+        const changes = yield* store(Changes)
+        const plans = yield* store(Plans)
+        const instance = yield* store(Instance)
+        let reads = 0
+        let opened: string | undefined
+        const tasks = Context.get(
+          yield* store(
+            Layer.build(Layer.fresh(Tasks.layer)).pipe(
+              Effect.provideService(Changes, {
+                ...changes,
+                nothingBuilt: (taskId) =>
+                  Effect.gen(function* () {
+                    if (++reads === 2)
+                      opened = yield* plans.propose({
+                        projectId: project.id as ProjectId,
+                        taskId,
+                        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+                        reason: 'A plan arrived while Done was checked.',
+                        actorId: instance.personId,
+                        held: true,
+                      })
+                    return yield* changes.nothingBuilt(taskId)
+                  }),
+              }),
+            ),
+          ),
+          Tasks,
+        )
+        assert.isTrue(
+          yield* tasks.markDone({ envelope: yield* store(Runtime.envelope('task.mark_done', {})), taskId: aside.id, clear: true }),
+        )
+        assert.strictEqual(reads, 2)
+        const [task] = yield* store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${aside.id}`))
+        const [plan] = yield* store(sqlOf((sql) => sql<{ state: string }>`SELECT state FROM task_plans WHERE id = ${opened ?? ''}`))
+        assert.strictEqual(task?.state, 'done')
+        assert.strictEqual(plan?.state, 'declined')
         const card = (yield* client.GetBoard({ projectId: project.id })).tasks.find((one) => one.taskId === aside.id)
         assert.strictEqual(card?.phase, 'settled')
       }),
