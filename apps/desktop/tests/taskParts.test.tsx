@@ -303,6 +303,8 @@ describe('a task’s parts', () => {
   })
 
   describe('a merge under way, by its pull request', () => {
+    /** What a part says of itself: not the pressed Merge's own words, which say Merging too, in its place. */
+    const said = { ignore: '[role="status"] *, script, style' }
     const PASSED = { outcome: 'passed' as const, passed: 3, failed: 0, running: 0, total: 3, failing: [], list: [] }
     const first = change({ draft: false, head: 'aaa111', checks: PASSED, number: 714, short: 'PR #714' })
     const second = change({
@@ -342,12 +344,12 @@ describe('a task’s parts', () => {
       rerender(view(false))
       rerender(view(true))
       popover = await parts()
-      expect(await popover.findByText('Merging')).toBeTruthy()
+      expect(await popover.findByText('Merging', said)).toBeTruthy()
       expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1)
       // Gone through, though the read after it still says open: still Merging, never merged again.
       act(() => answers[0]!.resolve())
       await waitFor(() => expect(getThread.mock.calls.length).toBeGreaterThan(2))
-      expect(popover.getByText('Merging')).toBeTruthy()
+      expect(popover.getByText('Merging', said)).toBeTruthy()
       expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1)
       expect(merge).toHaveBeenCalledOnce()
     })
@@ -368,11 +370,11 @@ describe('a task’s parts', () => {
       // Pressed again meanwhile, nothing merges it twice.
       await userEvent.click(screen.getByRole('button', { name: 'Press elsewhere' }))
       const popover = await parts()
-      expect(await popover.findByText('Merging')).toBeTruthy()
+      expect(await popover.findByText('Merging', said)).toBeTruthy()
       expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1)
       expect(merge).toHaveBeenCalledOnce()
       act(() => answers[0]!.reject(new Error('GitHub refused the merge.')))
-      await waitFor(() => expect(popover.queryByText('Merging')).toBeNull())
+      await waitFor(() => expect(popover.queryByText('Merging', said)).toBeNull())
       expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(2)
     })
 
@@ -411,7 +413,7 @@ describe('a task’s parts', () => {
       await waitFor(() => expect(merge).toHaveBeenCalledOnce())
       const popover = await parts()
       // The first Merging; the second neither Merging nor to merge on its own while it waits for the first.
-      expect(popover.getAllByText('Merging')).toHaveLength(1)
+      expect(popover.getAllByText('Merging', said)).toHaveLength(1)
       expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
       act(() => {
         queued = true
@@ -445,7 +447,7 @@ describe('a task’s parts', () => {
       rerender(view(false))
       rerender(view(true))
       const popover = await parts()
-      expect(await popover.findByText('Merging')).toBeTruthy()
+      expect(await popover.findByText('Merging', said)).toBeTruthy()
       expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
       // The first goes in its queue: the press ends there, and the second is the person's again.
       act(() => {
@@ -487,7 +489,7 @@ describe('a task’s parts', () => {
       await waitFor(() => expect(merge).toHaveBeenCalledTimes(2))
       const popover = await parts()
       // Only the second, the one under way: the first's row no longer says Merging, from the read that found it merged.
-      expect(popover.getAllByText('Merging')).toHaveLength(1)
+      expect(popover.getAllByText('Merging', said)).toHaveLength(1)
       expect(popover.getByRole('button', { name: /PR #715/ }).textContent).toContain('Merging')
     })
   })
@@ -554,5 +556,29 @@ describe('a task’s parts', () => {
       await userEvent.click(screen.getByRole('button', { name: /^Parts, \d+/ }))
       expect(merge).toHaveBeenCalledOnce()
     })
+  })
+})
+
+describe('Merge, pressed from a part’s row', () => {
+  it('answers in its place, the row staying where it was while its host takes it', async () => {
+    const ready = change({
+      draft: false,
+      head: 'abc123',
+      checks: { outcome: 'passed', passed: 3, failed: 0, running: 0, total: 3, failing: [], list: [] },
+    })
+    const merge = vi.fn(() => new Promise<void>(() => undefined))
+    const { client } = fakeClient({ merge, getThread: vi.fn(async () => snapshot({ task: { ...base.task, changes: [ready] } })) })
+    withServices(<Task />, client)
+    const popover = await parts()
+    const pressed = popover.getByRole('button', { name: 'Merge' })
+    const row = pressed.parentElement as HTMLElement
+    await userEvent.click(pressed)
+    // Merging, in Merge's place, in the same row: nothing moved under the pointer, nothing to press again.
+    expect(row.isConnected).toBe(true)
+    expect(within(row).getByRole('status').textContent).toContain('Merging')
+    expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
+    // Opened, it says so in its actions too.
+    await userEvent.click(within(row).getByRole('button', { name: /PR/ }))
+    expect(popover.getByRole('status').textContent).toContain('Merging')
   })
 })

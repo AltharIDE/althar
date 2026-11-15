@@ -2,7 +2,7 @@ import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useMemo, us
 import { createPortal } from 'react-dom'
 import type { QueryClient } from '@tanstack/react-query'
 
-import type { BoardSnapshot, BoardTask, PlanStep, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import type { BoardSnapshot, BoardTask, PlanStep, SearchDocument, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton, Problem } from '@althar/ui'
 
 import { type Client, messageOf, newTaskId } from '../../data/client'
@@ -422,7 +422,28 @@ export function useAsides({
   }
 }
 
-/** The pills over the coordinator's conversation, flying one that left for the board to its card there. */
+/**
+ * What was said in each conversation of a project, a passage each, the latest first: from the passages the finder's catalog
+ * holds (every public message and report, the latest few thousand across the profile), by the aside's id, or null for the
+ * coordinator's. The search finds a conversation by any of them.
+ */
+export const passagesOf = (
+  documents: ReadonlyArray<SearchDocument>,
+  projectId: string | null,
+): ReadonlyMap<string | null, readonly string[]> => {
+  const said = documents
+    .filter((one) => one.kind === 'said' && one.projectId === projectId)
+    .sort((a, b) => (a.changedAt < b.changedAt ? 1 : a.changedAt > b.changedAt ? -1 : 0))
+  const found = new Map<string | null, string[]>()
+  for (const one of said) {
+    const passages = found.get(one.taskId) ?? []
+    for (const text of [one.title, one.body]) if (text.trim() !== '') passages.push(text)
+    found.set(one.taskId, passages)
+  }
+  return found
+}
+
+/** The heading over the coordinator's conversation, flying an aside that left for the board to its card there. */
 export function AsidesBar({
   scratch,
   open,
@@ -433,6 +454,8 @@ export function AsidesBar({
   onClear,
   board,
   now,
+  passages,
+  onSearching,
 }: {
   scratch: ReadonlyArray<BoardTask>
   open: AsideOpen
@@ -446,6 +469,10 @@ export function AsidesBar({
   /** Every task on the board, to tell one that left for the board from one cleared. */
   board: ReadonlyArray<BoardTask>
   now: number
+  /** What was said in each conversation (`passagesOf`), once the window has read it: the titles are found without it. */
+  passages?: ReadonlyMap<string | null, readonly string[]> | undefined
+  /** The search opens or shuts: the window reads what was said as it opens. */
+  onSearching?: ((open: boolean) => void) | undefined
 }) {
   const byAgent = useAgentRenames()
   const { recent, older } = asidesOf(scratch, now, {
@@ -455,13 +482,38 @@ export function AsidesBar({
   })
   const strip = useRef<HTMLDivElement>(null)
   useFlights(strip, scratch, board)
+  const [searching, setSearching] = useState(false)
+  useEffect(() => onSearching?.(searching), [searching, onSearching])
+  // ⌘J, from anywhere in the window, opens the search over every conversation, or shuts it. A project kept behind another
+  // tab runs no effects (KeptScreens' Activity), so this is the one in front; with its conversation's pane closed, it waits.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'j') return
+      if (strip.current?.checkVisibility?.() === false) return
+      event.preventDefault()
+      setSearching((was) => !was)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  // When each was last spoken in, as the search says it.
+  const dated = (one: Aside): Aside => {
+    const task = scratch.find((candidate) => candidate.taskId === one.id)
+    const at = task === undefined ? '' : ago(task.latest?.at ?? task.createdAt, new Date(now))
+    const words = passages?.get(one.id)
+    return { ...one, ...(at === '' ? {} : { ago: at }), ...(words === undefined ? {} : { words }) }
+  }
   return (
     <AsideTabs
       ref={strip}
       className={s.bar}
       mark={coordinatorSigned.mark}
-      asides={recent.map((one) => ({ ...one, byAgent: byAgent.get(one.id) ?? null }))}
-      older={older}
+      asides={recent.map((one) => ({ ...dated(one), byAgent: byAgent.get(one.id) ?? null }))}
+      older={older.map(dated)}
+      searching={searching}
+      onSearchingChange={setSearching}
+      {...(passages?.get(null) === undefined ? {} : { coordinatorWords: passages.get(null)! })}
+      searchKbd="⌘J"
       current={open.kind === 'coordinator' ? null : open.taskId}
       onPick={onPick}
       onNew={onNew}
@@ -472,8 +524,9 @@ export function AsidesBar({
 }
 
 /**
- * An aside that left Scratch for the board flies from its pill to its card
- * there, or to the Board tab with the board closed; one cleared just goes.
+ * An aside that left Scratch for the board flies from where the bar shows it
+ * (the heading, or its word among the latest) to its card there, or to the
+ * Board tab with the board closed; one cleared just goes.
  */
 function useFlights(strip: RefObject<HTMLDivElement | null>, scratch: ReadonlyArray<BoardTask>, board: ReadonlyArray<BoardTask>) {
   // Where each pill was, last drawn, and the pill: once it leaves, it is gone from the page, and only then copied to fly.

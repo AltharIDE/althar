@@ -314,10 +314,13 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       ...(failing
         ? { tone: 'bad' as const, act: { label: t.seeCheck } }
         : ready
-          ? { tone: 'you' as const, act: { label: mergeLabel(change), onClick: () => act.merge(change) } }
-          : merge === 'merging' || merge === 'queued'
-            ? { tone: 'live' as const }
-            : {}),
+          ? { tone: 'you' as const, act: { label: mergeLabel(change), onClick: () => act.merge(change), standing: null } }
+          : merge === 'merging'
+            ? // Pressed: the row stays, Merge answering the press in its place, until its host has it.
+              { tone: 'live' as const, act: { label: mergeLabel(change), standing: merge } }
+            : merge === 'queued'
+              ? { tone: 'live' as const }
+              : {}),
       facts: [
         [t.title, change.title],
         ...(line === undefined ? [] : lineFacts(line)),
@@ -337,12 +340,14 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
           }
         : {}),
       actions: [
-        ...(ready
+        ...(ready || merge === 'merging'
           ? [
               {
                 label: mergeLabel(change),
                 onClick: () => act.merge(change),
-                ...(change.canBypassQueue === true && change.unpushed === 0 && task.held === undefined && line?.waiting !== true
+                // Merge, and where it stands from the press on: pressed, it answers in its place.
+                standing: ready ? null : merge,
+                ...(ready && change.canBypassQueue === true && change.unpushed === 0 && task.held === undefined && line?.waiting !== true
                   ? { onBypassQueue: () => act.merge(change, true) }
                   : {}),
                 variant: 'signal' as const,

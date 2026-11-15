@@ -1,5 +1,6 @@
 /* A small change's card: ink, its route in a row; violet only on what waits on the person */
 .card {
+  position: relative;
   padding: 15px 18px 16px;
 }
 .named {
