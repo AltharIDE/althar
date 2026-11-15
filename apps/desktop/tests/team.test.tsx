@@ -7,7 +7,7 @@ import { Room } from '@althar/ui'
 
 import { BoardView } from '../src/renderer/features/board/BoardView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
-import { canHold, ChangeTeam, TeamMenu, teamChangeOf, useTeamed } from '../src/renderer/features/team/Team'
+import { canHold, ChangeTeam, TeamMenu, TeamOf, teamChangeOf, useTeamed } from '../src/renderer/features/team/Team'
 import { agents, card, change, changed, coordinatorSnapshot, fakeClient, items } from './fixtures'
 import { servicesFor, withServices } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
@@ -437,8 +437,8 @@ describe('changing a plan’s team before it begins', () => {
     const { client } = fakeClient({
       holdPlan: vi.fn(
         () =>
-          new Promise<void>((resolve) => {
-            finishHold = resolve
+          new Promise<boolean>((resolve) => {
+            finishHold = () => resolve(true)
           }),
       ),
     })
@@ -471,6 +471,61 @@ describe('changing a plan’s team before it begins', () => {
     withServices(<ChangeTeam projectId="p1" task={counting} agents={agents} onClose={vi.fn()} />, client)
     await waitFor(() => expect(client.holdPlan).toHaveBeenCalledWith('plc'))
     expect(within(screen.getByRole('dialog')).getByRole('button', { name: 'Start' })).toBeTruthy()
+  })
+
+  it('saves through the running task where its hold found it begun already, with no Start left', async () => {
+    const { client } = fakeClient({ holdPlan: vi.fn(async () => false) })
+    // The board still says planned: the small change started between its reading and the hold.
+    const startedMeanwhile = task({
+      taskId: 'sm',
+      phase: 'planned',
+      plan: { ...card().plan!, id: 'pls', startsAt: null, preset: 'Small change' },
+    })
+    withServices(<ChangeTeam projectId="p1" task={startedMeanwhile} agents={agents} onClose={vi.fn()} />, client)
+    const dialog = within(screen.getByRole('dialog'))
+    await waitFor(() => expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull())
+    expect(dialog.getByText('From its next turn.')).toBeTruthy()
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.changeTeam).toHaveBeenCalledWith('sm', [expect.objectContaining({ key: 'review', skipped: true })]))
+    expect(client.changePlan).not.toHaveBeenCalled()
+  })
+
+  it('saves through the running task even if the person presses Save before the hold answers', async () => {
+    let answer: (held: boolean) => void = () => {}
+    const { client } = fakeClient({ holdPlan: vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve))) })
+    const startedMeanwhile = task({
+      taskId: 'sm',
+      phase: 'planned',
+      plan: { ...card().plan!, id: 'pls', startsAt: null, preset: 'Small change' },
+    })
+    withServices(<ChangeTeam projectId="p1" task={startedMeanwhile} agents={agents} onClose={vi.fn()} />, client)
+    const dialog = within(screen.getByRole('dialog'))
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    act(() => answer(false))
+    await waitFor(() => expect(client.changeTeam).toHaveBeenCalled())
+    expect(client.changePlan).not.toHaveBeenCalled()
+  })
+
+  it('holds a small change started with its first step waiting for a place, and offers Start, until the board reads it held', async () => {
+    const { client } = fakeClient()
+    const waiting = { ...queued, plan: { ...queued.plan!, preset: 'Small change' } }
+    withServices(<ChangeTeam projectId="p1" task={waiting} agents={agents} onClose={vi.fn()} />, client)
+    await waitFor(() => expect(client.holdPlan).toHaveBeenCalledWith('plq'))
+    const dialog = within(screen.getByRole('dialog'))
+    await waitFor(() => expect(dialog.getByRole('button', { name: 'Start' })).toBeTruthy())
+    await userEvent.click(dialog.getByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith('plq'))
+  })
+
+  it('leaves another task waiting for a place as it was: changed, not held', async () => {
+    const { client } = fakeClient()
+    withServices(<ChangeTeam projectId="p1" task={queued} agents={agents} onClose={vi.fn()} />, client)
+    expect(within(screen.getByRole('dialog')).queryByRole('button', { name: 'Start' })).toBeNull()
+    expect(client.holdPlan).not.toHaveBeenCalled()
   })
 
   it('says so, rather than closing or going with what was picked, once it started meanwhile', async () => {
@@ -605,7 +660,9 @@ describe("a small change's card in the coordinator's thread", () => {
       vi.fn(() => pending),
     )
     await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
-    expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull()
+    // At once, it says it reads; the team is there once the board has.
+    expect(within(screen.getByRole('dialog', { name: 'Team' })).getByText('Reading its team…')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Implement:/ })).toBeNull()
     act(() => read(board([current])))
     expect(await screen.findByRole('dialog', { name: 'Team' })).toBeTruthy()
   })
@@ -625,5 +682,48 @@ describe("a small change's card in the coordinator's thread", () => {
     expect(dialog.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
     expect(dialog.queryByRole('button', { name: /^Review:/ })).toBeNull()
     expect(dialog.queryByRole('button', { name: 'Add a review' })).toBeNull()
+  })
+})
+
+describe('a team opened before the board has read', () => {
+  const open = (client: ReturnType<typeof fakeClient>['client'], onClose = vi.fn()) =>
+    withServices(<TeamOf projectId="p1" taskId={held.taskId} agents={agents} onClose={onClose} />, client)
+
+  it('shows at once that it reads, and becomes the team once the task is read', async () => {
+    let read: (snapshot: BoardSnapshot) => void = () => {}
+    const pending = new Promise<BoardSnapshot>((resolve) => (read = resolve))
+    const { client } = fakeClient({ getBoard: vi.fn(() => pending) })
+    open(client)
+    const dialog = within(screen.getByRole('dialog', { name: 'Team' }))
+    expect(dialog.getByText('Reading its team…')).toBeTruthy()
+    expect(dialog.getByRole('button', { name: 'Close' })).toBeTruthy()
+    act(() => read(board([held])))
+    expect(await screen.findByRole('button', { name: /^Implement:/ })).toBeTruthy()
+  })
+
+  it('says why where the board can’t be read, and reads it again on Try again', async () => {
+    let attempts = 0
+    const { client } = fakeClient({
+      getBoard: vi.fn(async () => {
+        attempts += 1
+        if (attempts === 1) throw new ApiError({ reason: 'Busy', message: 'The board is out of reach.' })
+        return board([held])
+      }),
+    })
+    open(client)
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect((await dialog.findByRole('alert')).textContent).toContain('The board is out of reach.')
+    await userEvent.click(dialog.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('button', { name: /^Implement:/ })).toBeTruthy()
+  })
+
+  it('says the task is no longer there, with a way out, where it is gone before the first read', async () => {
+    const onClose = vi.fn()
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board([running])) })
+    open(client, onClose)
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect((await dialog.findByRole('status')).textContent).toBe('This task is no longer available to change.')
+    await userEvent.click(dialog.getByRole('button', { name: 'Close' }))
+    expect(onClose).toHaveBeenCalledOnce()
   })
 })
