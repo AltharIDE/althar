@@ -605,9 +605,8 @@ export const PlainWithFiles: Story = {
   args: PLAIN_FILES,
   play: async ({ canvasElement }) => {
     const card = within(canvasElement)
-    // The name whole, and the folder before it, which gives way first.
-    await expect(card.getByText('release-notes-0.4.md')).toBeInTheDocument()
-    await expect(card.getByText('docs/releases/partners/')).toBeInTheDocument()
+    // The name whole, and its folders before it, which give way first, whole.
+    await expect(card.getByTitle('docs/releases/partners/release-notes-0.4.md')).toHaveTextContent(/release-notes-0\.4\.md$/)
   },
 }
 /** Waiting for a free agent before any work: only its title, its status and why. */

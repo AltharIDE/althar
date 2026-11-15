@@ -40,14 +40,27 @@
   white-space: nowrap;
 }
 .meta {
+  display: flex;
   font-size: 11.5px;
   color: var(--t-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* the folder gives way first, by whole folders; then the facts, at their end */
 .dir {
+  display: flex;
+  flex: 0 1000 auto;
+  min-width: 4ch;
   font: 11px var(--mono);
+}
+.sep {
+  flex: none;
+  white-space: pre;
+}
+.facts {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .actions {
   display: flex;

@@ -1,0 +1,32 @@
+/*
+ * The room it takes is what the path needs, never more, and it gives way
+ * where its container is narrower. The path is in it twice, in one cell:
+ * whole and hidden, so the room it asks for stays the same as it shortens,
+ * and as shown, with the folders that fit.
+ */
+.path {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.whole,
+.shown {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+.whole > span::before {
+  content: attr(data-text);
+}
+.whole {
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+/* where even the end doesn't fit, it is the end of the name that gives way, as the last thing to */
+.shown {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

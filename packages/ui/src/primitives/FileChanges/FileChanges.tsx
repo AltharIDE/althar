@@ -1,5 +1,6 @@
 import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
+import { Path } from '../Path/Path'
 import s from './FileChanges.module.css'
 
 /*
@@ -36,18 +37,10 @@ export function FileChanges({ files, most, onOpen, className, text }: FileChange
   return (
     <ul className={cx(s.files, className)}>
       {files.map((f) => {
-        const cut = f.path.lastIndexOf('/') + 1
         const inner = (
           <>
-            {/* Narrow, its folders give way before its name, from the left: …unit/middleware.test.js. */}
-            <span className={s.path} title={f.path}>
-              {cut > 0 && (
-                <span className={s.dir}>
-                  <span className={s.dirText}>{f.path.slice(0, cut)}</span>
-                </span>
-              )}
-              <span className={cx(s.name, cut > 0 && s.inDir)}>{f.path.slice(cut)}</span>
-            </span>
+            {/* Narrow, whole folders give way before its name, from the left: …/unit/middleware.test.js. */}
+            <Path path={f.path} className={s.path} dirClassName={s.dir} />
             <Delta add={f.add} del={f.del} />
             <span className={s.bar} style={cssVars({ '--w': (f.add + f.del) / scale, '--a': f.add / Math.max(1, f.add + f.del) })}>
               <i />

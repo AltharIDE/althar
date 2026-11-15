@@ -74,7 +74,7 @@ export const Files: Story = {
     const chips = within(canvasElement)
     await expect(chips.getAllByRole('listitem')).toHaveLength(3)
     // A file at the top of its repository has no folder to give way.
-    await expect(chips.getByText('CHANGELOG.md')).toBeInTheDocument()
+    await expect(chips.getByTitle('CHANGELOG.md')).toHaveTextContent('CHANGELOG.md')
   },
 }
 export const Pictures: Story = {

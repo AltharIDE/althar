@@ -1,6 +1,7 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import { CopyButton } from '../../primitives/CopyButton/CopyButton'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
@@ -132,8 +133,8 @@ function Folder({ path }: { path: string }) {
   const folder = folderOf(path).replace(/\/$/, '')
   if (folder === '') return null
   return (
-    <span className={s.titleFolder} title={path}>
-      <bdi>{folder}</bdi>
+    <span className={s.titleFolder}>
+      <Path path={folder} />
     </span>
   )
 }
@@ -216,11 +217,8 @@ function Meta({
     <div className={s.meta}>
       {path !== null && (
         <span className={s.pathRow}>
-          <span className={s.path} title={path}>
-            <bdi>
-              {folderOf(path)}
-              <strong>{nameOf(path)}</strong>
-            </bdi>
+          <span className={s.path}>
+            <Path path={path} nameClassName={s.pathName} />
           </span>
           {/* Beside the path it copies, not in the head, where the file's name needs the room. */}
           <CopyButton ghost value={copyOf(found)} text={{ copy: t.copy }} className={s.copy} />
@@ -307,9 +305,7 @@ function Choices({ paths, suffix = '', onGo }: { paths: readonly string[]; suffi
         <li key={path}>
           <button type="button" className={s.choice} onClick={() => onGo(`${path}${suffix.replace('–', '-')}`)}>
             <Icon name="file" size={12} />
-            <span className={s.choiceFolder}>{folderOf(path)}</span>
-            {nameOf(path)}
-            {suffix}
+            <Path path={`${path}${suffix}`} dirClassName={s.choiceFolder} />
           </button>
         </li>
       ))}

@@ -154,14 +154,14 @@
   font: 12px/1.6 var(--mono);
 }
 .dir {
+  display: flex;
   flex: none;
   max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre;
   color: var(--t-3);
 }
 .dir::after {
+  flex: none;
   content: ' ›';
   color: var(--t-4);
 }

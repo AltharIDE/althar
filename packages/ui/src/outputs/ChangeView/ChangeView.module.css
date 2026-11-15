@@ -133,10 +133,6 @@ div.made {
   background: var(--hover-paper);
 }
 .path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font: 12px/1.5 var(--mono);
 }
 .dir {

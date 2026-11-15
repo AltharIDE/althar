@@ -3,6 +3,7 @@ import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
+import { Path } from '../../primitives/Path/Path'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { Button } from '../../primitives/Button/Button'
 import { Delta } from '../../primitives/FileChanges/FileChanges'
@@ -154,11 +155,6 @@ const WEIGHTS: readonly FindingWeight[] = ['blocking', 'major', 'minor', 'nit']
 export const worstFirst = <T extends { readonly weight: FindingWeight }>(findings: readonly T[]): T[] =>
   findings.toSorted((a, b) => WEIGHTS.indexOf(a.weight) - WEIGHTS.indexOf(b.weight))
 
-const split = (path: string) => {
-  const cut = path.lastIndexOf('/') + 1
-  return { dir: path.slice(0, cut), name: path.slice(cut) }
-}
-
 /** A task's change over the whole window. A modal dialog: mount it to open it. */
 export function ChangeView({
   branch,
@@ -306,7 +302,6 @@ export function ChangeView({
                     </li>
                   )}
                   {files.map((file, index) => {
-                    const { dir, name } = split(file.path)
                     const on = !showingLoose && file.path === current?.path
                     const status = file.untouched === true ? t.untouched : file.status === 'modified' ? null : t.status[file.status]
                     const here = findings.filter((one) => one.path === file.path)
@@ -319,10 +314,7 @@ export function ChangeView({
                           aria-current={on ? 'true' : undefined}
                           onClick={() => pick(file.path)}
                         >
-                          <span className={s.path}>
-                            <span className={s.dir}>{dir}</span>
-                            {name}
-                          </span>
+                          <Path path={file.path} className={s.path} dirClassName={s.dir} />
                           <Delta {...counts(file.add, file.del)} className={s.delta} />
                           {(status !== null || file.uncommitted) && (
                             <span className={s.meta}>

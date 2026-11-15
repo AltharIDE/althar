@@ -3,6 +3,7 @@ import { type ReactNode, useState } from 'react'
 import { Brand } from '../../foundations/brands/brands'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import { MergeButton } from '../../primitives/MergeButton/MergeButton'
 import { KeyValues } from '../../primitives/KeyValues/KeyValues'
@@ -83,7 +84,7 @@ export function PartLines({ lines, log = false }: { lines: ReadonlyArray<readonl
     <ul className={s.files}>
       {lines.map(([path, delta]) => (
         <li key={path}>
-          <span className={delta === '' ? s.plain : s.path}>{path}</span>
+          {delta === '' ? <span className={s.plain}>{path}</span> : <Path path={path} className={s.path} />}
           <span className={s.delta}>{delta}</span>
         </li>
       ))}

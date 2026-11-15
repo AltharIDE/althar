@@ -6,6 +6,7 @@ import { BrandMark } from '../../foundations/Marks/Marks'
 import { commandGlance } from '../../lib/commandGlance'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { Path } from '../../primitives/Path/Path'
 import { Code } from '../../primitives/Code/Code'
 import { Delta } from '../../primitives/FileChanges/FileChanges'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
@@ -107,14 +108,10 @@ export function FileChips({ files, className, ...rest }: FileChipsProps) {
   return (
     <ul className={cx(s.list, className)} {...rest}>
       {files.map((file) => {
-        const cut = file.path.lastIndexOf('/') + 1
         return (
           <li key={file.path} className={s.chip}>
             <Icon name="file" size={12} />
-            <span className={s.path}>
-              {cut > 0 && <span className={s.folder}>{file.path.slice(0, cut)}</span>}
-              <span className={s.file}>{file.path.slice(cut)}</span>
-            </span>
+            <Path path={file.path} className={s.path} dirClassName={s.folder} nameClassName={s.file} />
             {file.add != null && <Delta add={file.add} className={s.delta} />}
           </li>
         )
