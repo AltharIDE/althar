@@ -8,6 +8,19 @@ import { ANSWERS_WITHIN, landings, notePress, takePress } from '../src/primitive
 import { MergeFeel, type MergeFeelStage } from '../src/primitives/MergeFeel/MergeFeel'
 
 /*
+ * Each test is a window of its own: its landings make a spell of their own.
+ * The window's spell is one for every card, so a landing in one test would
+ * otherwise make the next test's, run within the spell, a quiet one.
+ */
+const spell = vi.hoisted(() => ({ fresh: () => undefined as void }))
+vi.mock('../src/primitives/MergeFeel/feel', async (real) => {
+  const feel = await real<typeof import('../src/primitives/MergeFeel/feel')>()
+  let landing = feel.landings()
+  spell.fresh = () => void (landing = feel.landings())
+  return { ...feel, landing: (seen: boolean) => landing(seen) }
+})
+
+/*
  * What a merge feels like where it is pressed (feel.ts): the press answered
  * in Merge's place, the dot into where it stands, the landing, loud only for
  * the first of many, and only fading with less motion. A browser plays the
@@ -54,6 +67,7 @@ const lessMotion = () =>
   })
 
 afterEach(() => {
+  spell.fresh()
   // Presses nothing answered are forgotten, as they are a moment later.
   takePress(performance.now() + 10 * ANSWERS_WITHIN)
   Reflect.deleteProperty(HTMLElement.prototype, 'animate')
