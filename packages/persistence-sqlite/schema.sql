@@ -1357,7 +1357,7 @@ CREATE TABLE errand_steps (
     target_branch TEXT,
     request TEXT NOT NULL CHECK (json_valid(request)),
     waits TEXT NOT NULL CHECK (json_valid(waits)),
-    state TEXT NOT NULL CHECK (state IN ('waiting', 'done')),
+    state TEXT NOT NULL CHECK (state IN ('waiting', 'done')), says TEXT,
     FOREIGN KEY (errand_id, project_id) REFERENCES errands(id, project_id),
     FOREIGN KEY (task_id, project_id) REFERENCES tasks(id, project_id),
     PRIMARY KEY (errand_id, step_key),

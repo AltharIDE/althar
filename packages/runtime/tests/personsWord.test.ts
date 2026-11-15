@@ -308,7 +308,10 @@ describe('the person’s word through the tool boundary', () => {
       const items = yield* s.sql<{
         content: string
       }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId} AND kind = 'notice'`
-      assert.isTrue(items.some((i) => i.content.includes('Kept an errand')))
+      // Said in words, as the person reads them: no tool name, wait kind or head.
+      const kept = items.find((i) => i.content.includes('Kept your errand'))?.content ?? ''
+      assert.include(kept, 'Kept your errand: test asked once its checks pass')
+      assert.notInclude(JSON.parse(kept).title, 'head-a')
       assert.isTrue(items.some((i) => i.content.includes('Errand done')))
     }).pipe(Effect.provide(runtime())),
   )
@@ -330,6 +333,47 @@ describe('the person’s word through the tool boundary', () => {
       const fresh = yield* s.say({ kind: 'window' }, 'Go ahead now')
       assert.match(yield* callTool(s.access, 'resume_errand', { errand: id, message: fresh }), /^Resumed the errand/)
       assert.match(yield* callTool(s.access, 'cancel_errand', { errand: id, message: fresh }), /^Called off the errand/)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('a kept errand’s lines read in its own plain words, kept through its tool, from the store, to its end', () =>
+    Effect.gen(function* () {
+      const s = yield* setup()
+      const message = yield* s.say({ kind: 'window' }, 'Once it’s green, do the test action, then again on the second')
+      const step = { ...s.step, request: { method: 'test' } }
+      const kept = yield* callTool(s.access, 'keep_errand', {
+        message,
+        steps: [
+          { ...step, says: 'Do the test action', waits: [{ kind: 'checks', target: 'head-a', says: 'its checks pass' }] },
+          { ...step, key: 'second', target: 'repo/#2', says: 'Do it again on the second', waits: [{ kind: 'checks', target: 'head-a' }] },
+        ],
+      })
+      const id = /errand_\w+/.exec(kept)?.[0] ?? kept
+      yield* callTool(s.access, 'pause_errand', { errand: id, reason: 'The person said to wait.' })
+      yield* callTool(s.access, 'resume_errand', { errand: id, message: yield* s.say({ kind: 'window' }, 'Go ahead now') })
+      // Each step's words come back from the store as each step goes.
+      yield* s.say({ kind: 'internal' })
+      assert.strictEqual(yield* callTool(s.access, 'test_asked', { errandId: id, step: 'first' }), 'Did it once.')
+      assert.strictEqual(yield* callTool(s.access, 'test_asked', { errandId: id, step: 'second', target: 'repo/#2' }), 'Did it once.')
+      const notices = (yield* s.sql<{
+        content: string
+      }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId} AND kind = 'notice' ORDER BY sequence`).map(
+        (row) => JSON.parse(row.content) as { title: string; details?: string },
+      )
+      assert.deepStrictEqual(
+        notices.map((notice) => notice.title),
+        [
+          'Kept your errand: do the test action once its checks pass, then do it again on the second',
+          'Errand on hold: the person said to wait',
+          'Errand resumed: you said “Go ahead now”',
+          'Did it once. Next: do it again on the second',
+          'Did it once. Errand done',
+        ],
+      )
+      assert.strictEqual(
+        notices[0]?.details,
+        'You said: “Once it’s green, do the test action, then again on the second”\n\n1. Do the test action once its checks pass\n2. Do it again on the second once its checks pass',
+      )
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -606,7 +650,7 @@ describe('the person’s word through the tool boundary', () => {
         content: string
       }>`SELECT content FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`
       assert.lengthOf(lines, 2)
-      assert.isTrue(lines.some((line) => line.content.includes('checks head-a')))
+      assert.isTrue(lines.some((line) => line.content.includes('once its checks pass')))
       assert.isTrue(lines.every((line) => !line.content.includes('[{')))
     }).pipe(Effect.provide(slowDays())),
   )

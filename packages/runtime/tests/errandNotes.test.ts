@@ -1,6 +1,6 @@
 import { assert, describe, it } from '@effect/vitest'
 
-import { DETAILS_MOST, failedNote, labelOf, stepNote } from '../src/errandNotes'
+import { afterStep, DETAILS_MOST, failedNote, keptNote, labelOf, stepNote, stillNote } from '../src/errandNotes'
 
 const PR = 'https://github.com/AltharIDE/althar/pull/698'
 /** A host's answer as the tools keep it: its status and a body full of urls, as the person's screencast showed. */
@@ -112,5 +112,77 @@ describe('a step that did not go through says why in its line', () => {
   it('an unknown outcome says it is not known', () => {
     const note = failedNote('mark_pull_request_draft', PR, {}, 'The host did not answer.', true)
     assert.strictEqual(note.title, 'Not sure this went through: marked #698 as a draft — The host did not answer.')
+  })
+})
+
+describe('a kept errand reads in plain words', () => {
+  const merge = {
+    tool: 'merge_pull_request',
+    target: 'AltharIDE/althar pull request from althar/release-prep-althar-0-9-0',
+    says: 'Merge the 0.9.0 pull request',
+    waits: [
+      { kind: 'pull_request_opened', says: 'it’s open' },
+      { kind: 'checks_passed', says: 'its checks pass' },
+    ],
+  }
+  const tag = { tool: 'push_tag', target: 'AltharIDE/althar v0.9.0', says: 'Tag v0.9.0', waits: [{ kind: 'merged' }] }
+
+  it('says each step in its words, in order, with what the first waits for, and folds the ask and every wait', () => {
+    const note = keptNote('Once 0.9.0 is ready and on prs, merge for me then tag', [merge, tag])
+    assert.strictEqual(note.title, 'Kept your errand: merge the 0.9.0 pull request once it’s open and its checks pass, then tag v0.9.0')
+    assert.strictEqual(
+      note.details,
+      'You said: “Once 0.9.0 is ready and on prs, merge for me then tag”\n\n1. Merge the 0.9.0 pull request once it’s open and its checks pass\n2. Tag v0.9.0 once it’s merged',
+    )
+  })
+
+  it('without the agent’s words, says the tool and target short, and the waits Althar knows', () => {
+    const note = keptNote('merge it', [{ tool: 'merge_pull_request', target: PR, waits: [{ kind: 'merge_line' }, { kind: 'checks' }] }])
+    assert.strictEqual(note.title, 'Kept your errand: merge #698 once its turn to merge comes and its checks pass')
+    assert.deepStrictEqual(note.links, [{ label: '#698', url: PR }])
+    assert.notMatch(note.title, /merge_line|checks_|AltharIDE/)
+  })
+
+  it('without the agent’s words, never says a target that only a branch or a repository names', () => {
+    const steps = [
+      { ...merge, says: undefined, waits: [{ kind: 'pull_request_opened' }, { kind: 'checks_passed' }] },
+      { ...tag, says: undefined },
+    ]
+    const note = keptNote('Once 0.9.0 is ready and on prs, merge for me then tag', steps)
+    assert.strictEqual(note.title, 'Kept your errand: merge the pull request once it’s open and its checks pass, then tag v0.9.0')
+    assert.notMatch(`${note.title}\n${(note.details ?? '').split('\n').slice(1).join('\n')}`, /AltharIDE|release-prep|althar\//)
+    // A task's pull request, as errands bind it before it exists, and a tag named in the tool's arguments.
+    const task = [
+      { tool: 'merge_pull_request', target: 'task:release-prep-althar-0-9-0', waits: [{ kind: 'task_pull_request' }] },
+      { tool: 'push_tag', target: 'AltharIDE/althar tag', request: { tag: 'v0.9.0' }, waits: [{ kind: 'task_merged' }] },
+    ]
+    assert.strictEqual(
+      keptNote('merge then tag', task).title,
+      'Kept your errand: merge the pull request once its pull request is ready, then tag v0.9.0',
+    )
+    assert.strictEqual(afterStep({ title: 'Merged #958', links: [] }, task[1]).title, 'Merged #958. Next: tag v0.9.0')
+    assert.strictEqual(stillNote(false, null, task[0]).title, 'Errand still waits to merge the pull request once its pull request is ready')
+  })
+
+  it('names three steps and counts the rest', () => {
+    const steps = ['One', 'Two', 'Three', 'Four', 'Five'].map((says) => ({ tool: 'x', target: 'y', says, waits: [] }))
+    assert.strictEqual(keptNote('all of it', steps).title, 'Kept your errand: one, then two, then three, then 2 more steps')
+  })
+
+  it('a step’s note says what comes next, or that the errand is done', () => {
+    const merged = stepNote('merge_pull_request', PR, {}, hostAnswer())
+    assert.strictEqual(afterStep(merged, tag).title, 'Merged #698. Next: tag v0.9.0')
+    assert.strictEqual(afterStep({ title: 'Tagged v0.9.0.', links: [] }, undefined).title, 'Tagged v0.9.0. Errand done')
+  })
+
+  it('the daily reminder says where it waits, or why it is on hold', () => {
+    assert.strictEqual(
+      stillNote(false, null, merge).title,
+      'Errand still waits to merge the 0.9.0 pull request once it’s open and its checks pass',
+    )
+    assert.strictEqual(
+      stillNote(true, 'You asked to wait for the changelog.', merge).title,
+      'Errand still on hold: you asked to wait for the changelog',
+    )
   })
 })

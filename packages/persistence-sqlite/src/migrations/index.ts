@@ -88,6 +88,7 @@ import { statements as notedInput } from './0082_noted_input'
 import { statements as externalWaits } from './0083_external_waits'
 import { statements as evidenceGalleries } from './0084_evidence_galleries'
 import { statements as turnUndo } from './0085_turn_undo'
+import { statements as errandWords } from './0087_errand_words'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -193,6 +194,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0084_evidence_galleries', statements: evidenceGalleries },
   { key: '0085_turn_undo', statements: turnUndo },
   { key: '0086_client_identities', statements: clientIdentities },
+  { key: '0087_errand_words', statements: errandWords },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
