@@ -170,6 +170,8 @@ contextBridge.exposeInMainWorld('althar', {
   sounds: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:sounds'),
   editorPicture: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:editor-picture', id),
   findRepositories: (): Promise<unknown> => ipcRenderer.invoke('althar:find-repositories'),
+  clonePlace: (): Promise<unknown> => ipcRenderer.invoke('althar:clone-place'),
+  pickClonePlace: (): Promise<unknown> => ipcRenderer.invoke('althar:pick-clone-place'),
   grantFound: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:grant-found', id),
   playSound: (name: string): Promise<void> => ipcRenderer.invoke('althar:play-sound', name),
   edge: (): Promise<{ place: string; notch: boolean; platform: string; tray: boolean } | null> => ipcRenderer.invoke('althar:edge'),

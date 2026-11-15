@@ -192,3 +192,24 @@ export const forWindow = (found: FoundRepositories, home: string, idOf: (reposit
     worked: repository.worked,
   })),
 })
+
+/**
+ * Where a repository cloned for a new project goes, unless the person
+ * chooses: the folder most of the repositories found are in, as people keep
+ * their code together; else the first of the usual places there is. Null
+ * where there is none, and the person is asked.
+ */
+export const clonePlaceFor = async (found: FoundRepositories, places: ReadonlyArray<string>): Promise<string | null> => {
+  const counts = new Map<string, number>()
+  for (const repository of found.repositories) {
+    const parent = dirname(repository.real)
+    counts.set(parent, (counts.get(parent) ?? 0) + 1)
+  }
+  const [most] = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  if (most !== undefined) return most[0]
+  for (const place of places) {
+    const there = await stat(place).catch(() => null)
+    if (there?.isDirectory() === true) return realpath(place)
+  }
+  return null
+}

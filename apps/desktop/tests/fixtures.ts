@@ -1,5 +1,7 @@
 import { isoAfter } from '@althar/testing'
 import type {
+  HostRepository,
+  RepositoryOwner,
   AccountSignInState,
   AgentModels,
   AgentStatus,
@@ -1094,6 +1096,18 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       grant: 'grant_made',
       path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     })),
+    prepareFolder: vi.fn(async () => ({ did: 'nothing' as const, branch: 'main', files: 0 })),
+    listHostRepositories: vi.fn(async (): Promise<ReadonlyArray<HostRepository>> => []),
+    listRepositoryOwners: vi.fn(async (): Promise<ReadonlyArray<RepositoryOwner>> => [{ id: 'ada', name: 'ada', kind: 'user' as const }]),
+    cloneRepository: vi.fn(async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }) => {
+      const name = ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')
+      return { grant: `grant_${name}`, path: `/Users/ada/code/${name}` }
+    }),
+    publishRepository: vi.fn(async (input: { readonly owner: RepositoryOwner; readonly name: string }) => ({
+      remote: `${input.owner.id}/${input.name}`,
+      webUrl: `https://github.com/${input.owner.id}/${input.name}`,
+      branch: 'main',
+    })),
     listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
     getSearchDocuments: vi.fn(async () => ({ documents: [], next: null })),
     getSearchFiles: vi.fn(async () => ({ files: [] })),
@@ -1476,6 +1490,8 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   attachPasted: vi.fn(async () => []),
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
+  clonePlace: vi.fn(async () => ({ grant: 'grant_code', where: '~/code' })),
+  pickClonePlace: vi.fn(async () => ({ grant: 'grant_elsewhere', where: '~/elsewhere' })),
   onOpen: vi.fn(() => () => {}),
   onStoreFailed: vi.fn(() => () => {}),
   showBackup: vi.fn(async () => {}),

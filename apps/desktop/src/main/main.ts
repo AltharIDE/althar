@@ -40,7 +40,7 @@ import { takeScreenshot } from './screenshots'
 import { storeFacts } from './report/mainFacts'
 import { factsIn, type RuntimeFacts } from './report/facts'
 import { factsAsker, startReports } from './report/reports'
-import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
+import { clonePlaceFor, findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from './repositories'
 import { watchOnline } from './online'
 import { afterExit } from './restarts'
 import { alertSounds, playSound } from './sounds'
@@ -979,6 +979,32 @@ ipcMain.handle('althar:find-repositories', async () => {
   const home = process.env.ALTHAR_CODE_HOME || homedir()
   const found = await findRepositories(placesFor(home, process.platform))
   return forWindow(found, home, foundHere.idOf)
+})
+
+// Where a clone for a new project goes, as the person knows the place, and a grant for it; null where there is nowhere usual, and the person is asked.
+ipcMain.handle('althar:clone-place', async () => {
+  const home = process.env.ALTHAR_CODE_HOME || homedir()
+  const places = placesFor(home, process.platform)
+  const path = await clonePlaceFor(await findRepositories(places), places)
+  const grant = path === null ? null : await allowFolder(path)
+  return path === null || grant === null ? null : { grant, where: shownAt(path, home) }
+})
+
+// Another place for it, chosen by the person: as above, or null where they cancel.
+ipcMain.handle('althar:pick-clone-place', async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const home = process.env.ALTHAR_CODE_HOME || homedir()
+  const options = {
+    properties: ['openDirectory' as const, 'createDirectory' as const],
+    title: 'Choose where to clone it',
+    message: 'Choose the folder the repository is cloned into',
+    buttonLabel: 'Clone here',
+    defaultPath: home,
+  }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  const path = result.canceled ? undefined : result.filePaths[0]
+  const grant = path === undefined ? null : await allowFolder(path)
+  return path === undefined || grant === null ? null : { grant, where: shownAt(path, home) }
 })
 
 // A grant for one of them, once the person ticks or adds it: one main found, still where it was found, and nothing else.
