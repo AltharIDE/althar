@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { generateKeyPairSync } from 'node:crypto'
 
 import { Effect, Fiber, Layer } from 'effect'
 import { Agents } from '@althar/runtime'
@@ -12,7 +13,7 @@ import { initializeHome } from '../src/home'
 import { reserveDatabase } from '../src/updates/reservation'
 import { recoverBeforeStart, runUpdateQueue } from '../src/updates/controller'
 import { loadInstallation, processStamp, readState, saveState, writeJSON, type Transaction } from '../src/updates/store'
-import { updateFixture } from './updateFixture'
+import { fixtureFiles, updateFixture } from './updateFixture'
 
 const ioFor = (root: string) => {
   const output: string[] = []
@@ -29,6 +30,55 @@ const ioFor = (root: string) => {
   }
 }
 describe('operator update commands', () => {
+  it('produces signed release output through the operator command and redacts unexpected packaging failures', async () => {
+    const at = await updateFixture()
+    const { io, output } = ioFor(at.root)
+    const options = parseOptions(
+      [
+        'package-release',
+        '--release-base-url',
+        'https://updates.example/host/',
+        '--release-sequence',
+        '3',
+        '--output',
+        join(at.directory, 'published'),
+        '--json',
+      ],
+      {},
+      at.directory,
+    )
+    const commands = {
+      ...io,
+      releaseSigningKey: generateKeyPairSync('ed25519').privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
+      updates: {
+        source: { entry: io.entry, node: io.node, version: at.oldInfo.version },
+        assemble: async (_: unknown, folder: string) => {
+          fixtureFiles(folder)
+        },
+        execute: async () => JSON.stringify(at.oldInfo),
+      },
+    }
+    await Effect.runPromise(runCommand(options, commands))
+    expect(JSON.parse(output.pop() ?? '')).toMatchObject({ version: at.oldInfo.version, archive: expect.stringContaining('.tar.gz') })
+    const failed = await Effect.runPromise(
+      Effect.flip(
+        runCommand(
+          { ...options, releaseOutput: join(at.directory, 'failed') },
+          {
+            ...commands,
+            updates: {
+              ...commands.updates,
+              assemble: async () => {
+                throw new Error('private material')
+              },
+            },
+          },
+        ),
+      ),
+    )
+    expect(failed).toMatchObject({ code: 'UpdateFailed' })
+    expect(String(failed)).not.toContain('private material')
+  })
   it('configures a real home and repairs a leftover committed reservation on managed service startup', async () => {
     const at = await updateFixture()
     rmSync(at.database)
@@ -47,7 +97,11 @@ describe('operator update commands', () => {
     const env = { XDG_CONFIG_HOME: join(at.directory, 'config') }
     const parse = (command: string[]) =>
       parseOptions(
-        [...command, ...args.slice(0, -2), ...(command[0] === 'configure-updates' ? ['--service-name', at.config.serviceName] : [])],
+        [
+          ...command,
+          ...args.slice(0, -2),
+          ...(['configure-updates', 'install-service'].includes(command[0] ?? '') ? ['--service-name', at.config.serviceName] : []),
+        ],
         env,
         at.directory,
       )
@@ -66,6 +120,32 @@ describe('operator update commands', () => {
     }
     await Effect.runPromise(runCommand(parse(['configure-updates']), commands, dependencies))
     expect(output.join('')).toContain('explicit apply')
+    await Effect.runPromise(runCommand(parse(['install-service']), commands, dependencies))
+    expect(
+      await Effect.runPromise(
+        Effect.flip(runCommand({ ...parse(['install-service']), serviceName: 'another-service' }, commands, dependencies)),
+      ),
+    ).toMatchObject({ code: 'UpdateFailed' })
+    const preparation = {
+      id: '2'.repeat(32),
+      from: at.oldId,
+      to: at.oldId,
+      phase: 'migrating' as const,
+      compatible: true,
+      recoverable: true,
+      controller: { pid: 0, boot: '', started: '' },
+    }
+    const settled = await readState(at.root)
+    await saveState(at.root, { ...settled, transaction: preparation })
+    await reserveDatabase(await loadInstallation(at.root), preparation)
+    await Effect.runPromise(runCommand(parse(['prepare-update', '--json']), commands, dependencies))
+    expect(JSON.parse(output.pop() ?? '')).toEqual({ homeId: home.homeId })
+    expect(
+      await Effect.runPromise(
+        Effect.flip(runCommand(parse(['prepare-update']), { ...commands, entry: join(at.directory, 'missing-entry') }, dependencies)),
+      ),
+    ).toMatchObject({ code: 'UpdateFailed' })
+    await saveState(at.root, settled)
     // A crash after healthy-state commit can leave this marker behind; only
     // the selected managed executable can open storage and clear it after ready.
     await reserveDatabase(await loadInstallation(at.root), {
@@ -155,6 +235,24 @@ describe('operator update commands', () => {
     await Effect.runPromise(runCommand(parse(['recover-update']), io))
     await saveState(at.root, { ...(await readState(at.root)), transaction: { ...transaction, phase: 'recovery-required' } })
     expect(await Effect.runPromise(Effect.flip(runCommand(parse(['recover-update']), io)))).toMatchObject({
+      code: 'UpdateRecoveryRequired',
+    })
+    expect(await Effect.runPromise(Effect.flip(runCommand(parse(['recover-locked', '--controller-pid', '2147483647']), io)))).toMatchObject(
+      { code: 'UpdateFailed' },
+    )
+    const { transaction: _, ...settled } = await readState(at.root)
+    await saveState(at.root, settled)
+    const unavailableLock = {
+      ...io,
+      updates: {
+        ...at.dependencies,
+        execute: async () => {
+          await saveState(at.root, { ...settled, transaction: { ...transaction, controller: { pid: 0, boot: '', started: '' } } })
+          return ''
+        },
+      },
+    }
+    expect(await Effect.runPromise(Effect.flip(runCommand(parse(['recover-update']), unavailableLock)))).toMatchObject({
       code: 'UpdateRecoveryRequired',
     })
   })

@@ -206,10 +206,15 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
       }
       case 'install-service': {
         const configured = yield* configuredHome(options)
-        if (options.installation !== undefined) {
-          const installation = yield* update(() => loadInstallation(options.installation ?? ''))
-          if (installation.config.profile !== configured.profile || installation.config.worktrees !== configured.worktrees)
-            return yield* updateError('UpdateFailed', 'This installation belongs to another home or worktree location.')
+        const root = options.installation
+        if (root !== undefined) {
+          const installation = yield* update(() => loadInstallation(root))
+          if (
+            installation.config.profile !== configured.profile ||
+            installation.config.worktrees !== configured.worktrees ||
+            installation.config.serviceName !== configured.serviceName
+          )
+            return yield* updateError('UpdateFailed', 'This installation belongs to another home, worktree location or service.')
         }
         const file = yield* installService(configured, io)
         return yield* out(

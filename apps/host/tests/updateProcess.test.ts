@@ -48,6 +48,8 @@ const assembleFixture = async (source: BundleSource, folder: string) => {
   put(join(folder, 'dist/althar-host.js'), readFileSync(source.entry, 'utf8'))
   put(join(folder, 'node/LICENSE'), 'Process fixture; not a distributed release')
   put(join(folder, 'package.json'), '{"type":"module"}')
+  put(join(folder, 'LICENSE'), 'Fixture application license')
+  put(join(folder, 'THIRD_PARTY_NOTICES.txt'), 'Fixture third-party notices')
   const module = (name: string, version: string, main = true) => {
     put(join(folder, 'node_modules', name, 'package.json'), JSON.stringify({ name, version, ...(main ? { main: 'index.js' } : {}) }))
     if (main) put(join(folder, 'node_modules', name, 'index.js'), '')
@@ -203,7 +205,14 @@ describe.runIf(process.platform === 'linux')('managed host processes', () => {
         }
         walk(tree)
         const archive = join(root, `${version}.tar.gz`)
-        await c({ file: archive, cwd: tree, gzip: true, portable: true, noMtime: true }, ['dist', 'node', 'node_modules', 'package.json'])
+        await c({ file: archive, cwd: tree, gzip: true, portable: true, noMtime: true }, [
+          'dist',
+          'node',
+          'node_modules',
+          'package.json',
+          'LICENSE',
+          'THIRD_PARTY_NOTICES.txt',
+        ])
         const bytes = readFileSync(archive)
         const now = Date.now()
         const manifest: ReleaseManifest = {

@@ -70,6 +70,11 @@ try {
   const unpacked = join(root, 'unpacked')
   mkdirSync(unpacked, { mode: 0o700 })
   execFileSync('/usr/bin/tar', ['-xzf', result.archive, '-C', unpacked])
+  if (
+    !readFileSync(join(unpacked, 'LICENSE'), 'utf8').includes('Apache License') ||
+    !readFileSync(join(unpacked, 'THIRD_PARTY_NOTICES.txt'), 'utf8').includes('effect@')
+  )
+    throw new Error('Missing application or bundled dependency license notices')
   // This cwd has no workspace node_modules. Both native provider CLIs and the
   // exact patched adapter packages must resolve from the portable release.
   const { ALTHAR_HOST_RELEASE_SIGNING_KEY: _, ...probeEnvironment } = env

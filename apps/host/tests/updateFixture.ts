@@ -19,6 +19,8 @@ export const fixtureFiles = (folder: string, text = 'fixture') => {
   writeFileSync(join(folder, 'node/bin/node'), text, { mode: 0o700 })
   writeFileSync(join(folder, 'node/LICENSE'), 'Fixture license', { mode: 0o600 })
   writeFileSync(join(folder, 'package.json'), '{"type":"module"}', { mode: 0o600 })
+  writeFileSync(join(folder, 'LICENSE'), 'Fixture application license', { mode: 0o600 })
+  writeFileSync(join(folder, 'THIRD_PARTY_NOTICES.txt'), 'Fixture third-party notices', { mode: 0o600 })
 }
 export const updateFixture = async (changes: Partial<ReleaseInfo> = {}) => {
   const directory = temporary()
@@ -51,7 +53,7 @@ export const updateFixture = async (changes: Partial<ReleaseInfo> = {}) => {
     apiVersion: nextInfo.apiVersion,
     storage: nextInfo.storage,
     archive: { url: 'https://updates.example/release.tar.gz', sha256: 'b'.repeat(64), bytes: 100 },
-    files: 4,
+    files: 6,
     unpackedBytes: 100,
   }
   const seal = (value: ReleaseManifest) => {

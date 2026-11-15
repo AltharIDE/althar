@@ -113,6 +113,15 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
   const dist = join(destination, 'dist')
   await fs.mkdir(dist, { mode: 0o700 })
   await fs.copyFile(source.entry, join(dist, 'althar-host.js'), constants.COPYFILE_EXCL)
+  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
+    try {
+      await fs.copyFile(join(dirname(source.entry), name), join(destination, name), constants.COPYFILE_EXCL)
+    } catch (error) {
+      if (typeof error !== 'object' || error === null || !('code' in error) || error.code !== 'ENOENT') throw error
+      // Built entries keep assets beside the entry; portable releases keep them at their root.
+      await fs.copyFile(join(dirname(source.entry), '..', name), join(destination, name), constants.COPYFILE_EXCL)
+    }
+  }
   await fs.mkdir(join(destination, 'node/bin'), { recursive: true, mode: 0o700 })
   await fs.copyFile(source.node, join(destination, 'node/bin/node'), constants.COPYFILE_EXCL)
   await fs.chmod(join(destination, 'node/bin/node'), 0o700)

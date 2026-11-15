@@ -62,7 +62,7 @@ export const checkCandidate = async (
   execute: UpdateExecutor = executeUpdate,
   signal?: AbortSignal,
 ) => {
-  for (const name of ['dist/althar-host.js', 'node/bin/node', 'node/LICENSE', 'package.json']) {
+  for (const name of ['dist/althar-host.js', 'node/bin/node', 'node/LICENSE', 'package.json', 'LICENSE', 'THIRD_PARTY_NOTICES.txt']) {
     const stat = await fs.lstat(join(folder, name))
     if (!stat.isFile() || stat.isSymbolicLink()) throw unavailable()
   }

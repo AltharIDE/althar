@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
@@ -49,6 +49,8 @@ describe('signed host release production', () => {
     expect(envelope.toString()).not.toContain(signingKey)
     await inspectArchive(result.archive, verified.manifest)
     await expect(packageRelease(options, dependencies)).rejects.toThrow()
+    rmSync(result.archive)
+    await expect(packageRelease(options, dependencies)).rejects.toThrow('already holds a release manifest')
   })
 
   it('requires a protected Ed25519 signing key and explicit release metadata', async () => {

@@ -2,15 +2,26 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
+import { Effect } from 'effect'
 
 import metadata from '../package.json'
 import { verifyBundledPrograms } from '../src/updates/preflight'
+import { runCommand } from '../src/commands'
+import { parseOptions } from '../src/options'
 import { temporary } from './support'
 
 const providers = vi.hoisted(() => ({ claude: vi.fn<() => string | null>(), codex: vi.fn<() => string | null>() }))
-vi.mock('@althar/provider-adapters', () => ({
-  agents: { 'claude-code': { cli: { bundled: providers.claude } }, codex: { cli: { bundled: providers.codex } } },
-}))
+vi.mock('@althar/provider-adapters', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@althar/provider-adapters')>()
+  return {
+    ...original,
+    agents: {
+      ...original.agents,
+      'claude-code': { ...original.agents['claude-code'], cli: { ...original.agents['claude-code'].cli, bundled: providers.claude } },
+      codex: { ...original.agents.codex, cli: { ...original.agents.codex.cli, bundled: providers.codex } },
+    },
+  }
+})
 const fixture = () => {
   const root = temporary()
   for (const name of ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp'] as const) {
@@ -33,6 +44,18 @@ describe('portable release provider preflight', () => {
     providers.claude.mockReturnValue(program)
     providers.codex.mockReturnValue(program)
     await verifyBundledPrograms(at.entry)
+    const commandOutput: string[] = []
+    await Effect.runPromise(
+      runCommand(parseOptions(['verify-release', '--json'], {}, at.root), {
+        entry: at.entry,
+        node: process.execPath,
+        path: '/usr/bin:/bin',
+        out: (text: string) => {
+          commandOutput.push(text)
+        },
+      }),
+    )
+    expect(JSON.parse(commandOutput.join(''))).toMatchObject({ updaterProtocol: 1, platform: 'linux' })
     const home = readFileSync(output, 'utf8')
     expect(home).not.toBe(at.root)
     expect(existsSync(home)).toBe(false)

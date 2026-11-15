@@ -22,6 +22,8 @@ describe('locked host dependency bundles', () => {
     const node = join(root, 'node/bin/node')
     mkdirSync(join(root, 'node/bin'), { recursive: true })
     writeFileSync(entry, 'host code')
+    writeFileSync(join(root, 'LICENSE'), 'Host license')
+    writeFileSync(join(root, 'THIRD_PARTY_NOTICES.txt'), 'Bundled notices')
     writeFileSync(node, 'node binary')
     writeFileSync(join(root, 'node/LICENSE'), 'Node license')
     pkg(root, '@agentclientprotocol/claude-agent-acp')
@@ -32,6 +34,12 @@ describe('locked host dependency bundles', () => {
     expect(readFileSync(join(destination, 'node/LICENSE'), 'utf8')).toBe('Node license')
     expect(readFileSync(join(destination, 'dist/althar-host.js'), 'utf8')).toBe('host code')
     expect(JSON.parse(readFileSync(join(destination, 'package.json'), 'utf8'))).toMatchObject({ type: 'module', version: '1.2.3' })
+    const recaptured = join(temporary(), 'release')
+    await assembleBundle(
+      { entry: join(destination, 'dist/althar-host.js'), node: join(destination, 'node/bin/node'), version: '1.2.3' },
+      recaptured,
+    )
+    expect(readFileSync(join(recaptured, 'LICENSE'), 'utf8')).toBe('Host license')
     await expect(assembleBundle({ entry, node, version: '1.2.3' }, destination)).rejects.toThrow()
     await expect(
       assembleBundle({ entry, node, version: '1.2.3', license: join(root, 'missing-license') }, join(temporary(), 'release')),

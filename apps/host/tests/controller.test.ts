@@ -214,7 +214,7 @@ describe('controlled host activation and recovery', () => {
     await runUpdateQueue(at.root, at.dependencies)
     expect((await readReceipt(at.root, applied)).state).toBe('applied')
     const count = at.calls.length
-    writeFileSync(join(at.root, 'requests', `${applied}.json`), intent)
+    writeFileSync(join(at.root, 'requests', `${applied}.json`), intent, { mode: 0o600 })
     await runUpdateQueue(at.root, at.dependencies)
     expect(at.calls).toHaveLength(count)
     expect(existsSync(join(at.root, 'requests', `${applied}.json`))).toBe(false)

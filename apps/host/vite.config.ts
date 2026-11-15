@@ -1,7 +1,9 @@
 import { defineConfig } from 'vite-plus'
 import { testing } from '@althar/testing/vitest'
+import { releaseLicenses } from './scripts/release-licenses'
 
 export default defineConfig({
+  plugins: [releaseLicenses()],
   build: {
     ssr: 'src/main.ts',
     outDir: 'dist',

@@ -15,14 +15,20 @@ const downloadable = async () => {
   const source = join(temporary(), 'release')
   fixtureFiles(source)
   const archive = join(temporary(), 'release.tar.gz')
-  await c({ file: archive, cwd: source, gzip: true, portable: true, noMtime: true }, ['dist', 'node', 'package.json'])
+  await c({ file: archive, cwd: source, gzip: true, portable: true, noMtime: true }, [
+    'dist',
+    'node',
+    'package.json',
+    'LICENSE',
+    'THIRD_PARTY_NOTICES.txt',
+  ])
   const bytes = readFileSync(archive)
-  const sizes = ['dist/althar-host.js', 'node/bin/node', 'node/LICENSE', 'package.json'].map(
+  const sizes = ['dist/althar-host.js', 'node/bin/node', 'node/LICENSE', 'package.json', 'LICENSE', 'THIRD_PARTY_NOTICES.txt'].map(
     (path) => readFileSync(join(source, path)).length,
   )
   const manifest = {
     ...at.manifest,
-    files: 4,
+    files: 6,
     unpackedBytes: sizes.reduce((sum, value) => sum + value, 0),
     archive: { ...at.manifest.archive, bytes: bytes.length, sha256: digest(bytes) },
   }
