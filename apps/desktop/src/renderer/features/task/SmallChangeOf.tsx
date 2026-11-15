@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 
+import type { AgentStatus, PlanStep } from '@althar/contracts'
 import { Model, SmallChange, type SmallChangeChecks, type SmallChangeReview, type SmallChangeReviewWhen, Problem } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import { useServices } from '../../data/services'
-import type { NameModel } from '../../shared/modelNames'
+import { type NameModel, useEffortNames } from '../../shared/modelNames'
 import type { SmallChangeContent } from '../../shared/thread'
+import { ChangeTeam, text as teamText, useTeamed } from '../team/Team'
 import s from './FastLaneOf.module.css'
 
 /*
@@ -15,6 +17,11 @@ import s from './FastLaneOf.module.css'
  * or takes it off, at once, and goes back with a line where that fails. See
  * findings takes the person to the review's report in this thread; for a full
  * task, to its review task, whose review holds Merge until it comes back clear.
+ * Under its title is its team, and Change the team… from the moment the card
+ * appears (it has no countdown to wait on): the same dialog a task's header
+ * opens, a new lead taking over from its next turn, a new reviewer applying until
+ * its review starts. What the person saved shows at once, until the card read
+ * again says it.
  */
 
 export const text = {
@@ -50,9 +57,15 @@ const whenOf = (card: SmallChangeContent): SmallChangeReviewWhen =>
           ? 'none'
           : 'after'
 
+/** The team as its card says it: Sonnet 5.5 · Low, GPT-6.1 Sol reviews. */
+const teamLine = (lead: string, review: string | null) =>
+  teamText.team(lead, review === null ? teamText.noReview : teamText.reviews(review))
+
 export function SmallChangeOf({
   card,
   named,
+  projectId,
+  agents,
   busy,
   onMerge,
   onOpen,
@@ -60,6 +73,8 @@ export function SmallChangeOf({
 }: {
   card: SmallChangeContent
   named: NameModel
+  projectId: string
+  agents: ReadonlyArray<AgentStatus>
   busy: boolean
   /** Merges its open change, as the task's header does, which asks first. */
   onMerge: (change: { readonly head: string; readonly url: string; readonly bypassQueue?: boolean }) => void
@@ -74,6 +89,13 @@ export function SmallChangeOf({
   const [chosen, setChosen] = useState<SmallChangeReviewWhen | null>(null)
   const kept = whenOf(card)
   useEffect(() => setChosen(null), [kept])
+  // Its team: what the person just saved, laid over the card's until the card read again says the same.
+  const effortOf = useEffortNames()
+  const teamed = useTeamed(projectId, card.taskId)
+  const [changingTeam, setChangingTeam] = useState(false)
+  const [saved, setSaved] = useState<Partial<Record<PlanStep['key'], PlanStep>>>({})
+  const seen = JSON.stringify([card.lead, card.reviewer])
+  useEffect(() => setSaved({}), [seen])
   const change = card.change
   const head = change?.head ?? null
   const merged = change?.state === 'merged'
@@ -129,8 +151,12 @@ export function SmallChangeOf({
       setError(messageOf(failure))
     })
   }
-  const lead = named(card.lead.agentId, card.lead.model)
-  const reviewer = card.reviewer == null ? null : named(card.reviewer.agentId, card.reviewer.model)
+  const leadStep = saved.implement ?? { agentId: card.lead.agentId, model: card.lead.model, effort: card.lead.effort ?? null }
+  const lead = named(leadStep.agentId, leadStep.model)
+  const reviewStep = saved.review === undefined ? card.reviewer : saved.review.skipped ? null : saved.review
+  const reviewer = reviewStep == null ? null : named(reviewStep.agentId, reviewStep.model)
+  const effort = effortOf(leadStep.agentId, leadStep.model, leadStep.effort ?? null)
+  const team = teamLine(`${lead.name}${effort === null ? '' : ` · ${effort}`}`, reviewer === null ? null : reviewer.name)
   const holds = card.afterMerge?.holds ?? 'major'
   const explain = beforeShip ? (
     reviewer === null ? (
@@ -173,6 +199,8 @@ export function SmallChangeOf({
         }}
         review={review}
         explain={explain}
+        team={team}
+        {...(teamed === null ? {} : { onTeam: () => setChangingTeam(true) })}
         busy={busy}
         {...(ready ? { onMerge: () => onMerge({ head, url: change.url }) } : {})}
         {...(ready && change.canBypassQueue === true && change.unpushed === 0
@@ -198,6 +226,15 @@ export function SmallChangeOf({
             : { onFindings: () => onShow(item) })}
       />
       {error !== null && <Problem className={s.failure}>{text.failed(error)}</Problem>}
+      {changingTeam && (
+        <ChangeTeam
+          projectId={projectId}
+          task={teamed}
+          agents={agents}
+          onClose={() => setChangingTeam(false)}
+          onSaved={(changed) => setSaved((was) => ({ ...was, ...Object.fromEntries(changed.map((step) => [step.key, step])) }))}
+        />
+      )}
     </>
   )
 }

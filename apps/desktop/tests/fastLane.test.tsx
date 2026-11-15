@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -10,7 +10,7 @@ import { SmallChangeOf } from '../src/renderer/features/task/SmallChangeOf'
 import type { SmallChangeContent } from '../src/renderer/shared/thread'
 import { act } from 'react'
 
-import { change, changed, fakeClient, items, snapshot } from './fixtures'
+import { agents, card, change, changed, fakeClient, items, snapshot } from './fixtures'
 import { servicesFor, withServices } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { ModelMoveOf } from '../src/renderer/features/task/ModelMoveOf'
@@ -72,6 +72,68 @@ const Task = ({ onOpenTask }: { onOpenTask?: (threadId: string) => void }) => (
   <TaskView model={useTask('th1')} onBack={vi.fn()} {...(onOpenTask === undefined ? {} : { onOpenTask })} />
 )
 
+describe("a small change's team", () => {
+  const board = (plan: NonNullable<ReturnType<typeof card>['plan']>, phase: 'planned' | 'running' = 'running') => ({
+    cursor: 1,
+    tasks: [{ ...card({ phase, plan }), state: 'open' as const, createdAt: when, settledAt: null, changed: null, here: [] }],
+    calls: [],
+    settledTotal: 0,
+  })
+  const small = {
+    ...card().plan!,
+    startsAt: null,
+    preset: 'Small change',
+    steps: [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, effort: 'low', skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ],
+  }
+  const content = () => {
+    const item = smallChange({ reviewAfterMerge: false })
+    if (item.kind !== 'small_change') throw new Error('Expected a small change')
+    return item.content
+  }
+  const show = (phase: 'planned' | 'running') => {
+    const fake = fakeClient({ getBoard: vi.fn(async () => board(small, phase)) })
+    withServices(
+      <SmallChangeOf
+        card={content()}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    return fake
+  }
+
+  it.each(['running', 'planned'] as const)(
+    'says who is on it and offers Change the team… while it is %s, never holding it',
+    async (phase) => {
+      const { client } = show(phase)
+      await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+      expect(await screen.findByRole('dialog', { name: 'Team' })).toBeTruthy()
+      expect(client.holdPlan).not.toHaveBeenCalled()
+    },
+  )
+
+  it('shows the team the person saved at once, a new reviewer or none', async () => {
+    const { client } = show('running')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('t1', [{ key: 'review', agentId: 'codex', model: null, skipped: true }]),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    expect(screen.getByText(/no review/)).toBeTruthy()
+  })
+})
+
 describe('a small change before the runtime knows its final route', () => {
   const show = (over: Partial<SmallChangeContent>) => {
     const item = smallChange(over)
@@ -82,6 +144,8 @@ describe('a small change before the runtime knows its final route', () => {
       <SmallChangeOf
         card={item.content}
         named={(id, model) => ({ id: id ?? '', name: model ?? id ?? '', short: model ?? id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
         busy={false}
         onMerge={onMerge}
       />,

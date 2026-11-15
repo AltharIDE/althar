@@ -74,6 +74,8 @@ export const canHold = (task: Teamed): boolean => task.plan !== null && (task.ph
  */
 export const teamChangeOf = (task: Teamed): 'starts' | 'waits' | 'begun' | null => {
   if (task.plan === null) return null
+  // A small change starts at once, with no countdown to stop: its team changes as a begun task's does, and it is never held for it.
+  if (task.phase === 'planned' && task.plan.preset === 'Small change') return 'begun'
   if (task.phase === 'planned' || task.phase === 'held') return 'starts'
   if (task.planWaits === true && task.queued !== null) return 'waits'
   return task.phase === 'drafting' || task.phase === 'settled' ? null : 'begun'
@@ -159,11 +161,14 @@ export function ChangeTeam({
   task,
   agents,
   onClose,
+  onSaved,
 }: {
   projectId: string
   task: Teamed | null
   agents: ReadonlyArray<AgentStatus>
   onClose: () => void
+  /** The steps the person changed, once saved: where the task is shown, its team reads them at once. */
+  onSaved?: (changed: ReadonlyArray<PlanStep>) => void
 }) {
   const { client, cache } = useServices()
   // The task as it opened: what the dialog shows once it can no longer change.
@@ -177,7 +182,7 @@ export function ChangeTeam({
   const firstPlan = first?.plan ?? null
   useEffect(() => {
     // Its countdown stops while its team is changed: held, it starts when the person says.
-    if (first?.phase === 'planned' && firstPlan !== null && holding.current === null) {
+    if (first?.phase === 'planned' && teamChangeOf(first) === 'starts' && firstPlan !== null && holding.current === null) {
       holding.current = client.holdPlan(firstPlan.id)
       void holding.current.catch((failure: unknown) => setError(messageOf(failure)))
     }
@@ -220,7 +225,10 @@ export function ChangeTeam({
       if (begun) {
         // A live session may have moved since this dialog opened. Only the steps the person touched are a new choice.
         const changed = steps.filter((step) => edits[step.key] !== undefined)
-        if (changed.length > 0) await client.changeTeam(now.taskId, changed)
+        if (changed.length > 0) {
+          await client.changeTeam(now.taskId, changed)
+          onSaved?.(changed)
+        }
       } else {
         await client.changePlan(plan.id, steps, ending)
         if (andStart) await client.startPlan(plan.id)
