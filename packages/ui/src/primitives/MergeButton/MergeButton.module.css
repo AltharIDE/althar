@@ -1,0 +1,49 @@
+/* Where a pressed merge stands, in the button's place and of its size: words, not a control. */
+.standing {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 100%;
+  color: var(--t-1);
+  background: var(--live-dim);
+  animation: arrive var(--fast) var(--ease-out);
+}
+.small {
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.standing[data-standing='merged'] {
+  color: var(--ok-ink);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live-dot);
+}
+.pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@keyframes arrive {
+  from {
+    transform: scale(0.96);
+    opacity: 0.6;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .standing {
+    animation: none;
+  }
+}

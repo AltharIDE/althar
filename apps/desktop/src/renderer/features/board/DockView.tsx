@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import type { AgentStatus, BoardTask, ThreadSnapshot } from '@althar/contracts'
 import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek, Problem } from '@althar/ui'
 
+import { mergeStandingOf } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
@@ -190,6 +191,8 @@ export function DockView({
             : { held: task.held.commits, onShip: () => void model.ship(task.taskId), shipping: model.shipping.has(task.taskId) })}
           onOpenFile={(path) => onChanges(task, path)}
           accepting={model.merging.has(task.taskId)}
+          // Pressed here or anywhere in the window: Merging at once, then In the queue as the runtime reads it, never Accept again.
+          standing={mergeStandingOf(change, model.merging.has(task.taskId))}
           sendingBack={model.sending.has(task.taskId)}
           {...(model.error === null ? {} : { error: model.error })}
           text={{ number: (n: number) => `${change.prefix}${n}` }}

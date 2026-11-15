@@ -17,7 +17,7 @@ import {
 } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
-import { useMerge } from '../../data/merges'
+import { type MergeStanding, mergeStandingOf, shownChangeOf, useMerge, useMerging } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
 import { isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
@@ -92,6 +92,11 @@ export interface TaskModel {
   readonly merging: string | null
   /** The pull request whose merge the error is about, by its address, so its card says why there; null otherwise. */
   readonly mergeRefused: string | null
+  /**
+   * Where the merge of its pull request at this address stands, as every Merge of the task shows it in place of the button:
+   * merging from the press, in the queue or merged as the runtime reads it; null where it is the person's to merge.
+   */
+  readonly mergeStanding: (url: string) => MergeStanding | null
   /** An action is on its way to the runtime. */
   readonly pending: boolean
   /** Which of them, where it is one of the outputs' (see `doing`): the others wait, but aren't working. */
@@ -298,6 +303,11 @@ export const useTask = (threadId: string): TaskModel => {
   const thread = useQuery(read.thread(threadId))
   const snapshot = thread.data ?? null
   const status = useQuery(read.status()).data
+  // Its merges as the window keeps them: pressed and not answered, or answered and not yet read back merged, wherever pressed.
+  const shownChange = snapshot === null ? null : shownChangeOf(snapshot.task.changes)
+  const windowMerges = useMerging(snapshot === null ? null : [{ taskId: snapshot.task.id, change: shownChange }])
+  // The pull requests pressed here, Merging at once, until the head read after the press lands, or the press fails.
+  const [pressedMerges, setPressedMerges] = useState<ReadonlySet<string>>(new Set())
   const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
   // What its lead is still saying, while the window hears it.
   const streaming = useStreamed(threadId, snapshot?.items ?? NO_ITEMS, undefined, snapshot?.conversationVersion)
@@ -611,6 +621,13 @@ export const useTask = (threadId: string): TaskModel => {
     refused,
     merging,
     mergeRefused: error === null ? null : mergeFailed,
+    mergeStanding: (url) =>
+      mergeStandingOf(
+        snapshot?.task.changes.find((change) => change.url === url),
+        merging === url ||
+          pressedMerges.has(url) ||
+          (snapshot !== null && shownChange?.url === url && windowMerges.merging.has(snapshot.task.id)),
+      ),
     pending,
     doing: acting,
     loadingEarlier,
@@ -857,8 +874,10 @@ export const useTask = (threadId: string): TaskModel => {
         if (open === undefined) return
         await client.merge(snapshot.task.id, open.head ?? '', open.url, how)
       }, doing.mergeWaiting),
-    accept: (changes) =>
-      act(async () => {
+    accept: (changes) => {
+      const urls = changes.map((change) => change.url)
+      setPressedMerges((now) => new Set([...now, ...urls]))
+      return act(async () => {
         setMergeFailed(null)
         if (snapshot === null) return
         try {
@@ -882,7 +901,14 @@ export const useTask = (threadId: string): TaskModel => {
         } finally {
           setMerging(null)
         }
-      }, doing.accept),
+      }, doing.accept).finally(() =>
+        setPressedMerges((now) => {
+          const next = new Set(now)
+          for (const url of urls) next.delete(url)
+          return next
+        }),
+      )
+    },
     push: (head, url) =>
       act(
         async () => {

@@ -397,6 +397,71 @@ describe('the fast lane on a task’s screen', () => {
     expect(screen.getByText('Before merge')).toBeTruthy()
   })
 
+  it('says In the queue as the task reads it, though its card was made before the merge, and offers no Merge again', async () => {
+    const open = change({ state: 'open', head: 'abc123', checks: PASSED })
+    const base = snapshot()
+    const { client } = fakeClient({
+      // The card as it was made, its pull request open; the task's head, read after the merge, has it in its merge queue.
+      getThread: vi.fn(async () =>
+        snapshot({ task: { ...base.task, changes: [{ ...open, queued: true }] }, items: [smallChange({ change: open })] }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('In the queue')).toBeTruthy()
+    expect(screen.queryByText('Ready')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+  })
+
+  it('shows Merging at once on Merge, then In the queue once the runtime says so: never Merge again', async () => {
+    const open = change({ state: 'open', head: 'abc123', checks: PASSED })
+    const base = snapshot()
+    let queued = false
+    let answer: () => void = () => {}
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: { ...base.task, changes: [queued ? { ...open, queued: true } : open] },
+          items: [smallChange({ change: open })],
+        }),
+      ),
+      merge: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            answer = () => {
+              queued = true
+              resolve()
+            }
+          }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge' }))
+    // Before the runtime answers: Merging, in Merge's place.
+    expect(screen.getAllByText('Merging').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    act(() => answer())
+    expect(await screen.findByText('In the queue')).toBeTruthy()
+    await waitFor(() => expect(screen.queryByText('Merging')).toBeNull())
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(client.merge).toHaveBeenCalledOnce()
+  })
+
+  it('goes back to Merge, with a line, where the merge fails', async () => {
+    const open = change({ state: 'open', head: 'abc123', checks: PASSED })
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ task: { ...base.task, changes: [open] }, items: [smallChange({ change: open })] })),
+      merge: vi.fn(async () => {
+        throw new ApiError({ reason: 'ConnectorFailed', message: 'GitHub refused the merge.' })
+      }),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge' }))
+    expect(await screen.findByText(/GitHub refused the merge/)).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Merge' })).toBeTruthy()
+    expect(screen.queryByText('Merging')).toBeNull()
+  })
+
   it('goes back, with a line, where moving its review fails', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => snapshot({ items: [smallChange()] })),

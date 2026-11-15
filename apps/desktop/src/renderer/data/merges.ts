@@ -1,7 +1,8 @@
 import { type Mutation, useMutation, useMutationState } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 
-import { type BoardTask, queuedToMerge } from '@althar/contracts'
+import { type BoardTask, type ChangeSummary, queuedToMerge } from '@althar/contracts'
+import type { MergeStanding } from '@althar/ui'
 
 import { messageOf } from './client'
 import { useServices } from './services'
@@ -103,6 +104,26 @@ export const useMerging = (tasks: ReadonlyArray<Pick<BoardTask, 'taskId' | 'chan
     }
     return { merging, failed }
   }, [last, tasks, now])
+}
+
+/**
+ * Where a pull request's merge stands, as every Merge button shows it in its
+ * place: `merging` from the press until the runtime says otherwise, then
+ * `queued` while its branch's merge queue holds it, `merged` once it landed;
+ * null where it is the person's to merge, as before the press or after a
+ * merge that failed, which its place says beside it.
+ */
+export type { MergeStanding }
+
+export const mergeStandingOf = (
+  change: Pick<ChangeSummary, 'state' | 'queued'> | null | undefined,
+  merging: boolean,
+): MergeStanding | null => {
+  if (change == null) return merging ? 'merging' : null
+  if (change.state === 'merged') return 'merged'
+  if (change.state !== 'open') return null
+  if (change.queued === true) return 'queued'
+  return merging ? 'merging' : null
 }
 
 /** The step a task being merged shows it is on, as a step after its plan's. */

@@ -28,7 +28,7 @@ import { usageLines, useUsageOpen } from '../../shared/usage'
 import { checkOf } from '../../shared/checks'
 import { hasOutcome, outcomeOf } from '../../shared/outcome'
 import { mergeHereLabel } from '../../shared/mergeHere'
-import { shownQueued } from '../../data/merges'
+import { type MergeStanding, shownQueued } from '../../data/merges'
 import { productBrand, productName } from '../../shared/products'
 import { personPushes } from '../../shared/standing'
 import { commitsToShip } from '../../shared/shipping'
@@ -213,6 +213,7 @@ export function Outputs({
   onMarkAllReady,
   merging = null,
   mergeRefused = null,
+  mergeStanding,
   onPostScreenshots,
   onOpenFile,
   conflict = null,
@@ -250,6 +251,8 @@ export function Outputs({
   merging?: string | null
   /** The pull request whose merge the error is about, by its address: said on its own part of the card. */
   mergeRefused?: string | null
+  /** Where the merge of its pull request at this address stands from the press on: shown in Merge's place, never Merge again. */
+  mergeStanding?: (url: string) => MergeStanding | null
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
@@ -370,6 +373,7 @@ export function Outputs({
           // What the lead committed since goes up first: accepting merges what the pull request has.
           // Unshipped commits belong to repositories without an open PR, so they don't hold a sibling's published PR back.
           const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0 && held === undefined
+          const firstStanding = mergeStanding?.(first.url) ?? null
           if (open.length > 1) return track(accepting)
           // Merge, with commits not shipped: Review and merge, or Merge now, beside Ship.
           const mergingWaiting =
@@ -411,22 +415,26 @@ export function Outputs({
                   {several ? text.pushTo(one.unpushed, nameOf(one.repository)) : text.push(one.unpushed)}
                 </Button>
               )),
-            ...(accepting
-              ? [
-                  <MergeButton
-                    key="accept"
-                    variant="signal"
-                    {...pressed(doing.accept)}
-                    // In order, each at the head shown, so one that moved on since isn't merged unseen; the rest wait on a refusal.
-                    onMerge={() => onAccept(open.flatMap((one) => (one.state === 'open' ? [{ head: one.head ?? '', url: one.url }] : [])))}
-                    {...(first.canBypassQueue === true
-                      ? { onBypassQueue: () => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }]) }
-                      : {})}
-                  >
-                    {text.accept(open.filter((one) => one.state === 'open').length)}
-                  </MergeButton>,
-                ]
-              : []),
+            ...(accepting && firstStanding === 'merging'
+              ? [<MergeButton key="accept" variant="signal" standing="merging" />]
+              : accepting
+                ? [
+                    <MergeButton
+                      key="accept"
+                      variant="signal"
+                      {...pressed(doing.accept)}
+                      // In order, each at the head shown, so one that moved on since isn't merged unseen; the rest wait on a refusal.
+                      onMerge={() =>
+                        onAccept(open.flatMap((one) => (one.state === 'open' ? [{ head: one.head ?? '', url: one.url }] : [])))
+                      }
+                      {...(first.canBypassQueue === true
+                        ? { onBypassQueue: () => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }]) }
+                        : {})}
+                    >
+                      {text.accept(open.filter((one) => one.state === 'open').length)}
+                    </MergeButton>,
+                  ]
+                : []),
             ...(first.queued === true && first.canBypassQueue === true && first.unpushed === 0 && held === undefined
               ? [
                   <MergeButton
@@ -481,7 +489,7 @@ export function Outputs({
         ? 'merged'
         : refusedAt === one.url
           ? 'refused'
-          : merging === one.url
+          : merging === one.url || mergeStanding?.(one.url) === 'merging'
             ? 'merging'
             : at !== -1 && i > at && acting === doing.accept
               ? 'waiting'
@@ -513,7 +521,7 @@ export function Outputs({
     const bypass = () => (next === undefined ? undefined : onAccept([{ head: next.head ?? '', url: next.url, bypassQueue: true }]))
     // The next to merge still in its merge queue holds the rest: nothing to press until it has landed.
     const accept =
-      accepting && next !== undefined && next.queued !== true ? (
+      accepting && next !== undefined && next.queued !== true && mergeStanding?.(next.url) == null ? (
         left.length === 1 ? (
           <MergeButton
             key="accept"
