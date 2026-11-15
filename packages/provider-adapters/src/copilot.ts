@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import type { AgentDefinition } from './registry'
 
 /** Althar owns the agent and account connection; no external engine or OAuth identity is substituted. */
-export const copilotDefinition: AgentDefinition = {
+export const copilotDefinition: AgentDefinition<'copilot-direct'> = {
   id: 'copilot-direct',
   native: 'copilot',
   name: 'GitHub Copilot',

@@ -5,6 +5,7 @@
  */
 
 export * from './foundations/device'
+export * from './setup/AgentCatalog/AgentCatalog'
 export * from './thread/UndoTurn/UndoTurnDialog'
 export * from './foundations/keys'
 export * from './foundations/vocabulary'
@@ -46,6 +47,7 @@ export * from './primitives/Segmented/Segmented'
 export * from './primitives/Checks/Checks'
 export * from './primitives/CountdownRing/CountdownRing'
 export * from './primitives/FileChanges/FileChanges'
+export * from './primitives/Path/Path'
 export * from './primitives/Field/Field'
 export * from './primitives/FormRow/FormRow'
 export * from './primitives/Panel/Panel'

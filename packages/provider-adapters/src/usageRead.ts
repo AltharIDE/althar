@@ -1,7 +1,6 @@
 import { join } from 'node:path'
 
 import { type KeychainRead, readClaudeKeychainField, readTokenField, type TokenLocation } from './credentialStore'
-import type { AgentId } from './registry'
 import type { AccountUsage } from './usage'
 import { allowedEndpoints, type EndpointSource, endpointProblem, type TokenSource, type UsagePair, usagePairs } from './usageSources'
 
@@ -41,7 +40,7 @@ export type EndpointRead =
 
 /** The account a read is for: bound to its agent and provider, so a source is only used for its own pair. */
 export interface UsageAccount {
-  readonly agent: AgentId
+  readonly agent: string
   readonly provider: string
   /** The account's home folder. */
   readonly home: string

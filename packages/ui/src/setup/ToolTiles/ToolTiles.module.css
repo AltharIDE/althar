@@ -433,7 +433,9 @@
   color: var(--t-1);
 }
 .filePath {
+  display: flex;
   flex: 1;
+  min-width: 0;
   font: 10.5px var(--mono);
   color: var(--t-3);
 }

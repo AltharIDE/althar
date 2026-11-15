@@ -5,6 +5,7 @@ import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
 import {
+  apiLayer,
   AgentsAtOnce,
   Api,
   ApiError,
@@ -457,9 +458,19 @@ describe('the API', () => {
       Effect.gen(function* () {
         const channel = new MessageChannel()
         yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
-        const handlers = Api.toLayer(
+        const handlers = apiLayer(
           Effect.succeed(
             Api.of({
+              GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),
+              SaveAcpConnection: () => Effect.succeed(1),
+              CheckAcpConnection: () => Effect.succeed(1),
+              RemoveAcpConnection: () => Effect.succeed(1),
+              WatchAttention: () => Stream.die('unused'),
+              GetConnectionInfo: () => Effect.die('unused'),
+              ListClientDevices: () => Effect.die('unused'),
+              RegisterClientDevice: () => Effect.die('unused'),
+              RevokeClientDevice: () => Effect.die('unused'),
+              WatchFrom: () => Stream.die('unused'),
               Status: ({ recheck }) => Effect.succeed({ apiVersion: 1, appVersion: recheck === true ? 'rechecked' : 'cached', agents: [] }),
               ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
@@ -804,7 +815,7 @@ describe('the API', () => {
           Effect.gen(function* () {
             const channel = new MessageChannel()
             yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
-            const handlers = Api.toLayer({
+            const handlers = apiLayer({
               Status: () => Effect.succeed({ apiVersion: API_VERSION, appVersion: 'x', agents: [] }),
             } as never)
             yield* Effect.forkScoped(

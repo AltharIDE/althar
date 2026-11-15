@@ -101,6 +101,7 @@ const RepositoryAnswer = Schema.Struct({
 })
 
 const PullAnswer = Schema.Struct({
+  merge_commit_sha: Schema.optional(Schema.NullOr(Schema.String)),
   id: Schema.Number,
   node_id: Schema.String,
   number: Schema.Number,
@@ -255,6 +256,7 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   source: pull.head.ref,
   target: pull.base.ref,
   headSha: pull.head.sha,
+  ...(pull.merged_at != null && pull.merge_commit_sha != null ? { mergeCommit: pull.merge_commit_sha } : {}),
   author: pull.user == null ? null : personOf(pull.user),
   additions: pull.additions ?? null,
   deletions: pull.deletions ?? null,
