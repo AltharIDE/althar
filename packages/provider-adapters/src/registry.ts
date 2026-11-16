@@ -4,7 +4,7 @@ import type { NativeProcessHooks } from './native/tools'
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
 import { claudeHolding, codexHolding, type HeldSkill, openCodeHolding } from './heldSkills'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt, upToRepository } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
@@ -939,7 +939,8 @@ const placeHere = (): SandboxPlace => ({
 const startsUntried = ({ platform, env, exists }: SandboxPlace): boolean | null => {
   if (platform === 'darwin') return exists('/usr/bin/sandbox-exec')
   if (platform !== 'linux' || env.FLATPAK_ID !== undefined) return false
-  const onPath = (name: string) => (env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && exists(join(folder, name)))
+  // Linux's own PATH, read by Linux's rules wherever this is worked out, as a test on Windows does.
+  const onPath = (name: string) => (env.PATH ?? '').split(':').some((folder) => folder !== '' && exists(posix.join(folder, name)))
   return onPath('bwrap') && onPath('socat') ? null : false
 }
 
