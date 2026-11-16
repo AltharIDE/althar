@@ -1697,3 +1697,7 @@ CREATE TABLE api_commands (
   ) STRICT;
 
 CREATE INDEX api_commands_pending ON api_commands(runtime_instance_id) WHERE state = 'pending';
+
+CREATE INDEX turn_deliveries_by_thread_time ON turn_deliveries (thread_id, requested_at);
+
+CREATE INDEX thread_items_tool_calls ON thread_items (thread_id, sequence) WHERE kind = 'tool_call';
