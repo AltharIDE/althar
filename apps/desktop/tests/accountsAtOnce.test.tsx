@@ -77,6 +77,47 @@ describe('an account changed', () => {
     await act(async () => answer.resolve())
   })
 
+  it('holds a rename over a read begun before it, as a recheck on focus is, until a read after its answer', async () => {
+    const renamed: Status = {
+      ...withTwo,
+      agents: withTwo.agents.map((agent) => ({
+        ...agent,
+        accounts: agent.accounts.map((account) => (account.id === 'acc_work' ? { ...account, name: 'Personal' } : account)),
+      })),
+    }
+    const before = later()
+    let runtimeHas = withTwo
+    const reads = vi.fn(async (asked?: { readonly recheck?: boolean }) => {
+      // The recheck began before the rename, and answers as the runtime had it then, whenever it lands.
+      if (asked?.recheck === true) {
+        await before.promise
+        return withTwo
+      }
+      return runtimeHas
+    })
+    const { client } = fakeClient({ status: reads })
+    const answer = later()
+    vi.mocked(client.renameAccount).mockReturnValue(answer.promise)
+    const { result } = render(() => useStart(), client)
+    await waitFor(() => expect(result.current.status).not.toBeNull())
+    let rechecked: Promise<unknown> = Promise.resolve()
+    act(() => {
+      rechecked = result.current.recheck()
+    })
+    act(() => void result.current.renameAccount('acc_work', 'Personal'))
+    // The read from before lands, in the cache and drawn: the rename still shows.
+    await act(async () => {
+      before.resolve()
+      await rechecked
+      await new Promise((drawn) => setTimeout(drawn, 0))
+    })
+    expect(accountsOf(result.current.status)).toContainEqual(['acc_work', 'Personal'])
+    // Kept, and read after: the runtime's word, which has it.
+    runtimeHas = renamed
+    await act(async () => answer.resolve())
+    await waitFor(() => expect(accountsOf(result.current.status)).toContainEqual(['acc_work', 'Personal']))
+  })
+
   it('comes back as the runtime has it, saying why, where it wasn’t renamed', async () => {
     const { client } = fakeClient({ status: vi.fn(async () => withTwo) })
     vi.mocked(client.renameAccount).mockRejectedValue(new ApiError({ reason: 'Taken', message: 'Another account has that name.' }))

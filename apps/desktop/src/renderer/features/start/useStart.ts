@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { type AgentStatus, ApiError, type ProjectSummary, type Status } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
-import { keys, reads, recheckStatus } from '../../data/reads'
+import { reads, recheckStatus } from '../../data/reads'
 import { useServices } from '../../data/services'
 
 /*
@@ -43,12 +43,32 @@ export interface StartModel {
  * runtime's last answer: where the person signs in, so after they did. The
  * window also asks again whenever it comes back to the front.
  */
+/**
+ * An account change as it shows before the runtime says so: each agent as it changes it, and what it changes (an
+ * account's name, an agent's order of accounts), which a later change of the same, once kept, takes the place of.
+ */
+interface AccountChange {
+  readonly of: string
+  readonly show: (agent: AgentStatus) => AgentStatus
+}
+
 export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {}): StartModel => {
   const { client, cache } = useServices()
   const read = reads(client)
   const projectsRead = useQuery(read.projects())
   const statusRead = useQuery(read.status())
-  const status = statusRead.data ?? null
+  // Account changes still waiting for a read after their answer, by press: each drawn over every read of the agents, so a
+  // read begun before one (a recheck as the window got focus) never takes it back.
+  const [held, setHeld] = useState<ReadonlyMap<number, AccountChange>>(new Map())
+  const pressed = useRef(0)
+  const readNow = statusRead.data ?? null
+  const status = useMemo(
+    () =>
+      readNow === null || held.size === 0
+        ? readNow
+        : { ...readNow, agents: readNow.agents.map((agent) => [...held.values()].reduce((now, change) => change.show(now), agent)) },
+    [readNow, held],
+  )
   const projects = projectsRead.data?.projects ?? null
   const [failed, setError] = useState<string | null>(null)
   const readFailure = projectsRead.error ?? statusRead.error
@@ -85,18 +105,27 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
    * did, and shows the agents as they are after it.
    */
   const changing = useCallback(
-    async (change: () => Promise<unknown>, shows?: (agent: AgentStatus) => AgentStatus) => {
+    async (change: () => Promise<unknown>, shows?: AccountChange) => {
       setError(null)
-      if (shows !== undefined)
-        cache.setQueryData<Status>(keys.status, (was) => (was === undefined ? was : { ...was, agents: was.agents.map(shows) }))
+      const press = ++pressed.current
+      if (shows !== undefined) setHeld((now) => new Map([...now, [press, shows]]))
+      let failed = false
       try {
         await change()
       } catch (failure) {
+        failed = true
         setError(messageOf(failure))
       }
+      // Read after the answer: what it shows from here is the runtime's. Kept, it also takes the place of every earlier change
+      // of its account still waiting, which would otherwise show again over it; failed, only its own goes.
       await reloadStatus(false)
+      const of = failed ? undefined : shows?.of
+      setHeld((now) => {
+        const left = [...now].filter(([one, it]) => one !== press && (of === undefined || one > press || it.of !== of))
+        return left.length === now.size ? now : new Map(left)
+      })
     },
-    [reloadStatus, cache],
+    [reloadStatus],
   )
 
   const moveAccount = useCallback(
@@ -105,13 +134,13 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
       const at = ids.indexOf(accountId)
       const next = ids.filter((id) => id !== accountId)
       next.splice(Math.max(0, to === 'up' ? at - 1 : at + 1), 0, accountId)
-      return changing(
-        () => client.orderAccounts(agentId, next),
-        (agent) =>
+      return changing(() => client.orderAccounts(agentId, next), {
+        of: `order ${agentId}`,
+        show: (agent) =>
           agent.id !== agentId
             ? agent
             : { ...agent, accounts: next.flatMap((id) => agent.accounts.filter((account) => account.id === id)) },
-      )
+      })
     },
     [changing, client, status],
   )
@@ -138,10 +167,13 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     installFailed,
     checkedAt: statusRead.dataUpdatedAt,
     renameAccount: (accountId, name) =>
-      changing(
-        () => client.renameAccount(accountId, name),
-        (agent) => ({ ...agent, accounts: agent.accounts.map((account) => (account.id === accountId ? { ...account, name } : account)) }),
-      ),
+      changing(() => client.renameAccount(accountId, name), {
+        of: `name ${accountId}`,
+        show: (agent) => ({
+          ...agent,
+          accounts: agent.accounts.map((account) => (account.id === accountId ? { ...account, name } : account)),
+        }),
+      }),
     moveAccount,
     removeAccount: (accountId) => {
       setUnremoved(null)
@@ -154,7 +186,10 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
             throw failure
           }
         },
-        (agent) => ({ ...agent, accounts: agent.accounts.filter((account) => account.id !== accountId) }),
+        {
+          of: `removed ${accountId}`,
+          show: (agent) => ({ ...agent, accounts: agent.accounts.filter((account) => account.id !== accountId) }),
+        },
       )
     },
     unremoved,
