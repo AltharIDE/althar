@@ -41,6 +41,7 @@ import type { LoadOptions } from '../src/MachineLoad'
 import { WORK } from '../src/machine'
 import type { PlanUsageOptions } from '../src/PlanUsage'
 import type { ModelFactsOptions } from '../src/ModelFacts'
+import { KEPT_FOR } from '../src/Queries'
 
 /** The repository every test starts from, made once per worker: copying it is much quicker than running git anew. */
 let template: string | undefined
@@ -422,7 +423,9 @@ export const runtime = (
     publishAgain: more.publishAgain ?? Duration.zero,
     ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
-    keptFor: more.keptFor ?? Duration.zero,
+    // Cards worked out afresh on every read, as most tests write the store by hand; `ALTHAR_TEST_KEEP_CARDS=1` keeps them as
+    // Althar does, to run any test on the cache production reads through.
+    keptFor: more.keptFor ?? (process.env.ALTHAR_TEST_KEEP_CARDS === '1' ? KEPT_FOR : Duration.zero),
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),
