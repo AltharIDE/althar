@@ -42,6 +42,11 @@ const behind = ((ApiModule as Partial<typeof ApiModule>).Behind?.layer ?? Layer.
  *   ALTHAR_RESPONSIVENESS_OUT=before.json bun run test:responsiveness                    # idle, then every core and the disk busy
  *   bun tests/real/compare.ts before.json after.json                                     # two runs' summaries, row by row
  *
+ * A commit from before these files had them is timed the same way with them copied into its checkout's tests/real/
+ * (and `bunx vp test run --config vite.real.config.ts tests/real/responsiveness.test.ts` where it has no script for it):
+ * what a commit has only later (the lane, GetThreadItems, cards kept and their spans) is looked for, and what the
+ * windows do is read off that checkout's renderer (follow.ts), so each commit's app is the one followed.
+ *
  * It builds a profile the size of a real one on a store on disk: a project of
  * 400 tasks, one with 5,000 items and 500 turns in its thread, a coordinator's
  * thread of 2,000 items with its task cards, and a million rows of the change
@@ -81,9 +86,13 @@ const ITEMS = Number(setting('ALTHAR_ITEMS', '5000'))
 const TURNS = Number(setting('ALTHAR_TURNS', '500'))
 const COORDINATOR_ITEMS = Number(setting('ALTHAR_COORDINATOR_ITEMS', '2000'))
 const CHANGES = Number(setting('ALTHAR_CHANGES', '1000000'))
-/** Windows of the app, each following the feed; and the edge, unless `ALTHAR_EDGE=0`. */
+/**
+ * Windows of the app, each following the feed: the first on its project's screen (the board and the coordinator), the
+ * second on the long task's, and so on in turn, each with the projects in its sidebar.
+ */
 const WINDOWS = Math.max(1, Number(setting('ALTHAR_WINDOWS', '2')))
-const EDGE = setting('ALTHAR_EDGE', '1') !== '0'
+/** The edge: `1` seen (the notch), `hidden` (the menu bar's sheet between clicks), `0` none. */
+const EDGE = setting('ALTHAR_EDGE', '1')
 /** Agents at work at once, each in a task of its own. */
 const AGENTS = Number(setting('ALTHAR_AGENTS', '8'))
 /** Tasks open: the long one, Ship's, the presses', the agents' and Done's for each phase. The rest of the 400 settled. */
@@ -114,12 +123,45 @@ const say = (...what: ReadonlyArray<unknown>) =>
   void process.stdout.write(`${what.map((one) => (typeof one === 'string' ? one : JSON.stringify(one, null, 1))).join(' ')}\n`)
 
 /**
- * Statements the runtime runs at 9cde0f5 for what the run counts, where no span names it: the card watcher's look at
- * what changed, once a round (Queries `cardsMoved`), and the read each card on a board starts with (`cardOnBoard`).
+ * Statements the runtime runs for what the run counts, where no span names it: the card watcher's look at what changed,
+ * once a round at 9cde0f5 (Queries `cardsMoved`); and the first a card worked out runs, wherever it is worked out (a
+ * board, the home, an item, the watcher), at 9cde0f5 and since (Queries `cardFor`), so cards count alike on both.
  */
 const SIGNATURES = {
   cardRound: /^sql:\s+SELECT c\.cursor, c\.project_id, CASE c\.aggregate_type WHEN 'task'/,
-  cardOnBoard: /^sql:\s+SELECT \(SELECT max\(updated_at\) FROM external_links WHERE task_id = \? AND kind = 'change'\) AS seen/,
+  cardFor: /^sql:\s+SELECT k\.state, \(SELECT count\(\*\) FROM external_links l WHERE l\.task_id = k\.id AND l\.kind = 'change'\)/,
+}
+
+/** A card worked out, where a span names each (Queries.ts `Queries.card`, as load.ts names it: kept, or not and why). */
+const CARD_SPAN = /^Queries\.card\b/
+
+/**
+ * The cards worked out, by the statement each starts with, alike on every commit; and where a span names each, as many
+ * by their spans, and how many of those were kept for the next read.
+ */
+const cardsWorkedOut = () => {
+  const spanned = traced.count(CARD_SPAN).n
+  return {
+    n: traced.count(SIGNATURES.cardFor).n,
+    by: 'cardFor’s first statement',
+    ...(spanned > 0 ? { spans: spanned, kept: traced.count(/^Queries\.card: kept$/).n } : {}),
+  }
+}
+
+/**
+ * The card watcher's rounds: by a span of their own where one names them, else by the statement each starts with at
+ * 9cde0f5; neither where a later commit shares that look at the feed with reads and names no round (`undefined`).
+ */
+const cardRounds = () => {
+  const named = Object.entries(traced.named()).filter(([name]) => /card/i.test(name) && /round|moved|watch/i.test(name))
+  if (named.length > 0)
+    return {
+      n: sum(named.map(([, list]) => list.length)),
+      times: named.flatMap(([, list]) => list),
+      by: named.map(([name]) => name).join(', '),
+    }
+  const n = traced.count(SIGNATURES.cardRound).n
+  return n > 0 ? { n, times: undefined, by: 'its first statement, as at 9cde0f5' } : undefined
 }
 
 /** The runtime's statements, not those the run reads the feed by while it waits for an update's cost to settle. */
@@ -265,16 +307,33 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
         }
         say('quiet', quiet)
 
-        // The windows: the first with the long task open, the second its project's coordinator, and so on; and the edge.
+        // The windows: the first on the project's screen, its board and its coordinator's thread, the second on the long
+        // task's, and so on, each with the projects in its sidebar and the home held off screen; and the edge.
         const setups: Array<WindowSetup> = Array.from({ length: WINDOWS }, (_, index) => ({
           name: `window-${index + 1}`,
           kind: 'window' as const,
           projectId,
           follows: following,
-          ...(index % 2 === 0 ? { thread: long.threadId } : { coordinator: true }),
+          ...(index % 2 === 0
+            ? { coordinator: true, shows: ['projects', 'board'] as const }
+            : { thread: long.threadId, shows: ['projects'] as const }),
         }))
-        if (EDGE) setups.push({ name: 'edge', kind: 'edge', projectId, follows: following })
+        if (EDGE !== '0') setups.push({ name: 'edge', kind: 'edge', projectId, follows: following, seen: EDGE !== 'hidden' })
         const windows = yield* openWindows(setups)
+        // What this commit's app and API do, as the windows run them.
+        const batched = following.batched && windows.features.items
+        results.variant = {
+          ...variant,
+          api: windows.features,
+          screens: setups.map((setup) => ({
+            name: setup.name,
+            shows: setup.shows ?? [],
+            thread: setup.thread !== undefined,
+            coordinator: setup.coordinator === true,
+            seen: setup.seen,
+          })),
+        }
+        say('and their API has', JSON.stringify(windows.features))
         const press = (method: string, payload: Record<string, unknown> = {}, want = false) =>
           windows.call(0, method, { commandId: commandId(), ...payload }, want)
         const read = (method: string, payload?: unknown, want = false) => windows.call(0, method, payload, want)
@@ -285,7 +344,7 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
           // Its processes take a moment to take the cores.
           yield* Effect.sleep(Duration.seconds(2))
           // What one tool call's update makes the runtime and the windows do, before the agents start, once all is at rest:
-          // on the task the first window has open, so its screen reads what changed as it would.
+          // on the task the second window has open, so its screen reads what changed as it would.
           const amplification = yield* amplify(long, projectId, phase, windows.stats)
           yield* windows.stats(true)
           traced.clear()
@@ -323,13 +382,17 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
             keep('board', yield* read('GetBoard', { projectId }))
             keep('home', yield* read('GetHome', {}))
             keep('projects', yield* read('ListProjects'))
-            const burst = yield* windows.burst(
-              0,
-              'GetThreadItem',
-              latest.map((itemId) => ({ threadId: long.threadId, itemId })),
-            )
-            keep('item burst', burst)
-            for (const ms of burst.each ?? []) times.set('item', [...(times.get('item') ?? []), ms])
+            // The items a screen reads of what changed, as this commit's screens read them: in one call, or one call each.
+            if (batched) keep('item burst', yield* read('GetThreadItems', { threadId: long.threadId, itemIds: latest }))
+            else {
+              const burst = yield* windows.burst(
+                0,
+                'GetThreadItem',
+                latest.map((itemId) => ({ threadId: long.threadId, itemId })),
+              )
+              keep('item burst', burst)
+              for (const ms of burst.each ?? []) times.set('item', [...(times.get('item') ?? []), ms])
+            }
             keep('search', yield* read('SearchTasks', { text: 'retry' }))
             keep('settings', yield* read('GetSettings', {}))
             keep('rules', yield* read('GetProjectRules', { projectId }))
@@ -426,8 +489,11 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
           const named = traced.named()
           const phaseSpans = traced.top(30)
           const phaseSpawns = started.top(30)
-          const rounds = traced.count(SIGNATURES.cardRound).n
+          const rounds = cardRounds()
+          const cards = cardsWorkedOut()
           const per = (n: number) => n / seconds
+          const itemsRead = sum(seen.flatMap((window) => Object.values(window.items)))
+          const marked = (what: string) => sum(seen.map((window) => window.marked[what] ?? 0))
 
           // The agents' turns over, before the next phase's are timed.
           for (const one of [pressed, ...agents]) yield* idle(one.threadId)
@@ -445,6 +511,8 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
                 window.name,
                 {
                   reads: Object.fromEntries(Object.entries(window.reads).map(([what, list]) => [what, summary(list)])),
+                  items: window.items,
+                  marked: window.marked,
                   failed: window.failed,
                   watched: window.watched,
                   changed: window.changed,
@@ -456,7 +524,8 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
               agents: agents.length,
               feed,
               rows: to - from,
-              rounds,
+              rounds: rounds === undefined ? null : { n: rounds.n, by: rounds.by },
+              cards,
               named: Object.fromEntries(Object.entries(named).map(([name, list]) => [name, summary(list)])),
             },
             amplification,
@@ -482,8 +551,30 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
             'settings',
             'rules',
           ])
-            rows.push(timed(phase, 'read', what, of(what), BUDGETS.call, missing.has(what) ? 'no such call on this commit' : undefined))
-          rows.push(timed(phase, 'read', 'item burst', of('item burst'), null, `${latest.length} items at once, all answered`))
+            rows.push(
+              timed(
+                phase,
+                'read',
+                what,
+                of(what),
+                BUDGETS.call,
+                missing.has(what)
+                  ? 'no such call on this commit'
+                  : what === 'item' && batched
+                    ? 'a screen reads items in one call here: the item burst'
+                    : undefined,
+              ),
+            )
+          rows.push(
+            timed(
+              phase,
+              'read',
+              'item burst',
+              of('item burst'),
+              batched ? BUDGETS.call : null,
+              `${latest.length} items at once, ${batched ? 'in one call' : 'one call each, all answered'}`,
+            ),
+          )
           for (const what of ['rename', 'set model', 'send', 'send queued', 'take back', 'interrupt', 'done', 'ship answered'])
             rows.push(
               timed(
@@ -501,37 +592,45 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
           rows.push(counted(phase, 'activity', 'agents at work', agents.length, 'n'))
           rows.push(counted(phase, 'activity', 'change log rows', per(to - from), '/s'))
           rows.push(counted(phase, 'activity', 'card notifies', per(feed.card ?? 0), '/s'))
-          rows.push(counted(phase, 'activity', 'card rounds', per(rounds), '/s', 'by its statement at 9cde0f5'))
-          const roundSpans = Object.entries(named).filter(([name]) => /card/i.test(name) && /round|moved|watch/i.test(name))
-          if (roundSpans.length > 0)
-            rows.push(
-              timed(
-                phase,
-                'activity',
-                'card round',
-                summary(roundSpans.flatMap(([, list]) => list)),
-                null,
-                roundSpans.map(([name]) => name).join(', '),
-              ),
-            )
+          rows.push(
+            counted(
+              phase,
+              'activity',
+              'card rounds',
+              rounds === undefined ? undefined : per(rounds.n),
+              '/s',
+              rounds?.by ?? 'no span names a round, and its look at the feed is shared with reads here',
+            ),
+          )
+          rows.push(counted(phase, 'activity', 'cards worked out', per(cards.n), '/s', `by ${cards.by}`))
+          if (cards.spans !== undefined) {
+            rows.push(counted(phase, 'activity', 'cards worked out, by span', per(cards.spans), '/s', 'Queries.card'))
+            rows.push(counted(phase, 'activity', 'cards worked out and kept', per(cards.kept ?? 0), '/s'))
+          }
+          if (rounds?.times !== undefined) rows.push(timed(phase, 'activity', 'card round', summary(rounds.times), null, rounds.by))
           else {
             rows.push(counted(phase, 'activity', 'card round', undefined, 'ms', 'no span names a round on this commit'))
             if (at === 0)
               skipped.push({
                 what: 'card round duration',
-                why: 'no span names the card watcher’s round on this commit: rounds counted by their statement only',
+                why: 'no span names the card watcher’s round on this commit (Queries `cardsMoved`): rounds counted by their statement where it is theirs alone',
               })
           }
           rows.push(counted(phase, 'activity', 'whole re-reads', per(sum(WHOLE.map((what) => reads.get(what)?.length ?? 0))), '/s'))
           for (const what of ['board', 'home', 'projects', 'edge.home'])
             rows.push(counted(phase, 'activity', `${what} re-reads`, per(reads.get(what)?.length ?? 0), '/s'))
+          // Those only marked: off screen, or the edge hidden, to be read as they next show.
+          for (const what of ['board', 'home', 'projects', 'edge.home'])
+            if (marked(what) > 0) rows.push(counted(phase, 'activity', `${what} marked`, per(marked(what)), '/s'))
+          rows.push(counted(phase, 'activity', 'items re-read', per(itemsRead), '/s'))
           rows.push(
             counted(
               phase,
               'activity',
-              'item re-reads',
-              per(sum([...reads].filter(([what]) => what.endsWith('.item')).map(([, list]) => list.length))),
+              'item read calls',
+              per(sum([...reads].filter(([what]) => what.endsWith('.item') || what.endsWith('.items')).map(([, list]) => list.length))),
               '/s',
+              batched ? 'several items a call' : 'one item a call',
             ),
           )
           for (const window of seen) {
@@ -556,16 +655,27 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
                   what.endsWith('ms') || what === 'settled in' ? 'ms' : what.endsWith('per s') ? '/s' : 'n',
                   what === 'settled in' && !(amplification.atRest && amplification.settled)
                     ? `the runtime ${amplification.atRest ? 'never settled after it' : 'was not at rest before it'}`
-                    : undefined,
+                    : what === 'card rounds' && value === undefined
+                      ? 'no span names a round, and its look at the feed is shared with reads here'
+                      : undefined,
                 ),
               )
           yield* Effect.sleep(Duration.seconds(2))
         }
 
         results.version = 1
-        results.commit = git(import.meta.dirname, 'rev-parse', 'HEAD')
-        results.variant = variant
+        // Where it ran: the checkout's commit, or what `ALTHAR_COMMIT` names, for a tree that isn't a checkout.
+        results.commit =
+          process.env.ALTHAR_COMMIT ??
+          Effect.runSync(
+            Effect.orElseSucceed(
+              Effect.try(() => git(import.meta.dirname, 'rev-parse', 'HEAD')),
+              () => 'unknown',
+            ),
+          )
         results.settings = {
+          // Whether cards are kept between reads: null on a commit that keeps none.
+          keepCards: keptFor === undefined ? null : KEEP,
           phases: PHASES,
           repeats: REPEATS,
           presses: PRESSES,
@@ -678,31 +788,35 @@ const amplify = (
     const wrote = performance.now() - began
     const over = yield* settle(800, 20_000)
     const feed = yield* feedSince(from)
-    const seen = followed(yield* windowStats(true))
+    const after = yield* windowStats(true)
+    const seen = followed(after)
     const reads = (matching: (what: string) => boolean) => sum([...seen].filter(([what]) => matching(what)).map(([, list]) => list.length))
-    const named = Object.entries(traced.named()).filter(([name]) => /^(cardFor|cardOnBoard|Queries\.card)/i.test(name))
+    const cards = cardsWorkedOut()
+    const counts: Readonly<Record<string, number | undefined>> = {
+      'change log rows': sum(Object.values(feed)),
+      'card notifies': feed.card ?? 0,
+      'sql statements': traced.count(STATEMENTS).n,
+      'sql ms': traced.count(STATEMENTS).ms,
+      'card computations': cards.n,
+      ...(cards.spans === undefined ? {} : { 'card computations, by span': cards.spans, 'cards kept': cards.kept }),
+      'card rounds': cardRounds()?.n,
+      'git processes': started.count(/^git/),
+      'window whole re-reads': reads((what) => WHOLE.includes(what)),
+      'window items re-read': sum(after.flatMap((window) => Object.values(window.items))),
+      'window item read calls': reads((what) => what.endsWith('.item') || what.endsWith('.items')),
+      'window head re-reads': reads((what) => what.endsWith('.head')),
+      'idle sql per s': idleSql,
+      'idle git per s': idleGit,
+      'write ms': wrote,
+      'settled in': over.at - began,
+    }
     return {
-      counts: {
-        'change log rows': sum(Object.values(feed)),
-        'card notifies': feed.card ?? 0,
-        'sql statements': traced.count(STATEMENTS).n,
-        'sql ms': traced.count(STATEMENTS).ms,
-        'card computations': named.length > 0 ? sum(named.map(([, list]) => list.length)) : traced.count(SIGNATURES.cardOnBoard).n,
-        'card rounds': traced.count(SIGNATURES.cardRound).n,
-        'git processes': started.count(/^git/),
-        'window whole re-reads': reads((what) => WHOLE.includes(what)),
-        'window item re-reads': reads((what) => what.endsWith('.item')),
-        'window head re-reads': reads((what) => what.endsWith('.head')),
-        'idle sql per s': idleSql,
-        'idle git per s': idleGit,
-        'write ms': wrote,
-        'settled in': over.at - began,
-      },
+      counts,
       atRest: rest.still,
       settled: over.still,
       feed,
       reads: Object.fromEntries([...seen].map(([what, list]) => [what, summary(list)])),
-      cardComputationsBy: named.length > 0 ? named.map(([name]) => name) : 'its first statement (cardOnBoard at 9cde0f5)',
+      cardComputationsBy: cards.by,
       spans: traced.top(20),
       spawned: started.top(10),
     }
