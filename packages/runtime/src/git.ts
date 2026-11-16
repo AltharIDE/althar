@@ -9,7 +9,7 @@ import { Cause, Context, Deferred, Duration, Effect } from 'effect'
 
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
-import { refStamp } from './refStamps'
+import { refStamp, historyWhole } from './refStamps'
 import { noteLook, noteUnsure, unnoted } from './standsOn'
 import { Foreground, reachesRemote, startApart } from './spawner'
 import { forkOf } from './forks'
@@ -874,45 +874,64 @@ export const KEPT_BY_IDS = 4096
 
 /*
  * What git says of commits named by their ids alone: which is under which,
- * and what one has that another doesn't. An id names the same commit for
- * good, so the answer never changes: it is asked once, and a card standing
- * on it is kept as any other (standsOn.ts), rather than worked out again,
- * with git started for it, on every read. Only where every name is an id:
- * a branch or HEAD moves.
+ * and what one has that another doesn't. In a repository with its whole
+ * history, two commits it has answer the same for good, so it is asked once,
+ * and a card standing on it is kept as any other (standsOn.ts) rather than
+ * worked out again, with git started for it, on every read. Not where the
+ * history is shallow, whose answers change as a fetch deepens it; not where
+ * a name could move (a branch, HEAD); and never what git failed to say, as
+ * of a commit not fetched yet: those are asked each time, and the answer
+ * waiting on them isn't kept.
  */
 const byIds = new Map<string, unknown>()
-const keptByIds = <A, E>(key: ReadonlyArray<string>, ask: Effect.Effect<A, E>): Effect.Effect<A, E> => {
-  const named = key.join('\0')
-  return Effect.suspend(() => {
-    if (byIds.has(named)) return Effect.succeed(byIds.get(named) as A)
-    // Nothing it reads can change, so nothing is noted of it: the answer holds for good.
-    return unnoted(ask).pipe(
-      Effect.tap((answer) =>
-        Effect.sync(() => {
-          if (byIds.size >= KEPT_BY_IDS) byIds.delete(byIds.keys().next().value ?? '')
-          byIds.set(named, answer)
-        }),
-      ),
-    )
+const keptByIds = <A, E>(
+  cwd: string,
+  key: ReadonlyArray<string>,
+  ask: Effect.Effect<A, E>,
+  sure: (answer: A) => boolean = () => true,
+): Effect.Effect<A, E> => {
+  const named = [cwd, ...key].join('\0')
+  return Effect.gen(function* () {
+    if (byIds.has(named)) return byIds.get(named) as A
+    // Asked of git outright, as any other question, where the history is shallow: what waits on it isn't kept.
+    if (!(yield* Effect.promise(() => historyWhole(cwd)))) return yield* ask
+    const answer = yield* unnoted(ask).pipe(Effect.tapCause(() => noteUnsure('git failed')))
+    if (!sure(answer)) {
+      yield* noteUnsure('git could not say')
+      return answer
+    }
+    if (byIds.size >= KEPT_BY_IDS) byIds.delete(byIds.keys().next().value ?? '')
+    byIds.set(named, answer)
+    return answer
   })
 }
 
-/** Whether `commit` is `under` or behind it: kept where both are ids, as the answer never changes; false where git can't say. */
-export const isUnder = (cwd: string, commit: string, under: string): Effect.Effect<boolean> => {
-  const ask = Effect.match(git(cwd, 'merge-base', '--is-ancestor', commit, under), { onFailure: () => false, onSuccess: () => true })
-  return COMMIT_ID.test(commit) && COMMIT_ID.test(under) ? keptByIds(['under', cwd, commit, under], ask) : ask
-}
+/** Whether git says `commit` is `under` or behind it: yes, no, or null where it couldn't say, as of a commit it hasn't got. */
+const ancestry = (cwd: string, commit: string, under: string) =>
+  Effect.map(gitOutcome(cwd, 'merge-base', '--is-ancestor', commit, under), ({ code }) => (code === 0 ? true : code === 1 ? false : null))
 
-/** How many commits `head` has that `base` doesn't: kept where both are ids. */
+/**
+ * Whether `commit` is `under` or behind it: false where git can't say. Kept where both are ids and the history is whole,
+ * and only git's own yes or no, never a failure read as no.
+ */
+export const isUnder = (cwd: string, commit: string, under: string): Effect.Effect<boolean> =>
+  Effect.map(
+    COMMIT_ID.test(commit) && COMMIT_ID.test(under)
+      ? keptByIds(cwd, ['under', commit, under], ancestry(cwd, commit, under), (said) => said !== null)
+      : ancestry(cwd, commit, under),
+    (said) => said === true,
+  )
+
+/** How many commits `head` has that `base` doesn't: kept where both are ids and the history is whole. */
 export const countBetween = (cwd: string, base: string, head: string): Effect.Effect<number, GitFailed> => {
   const ask = commitsAhead(cwd, base, head)
-  return COMMIT_ID.test(base) && COMMIT_ID.test(head) ? keptByIds(['count', cwd, base, head], ask) : ask
+  return COMMIT_ID.test(base) && COMMIT_ID.test(head) ? keptByIds(cwd, ['count', base, head], ask) : ask
 }
 
-/** The commits `head` has that `base` doesn't, oldest first, one line each in `format`: kept where both are ids. */
+/** The commits `head` has that `base` doesn't, oldest first, one line each in `format`: kept as `countBetween` is. */
 export const logBetween = (cwd: string, base: string, head: string, format: string): Effect.Effect<string, GitFailed> => {
   const ask = git(cwd, 'log', '--reverse', `--format=${format}`, `${base}..${head}`)
-  return COMMIT_ID.test(base) && COMMIT_ID.test(head) ? keptByIds(['log', cwd, base, head, format], ask) : ask
+  return COMMIT_ID.test(base) && COMMIT_ID.test(head) ? keptByIds(cwd, ['log', base, head, format], ask) : ask
 }
 
 /** How many commits `head` (HEAD, unless named) has that a base doesn't. */

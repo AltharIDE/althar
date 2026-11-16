@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { renameSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, renameSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
@@ -70,6 +71,43 @@ describe('what git says of commits by their ids', () => {
       commit(cwd, 'two.txt')
       assert.strictEqual(yield* countBetween(cwd, base, 'HEAD'), 2)
       assert.isTrue(yield* isUnder(cwd, base, 'HEAD'))
+    }),
+  )
+
+  it.effect('says a commit not fetched yet is under nothing, and asks again once it is: a failure is never kept', () =>
+    Effect.gen(function* () {
+      const upstream = repository()
+      const base = git(upstream, 'rev-parse', 'HEAD')
+      const clone = mkdtempSync(join(tmpdir(), 'althar-ids-'))
+      git(clone, 'clone', '-q', upstream, '.')
+      const later = commit(upstream, 'later.txt')
+      const on = { looks: [], unsure: null as string | null, until: Infinity }
+      assert.isFalse(yield* Effect.provideService(isUnder(clone, base, later), StandsOn, on))
+      // What waited on git's failure isn't kept either.
+      assert.isNotNull(on.unsure)
+      git(clone, 'fetch', '-q', 'origin')
+      assert.isTrue(yield* isUnder(clone, base, later))
+    }),
+  )
+
+  it.effect('is asked again where the history is shallow, and kept once a fetch makes it whole', () =>
+    Effect.gen(function* () {
+      const upstream = repository()
+      const base = git(upstream, 'rev-parse', 'HEAD')
+      commit(upstream, 'one.txt')
+      const head = commit(upstream, 'two.txt')
+      const shallow = mkdtempSync(join(tmpdir(), 'althar-ids-'))
+      git(shallow, 'clone', '-q', '--depth', '2', `file://${upstream}`, '.')
+      // Shallow: its first commit stands for its history, so it isn't kept.
+      const cut = git(shallow, 'rev-list', '--max-parents=0', 'HEAD')
+      const on = { looks: [], unsure: null as string | null, until: Infinity }
+      assert.strictEqual(yield* Effect.provideService(countBetween(shallow, cut, head), StandsOn, on), 1)
+      assert.isNotNull(on.unsure)
+      git(shallow, 'fetch', '-q', '--unshallow', 'origin')
+      assert.strictEqual(yield* countBetween(shallow, base, head), 2)
+      // Whole now: kept, so the same comes with the repository gone.
+      renameSync(shallow, `${shallow}-moved`)
+      assert.strictEqual(yield* countBetween(shallow, base, head), 2)
     }),
   )
 })
