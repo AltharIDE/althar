@@ -697,7 +697,8 @@ const playStall = async (
  * by itself, but only when its turn is cancelled, its session closed, or the test opens the marker's hold;
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting; `[lead:fix-tiny]` settles with one line in README.md, the file
- * `[review:findings]` names, a fix too small to be checked again; `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
+ * `[review:findings]` names, a fix too small to be checked again; `[lead:fix-untracked]` also leaves an untracked picture as evidence;
+ * `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
  * the test holds it (`FakeAgentOptions.holds`).
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to; `[lead:nothing]` says it built
@@ -1226,6 +1227,8 @@ const playRole = async (
         const aside = session.markers.has('[lead:set-aside]')
         // `[lead:fix-tiny]` fixes in a line of the file the finding named, README.md: a fix too small to check again.
         if (!aside) await commitIn(session.cwd, session.markers.has('[lead:fix-tiny]') ? 'README.md' : 'settled.txt', 'Settle the review')
+        if (session.markers.has('[lead:fix-untracked]'))
+          writeFileSync(join(session.cwd, 'untracked.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
         // `[lead:fix-elsewhere]` names a commit from before the round, which made none of the fix.
         const fix = aside
           ? null
@@ -1255,7 +1258,9 @@ const playRole = async (
               ],
               unverified: [],
             }
-          : {}
+          : session.markers.has('[lead:fix-untracked]')
+            ? { evidence: [{ kind: 'screenshot', caption: 'An untracked file', path: 'untracked.png' }] }
+            : {}
         // What the task built, said again where settling changed it; or, unsaid, once Althar asks for it.
         const built = aside ? {} : { built: BUILT_SETTLED }
         if (session.markers.has('[lead:built-unsaid]') && !aside) {

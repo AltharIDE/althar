@@ -79,6 +79,21 @@ const toldReviewer = (taskId: string) =>
   })
 
 describe('checking a fix after a review', () => {
+  it.live('checks a tiny fix that also leaves an untracked file', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const instance = yield* Instance
+      yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const coordinator = yield* Coordinator
+      const threadId = yield* coordinator.thread(project.projectId)
+      const body = 'Add a retry. [coordinator:plan-branch] [lead:finish] [lead:edit] [review:findings] [lead:fix-tiny] [lead:fix-untracked]'
+      yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+      const [card] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' || all[0]?.phase === 'waiting')
+      assert.isTrue((yield* toldReviewer(card?.taskId ?? '')).some((body) => body.startsWith('A check of the fixes')))
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('reads a tiny fix in the file its finding named no more: the task goes on to its end, sealed, the fix named', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
