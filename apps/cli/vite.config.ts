@@ -11,7 +11,7 @@ export default defineConfig({
     ssr: 'src/main.ts',
     outDir: 'dist',
     target: 'node22',
-    rollupOptions: { output: { entryFileNames: 'althar.js', banner: '#!/usr/bin/env node' } },
+    rollupOptions: { external: ['sharp'], output: { entryFileNames: 'althar.js', banner: '#!/usr/bin/env node' } },
   },
   ssr: { noExternal: true, target: 'node' },
   test: {

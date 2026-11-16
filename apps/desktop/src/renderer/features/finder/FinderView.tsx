@@ -11,6 +11,8 @@ import { usePreferences } from '../../shared/usePreferences'
 import { useNewTab } from '../tabs/TabsFrame'
 import { isSection } from '../settings/sections'
 import { isProjectSection } from '../projectSettings/sections'
+import type { Place } from '../../shared/dictation/Loose'
+import { pressDictationShortcut } from '../../shared/dictation/useDictation'
 import { catalogKey, catalogRead } from './catalog'
 import { entriesFor, withTaskActions } from './entries'
 import { OneBox } from './OneBox'
@@ -60,8 +62,22 @@ export const useWarmSearch = () => {
   }, [client, cache, feed])
 }
 
-export function FinderView({ projectId, onClose, onUsage }: { projectId: string | null; onClose: () => void; onUsage?: () => void }) {
-  const { client, cache, feed } = useServices()
+/**
+ * `place`: the box chooses where something goes rather than where the person does: a project, for its coordinator, or a
+ * task, an aside among them, and nothing else shows.
+ */
+export function FinderView({
+  projectId,
+  onClose,
+  onUsage,
+  place,
+}: {
+  projectId: string | null
+  onClose: () => void
+  onUsage?: () => void
+  place?: (to: Place) => void
+}) {
+  const { client, cache, feed, host } = useServices()
   const navigate = useNavigate()
   const path = useRouterState({ select: (state) => state.location.pathname })
   const thread = path.startsWith('/threads/') ? path.slice('/threads/'.length) : null
@@ -87,7 +103,14 @@ export function FinderView({ projectId, onClose, onUsage }: { projectId: string 
   )
   const [drilled, setDrilled] = useState<string | null>(thread)
   const actionRead = useQuery({ ...reads(client).thread(drilled ?? ''), enabled: drilled !== null })
-  const hydrated = useMemo(() => withTaskActions(entries, actionRead.data), [entries, actionRead.data])
+  const hydrated = useMemo(() => {
+    // Dictate is there where this window can dictate.
+    const all = withTaskActions(entries, actionRead.data).filter((one) => one.id !== 'command:dictate' || host.dictation !== undefined)
+    if (place === undefined) return all
+    return all
+      .filter((one) => one.kind === 'task' || one.id.startsWith('project:'))
+      .map((one) => ({ ...one, acts: one.acts?.filter((act) => act.id === 'open').map((act) => ({ ...act, title: 'Place it here' })) }))
+  }, [entries, actionRead.data, place, host.dictation])
   const editors = useEditorList()
   const { preferences } = usePreferences()
   const newTab = useNewTab()
@@ -107,6 +130,11 @@ export function FinderView({ projectId, onClose, onUsage }: { projectId: string 
     }
   }, [feed, cache])
   const run = (go: Go, entry?: Entry) => {
+    if (place !== undefined) {
+      if (go.to === 'task' && go.slug !== '') place({ kind: 'task', threadId: go.slug })
+      else if (go.to === 'project') place({ kind: 'coordinator', projectId: go.project })
+      return
+    }
     if (entry !== undefined) {
       const used = readUses()
       const next = { ...used, [entry.id]: { at: Date.now(), n: (used[entry.id]?.n ?? 0) + 1 } }
@@ -184,6 +212,7 @@ export function FinderView({ projectId, onClose, onUsage }: { projectId: string 
       case 'command':
         if (go.command === 'new-project') newTab.start()
         else if (go.command === 'usage') onUsage?.()
+        else if (go.command === 'dictate') pressDictationShortcut()
         else if (go.command === 'stop' && go.taskId !== undefined) await client.stopTask(go.taskId)
         else if (go.command === 'resume' && go.taskId !== undefined) await client.resumeTask({ taskId: go.taskId })
     }
@@ -191,6 +220,7 @@ export function FinderView({ projectId, onClose, onUsage }: { projectId: string 
   return (
     <OneBox
       context={context}
+      placing={place !== undefined}
       entries={hydrated}
       onDrill={(entry) => {
         if (entry.go.to === 'task') setDrilled(entry.go.slug)

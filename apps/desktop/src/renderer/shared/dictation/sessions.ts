@@ -50,8 +50,8 @@ export interface Session {
 export interface Destination {
   /** Whose it is: "To the coordinator · althar". */
   readonly to: string
-  /** Its composer, to go back to. */
-  readonly back: { readonly kind: 'coordinator'; readonly projectId: string } | { readonly kind: 'task'; readonly threadId: string }
+  /** Its composer, to go back to; null for what was said from anywhere, with no composer to say it to (`Loose.tsx`). */
+  readonly back: { readonly kind: 'coordinator'; readonly projectId: string } | { readonly kind: 'task'; readonly threadId: string } | null
   /** The thread it is sent to; null where it can't be sent from elsewhere, and only its own composer may send it (a task with no lead on it). */
   readonly threadId: string | null
   /** Sending it there: "Send to the coordinator". */

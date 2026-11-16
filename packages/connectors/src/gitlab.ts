@@ -30,6 +30,7 @@ import type {
   IssuePage,
   IssueQuery,
   ListedChange,
+  ListedRepository,
   MergeMethod,
   Person,
   Repository,
@@ -361,6 +362,72 @@ export const mergesOf = (method: string | null | undefined, squash: string | nul
       return [own]
   }
 }
+
+/** A project as GitLab answers for one: read, or just made. An empty one has no default branch yet: `main`, as GitLab's own is. */
+const repositoryOf = (answer: typeof ProjectAnswer.Type): Repository => ({
+  id: String(answer.id),
+  path: answer.path_with_namespace.split('/'),
+  defaultBranch: answer.default_branch ?? 'main',
+  webUrl: answer.web_url,
+  canPush:
+    Math.max(answer.permissions?.project_access?.access_level ?? 0, answer.permissions?.group_access?.access_level ?? 0) >= DEVELOPER,
+  merges: mergesOf(answer.merge_method, answer.squash_option),
+  parent:
+    answer.forked_from_project == null
+      ? null
+      : {
+          path: answer.forked_from_project.path_with_namespace.split('/'),
+          // Its addresses, as the server writes them, under its own path where it is under one.
+          ...addressesOf([answer.forked_from_project.http_url_to_repo, answer.forked_from_project.ssh_url_to_repo]),
+        },
+})
+
+/** A project the account is a member of, as a list of them says it, for choosing one to clone. */
+const ReachedProject = Schema.Struct({
+  path_with_namespace: Schema.String,
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  // Internal is seen by everyone signed in to the server, not the world: private, as far as cloning it goes.
+  visibility: Schema.optional(Schema.String),
+  last_activity_at: Schema.optional(Schema.NullOr(Schema.String)),
+  web_url: Schema.String,
+  archived: Schema.optional(Schema.Boolean),
+  // A project can turn its repository off, keeping only its issues or wiki: nothing to clone.
+  repository_access_level: Schema.optional(Schema.NullOr(Schema.String)),
+})
+
+/** Whether the account may make projects of its own, as GitLab says of the one signed in. */
+const Creator = Schema.Struct({
+  username: Schema.String,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  can_create_project: Schema.optional(Schema.Boolean),
+})
+
+/**
+ * The groups the account may make a project in, as GitLab itself decides
+ * it: by the account's role there, the group's own setting for who makes
+ * projects, and an administrator's reach.
+ */
+const CREATABLE = `query($after: String) {
+  currentUser {
+    groups(permissionScope: CREATE_PROJECTS, first: 100, after: $after) {
+      nodes { fullPath fullName }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`
+
+const CreatableAnswer = Schema.Struct({
+  currentUser: Schema.NullOr(
+    Schema.Struct({
+      groups: Schema.NullOr(
+        Schema.Struct({
+          nodes: Schema.Array(Schema.NullOr(Schema.Struct({ fullPath: Schema.String, fullName: Schema.String }))),
+          pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean, endCursor: Schema.optional(Schema.NullOr(Schema.String)) }),
+        }),
+      ),
+    }),
+  ),
+})
 
 /** A job's state. A failure the pipeline allows doesn't hold the merge request up. */
 export const jobState = (status: string, allowFailure: boolean): CheckState => {
@@ -979,6 +1046,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     ...makeGitLabReleases({ http, project, mayNot }),
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
     capabilities: {
+      pictureLimit: 100 * 1024 * 1024,
       drafts: true,
       checkLogs: true,
       threads: true,
@@ -989,24 +1057,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       ...TRACKING,
     },
     account,
-    repository: (path) =>
-      Effect.map(http.json(ProjectAnswer, 'GET', project(path)), (answer) => ({
-        id: String(answer.id),
-        path: answer.path_with_namespace.split('/'),
-        defaultBranch: answer.default_branch ?? 'main',
-        webUrl: answer.web_url,
-        canPush:
-          Math.max(answer.permissions?.project_access?.access_level ?? 0, answer.permissions?.group_access?.access_level ?? 0) >= DEVELOPER,
-        merges: mergesOf(answer.merge_method, answer.squash_option),
-        parent:
-          answer.forked_from_project == null
-            ? null
-            : {
-                path: answer.forked_from_project.path_with_namespace.split('/'),
-                // Its addresses, as the server writes them, under its own path where it is under one.
-                ...addressesOf([answer.forked_from_project.http_url_to_repo, answer.forked_from_project.ssh_url_to_repo]),
-              },
-      })),
+    repository: (path) => Effect.map(http.json(ProjectAnswer, 'GET', project(path)), repositoryOf),
     findChange,
     openChange: (repository, change) =>
       http
@@ -1442,6 +1493,93 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         number,
       }),
     pushTarget,
+    /*
+     * The projects the account is a member of, archived ones too, last active
+     * first: GitLab keeps no time of the last push, and its last activity is
+     * the nearest it says. One whose repository is turned off has nothing to clone.
+     */
+    repositories: () =>
+      paged(1, (page) =>
+        Effect.map(
+          http.json(
+            Schema.Array(ReachedProject),
+            'GET',
+            `${api}/projects?membership=true&order_by=last_activity_at&sort=desc&per_page=100&page=${page}`,
+          ),
+          // A page short of a hundred is the last.
+          (projects) => ({ items: projects, next: projects.length < 100 ? undefined : page + 1 }),
+        ),
+      ).pipe(
+        Effect.map((projects) =>
+          projects
+            .filter((found) => found.repository_access_level !== 'disabled')
+            .map((found): ListedRepository => ({
+              path: found.path_with_namespace.split('/'),
+              description: found.description == null || found.description === '' ? null : found.description,
+              private: found.visibility !== 'public',
+              pushedAt: found.last_activity_at ?? null,
+              webUrl: found.web_url,
+              archived: found.archived === true,
+            })),
+        ),
+      ),
+    /*
+     * The account, where it may make projects of its own, then each group it
+     * may make one in, by its full path: a subgroup by its parents' too.
+     */
+    owners: () =>
+      Effect.gen(function* () {
+        const [me, groups] = yield* Effect.all(
+          [
+            http.json(Creator, 'GET', `${api}/user`),
+            paged(null as string | null, (after) =>
+              Effect.map(http.graphql(CreatableAnswer, graphqlUrl, CREATABLE, { after }), (answer) => {
+                const found = answer.currentUser?.groups
+                return {
+                  items: (found?.nodes ?? []).filter((group) => group !== null),
+                  next: found?.pageInfo.hasNextPage === true && found.pageInfo.endCursor != null ? found.pageInfo.endCursor : undefined,
+                }
+              }),
+            ),
+          ],
+          { concurrency: 2 },
+        )
+        return [
+          ...(me.can_create_project === false ? [] : [{ id: me.username, name: me.name ?? me.username, kind: 'user' as const }]),
+          ...groups.map((group) => ({ id: group.fullPath, name: group.fullName, kind: 'group' as const })),
+        ]
+      }),
+    // Empty: no README, so the project's own first commit is pushed as it is. GitLab makes its path from its name.
+    createRepository: (made) =>
+      Effect.gen(function* () {
+        // A group goes by its id here, found by its full path; a project of the account's own needs none.
+        const namespace =
+          made.owner.kind === 'user'
+            ? undefined
+            : yield* http.json(Schema.Struct({ id: Schema.Number }), 'GET', `${api}/namespaces/${encodeURIComponent(made.owner.id)}`).pipe(
+                Effect.mapError((error) =>
+                  error.reason === 'not_found'
+                    ? new ConnectorFailed({
+                        product,
+                        reason: 'forbidden',
+                        ...(error.status === undefined ? {} : { status: error.status }),
+                        message: `The account may not make a project in ${made.owner.name}`,
+                      })
+                    : error,
+                ),
+              )
+        const answer = yield* mayNot(
+          http.json(ProjectAnswer, 'POST', `${api}/projects`, {
+            name: made.name,
+            ...(namespace === undefined ? {} : { namespace_id: namespace.id }),
+            visibility: made.private ? 'private' : 'public',
+            ...(made.description === undefined || made.description === '' ? {} : { description: made.description }),
+            initialize_with_readme: false,
+          }),
+        )
+        // The account made it, so it may push to it, whatever the answer says.
+        return { ...repositoryOf(answer), canPush: true }
+      }),
     issue: (ref) =>
       Effect.gen(function* () {
         const { path, number } = yield* parseRef(ref)

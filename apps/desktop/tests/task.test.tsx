@@ -779,7 +779,7 @@ describe('a task', () => {
     expect(screen.queryByRole('complementary', { name: 'Connect GitHub' })).toBeNull()
   })
 
-  it('says there is no code host where Althar can tell none, rather than leave merging here as all there is', async () => {
+  it('says nothing is missing with no remote at all, and there is no code host where its remote is on none Althar knows', async () => {
     const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
     const at = (remote: { name: string; newPullRequest: null; pushed: boolean; ahead: number } | null) => {
       const base = thread({ session: null })
@@ -807,7 +807,8 @@ describe('a task', () => {
     const none = withServices(<Task />, fakeClient({ getThread: vi.fn(async () => at(null)) }).client)
     await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
     const alone = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(alone.getByText('No code host: this repository has no remote Althar can open a pull request on.')).toBeTruthy()
+    // Only on this computer, as its project is: merged here, with no line on what it lacks.
+    expect(alone.queryByText(/No code host/)).toBeNull()
     expect(alone.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
     expect(alone.queryByRole('button', { name: /Connect|pull request/ })).toBeNull()
     none.unmount()

@@ -441,7 +441,7 @@ describe('what a task changed, card by card', () => {
     expect(screen.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
   })
 
-  it('says a merge here with no remote has nowhere to push to, with its review and what went wrong', async () => {
+  it('says a merge here with no remote is merged here, and no more, with its review and what went wrong', async () => {
     const merged = [{ repository: 'meridian', name: 'meridian', branch: 'main', remote: null, ahead: 0 }]
     show(
       task(
@@ -450,7 +450,8 @@ describe('what a task changed, card by card', () => {
       ),
       { error: 'The worktree is gone.' },
     )
-    expect(await screen.findByText('Into main on this Mac. It has no remote to push to.')).toBeTruthy()
+    // Only on this computer, as its project is: nothing it lacks is said.
+    expect(await screen.findByText('Into main on this Mac.')).toBeTruthy()
     expect(screen.getByText(/Reviewed by/)).toBeTruthy()
     expect(screen.getByText('The worktree is gone.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Push/ })).toBeNull()

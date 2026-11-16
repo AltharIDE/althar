@@ -2073,3 +2073,190 @@ describe('GitLab bringing a merge request’s branch up to date', () => {
     }),
   )
 })
+
+describe('GitLab’s projects, for cloning one or making one', () => {
+  const LISTED = `${API}/projects?membership=true&order_by=last_activity_at&sort=desc&per_page=100&page=`
+  const GRAPHQL = 'https://gitlab.com/api/graphql'
+  const reached = (path: string, overrides: Record<string, unknown> = {}) => ({
+    id: 1,
+    path_with_namespace: path,
+    description: null,
+    visibility: 'public',
+    last_activity_at: '2026-10-07T16:41:00.548Z',
+    web_url: `https://gitlab.com/${path}`,
+    archived: false,
+    repository_access_level: 'enabled',
+    ...overrides,
+  })
+  const creatable = (nodes: ReadonlyArray<unknown>, endCursor: string | null = null) => ({
+    json: { data: { currentUser: { groups: { nodes, pageInfo: { hasNextPage: endCursor !== null, endCursor } } } } },
+  })
+  const made = (path: string) => ({
+    id: 77,
+    path_with_namespace: path,
+    default_branch: null,
+    web_url: `https://gitlab.com/${path}`,
+    merge_method: 'merge',
+    squash_option: 'default_off',
+  })
+
+  it.effect('lists every project the account is a member of, last active first, page after page, as each says it is', () =>
+    Effect.gen(function* () {
+      const full = Array.from({ length: 100 }, (_, at) => reached(`meridian/repo-${at}`))
+      const { host, sent } = gitlab([
+        ['GET', `${LISTED}1`, { json: full }],
+        [
+          'GET',
+          `${LISTED}2`,
+          {
+            json: [
+              reached('meridian/payments/api', { description: 'Refunds', visibility: 'private' }),
+              reached('meridian/handbook', { description: '', visibility: 'internal', archived: true, last_activity_at: null }),
+              // Its repository turned off: nothing to clone.
+              reached('meridian/wiki-only', { repository_access_level: 'disabled' }),
+            ],
+          },
+        ],
+      ])
+      const found = yield* host.repositories()
+      assert.lengthOf(found, 102)
+      assert.deepStrictEqual(found[0], {
+        path: ['meridian', 'repo-0'],
+        description: null,
+        private: false,
+        pushedAt: '2026-10-07T16:41:00.548Z',
+        webUrl: 'https://gitlab.com/meridian/repo-0',
+        archived: false,
+      })
+      assert.deepStrictEqual(found.slice(-2), [
+        {
+          path: ['meridian', 'payments', 'api'],
+          description: 'Refunds',
+          private: true,
+          pushedAt: '2026-10-07T16:41:00.548Z',
+          webUrl: 'https://gitlab.com/meridian/payments/api',
+          archived: false,
+        },
+        // Internal is seen only by those signed in to the server: private, as far as cloning goes.
+        {
+          path: ['meridian', 'handbook'],
+          description: null,
+          private: true,
+          pushedAt: null,
+          webUrl: 'https://gitlab.com/meridian/handbook',
+          archived: true,
+        },
+      ])
+      assert.lengthOf(sent, 2)
+    }),
+  )
+
+  it.effect('says the account first, where it may make projects, then each group GitLab lets it make one in, every page', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['GET', `${API}/user`, { json: user(5, 'you', { can_create_project: true }) }],
+        [
+          'POST',
+          GRAPHQL,
+          (request) =>
+            (request.body as { variables: { after: string | null } }).variables.after === null
+              ? creatable([{ fullPath: 'meridian', fullName: 'Meridian' }, null], 'c1')
+              : creatable([{ fullPath: 'meridian/payments', fullName: 'Meridian / Payments' }]),
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.owners(), [
+        { id: 'you', name: 'You Person', kind: 'user' },
+        { id: 'meridian', name: 'Meridian', kind: 'group' },
+        { id: 'meridian/payments', name: 'Meridian / Payments', kind: 'group' },
+      ])
+      const asked = sent.filter((request) => request.method === 'POST')
+      assert.lengthOf(asked, 2)
+      assert.match(JSON.stringify(asked[0]?.body), /permissionScope: CREATE_PROJECTS/)
+      // One the server keeps from making projects of its own makes none.
+      const kept = gitlab([
+        ['GET', `${API}/user`, { json: user(5, 'you', { can_create_project: false }) }],
+        ['POST', GRAPHQL, creatable([])],
+      ])
+      assert.deepStrictEqual(yield* kept.host.owners(), [])
+    }),
+  )
+
+  it.effect('makes an empty project of the account’s own, or in a group found by its full path', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        [
+          'POST',
+          `${API}/projects`,
+          (request) => ({
+            status: 201,
+            json: made((request.body as { namespace_id?: number }).namespace_id === undefined ? 'you/atlas' : 'meridian/payments/atlas'),
+          }),
+        ],
+        ['GET', `${API}/namespaces/meridian%2Fpayments`, { json: { id: 41, kind: 'group', full_path: 'meridian/payments' } }],
+      ])
+      assert.deepStrictEqual(
+        yield* host.createRepository({
+          owner: { id: 'you', name: 'You Person', kind: 'user' },
+          name: 'Atlas',
+          private: true,
+          description: 'Maps',
+        }),
+        {
+          id: '77',
+          path: ['you', 'atlas'],
+          // Empty, it has no default branch yet.
+          defaultBranch: 'main',
+          webUrl: 'https://gitlab.com/you/atlas',
+          canPush: true,
+          merges: ['merge', 'squash'],
+        },
+      )
+      assert.deepStrictEqual(sent[0]?.body, { name: 'Atlas', visibility: 'private', description: 'Maps', initialize_with_readme: false })
+      const grouped = yield* host.createRepository({
+        owner: { id: 'meridian/payments', name: 'Meridian / Payments', kind: 'group' },
+        name: 'Atlas',
+        private: false,
+      })
+      assert.deepStrictEqual(grouped.path, ['meridian', 'payments', 'atlas'])
+      assert.deepStrictEqual(
+        sent.slice(1).map((request) => [request.method, request.url, request.body]),
+        [
+          ['GET', `${API}/namespaces/meridian%2Fpayments`, undefined],
+          ['POST', `${API}/projects`, { name: 'Atlas', namespace_id: 41, visibility: 'public', initialize_with_readme: false }],
+        ],
+      )
+    }),
+  )
+
+  it.effect('refuses a name taken, in GitLab’s words, and a group the account may not make one in', () =>
+    Effect.gen(function* () {
+      const you = { id: 'you', name: 'You Person', kind: 'user' } as const
+      const { host } = gitlab([
+        [
+          'POST',
+          `${API}/projects`,
+          { status: 400, json: { message: { name: ['has already been taken'], path: ['has already been taken'], limit_reached: [] } } },
+        ],
+      ])
+      assert.deepInclude(yield* Effect.flip(host.createRepository({ owner: you, name: 'api', private: true })), {
+        reason: 'rejected',
+        status: 400,
+        message: 'name has already been taken; path has already been taken',
+      })
+      const group = { id: 'meridian', name: 'Meridian', kind: 'group' } as const
+      const refusing = gitlab([
+        ['GET', `${API}/namespaces/meridian`, { json: { id: 9 } }],
+        ['POST', `${API}/projects`, { status: 403, json: { message: '403 Forbidden' } }],
+      ])
+      assert.deepInclude(yield* Effect.flip(refusing.host.createRepository({ owner: group, name: 'atlas', private: true })), {
+        reason: 'forbidden',
+      })
+      // A group GitLab hides from the account is one it may not make a project in: nothing is made.
+      const hidden = gitlab([['GET', `${API}/namespaces/meridian`, { status: 404, json: { message: '404 Namespace Not Found' } }]])
+      assert.deepInclude(yield* Effect.flip(hidden.host.createRepository({ owner: group, name: 'atlas', private: true })), {
+        reason: 'forbidden',
+      })
+      assert.isFalse(hidden.sent.some((request) => request.method === 'POST'))
+    }),
+  )
+})

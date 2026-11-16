@@ -280,11 +280,25 @@ describe('pages hidden past the few kept', () => {
 
 describe('a key pressed in the page', () => {
   const mod = process.platform === 'darwin' ? { meta: true, control: false } : { meta: false, control: true }
-  const press = (view: FakeView | undefined, key: string) => {
+  const press = (view: FakeView | undefined, key: string, shift = false) => {
     const event = { preventDefault: vi.fn() }
-    view?.webContents.emit('before-input-event', event, { type: 'keyDown', key, shift: false, alt: false, ...mod })
+    view?.webContents.emit('before-input-event', event, { type: 'keyDown', key, shift, alt: false, ...mod })
     return event
   }
+
+  it('⌘⇧D is the window’s, to dictate from anywhere, as in any other part of it', () => {
+    const { pages, options } = started()
+    const window = windowOf()
+    pages.open(owner(1), 'http://localhost:5173/')
+    pages.show(window.window, owner(1), PLACE)
+    const event = press(viewAt('http://localhost:5173/'), 'D', true)
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(options.pressed).toHaveBeenCalledWith(owner(1), 'dictate')
+    // ⌘D alone is the page's.
+    options.pressed.mockClear()
+    expect(press(viewAt('http://localhost:5173/'), 'd').preventDefault).not.toHaveBeenCalled()
+    expect(options.pressed).not.toHaveBeenCalled()
+  })
 
   it('⌘L gives the window the keyboard, for its address field', () => {
     const { pages, options } = started()

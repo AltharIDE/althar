@@ -11,7 +11,9 @@ import { useNewProject } from './useNewProject'
 
 function NewProject() {
   const tab = useNewTab()
-  return <NewProjectView model={useNewProject()} connections={useConnections()} onCreated={tab.made} onClose={tab.close} />
+  return (
+    <NewProjectView model={useNewProject()} connections={useConnections()} onCreated={tab.made} onOpen={tab.made} onClose={tab.close} />
+  )
 }
 
 /** A new project, in a tab of its own: named first, then its folders. Coming here with none being made starts one. */

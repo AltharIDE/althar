@@ -39,6 +39,25 @@ export const Accepting: Story = {
   },
 }
 
+/** Accept and merge just pressed: Merging in its place at once. */
+export const Merging: Story = {
+  args: { standing: 'merging' },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('status')).toHaveTextContent('Merging')
+    await expect(c.queryByRole('button', { name: 'Accept and merge' })).not.toBeInTheDocument()
+  },
+}
+/** In its branch's merge queue: In the queue in Accept's place, never Accept again. */
+export const InTheQueue: Story = {
+  args: { standing: 'queued' },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('status')).toHaveTextContent('In the queue')
+    await expect(c.queryByRole('button', { name: 'Accept and merge' })).not.toBeInTheDocument()
+  },
+}
+
 export const SendingBack: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)

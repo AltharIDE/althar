@@ -2562,6 +2562,35 @@ describe('GitHub’s pictures', () => {
   const picture = { bytes: Uint8Array.of(137, 80, 78, 71), name: 'empty state.png', mediaType: 'image/png' }
   const UPLOADS = /^https:\/\/uploads\.github\.com\/user-attachments\/assets\?/
 
+  it.effect('keeps an upload size rejection distinct from a response size failure', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        [
+          'POST',
+          UPLOADS,
+          {
+            status: 422,
+            json: {
+              message: 'Validation Failed',
+              errors: [
+                {
+                  message: `Yowza that's a big file. <span class="drag-and-drop-error-info"><span class="btn-link">Try again</span> with a file size less than 10MB.</span>`,
+                },
+              ],
+            },
+          },
+        ],
+      ])
+      const error = yield* Effect.flip(host.uploadPicture!(repository, picture))
+      assert.strictEqual(error.reason, 'rejected')
+      assert.strictEqual(error.status, 422)
+      assert.strictEqual(error.uploadLimit, 10_000_000)
+      assert.isUndefined(error.sizeLimit)
+      assert.notInclude(error.message, '<span')
+      assert.include(error.message, 'less than 10MB')
+    }),
+  )
+
   it.effect('uploads one for the repository, by its number, as GitHub’s own CLI attaches one', () =>
     Effect.gen(function* () {
       const asset = 'https://github.com/user-attachments/assets/0c8e1a2b-3f4d-4e5f-9a6b-7c8d9e0f1a2b'
@@ -2846,6 +2875,200 @@ describe('GitHub bringing a pull request’s branch up to date', () => {
         ['PUT', UPDATE, { status: 403, json: { message: 'Resource not accessible by integration' } }],
       ])
       assert.deepInclude(yield* Effect.flip(own.host.updateBranch(repository, change, { expectedHead: 'abc' })), { reason: 'forbidden' })
+    }),
+  )
+})
+
+describe('GitHub’s repositories, for cloning one or making one', () => {
+  const LISTED = `${API}/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&page=`
+  const reached = (name: string, overrides: Record<string, unknown> = {}) => ({
+    id: 1,
+    full_name: `meridian/${name}`,
+    description: null,
+    private: false,
+    pushed_at: '2026-10-01T09:00:00Z',
+    html_url: `https://github.com/meridian/${name}`,
+    archived: false,
+    disabled: false,
+    ...overrides,
+  })
+  const made = (overrides: Record<string, unknown> = {}) => ({
+    id: 99,
+    full_name: 'meridian/atlas',
+    default_branch: 'main',
+    html_url: 'https://github.com/meridian/atlas',
+    permissions: { admin: true, push: true, pull: true },
+    allow_squash_merge: true,
+    allow_merge_commit: true,
+    allow_rebase_merge: true,
+    ...overrides,
+  })
+
+  it.effect('lists every repository the account reaches, last pushed first, page after page, as each says it is', () =>
+    Effect.gen(function* () {
+      const full = Array.from({ length: 100 }, (_, at) => reached(`repo-${at}`))
+      const { host, sent } = github([
+        ['GET', `${LISTED}1`, { json: full }],
+        [
+          'GET',
+          `${LISTED}2`,
+          {
+            json: [
+              reached('api', { description: 'The API', private: true }),
+              reached('old', { description: '', archived: true, pushed_at: null }),
+              reached('held', { disabled: true }),
+            ],
+          },
+        ],
+      ])
+      const found = yield* host.repositories()
+      assert.lengthOf(found, 103)
+      assert.deepStrictEqual(found.slice(-3), [
+        {
+          path: ['meridian', 'api'],
+          description: 'The API',
+          private: true,
+          pushedAt: '2026-10-01T09:00:00Z',
+          webUrl: 'https://github.com/meridian/api',
+          archived: false,
+        },
+        // An empty description is none; one archived, or disabled by GitHub, is never pushed to.
+        {
+          path: ['meridian', 'old'],
+          description: null,
+          private: false,
+          pushedAt: null,
+          webUrl: 'https://github.com/meridian/old',
+          archived: true,
+        },
+        {
+          path: ['meridian', 'held'],
+          description: null,
+          private: false,
+          pushedAt: '2026-10-01T09:00:00Z',
+          webUrl: 'https://github.com/meridian/held',
+          archived: true,
+        },
+      ])
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${LISTED}1`, `${LISTED}2`],
+      )
+    }),
+  )
+
+  it.effect('says the account first, then each organization it is in, every page of them', () =>
+    Effect.gen(function* () {
+      const many = Array.from({ length: 100 }, (_, at) => ({ login: `org-${at}`, id: at }))
+      const { host } = github([
+        ['GET', `${API}/user`, { json: { id: 5, login: 'you', name: 'You' } }],
+        ['GET', `${API}/user/orgs?per_page=100&page=1`, { json: many }],
+        ['GET', `${API}/user/orgs?per_page=100&page=2`, { json: [{ login: 'meridian', id: 7, description: 'Payments' }] }],
+      ])
+      const owners = yield* host.owners()
+      assert.lengthOf(owners, 102)
+      assert.deepStrictEqual(owners[0], { id: 'you', name: 'you', kind: 'user' })
+      assert.deepStrictEqual(owners.at(-1), { id: 'meridian', name: 'meridian', kind: 'organization' })
+    }),
+  )
+
+  it.effect('makes an empty repository of the account’s own, or an organization’s, as GitHub reads it back', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['POST', `${API}/user/repos`, { status: 201, json: made({ full_name: 'you/atlas', html_url: 'https://github.com/you/atlas' }) }],
+        ['POST', `${API}/orgs/meridian/repos`, { status: 201, json: made({ allow_merge_commit: false, allow_rebase_merge: false }) }],
+      ])
+      assert.deepStrictEqual(
+        yield* host.createRepository({
+          owner: { id: 'you', name: 'you', kind: 'user' },
+          name: 'atlas',
+          private: true,
+          description: 'Maps',
+        }),
+        {
+          id: '99',
+          path: ['you', 'atlas'],
+          defaultBranch: 'main',
+          webUrl: 'https://github.com/you/atlas',
+          canPush: true,
+          merges: ['squash', 'merge', 'rebase'],
+        },
+      )
+      assert.deepStrictEqual(sent[0]?.body, { name: 'atlas', private: true, description: 'Maps', auto_init: false })
+      const theirs = yield* host.createRepository({
+        owner: { id: 'meridian', name: 'meridian', kind: 'organization' },
+        name: 'atlas',
+        private: false,
+        description: '',
+      })
+      assert.deepStrictEqual(theirs, {
+        id: '99',
+        path: ['meridian', 'atlas'],
+        defaultBranch: 'main',
+        webUrl: 'https://github.com/meridian/atlas',
+        canPush: true,
+        merges: ['squash'],
+      })
+      // No description is sent where there is none.
+      assert.deepStrictEqual(sent[1]?.body, { name: 'atlas', private: false, auto_init: false })
+    }),
+  )
+
+  it.effect('refuses a name taken, in GitHub’s words, and an organization the account may not make one in', () =>
+    Effect.gen(function* () {
+      const meridian = { id: 'meridian', name: 'meridian', kind: 'organization' } as const
+      const { host } = github([
+        [
+          'POST',
+          `${API}/user/repos`,
+          {
+            status: 422,
+            json: {
+              message: 'Repository creation failed.',
+              errors: [{ resource: 'Repository', code: 'custom', field: 'name', message: 'name already exists on this account' }],
+            },
+          },
+        ],
+        [
+          'POST',
+          `${API}/orgs/meridian/repos`,
+          { status: 403, json: { message: 'You need admin access to the organization before adding a repository to it.' } },
+        ],
+        ['POST', `${API}/orgs/elsewhere/repos`, { status: 404, json: { message: 'Not Found' } }],
+      ])
+      const taken = yield* Effect.flip(
+        host.createRepository({ owner: { id: 'you', name: 'you', kind: 'user' }, name: 'api', private: true }),
+      )
+      assert.deepInclude(taken, { reason: 'rejected', status: 422 })
+      assert.match(taken.message, /name already exists on this account/)
+      assert.deepInclude(yield* Effect.flip(host.createRepository({ owner: meridian, name: 'atlas', private: true })), {
+        reason: 'forbidden',
+        message: 'You need admin access to the organization before adding a repository to it.',
+      })
+      assert.deepInclude(
+        yield* Effect.flip(
+          host.createRepository({ owner: { id: 'elsewhere', name: 'elsewhere', kind: 'organization' }, name: 'atlas', private: true }),
+        ),
+        { reason: 'forbidden', status: 404 },
+      )
+    }),
+  )
+
+  it.effect('asks Enterprise Server at its own API', () =>
+    Effect.gen(function* () {
+      const server = 'https://git.meridian.dev/api/v3'
+      const { host, sent } = github(
+        [
+          [
+            'GET',
+            `${server}/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&page=1`,
+            { json: [reached('api')] },
+          ],
+        ],
+        server,
+      )
+      assert.lengthOf(yield* host.repositories(), 1)
+      assert.lengthOf(sent, 1)
     }),
   )
 })

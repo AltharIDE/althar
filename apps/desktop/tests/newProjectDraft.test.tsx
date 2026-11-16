@@ -53,7 +53,7 @@ describe('a new project with no draft open', () => {
     const actions = draftActions({ client, host, cache: makeQueryClient() })
     await actions.choose()
     await actions.drop([new File([], 'ops')])
-    expect(await actions.create('clay')).toBeNull()
+    expect(await actions.create('clay', { publish: null, tracker: null })).toBeNull()
     expect(host.pickFolders).not.toHaveBeenCalled()
     expect(host.grantDropped).not.toHaveBeenCalled()
     expect(client.openProject).not.toHaveBeenCalled()

@@ -237,9 +237,9 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
   }, [client, flowId, agentId, recheck])
 
   /** Opens the account's sign-in in Terminal, or says the line to run where it can't. */
-  const terminal = async (accountId: string, mine: number) => {
+  const terminal = async (accountId: string, mine: number, host?: string) => {
     const since = start.checkedAt
-    const { line, opened } = await client.signInAccount(accountId)
+    const { line, opened } = await (host === undefined ? client.signInAccount(accountId) : client.signInAccount(accountId, host))
     if (mine === token.current) setFlow((now) => (now === null ? now : { ...now, step: { kind: 'terminal', line, opened }, since }))
   }
 
@@ -270,7 +270,7 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
     try {
       const accountId = await accountFor(agentId, name, grant, mine)
       if (accountId === null) return
-      if (how === 'terminal') return await terminal(accountId, mine)
+      if (how === 'terminal') return await terminal(accountId, mine, host)
       const started = await (host === undefined
         ? client.startAccountSignIn(accountId, how)
         : client.startAccountSignIn(accountId, how, host))
@@ -295,8 +295,19 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
   const again = (agentId: string, accountId: string) => {
     const mine = leave()
     // Where Althar runs the agent's login, its ways; elsewhere, Terminal at once.
-    if ((agentOf(agentId)?.ways.length ?? 0) > 0)
-      return setFlow({ agentId, again: accountId, made: null, step: { kind: 'choose' }, since: 0, flowId: null })
+    if (agentId === 'copilot' || (agentOf(agentId)?.ways.length ?? 0) > 0) {
+      const saved = agentId === 'copilot' ? agentOf(agentId)?.accounts.find((account) => account.id === accountId)?.signInHost : undefined
+      const enterpriseHost = saved === 'github.com' ? null : (saved ?? null)
+      return setFlow({
+        agentId,
+        again: accountId,
+        made: null,
+        enterpriseHost,
+        step: enterpriseHost === null ? { kind: 'choose' } : { kind: 'choose', enterprise: enterpriseHost },
+        since: 0,
+        flowId: null,
+      })
+    }
     setFlow({ agentId, again: accountId, made: null, step: opening, since: start.checkedAt, flowId: null })
     terminal(accountId, mine).catch((failure: unknown) => moveTo({ kind: 'failed', said: messageOf(failure) }, mine))
   }
@@ -337,8 +348,8 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
           setFlow({ ...flow, step: { kind: 'checking' } })
           return void signInBy(flow.agentId, 'device', null, name, mine)
         case SignInWay.Terminal:
-          setFlow({ ...flow, step: opening, since: start.checkedAt })
-          return void signInBy(flow.agentId, 'terminal', null, name, mine)
+          setFlow({ ...flow, enterpriseHost: null, step: opening, since: start.checkedAt })
+          return void signInBy(flow.agentId, 'terminal', null, name, mine, flow.agentId === 'copilot' ? 'github.com' : undefined)
         case SignInWay.Folder:
           return setFlow({ ...flow, step: { kind: 'folders' } })
         // Keys and the provider's console aren't offered here yet.
@@ -348,7 +359,7 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
       }
     },
     enterprise: (input) => {
-      if (flow === null || flow.agentId !== 'copilot-direct') return
+      if (flow === null || (flow.agentId !== 'copilot-direct' && flow.agentId !== 'copilot')) return
       const host = signInHost(input)
       if (host === null) {
         setFlow({
@@ -357,8 +368,16 @@ export const useAccountSignIn = (start: StartModel): AccountSignInModel => {
         })
         return
       }
-      setFlow({ ...flow, enterpriseHost: host === 'github.com' ? null : host, step: { kind: 'checking' } })
-      void signInBy(flow.agentId, 'browser', null, fresh(flow.agentId), token.current, host === 'github.com' ? undefined : host)
+      const cli = flow.agentId === 'copilot'
+      setFlow({ ...flow, enterpriseHost: host === 'github.com' ? null : host, step: cli ? opening : { kind: 'checking' } })
+      void signInBy(
+        flow.agentId,
+        cli ? 'terminal' : 'browser',
+        null,
+        fresh(flow.agentId),
+        token.current,
+        !cli && host === 'github.com' ? undefined : host,
+      )
     },
     reopen: () => {
       if (flow === null) return

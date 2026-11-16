@@ -89,6 +89,10 @@ This avoids a dependency on the enterprise's **Copilot CLI** permission. It does
 
 Reference: [OpenCode's Copilot provider](https://github.com/anomalyco/opencode/blob/f91b88efac039856f284979984ac43cd93bce8f5/packages/core/src/plugin/provider/github-copilot.ts), read against OpenCode 2.3.0's CLI and configuration. OpenCode is [MIT licensed](https://github.com/anomalyco/opencode/blob/f91b88efac039856f284979984ac43cd93bce8f5/LICENSE).
 
+## Copilot CLI enterprise sign-in
+
+The separate GitHub Copilot CLI connection also offers an enterprise-address choice. Althar passes that choice explicitly as `copilot login --host https://company.ghe.com`, rather than relying on the login command to honor `GH_HOST`. The selected hostname is kept per account in Althar's settings and passed as both `GH_HOST` and `COPILOT_GH_HOST` to CLI sessions and model discovery. A remembered choice takes precedence over shell defaults; choosing github.com resets it. Copilot CLI continues to own its credentials. See [GitHub's CLI authentication guide](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli).
+
 ## Accounts
 
 An **account** is one sign-in of an agent, in its own folder: its **home**. The agent's usual folder is its first account, so someone with one sign-in sees no change. Each session starts with its account's home in the agent's environment (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_DATA_HOME` for OpenCode), and records which account it ran on. Many people have a work and a personal plan, or a plan per client, and this lets several run at once without swapping one sign-in.

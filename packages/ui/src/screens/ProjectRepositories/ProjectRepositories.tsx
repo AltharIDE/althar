@@ -58,6 +58,7 @@ export type ProjectRepositoriesProps = RootProps<
     | 'onLeaveOut'
     | 'onOpen'
     | 'onConnect'
+    | 'putOnHost'
   > & {
     project: string
     /** Opens the system's folder picker. Without it, nothing is added here. */
@@ -94,6 +95,7 @@ export function ProjectRepositories({
   onLeaveOut,
   onOpen,
   onConnect,
+  putOnHost,
   className,
   ...rest
 }: ProjectRepositoriesProps) {
@@ -142,6 +144,7 @@ export function ProjectRepositories({
           {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
           {...(onOpen === undefined ? {} : { onOpen })}
           {...(onConnect === undefined ? {} : { onConnect })}
+          {...(putOnHost === undefined ? {} : { putOnHost })}
         />
       )}
     </SettingGroup>

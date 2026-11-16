@@ -78,6 +78,7 @@ export function OneBox({
   run,
   status,
   onDrill,
+  placing = false,
 }: {
   context: Context
   entries: ReadonlyArray<Entry>
@@ -85,6 +86,8 @@ export function OneBox({
   run: (go: Go, entry?: Entry) => void
   status?: ReactNode
   onDrill?: (entry: Entry) => void
+  /** Choosing where something goes: a project or a task, and no asking. */
+  placing?: boolean
 }) {
   const [typed, setTyped] = useState('')
   const words = { set: setTyped }
@@ -305,6 +308,18 @@ export function OneBox({
       return [{ key: `scope:${scope.scope.id}`, label: scope.scope.name, rows: found.slice(0, 40).map((one) => rowOf(one.entry, one)) }]
     }
 
+    // Choosing where something goes: the projects, and the tasks lately opened, and only what is typed after that.
+    if (query === '' && placing) {
+      const projects = entries.filter((one) => one.id.startsWith('project:'))
+      const lately = recent(entries, context, 8)
+        .filter((one) => one.kind === 'task')
+        .slice(0, 5)
+      return [
+        ...(projects.length === 0 ? [] : [{ key: 'projects', label: 'Projects', rows: projects.map((one) => rowOf(one)) }]),
+        ...(lately.length === 0 ? [] : [{ key: 'recent', label: 'Recent', rows: lately.map((one) => rowOf(one)) }]),
+      ]
+    }
+
     if (query === '') {
       const here = actionsHere(entries, context)
       const needs = needsYou(entries, context).filter((one) => one.place !== context.task)
@@ -374,8 +389,9 @@ export function OneBox({
       label: 'Use the words',
       rows: [...askRows(query, <Kbd>Tab</Kbd>), ...starts],
     }
-    if (top === undefined) return [words_]
-    const question = asksSomething(query)
+    // Nothing is asked or started from where something is being placed.
+    if (top === undefined) return placing ? [] : [words_]
+    const question = asksSomething(query) && !placing
     return [
       ...(question ? [words_] : []),
       { key: 'top', label: 'Top hit', rows: [rowOf(top.entry, top, o.top)] },
@@ -384,11 +400,11 @@ export function OneBox({
         label: KINDS_NAMED[kind],
         rows: list.slice(0, FEW[kind] ?? 3).map((one) => rowOf(one.entry, one)),
       })),
-      ...(question ? [] : [words_]),
+      ...(question || placing ? [] : [words_]),
     ]
     // choose and ask read the latest at the moment they run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, query, scope, asking, acting, context, crossing, ranked])
+  }, [entries, query, scope, asking, acting, context, crossing, ranked, placing])
 
   // What the chosen row can do, for →.
   const acts = useMemo((): ReadonlyArray<Act> => {
@@ -480,7 +496,7 @@ export function OneBox({
       return
     }
     // Tab asks the coordinator with the words, and Tab again goes back to searching.
-    if (event.key === 'Tab' && !event.shiftKey) {
+    if (event.key === 'Tab' && !event.shiftKey && !placing) {
       event.preventDefault()
       if (asking) fromAsk()
       else toAsk()
@@ -538,12 +554,15 @@ export function OneBox({
               ? 'Ask about any task, decision or change…'
               : scope !== null
                 ? `Search ${scope.scope.name.toLowerCase()}…`
-                : 'Search or do anything…'
+                : placing
+                  ? 'Place it in a project or a task…'
+                  : 'Search or do anything…'
         }
         before={chip}
         after={
           acting === null &&
-          !asking && (
+          !asking &&
+          !placing && (
             <span className={o.hint} data-hint="">
               <span data-chip-text="">{ASK}</span>
               <Kbd>Tab</Kbd>

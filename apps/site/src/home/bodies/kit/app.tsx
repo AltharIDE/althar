@@ -90,7 +90,7 @@ export function Launch({
       project={PROJECT}
       estimate={estimate}
       steps={plan}
-      picker={({ agent, owner }) => (
+      picker={({ agent, owner, onOpenChange }) => (
         <ModelPick
           variant="field"
           placement="below"
@@ -101,6 +101,7 @@ export function Launch({
           defaultEffort="High"
           onChange={none}
           onEffort={none}
+          onOpenChange={onOpenChange}
         />
       )}
       wait={wait}

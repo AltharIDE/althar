@@ -4,7 +4,7 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 
 - **Owner:** Repository maintainers
 - **Consumers:** the runtime, which is the database's only writer. The renderer, Electron main, agents and MCP servers never open it.
-- **Dependency direction:** depends on `@althar/domain`, `effect` and `@effect/sql-sqlite-node`. Nothing depends on it except the runtime.
+- **Dependency direction:** depends on `@althar/domain`, `effect` and `@effect/sql-sqlite-node`. The runtime and the standalone host's storage-only update preparation consume its public database API.
 
 ## The schema
 
@@ -41,6 +41,8 @@ An update that brings migrations changes the person's store on its first launch.
 - **No copy, no migration.** A copy that can't be made fails the layer with `BackupFailed`, and the store stays as it was.
 - **A failed migration changes nothing.** The migrator runs every pending migration in one transaction, so one that fails undoes them all. The layer fails with `MigrationFailed`, with the copy and what went wrong. Migrations that leave rows pointing at nothing fail it with `ForeignKeyViolations`, with the newest copy, on that launch and every one after. Either way the database isn't opened, so nothing runs on a store that isn't up to date: the runtime doesn't start, and the desktop app says what happened and where the copy is.
 - **The copy opens in the build before.** It is at the migration the store was at, so the version that was installed before the update opens it as it is.
+- **Older code refuses newer schema records.** Before migrations or backups, the largest recorded migration id is compared with the supported set. `DatabaseSchemaTooNew` keeps an older build from opening newer data. This guards downgrades; migration ids still require append-only discipline.
+- **Managed maintenance reserves the database.** A private, regular single-link `<canonical database>.maintenance` marker blocks opening with `DatabaseInMaintenance`, before constructing the client and again after obtaining the exclusive lock. The managed host passes a matching explicit `maintenanceToken` only after validating its executable and update journal. RPC and environment variables never supply the permit. The reservation spans the updater's stopped/migrating/starting phases; a trusted same-user administrator can still bypass it with another SQLite tool. The standalone host may restore its own snapshot only during pre-runtime preparation; compatible post-start rollback retains writes and incompatible post-start recovery requires corrected code.
 
 ## Checks
 
@@ -51,6 +53,5 @@ An update that brings migrations changes the person's store on its first launch.
 - **Fencing by controller generation** is in the schema (the columns exist) but not yet enforced on writes.
 - **The artifact store** for bytes, content-addressed on disk, is not built; only artifact metadata is.
 - **WAL checkpoints, integrity checks, and backups other than before a migration,** which 07 requires, are not built.
-- **Restoring a copy is by hand:** quit Althar and put the copy in place of the profile's database. Nothing in the app does it yet.
-- **A store newer than the build** (an update's migrations ran, then an older version was installed again) opens as if it were current: the migrator runs nothing, and the older build reads a schema it doesn't know. Nothing refuses it yet.
+- **Desktop restoration remains by hand:** quit Althar and restore a compatible copy deliberately. The standalone host's managed updater has bounded pre-start automatic restoration; it is not a desktop or whole-profile recovery system.
 - **Raw protocol capture** is not in this database. The agent adapter hands it over frame by frame; writing it to a separate bounded file (docs/architecture/07) is not built yet.
