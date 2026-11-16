@@ -143,8 +143,8 @@ export interface TaskModel {
   readonly pending: boolean
   /** Which action on its outputs is on its way, where one is (see `doing`): the others wait, but aren't working. */
   readonly doing: Doing | null
-  /** Whether this press is under way: one of the outputs' (`doing`), or one of the task's own (`presses`). */
-  readonly busy: (press: string) => boolean
+  /** The presses under way, by key: the outputs' (`doing`), and the task's own (`presses`). */
+  readonly busy: ReadonlySet<string>
   /** Earlier items are on their way. */
   readonly loadingEarlier: boolean
   /** Rejects on failure; quiet keeps automatic reads from opening the global error notice. */
@@ -409,6 +409,7 @@ export const useTask = (threadId: string): TaskModel => {
   const error = failed ?? (thread.error === null ? null : messageOf(thread.error))
   // What is on its way to the runtime, by each press's key, so a press marks only its own control busy: how many of each.
   const [under, setUnder] = useState<ReadonlyMap<string, number>>(new Map())
+  const busyNow = useMemo<ReadonlySet<string>>(() => new Set(under.keys()), [under])
   const pressedCount = useRef(0)
   const [conflict, setConflict] = useState<string | null>(null)
   const [refused, setRefused] = useState<string | null>(null)
@@ -814,7 +815,7 @@ export const useTask = (threadId: string): TaskModel => {
       (awaitingMerges.has(url) || heldMerges.has(url)) && merging !== url && !pressedMerges.has(url) && !pressedByUrl.has(url),
     pending: under.has(presses.send),
     doing: [...under.keys()].find((key) => !OWN.has(key)) ?? null,
-    busy: (press) => under.has(press),
+    busy: busyNow,
     loadingEarlier,
     loadEarlier,
     readFiles,

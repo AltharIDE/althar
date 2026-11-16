@@ -1519,7 +1519,7 @@ export function TaskView({
                       session={session}
                       retryable={snapshot.retryable}
                       undoable={snapshot.undoable}
-                      onUndoFrom={busy || model.pending || model.busy(presses.undo) ? undefined : turnUndo.ask}
+                      onUndoFrom={busy || model.pending || model.busy.has(presses.undo) ? undefined : turnUndo.ask}
                       project={snapshot.project.name}
                       // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
                       {...(busy || stuckOpen ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
@@ -1581,7 +1581,7 @@ export function TaskView({
                           named={named}
                           projectId={snapshot.project.id}
                           agents={model.agents}
-                          busy={model.busy(doing.accept)}
+                          busy={model.busy.has(doing.accept)}
                           onMerge={(change) => void model.accept([change])}
                           {...(card.taskId === snapshot.task.id
                             ? { changes: snapshot.task.changes, mergeStanding: model.mergeStanding }
@@ -1598,7 +1598,7 @@ export function TaskView({
                           request={request}
                           at={at}
                           {...(lead.name === '' ? {} : { by: lead.name })}
-                          pushing={model.busy(doing.push(request.url))}
+                          pushing={model.busy.has(doing.push(request.url))}
                           onPush={(head, url) => void model.push(head, url)}
                         />
                       )}
@@ -1610,7 +1610,7 @@ export function TaskView({
                     <Button
                       variant="signal"
                       size="small"
-                      busy={model.busy(presses.fileIssues)}
+                      busy={model.busy.has(presses.fileIssues)}
                       onClick={() => void model.fileIssueDrafts(waitingIssues)}
                     >
                       {text.fileAll(waitingIssues.length)}
@@ -1682,7 +1682,7 @@ export function TaskView({
                       commits: snapshot.task.unshipped?.commits ?? 0,
                     },
                   })}
-              busy={model.busy(presses.abandon)}
+              busy={model.busy.has(presses.abandon)}
               {...(model.error === null ? {} : { error: model.error })}
               // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers (closing pull requests): it stays open, busy, so a refusal lands in it.
               onAbandon={(choices) =>
@@ -1719,7 +1719,7 @@ export function TaskView({
                       setAttaching({ value: attaching.value })
                     },
                   })}
-              busy={model.busy(presses.attach)}
+              busy={model.busy.has(presses.attach)}
               {...(model.error === null ? {} : { error: model.error })}
               // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers: it stays open, busy, so a refusal lands in it.
               onAttach={(pullRequest, start) =>
