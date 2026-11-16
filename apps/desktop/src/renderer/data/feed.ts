@@ -36,8 +36,11 @@ import { keys } from './reads'
  *   the same change; one that isn't showing is read again when it is next
  *   opened.
  *
- * Every read the feed starts goes behind (`client.behind`): nobody waits on
- * it, so the runtime answers a press first, however many there are.
+ * A read the feed starts for what shows goes at once; one that also reads
+ * what doesn't show goes behind (`client.behind`), where nobody waits on it,
+ * so the runtime answers a press first. In the lane, a screen's own read
+ * waited behind every other the window had, and under agents' work showed
+ * seconds late (the responsiveness run's `window.board`).
  *
  * A read that was under way when a change touched it may not hold it, so
  * it is read once more as it ends, while it shows; marked, where it doesn't. It is let finish, never cut short to
@@ -246,10 +249,14 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
     due.clear()
     // A read under way is let finish, not cut short and begun again: changes that keep coming would never let a slow one
     // land. It is read once more as it ends, for what came while it ran.
-    client.behind(() => {
-      for (const { key, offScreen } of reads)
+    // What shows is read at once: in the lane behind, each waited for the rest of the window's, and a board under agents'
+    // work showed seconds late. Only what also reads off screen goes behind, as nobody waits on that.
+    for (const { key, offScreen } of reads) {
+      const read = () =>
         void cache.invalidateQueries({ queryKey: key, exact: true, refetchType: offScreen ? 'all' : 'active' }, { cancelRefetch: false })
-    })
+      if (offScreen) client.behind(read)
+      else read()
+    }
   }
 
   /** Which reads a change touched are read again off screen too, by their keys' hashes: a read under way is read once more there as well. */
@@ -274,7 +281,9 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
     // Read now, so not again when the gathered changes are read.
     due.delete(queryHash)
     const refetchType = !isThread(queryKey) && readsOffScreen.get(queryHash) === true ? 'all' : 'active'
-    client.behind(() => void cache.invalidateQueries({ queryKey, exact: true, refetchType }, { cancelRefetch: false }))
+    const read = () => void cache.invalidateQueries({ queryKey, exact: true, refetchType }, { cancelRefetch: false })
+    if (refetchType === 'all') client.behind(read)
+    else read()
   })
 
   const heard = (event: WatchEvent) => {
@@ -297,7 +306,7 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
       for (const queryKey of threadReads(cache, event)) {
         if (cache.getQueryState(queryKey) === undefined) continue
         touched.set(hashKey(queryKey), heardSoFar)
-        client.behind(() => void cache.invalidateQueries({ queryKey, exact: true, refetchType: renamed ? 'active' : 'none' }))
+        void cache.invalidateQueries({ queryKey, exact: true, refetchType: renamed ? 'active' : 'none' })
       }
     }
     // Plan usage comes whole each time, so it is the cache's as it is, not read again; each model's room follows from it.

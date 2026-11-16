@@ -38,7 +38,11 @@ export interface Follows {
    * only marked, to be read as the person next goes to them.
    */
   readonly offScreen: boolean
-  /** feed.ts `client.behind`: what the feed starts reading goes behind, in the runtime's lane for reads nobody waits on. */
+  /**
+   * feed.ts `client.behind`: what the feed starts reading for a screen that shows goes behind, in the runtime's lane for
+   * reads nobody waits on. Where only what reads off screen too goes there (`if (offScreen) client.behind`), no: the
+   * windows here read again only what they show.
+   */
   readonly behind: boolean
   /** useTask.ts and useProject.ts `GATHER`: how long a thread on screen gathers its changes before it reads them. */
   readonly threadGather: number
@@ -160,7 +164,7 @@ export const follows = (): { readonly follows: Follows; readonly variant: Record
       /keys\.board\(event\.projectId\), offScreen: true/,
       /keys\.board\(event\.projectId\), offScreen: false/,
     ),
-    behind: flag('behind', feed, /client\.behind\(/),
+    behind: flag('behind', feed, /client\.behind\(/) && !/if \(offScreen\) client\.behind\(/.test(feed ?? ''),
     threadGather: Math.min(number('threadGather', task, 'GATHER'), numberIn(project, 'GATHER') ?? BUILT_IN.threadGather),
     // What the coordinator on screen reads on a card's change: every task card it holds, while its source says so.
     everyCard: flag('everyCard', project, /if \(cards\) for \(const item of held\(\)\) if \(item\.kind === 'task'\)/),

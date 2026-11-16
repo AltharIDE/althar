@@ -157,7 +157,7 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.board('p1'))?.isInvalidated).toBe(false)
   })
 
-  it('starts every read behind, which a press goes past', async () => {
+  it('reads again at once what shows, and behind, where a press goes past, only what reads off screen too', async () => {
     const lanes: Array<readonly [string, boolean]> = []
     let behind = false
     const fake = fakeClient({
@@ -182,9 +182,15 @@ describe('the window’s watch', () => {
       lane('thread')()
       return snapshot()
     })
-    // As a screen first reads them: not behind.
+    const connections = await fake.client.listConnections()
+    vi.mocked(fake.client.listConnections).mockImplementation(async () => {
+      lane('connections')()
+      return connections
+    })
+    // As a screen first reads them: not behind. The connections are held, but no screen shows them.
     await cache.fetchQuery(read.board('p1'))
     await cache.fetchQuery(read.thread('th1'))
+    await cache.fetchQuery(read.connections())
     const showing = [
       new QueryObserver(cache, read.board('p1')).subscribe(() => undefined),
       new QueryObserver(cache, read.thread('th1')).subscribe(() => undefined),
@@ -194,13 +200,18 @@ describe('the window’s watch', () => {
     await settle()
     fake.emit(changed('project', 'p1', null, 'p1'))
     await settle()
-    // The project's new name: its thread at once, its board gathered.
-    expect(lanes).toEqual([
+    // What shows is read at once: the board its card moved, the thread its project's new name, the board gathered again.
+    // The connections, which the project's change moves and no screen shows, behind.
+    expect(lanes.filter(([name]) => name !== 'connections')).toEqual([
       ['board', false],
       ['thread', false],
-      ['board', true],
-      ['thread', true],
-      ['board', true],
+      ['board', false],
+      ['thread', false],
+      ['board', false],
+    ])
+    expect(lanes.filter(([name]) => name === 'connections')).toEqual([
+      ['connections', false],
+      ['connections', true],
     ])
     for (const stop of showing) stop()
   })
