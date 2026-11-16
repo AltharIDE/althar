@@ -59,6 +59,7 @@ import {
   type TaskLineComments,
   type LineComment,
   waitingIn,
+  blockerAbandoned,
   plainTitle,
   toolPhrase,
 } from '@althar/contracts'
@@ -3155,11 +3156,14 @@ export class Queries extends Context.Service<
 
       /** The phases the home shows a task in: running, stopped or waiting on a call, and ready to accept. */
       const ON_HOME: ReadonlyArray<TaskPhase> = ['running', 'waiting', 'stopped', 'ready']
+      /** Whether the home shows a task: in a phase `ON_HOME` has, or a plan waiting for a task that was abandoned, the person's. */
+      const onHome = (task: Pick<BoardSnapshot['tasks'][number], 'phase' | 'waitsFor'>) =>
+        ON_HOME.includes(task.phase) || blockerAbandoned(task)
 
       /**
        * The tasks the home shows, across every project, as their cards on
        * the board say them: open ones, and the merged ones a board still
-       * shows, which can be ready again; each in a phase `ON_HOME` has. What
+       * shows, which can be ready again; each the home shows (`onHome`). What
        * the home, the edge, the Dock's badge and the notifications count is
        * read from these, so none can say a task waits where its card doesn't.
        */
@@ -3180,7 +3184,7 @@ export class Queries extends Context.Service<
             Effect.map(onBoard(row), (read) =>
               read.flatMap((task) =>
                 // A task kept for later waits on its board, not here.
-                ON_HOME.includes(task.phase) ? [{ ...task, projectId: row.projectId }] : [],
+                onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
               ),
             ),
           { concurrency: AT_ONCE },
@@ -4225,7 +4229,7 @@ export class Queries extends Context.Service<
       const primed = yield* Deferred.make<void>()
       const keep = (taskId: string, projectId: string, read: ReadonlyArray<BoardSnapshot['tasks'][number]>) => {
         const [card] = read
-        if (card !== undefined && ON_HOME.includes(card.phase)) standing.set(taskId, { ...card, projectId })
+        if (card !== undefined && onHome(card)) standing.set(taskId, { ...card, projectId })
         else standing.delete(taskId)
       }
       const waiting = Effect.gen(function* () {
