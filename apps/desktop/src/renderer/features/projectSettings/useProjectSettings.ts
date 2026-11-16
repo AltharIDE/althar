@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { AfterMergeRule, ProjectInk, ProjectNote, ProjectRulesView, ProjectSummary, WorksIn } from '@althar/contracts'
+import type { AfterMergeRule, ProjectInk, ProjectList, ProjectNote, ProjectRulesView, ProjectSummary, WorksIn } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -86,11 +86,22 @@ interface Chosen {
   readonly ink?: { readonly value: ProjectInk; readonly change: number }
 }
 
+/** No ink taken by another project. */
+const NONE_TAKEN: Partial<Record<ProjectInk, string>> = {}
+
+/** What a project's settings read of the projects: itself, and which inks the others took, by the first to take each. */
+const settingsOf = (list: ProjectList, projectId: string) => {
+  const taken: Partial<Record<ProjectInk, string>> = {}
+  for (const other of list.projects) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
+  return { project: list.projects.find((each) => each.id === projectId) ?? null, taken }
+}
+
 export const useProjectSettings = (projectId: string, onRemoved: () => void): ProjectSettingsModel => {
   const { client, cache } = useServices()
   const read = reads(client)
-  const listed = useQuery(read.projects()).data
-  const project = listed?.projects.find((each) => each.id === projectId) ?? null
+  // Only what the settings say of the list, this project and the inks others took: another's change of name draws nothing here.
+  const listed = useQuery({ ...read.projects(), select: useCallback((list: ProjectList) => settingsOf(list, projectId), [projectId]) }).data
+  const project = listed?.project ?? null
   const rules = useQuery(read.rules(projectId)).data ?? null
   const notes = useQuery(read.notes(projectId)).data ?? null
 
@@ -171,8 +182,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   const setWorksIn = useCallback((worksIn: WorksIn) => setRule('worksIn', worksIn), [setRule])
   const setAfterMergeReview = useCallback((rule: AfterMergeRule) => setRule('afterMergeReview', rule), [setRule])
 
-  const taken: Partial<Record<ProjectInk, string>> = {}
-  for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
+  const taken = listed?.taken ?? NONE_TAKEN
 
   const [noteFailed, setNoteFailed] = useState<string | null>(null)
   const dropNote = useCallback(
@@ -270,14 +280,17 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
  */
 export const useWhenRemoved = (projectId: string | undefined, onRemoved: () => void) => {
   const { client } = useServices()
-  const listed = useQuery(reads(client).projects()).data
-  const there = projectId !== undefined && (listed?.projects.some((each) => each.id === projectId) ?? false)
+  // Only whether it is listed: another project's change draws nothing here. Undefined until the list is read.
+  const there = useQuery({
+    ...reads(client).projects(),
+    select: useCallback((list: ProjectList) => projectId !== undefined && list.projects.some((each) => each.id === projectId), [projectId]),
+  }).data
   const seen = useRef(false)
   useEffect(() => {
-    if (there) seen.current = true
-    else if (seen.current && listed !== undefined) {
+    if (there === true) seen.current = true
+    else if (seen.current && there === false) {
       seen.current = false
       onRemoved()
     }
-  }, [there, listed, onRemoved])
+  }, [there, onRemoved])
 }

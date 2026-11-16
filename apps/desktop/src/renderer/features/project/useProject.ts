@@ -8,6 +8,7 @@ import {
   type Draft,
   PAGE,
   type PlanStep,
+  type ProjectList,
   type ProjectRepository,
   type ProjectSummary,
   type TaskEnd,
@@ -21,6 +22,7 @@ import { AUTOMATIONS, CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
 import type { OutputSoFar } from '../../shared/handed'
+import type { Heard } from '../../shared/heard'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
 import { useDrafts } from '../../shared/useDrafts'
@@ -50,12 +52,12 @@ export interface ProjectModel {
   readonly repositories: ReadonlyArray<ProjectRepository> | null
   /** The coordinator's thread: its head and the items read so far, oldest first. */
   readonly coordinator: CoordinatorSnapshot | null
-  /** Text still streaming, by thread item. */
-  readonly streaming: ReadonlyMap<string, Streamed>
+  /** Text still streaming, by thread item: held apart, for what shows it to read (`useStreaming`). */
+  readonly streaming: Heard<Streamed>
   /** The tasks the coordinator is drafting now, as far as written (useDrafts). */
   readonly drafts: ReadonlyArray<Draft>
-  /** Commands' output as far as it has come, by their tool call's item, while they run. */
-  readonly outputs: ReadonlyMap<string, OutputSoFar>
+  /** Commands' output as far as it has come, by their tool call's item, while they run: held apart, for what shows it to read (`usePrinted`). */
+  readonly outputs: Heard<OutputSoFar>
   /** Agents that could work: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
   /** The agents have been read: none above then means none can work, not that none are known yet. */
@@ -139,8 +141,12 @@ const NO_ITEMS: ReadonlyArray<ThreadItem> = []
 export const useProject = (projectId: string): ProjectModel => {
   const { client, cache } = useServices()
   const read = reads(client)
-  const listed = useQuery(read.projects())
-  const project = listed.data?.projects.find((candidate) => candidate.id === projectId) ?? null
+  // Only this project of the list: another's change draws nothing here.
+  const listed = useQuery({
+    ...read.projects(),
+    select: useCallback((list: ProjectList) => list.projects.find((candidate) => candidate.id === projectId) ?? null, [projectId]),
+  })
+  const project = listed.data ?? null
   const repositories = useQuery(read.repositories(projectId)).data ?? null
   const thread = useQuery(read.coordinator(projectId))
   const coordinator = thread.data ?? null

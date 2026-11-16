@@ -13,7 +13,7 @@ import { useState } from 'react'
 
 import { pictureUrl } from '../../main/pictureAddress'
 import type { Host } from '../data/services'
-import { nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftOf } from './drafts'
+import { nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftAttached } from './drafts'
 import { type Attached, metaOf, refusedText, text as filesText } from './files'
 import { pictureOf, previewOf, readImage, remember, type Shrink, sentOf, shrinkInWindow, text } from './images'
 
@@ -152,7 +152,8 @@ const readyOf = (attached: Extract<Attached, { ok: true }>): NonNullable<Waiting
 
 /** The images and files waiting in the draft kept under `key` (`drafts.ts`). */
 export function useAttachments(key: string, host: Attacher, shrink: Shrink = shrinkInWindow): Attachments {
-  const { images: waiting, files: waitingFiles, dictated } = useDraftOf<Waiting, WaitingFile>(key)
+  // Not the words: a screen with its images isn't drawn again for each one typed.
+  const { images: waiting, files: waitingFiles, dictated } = useDraftAttached<Waiting, WaitingFile>(key)
   const setWaiting = (change: (now: ReadonlyArray<Waiting>) => ReadonlyArray<Waiting>) => setDraftImages(key, change)
   const setFiles = (change: (now: ReadonlyArray<WaitingFile>) => ReadonlyArray<WaitingFile>) => setDraftFiles(key, change)
   const [note, setNote] = useState<string | null>(null)

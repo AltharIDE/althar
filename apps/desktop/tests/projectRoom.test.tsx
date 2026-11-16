@@ -160,7 +160,7 @@ describe('the Talk room’s model, once the thread is read', () => {
       })
       await waitFor(() => expect(result.current.coordinator?.items).toHaveLength(2))
       act(() => emit(streamed('old', 'I’ve planned it as you asked. Earlier turns load as you scroll. A small indicator app', 'thc')))
-      expect(result.current.streaming.get('old')?.text).toMatch(/indicator app$/)
+      expect(result.current.streaming.read().get('old')?.text).toMatch(/indicator app$/)
       stop({
         emit,
         rewatch: () => act(() => rewatch()),
@@ -179,7 +179,7 @@ describe('the Talk room’s model, once the thread is read', () => {
       rerender()
       await act(async () => services.cache.refetchQueries({ queryKey: keys.coordinator('p1') }))
       await waitFor(() => expect(result.current.coordinator?.items.map((item) => item.id)).toEqual(newer.map((item) => item.id)))
-      return result.current.streaming
+      return result.current.streaming.read()
     }
 
     it('goes once the screen is hidden (`KeptScreens`), and doesn’t show under the turn that runs after', async () => {
@@ -236,10 +236,10 @@ describe('the Talk room’s model, once the thread is read', () => {
     })
     await waitFor(() => expect(result.current.coordinator).not.toBeNull())
     act(() => emit(streamed('m', 'Hello', 'thc')))
-    expect(result.current.streaming.has('m')).toBe(true)
+    expect(result.current.streaming.read().has('m')).toBe(true)
     getCoordinator.mockResolvedValue(coordinatorSnapshot({ items: [{ ...items.says('Hello there', 'claude-code', 'm'), sequence: 1 }] }))
     await act(async () => services.cache.refetchQueries({ queryKey: keys.coordinator('p1') }))
-    await waitFor(() => expect(result.current.streaming.has('m')).toBe(false))
+    await waitFor(() => expect(result.current.streaming.read().has('m')).toBe(false))
   })
 
   it('compacts the coordinator’s context', async () => {

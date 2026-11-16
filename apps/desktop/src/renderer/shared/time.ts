@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useState, useSyncExternalStore } from 'react'
 
 /*
  * Times as the thread says them: "just now", "4m ago", "2h ago", then the
@@ -71,23 +71,90 @@ export const runningCalmly = (from: string, now: string): string => {
   return new Date(now).getTime() - new Date(from).getTime() < 60_000 ? 'just now' : running(from, now)
 }
 
+/** The paces the time is read at: each second, for how long something has worked; each minute, for how long ago it was. */
+export const SECOND = 1000
+export const MINUTE = 60_000
+
+/*
+ * One clock for the window: each pace has one timer, however many places read
+ * it, so what says the time moves on in the same frame, drawn once, and only
+ * where it is read. One that starts reading it reads it from now.
+ */
+interface Pace {
+  /** The time it last said: null before anything read it. */
+  now: string | null
+  readonly listeners: Set<() => void>
+  timer: ReturnType<typeof setInterval> | undefined
+  /** Said again from now at once, for a place that starts reading it. */
+  soon: ReturnType<typeof setTimeout> | undefined
+}
+
+const paces = new Map<number, Pace>()
+
+const paceOf = (every: number): Pace => {
+  const known = paces.get(every)
+  if (known !== undefined) return known
+  const pace: Pace = { now: null, listeners: new Set(), timer: undefined, soon: undefined }
+  paces.set(every, pace)
+  return pace
+}
+
+const fresh = () => new Date().toISOString()
+
+const tick = (pace: Pace) => {
+  clearTimeout(pace.soon)
+  pace.soon = undefined
+  pace.now = new Date().toISOString()
+  for (const listener of pace.listeners) listener()
+}
+
+/** Reads a pace: it ticks while anything does, and says the time from now to each place that starts. */
+const listen = (every: number, listener: () => void) => {
+  const pace = paceOf(every)
+  pace.listeners.add(listener)
+  if (pace.timer === undefined) {
+    pace.now = fresh()
+    pace.timer = setInterval(() => tick(pace), every)
+  } else {
+    // A screen kept hidden a while (`KeptScreens`) says how long ago from now as it shows again, not from the last tick.
+    pace.soon ??= setTimeout(() => tick(pace), 0)
+  }
+  return () => {
+    pace.listeners.delete(listener)
+    if (pace.listeners.size > 0) return
+    clearInterval(pace.timer)
+    clearTimeout(pace.soon)
+    pace.timer = undefined
+    pace.soon = undefined
+  }
+}
+
+/** Not ticking: nothing to hear. */
+const idle = () => () => {}
+
+/** The later of two times, as ISO strings say them; the second where the first is unknown. */
+const later = (one: string | null, other: string) => (one !== null && one > other ? one : other)
+
 /**
  * The time now, as an ISO string, again each second while `ticking`: for how
  * long a running turn has worked. `every` slows it, for what only says how
- * many minutes or hours ago something was.
+ * many minutes or hours ago something was. While it ticks it reads its pace's
+ * one clock (above); stopped, it keeps the time it last said, and before it
+ * ever ticked, the time it was first drawn.
  */
-export const useNow = (ticking: boolean, every = 1000): string => {
-  const [now, setNow] = useState(() => new Date().toISOString())
-  useEffect(() => {
-    if (!ticking) return
-    const tick = () => setNow(new Date().toISOString())
-    // A screen kept hidden a while (`KeptScreens`) says how long ago from now as it shows again, not from when it hid.
-    const again = setTimeout(tick, 0)
-    const id = setInterval(tick, every)
-    return () => {
-      clearTimeout(again)
-      clearInterval(id)
-    }
-  }, [ticking, every])
-  return now
+export const useNow = (ticking: boolean, every = SECOND): string => {
+  const [held, setHeld] = useState(fresh)
+  const [was, setWas] = useState({ ticking, every })
+  /** What a pace says, while it runs: one that doesn't says the time from now as something starts reading it. */
+  const said = (at: number) => {
+    const pace = paceOf(at)
+    return pace.timer === undefined ? null : pace.now
+  }
+  if (was.ticking !== ticking || was.every !== every) {
+    setWas({ ticking, every })
+    // Stopping, or reading another pace, it keeps what the one it read says now, which it is still reading.
+    if (was.ticking) setHeld(later(said(was.every), held))
+  }
+  const subscribe = useCallback((listener: () => void) => (ticking ? listen(every, listener) : idle()), [ticking, every])
+  return useSyncExternalStore(subscribe, () => (ticking ? later(said(every), held) : held))
 }

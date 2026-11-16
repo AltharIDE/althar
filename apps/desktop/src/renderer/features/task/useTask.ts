@@ -35,6 +35,7 @@ import { headsOf } from '../../shared/mergeHere'
 import { commitsToShip } from '../../shared/shipping'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
+import type { Heard } from '../../shared/heard'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
 import { useStreamed } from '../../shared/useStreamed'
@@ -80,10 +81,10 @@ export interface ErrorMore {
 export interface TaskModel {
   /** The thread's head and the items read so far, oldest first. */
   readonly snapshot: ThreadSnapshot | null
-  /** Text still streaming, by thread item. */
-  readonly streaming: ReadonlyMap<string, Streamed>
-  /** Commands' output as far as it has come, by their tool call's item, while they run. */
-  readonly outputs: ReadonlyMap<string, OutputSoFar>
+  /** Text still streaming, by thread item: held apart, for what shows it to read (`useStreaming`). */
+  readonly streaming: Heard<Streamed>
+  /** Commands' output as far as it has come, by their tool call's item, while they run: held apart, for what shows it to read (`usePrinted`). */
+  readonly outputs: Heard<OutputSoFar>
   /** Agents that could lead: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
   /** The agents have been read: none above then means none can lead, not that none are known yet. */

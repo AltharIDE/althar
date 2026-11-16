@@ -221,6 +221,40 @@ describe('a board that measures itself', () => {
   })
 })
 
+describe('a board given what its cards stand on', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    delete (Element.prototype as Partial<Element>).animate
+  })
+
+  it('reads nothing of the page drawn again with it as it was, and moves its cards once it changes', () => {
+    // As in a browser, which animates: its cards are measured only then.
+    Object.defineProperty(Element.prototype, 'animate', {
+      value: () => ({ addEventListener: () => {}, cancel: () => {} }),
+      configurable: true,
+    })
+    const found = vi.spyOn(Element.prototype, 'querySelectorAll')
+    const measured = () => found.mock.calls.filter(([selector]) => selector === '[data-move]').length
+    const board = (cards: ReadonlyArray<string>) => (
+      <Board label="Meridian’s work" version={cards.join(' ')}>
+        <BoardColumn lane={BoardLane.Running} count={cards.length}>
+          {cards.map((card) => (
+            <div key={card} data-move={card}>
+              {card}
+            </div>
+          ))}
+        </BoardColumn>
+      </Board>
+    )
+    const { rerender } = render(board(['a', 'b']))
+    found.mockClear()
+    rerender(board(['a', 'b']))
+    expect(measured()).toBe(0)
+    rerender(board(['b', 'a']))
+    expect(measured()).toBeGreaterThan(0)
+  })
+})
+
 describe('a lane holding two things', () => {
   it('names both in its head, the one showing pressed, keeps its own name, and shows the other once pressed', () => {
     const onChange = vi.fn()
