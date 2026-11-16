@@ -159,13 +159,14 @@ export const newestOf = <A>(events: Stream.Stream<A>, keyOf: (event: A) => strin
         }),
       ),
     )
-    const next: Effect.Effect<A> = Effect.suspend(() => {
-      const first = held.entries().next()
-      if (first.done === true) return Effect.andThen(Queue.take(arrived), next)
-      held.delete(first.value[0])
-      return Effect.succeed(first.value[1])
+    // Everything held goes at once, as one message to the client: what changed longest ago first.
+    const next: Effect.Effect<readonly [A, ...Array<A>]> = Effect.suspend(() => {
+      const [first, ...rest] = held.values()
+      if (first === undefined) return Effect.andThen(Queue.take(arrived), next)
+      held.clear()
+      return Effect.succeed([first, ...rest] as const)
     })
-    return Stream.fromEffectRepeat(next)
+    return Stream.flattenArray(Stream.fromEffectRepeat(next))
   })
 
 /** How many messages a watch remembers how much of it sent, the latest: one streamed again after them is sent whole, as the first time. */
