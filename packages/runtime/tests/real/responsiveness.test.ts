@@ -12,7 +12,7 @@ import { Connections } from '../../src/Connections'
 import { Coordinator } from '../../src/Coordinator'
 import { Instance } from '../../src/Instance'
 import { Projects } from '../../src/Projects'
-import { Queries } from '../../src/Queries'
+import { KEPT_FOR, Queries } from '../../src/Queries'
 import { Runs } from '../../src/Runs'
 import * as Runtime from '../../src/Runtime'
 import { Sessions } from '../../src/Sessions'
@@ -76,7 +76,8 @@ const onGitHub = () => {
 
 const runtimeWith = (github: FakeService) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(store, {}, { connectors: fakeConnectors({ github }) })),
+    // Cards kept between reads as Althar keeps them, which a test otherwise doesn't.
+    Layer.provideMerge(runtime(store, {}, { connectors: fakeConnectors({ github }), keptFor: KEPT_FOR })),
     Layer.provide(Layer.succeed(Tracer.Tracer, traced.tracer)),
   )
 

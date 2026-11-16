@@ -343,6 +343,8 @@ export const runtime = (
     readonly publishAgain?: Duration.Duration
     /** How long a task is under way after its agent went or its lead's turn ended; none at all unless a test says. */
     readonly betweenAgents?: Duration.Duration
+    /** How long cards are kept between reads at most, until their task moves: none unless a test says, as most write the store by hand. */
+    readonly keptFor?: Duration.Duration
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
     /** Agents signed in on a key, paid per use, rather than a plan: by id, or by an account's home. */
     readonly perUse?: ReadonlyArray<string>
@@ -416,6 +418,7 @@ export const runtime = (
     publishAgain: more.publishAgain ?? Duration.zero,
     ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
+    keptFor: more.keptFor ?? Duration.zero,
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),

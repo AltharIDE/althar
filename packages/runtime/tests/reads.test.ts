@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { commitsOf, indexStamp } from '../src/git'
@@ -25,7 +25,8 @@ import { repository, runtime, until } from './support'
  * leaves the screens.
  */
 
-const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+// Cards kept between reads, as Althar keeps them: what git says by hand shows on the board all the same.
+const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { keptFor: Duration.hours(1) })))
 
 const git = (cwd: string, ...args: Array<string>) =>
   execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd })
