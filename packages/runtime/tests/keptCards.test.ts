@@ -182,6 +182,29 @@ describe('a board read after one task moved', () => {
   })
 })
 
+describe('a board read while the same one is under way', () => {
+  it.live('waits for it, where nothing was written since it began', () => {
+    const traced = cardsWorkedOut()
+    return Effect.gen(function* () {
+      const queries = yield* Queries
+      // A card that stands on git, which is looked at again as it is read: each read waits for the disk a moment.
+      const { projectId } = yield* atWork(traced)
+      traced.boards()
+      // Three windows read it on the same change: it is read once, and each has it.
+      const read = yield* Effect.all([queries.board(projectId), queries.board(projectId), queries.board(projectId)], {
+        concurrency: 'unbounded',
+      })
+      assert.strictEqual(traced.boards(), 1)
+      assert.deepStrictEqual(read[1], read[0])
+      assert.deepStrictEqual(read[2], read[0])
+      // Once it has answered, a read is its own.
+      yield* queries.board(projectId)
+      yield* queries.board(projectId)
+      assert.strictEqual(traced.boards(), 2)
+    }).pipe(Effect.provide(keeping), Effect.provide(traced.layer))
+  })
+})
+
 describe('a kept card', () => {
   it.live('is never older than what its read has seen of the store, ahead of the watcher or not', () =>
     Effect.gen(function* () {

@@ -4560,6 +4560,44 @@ export class Queries extends Context.Service<
         }),
       )
 
+      /*
+       * A read asked again while the same one is under way, with nothing written to the store since that one began, waits
+       * for it: several windows, and the edge, read the board and the home again on the same change. The store's own count
+       * of the rows written says so, which every write moves, whether a change was recorded for it or not.
+       */
+      const written = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const [row] = yield* sql<{ written: number }>`SELECT total_changes() AS written`
+        return row?.written ?? 0
+      })
+      const sharing = <A, E>() => {
+        const going = new Map<string, { readonly written: number; readonly answer: Deferred.Deferred<A, E> }>()
+        return (key: string, read: Effect.Effect<A, E, Store>) =>
+          Effect.gen(function* () {
+            const now = yield* written
+            const under = going.get(key)
+            // Where the one under way was stopped before it answered, this read is its own.
+            if (under !== undefined && under.written === now)
+              return yield* Deferred.await(under.answer).pipe(
+                Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? read : Effect.failCause(cause))),
+              )
+            const answer = Deferred.makeUnsafe<A, E>()
+            going.set(key, { written: now, answer })
+            return yield* read.pipe(
+              Effect.onExit((exit) =>
+                Effect.andThen(
+                  Effect.sync(() => {
+                    if (going.get(key)?.answer === answer) going.delete(key)
+                  }),
+                  Deferred.done(answer, exit),
+                ),
+              ),
+            )
+          })
+      }
+      const boards = sharing<Effect.Success<ReturnType<typeof board>>, Effect.Error<ReturnType<typeof board>>>()
+      const homes = sharing<Effect.Success<ReturnType<typeof home>>, Effect.Error<ReturnType<typeof home>>>()
+
       // The coordinator's list_tasks and read_task say how each task's pull request stands, from the same reads as the card.
       yield* (yield* Coordinator).reading((taskId) => run(pullRequestsOf(taskId)).pipe(Effect.orElseSucceed(() => undefined)))
 
@@ -4592,9 +4630,9 @@ export class Queries extends Context.Service<
               found === undefined ? Effect.fail(new NotFound({ kind: 'task', id: taskId })) : Effect.succeed(found),
             ),
           ),
-        board: (projectId) => run(board(projectId)),
+        board: (projectId) => run(boards(projectId, board(projectId))),
         olderSettled: (projectId, before, taskId) => run(olderSettled(projectId, before, taskId)),
-        home: (since, deviceId) => run(home(since, deviceId)),
+        home: (since, deviceId) => run(homes(`${since ?? ''} ${deviceId ?? ''}`, home(since, deviceId))),
         waiting: run(waiting),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         shown: (threadId, itemId) => run(shown(threadId, itemId)),
