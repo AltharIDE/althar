@@ -76,6 +76,8 @@ const PLAIN: Readonly<Record<string, string>> = {
     'a new project’s ways in, and where its code lives, as large options; a repository’s row, the whole of which chooses it',
   'setup/SettingsNav/SettingsNav.tsx': 'a section in the list down the side of Settings',
   /* a shape of its own */
+  'outputs/ShipButton/ShipButton.tsx':
+    'a stop’s round mark on How Ship works’ path, joined to the next by its line, which turns that stop on or off',
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
   'chrome/PlanGauge/PlanGauge.tsx': 'the plan gauge, drawn in steps as the load meters are',

@@ -707,3 +707,25 @@ export enum MemoryPressure {
   /** It moves memory to disk, and everything runs slower. */
   Critical = 'critical',
 }
+
+/** A stop on a Ship's route, in the order it takes them. */
+export enum ShipStop {
+  /** Its reviewer reads what waits, and the lead settles what it finds. */
+  Review = 'review',
+  /** What waits goes up to its pull request, or opens one. */
+  Push = 'push',
+  /** Its pull request is marked ready for review. */
+  Ready = 'ready',
+  /** Its pull request merges, once the checks main requires pass. */
+  Merge = 'merge',
+}
+
+/** How far a Ship goes: the last stop it takes. */
+export enum ShipFar {
+  /** As far as a push: a draft stays one. */
+  Push = 'push',
+  /** Ready for review. */
+  Ready = 'ready',
+  /** Merged. */
+  Merge = 'merge',
+}

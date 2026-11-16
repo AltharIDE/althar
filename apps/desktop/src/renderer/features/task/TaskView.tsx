@@ -63,7 +63,7 @@ import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
 import { taskStatusOf } from '../../shared/taskStatus'
-import { stepText, trackFor } from '../../shared/steps'
+import { stepNow, stepText, trackFor } from '../../shared/steps'
 import { MERGE_QUEUE_STEP, queuedToMerge, shownChangeOf } from '../../data/merges'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
@@ -236,8 +236,11 @@ export const statusOf = (
   if (status === TaskStatus.Running && snapshot.task.externalWait !== undefined)
     return { status, state: text.waiting, why: externalWaitWords(snapshot.task.externalWait, clock) }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
+  const shipAt = snapshot.task.shipping?.at
   const doing =
-    step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
+    step === 'implement' && snapshot.task.followUp === true
+      ? stepText.followingUp
+      : stepNow(step, shipAt === 'ready' || shipAt === 'merge' ? shipAt : null)
   switch (status) {
     case TaskStatus.Yours: {
       if (snapshot.attention.length > 0) return { status, state: text.needsYou }
@@ -1417,10 +1420,9 @@ export function TaskView({
                   error={model.error}
                   errorMore={model.errorMore}
                   onAccept={(changes) => void model.accept(changes)}
-                  onMergeWaiting={(how) => void model.mergeWaiting(how)}
                   onMergeHere={() => void model.mergeHere()}
                   onOpenChange={() => void model.openChange()}
-                  onShip={() => void model.ship()}
+                  ship={model}
                   onPush={(head, url) => void model.push(head, url)}
                   refused={model.refused}
                   onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}

@@ -1139,6 +1139,21 @@ describe('settings, through the API', () => {
     ),
   )
 
+  it.live('ships each task by its own route until the person makes one their default, and back', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.isUndefined((yield* client.GetSettings({})).shipRoute)
+        yield* client.SetShipRoute({ commandId: commandId(), route: { review: false, far: 'merge' } })
+        assert.deepStrictEqual((yield* client.GetSettings({})).shipRoute, { review: false, far: 'merge' })
+        yield* client.SetShipRoute({ commandId: commandId(), route: { review: true, far: 'ready' } })
+        assert.deepStrictEqual((yield* client.GetSettings({})).shipRoute, { review: true, far: 'ready' })
+        yield* client.SetShipRoute({ commandId: commandId(), route: null })
+        assert.isUndefined((yield* client.GetSettings({})).shipRoute)
+      }),
+    ),
+  )
+
   it.live('queues what is sent mid-turn unless the person sets it to steer', () =>
     Effect.scoped(
       Effect.gen(function* () {

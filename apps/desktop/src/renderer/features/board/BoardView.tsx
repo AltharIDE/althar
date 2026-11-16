@@ -72,7 +72,7 @@ import {
   standingOf,
   standingText,
 } from '../../shared/standing'
-import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
+import { afterSteps, isAutomatedStep, stepNow, stepText } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock, runningCalmly } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -395,7 +395,7 @@ const empty = (size: { readonly add: number; readonly del: number } | null | und
 
 /** The step a change is on, in its word: its step's name on its track, or what it does once its steps are done. */
 const stepWordOf = (work: BoardTask): string => {
-  if (work.step === 'publish' || afterSteps(work.step)) return stepText.now[work.step ?? ''] ?? ''
+  if (work.step === 'publish' || afterSteps(work.step)) return stepNow(work.step, work.shipAt) ?? ''
   const { steps, at } = trackOf(work)
   return steps[at] ?? text.status[TaskStatus.Running]
 }

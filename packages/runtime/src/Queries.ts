@@ -59,6 +59,7 @@ import {
   type LineComment,
   waitingIn,
   plainTitle,
+  shipsToOpen,
   toolPhrase,
 } from '@althar/contracts'
 import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } from 'effect'
@@ -91,6 +92,7 @@ import { type KeptLineComment, keepLineComments, keptIn, lineCommentsOf, sentOf 
 import { filesOf, outputOf, picturesOf } from './handed'
 import { handedOf, issueCardsWaiting, issueChangesWaiting, issueDraftsWaiting, kindOf } from './kinds'
 import { reviewOfferOf } from './reviewOffer'
+import { shipUnderWayOf, taskShipRoute } from './shipRoute'
 import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
@@ -2235,6 +2237,7 @@ export class Queries extends Context.Service<
             runAt: string | null
             attemptAt: string | null
             step: string | null
+            shipAt: string | null
             waiting: number
             issueDrafts: number
             issueChanges: number
@@ -2269,6 +2272,8 @@ export class Queries extends Context.Service<
               (SELECT max(started_at) FROM run_attempts WHERE run_id = r.id) AS attempt_at,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
+              -- Its Ship's stop past its push, kept on its run as it gets there.
+              CASE WHEN r.state = 'running' THEN json_extract(r.parameters, '$.ships.at') END AS ship_at,
               -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
               (SELECT a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state = 'held' ORDER BY a.admitted_at DESC LIMIT 1) AS held,
@@ -2766,6 +2771,7 @@ export class Queries extends Context.Service<
                         : asked
                           ? 'implement'
                           : goes),
+            ...(task.step === 'publish' && (task.shipAt === 'ready' || task.shipAt === 'merge') ? { shipAt: task.shipAt } : {}),
             followUp: (task.runState === 'running' && task.runPlan === null) || asked,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: team?.current?.agentId ?? task.lead ?? (implement?.agentId || null),
@@ -3820,6 +3826,34 @@ export class Queries extends Context.Service<
             FROM workspaces w
             WHERE w.task_id = ${head.taskId} AND w.access = 'write' AND w.reviewing IS NULL AND w.state IN ('ready', 'away')
             ORDER BY w.created_at, w.rowid`
+          // The route its Ship takes when pressed without one, while something waits for Ship (held, or commits for a pull request
+          // still to open, as the card reads it): the same the press takes (shipRoute.ts).
+          const toShip =
+            card?.held !== undefined ||
+            shipsToOpen({
+              end: card?.plan?.end ?? null,
+              open: false,
+              commits: links.changes.length === 0 ? said.commits : (card?.unshipped?.commits ?? 0),
+            })
+          const shipRoute = toShip
+            ? yield* taskShipRoute(yield* Changes, head.taskId).pipe(Effect.orElseSucceed(() => undefined))
+            : undefined
+          // Its Ship under way: the route, as changed since, and the stop it is at. One whose step waits for the person (a push
+          // that failed, to try again) isn't: it does nothing until they answer, and its card says so, not a stop it is at.
+          const [shipRun] = yield* sql<{ parameters: string; step: string | null; stepState: string | null }>`
+            SELECT r.parameters,
+              (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = e.id
+                AND a.state IN ('admitted', 'running', 'held', 'waiting_attention') ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1) AS step,
+              (SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = e.id
+                AND a.state IN ('admitted', 'running', 'held', 'waiting_attention') ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1)
+                AS step_state
+            FROM runs r JOIN workflow_executions e ON e.run_id = r.id
+            WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
+              AND r.state = 'running' AND json_type(r.parameters, '$.ships') = 'object'`
+          const shipping =
+            shipRun === undefined || shipRun.stepState === 'waiting_attention'
+              ? undefined
+              : shipUnderWayOf(shipRun.parameters, shipRun.step)
           // Several changes, by name: one in several repositories is one change, with its row there as it was.
           const severalChanges = new Set(lineRows.map((row) => row.name ?? '')).size > 1
           const waitingLines = !severalChanges
@@ -3947,6 +3981,8 @@ export class Queries extends Context.Service<
                 ? { nothingBuilt: true }
                 : {}),
               skipReview: (reviewing?.left ?? 0) > 0 && card?.step !== 'publish',
+              ...(shipRoute === undefined ? {} : { shipRoute }),
+              ...(shipping === undefined ? {} : { shipping }),
               // Begun, of its own work, not merged, and ending with no pull request: Make it a change gives it both at once.
               ...(card?.plan != null &&
               card.reviewing == null &&

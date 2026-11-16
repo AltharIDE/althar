@@ -741,6 +741,18 @@ export const AgentTools = Schema.Struct({
 })
 export type AgentTools = typeof AgentTools.Type
 
+/**
+ * How far a Ship takes what waits: as far as a push (a draft stays one, a new
+ * pull request opens as one), ready for review (a draft is marked ready, a new
+ * one opens ready), or merged, once the checks main requires pass.
+ */
+export const ShipFar = Schema.Literals(['push', 'ready', 'merge'])
+export type ShipFar = typeof ShipFar.Type
+
+/** A Ship's route: whether its review comes first, and how far it goes. */
+export const ShipRoute = Schema.Struct({ review: Schema.Boolean, far: ShipFar })
+export type ShipRoute = typeof ShipRoute.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   plansAndReviews: PlansAndReviews,
@@ -756,6 +768,8 @@ export const AppSettings = Schema.Struct({
   runOutside: Schema.optional(Schema.Literals(['ask', 'safe', 'full'])),
   /** What sending does while an agent is mid-turn: `queue` it for the turn's end, its default, or `steer` it to the agent at once. */
   sendMidTurn: Schema.optional(Schema.Literals(['queue', 'steer'])),
+  /** The route the person's Ships take unless they choose another for one: absent until they make one their default. */
+  shipRoute: Schema.optional(ShipRoute),
   /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
   automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
@@ -2348,6 +2362,30 @@ export const HeldForShip = Schema.Struct({
 })
 export type HeldForShip = typeof HeldForShip.Type
 
+/** A stop on a Ship's route. */
+export const ShipStop = Schema.Literals(['review', 'push', 'ready', 'merge'])
+export type ShipStop = typeof ShipStop.Type
+
+/**
+ * The route Ship takes on a task when pressed without one chosen: the
+ * person's own default (Settings' `shipRoute`), else what the task's plan and
+ * ending say, bent where the task makes a stop pointless: no review where it
+ * has no reviewer (`reviewable` false), and no further than Ready where main
+ * needs someone else's approval (`bent`).
+ */
+export const ShipRouteOf = Schema.Struct({
+  route: ShipRoute,
+  /** Whether a review can come first: it has a reviewer to run one. */
+  reviewable: Schema.Boolean,
+  /** Why it goes less far than the person's default, where it does: main needs an approval from someone else. */
+  bent: Schema.NullOr(Schema.Literals(['approval'])),
+})
+export type ShipRouteOf = typeof ShipRouteOf.Type
+
+/** A Ship under way: its route, as chosen or changed since, and the stop it is at. */
+export const ShipUnderWay = Schema.Struct({ route: ShipRoute, at: ShipStop })
+export type ShipUnderWay = typeof ShipUnderWay.Type
+
 export const Unshipped = Schema.Struct({
   commits: Schema.Int,
   /** Lines they add and remove, all together. */
@@ -2666,6 +2704,11 @@ export const TaskCard = Schema.Struct({
   reviewOffer: Schema.optional(PlanStep),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
+  /**
+   * Its Ship's stop past its push, while `step` is still `publish`: marking its pull request ready, or waiting to merge on the
+   * checks main requires. Its card and header say that stop, not the opening of a pull request. Absent otherwise.
+   */
+  shipAt: Schema.optional(Schema.Literals(['ready', 'merge'])),
   /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
   followUp: Schema.optional(Schema.Boolean),
   /** The latest summary the lead reported. */
@@ -4027,6 +4070,10 @@ export const ThreadSnapshot = Schema.Struct({
     nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
     skipReview: Schema.optional(Schema.Boolean),
+    /** The route its Ship takes when pressed without one chosen, while something waits for Ship. Absent otherwise. */
+    shipRoute: Schema.optional(ShipRouteOf),
+    /** Its Ship under way: the route and the stop it is at. Absent while none is. */
+    shipping: Schema.optional(ShipUnderWay),
     /**
      * It can be made a change in one move, as its menu's Make it a change does: begun, of its own work, not merged, and
      * ending with no pull request (a prototype, a chat, a quick task).
@@ -5236,6 +5283,8 @@ const ProjectApi = RpcGroup.make(
   command('SetRunOutside', { to: Schema.Literals(['ask', 'safe', 'full']) }, Schema.Void),
   /** What sending a message does while an agent is mid-turn: queue it, or steer the agent with it at once. */
   command('SetSendMidTurn', { to: Schema.Literals(['queue', 'steer']) }, Schema.Void),
+  /** Makes a route the person's default for every Ship, as Make this my default does; null goes back to each task's own. */
+  command('SetShipRoute', { route: Schema.NullOr(ShipRoute) }, Schema.Void),
   /**
    * Saves a preset: a task's parts, team and first lines of its brief (Save as preset), or the parts the coordinator offered;
    * kept to the task's project with `projectOnly`. Its name, as kept.
@@ -5771,7 +5820,14 @@ const WorkApi = RpcGroup.make(
    * where nothing waits (`ShipRefused`).
    */
   // A change named ships alone, with what waits beneath it in its stack; none, every change waiting, the bottom of a stack first.
-  command('Ship', { taskId: Schema.String, change: Schema.optional(Schema.String) }, Schema.Void),
+  // `route` is this Ship's, as the person chose it; without it, the task's own (`TaskView.shipRoute`).
+  command('Ship', { taskId: Schema.String, change: Schema.optional(Schema.String), route: Schema.optional(ShipRoute) }, Schema.Void),
+  /**
+   * Changes the route of the task's Ship under way: how far it goes, where it
+   * hasn't gone past that yet, and its review, which stops as Skip review
+   * stops it where the route turns it off. Refused where no Ship is under way.
+   */
+  command('RouteShip', { taskId: Schema.String, route: ShipRoute }, Schema.Void),
   /**
    * Fix it, on what a review after a merge found (a task is a conversation
    * plus parts, "After merge, in the same task"): the findings go to the
