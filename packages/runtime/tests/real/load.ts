@@ -4,6 +4,7 @@ import { Session } from 'node:inspector/promises'
 import { cpus, setPriority, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
+import { Worker } from 'node:worker_threads'
 
 import { Tracer } from 'effect'
 
@@ -12,7 +13,8 @@ import { Tracer } from 'effect'
  * with and reads off the runtime: agents' builds stood in for by processes
  * that keep every core busy and others that write to the disk and sync it,
  * at the priority a test names; how late the event loop runs; the spans the
- * runtime's statements and steps make, by name; and a CPU profile of it all.
+ * runtime's statements and steps make, by name; the processes it starts, on
+ * its own thread and on the runner's; and a CPU profile of it all.
  * Run by hand, never in CI: it takes the computer for minutes.
  */
 
@@ -66,9 +68,14 @@ export const lag = () => {
   }
 }
 
-/** Every span the runtime makes, timed, by name: a statement by its text, and what each statement or step costs in all. */
-export const spans = () => {
-  const ended: Array<{ name: string; ms: number }> = []
+/**
+ * Every span the runtime makes, timed, by name: a statement by its text, and what each statement or step costs in all.
+ * Counted as they end, so a run of minutes holds only one line for each name. A span that isn't a statement and whose
+ * name matches `kept` keeps each of its times too, for the steps a later commit may name (the card watcher's rounds).
+ */
+export const spans = (kept = /card|round/i) => {
+  const by = new Map<string, { n: number; total: number; max: number }>()
+  const times = new Map<string, Array<number>>()
   const children = new Map<string, Array<{ name: string; ms: number }>>()
   const long: Array<{ ms: number; inside: Array<{ name: string; ms: number }> }> = []
   const tracer = Tracer.make({
@@ -80,15 +87,21 @@ export const spans = () => {
         end(endTime, exit)
         const text = span.attributes.get('db.query.text')
         // A card worked out says whether it was kept, and why not (Queries.ts).
-        const kept = span.attributes.get('kept')
+        const wasKept = span.attributes.get('kept')
         const name =
           typeof text === 'string'
             ? `sql: ${text.replace(/\s+/g, ' ').slice(0, 140)}`
-            : kept === undefined
+            : wasKept === undefined
               ? span.name
-              : `${span.name}: ${kept === true ? 'kept' : `not kept, ${String(span.attributes.get('unsure'))}`}`
+              : `${span.name}: ${wasKept === true ? 'kept' : `not kept, ${String(span.attributes.get('unsure'))}`}`
         const ms = Number(endTime - span.startTime) / 1e6
-        ended.push({ name, ms })
+        const was = by.get(name) ?? { n: 0, total: 0, max: 0 }
+        by.set(name, { n: was.n + 1, total: was.total + ms, max: Math.max(was.max, ms) })
+        if (typeof text !== 'string' && kept.test(name)) {
+          const of = times.get(name) ?? []
+          of.push(ms)
+          times.set(name, of)
+        }
         if (parent !== undefined) {
           const of = children.get(parent) ?? []
           if (of.length < 40) of.push({ name: name.slice(0, 100), ms: Math.round(ms) })
@@ -100,20 +113,23 @@ export const spans = () => {
       return span
     },
   })
+  /** The spans by name, `matching` where given. */
+  const lines = (matching?: RegExp) => [...by.entries()].filter(([name]) => matching === undefined || matching.test(name))
   return {
     tracer,
     clear: () => {
-      ended.splice(0)
+      by.clear()
+      times.clear()
       long.splice(0)
     },
     long: () => long.toSorted((a, b) => b.ms - a.ms).slice(0, 8),
-    top: (count = 25) => {
-      const by = new Map<string, { n: number; total: number; max: number }>()
-      for (const one of ended) {
-        const was = by.get(one.name) ?? { n: 0, total: 0, max: 0 }
-        by.set(one.name, { n: was.n + 1, total: was.total + one.ms, max: Math.max(was.max, one.ms) })
-      }
-      return [...by.entries()]
+    /** How many ended, and what they took in all, of those `matching`: statements are `sql: …`. */
+    count: (matching?: RegExp) =>
+      lines(matching).reduce((sum, [, one]) => ({ n: sum.n + one.n, ms: Math.round(sum.ms + one.total) }), { n: 0, ms: 0 }),
+    /** The times of each span kept by name (`kept`), named by the runtime rather than a statement. */
+    named: () => Object.fromEntries(times),
+    top: (count = 25, matching?: RegExp) =>
+      lines(matching)
         .sort(([, a], [, b]) => b.total - a.total)
         .slice(0, count)
         .map(([name, { n, total, max }]) => ({
@@ -122,8 +138,7 @@ export const spans = () => {
           total: Math.round(total),
           mean: Math.round((total / n) * 10) / 10,
           max: Math.round(max),
-        }))
-    },
+        })),
   }
 }
 
@@ -169,16 +184,23 @@ export const summary = (times: ReadonlyArray<number>) => {
   return { n: sorted.length, p50: Math.round(at(0.5)), p95: Math.round(at(0.95)), max: Math.round(sorted.at(-1) ?? 0) }
 }
 
-/** Every process this thread starts, by its command and first words: how many, how long starting it held the loop, and who. */
+/**
+ * Every process the runtime starts, by its command and first words: on this thread, how many, how long starting each
+ * held the loop, and who; and on the runner thread (spawner.ts), where the runtime's own commands start, how many and
+ * how long each ran, read off what this thread asks of the runner.
+ */
 export const spawns = () => {
-  const by = new Map<string, { n: number; blocked: number; ran: number; from: string }>()
+  const by = new Map<string, { n: number; blocked: number; ran: number; from: string; apart: boolean }>()
+  const keyOf = (file: string, args: ReadonlyArray<string>) => {
+    const words = args.filter((word) => !word.startsWith('-') && !word.includes('=') && !word.startsWith('/'))
+    return `${file.split('/').at(-1)} ${words.slice(0, 2).join(' ')}`.slice(0, 60)
+  }
   const prototype = childProcess.ChildProcess.prototype as unknown as {
     spawn: (options: { file: string; args: ReadonlyArray<string> }) => unknown
   }
   const original = prototype.spawn
   prototype.spawn = function (this: ChildProcess, options) {
-    const words = options.args.slice(1).filter((word) => !word.startsWith('-c') && word !== 'core.hooksPath=/dev/null')
-    const key = `${options.file.split('/').at(-1)} ${words.slice(0, 2).join(' ')}`.slice(0, 60)
+    const key = keyOf(options.file, options.args.slice(1))
     const from = (new Error().stack ?? '').split('\n').find((line) => line.includes('/packages/') && !line.includes('load.ts')) ?? ''
     const began = performance.now()
     const result = original.call(this, options)
@@ -187,6 +209,7 @@ export const spawns = () => {
       n: 0,
       blocked: 0,
       ran: 0,
+      apart: false,
       from: from
         .trim()
         .replace(/^.*\/packages\//, '')
@@ -200,15 +223,45 @@ export const spawns = () => {
     })
     return result
   }
+  // The runner's: each command it is asked to start, by its job's id, until it says the job ended.
+  const runners = new WeakSet<Worker>()
+  const jobs = new Map<number, { readonly key: string; readonly began: number }>()
+  const post = Reflect.get(Worker.prototype, 'postMessage') as (this: Worker, message: unknown, transfer?: never) => void
+  Worker.prototype.postMessage = function (this: Worker, message: unknown, transfer?: never) {
+    const asked = message as { kind?: string; job?: { id: number; command: string; args: ReadonlyArray<string> } } | null
+    const job = asked?.job
+    if (asked?.kind === 'start' && job !== undefined) {
+      const key = keyOf(job.command, job.args)
+      const was = by.get(key) ?? { n: 0, blocked: 0, ran: 0, apart: true, from: 'spawner.ts (its runner)' }
+      was.n += 1
+      by.set(key, was)
+      jobs.set(job.id, { key, began: performance.now() })
+      if (!runners.has(this)) {
+        runners.add(this)
+        this.on('message', (ended: { kind?: string; id?: number } | null) => {
+          const one = ended?.kind === 'ended' && ended.id !== undefined ? jobs.get(ended.id) : undefined
+          if (one === undefined || ended?.id === undefined) return
+          jobs.delete(ended.id)
+          const of = by.get(one.key)
+          if (of !== undefined) of.ran += performance.now() - one.began
+        })
+      }
+    }
+    return post.call(this, message, transfer)
+  }
   return {
     clear: () => by.clear(),
+    /** How many were started in all, of those whose name matches where given, on either thread. */
+    count: (matching?: RegExp) =>
+      [...by.entries()].reduce((sum, [name, one]) => sum + (matching === undefined || matching.test(name) ? one.n : 0), 0),
     top: (count = 25) =>
       [...by.entries()]
-        .sort(([, a], [, b]) => b.blocked - a.blocked)
+        .sort(([, a], [, b]) => b.n - a.n || b.blocked - a.blocked)
         .slice(0, count)
-        .map(([name, { n, blocked, ran, from }]) => ({
+        .map(([name, { n, blocked, ran, from, apart }]) => ({
           name,
           n,
+          where: apart ? 'runner' : 'here',
           blocked: Math.round(blocked),
           blockedEach: Math.round((blocked / n) * 10) / 10,
           ranEach: Math.round(ran / n),

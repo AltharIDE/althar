@@ -58,7 +58,13 @@ From `packages/runtime`:
 | `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches |
 | `bun run verify` | Check and coverage, as CI runs them |
 | `bun run test:agents` | On the real agents signed in on this Mac: the coordinator loop (a small repository, one request, and the plan run until the task is ready), and a reader refused a write. It costs usage; set `ALTHAR_ASK` to ask the loop something else |
+| `bun run test:performance` | The benchmarks in `tests/*.bench.ts`, as `nightly` runs them: one over its budget is a warning, never a failure |
+| `bun run test:responsiveness` | The responsiveness run, by hand and never in CI: below |
 
 The process tests run the fake agent with Bun. To try the runtime with real agents by hand, use the command-line client in `apps/cli`.
+
+### Responsiveness
+
+`tests/real/responsiveness.test.ts` times what the person waits on, on a store of their size (400 tasks, a 5,000-item thread, a 2,000-item coordinator's thread, a million rows of the change feed), with nothing else running and again with every core and the disk busy (`ALTHAR_PHASES=idle,load`). The app's windows follow the feed on threads of their own, each with its own connection to the API, as `follow.ts` says the app's do (it reads the sets from the renderer's sources, and prints what it ran with); agents work in other tasks (`storm.ts`). It times reads from a window, presses from the call to the answer, counts what the agents' work and one tool call's update make the runtime do, and ends with a table of each measurement against its budget (`budgets.ts`); `ALTHAR_STRICT=1` fails the run on one over. The settings are at the top of the file: `ALTHAR_WINDOWS`, `ALTHAR_EDGE`, `ALTHAR_AGENTS`, `ALTHAR_REPEATS` and the rest. Its JSON (`ALTHAR_RESPONSIVENESS_OUT`) is compared row by row with `bun tests/real/compare.ts before.json after.json`. The benchmarks in `tests/responsiveness.bench.ts` guard the same paths nightly, on a small store.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the rules this package follows.
