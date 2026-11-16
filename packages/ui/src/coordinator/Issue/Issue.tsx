@@ -154,14 +154,24 @@ export interface IssueRefProps {
   id: string
   /** Draw the mark in Linear's colour. */
   linear?: boolean
+  /** The other issues it came from, after this one, each on its own tracker. */
+  also?: ReadonlyArray<Omit<IssueRefProps, 'also'>>
 }
 
-/** Where a task came from, inline: the tracker's mark and the issue's key. */
-export function IssueRef({ mark, id, linear }: IssueRefProps) {
+/** Where a task came from, inline: the tracker's mark and the issue's key; for several, each. */
+export function IssueRef({ mark, id, linear, also = [] }: IssueRefProps) {
+  const one = (ref: Omit<IssueRefProps, 'also'>) => (
+    <span key={ref.id} className={s.from}>
+      {ref.mark && <BrandMark brand={ref.mark} size={11} className={ref.linear ? s.fromLinear : undefined} />}
+      <span className={s.fromId}>{ref.id}</span>
+    </span>
+  )
+  const first = one({ id, ...(mark === undefined ? {} : { mark }), ...(linear === undefined ? {} : { linear }) })
+  if (also.length === 0) return first
   return (
-    <span className={s.from}>
-      {mark && <BrandMark brand={mark} size={11} className={linear ? s.fromLinear : undefined} />}
-      <span className={s.fromId}>{id}</span>
+    <span className={s.froms}>
+      {first}
+      {also.map(one)}
     </span>
   )
 }

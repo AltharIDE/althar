@@ -301,8 +301,8 @@ export interface TaskModel {
   readonly discardIssueChanges: (changesId: string) => Promise<void>
   /** From an issue card: issues filed and changed at once from now on, or each on a card first, said to the coordinator and the lead. */
   readonly preferIssueCards: (atOnce: boolean) => Promise<void>
-  /** Whether the task does only part of its issue, so its merge comments on it and leaves it open. */
-  readonly setIssuePart: (partOf: boolean) => Promise<void>
+  /** Whether the task does only part of an issue it came from (by its ref; its first where none), so its merge comments on it and leaves it open. */
+  readonly setIssuePart: (partOf: boolean, issue?: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
@@ -1061,7 +1061,7 @@ export const useTask = (threadId: string): TaskModel => {
     applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
     discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
     preferIssueCards: (atOnce) => act(() => client.preferIssueCards(threadId, atOnce)),
-    setIssuePart: (partOf) => onTask((taskId) => client.setTaskIssuePart(taskId, partOf)),
+    setIssuePart: (partOf, issue) => onTask((taskId) => client.setTaskIssuePart(taskId, partOf, issue)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),
