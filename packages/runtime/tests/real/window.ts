@@ -12,6 +12,9 @@ import type { Follows } from './follow'
  * runtime's thread's work.
  */
 
+/** The whole reads a window may show: the projects (its sidebar), the home, its project's board. */
+export type Shown = 'projects' | 'home' | 'board'
+
 export interface WindowSetup {
   readonly name: string
   /** A window of the app, or the edge (the notch, or the menu bar's sheet), which reads only the home. */
@@ -21,7 +24,19 @@ export interface WindowSetup {
   readonly thread?: string
   /** The project's screen is open: its coordinator's thread, read item by item as it changes, its cards too. */
   readonly coordinator?: boolean
+  /** The whole reads on screen; the others are held, read again off screen only where the feed does (`offScreen`). */
+  readonly shows?: ReadonlyArray<Shown>
+  /** The edge is seen, not the menu bar's sheet kept hidden between clicks. */
+  readonly seen?: boolean
   readonly follows: Follows
+}
+
+/** What a window's connection offers, as this commit's API and contracts have it. */
+export interface Features {
+  /** `GetThreadItems`, several items in one call. */
+  readonly items: boolean
+  /** The lane header a read nobody waits on carries. */
+  readonly lane: boolean
 }
 
 /** What the run asks of a window, and what it answers. */
@@ -41,6 +56,8 @@ export interface Answer {
   readonly missing?: boolean
   readonly value?: unknown
   readonly stats?: WindowStats
+  /** Said as the window starts. */
+  readonly features?: Features
 }
 
 export interface WindowStats {
@@ -49,6 +66,10 @@ export interface WindowStats {
   readonly ms: number
   /** Each read it made of its own, following the feed, by what it read: how long each took, in ms. */
   readonly reads: Readonly<Record<string, ReadonlyArray<number>>>
+  /** How many items its screens read of what changed, by screen, whether one call an item or several in one. */
+  readonly items: Readonly<Record<string, number>>
+  /** The whole reads a change only marked, off screen or hidden, to be read as they next show. */
+  readonly marked: Readonly<Record<string, number>>
   readonly failed: Readonly<Record<string, number>>
   /** What its watch delivered, by event: how many, and their size as JSON. */
   readonly watched: Readonly<Record<string, { readonly n: number; readonly bytes: number }>>
@@ -72,27 +93,42 @@ interface Item {
 const waiting = (items: ReadonlyMap<string, Item>) =>
   [...items.values()].flatMap((item) => (item.kind === 'user_message' && item.input?.state === 'queued' ? [item.id] : []))
 
-export const runWindow = (client: Client, setup: WindowSetup, post: (answer: Answer) => void) => {
+/**
+ * Runs a window: `behind` marks a call as one nobody waits on, as client.ts's `behind` does (the lane header), where
+ * this commit has the lane; `most` is how many items one `GetThreadItems` reads.
+ */
+export const runWindow = (
+  client: Client,
+  setup: WindowSetup,
+  post: (answer: Answer) => void,
+  behind: ((call: Effect.Effect<unknown, unknown>) => Effect.Effect<unknown, unknown>) | undefined,
+  most: number,
+) => {
   const { follows } = setup
+  const shows = new Set(setup.shows ?? [])
+  const batched = follows.batched && client.GetThreadItems !== undefined
   let began = performance.now()
   let reads = new Map<string, Array<number>>()
+  let items = new Map<string, number>()
+  let marked = new Map<string, number>()
   let failed = new Map<string, number>()
   let watched = new Map<string, { n: number; bytes: number }>()
   let changed = new Map<string, number>()
   let broke: string | null = null
+  const add = (map: Map<string, number>, key: string, by = 1) => map.set(key, (map.get(key) ?? 0) + by)
 
-  const call = async (method: string, payload?: unknown): Promise<unknown> => {
-    const made = client[method]?.(payload)
+  const call = async (method: string, payload?: unknown, aside = false): Promise<unknown> => {
+    const made = client[method]?.(payload) as Effect.Effect<unknown, unknown> | undefined
     if (made === undefined) throw new Error(`no call ${method}`)
-    return Effect.runPromise(made as Effect.Effect<unknown, unknown>)
+    return Effect.runPromise(aside && behind !== undefined ? behind(made) : made)
   }
-  /** A read the window makes of its own, timed under `what`. */
-  const timed = async (what: string, method: string, payload?: unknown) => {
+  /** A read the window makes of its own, timed under `what`: behind, where the feed started it and reads go behind. */
+  const timed = async (what: string, method: string, payload?: unknown, aside = false) => {
     const start = performance.now()
     try {
-      return await call(method, payload)
+      return await call(method, payload, aside)
     } catch {
-      failed.set(what, (failed.get(what) ?? 0) + 1)
+      add(failed, what)
       return undefined
     } finally {
       const list = reads.get(what) ?? []
@@ -108,7 +144,7 @@ export const runWindow = (client: Client, setup: WindowSetup, post: (answer: Ans
     whole.set(key, state)
     if (state.running && follows.oneAtATime) return void (state.again = true)
     state.running = true
-    void timed(what, method, payload).finally(() => {
+    void timed(what, method, payload, follows.behind).finally(() => {
       state.running = false
       if (state.again) {
         state.again = false
@@ -127,10 +163,15 @@ export const runWindow = (client: Client, setup: WindowSetup, post: (answer: Ans
       for (const one of now) one()
     }, ms)
   }
+  /** A whole read a change touched: read again where it shows, or off screen where the feed reads those too; else marked. */
+  const touched = (key: Shown | 'connections', read: () => void, offScreen = follows.offScreen) => {
+    if (key === 'connections' || shows.has(key) || offScreen) gather(key, read, follows.gather)
+    else add(marked, key)
+  }
 
-  /* A thread on screen (useTask.ts, useProject.ts): what changed, item by item, and its head where anything else did. */
+  /* A thread on screen (useTask.ts, useProject.ts): what changed, item by item or in one call, and its head where anything else did. */
   const screen = (what: 'thread' | 'coordinator') => {
-    const items = new Map<string, Item>()
+    const held = new Map<string, Item>()
     // A coordinator's thread is named by its first read.
     let threadId = what === 'thread' ? (setup.thread ?? '') : ''
     let changes = { head: false, cards: false, automations: false, items: new Set<string>(), tasks: new Set<string>() }
@@ -138,31 +179,51 @@ export const runWindow = (client: Client, setup: WindowSetup, post: (answer: Ans
     const keep = (value: unknown) => {
       const page = value as { readonly threadId?: string; readonly items?: ReadonlyArray<Item> } | undefined
       if (page?.threadId !== undefined) threadId = page.threadId
-      for (const item of page?.items ?? []) items.set(item.id, item)
+      for (const item of page?.items ?? []) held.set(item.id, item)
     }
-    const readItems = (ids: Iterable<string>) =>
-      Promise.all(
-        [...ids].map((itemId) =>
-          timed(`${what}.item`, 'GetThreadItem', { threadId, itemId }).then((item) =>
-            item === null ? void items.delete(itemId) : item === undefined ? undefined : void items.set(itemId, item as Item),
+    const readItems = (ids: Iterable<string>) => {
+      const asked = [...new Set(ids)]
+      if (asked.length === 0) return Promise.resolve()
+      add(items, what, asked.length)
+      if (!batched)
+        return Promise.all(
+          asked.map((itemId) =>
+            timed(`${what}.item`, 'GetThreadItem', { threadId, itemId }).then((item) =>
+              item === null ? void held.delete(itemId) : item === undefined ? undefined : void held.set(itemId, item as Item),
+            ),
           ),
+        )
+      // client.ts `getThreadItems`: as many calls as it takes, each of at most `most`, and what none found is gone.
+      return Promise.all(
+        Array.from({ length: Math.ceil(asked.length / most) }, (_, at) =>
+          timed(`${what}.items`, 'GetThreadItems', { threadId, itemIds: asked.slice(at * most, (at + 1) * most) }),
         ),
-      )
+      ).then((read) => {
+        const found = new Map(
+          (read.flat() as ReadonlyArray<Item | undefined>).flatMap((item) => (item === undefined ? [] : [[item.id, item]])),
+        )
+        for (const id of asked) {
+          const item = found.get(id)
+          if (item === undefined) held.delete(id)
+          else held.set(id, item)
+        }
+      })
+    }
     const readHead = (also: Iterable<string>) =>
       timed(
         `${what}.head`,
         what === 'thread' ? 'GetThread' : 'GetCoordinator',
         what === 'thread' ? { threadId, limit: 0 } : { projectId: setup.projectId, limit: 0 },
-      ).finally(() => readItems(new Set([...also, ...waiting(items)])))
+      ).finally(() => readItems(new Set([...also, ...waiting(held)])))
     const readChanged = () => {
       timer = undefined
       const now = changes
       changes = { head: false, cards: false, automations: false, items: new Set(), tasks: new Set() }
       const read = new Set(now.items)
-      // Every task card it holds, as at 9cde0f5; or, where the app's source no longer says so, those of the tasks that changed.
-      for (const item of items.values())
+      // Every task card it holds, as the app does; or, where its source no longer says so, those of the tasks that changed.
+      for (const item of held.values())
         if (now.cards && item.kind === 'task' && (follows.everyCard || now.tasks.has(item.content?.taskId ?? ''))) read.add(item.id)
-      if (now.automations) for (const item of items.values()) if (item.kind === 'automation') read.add(item.id)
+      if (now.automations) for (const item of held.values()) if (item.kind === 'automation') read.add(item.id)
       void (now.head ? readHead(read) : readItems(read))
     }
     const open = async () =>
@@ -182,7 +243,7 @@ export const runWindow = (client: Client, setup: WindowSetup, post: (answer: Ans
       if (event.threadId === threadId || ofItsRules) {
         if (event.aggregateType === 'thread_item') changes.items.add(event.aggregateId)
         else changes.head = true
-        if (event.aggregateType === 'user_input') for (const id of waiting(items)) changes.items.add(id)
+        if (event.aggregateType === 'user_input') for (const id of waiting(held)) changes.items.add(id)
       } else if (what === 'thread') return
       else if (event.aggregateType === 'connection') changes.head = true
       else if (event.projectId === setup.projectId && follows.cards.includes(event.aggregateType)) {
@@ -208,25 +269,26 @@ export const runWindow = (client: Client, setup: WindowSetup, post: (answer: Ans
     watched.set(tag, was)
     if (tag !== 'Changed') return
     const change = event as Changed
-    changed.set(change.aggregateType, (changed.get(change.aggregateType) ?? 0) + 1)
     const type = change.aggregateType
+    add(changed, type)
     if (setup.kind === 'edge') {
-      // The edge's own read of the home (useEdge.ts `followEdge`): a burst once, never a permission the rules answered.
+      // The edge's own read of the home (useEdge.ts `followEdge`): a burst once, never a permission the rules answered;
+      // hidden, only marked, where the app's edge reads only while it is seen.
       if (!follows.home.includes(type) || follows.homeShown.includes(type)) return
       edgeTimer ??= setTimeout(() => {
         edgeTimer = undefined
-        void timed('edge.home', 'GetHome', {})
+        if (follows.edgeSeen && setup.seen === false) add(marked, 'edge.home')
+        else void timed('edge.home', 'GetHome', {}, follows.behind)
       }, follows.edgeGather)
       return
     }
-    // The window's whole reads: its home off screen, behind the screen that is open.
-    if (follows.projects.includes(type)) gather('projects', () => readWhole('projects', 'projects', 'ListProjects'), follows.gather)
-    if (follows.home.includes(type) && !follows.homeShown.includes(type))
-      gather('home', () => readWhole('home', 'home', 'GetHome', {}), follows.gather)
+    // The window's whole reads: what shows, and, where the feed reads them off screen, what it holds.
+    if (follows.projects.includes(type)) touched('projects', () => readWhole('projects', 'projects', 'ListProjects'))
+    if (follows.home.includes(type))
+      touched('home', () => readWhole('home', 'home', 'GetHome', {}), follows.offScreen && !follows.homeShown.includes(type))
     if (change.projectId === setup.projectId && follows.board.includes(type))
-      gather('board', () => readWhole('board', 'board', 'GetBoard', { projectId: setup.projectId }), follows.gather)
-    if (follows.connections.includes(type))
-      gather('connections', () => readWhole('connections', 'connections', 'ListConnections'), follows.gather)
+      touched('board', () => readWhole('board', 'board', 'GetBoard', { projectId: setup.projectId }))
+    if (follows.connections.includes(type)) touched('connections', () => readWhole('connections', 'connections', 'ListConnections'))
     // What only a project's screen shows (reads.ts `projectReads`), read again while it shows.
     if (setup.coordinator === true && change.projectId === setup.projectId) {
       if (follows.rules.includes(type))
@@ -241,7 +303,7 @@ export const runWindow = (client: Client, setup: WindowSetup, post: (answer: Ans
     for (const one of screens) one.heard(change)
   }
 
-  const watch = client.Watch?.({}) as Stream.Stream<WatchEvent, unknown> | undefined
+  const watch = client.Watch?.(follows.deltas ? { deltas: true } : {}) as Stream.Stream<WatchEvent, unknown> | undefined
   if (watch !== undefined)
     Effect.runFork(
       Stream.runForEach(watch, (event) => Effect.sync(() => heard(event))).pipe(
@@ -267,6 +329,8 @@ export const runWindow = (client: Client, setup: WindowSetup, post: (answer: Ans
       name: setup.name,
       ms: performance.now() - began,
       reads: Object.fromEntries(reads),
+      items: Object.fromEntries(items),
+      marked: Object.fromEntries(marked),
       failed: Object.fromEntries(failed),
       watched: Object.fromEntries(watched),
       changed: Object.fromEntries(changed),
@@ -275,6 +339,8 @@ export const runWindow = (client: Client, setup: WindowSetup, post: (answer: Ans
     if (reset) {
       began = performance.now()
       reads = new Map()
+      items = new Map()
+      marked = new Map()
       failed = new Map()
       watched = new Map()
       changed = new Map()

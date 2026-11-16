@@ -8,7 +8,7 @@ import { emitterPort } from '@althar/contracts'
 import { Effect, Layer } from 'effect'
 
 import { connection } from '../../src/Api'
-import type { Answer, Asked, WindowSetup, WindowStats } from './window'
+import type { Answer, Asked, Features, WindowSetup, WindowStats } from './window'
 
 /*
  * The app's windows, as the responsiveness run has them: each a thread of
@@ -20,6 +20,8 @@ import type { Answer, Asked, WindowSetup, WindowStats } from './window'
 
 export interface Windows {
   readonly names: ReadonlyArray<string>
+  /** What the first window's connection offers, as this commit has it. */
+  readonly features: Features
   /** A call made by window `at`, as a press makes it, timed there from the call to its answer. */
   readonly call: (at: number, method: string, payload?: unknown, want?: boolean) => Effect.Effect<Answer>
   /** Calls made at once by window `at`, each timed, and all of them together. */
@@ -44,6 +46,7 @@ export const openWindows = (setups: ReadonlyArray<WindowSetup>) =>
     const { out, folder } = bundled()
     yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(folder, { recursive: true, force: true })))
     const made: Array<{ readonly worker: Worker; readonly ask: (asked: Asked) => Promise<Answer> }> = []
+    let features: Features | undefined
     for (const setup of setups) {
       const channel = new MessageChannel()
       // Its connection, served on a fiber of its own, as the app serves each window's: it ends when its window goes.
@@ -58,9 +61,9 @@ export const openWindows = (setups: ReadonlyArray<WindowSetup>) =>
       const worker = new Worker(out, { workerData: { port: channel.port2, setup }, transferList: [channel.port2] })
       const pending = new Map<number, (answer: Answer) => void>()
       let ids = 0
-      const started = new Promise<void>((resolve, reject) => {
+      const started = new Promise<Features | undefined>((resolve, reject) => {
         worker.once('error', reject)
-        pending.set(0, () => resolve())
+        pending.set(0, (answer) => resolve(answer.features))
       })
       worker.on('message', (answer: Answer) => {
         const resolve = pending.get(answer.id)
@@ -72,7 +75,7 @@ export const openWindows = (setups: ReadonlyArray<WindowSetup>) =>
           pending.set(asked.id, resolve)
           worker.postMessage(asked)
         })
-      yield* Effect.promise(() => started)
+      features ??= yield* Effect.promise(() => started)
       yield* Effect.addFinalizer(() =>
         Effect.promise(async () => {
           await Promise.race([ask({ op: 'stop', id: (ids += 1) }), new Promise((resolve) => setTimeout(resolve, 500))])
@@ -85,6 +88,7 @@ export const openWindows = (setups: ReadonlyArray<WindowSetup>) =>
     const at = (index: number) => made[index] ?? made[0]!
     return {
       names: setups.map((setup) => setup.name),
+      features: features ?? { items: false, lane: false },
       call: (index, method, payload, want) =>
         Effect.promise(() => at(index).ask({ op: 'call', id: 0, method, payload, ...(want === undefined ? {} : { want }) })),
       burst: (index, method, payloads) => Effect.promise(() => at(index).ask({ op: 'burst', id: 0, method, payloads })),
