@@ -1,4 +1,6 @@
 import { isStartupStage, type StartupStage } from '../startup'
+import { keepCompiledNow } from '../compileCache'
+import { compiledIn, windowFolderOf } from './windowFolder'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
@@ -192,18 +194,9 @@ if (store !== null) app.commandLine.appendSwitch('password-store', store)
 const portal = sealsWithPortal(process.env.FLATPAK_ID !== undefined, process.platform)
 if (portal) app.commandLine.appendSwitch('enable-features', withPortalFeature(app.commandLine.getSwitchValue('enable-features')))
 
-/*
- * Where the window keeps what it remembers, its tabs and pinned models. A
- * profile of its own, as the end-to-end tests give, keeps it apart from the
- * person's. Otherwise it stays in the folder it had before the app took its
- * name, Althar (productName, which also names the keychain entry sign-ins
- * are sealed with): Application Support/Althar is where a profile lives.
- */
+/* Where the window keeps what it remembers, its tabs and pinned models (windowFolder.ts). */
 const ownProfile = process.env.ALTHAR_PROFILE
-app.setPath(
-  'userData',
-  ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'window') : join(app.getPath('appData'), '@althar', 'desktop'),
-)
+app.setPath('userData', windowFolderOf(ownProfile, app.getPath('appData')))
 
 /*
  * Native crashes, in any of Althar's processes, as Crashpad's minidumps,
@@ -241,6 +234,9 @@ startupMark('main-entry')
 watchLag((lag) => logs.warn('Event loop ran late', { max_ms: lag.maxMs, p99_ms: lag.p99Ms, mean_ms: lag.meanMs }))
 let startupStage: StartupStage = 'data'
 let firstScreenDrawn = false
+/** How long after the first screen what was compiled is written, so it doesn't compete with the screen's first reads. */
+const KEEP_COMPILED_AFTER = 5_000
+let compiledKept = false
 let releaseBackground: () => void = () => {}
 const backgroundReady = new Promise<void>((resolve) => {
   releaseBackground = resolve
@@ -252,6 +248,9 @@ ipcMain.on('althar:startup', (event, stage: unknown, duration: unknown) => {
     firstScreenDrawn = true
     releaseBackground()
     runtime?.postMessage({ type: 'first-screen' })
+    // What this launch compiled is kept for the next, once the first screen is up (compileCache.ts): after an update, once.
+    if (!compiledKept) setTimeout(keepCompiledNow, KEEP_COMPILED_AFTER).unref()
+    compiledKept = true
   }
 })
 
@@ -606,6 +605,8 @@ const startRuntime = () => {
       ALTHAR_WORKTREES: worktrees,
       ALTHAR_APP_VERSION: app.getVersion(),
       ALTHAR_LOGS: logs.dir,
+      // Where it keeps V8's compiled code between launches, as this process does (compileCache.ts).
+      ALTHAR_COMPILE_CACHE: compiledIn(app.getPath('userData')),
       // The runtime says in its log when its thread ran late, and which calls took long (lag.ts): packaged or not, so a
       // slowness a person reports has its evidence in the logs on their computer.
       ALTHAR_LAG_LOG: '1',

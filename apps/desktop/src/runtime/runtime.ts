@@ -29,6 +29,7 @@ import {
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { SqlClient } from 'effect/sql'
+import { keepCompiledNow } from '../compileCache'
 import { appFetchOf } from './appFetch'
 import { handledOf, watchCrashes } from './crashes'
 import { runtimeWork } from './atWork'
@@ -144,6 +145,9 @@ const opened = Effect.runPromise(Deferred.await(firstScreen))
  * starts bubblewrap): a Claude Code session started sooner waits for it, and starts it if it hasn't (registry.ts).
  */
 void opened.then(() => probeClaudeSandbox())
+
+/* What this launch compiled is kept for the next (compileCache.ts), a while after the first screen, so it doesn't compete with its reads. */
+void opened.then(() => void setTimeout(keepCompiledNow, 5_000).unref())
 const fetchNow = appFetchOf(net)
 const appFetch: Fetch = async (input, init) => {
   await opened
