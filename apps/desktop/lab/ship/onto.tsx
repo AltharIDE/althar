@@ -1,10 +1,9 @@
-import { isValidElement, type ReactElement, type ReactNode, useSyncExternalStore } from 'react'
+import { type ReactElement, type ReactNode, useSyncExternalStore } from 'react'
 
 import {
   Button,
   type ChangeSetProps,
   CheckState,
-  Dialog,
   HoverCard,
   Icon,
   LinkButton,
@@ -14,7 +13,6 @@ import {
   MenuSeparator,
   MenuSwitchItem,
   MergeButton,
-  Popover,
   SplitButton,
   StepTrack,
   TaskStatus,
@@ -22,20 +20,21 @@ import {
 } from '@althar/ui'
 
 import { type Card, a } from './directions'
+import { ShipGuide } from './guide'
 import type { Moment } from './moments'
-import { GuideOf } from './guides'
 import s from './lab.module.css'
 
 /*
- * B′, onto main: B, as the person took it further (15 Nov). One control says
- * how far the commits go (a review first or not, then as far as a push, Ready
- * for review, or merged), its label the route itself. The route starts from
- * the person's own default, which Althar bends only where the project makes
- * it pointless (main needs someone else's approval: it stops at Ready), and
- * says so. The first time, Ship's button says what it does, until Got it, in
- * one of a few looks (LOOKS: S cycles them). Where the
- * person keeps choosing another route, it offers to make that the default,
- * asking again after 3, 6, then 12 more.
+ * B′, onto main: B, as the person took it further (15 and 16 Nov). One Ship,
+ * its button naming every stop (review, push, ready, merge), the ones this
+ * Ship skips faded; its arrow sets how far it goes. The route starts from the
+ * person's own default, which Althar bends only where the project makes it
+ * pointless (main needs someone else's approval: it stops at Ready), and says
+ * so. A friendly modal says how Ship works, a click on a stop's icon turning
+ * it on or off; the way into it is what E swaps (ENTRIES). Where the person
+ * keeps choosing another route, it offers to make that the default. While
+ * Ship runs, the same button greys and keeps its route, the stop it is at in
+ * bold, never a Push beside it.
  *
  * The lab's state for it lives here, so a route chosen at one moment carries
  * along the path: T swaps the project between shared and solo.
@@ -54,63 +53,32 @@ interface State {
   readonly chosen: Route | null
   /** Whether others work on main here, its rules needing an approval from someone else. */
   readonly shared: boolean
-  /** Whether they've said Got it to what Ship does. */
+  /** Whether they've opened How Ship works once: until then, its way in carries a dot. */
   readonly explained: boolean
   /** The offer to make what they keep choosing their default: shown, put off (asks again after twice as many), or taken. */
   readonly offer: 'shown' | 'later' | 'taken'
-  /** How Ship shows at its button: one of LOOKS. */
-  readonly look: Look
-  /** How Ship explains itself the first time: one of INTROS. */
-  readonly intro: Intro
-  /** Ship pressed the first time, where it explains itself then. */
-  readonly pressed: boolean
-  /** The friendly modal open, and its quiet way in hidden by the person. */
+  /** The way into How Ship works: one of ENTRIES. */
+  readonly entry: Entry
+  /** The modal open, and whether Ship's first press opened it. */
   readonly modal: boolean
+  readonly pressed: boolean
+  /** Its way in under the button, hidden by the person; the arrow's menu keeps it. */
   readonly hidden: boolean
-  /** Which friendly modal: one of GUIDES. M cycles them, opening it. */
-  readonly guide: Guide
-  /** The tour's page. */
-  readonly page: number
 }
 
-/** Ways the friendly modal can go: read only, or with the route set right in it. */
-export const GUIDES = [
-  { key: 'path', label: 'Modal: path to read' },
-  { key: 'pathToggle', label: 'Modal: path, Change stops toggle' },
-  { key: 'switches', label: 'Modal: a switch a stop' },
-  { key: 'tap', label: 'Modal: tap the route' },
-  { key: 'pick', label: 'Modal: pick a route' },
-  { key: 'tour', label: 'Modal: a stop a page' },
-  { key: 'short', label: 'Modal: short' },
+/** Ways into How Ship works, in place of the ⓘ link under the button. E cycles them. */
+export const ENTRIES = [
+  { key: 'words', label: 'A question under Ship' },
+  { key: 'menu', label: 'In the arrow’s menu' },
+  { key: 'question', label: 'A ? beside Ship' },
+  { key: 'hover', label: 'Hovering Ship' },
+  { key: 'firstPress', label: 'Ship’s first press' },
+  { key: 'before', label: 'ⓘ link (before)' },
 ] as const
-export type Guide = (typeof GUIDES)[number]['key']
+export type Entry = (typeof ENTRIES)[number]['key']
 
-/** Ways Ship explains itself the first time, in place of a box under it. E cycles them. */
-export const INTROS = [
-  { key: 'modal', label: 'Quiet link, friendly modal' },
-  { key: 'legend', label: 'Legend under the button' },
-  { key: 'press', label: 'On the first press' },
-  { key: 'pointer', label: 'Pointer' },
-  { key: 'link', label: 'Quiet link' },
-  { key: 'banner', label: 'Box under (before)' },
-] as const
-export type Intro = (typeof INTROS)[number]['key']
-
-/** Ways to say Ship at its button, each with the same arrow beside it. S cycles them. */
-export const LOOKS = [
-  { key: 'caption', label: 'Line under' },
-  { key: 'twoLine', label: 'Two lines' },
-  { key: 'twoArrows', label: 'Two lines, arrows' },
-  { key: 'twoChevrons', label: 'Two lines, chevrons' },
-  { key: 'twoIcons', label: 'Two lines, icons' },
-  { key: 'twoAll', label: 'Two lines, every stop' },
-  { key: 'twoPills', label: 'Two lines, pills' },
-  { key: 'side', label: 'Route beside Ship' },
-  { key: 'track', label: 'Track under' },
-  { key: 'coach', label: 'Pointer' },
-  { key: 'route', label: 'Route as label' },
-] as const
-export type Look = (typeof LOOKS)[number]['key']
+/** The ways in that sit under or beside the button, and so can be hidden. */
+export const HIDEABLE = new Set<Entry>(['words', 'question', 'before'])
 
 function routeOf(said: string | null): Route | null {
   const [first, far] = said?.split('-') ?? []
@@ -118,20 +86,18 @@ function routeOf(said: string | null): Route | null {
   return { review: first === 'review', far }
 }
 
+const asked = new URLSearchParams(location.search)
 const start: State = {
   mine: { review: true, far: 'merge' },
   // ?route=review-ready, push-merge and the like: a route chosen for this Ship, for pictures.
-  chosen: routeOf(new URLSearchParams(location.search).get('route')),
-  shared: new URLSearchParams(location.search).get('solo') !== '1',
-  explained: new URLSearchParams(location.search).get('explained') === '1',
+  chosen: routeOf(asked.get('route')),
+  shared: asked.get('solo') !== '1',
+  explained: asked.get('explained') === '1',
   offer: 'shown',
-  look: (LOOKS.find((one) => one.key === new URLSearchParams(location.search).get('look'))?.key ?? 'twoAll') as Look,
-  intro: (INTROS.find((one) => one.key === new URLSearchParams(location.search).get('intro'))?.key ?? 'modal') as Intro,
-  modal: new URLSearchParams(location.search).get('modal') === '1',
-  hidden: new URLSearchParams(location.search).get('hidden') === '1',
-  guide: (GUIDES.find((one) => one.key === new URLSearchParams(location.search).get('guide'))?.key ?? 'pathToggle') as Guide,
-  page: Number(new URLSearchParams(location.search).get('page') ?? 0),
-  pressed: new URLSearchParams(location.search).get('pressed') === '1',
+  entry: (ENTRIES.find((one) => one.key === asked.get('entry'))?.key ?? 'words') as Entry,
+  modal: asked.get('modal') === '1',
+  pressed: asked.get('pressed') === '1',
+  hidden: asked.get('hidden') === '1',
 }
 let state = start
 const listeners = new Set<() => void>()
@@ -140,12 +106,8 @@ const set = (change: Partial<State>) => {
   for (const one of listeners) one()
 }
 export const resetOnto = () => set(start)
-export const setLook = (look: Look) => set({ look })
-export const setIntro = (intro: Intro) => set({ intro, explained: false, pressed: false, modal: false, hidden: false })
-export const nextIntro = () => setIntro(INTROS[(INTROS.findIndex((one) => one.key === state.intro) + 1) % INTROS.length]!.key)
-export const setGuide = (guide: Guide) => set({ guide, intro: 'modal', modal: true, explained: true, hidden: false, page: 0 })
-export const nextGuide = () => setGuide(GUIDES[(GUIDES.findIndex((one) => one.key === state.guide) + 1) % GUIDES.length]!.key)
-export const nextLook = () => set({ look: LOOKS[(LOOKS.findIndex((one) => one.key === state.look) + 1) % LOOKS.length]!.key })
+export const setEntry = (entry: Entry) => set({ entry, explained: false, pressed: false, modal: false, hidden: false })
+export const nextEntry = () => setEntry(ENTRIES[(ENTRIES.findIndex((one) => one.key === state.entry) + 1) % ENTRIES.length]!.key)
 export const toggleShared = () => set({ shared: !state.shared, chosen: null })
 export const useOnto = () =>
   useSyncExternalStore(
@@ -155,6 +117,9 @@ export const useOnto = () =>
     },
     () => state,
   )
+
+/** Opens How Ship works; from Ship's first press, it ends on that press. */
+const explain = (pressed = false) => set({ modal: true, explained: true, pressed })
 
 /** What the project allows of the person's default, and why, where it bends it. */
 const smart = (now: State): { route: Route; why: string | null } =>
@@ -231,7 +196,17 @@ function HowFar({
       >
         Make this my default
       </MenuItem>
-      {now.intro === 'modal' && <MenuItem onSelect={() => set({ modal: true })}>How Ship works</MenuItem>}
+      {(now.entry === 'menu' || now.entry === 'firstPress' || now.hidden) && (
+        <>
+          <MenuSeparator />
+          <MenuItem onSelect={() => explain()}>
+            <span className={s.menuHow}>
+              How Ship works
+              {!now.explained && <span className={s.unread} aria-label="Not opened yet" />}
+            </span>
+          </MenuItem>
+        </>
+      )}
     </Menu>
   )
 }
@@ -247,282 +222,113 @@ const saysOf = ({ review, far }: Route, n: number) => {
   return parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(', ')}, then ${parts.at(-1)!}`
 }
 
-/** The looks that put the route on a second line in the button. */
-const TWO = new Set<Look>(['twoLine', 'twoArrows', 'twoChevrons', 'twoIcons', 'twoAll', 'twoPills'])
-
 /** The stops the button names: the checks are the merge's own wait, not a stop of their own. */
 const BUTTON_STOPS = ['Review', 'Push', 'Ready', 'Merge'] as const
+export type Stop = (typeof BUTTON_STOPS)[number]
 const ICON_OF = { Review: 'search', Push: 'up', Ready: 'pr', Merge: 'after' } as const
 
-/** The route, small, as the look sets it: dots, arrows, chevrons, icons, or every stop with the ones it skips faded. */
-function RouteLine({ stops, look, at }: { stops: ReadonlyArray<string>; look: Look; at?: string }) {
-  const atIndex = at === undefined ? -1 : BUTTON_STOPS.indexOf((at === 'Checks' ? 'Merge' : at) as (typeof BUTTON_STOPS)[number])
-  const shown = look === 'twoAll' ? BUTTON_STOPS : BUTTON_STOPS.filter((one) => stops.includes(one))
-  const between =
-    look === 'twoPills' ? null : look === 'twoLine' ? (
-      <span className={s.sep}>·</span>
-    ) : look === 'twoChevrons' ? (
-      <Icon name="chevron" size={10} className={s.sep} />
-    ) : (
-      <Icon name="arrow" size={10} className={s.sep} />
-    )
+/** The route, small, every stop with arrows between, the ones it skips faded; under way, the stop it is at in bold. */
+function RouteLine({ stops, at }: { stops: ReadonlyArray<string>; at?: string }) {
+  const atIndex = at === undefined ? -1 : BUTTON_STOPS.indexOf((at === 'Checks' ? 'Merge' : at) as Stop)
   return (
     <small className={s.route} aria-label={stops.filter((one) => one !== 'Checks').join(', then ')}>
-      {shown.map((stop, i) => (
+      {BUTTON_STOPS.map((stop, i) => (
         <span
           key={stop}
-          className={look === 'twoPills' ? s.pill : s.stop}
+          className={s.stop}
           data-skipped={!stops.includes(stop) || undefined}
-          data-step={
-            atIndex < 0
-              ? undefined
-              : BUTTON_STOPS.indexOf(stop) < atIndex
-                ? 'done'
-                : BUTTON_STOPS.indexOf(stop) === atIndex
-                  ? 'now'
-                  : 'next'
-          }
+          data-step={atIndex < 0 ? undefined : i < atIndex ? 'done' : i === atIndex ? 'now' : 'next'}
         >
-          {i > 0 && between}
-          {look === 'twoIcons' && <Icon name={ICON_OF[stop]} size={11} />}
-          {look === 'twoChevrons' ? stop : stop.toLowerCase()}
+          {i > 0 && <Icon name="arrow" size={10} className={s.sep} />}
+          {stop.toLowerCase()}
         </span>
       ))}
     </small>
   )
 }
 
-/** Got it: said once, and what Ship does stays a hover or a quiet line away. */
-const gotIt = (
-  <Button size="small" onClick={() => set({ explained: true })}>
-    Got it
-  </Button>
-)
-
-/** What each stop does on this route, short (a legend's column) or in full (a list), and whether it is skipped. */
-const stopWords = (stop: (typeof BUTTON_STOPS)[number], route: Route, n: number, shared: boolean) => {
-  switch (stop) {
-    case 'Review':
-      return route.review
-        ? { short: 'GPT-6.1 Sol reads them', full: `GPT-6.1 Sol reads the ${commits(n)}; the lead fixes what it finds.`, on: true }
-        : { short: 'Off', full: 'Off: they go up unread.', on: false }
-    case 'Push':
-      return { short: 'To PR #820', full: 'Sent up to PR #820.', on: true }
-    case 'Ready':
-      return route.far === 'push'
-        ? { short: 'Stays a draft', full: 'Off: the pull request stays a draft.', on: false }
-        : { short: 'For review', full: 'Marked ready for review.', on: true }
-    case 'Merge':
-      return route.far === 'merge'
-        ? { short: 'Once verify passes', full: 'Merged once verify, the check main requires, passes.', on: true }
-        : {
-            short: shared ? 'Off: theirs' : 'Off: yours',
-            full: shared ? 'Off: merging is for whoever approves it.' : 'Off: merging stays yours.',
-            on: false,
-          }
-  }
-}
-
-/** Every stop, a row each: what it does, the ones it skips faded. */
-function StopList({ route, n, shared }: { route: Route; n: number; shared: boolean }) {
-  return (
-    <span className={s.stopList}>
-      {BUTTON_STOPS.map((stop) => {
-        const words = stopWords(stop, route, n, shared)
-        return (
-          <span key={stop} className={s.stopRow} data-skipped={!words.on || undefined}>
-            <b>{stop}</b>
-            <span>{words.full}</span>
-          </span>
-        )
-      })}
-    </span>
-  )
-}
-
-/** The legend: the button unfolds a strip under it, a column a stop, until Got it. */
-function Legend({ route, n, shared }: { route: Route; n: number; shared: boolean }) {
-  return (
-    <span className={s.legend}>
-      {BUTTON_STOPS.map((stop) => {
-        const words = stopWords(stop, route, n, shared)
-        return (
-          <span key={stop} className={s.legendCell} data-skipped={!words.on || undefined}>
-            <b>{stop}</b>
-            <span>{words.short}</span>
-          </span>
-        )
-      })}
-      <span className={s.legendFoot}>
-        <span>The arrow turns stops on and off.</span>
-        <LinkButton onClick={() => set({ explained: true })}>Got it</LinkButton>
-      </span>
-    </span>
-  )
-}
-
-/** A light card pinned under the button, its point at it: the stops, and what closes it. */
-function Pinned({ children }: { children: ReactNode }) {
-  return (
-    <span className={s.pinned} role="note">
-      {children}
-    </span>
-  )
-}
-
-/** A quiet way in, kept: How Ship works, a dot on it until it has been opened. */
-function HowLink({ route, n, shared, unread }: { route: Route; n: number; shared: boolean; unread: boolean }) {
-  return (
-    <span className={s.howLink}>
-      <Popover
-        label="How Ship works"
-        placement="below"
-        align="center"
-        width={330}
-        onOpenChange={(open) => {
-          if (open) set({ explained: true })
-        }}
-        trigger={
-          <Button variant="quiet" size="small">
-            {unread && <span className={s.unread} aria-label="New" />}
-            How Ship works
-          </Button>
-        }
-      >
-        <StopList route={route} n={n} shared={shared} />
-      </Popover>
-    </span>
-  )
-}
+/** A dot on what opens How Ship works, until it has been opened once. */
+const dot = (on: boolean) => on && <span className={s.unread} aria-label="Not opened yet" />
 
 /**
- * The control before Ship: Ship, with how far a chevron away, and under it, as the look has it, what Ship will do. The first
- * time, that says it in full until Got it; on a later task, the offer to make what they keep choosing their default.
+ * The control before Ship: Ship, naming its stops, with how far a chevron away, and the way into How Ship works as
+ * the entry has it. On a later task, under it, the offer to make what they keep choosing their default.
  */
 function Onto({ n, later = false }: { n: number; later?: boolean }) {
   const now = useOnto()
   const { route: picked, why } = smart(now)
   const route = now.chosen ?? picked
   const note = now.chosen !== null ? null : why
-  const stops = stopsOf(route)
-  const first = !now.explained && !later
-  const says = (
-    <>
-      <b>Ship</b> {saysOf(route, n)}. The arrow changes how far it goes.
-    </>
-  )
-  const label =
-    now.look === 'route' ? (
-      routeLabel(route)
-    ) : now.look === 'side' ? (
-      <span className={s.side}>
-        <b>Ship</b>
-        <RouteLine stops={stops} look="twoArrows" />
-      </span>
-    ) : TWO.has(now.look) ? (
-      <span className={s.twoLine}>
-        <b>Ship</b>
-        <RouteLine stops={stops} look={now.look} />
-      </span>
-    ) : (
-      'Ship'
-    )
+  const fresh = !now.explained && !later
+  const shown = !now.hidden
   const button = (
     <SplitButton
       variant="signal"
-      {...(TWO.has(now.look) ? { className: s.tallSplit } : now.look === 'side' ? { mainClassName: s.sideMain } : {})}
+      className={`${s.tallSplit} ${now.entry === 'menu' && fresh ? s.moreDot : ''}`}
       onClick={() => {
-        if (first && now.intro === 'press') set({ pressed: true })
+        if (now.entry === 'firstPress' && fresh) explain(true)
       }}
       moreLabel="How far it goes"
       menu={(trigger) => <HowFar trigger={trigger} route={route} onRoute={(chosen) => set({ chosen })} note={note} n={n} />}
     >
-      {label}
+      <span className={s.twoLine}>
+        <b>Ship</b>
+        <RouteLine stops={stopsOf(route)} />
+      </span>
     </SplitButton>
   )
-  const tip = (
-    <span className={s.tip}>
-      <span>{says}</span>
-      {gotIt}
-    </span>
-  )
+  const control: ReactNode =
+    now.entry === 'question' && shown ? (
+      <span className={s.withAsk}>
+        {button}
+        <button type="button" className={s.ask} aria-label="How Ship works" title="How Ship works" onClick={() => explain()}>
+          ?{dot(fresh)}
+        </button>
+      </span>
+    ) : now.entry === 'hover' ? (
+      <HoverCard
+        placement="below"
+        align="center"
+        width={300}
+        card={
+          <span className={s.hoverSays}>
+            <span>
+              <b>Ship</b> {saysOf(route, n)}.
+            </span>
+            <LinkButton onClick={() => explain()}>How Ship works</LinkButton>
+          </span>
+        }
+      >
+        <span className={s.anchor}>{button}</span>
+      </HoverCard>
+    ) : (
+      button
+    )
   const under = later ? (
     <Offer />
-  ) : now.look === 'caption' ? (
-    first ? (
-      tip
-    ) : (
-      <span className={s.caption}>{stops.join(' → ').toLowerCase()}</span>
-    )
-  ) : now.look === 'track' ? (
-    <>
-      <span className={s.preview}>
-        <StepTrack steps={trackOf(stops, -1)} status={TaskStatus.Running} labels />
-      </span>
-      {first && tip}
-    </>
-  ) : now.look === 'coach' ? (
-    first ? (
-      <span className={s.coach} role="note">
-        <span>{says}</span>
-        {gotIt}
-      </span>
-    ) : null
-  ) : now.intro === 'modal' ? (
-    now.hidden ? null : (
-      <span className={s.howLink}>
-        <Button variant="quiet" size="small" onClick={() => set({ modal: true, explained: true })}>
-          <span className={s.howInner}>
-            <Icon name="info" size={13} />
-            How Ship works
-            {first && <span className={s.unread} aria-label="Not opened yet" />}
-          </span>
-        </Button>
-      </span>
-    )
-  ) : now.intro === 'link' ? (
-    <HowLink route={route} n={n} shared={now.shared} unread={first} />
-  ) : !first ? null : now.intro === 'legend' ? (
-    <Legend route={route} n={n} shared={now.shared} />
-  ) : now.intro === 'pointer' ? (
-    <Pinned>
-      <StopList route={route} n={n} shared={now.shared} />
-      <span className={s.pinnedFoot}>
-        <span>The arrow turns stops on and off.</span>
-        <Button size="small" onClick={() => set({ explained: true })}>
-          Got it
-        </Button>
-      </span>
-    </Pinned>
-  ) : now.intro === 'press' ? (
-    now.pressed ? (
-      <Pinned>
-        <StopList route={route} n={n} shared={now.shared} />
-        <span className={s.pinnedFoot}>
-          <LinkButton onClick={() => set({ pressed: false })}>Not now</LinkButton>
-          <Button size="small" variant="signal" onClick={() => set({ explained: true, pressed: false })}>
-            Ship
-          </Button>
+  ) : !shown ? null : now.entry === 'words' ? (
+    <span className={s.howLink}>
+      <button type="button" className={s.asking} onClick={() => explain()}>
+        What does Ship do?
+        {dot(fresh)}
+      </button>
+    </span>
+  ) : now.entry === 'before' ? (
+    <span className={s.howLink}>
+      <Button variant="quiet" size="small" onClick={() => explain()}>
+        <span className={s.howInner}>
+          <Icon name="info" size={13} />
+          How Ship works
+          {dot(fresh)}
         </span>
-        <span className={s.pinnedNote}>Shown once. After this, Ship goes at once.</span>
-      </Pinned>
-    ) : null
-  ) : (
-    tip
-  )
+      </Button>
+    </span>
+  ) : null
   return (
     <span className={s.ship}>
-      {now.look === 'coach' && !first ? (
-        <HoverCard card={<>{says}</>} placement="below" align="center" width={280}>
-          <span className={s.anchor}>{button}</span>
-        </HoverCard>
-      ) : (
-        button
-      )}
+      {control}
       {under}
-      {now.intro === 'modal' &&
-        now.modal &&
-        (now.guide === 'path' ? <ShipGuide route={route} n={n} shared={now.shared} /> : <GuideOf route={route} n={n} />)}
+      {now.modal && <ShipGuide route={route} n={n} />}
     </span>
   )
 }
@@ -551,80 +357,14 @@ const guideOf = (stop: (typeof BUTTON_STOPS)[number], route: Route, n: number, s
   }
 }
 
-/** The friendly modal: what Ship does, stop by stop, how to make it yours, and a way to hide its link or just close. */
-function ShipGuide({ route, n, shared }: { route: Route; n: number; shared: boolean }) {
-  const stops = stopsOf(route)
-  const close = () => set({ modal: false })
-  return (
-    <Dialog
-      title="How Ship works"
-      description="Ship takes your work toward main, one stop at a time, and stops wherever you’re needed."
-      width={480}
-      tall
-      onClose={close}
-      actions={
-        <>
-          <Button variant="quiet" onClick={() => set({ modal: false, hidden: true })}>
-            Hide this link
-          </Button>
-          <Button variant="signal" onClick={close}>
-            Got it
-          </Button>
-        </>
-      }
-    >
-      <ol className={s.guide}>
-        {BUTTON_STOPS.map((stop) => {
-          const on = stops.includes(stop)
-          return (
-            <li key={stop} className={s.guideStop} data-skipped={!on || undefined}>
-              <span className={s.guideIcon}>
-                <Icon name={ICON_OF[stop]} size={14} />
-              </span>
-              <span className={s.guideText}>
-                <b>
-                  {stop}
-                  {!on && <span className={s.guideOff}>Off</span>}
-                </b>
-                <span>{guideOf(stop, route, n, shared)}</span>
-              </span>
-            </li>
-          )
-        })}
-      </ol>
-      <p className={s.guideMine}>
-        <span className={s.guideChevron}>
-          <Icon name="chevronD" size={12} />
-        </span>
-        <span>
-          <b>Make it yours.</b> The arrow beside Ship turns any stop on or off: skip the review when you’re sure, or stop before merging
-          when a friend should look first. Your choice can become your default there, and this guide stays in that menu.
-        </span>
-      </p>
-    </Dialog>
-  )
-}
-
-/** Under way: greyed, where it is, with how far still changeable and the review skippable, never a Push beside it. */
+/** Under way: greyed, keeping its route, the stop it is at in bold, with how far still changeable and the review skippable, never a Push beside it. */
 function Under({ label, n, skip, at }: { label: string; n: number; skip: boolean; at: string }) {
   const now = useOnto()
   const route = now.chosen ?? smart(now).route
-  const stops = stopsOf(route)
-  // Where Ship's button said its route, the route stays, the stop it is at in bold.
-  const two = TWO.has(now.look) || now.look === 'side'
-  const shown = two ? (
-    <span className={now.look === 'side' ? s.side : s.twoLine}>
-      <b>{label}</b>
-      <RouteLine stops={stops} look={now.look === 'side' ? 'twoArrows' : now.look} at={at} />
-    </span>
-  ) : (
-    label
-  )
   return (
     <SplitButton
       aria-disabled="true"
-      className={cx(s.waitingSplit, two && now.look !== 'side' && s.tallSplit)}
-      {...(now.look === 'side' ? { mainClassName: s.sideMain } : {})}
+      className={`${s.waitingSplit} ${s.tallSplit}`}
       onClick={noop}
       moreLabel="How far it goes"
       menu={(trigger) => (
@@ -647,12 +387,13 @@ function Under({ label, n, skip, at }: { label: string; n: number; skip: boolean
         />
       )}
     >
-      {shown}
+      <span className={s.twoLine}>
+        <b>{label}</b>
+        <RouteLine stops={stopsOf(route)} at={at} />
+      </span>
     </SplitButton>
   )
 }
-
-const cx = (...names: ReadonlyArray<string | false | undefined>) => names.filter(Boolean).join(' ')
 
 /** What they keep choosing, offered as their default; put off, it asks again after twice as many. */
 function Offer() {
@@ -690,23 +431,8 @@ function Track({ at, status = TaskStatus.Running, done = false }: { at: string; 
 
 const routeNow = () => state.chosen ?? smart(state).route
 
-/** With the track look, the track Ship previewed under its button stays there as it runs, the control over it. */
+/** B′'s Change card at each moment. */
 export const onto = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
-  const card = cardOf(moment, real, hover)
-  if (state.look !== 'track' || !isValidElement(card.note) || card.note.type !== Track) return card
-  const { note, actions, ...rest } = card
-  return {
-    ...rest,
-    actions: [
-      <span key="ship" className={s.ship}>
-        {actions}
-        {note}
-      </span>,
-    ],
-  }
-}
-
-const cardOf = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
   const n = moment.snapshot.task.held?.commits ?? 0
   const route = routeNow()
   switch (moment.key) {
@@ -768,4 +494,4 @@ const cardOf = (moment: Moment, real: ChangeSetProps, hover: boolean): Card => {
   }
 }
 
-export { BUTTON_STOPS, ICON_OF, commits, guideOf, same, saysOf, set as setOnto, stopWords, stopsOf }
+export { BUTTON_STOPS, ICON_OF, commits, guideOf, same, saysOf, set as setOnto, stopsOf }

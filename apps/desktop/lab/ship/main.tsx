@@ -16,22 +16,7 @@ import { fakeClient, fakeHost } from '../../tests/fixtures'
 import { servicesFor } from '../../tests/render'
 import { DIRECTIONS, type DirectionKey, LabContext } from './directions'
 import { MOMENTS, momentOf, type Moment } from './moments'
-import {
-  GUIDES,
-  type Guide,
-  INTROS,
-  type Intro,
-  LOOKS,
-  type Look,
-  nextGuide,
-  nextIntro,
-  nextLook,
-  setGuide,
-  setIntro,
-  setLook,
-  toggleShared,
-  useOnto,
-} from './onto'
+import { ENTRIES, type Entry, nextEntry, setEntry, toggleShared, useOnto } from './onto'
 import s from './lab.module.css'
 
 /*
@@ -98,8 +83,8 @@ function Lab() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLElement && event.target.closest('input, textarea, [contenteditable="true"]')) return
-      // In the modal, its own keys (arrows through a radio group, space on a switch) stay its own; only M swaps it.
-      if (event.target instanceof HTMLElement && event.target.closest('[role="dialog"]') && event.key !== 'm') return
+      // In the modal, its keys stay its own.
+      if (event.target instanceof HTMLElement && event.target.closest('[role="dialog"]')) return
       const picked = DIRECTIONS[Number(event.key) - 1]
       if (picked !== undefined) setDirection(picked.key)
       else if (event.key === 'ArrowRight') step(1)
@@ -107,9 +92,7 @@ function Lab() {
       else if (event.key === 'h') setHover((on) => !on)
       else if (event.key === 'n') setNarrow((on) => !on)
       else if (event.key === 't') toggleShared()
-      else if (event.key === 's') nextLook()
-      else if (event.key === 'e') nextIntro()
-      else if (event.key === 'm') nextGuide()
+      else if (event.key === 'e') nextEntry()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -170,33 +153,13 @@ function Lab() {
           </button>
           {direction === 'b2' && (
             <label className={s.look}>
-              <kbd>S</kbd>
-              <select value={onto.look} onChange={(event) => setLook(event.target.value as Look)} aria-label="How Ship shows">
-                {LOOKS.map((one) => (
-                  <option key={one.key} value={one.key}>
-                    {one.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {direction === 'b2' && (
-            <label className={s.look}>
               <kbd>E</kbd>
-              <select value={onto.intro} onChange={(event) => setIntro(event.target.value as Intro)} aria-label="How Ship explains itself">
-                {INTROS.map((one) => (
-                  <option key={one.key} value={one.key}>
-                    {one.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-          {direction === 'b2' && onto.intro === 'modal' && (
-            <label className={s.look}>
-              <kbd>M</kbd>
-              <select value={onto.guide} onChange={(event) => setGuide(event.target.value as Guide)} aria-label="Which modal">
-                {GUIDES.map((one) => (
+              <select
+                value={onto.entry}
+                onChange={(event) => setEntry(event.target.value as Entry)}
+                aria-label="The way into How Ship works"
+              >
+                {ENTRIES.map((one) => (
                   <option key={one.key} value={one.key}>
                     {one.label}
                   </option>
