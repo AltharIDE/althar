@@ -1427,3 +1427,45 @@ it('keeps the project web switch, default on, with the privacy trade-off visible
   await userEvent.click(toggle)
   await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', leadsReachWeb: false }))
 })
+
+describe('a repository only on this Mac, in its project’s settings', () => {
+  const tidepool: ProjectRepository = {
+    id: 'repo_tide',
+    name: 'tidepool',
+    path: '/Users/me/code/tidepool',
+    folder: null,
+    branch: null,
+    host: null,
+    role: 'service',
+    fork: null,
+    tasks: 0,
+    setup: { copy: [], commands: [] },
+  }
+
+  it('puts it on a code host connected, from its row, and offers to connect the others first', async () => {
+    const { client } = windowAt('/projects/p1', {
+      getRepositories: vi.fn(async () => [...repositories, tidepool]),
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })),
+    })
+    await openSettings('Code and issues')
+    const nowhere = within(await screen.findByRole('region', { name: 'No remote' }))
+    expect(nowhere.getByText('tidepool')).toBeTruthy()
+    // One not connected connects first, over the page.
+    await userEvent.click(nowhere.getByRole('button', { name: 'Push to…' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect Bitbucket…' }))
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await userEvent.click(nowhere.getByRole('button', { name: 'Push to…' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'A new repository on GitHub' }))
+    expect(await nowhere.findByText('Makes it empty, then pushes main. Tasks open their changes there from then.')).toBeTruthy()
+    await waitFor(() => expect((nowhere.getByRole('button', { name: 'Create and push' }) as HTMLButtonElement).disabled).toBe(false))
+    await userEvent.click(nowhere.getByRole('button', { name: 'Create and push' }))
+    await waitFor(() =>
+      expect(client.publishRepository).toHaveBeenCalledWith(
+        expect.objectContaining({ at: { projectId: 'p1', repositoryId: 'repo_tide' }, connectionId: 'conn1', name: 'tidepool' }),
+      ),
+    )
+    await waitFor(() => expect(nowhere.queryByRole('button', { name: 'Create and push' })).toBeNull())
+  })
+})

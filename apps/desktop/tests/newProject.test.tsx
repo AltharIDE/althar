@@ -703,3 +703,137 @@ describe('where code is hosted', () => {
     expect([changesOn('gitlab'), changesOn('github'), changesOn(null)]).toEqual(['merge requests', 'pull requests', 'pull requests'])
   })
 })
+
+describe('a new project’s choices, changed and refused', () => {
+  it('puts a repository only here under the owner and the visibility the person gives', async () => {
+    const { client, onCreated } = opened(
+      {
+        listConnections: vi.fn(async () => connected),
+        listRepositoryOwners: vi.fn(async () => [
+          { id: 'ada', name: 'ada', kind: 'user' as const },
+          { id: 'northwind', name: 'northwind', kind: 'organization' as const },
+        ]),
+      },
+      { pickFolders: vi.fn(async () => ['grant_local']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    const code = await screen.findByRole('radiogroup', { name: 'Where its code lives' })
+    await waitFor(() => expect((within(code).getByRole('combobox', { name: 'Owner' }) as HTMLButtonElement).disabled).toBe(false))
+    await userEvent.click(within(code).getByRole('combobox', { name: 'Owner' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'northwind' }))
+    await userEvent.click(within(code).getByRole('radio', { name: 'Public' }))
+    await create('Tidepool')
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(client.publishRepository).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: { id: 'northwind', name: 'northwind', kind: 'organization' }, private: false }),
+    )
+  })
+
+  it('places nothing where the person cancels, and says why a place couldn’t be had', async () => {
+    const pickPlace = vi.fn<() => Promise<string | null>>().mockResolvedValueOnce(null).mockResolvedValue('grant_code')
+    const placeRepository = vi.fn().mockRejectedValue(new ApiError({ reason: 'GitFailed', message: 'There’s a lighthouse there already.' }))
+    const { client } = opened({ placeRepository }, { pickPlace })
+    await named('Lighthouse')
+    await userEvent.click(way(/^Start empty/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose where it goes…' }))
+    await waitFor(() => expect(pickPlace).toHaveBeenCalledTimes(1))
+    expect(placeRepository).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Choose where it goes…' }))
+    expect(await screen.findByText('There’s a lighthouse there already.')).toBeTruthy()
+    expect(client.makeRepository).not.toHaveBeenCalled()
+  })
+
+  it('clones where the person chooses, where there is nowhere usual', async () => {
+    const { client, onCreated } = opened({ listConnections: vi.fn(async () => connected) }, { clonePlace: vi.fn(async () => null) })
+    await named('Tidepool')
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone you/tidepool' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Choose where it goes' }))
+    expect(await screen.findByText(/~\/elsewhere/)).toBeTruthy()
+    await create('Tidepool')
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(client.cloneRepository).toHaveBeenCalledWith('grant_elsewhere', expect.anything())
+  })
+
+  it('says the runtime didn’t answer where a clone fails without its word', async () => {
+    const cloneRepository = vi.fn(async () => Promise.reject(new Error('socket closed')))
+    const { client } = opened({ listConnections: vi.fn(async () => connected), cloneRepository })
+    await named('Tidepool')
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone you/tidepool' }))
+    await create('Tidepool')
+    expect(await screen.findByText(/Althar's runtime didn't answer/)).toBeTruthy()
+    expect(client.openProject).not.toHaveBeenCalled()
+  })
+})
+
+describe('a new project’s issues, and hosts connected in place', () => {
+  it('sends its issues to the team chosen on the tracker, or nowhere, as the person says', async () => {
+    const listContainers = vi.fn(async () => [
+      { id: 'team_mer', key: 'MER', name: 'Meridian' },
+      { id: 'team_ops', key: 'OPS', name: 'Operations' },
+    ])
+    const { client, onCreated } = opened(
+      { listConnections: vi.fn(async () => connected), listContainers },
+      { pickFolders: vi.fn(async () => ['grant_local']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    const issues = await screen.findByRole('radiogroup', { name: 'Issues' })
+    await userEvent.click(within(issues).getByRole('radio', { name: /^None for now/ }))
+    expect(
+      within(issues)
+        .getByRole('radio', { name: /^None for now/ })
+        .getAttribute('aria-checked'),
+    ).toBe('true')
+    await userEvent.click(within(issues).getByRole('radio', { name: /^Linear/ }))
+    await waitFor(() => expect((within(issues).getByRole('combobox', { name: 'Where on it' }) as HTMLButtonElement).disabled).toBe(false))
+    await userEvent.click(within(issues).getByRole('combobox', { name: 'Where on it' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Operations' }))
+    await create('Tidepool')
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(client.setProjectTracker).toHaveBeenCalledWith(expect.any(String), {
+      connectionId: 'lin1',
+      container: { id: 'team_ops', name: 'Operations' },
+    })
+  })
+
+  it('connects a code host in place, and goes back to the choices', async () => {
+    opened({ listConnections: vi.fn(async () => connected) }, { pickFolders: vi.fn(async () => ['grant_local']) })
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    const code = await screen.findByRole('radiogroup', { name: 'Where its code lives' })
+    const [connect] = within(code).getAllByRole('button', { name: /^Connect/ })
+    await userEvent.click(connect!)
+    await waitFor(() => expect(screen.queryByRole('radiogroup', { name: 'Where its code lives' })).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }))
+    expect(await screen.findByRole('radiogroup', { name: 'Where its code lives' })).toBeTruthy()
+  })
+
+  it('says where a folder’s code is, by its remote, where the remote is no host’s', async () => {
+    const odd = repo('/Users/me/code/odd', '/srv/git/odd.git')
+    opened(
+      { readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'odd', repositories: [odd], project: null })) },
+      { pickFolders: vi.fn(async () => ['grant_odd']) },
+    )
+    await named('Odd')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    expect(await screen.findByText('At /srv/git/odd.git.')).toBeTruthy()
+  })
+})
+
+describe('a new project’s folder on a host not connected', () => {
+  it('offers to connect the host, over the page, and closes the walk back to the tab', async () => {
+    opened({}, { pickFolders: vi.fn(async () => ['grant_ops']) })
+    await named('Ops')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect GitLab' }))
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+})
