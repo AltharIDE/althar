@@ -3814,15 +3814,22 @@ export class Queries extends Context.Service<
           const shipRoute = toShip
             ? yield* taskShipRoute(yield* Changes, head.taskId).pipe(Effect.orElseSucceed(() => undefined))
             : undefined
-          // Its Ship under way: the route, as changed since, and the stop it is at.
-          const [shipRun] = yield* sql<{ parameters: string; step: string | null }>`
+          // Its Ship under way: the route, as changed since, and the stop it is at. One whose step waits for the person (a push
+          // that failed, to try again) isn't: it does nothing until they answer, and its card says so, not a stop it is at.
+          const [shipRun] = yield* sql<{ parameters: string; step: string | null; stepState: string | null }>`
             SELECT r.parameters,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = e.id
-                AND a.state IN ('admitted', 'running', 'held', 'waiting_attention') ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1) AS step
+                AND a.state IN ('admitted', 'running', 'held', 'waiting_attention') ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1) AS step,
+              (SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = e.id
+                AND a.state IN ('admitted', 'running', 'held', 'waiting_attention') ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1)
+                AS step_state
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id
             WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
               AND r.state = 'running' AND json_type(r.parameters, '$.ships') = 'object'`
-          const shipping = shipRun === undefined ? undefined : shipUnderWayOf(shipRun.parameters, shipRun.step)
+          const shipping =
+            shipRun === undefined || shipRun.stepState === 'waiting_attention'
+              ? undefined
+              : shipUnderWayOf(shipRun.parameters, shipRun.step)
           // Several changes, by name: one in several repositories is one change, with its row there as it was.
           const severalChanges = new Set(lineRows.map((row) => row.name ?? '')).size > 1
           const waitingLines = !severalChanges

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdtempSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -22,7 +22,7 @@ import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { setShipRoute } from '../src/shipRoute'
+import { approvalShort, routeOf, routeOfShip, setShipRoute, shipStopOf, shipUnderWayOf, taskShipRoute } from '../src/shipRoute'
 import { callTool, fakeConnectors, HOST, hosted, items, notices, runtime, until } from './support'
 
 /*
@@ -46,6 +46,22 @@ const squashMerge = (bare: string, branch: string) => {
   git(clone, ...as, 'merge', '-q', '--squash', `origin/${branch}`)
   git(clone, ...as, 'commit', '-q', '-m', `Squashed ${branch}`)
   git(clone, 'push', '-q', 'origin', 'main')
+}
+
+/** Main moves on by two commits someone else made, fetched where the task works: a merge of it brings only main in. */
+const mainMovesOn = (bare: string, path: string) => {
+  const clone = mkdtempSync(join(tmpdir(), 'althar-main-'))
+  execFileSync('git', ['clone', '-q', bare, clone])
+  for (const [file, message] of [
+    ['usage.ts', 'Usage card drops the time breakdown (#763)'],
+    ['timing.ts', 'Stop summing task timing (#767)'],
+  ] as const) {
+    writeFileSync(join(clone, file), `${file}\n`)
+    git(clone, 'add', '-A')
+    git(clone, '-c', 'user.name=Other', '-c', 'user.email=other@althar.test', 'commit', '-q', '-m', message)
+  }
+  git(clone, 'push', '-q', 'origin', 'main')
+  git(path, 'fetch', '-q', bare, '+main:refs/remotes/origin/main')
 }
 
 /** A repository on the fake GitHub, its lead committing as the person does. */
@@ -372,7 +388,234 @@ describe('how far a Ship goes', () => {
   })
 })
 
+describe('a Ship at its stops past its push, where its host says otherwise', () => {
+  it.live('says why where its host refuses the merge, and is over at ready', () => {
+    const { working, bare, github } = onGitHub(requires('test'))
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.setChecks(1, [{ name: 'test', state: 'passed' }])
+      github.failNext('merge', 'rejected', undefined, 405, { message: 'Base branch was modified. Review and try the merge again.' })
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* shipped(task.taskId)
+      assert.lengthOf(github.merged, 0)
+      assert.isFalse(github.changes[0]?.draft)
+      assert.isTrue((yield* titles(task.threadId)).some((one) => one.startsWith('Shipped, but not merged: ')))
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('waits on each required check by name, and is over once its pull request merged on the host meanwhile', () => {
+    const { working, bare, github } = onGitHub(requires('test', 'lint'))
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.setChecks(1, [
+        { name: 'test', state: 'running' },
+        { name: 'lint', state: 'running' },
+      ])
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(titles(task.threadId), (all) =>
+        all.some((one) => /^PR #1 merges once (test, lint|lint, test) pass, as main requires\.$/.test(one)),
+      )
+      // Someone merges it on the host while it waits: Ship has nothing left to merge.
+      squashMerge(bare, BRANCH)
+      github.mergeByHand(1)
+      yield* shipped(task.taskId)
+      assert.notInclude(github.calls, 'merge')
+      assert.isUndefined((yield* header(task.threadId)).shipping)
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('merges as it stands where its host can’t say how its checks went while it waits, having said its wait once', () => {
+    const { working, bare, github } = onGitHub(requires('test'))
+    const looks = () => github.calls.filter((one) => one === 'checks').length
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.setChecks(1, [{ name: 'test', state: 'running' }])
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(titles(task.threadId), (all) => all.includes('PR #1 merges once test passes, as main requires.'))
+      // It looks again, still waiting; then its host can't say.
+      const looked = looks()
+      yield* until(Effect.sync(looks), (count) => count >= looked + 2)
+      github.failNext('checks', 'forbidden')
+      yield* shipped(task.taskId)
+      assert.deepStrictEqual(
+        github.merged.map((one) => one.number),
+        [1],
+      )
+      assert.lengthOf(
+        (yield* titles(task.threadId)).filter((one) => one.startsWith('PR #1 merges once')),
+        1,
+      )
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('waits on the checks its target requires though none has started, and merges once they pass', () => {
+    const { working, bare, github } = onGitHub({ rulesOf: (): MergeRules => ({ requiredChecks: 'all', needs: [] }) })
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.setChecks(1, [])
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(titles(task.threadId), (all) => all.includes('PR #1 merges once the checks pass, as main requires.'))
+      github.setChecks(1, [{ name: 'test', state: 'passed' }])
+      yield* shipped(task.taskId)
+      assert.deepStrictEqual(
+        github.merged.map((one) => one.number),
+        [1],
+      )
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('waits after all where its host refuses the merge as a required check runs again, and merges once it passes', () => {
+    let reruns = true
+    const { working, bare, github } = onGitHub({
+      ...requires('test'),
+      // As the merge reaches the host, its required check starts again: the host refuses it.
+      waitsFor: (method) =>
+        method === 'merge' && reruns
+          ? Effect.sync(() => {
+              reruns = false
+              github.setChecks(1, [{ name: 'test', state: 'running' }])
+            })
+          : Effect.void,
+    })
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.setChecks(1, [{ name: 'test', state: 'passed' }])
+      github.failNext('merge', 'rejected', undefined, 405, { message: 'Required status check "test" is expected.' })
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(titles(task.threadId), (all) => all.includes('PR #1 merges once test passes, as main requires.'))
+      github.setChecks(1, [{ name: 'test', state: 'passed' }])
+      yield* shipped(task.taskId)
+      assert.deepStrictEqual(
+        github.merged.map((one) => one.number),
+        [1],
+      )
+      assert.isFalse((yield* titles(task.threadId)).some((one) => one.startsWith('Shipped, but not merged')))
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('puts it in its branch’s merge queue at once, which waits for the checks itself', () => {
+    const { working, bare, github } = onGitHub(requires('test'))
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.mergeQueue()
+      github.setChecks(1, [{ name: 'test', state: 'running' }])
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* shipped(task.taskId)
+      assert.deepStrictEqual(
+        github.merged.map((one) => [one.number, one.how]),
+        [[1, 'queue']],
+      )
+      assert.isFalse((yield* titles(task.threadId)).some((one) => one.startsWith('PR #1 merges once')))
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('says a draft its host won’t mark ready, and is over', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.failNext('markReady', 'rejected', undefined, 422, { message: 'This pull request can’t be marked ready now.' })
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'ready' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* shipped(task.taskId)
+      assert.isTrue(github.changes[0]?.draft)
+      assert.isTrue((yield* titles(task.threadId)).some((one) => one.startsWith('Shipped, but PR #1 is still a draft: ')))
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('sends what only brings main in as it is, then marks its draft ready as its route goes', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      mainMovesOn(bare, task.path)
+      git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'merge', '-q', '--no-edit', 'origin/main')
+      // Held for Ship, as the person's commits are.
+      yield* sql`UPDATE workspaces SET held_at = ${new Date().toISOString()} WHERE task_id = ${task.taskId}`
+      yield* ship(task.taskId, { review: false, far: 'ready' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(
+        Effect.sync(() => github.changes[0]?.draft),
+        (draft) => draft === false,
+      )
+      // No Ship of its own: what went up is none of the task's work.
+      assert.lengthOf(yield* shipRuns(task.taskId), 0)
+      assert.lengthOf(github.merged, 0)
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('sends what only brings main in as it is, then merges as its route goes', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      mainMovesOn(bare, task.path)
+      git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'merge', '-q', '--no-edit', 'origin/main')
+      yield* sql`UPDATE workspaces SET held_at = ${new Date().toISOString()} WHERE task_id = ${task.taskId}`
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(
+        Effect.sync(() => github.merged.map((one) => one.number)),
+        (merged) => merged.length === 1,
+      )
+      assert.lengthOf(yield* shipRuns(task.taskId), 0)
+    }).pipe(Effect.provide(withHost(github)))
+  })
+})
+
 describe('changing a Ship’s route at its merge stop, against its host', () => {
+  it.live('sends no merge where its route goes back to ready as its merge stop first reads the host', () => {
+    const gate = Deferred.makeUnsafe<void>()
+    const reading = Deferred.makeUnsafe<void>()
+    let holds = false
+    const { working, bare, github } = onGitHub({
+      ...requires('test'),
+      // Its merge stop's first look at the checks, the Ship's first, is held.
+      waitsFor: (method) => {
+        if (method !== 'checks' || !holds) return Effect.void
+        holds = false
+        return Effect.andThen(Deferred.succeed(reading, undefined), Deferred.await(gate))
+      },
+    })
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.setChecks(1, [{ name: 'test', state: 'passed' }])
+      commitIn(task.path, 'Retry twice')
+      holds = true
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* Deferred.await(reading)
+      yield* routeShip(task.taskId, { review: false, far: 'ready' })
+      yield* Deferred.succeed(gate, undefined)
+      yield* wentUp(bare, task.path, pushed)
+      yield* shipped(task.taskId)
+      assert.notInclude(github.calls, 'merge')
+      assert.isFalse(github.changes[0]?.draft)
+      assert.include(yield* titles(task.threadId), 'Not merged: the Ship goes as far as ready for review now.')
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
   it.live('sends no merge where its route goes back to ready while it reads the host, its checks then passing', () => {
     const gate = Deferred.makeUnsafe<void>()
     const reading = Deferred.makeUnsafe<void>()
@@ -438,6 +681,26 @@ describe('changing a Ship’s route at its merge stop, against its host', () => 
 })
 
 describe('changing a Ship’s route as it goes', () => {
+  it.live('is refused while the task’s plan still runs, with no Ship under way', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const coordinator = yield* Coordinator
+      const threadId = yield* coordinator.thread(project.projectId)
+      const body = 'Add a retry. [coordinator:plan] [lead:wait]'
+      yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+      const [card] = yield* until(cards(project.projectId), (all) => all[0] !== undefined)
+      const taskId = card?.taskId ?? assert.fail('no card')
+      yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${taskId}`, (rows) => rows[0]?.state === 'running')
+      const refused = yield* Effect.flip(routeShip(taskId, { review: false, far: 'push' }))
+      assert.instanceOf(refused, ShipRefused)
+      assert.strictEqual((refused as ShipRefused).why, 'not_shipping')
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
   it.live('mid-review, takes how far it goes, said at its review stop, then at its push', () => {
     const { working, bare, github } = onGitHub()
     let reads = true
@@ -523,6 +786,63 @@ describe('changing a Ship’s route as it goes', () => {
     }).pipe(Effect.provide(withHost(github)))
   })
 
+  it.live('takes its review off from ship_task mid-review; with nothing shipping, a route said goes with a Ship of its own', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[review:pass] [review:wait-later]')
+      const threadId = yield* (yield* Coordinator).thread(task.projectId)
+      const coordinator = { role: 'coordinator' as const, projectId: task.projectId, threadId, sessionId: 'none', taskId: null }
+      const slug = (yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`)[0]?.slug ?? ''
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId)
+      yield* until(
+        sql<{ state: string }>`
+          SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+          JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND r.plan_id IS NULL AND n.node_key = 'review'`,
+        (rows) => rows[0]?.state === 'running',
+      )
+      assert.include(
+        yield* callTool(coordinator, 'ship_task', { task: slug, review: false }),
+        ', without its review (one under way stops).',
+      )
+      yield* wentUp(bare, task.path, pushed)
+      yield* shipped(task.taskId)
+      // Nothing ships now: the route said goes with the next Ship, the rest the task's own; an agent's Ship never merges, though
+      // the person's default does.
+      yield* setShipRoute({ review: true, far: 'merge' })
+      commitIn(task.path, 'Log each retry')
+      assert.notMatch(yield* callTool(coordinator, 'ship_task', { task: slug, review: false }), /^Changed /)
+      yield* shipped(task.taskId, 2)
+      assert.deepStrictEqual(JSON.parse((yield* shipRuns(task.taskId))[1]?.parameters ?? '{}').ships?.route, {
+        review: false,
+        far: 'ready',
+      })
+      assert.isFalse(github.changes[0]?.draft)
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('is no longer under way once its push waits for the person to try again', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[coordinator:plan-no-review]', 'none')
+      yield* (yield* Runs).reshape({ taskId: task.taskId, end: 'draft', actorId: (yield* Instance).personId })
+      commitIn(task.path, 'Retry twice')
+      github.failNext('openChange', 'rejected', undefined, 422)
+      yield* ship(task.taskId)
+      yield* until(
+        sql<{ id: string }>`SELECT id FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`,
+        (rows) => rows.length === 1,
+      )
+      // Its run still goes, waiting on the person; the card says what it needs, not a push under way.
+      assert.strictEqual((yield* shipRuns(task.taskId))[0]?.state, 'running')
+      assert.isUndefined((yield* header(task.threadId)).shipping)
+      assert.lengthOf(github.changes, 0)
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
   it.live('says its push stop while it opens its pull request', () => {
     const gate = Deferred.makeUnsafe<void>()
     let holding = false
@@ -595,6 +915,86 @@ describe('a task’s own route', () => {
       yield* setShipRoute(null)
       const [setting] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM settings WHERE key = 'ship_route'`
       assert.strictEqual(setting?.n, 0)
+    }).pipe(Effect.provide(withHost(github)))
+  })
+})
+
+describe('a route’s parts, read alone', () => {
+  it('finds an approval short where a line needs more than it has, or waits on one without a count', () => {
+    assert.isTrue(approvalShort([{ kind: 'approvals', state: 'unmet', have: 0, need: 1 }]))
+    assert.isTrue(approvalShort([{ kind: 'approvals', state: 'unmet', need: 2 }]))
+    assert.isFalse(approvalShort([{ kind: 'approvals', state: 'met', have: 1, need: 1 }]))
+    assert.isTrue(approvalShort([{ kind: 'approvals', state: 'waiting' }]))
+    assert.isTrue(approvalShort([{ kind: 'approvals', state: 'unmet' }]))
+    assert.isFalse(approvalShort([{ kind: 'approvals', state: 'met' }]))
+    assert.isFalse(approvalShort([{ kind: 'checks', state: 'unmet' }]))
+  })
+
+  it('takes the person’s route, else the task’s ending after its review, bent where it can’t review or merge', () => {
+    assert.deepStrictEqual(routeOf({ chosen: undefined, reviewable: true, end: 'ready', approvalShort: false }), {
+      route: { review: true, far: 'ready' },
+      reviewable: true,
+      bent: null,
+    })
+    assert.deepStrictEqual(routeOf({ chosen: undefined, reviewable: false, end: 'draft', approvalShort: true }), {
+      route: { review: false, far: 'push' },
+      reviewable: false,
+      bent: null,
+    })
+    assert.deepStrictEqual(routeOf({ chosen: { review: true, far: 'merge' }, reviewable: true, end: null, approvalShort: true }), {
+      route: { review: true, far: 'ready' },
+      reviewable: true,
+      bent: 'approval',
+    })
+  })
+
+  it('reads a Ship admitted before routes by its steps and its ending, merging where it said so', () => {
+    assert.deepStrictEqual(routeOfShip({ route: { review: false, far: 'merge' } }, [{ key: 'review' }], 'draft'), {
+      review: false,
+      far: 'merge',
+    })
+    assert.deepStrictEqual(routeOfShip({ merges: true }, [{ key: 'review' }], 'draft'), { review: true, far: 'merge' })
+    assert.deepStrictEqual(routeOfShip({}, [{ key: 'review', skipped: true }], 'ready'), { review: false, far: 'ready' })
+    assert.deepStrictEqual(routeOfShip({}, [], null), { review: false, far: 'push' })
+  })
+
+  it('says the stop a Ship is at: past its push as its run says, else by its step, else its review while it has one', () => {
+    assert.strictEqual(shipStopOf({ at: 'merge', step: 'publish', reviewing: true }), 'merge')
+    assert.strictEqual(shipStopOf({ at: undefined, step: 'review', reviewing: false }), 'review')
+    assert.strictEqual(shipStopOf({ at: undefined, step: 'settle', reviewing: false }), 'review')
+    assert.strictEqual(shipStopOf({ at: undefined, step: 'publish', reviewing: true }), 'push')
+    assert.strictEqual(shipStopOf({ at: undefined, step: undefined, reviewing: true }), 'review')
+    assert.strictEqual(shipStopOf({ at: undefined, step: 'implement', reviewing: false }), 'push')
+  })
+
+  it('reads a Ship under way from its run: none where it can’t, nor for a review added after the work went up', () => {
+    assert.isUndefined(shipUnderWayOf('not a run', null))
+    assert.isUndefined(shipUnderWayOf(JSON.stringify({ steps: [{ key: 'review' }], ships: { reviewOnly: true } }), 'review'))
+    assert.deepStrictEqual(shipUnderWayOf(JSON.stringify({ steps: [{ key: 'review' }], end: 'ready', ships: {} }), null), {
+      route: { review: true, far: 'ready' },
+      at: 'review',
+    })
+    assert.deepStrictEqual(
+      shipUnderWayOf(
+        JSON.stringify({
+          steps: [{ key: 'review', skipped: true }],
+          reviewAfterMerge: true,
+          ships: { route: { review: false, far: 'merge' }, at: 'merge' },
+        }),
+        'publish',
+      ),
+      { route: { review: false, far: 'merge' }, at: 'merge' },
+    )
+  })
+
+  it.live('gives a task it doesn’t know no review, and goes no further than a push', () => {
+    const { github } = onGitHub()
+    return Effect.gen(function* () {
+      assert.deepStrictEqual(yield* taskShipRoute(yield* Changes, 'task_none'), {
+        route: { review: false, far: 'push' },
+        reviewable: false,
+        bent: null,
+      })
     }).pipe(Effect.provide(withHost(github)))
   })
 })
