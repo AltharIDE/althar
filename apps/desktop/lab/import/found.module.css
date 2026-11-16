@@ -1,0 +1,296 @@
+/* What was found, to pick from: the kit's list rows, a tick each, one column of marks. */
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  min-width: 0;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 10px 6px;
+}
+.headTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font: 600 12.5px/1.2 var(--font);
+  color: var(--t-1);
+}
+.count {
+  font: 500 11px/1 var(--mono);
+  color: var(--t-3);
+}
+.grow {
+  flex: 1;
+}
+.goes {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.allNone {
+  display: inline-flex;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.list,
+.cards,
+.setups,
+.nested {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.list,
+.setups {
+  gap: 2px;
+}
+.cards {
+  gap: 6px;
+}
+.row {
+  position: relative;
+  border-radius: 8px;
+  transition: background var(--fast) var(--ease);
+}
+.row:hover {
+  background: var(--hover-paper);
+}
+.list > .row + .row::before {
+  content: '';
+  position: absolute;
+  top: -1.5px;
+  left: 36px;
+  right: 10px;
+  height: 1px;
+  background: var(--line);
+}
+.list > .row:hover::before,
+.list > .row:hover + .row::before {
+  opacity: 0;
+}
+/* by place: each worktree a card of its own, its conversations under it */
+.cards > .row {
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.cards > .row:hover {
+  background: var(--hover-paper);
+}
+.rowHit {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  min-width: 0;
+}
+.row[data-off] .name {
+  color: var(--t-2);
+}
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.titleLine {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--t-1);
+}
+.at {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.where,
+.sub {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.branch,
+.path {
+  font: 11.5px/1.4 var(--mono);
+  color: var(--t-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch {
+  flex: none;
+  max-width: 55%;
+}
+.path {
+  color: var(--t-3);
+  min-width: 0;
+}
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.facts:empty {
+  display: none;
+}
+.fact,
+.problem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.fact :global(svg) {
+  color: var(--t-3);
+}
+.problem {
+  color: var(--danger);
+}
+.quiet {
+  color: var(--t-3);
+}
+
+.mark,
+.letter {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  margin-top: 1px;
+  color: var(--t-2);
+}
+.letter {
+  border-radius: 4px;
+  background: var(--n-3);
+  color: var(--t-2);
+  font: 650 10px/1 var(--font);
+}
+.markPair {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+  margin-top: 2px;
+  width: 30px;
+}
+
+.tickBox {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+}
+.tick {
+  appearance: none;
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
+  cursor: pointer;
+}
+.tick:checked,
+.tick:indeterminate {
+  background: var(--ink-fill);
+  box-shadow: none;
+}
+.tick:indeterminate::after {
+  content: '';
+  position: absolute;
+  inset: 6px 3px;
+  border-radius: 1px;
+  background: var(--on-ink);
+}
+.tick:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+.tickMark {
+  position: absolute;
+  color: var(--on-ink);
+  pointer-events: none;
+}
+
+.nested {
+  gap: 0;
+  margin: -2px 10px 8px 60px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.nestedRow .rowHit {
+  padding: 3px 0;
+  cursor: default;
+}
+.nestedRow .name {
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+
+.setupRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.setupRow:hover {
+  background: var(--hover-paper);
+}
+.radio {
+  appearance: none;
+  flex: none;
+  margin: 2px 0 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
+  cursor: pointer;
+}
+.radio:checked {
+  box-shadow: inset 0 0 0 4.5px var(--ink-fill);
+}
+.radio:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+.script {
+  margin: 4px 0 0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: var(--well);
+  font: 11.5px/1.55 var(--mono);
+  color: var(--t-1);
+  white-space: pre-wrap;
+}
+.note {
+  font-size: 12px;
+  color: var(--t-3);
+}

@@ -1,0 +1,247 @@
+/* Up next's found group: a card of its own under Scratch, a row a thing, Bring in all its last row. */
+.found {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 8px;
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  background: var(--paper);
+  overflow: hidden;
+}
+.foundHead {
+  padding: 11px 12px 4px;
+}
+.foundTitle {
+  font: 600 12px/1.2 var(--font);
+  color: var(--t-1);
+}
+.grow {
+  flex: 1;
+}
+.foundList {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0 4px 4px;
+  list-style: none;
+}
+.foundRow {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+}
+.foundRow:hover {
+  background: var(--hover-paper);
+}
+.foundMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.foundName {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 17px;
+  color: var(--t-1);
+}
+.foundSub {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.foundMain :global([class*='facts']) {
+  font-size: 11.5px;
+}
+/* a row's actions over its end, on hover or focus, so its name has the width at rest */
+.foundActions {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 16px;
+  background: linear-gradient(to right, transparent, var(--hover-paper) 14px);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.foundRow:hover .foundActions,
+.foundRow:focus-within .foundActions {
+  opacity: 1;
+}
+.foundLeave {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--t-3);
+}
+.foundLeave:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+.foundFoot {
+  display: flex;
+  border-top: 1px solid var(--line);
+}
+.foundFoot button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--signal-ink);
+}
+.foundFoot button:hover {
+  background: var(--hover-paper);
+}
+.markPair {
+  display: inline-flex;
+  gap: 2px;
+  flex: none;
+  margin-top: 1px;
+}
+
+/* Settings' sections */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  min-width: 0;
+}
+.part {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.partHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.partTitle {
+  margin: 0;
+  font: 600 13px/1.3 var(--font);
+  color: var(--t-1);
+}
+.sources,
+.tools,
+.repos {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.source {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 10px;
+}
+.source + .source {
+  border-top: 1px solid var(--line);
+}
+.sourceMain {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.sourceName {
+  font-size: 13px;
+  color: var(--t-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sourceFacts {
+  display: flex;
+  gap: 14px;
+  flex: none;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.mono {
+  font: 11.5px/1.4 var(--mono);
+  color: var(--t-3);
+}
+.quiet {
+  color: var(--t-3);
+}
+.fresh {
+  color: var(--signal-ink);
+}
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.tool + .tool {
+  border-top: 1px solid var(--line);
+}
+.toolHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  text-align: left;
+}
+.toolHead:hover {
+  background: var(--hover-paper);
+}
+.toolName {
+  font-size: 13px;
+  color: var(--t-1);
+}
+.repos {
+  padding: 0 10px 10px 36px;
+}
+.repo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  font-size: 12.5px;
+}
+.repo + .repo {
+  border-top: 1px solid var(--line);
+}
+.repoName {
+  font: 12px/1.4 var(--mono);
+  color: var(--t-1);
+}
+.repoHas {
+  color: var(--t-2);
+}
+.inAlready {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 52px;
+  color: var(--t-3);
+}
