@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AfterMergeRule, ProjectInk, ProjectNote, ProjectRulesView, ProjectSummary, WorksIn } from '@althar/contracts'
 
@@ -80,6 +80,13 @@ export interface ProjectSettingsModel {
   readonly remove: () => Promise<void>
 }
 
+/** A rule the person switched, held over what is read: which change it was, and the revision its reply kept it as, once it came. */
+interface HeldRule {
+  readonly value: unknown
+  readonly change: number
+  readonly revision: number | null
+}
+
 /** A name or ink the person chose, and which change it was, in the order they were made. */
 interface Chosen {
   readonly name?: { readonly value: string; readonly change: number }
@@ -91,7 +98,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   const read = reads(client)
   const listed = useQuery(read.projects()).data
   const project = listed?.projects.find((each) => each.id === projectId) ?? null
-  const rules = useQuery(read.rules(projectId)).data ?? null
+  const rulesRead = useQuery(read.rules(projectId))
   const notes = useQuery(read.notes(projectId)).data ?? null
 
   // What the person chose, shown until the runtime says the same or says no.
@@ -135,15 +142,53 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
 
   // Shown switched at once; the rules as kept once saved, or as they were, with why, when it isn't.
   const [ruleFailed, setRuleFailed] = useState<{ readonly rule: GeneralRule; readonly message: string } | null>(null)
+  // Each switched, held over what is read until a read of the rules has it, by its own change: one switched a moment after
+  // another never flicks back as the first's reply, or a read from between them, lands (foundations.md, The UI is instant).
+  const [switched, setSwitched] = useState<ReadonlyMap<GeneralRule, HeldRule>>(new Map())
+  const switchedNow = useRef(switched)
+  // Read by a press, not in render: what is held as of the last render.
+  useEffect(() => {
+    switchedNow.current = switched
+  })
+  const ruleMade = useRef(0)
+  const readRules = rulesRead.data
+  // A read that has a switch's own revision says it from here.
+  if (readRules !== undefined && [...switched.values()].some((one) => one.revision !== null && readRules.revision >= one.revision))
+    setSwitched((now) => new Map([...now].filter(([, one]) => one.revision === null || readRules.revision < one.revision)))
+  const rules = useMemo(
+    () =>
+      readRules === undefined
+        ? null
+        : switched.size === 0
+          ? readRules
+          : { ...readRules, ...Object.fromEntries([...switched].map(([rule, one]) => [rule, one.value])) },
+    [readRules, switched],
+  )
   const setRule = useCallback(
     <R extends GeneralRule>(rule: R, value: ProjectRulesView[R]) => {
       const key = keys.rules(projectId)
+      const mine = ++ruleMade.current
       setRuleFailed(null)
+      setSwitched((now) => new Map([...now, [rule, { value, change: mine, revision: null }]]))
       cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, [rule]: value }))
+      const own = (change: (one: HeldRule) => HeldRule | null) =>
+        setSwitched((now) => {
+          const one = now.get(rule)
+          if (one?.change !== mine) return now
+          const next = new Map(now)
+          const changed = change(one)
+          if (changed === null) next.delete(rule)
+          else next.set(rule, changed)
+          return next
+        })
       queue.current = queue.current.then(async () => {
         try {
-          cache.setQueryData(key, await client.setProjectRules({ projectId, [rule]: value }))
+          const kept = await client.setProjectRules({ projectId, [rule]: value })
+          // Held until a read has this revision; the reply is that read only where no switch was made since, whose own is newer.
+          own((one) => ({ ...one, revision: kept.revision }))
+          if (mine === ruleMade.current) cache.setQueryData(key, kept)
         } catch (failure) {
+          own(() => null)
           setRuleFailed({ rule, message: messageOf(failure) })
           await cache.invalidateQueries({ queryKey: key, exact: true })
         }
@@ -163,7 +208,9 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   // The three are one rule: each switch sends all three, the one switched as now chosen, the others as last shown.
   const setRepositoryFile = useCallback(
     (file: RepositoryFile, on: boolean) => {
-      const now = cache.getQueryData<ProjectRulesView>(keys.rules(projectId))?.repositoryFiles
+      const now =
+        (switchedNow.current.get('repositoryFiles')?.value as ProjectRulesView['repositoryFiles'] | undefined) ??
+        cache.getQueryData<ProjectRulesView>(keys.rules(projectId))?.repositoryFiles
       if (now !== undefined) setRule('repositoryFiles', { ...now, [file]: on })
     },
     [cache, projectId, setRule],
