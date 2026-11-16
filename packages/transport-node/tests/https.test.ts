@@ -1,4 +1,4 @@
-import { randomBytes, verify, createPublicKey } from 'node:crypto'
+import { randomBytes, verify, createPublicKey, X509Certificate } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:https'
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -68,7 +68,7 @@ const body = (request: IncomingMessage, done: (value: unknown) => void) => {
   request.on('data', (chunk: Buffer) => chunks.push(chunk))
   request.once('end', () => done(JSON.parse(Buffer.concat(chunks).toString('utf8'))))
 }
-const serveRpc = (server: Server, ready = { type: 'Authenticated', identity, apiVersion: API_VERSION }) =>
+const serveRpc = (server: Server, ready: unknown = { type: 'Authenticated', identity, apiVersion: API_VERSION }) =>
   Effect.gen(function* () {
     const ws = webSocketServer()
     const scope = yield* Effect.scope
@@ -175,8 +175,25 @@ describe('secure bootstrap and device keys', () => {
           requests++
           json(response, { ok: true })
         })
-        const trusted = yield* homeHttpsAgent(server.origin, pin)
+        const clock = yield* Clock.Clock
+        let now = clock.currentTimeMillisUnsafe()
+        const trusted = yield* homeHttpsAgent(server.origin, pin).pipe(
+          Effect.provideService(Clock.Clock, {
+            currentTimeMillisUnsafe: () => now,
+            currentTimeMillis: clock.currentTimeMillis,
+            currentTimeNanosUnsafe: () => clock.currentTimeNanosUnsafe(),
+            currentTimeNanos: clock.currentTimeNanos,
+            monotonicTimeNanosUnsafe: () => clock.monotonicTimeNanosUnsafe(),
+            monotonicTimeNanos: clock.monotonicTimeNanos,
+            sleep: (duration) => clock.sleep(duration),
+          }),
+        )
         assert.deepStrictEqual(yield* httpsJson(server.origin, '/v1/info', trusted), { ok: true })
+        // A long-lived client must recheck validity on every new TLS connection.
+        now = Date.parse(new X509Certificate(certificate).validTo)
+        yield* Effect.flip(httpsJson(server.origin, '/v1/info', trusted))
+        now = Date.parse(new X509Certificate(certificate).validFrom) - 1
+        yield* Effect.flip(httpsJson(server.origin, '/v1/info', trusted))
         const untrusted = yield* homeHttpsAgent(server.origin, '0'.repeat(64))
         yield* Effect.flip(httpsJson(server.origin, '/v1/info', untrusted))
         const ordinary = yield* homeHttpsAgent(server.origin)
@@ -216,9 +233,81 @@ describe('secure bootstrap and device keys', () => {
       }),
     ),
   )
+
+  it.live('refuses pairing replies for a different home, key, API version or authority, including a revoked device', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const key = yield* createDeviceKey
+        const device = {
+          deviceId,
+          name: 'Desktop',
+          publicKey: key.publicKey,
+          role: 'socket',
+          revision: 1,
+          createdAt: '2020-01-01T00:00:00.000Z',
+          revokedAt: null,
+        }
+        for (const reply of [
+          { homeId: `home_${'9'.repeat(32)}`, apiVersion: API_VERSION, device },
+          { homeId, apiVersion: API_VERSION + 1, device },
+          { homeId, apiVersion: API_VERSION, device: { ...device, publicKey: (yield* createDeviceKey).publicKey } },
+          { homeId, apiVersion: API_VERSION, device: { ...device, role: 'paired_device' } },
+          { homeId, apiVersion: API_VERSION, device: { ...device, revokedAt: '2020-01-02T00:00:00.000Z' } },
+          null,
+        ]) {
+          const server = yield* fixture((_request, response) => json(response, reply))
+          const error = yield* Effect.flip(
+            completeDevicePairing(
+              {
+                protocol: 1,
+                homeId,
+                apiVersion: API_VERSION,
+                origin: server.origin,
+                tlsKeyPin: pin,
+                token: randomBytes(32).toString('base64url'),
+                expiresAt: (yield* Clock.currentTimeMillis) + 60_000,
+              },
+              key,
+              'Desktop',
+            ),
+          )
+          assert.strictEqual(error.reason, 'InvalidConnection')
+        }
+      }),
+    ),
+  )
 })
 
 describe('authenticated WebSocket streams', () => {
+  it.live('rejects an authenticated stream that returns malformed metadata or changes the device, home, API or authority', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const challenge = {
+          protocol: 1 as const,
+          homeId,
+          deviceId,
+          apiVersion: API_VERSION,
+          nonce: randomBytes(32).toString('base64url'),
+          expiresAt: (yield* Clock.currentTimeMillis) + 30_000,
+        }
+        for (const ready of [
+          {},
+          { type: 'Authenticated', apiVersion: API_VERSION, identity: { ...identity, homeId: `home_${'9'.repeat(32)}` } },
+          { type: 'Authenticated', apiVersion: API_VERSION, identity: { ...identity, deviceId: `dev_${'9'.repeat(32)}` } },
+          { type: 'Authenticated', apiVersion: API_VERSION, identity: { ...identity, role: 'paired_device' } },
+          { type: 'Authenticated', apiVersion: API_VERSION + 1, identity },
+        ]) {
+          const server = yield* fixture((_request, response) => json(response, challenge))
+          yield* serveRpc(server.server, ready)
+          const error = yield* Effect.flip(
+            openHttpsConnection({ origin: server.origin, homeId, deviceId, tlsKeyPin: pin }, () => Effect.succeed('A'.repeat(86))),
+          )
+          assert.strictEqual(error.reason, 'AuthenticationFailed')
+        }
+      }),
+    ),
+  )
+
   it.live('carries the existing versioned RPC through the binary stream and checks its authenticated identity', () =>
     Effect.scoped(
       Effect.gen(function* () {

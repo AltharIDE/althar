@@ -77,7 +77,9 @@ export const openHttpsConnection = (target: HttpsHomeTarget, sign: (message: str
     )
     const { port, socket } = opened
     yield* webSocketHeartbeat(socket)
-    const ready = yield* Schema.decodeUnknownEffect(Authenticated)(yield* readFrame(port)).pipe(
+    const ready = yield* readFrame(port).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(Authenticated)),
+      Effect.timeout('10 seconds'),
       Effect.mapError(() => transportError('AuthenticationFailed', 'The home did not confirm the authenticated device.')),
     )
     const identity = ready.identity

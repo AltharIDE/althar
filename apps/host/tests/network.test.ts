@@ -1,9 +1,14 @@
 import { chmodSync, copyFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { createServer } from 'node:net'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Agents } from '@althar/runtime'
+import { completeDevicePairing, createDeviceKey, decodePairingCode, openHttpsConnection, signDeviceMessage } from '@althar/transport-node'
+import { Deferred, Effect, Fiber, Layer, Schema } from 'effect'
 
+import { runCommand } from '../src/commands'
+import { serveHome, type HomeReady } from '../src/home'
 import { configureNetwork, disableNetwork, networkFiles, readNetworkConfiguration } from '../src/network'
 import { parseOptions } from '../src/options'
 import { temporary } from './support'
@@ -27,6 +32,8 @@ const fixture = () => {
       profile,
       '--worktrees',
       worktrees,
+      '--key-file',
+      join(root, 'keys/master'),
       '--origin',
       'https://home.test:6769',
       '--tls-certificate',
@@ -37,10 +44,76 @@ const fixture = () => {
     {},
     root,
   )
-  return { options, certificate, key }
+  return { root, options, certificate, key }
 }
 
+const freePort = Effect.promise(
+  () =>
+    new Promise<number>((resolve, reject) => {
+      const server = createServer()
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address()
+        if (address === null || typeof address === 'string') return server.close(() => reject(new Error('No fixture port')))
+        server.close((error) => (error == null ? resolve(address.port) : reject(error)))
+      })
+    }),
+)
+
 describe('opt-in HTTPS home configuration', () => {
+  it.live('runs the operator pairing, inventory and revocation commands against a real configured home', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { root, options: original } = fixture()
+        if (original.network === undefined) throw new Error('Missing fixture configuration')
+        const port = yield* freePort
+        const options = { ...original, network: { ...original.network, port, origin: `https://127.0.0.1:${port}` } }
+        const output: string[] = []
+        const io = {
+          out: (value: string) => {
+            output.push(value)
+          },
+          node: process.execPath,
+          entry: '/unused',
+          path: '/bin',
+        }
+        const dependencies = {
+          agents: Layer.succeed(Agents, Agents.from([])),
+          agentConfigs: { homeDir: root, folder: join(root, 'agent-sync') },
+        }
+        yield* runCommand({ ...options, command: 'init' }, io, dependencies)
+        assert.include((yield* Effect.flip(runCommand({ ...options, command: 'pair' }, io))).message, 'Configure direct')
+        yield* runCommand(options, io)
+        assert.include(output.at(-1) ?? '', 'Restart the host explicitly')
+        const ready = yield* Deferred.make<HomeReady, unknown>()
+        const host = yield* Effect.forkScoped(
+          serveHome(options, (info) => Effect.asVoid(Deferred.succeed(ready, info)), dependencies).pipe(
+            Effect.catchCause((cause) => Effect.andThen(Deferred.failCause(ready, cause), Effect.failCause(cause))),
+          ),
+        )
+        yield* Deferred.await(ready)
+        yield* runCommand({ ...options, command: 'pair', json: true }, io)
+        const invitation = Schema.decodeUnknownSync(Schema.Struct({ code: Schema.String }))(JSON.parse(output.at(-1) ?? ''))
+        const device = yield* createDeviceKey
+        const target = yield* completeDevicePairing(decodePairingCode(invitation.code), device, 'Operator test')
+        yield* runCommand({ ...options, command: 'devices' }, io)
+        assert.include(output.at(-1) ?? '', `${target.deviceId}  Operator test  socket  active`)
+        yield* runCommand({ ...options, command: 'devices', deviceAfter: target.deviceId, json: true }, io)
+        assert.deepStrictEqual(JSON.parse(output.at(-1) ?? ''), { clients: [], next: null })
+        yield* runCommand({ ...options, command: 'revoke-device', revokeDeviceId: target.deviceId }, io)
+        assert.include(output.at(-1) ?? '', 'Device access revoked')
+        yield* Effect.flip(openHttpsConnection(target, (message) => signDeviceMessage(device.privateKey, message)))
+        assert.include(
+          (yield* Effect.flip(runCommand({ ...options, command: 'revoke-device', revokeDeviceId: `dev_${'0'.repeat(32)}` }, io))).message,
+          'Choose a connection device',
+        )
+        yield* runCommand({ ...options, command: 'disable-network' }, io)
+        assert.isUndefined(yield* readNetworkConfiguration(options.profile))
+        yield* Fiber.interrupt(host)
+      }),
+    ),
+  )
+
   it.live('keeps direct access disabled until configured and persists it independently of service/update flags', () =>
     Effect.gen(function* () {
       const { options } = fixture()

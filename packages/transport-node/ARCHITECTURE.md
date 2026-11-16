@@ -19,7 +19,7 @@ sequenceDiagram
     Home-->>Client: Same identity + home-scoped history position
     Client->>Home: Normal versioned queries, commands and WatchFrom
     Client--xSSH: Quit / EOF / cancellation
-    Note over Home: Host owns sessions; work continues
+    Note over Home: Host owns sessions, work continues
 ```
 
 `streamPort` owns separate byte streams or a socket. It uses the existing
