@@ -11,7 +11,7 @@ import { locations as locationsOf } from './locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
-import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
+import { FIRST_SCHEME_WAIT, followDesktopScheme, keptSchemeIn, openingScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { CHROME_ARG, decideChrome, type DesktopChrome, parseHexAccent } from './desktop'
 import { chromeOf, FIRST_CHROME_WAIT, type FollowedChrome, followDesktopChrome, systemSources } from './desktopChrome'
 import { keepingAwake } from './awake'
@@ -1240,15 +1240,21 @@ void ready.then(() => {
     runtime?.postMessage({ type: 'first-screen' })
   }
   // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first;
-  // on Linux, matching the desktop, once it has said its scheme too (a moment at most), since Electron can't tell it.
-  // And once the desktop has said where its window buttons go, so they don't move as the window opens (a moment at most too).
+  // on Linux, matching the desktop, in the scheme it said last time, or once it has said it (a moment at most) on a first
+  // launch, since Electron can't tell it. And where the desktop said its window buttons go, last time or now, so they don't
+  // move as the window opens. What the desktop says after that, the windows follow.
   const look = startDesktopLook()
   void preferencesRead
     .catch(() => undefined)
     .then(() =>
       Promise.all([
         process.platform === 'linux' && preferences.appearance === 'system'
-          ? firstScheme(followDesktopScheme, FIRST_SCHEME_WAIT)
+          ? openingScheme(followDesktopScheme, FIRST_SCHEME_WAIT, keptSchemeIn(locations().profile)).then((scheme) => {
+              // What was kept, until the desktop says now.
+              if (linuxScheme !== undefined || scheme === undefined) return
+              linuxScheme = scheme
+              applyAppearance()
+            })
           : undefined,
         look.first(FIRST_CHROME_WAIT),
       ]),
