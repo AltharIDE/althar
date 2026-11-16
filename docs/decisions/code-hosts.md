@@ -241,7 +241,14 @@ Ship works explains each stop, where a click on a stop's icon turns it on
 or off. Under way, the same button greys at the stop it is at, its route
 still changeable (`RouteShip`, and `ship_task` for the coordinator and the
 leads, who go no further than ready) and its review skippable, with no Push
-or Mark ready beside it. So Merge, with commits not shipped, is Ship to
+or Mark ready beside it; the task's card and header say that stop too
+(Merges once checks pass), not the opening of a pull request. A change of
+route away from merged and the merge itself can't both win: the merge reads
+its route again in the transaction that records its intent, after its reads
+of the host, so a change made before then sends no merge, and one made
+after it is refused, the merge having gone to the host (`merging`). How Ship
+works keeps the review's stop off, saying why, where the task has no
+reviewer. So Merge, with commits not shipped, is Ship to
 merged: the card offers no Review and merge or Merge now beside it, and
 Review and merge stays a Ship to merged for the runtime. Merge now remains
 the runtime's, sending them up past the hold and merging at once, reviewed

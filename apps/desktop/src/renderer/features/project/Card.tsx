@@ -21,7 +21,7 @@ import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
-import { stepIndex, stepNames, stepText } from '../../shared/steps'
+import { stepIndex, stepNames, stepNow, stepText } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
@@ -335,9 +335,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
               ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
               : card.reconnects != null
                 ? reconnectsWords(card.reconnects, clock)
-                : card.step === null
-                  ? undefined
-                  : text.now[card.step]
+                : stepNow(card.step, card.shipAt)
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   // A small change's card names who leads from its next turn, which its plan's lead is as the runtime reads it, so a team just changed shows.
