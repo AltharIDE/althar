@@ -8,8 +8,9 @@ import { join } from 'node:path'
  * (productName, which also names the keychain entry sign-ins are sealed
  * with): Application Support/Althar is where a profile lives.
  */
-export const windowFolderOf = (ownProfile: string | undefined, appData: string) =>
-  ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'window') : join(appData, '@althar', 'desktop')
+export const windowFolderOf = (ownProfile: string | undefined, appData: () => string) =>
+  // The app's data folder is asked for only where no profile is given: Electron can fail to name it this early (Windows).
+  ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'window') : join(appData(), '@althar', 'desktop')
 
 /** Where the main process and the runtime keep V8's compiled code between launches (compileCache.ts). */
 export const compiledIn = (windowFolder: string) => join(windowFolder, 'compile-cache')
@@ -20,9 +21,8 @@ export const compiledIn = (windowFolder: string) => join(windowFolder, 'compile-
  * afresh: keeping it only makes a launch quicker, and never stops one.
  */
 export const compiledFolderOf = (profile: string | undefined, appData: () => string): string | null => {
-  if (profile !== undefined && profile !== '') return compiledIn(windowFolderOf(profile, ''))
   try {
-    return compiledIn(windowFolderOf(undefined, appData()))
+    return compiledIn(windowFolderOf(profile, appData))
   } catch {
     return null
   }

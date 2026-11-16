@@ -196,7 +196,10 @@ if (portal) app.commandLine.appendSwitch('enable-features', withPortalFeature(ap
 
 /* Where the window keeps what it remembers, its tabs and pinned models (windowFolder.ts). */
 const ownProfile = process.env.ALTHAR_PROFILE
-app.setPath('userData', windowFolderOf(ownProfile, app.getPath('appData')))
+app.setPath(
+  'userData',
+  windowFolderOf(ownProfile, () => app.getPath('appData')),
+)
 
 /*
  * Native crashes, in any of Althar's processes, as Crashpad's minidumps,
