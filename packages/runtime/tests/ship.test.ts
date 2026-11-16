@@ -922,7 +922,8 @@ describe('Merge, with commits not shipped', () => {
       assert.strictEqual(git(bare, 'log', '-1', '--format=%s', BRANCH), git(task.path, 'log', '-1', '--format=%s', tweak))
       const runs_ = yield* runsOf(task.taskId)
       assert.lengthOf(runs_, 2)
-      assert.include(runs_[1]?.parameters ?? '', '"merges":true')
+      // A Ship all the way: its route goes to merge.
+      assert.deepStrictEqual(JSON.parse(runs_[1]?.parameters ?? '{}').ships?.route, { review: true, far: 'merge' })
       const asked = yield* sql<{ body: string }>`
         SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
         WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%'`

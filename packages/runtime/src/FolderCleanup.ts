@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { lstat, readdir, rmdir, statfs } from 'node:fs/promises'
+import { rmdir, statfs } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import type { FolderHeld, FolderKind, FolderWait, FoldersFreed, TaskFolders } from '@althar/contracts'
@@ -12,6 +12,7 @@ import { SqlClient } from 'effect/sql'
 import type { SqlError } from 'effect/sql/SqlError'
 
 import { Changes } from './Changes'
+import { measure } from './DiskUsage'
 import { RuntimeConfig } from './Config'
 import { ChangedSinceSeen, FolderStayed, TaskRefused } from './errors'
 import { contained } from './Failures'
@@ -185,26 +186,13 @@ print "$total\n";
  */
 export const ownedBytes = async (roots: ReadonlyArray<string>): Promise<number> => {
   let total = 0
-  const seen = new Map<string, number>()
-  const gone = (error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    return null
+  const owned = new Map<string, number>()
+  for (const root of roots) {
+    // The same walk About › Storage measures with (DiskUsage.ts), but counting only what the folders own, and with no time limit.
+    const size = await measure(root, { owned, timeout: Infinity })
+    if (size.state === 'failed' || (size.state === 'done' && size.unreadable > 0)) throw new Error(`Couldn't read all of ${root}`)
+    if (size.state === 'done') total += size.bytes
   }
-  const walk = async (path: string): Promise<void> => {
-    const stats = await lstat(path, { bigint: true }).catch(gone)
-    if (stats === null) return
-    if (stats.isDirectory()) {
-      for (const name of (await readdir(path).catch(gone)) ?? []) await walk(join(path, name))
-    }
-    if (stats.nlink > 1n && stats.isFile()) {
-      const key = `${stats.dev}:${stats.ino}`
-      const count = (seen.get(key) ?? 0) + 1
-      seen.set(key, count)
-      if (BigInt(count) !== stats.nlink) return
-    }
-    total += Number(stats.blocks > 0n ? stats.blocks * 512n : stats.isFile() ? stats.size : 0n)
-  }
-  for (const root of roots) await walk(root)
   return total
 }
 

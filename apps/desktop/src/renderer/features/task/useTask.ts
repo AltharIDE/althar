@@ -11,6 +11,8 @@ import {
   type FieldAnswer,
   PAGE,
   type ReviewVerdict,
+  type ShipRoute,
+  type ShipUnderWay,
   type ThreadItem,
   type ThreadSnapshot,
   type UndoTurnResult,
@@ -178,6 +180,10 @@ export interface TaskModel {
   readonly attach: (pullRequest: string, start: boolean) => Promise<Attachment | null>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
+  /** Stops it waiting for another task (tasks wait for their blockers), by that task's id. */
+  readonly stopWaiting: (on: string) => Promise<void>
+  /** Reopens a task it waits for that was abandoned, by its id. */
+  readonly reopenBlocker: (taskId: string) => Promise<void>
   /** Holds its plan until it is started, while it counts down or waits for a free agent. */
   readonly holdPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
@@ -223,8 +229,19 @@ export interface TaskModel {
   readonly markAllReady: (urls: ReadonlyArray<string>) => Promise<void>
   /** Opens the pull request of a task whose work ended on its branch. */
   readonly openChange: () => Promise<void>
-  /** Ships what waits on its branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
+  /**
+   * Ships what waits on its branch for Ship, on the route chosen for this Ship (`shipChoice`), else its own: its review first
+   * where the route has one, then the commits go up, as far as the route goes. It shows under way at once (`shipPressed`).
+   */
   readonly ship: () => Promise<void>
+  /** The route the person chose for its next Ship, where they changed it from its own; null where they haven't. */
+  readonly shipChoice: ShipRoute | null
+  readonly chooseShipRoute: (route: ShipRoute) => void
+  /** Its Ship as pressed here, under way at once, until a read has it under way (`TaskView.shipping`), or it failed. */
+  readonly shipPressed: ShipUnderWay | null
+  /** Changes the route of its Ship under way, shown at once (`shipRerouted`) until a read has it. */
+  readonly routeShip: (route: ShipRoute) => Promise<void>
+  readonly shipRerouted: ShipRoute | null
   /** Ships one of its several changes, in a Ship of its own, with what waits beneath it in its stack: its row's Ship. */
   readonly shipChange: (change: string) => Promise<void>
   /** Fix it, on what its review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
@@ -245,11 +262,6 @@ export interface TaskModel {
   readonly accept: (
     changes: ReadonlyArray<{ readonly head: string; readonly url: string; readonly bypassQueue?: boolean }>,
   ) => Promise<void>
-  /**
-   * Merge, with commits not shipped (a task is a conversation plus parts): `review`, Review and merge, one review of what
-   * waits, then it goes up and merges; `now`, Merge now, up and merged at once, reviewed after the merge.
-   */
-  readonly mergeWaiting: (how: 'review' | 'now') => Promise<void>
   /** Pushes the task's branch to its pull request, up to the commit the person saw: the one at `url`, in a task of several. */
   readonly push: (head: string, url?: string) => Promise<void>
   /**
@@ -343,6 +355,15 @@ export const useTask = (threadId: string): TaskModel => {
   const error = failed ?? (thread.error === null ? null : messageOf(thread.error))
   const [pending, setPending] = useState(false)
   const [acting, setActing] = useState<Doing | null>(null)
+  // Ship's route as the person chose it for the next Ship, and as pressed or changed under way, held until a read has it.
+  // The choice is kept with the task it was made on, so another task's never shows on this one.
+  const [choice, setChoice] = useState<{ readonly taskId: string; readonly route: ShipRoute | null } | null>(null)
+  const shipChoice = choice !== null && choice.taskId === snapshot?.task.id ? choice.route : null
+  const setShipChoice = (route: ShipRoute | null) => {
+    if (snapshot !== null) setChoice({ taskId: snapshot.task.id, route })
+  }
+  const [shipPressed, setShipPressed] = useState<ShipUnderWay | null>(null)
+  const [shipRerouted, setShipRerouted] = useState<ShipRoute | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
   const [refused, setRefused] = useState<string | null>(null)
   const [merging, setMerging] = useState<string | null>(null)
@@ -509,7 +530,9 @@ export const useTask = (threadId: string): TaskModel => {
       )
     // Its project's rules, which belong to no thread: by their switch it may allow everything now, or no longer. Its head again.
     const ofItsRules = event._tag === 'Changed' && event.aggregateType === 'policy' && event.projectId === snapshot?.project.id
-    if (event.threadId !== threadId && !ofItsRules) return
+    // Its card, which belongs to no thread: what it waits for moved on, as a task it waits for did (tasks wait for their blockers).
+    const ofItsCard = event._tag === 'Changed' && event.aggregateType === 'card' && event.aggregateId === snapshot?.task.id
+    if (event.threadId !== threadId && !ofItsRules && !ofItsCard) return
     // How full the lead's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context')
       return void setSnapshot((current) =>
@@ -629,6 +652,7 @@ export const useTask = (threadId: string): TaskModel => {
         interrupting: disposition === 'interrupt_and_continue',
         ...(images?.dictated === true ? { dictated: true } : {}),
         ...(images === undefined ? {} : { pictures: images.pictures, files: images.attached }),
+        ...(images?.comments === undefined ? {} : { comments: images.comments }),
       })
       id = next.id
       return { ...current, items: next.items }
@@ -807,6 +831,8 @@ export const useTask = (threadId: string): TaskModel => {
       return done
     },
     startPlan: (planId) => act(() => client.startPlan(planId)),
+    stopWaiting: (on) => onTask((taskId) => client.stopWaiting(taskId, on)),
+    reopenBlocker: (taskId) => act(() => client.reopenTask(taskId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
@@ -877,7 +903,28 @@ export const useTask = (threadId: string): TaskModel => {
               : client.openChange(snapshot.task.id),
         snapshot !== null && commitsToShip(snapshot.task) > 0 ? doing.ship : doing.openChange,
       ),
-    ship: () => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id)), doing.ship),
+    ship: () => {
+      if (snapshot === null) return Promise.resolve()
+      const route = shipChoice ?? snapshot.task.shipRoute?.route
+      // Under way at once, at its first stop; held until the read after it lands, which has the Ship as the runtime has it.
+      if (route !== undefined) setShipPressed({ route, at: route.review ? 'review' : 'push' })
+      const taskId = snapshot.task.id
+      return act(async () => {
+        await client.ship(taskId, undefined, shipChoice ?? undefined)
+        // Shipped: the choice was this Ship's. Refused, it stays, for the next press.
+        setShipChoice(null)
+      }, doing.ship).finally(() => setShipPressed(null))
+    },
+    shipChoice,
+    chooseShipRoute: setShipChoice,
+    shipPressed,
+    routeShip: (route) => {
+      if (snapshot === null) return Promise.resolve()
+      setShipRerouted(route)
+      const taskId = snapshot.task.id
+      return act(async () => client.routeShip(taskId, route)).finally(() => setShipRerouted(null))
+    },
+    shipRerouted,
     shipChange: (change) => act(async () => (snapshot === null ? undefined : client.ship(snapshot.task.id, change)), doing.ship),
     fixAfterMerge: () =>
       act(
@@ -914,16 +961,6 @@ export const useTask = (threadId: string): TaskModel => {
         )
         await client.pushBranch(snapshot.task.id, heads)
       }, doing.pushBranch),
-    mergeWaiting: (how) => {
-      const open = snapshot?.task.changes.find((one) => one.state === 'open')
-      if (open === undefined || underWay.current.has(open.url)) return Promise.resolve()
-      // Kept by the window like any merge: Merging in every place at once, never Merge again meanwhile.
-      setPressedMerges((now) => new Map([...now, [open.url, 'merge']]))
-      return act(async () => {
-        if (snapshot === null) return
-        await merge({ taskId: snapshot.task.id, head: open.head ?? '', url: open.url, how })
-      }, doing.mergeWaiting).finally(() => forget([open.url]))
-    },
     accept: (pressed) => {
       // One already under way, wherever it was pressed, isn't merged again.
       const changes = pressed.filter((change) => !underWay.current.has(change.url) && !heldNow.current.has(change.url))

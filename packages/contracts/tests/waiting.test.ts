@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ChangeSummary } from '../src/Api'
 import {
+  blockerAbandoned,
   inMergeQueue,
   isAnswered,
   isAside,
@@ -49,6 +50,17 @@ const card = (taskId: string, phase: 'waiting' | 'ready' | 'stopped' | 'running'
 const call = (id: string, taskId: string | null, createdAt = '2026-11-12T09:00:00.000Z') => ({ id, taskId, createdAt, projectId: 'p1' })
 
 describe('what waits on the person', () => {
+  it('counts a plan that waits for a task that was abandoned, and not one that waits for one at work', () => {
+    const plan = (stands: string) => ({ taskId: 'w', projectId: 'p1', phase: 'planned' as const, change: null, waitsFor: [{ stands }] })
+    expect(blockerAbandoned(plan('abandoned'))).toBe(true)
+    expect(waitingOn([plan('abandoned')], []).abandoned).toHaveLength(1)
+    expect(waitingCount(waitingOn([plan('abandoned')], []))).toBe(1)
+    expect(waitingCount(waitingOn([plan('working')], []))).toBe(0)
+    // Started, what it waited for is no longer the person's.
+    expect(blockerAbandoned({ ...plan('abandoned'), phase: 'running' })).toBe(false)
+    expect(waitingIn([plan('abandoned')], []).get('p1')).toBe(1)
+  })
+
   it('keeps independent calls, and keeps the oldest waiting call regardless of the order they were read', () => {
     const oldest = call('old', 't1')
     const newer = call('new', 't1', '2026-11-12T10:00:00.000Z')

@@ -1,4 +1,5 @@
 import { MessageMotion } from '../../shared/MessageMotion'
+import { blockerText, blockerWords, openBlockers, standsOf } from '../../shared/blockers'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useTurnUndo } from './useTurnUndo'
@@ -42,6 +43,7 @@ import {
   SettleWays,
   TaskParts,
   Problem,
+  TaskWaitedBy,
 } from '@althar/ui'
 
 import { isAnswered, isSettleable, kindWords, takesDone } from '../../shared/calls'
@@ -63,7 +65,7 @@ import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { issuePriority, issueStatus, productBrand, productName } from '../../shared/products'
 import { afterMergeText, readyWordOf, shipText } from '../../shared/standing'
 import { taskStatusOf } from '../../shared/taskStatus'
-import { stepText, trackFor } from '../../shared/steps'
+import { stepNow, stepText, trackFor } from '../../shared/steps'
 import { MERGE_QUEUE_STEP, queuedToMerge, shownChangeOf } from '../../data/merges'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
@@ -107,6 +109,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
+import { useLineComments } from './useLineComments'
 import { canHold, ChangeTeam, useTeamed } from '../team/Team'
 import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
@@ -227,16 +230,22 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string; readonly why?: string } => {
   const { waits, queued, phase, step } = snapshot.task
+  // Its plan waits for other tasks: when it starts, as its row in Up next says it (tasks wait for their blockers).
+  const after = blockerWords(snapshot.task)
   // In its merge queue as its card on the board is: by the pull request the card shows, not every one of the task's.
   const shown = shownChangeOf(snapshot.task.changes)
   const inQueue = queuedToMerge({ phase, change: shown })
   // Where it stands is its card's, as the board and the home say it (`taskStatusOf`); only the words are the header's own.
   const status = taskStatusOf({ ...snapshot.task, inMergeQueue: inQueue, calls: snapshot.attention.length })
+  if (after !== null && snapshot.attention.length === 0) return { status, state: after }
   if (status === TaskStatus.Running && snapshot.task.externalWait !== undefined)
     return { status, state: text.waiting, why: externalWaitWords(snapshot.task.externalWait, clock) }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
+  const shipAt = snapshot.task.shipping?.at
   const doing =
-    step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
+    step === 'implement' && snapshot.task.followUp === true
+      ? stepText.followingUp
+      : stepNow(step, shipAt === 'ready' || shipAt === 'merge' ? shipAt : null)
   switch (status) {
     case TaskStatus.Yours: {
       if (snapshot.attention.length > 0) return { status, state: text.needsYou }
@@ -450,6 +459,8 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
+  // Tasks the person just stopped this one waiting for: gone from its list at once, until its head is read again.
+  const [letGo, setLetGo] = useState<ReadonlySet<string>>(new Set())
   // Its one repository only on this computer: the connection it is being put on from its card, or a host to connect first.
   const [putting, setPutting] = useState<string | null>(null)
   const [connectService, setConnectService] = useState<Service | null>(null)
@@ -516,10 +527,6 @@ export function TaskView({
   // The page belongs to the conversation: Outputs and Graph leave it out, and coming back brings it as it was (ADR-100).
   const conversation = face === null || face === 'talk' || (face === 'graph' && (model.snapshot?.task.graph?.length ?? 0) === 0)
   // What the thread's parts open: a picture in the lightbox, a document or a file the lead names, or a page, beside the thread.
-  const ways = useMemo(
-    () => ({ ...(onRules === undefined ? {} : { onRules }), ...(onSignIn === undefined ? {} : { onSignIn }) }),
-    [onRules, onSignIn],
-  )
   const host = useThreadHost(
     true,
     { threadId: model.snapshot?.threadId ?? null, taskId: model.snapshot?.task.id ?? null },
@@ -560,6 +567,35 @@ export function TaskView({
   )
   // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
   const { show } = changes
+  // The person's comments on its lines (DEV-175): gathered there, sent to the lead in one message, and read back where they are now.
+  const lineComments = useLineComments(
+    model.snapshot?.task.id ?? null,
+    changes.open,
+    // A commit moves no line against the base, but its files are no longer uncommitted: a comment it addressed is read again.
+    [
+      ...files.map((file) => `${file.path}:${file.add}:${file.del}:${file.uncommitted}`),
+      ...(model.snapshot?.reports ?? []).map((report) => report.id),
+    ].join('\n'),
+  )
+  const [commentShown, setCommentShown] = useState<string | null>(null)
+  const [sendingComments, setSendingComments] = useState(false)
+  // A comment's excerpt in the thread opens the diff on it, where the task changed something.
+  const canOpenComment = files.length > 0
+  const ways = useMemo(
+    () => ({
+      ...(onRules === undefined ? {} : { onRules }),
+      ...(onSignIn === undefined ? {} : { onSignIn }),
+      ...(canOpenComment
+        ? {
+            onOpenComment: (id: string, path: string) => {
+              setCommentShown(id)
+              show(path)
+            },
+          }
+        : {}),
+    }),
+    [onRules, onSignIn, canOpenComment, show],
+  )
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== 'd' || !commandDown(event) || event.shiftKey || event.altKey) return
@@ -846,6 +882,18 @@ export function TaskView({
     // Only the last pick's end takes it away: one made after is still on its way.
     void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
+  // The comments gathered on the diff go to the lead in one message of their own, the composer left as it is; given back where Althar doesn't take them.
+  const sendComments = () => {
+    const comments = lineComments.take()
+    if (comments.length === 0) return
+    const outgoing: Outgoing = { sent: [], pictures: [], files: [], attached: [], comments }
+    setSendingComments(true)
+    void model.send('', session === null || !session.held ? (chosen ?? undefined) : undefined, outgoing).then((accepted) => {
+      setSendingComments(false)
+      if (accepted) lineComments.reread()
+      else lineComments.giveBack(comments)
+    })
+  }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
     const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
@@ -855,6 +903,8 @@ export function TaskView({
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said)
+      // Its comments on the diff wait there again, to be sent with the next.
+      if (said.comments !== undefined) lineComments.giveBack(said.comments)
     }
   }
 
@@ -937,6 +987,35 @@ export function TaskView({
                   : {})}
       />
     ) : null
+  // What it waits for and what waits for it (tasks wait for their blockers): its header's words open them while it waits, and a
+  // part of its chip says what waits for it otherwise. One the person stops waiting for goes from the list at once.
+  const waitedBy = (snapshot.task.waitedBy ?? []).map((one) => ({
+    id: one.taskId,
+    title: one.title,
+    meta: blockerText.startsOnce,
+    ...(onOpenTask === undefined ? {} : { onOpen: () => onOpenTask(one.threadId) }),
+  }))
+  const waitsList =
+    openBlockers(snapshot.task).length === 0
+      ? undefined
+      : {
+          waitsFor: (snapshot.task.waitsFor ?? [])
+            .filter((one) => !letGo.has(one.taskId))
+            .map((one) => ({
+              id: one.taskId,
+              title: one.title,
+              stands: standsOf(one.stands),
+              ...(onOpenTask === undefined ? {} : { onOpen: () => onOpenTask(one.threadId) }),
+              onReopen: () => void model.reopenBlocker(one.taskId),
+              onStopWaiting: () => {
+                setLetGo((was) => new Set([...was, one.taskId]))
+                // Read again by then: gone where it went through, back with a line where it didn't.
+                void model.stopWaiting(one.taskId).finally(() => setLetGo((was) => new Set([...was].filter((id) => id !== one.taskId))))
+              },
+            })),
+          waitedBy,
+          ...(planId === null ? {} : { onStartNow: () => void model.startPlan(planId) }),
+        }
   // A change its lead or the coordinator split, before it ships: Keep them together; one its lead's git made: Drop it. Never once
   // it was kept together, dropped, or opened its pull request.
   const settledSteps = new Set(
@@ -1298,7 +1377,12 @@ export function TaskView({
                   face={shown}
                   onFace={setFace}
                   // Finished and the person's to settle: Done and Keep for later, inside where it stands.
-                  {...(settle === null ? {} : { beside: settle })}
+                  {...(settle !== null
+                    ? { beside: settle }
+                    : waitsList === undefined && waitedBy.length > 0
+                      ? { beside: <TaskWaitedBy waitedBy={waitedBy} /> }
+                      : {})}
+                  {...(waitsList === undefined ? {} : { waits: waitsList })}
                   parts={parts}
                   actions={actions}
                 />
@@ -1377,10 +1461,9 @@ export function TaskView({
                   error={model.error}
                   errorMore={model.errorMore}
                   onAccept={(changes) => void model.accept(changes)}
-                  onMergeWaiting={(how) => void model.mergeWaiting(how)}
                   onMergeHere={() => void model.mergeHere()}
                   onOpenChange={() => void model.openChange()}
-                  onShip={() => void model.ship()}
+                  ship={model}
                   onPush={(head, url) => void model.push(head, url)}
                   refused={model.refused}
                   onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
@@ -1757,9 +1840,24 @@ export function TaskView({
               findings={changes.findings}
               finding={changes.finding}
               onFinding={changes.goToFinding}
+              comments={lineComments.comments}
+              comment={commentShown}
+              // Comments are on the task's own change: one settled takes none.
+              {...(snapshot.task.phase === 'settled'
+                ? {}
+                : {
+                    onComment: lineComments.add,
+                    onEditComment: lineComments.edit,
+                    onRemoveComment: lineComments.remove,
+                    onSendComments: sendComments,
+                    sendingComments,
+                  })}
               view={changes.view}
               onRetry={changes.retry}
-              onClose={changes.close}
+              onClose={() => {
+                setCommentShown(null)
+                changes.close()
+              }}
               // A markdown file's pictures are read where the task works; a file it links to that isn't in the change opens in the editor.
               markdown={{ image: pictureOf(snapshot.threadId), ...(openFile === undefined ? {} : { open: openFile }) }}
               // An editor opens the task's folder there, at the file and its first change.
