@@ -20,6 +20,11 @@ import { type RouterContext, rootRoute } from './root'
  * flash. A place the window holds shows at once, what changed since read
  * behind it; the home's screen, and a project's or task's the person was on,
  * is kept as they left it (`KeptScreens`).
+ *
+ * The places a launch rarely opens on, Althar's settings and a new project,
+ * load their screens as they are first opened, beside what they read, so
+ * the window's first screen doesn't wait to parse them; the start, the home,
+ * projects and tasks are in from the first.
  */
 
 export const routeTree = rootRoute.addChildren([startRoute, newProjectRoute, projectRoute, taskRoute, settingsRoute, pageRoute])
