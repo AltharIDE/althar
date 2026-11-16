@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import type { EndpointRead } from '@althar/provider-adapters'
+import { type EndpointRead, probeClaudeSandbox } from '@althar/provider-adapters'
 import type { PageDone } from '@althar/runtime/pageBridge'
 import {
   AfterOpen,
@@ -138,6 +138,12 @@ const pages = pagesWith((message) => parent.postMessage(message))
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const firstScreen = Deferred.makeUnsafe<void>()
 const opened = Effect.runPromise(Deferred.await(firstScreen))
+
+/*
+ * Whether Claude Code's sandbox can start here, worked out off the thread once the first screen is drawn (on Linux it
+ * starts bubblewrap): a Claude Code session started sooner waits for it, and starts it if it hasn't (registry.ts).
+ */
+void opened.then(() => probeClaudeSandbox())
 const fetchNow = appFetchOf(net)
 const appFetch: Fetch = async (input, init) => {
   await opened

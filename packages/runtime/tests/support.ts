@@ -132,8 +132,11 @@ const launchedEnv = (agentId: string, cwd: string, env: Readonly<Record<string, 
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
 
-/** Whether the fake `claude-code` holds the coordinator in a sandbox it never leaves, as Claude Code's does where it starts. */
-export const fakeSandbox = { contains: false }
+/**
+ * Whether the fake `claude-code` holds the coordinator in a sandbox it never leaves, as Claude Code's does where it starts;
+ * and its sandbox probe, which each of its sessions waits for first (`ready`), in at once unless a test holds it.
+ */
+export const fakeSandbox = { contains: false, ready: (): Promise<unknown> => Promise.resolve() }
 
 /** When a fake agent's sign-in ends, by its id, as its status says it where the test sets one (Claude Code's claude.ai sign-in). */
 export const fakeSignInEnds = new Map<string, string>()
@@ -192,6 +195,7 @@ export const definition = (
           return { ...(options?.skills === undefined ? {} : registry['claude-code'].sessionMeta?.(role, options)), fake: { asks: true } }
         },
         contains: () => fakeSandbox.contains,
+        ready: () => fakeSandbox.ready(),
         upFront: true as const,
       }
     : {}),
