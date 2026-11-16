@@ -247,6 +247,56 @@ describe('the time now', () => {
   })
 })
 
+describe('the one clock', () => {
+  it('ticks once for every place that reads it at a pace, so they say the same time in the same frame', () => {
+    vi.useFakeTimers({ now: new Date('2026-10-03T12:00:00.000Z') })
+    try {
+      const timers = vi.spyOn(globalThis, 'setInterval')
+      const header = renderHook(() => useNow(true))
+      const thread = renderHook(() => useNow(true))
+      expect(timers).toHaveBeenCalledTimes(1)
+      act(() => {
+        vi.advanceTimersByTime(2_000)
+      })
+      expect(header.result.current).toBe('2026-10-03T12:00:02.000Z')
+      expect(thread.result.current).toBe(header.result.current)
+      // A place that stops keeps what it last said; the clock goes on for the other.
+      thread.rerender()
+      header.unmount()
+      act(() => {
+        vi.advanceTimersByTime(1_000)
+      })
+      expect(thread.result.current).toBe('2026-10-03T12:00:03.000Z')
+      thread.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('says the time from now to a place that starts reading it, never earlier than it said before', () => {
+    vi.useFakeTimers({ now: new Date('2026-10-03T12:00:00.000Z') })
+    try {
+      const home = renderHook(() => useNow(true, 60_000))
+      act(() => {
+        vi.advanceTimersByTime(30_000)
+      })
+      // Read a minute's pace half a minute after its last tick: from now, not from that tick.
+      const later = renderHook(({ ticking }) => useNow(ticking, 60_000), { initialProps: { ticking: false } })
+      expect(later.result.current).toBe('2026-10-03T12:00:30.000Z')
+      later.rerender({ ticking: true })
+      expect(later.result.current).toBe('2026-10-03T12:00:30.000Z')
+      act(() => {
+        vi.advanceTimersByTime(0)
+      })
+      expect(home.result.current).toBe('2026-10-03T12:00:30.000Z')
+      home.unmount()
+      later.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('what the person sends', () => {
   it('shows at once as the window’s copy, after what is there, until the store’s copy of it arrives, or the send fails', () => {
     const held = [{ ...items.you('Add a retry'), id: 'already-held', sequence: 4 }]
