@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import { type CompileCaching, keepCompiled, keepCompiledNow } from '../src/compileCache'
@@ -55,8 +57,9 @@ describe('V8’s compiled code, kept between launches', () => {
   })
 
   it('lives in the window’s folder of the profile, or of the app’s own data where no profile is given', () => {
-    expect(compiledIn(windowFolderOf('/tmp/e2e/profile', '/home/dana/.config'))).toBe('/tmp/e2e/profile/window/compile-cache')
-    expect(windowFolderOf(undefined, '/home/dana/.config')).toBe('/home/dana/.config/@althar/desktop')
-    expect(windowFolderOf('', '/home/dana/.config')).toBe('/home/dana/.config/@althar/desktop')
+    // By the system's own separators, as the folders are on disk: backslashes on Windows.
+    expect(compiledIn(windowFolderOf('/tmp/e2e/profile', '/home/dana/.config'))).toBe(join('/tmp/e2e/profile', 'window', 'compile-cache'))
+    expect(windowFolderOf(undefined, '/home/dana/.config')).toBe(join('/home/dana/.config', '@althar', 'desktop'))
+    expect(windowFolderOf('', '/home/dana/.config')).toBe(join('/home/dana/.config', '@althar', 'desktop'))
   })
 })
