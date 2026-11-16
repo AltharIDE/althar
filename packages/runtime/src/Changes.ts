@@ -5137,6 +5137,20 @@ export class Changes extends Context.Service<
           return run?.state === 'running'
         })
 
+      /**
+       * Whether how the task's checks end waits for its run, as while its plan still publishes (`publishing`): not for a Ship
+       * at its merge stop, which is up and waits on those very checks, so its card shows them as they go.
+       */
+      const checksWait = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [run] = yield* sql<{ state: string; at: string | null }>`
+            SELECT state, json_extract(parameters, '$.ships.at') AS at FROM runs
+            WHERE task_id = ${taskId} AND (plan_id IS NOT NULL OR json_type(parameters, '$.ships') = 'object')
+            ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          return run?.state === 'running' && run.at !== 'merge'
+        })
+
       /** Says in the task's thread that its checks still failed after FIX_ROUNDS fixes while Althar saw them through: the change is the person's now. */
       const gaveUp = (link: LinkRow, name: string) =>
         Effect.gen(function* () {
@@ -5282,8 +5296,8 @@ export class Changes extends Context.Service<
           let checks = before.checks
           let checksRevision = before.checksRevision ?? 0
           // While its plan still publishes, how its checks end waits: once the run has ended, they are heard as the change's,
-          // and a failure goes where it should (ADR-040).
-          const held = now.headSha !== null && (yield* publishing(link.taskId))
+          // and a failure goes where it should (ADR-040). A Ship waiting to merge on them hears them as they go.
+          const held = now.headSha !== null && (yield* checksWait(link.taskId))
           if (held) happened = true
           // Checks the host won't show Althar don't stop it hearing the rest: the thread says so, once a commit, and a change in
           // Althar's hands is the person's, since Althar can't see its checks through (ADR-041).

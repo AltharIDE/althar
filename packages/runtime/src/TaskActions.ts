@@ -26,6 +26,7 @@ import { answeredIn, quickIn } from './kinds'
 import { MergeReviews } from './MergeReviews'
 import { Reviews } from './Reviews'
 import { shelve } from './scratch'
+import { taskShipRoute } from './shipRoute'
 import { branchOnFirstWrite } from './firstWrite'
 import { Projects } from './Projects'
 import { Plans } from './Plans'
@@ -909,7 +910,13 @@ export class TaskActions extends Context.Service<
         pull_request: Schema.optional(Schema.String),
       })
       const Named = Schema.Struct({ task: Schema.optional(Schema.String) })
-      const ShipAsked = Schema.Struct({ task: Schema.optional(Schema.String), change: Schema.optional(Schema.String) })
+      // Its route, where the person said one: as far as a push, or ready for review; merging stays the person's own Ship.
+      const ShipAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        change: Schema.optional(Schema.String),
+        review: Schema.optional(Schema.Boolean),
+        far: Schema.optional(Schema.Literals(['push', 'ready'])),
+      })
       const AfterMerge = Schema.Struct({ task: Schema.optional(Schema.String), answer: Schema.Literals(['fix', 'leave']) })
       const NewChange = Schema.Struct({
         task: Schema.optional(Schema.String),
@@ -1047,19 +1054,33 @@ export class TaskActions extends Context.Service<
           return `${task.slug}: ${holds}. ${threadsSaying(access, task)}.`
         })
 
+      /**
+       * The route of a Ship an agent asks for, on the person's word: what they said of its review and how far, the rest the
+       * task's own, as its card offers it. Never as far as a merge, which is the person's own Ship, or the coordinator's
+       * merge on their word: one their default would merge goes as far as ready for review.
+       */
+      const agentRoute = (taskId: string, asked: { readonly review?: boolean | undefined; readonly far?: 'push' | 'ready' | undefined }) =>
+        Effect.map(taskShipRoute(changes, taskId), (own) => ({
+          // With no reviewer yet, its review is on: a reviewer the turn adds before it ships still reads it.
+          review: asked.review ?? (own.route.review || !own.reviewable),
+          far: asked.far ?? (own.route.far === 'merge' ? ('ready' as const) : own.route.far),
+        }))
+
       const shipTask = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(ShipAsked, input)
           const task = yield* named(access, asked.task)
           // Its own lead asks in its turn: it ships once that turn ends, with all the turn committed.
           const own = access.role === 'lead' && task.id === access.taskId
-          const said = yield* envelope('task.ship', { taskId: task.id, change: asked.change ?? null }, undefined, actorOf(access))
+          const route = yield* agentRoute(task.id, asked)
+          const said = yield* envelope('task.ship', { taskId: task.id, change: asked.change ?? null, route }, undefined, actorOf(access))
           yield* plainly(
             runs.ship({
               envelope: said,
               taskId: task.id,
               ...(own ? { afterTurn: true } : {}),
               ...(asked.change === undefined ? {} : { change: asked.change }),
+              route,
             }),
             task.slug,
           )
@@ -1709,8 +1730,10 @@ export class TaskActions extends Context.Service<
           }
           const sent = yield* plainly(mergeReviews.fix(task.id), task.slug)
           const said = yield* envelope('task.ship', { taskId: task.id, afterMerge: true }, undefined, actorOf(access))
+          // Its route read once the fix is in, when what waits for Ship is the fix.
+          const fixShipped = Effect.flatMap(agentRoute(task.id, {}), (route) => runs.ship({ envelope: said, taskId: task.id, route }))
           yield* Effect.forkDetach(
-            Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), runs.ship({ envelope: said, taskId: task.id })).pipe(
+            Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), fixShipped).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not ship a fix after a merge', cause)),
             ),
           )
@@ -1925,6 +1948,17 @@ export class TaskActions extends Context.Service<
               change: {
                 type: 'string',
                 description: 'One change to ship, by its name or branch, with what waits beneath it; else every change waiting.',
+              },
+              review: {
+                type: 'boolean',
+                description:
+                  'Only where the person said: false ships without its review, which then never runs for it. Left out, as the task goes.',
+              },
+              far: {
+                type: 'string',
+                enum: ['push', 'ready'],
+                description:
+                  'Only where the person said how far: push leaves a draft pull request a draft and opens a new one as a draft; ready marks an open draft ready for review and opens a new one ready. Left out, as the task goes. Merging is the person’s own Ship.',
               },
             },
           },

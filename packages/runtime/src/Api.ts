@@ -128,6 +128,7 @@ import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, runOutside, sendMidTurn, setPostTeamReviews, setRunOutside, setSendMidTurn } from './Reviews'
+import { setShipRoute, shipRouteSetting } from './shipRoute'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
 import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
@@ -1182,6 +1183,7 @@ export const handlers = apiLayer(
           Effect.gen(function* () {
             const on = yield* coAuthorOn
             const atOnce = yield* busy.atOnce
+            const shipRoute = yield* shipRouteSetting
             return {
               plansAndReviews: yield* plansAndReviewsOf,
               newProjects: yield* newProjectDefaultsOf,
@@ -1190,6 +1192,7 @@ export const handlers = apiLayer(
               postTeamReviews: yield* postTeamReviews,
               runOutside: yield* runOutside,
               sendMidTurn: yield* sendMidTurn,
+              ...(shipRoute === undefined ? {} : { shipRoute }),
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
               agentsAtOnce: {
@@ -1305,6 +1308,8 @@ export const handlers = apiLayer(
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetShipRoute: ({ commandId, route }) =>
+        once(commandId, api(setShipRoute(route)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetRunOutside: ({ commandId, to }) => once(commandId, api(setRunOutside(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       RunIt: ({ commandId, taskId, how }) => once(commandId, api(reviews.runIt({ taskId, ...(how === undefined ? {} : { how }) }))),
       StopRunning: ({ commandId, taskId }) => once(commandId, api(reviews.stopRunning({ taskId, actorId: actorId }))),
@@ -2116,12 +2121,26 @@ export const handlers = apiLayer(
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
       DeclineReview: ({ commandId, taskId }) => once(commandId, api(runs.declineReview(taskId, actorId))),
-      Ship: ({ commandId, taskId, change }) =>
+      Ship: ({ commandId, taskId, change, route }) =>
         once(
           commandId,
           api(
-            Effect.flatMap(envelope('task.ship', { taskId, change: change ?? null }, commandId), (said) =>
-              runs.ship({ envelope: said, taskId, ...(change === undefined ? {} : { change }) }),
+            Effect.flatMap(envelope('task.ship', { taskId, change: change ?? null, route: route ?? null }, commandId), (said) =>
+              runs.ship({
+                envelope: said,
+                taskId,
+                ...(change === undefined ? {} : { change }),
+                ...(route === undefined ? {} : { route }),
+              }),
+            ),
+          ),
+        ),
+      RouteShip: ({ commandId, taskId, route }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.route_ship', { taskId, route }, commandId), (said) =>
+              runs.routeShip({ envelope: said, taskId, route }),
             ),
           ),
         ),

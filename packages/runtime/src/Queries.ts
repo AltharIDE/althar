@@ -57,6 +57,7 @@ import {
   type TaskFindings,
   waitingIn,
   plainTitle,
+  shipsToOpen,
   toolPhrase,
 } from '@althar/contracts'
 import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } from 'effect'
@@ -88,6 +89,7 @@ import { taskFindingsOf } from './taskFindings'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { handedOf, issueCardsWaiting, issueChangesWaiting, issueDraftsWaiting, kindOf } from './kinds'
 import { reviewOfferOf } from './reviewOffer'
+import { shipUnderWayOf, taskShipRoute } from './shipRoute'
 import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
@@ -3796,6 +3798,27 @@ export class Queries extends Context.Service<
             FROM workspaces w
             WHERE w.task_id = ${head.taskId} AND w.access = 'write' AND w.reviewing IS NULL AND w.state IN ('ready', 'away')
             ORDER BY w.created_at, w.rowid`
+          // The route its Ship takes when pressed without one, while something waits for Ship (held, or commits for a pull request
+          // still to open, as the card reads it): the same the press takes (shipRoute.ts).
+          const toShip =
+            card?.held !== undefined ||
+            shipsToOpen({
+              end: card?.plan?.end ?? null,
+              open: false,
+              commits: links.changes.length === 0 ? said.commits : (card?.unshipped?.commits ?? 0),
+            })
+          const shipRoute = toShip
+            ? yield* taskShipRoute(yield* Changes, head.taskId).pipe(Effect.orElseSucceed(() => undefined))
+            : undefined
+          // Its Ship under way: the route, as changed since, and the stop it is at.
+          const [shipRun] = yield* sql<{ parameters: string; step: string | null }>`
+            SELECT r.parameters,
+              (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = e.id
+                AND a.state IN ('admitted', 'running', 'held', 'waiting_attention') ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1) AS step
+            FROM runs r JOIN workflow_executions e ON e.run_id = r.id
+            WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
+              AND r.state = 'running' AND json_type(r.parameters, '$.ships') = 'object'`
+          const shipping = shipRun === undefined ? undefined : shipUnderWayOf(shipRun.parameters, shipRun.step)
           // Several changes, by name: one in several repositories is one change, with its row there as it was.
           const severalChanges = new Set(lineRows.map((row) => row.name ?? '')).size > 1
           const waitingLines = !severalChanges
@@ -3923,6 +3946,8 @@ export class Queries extends Context.Service<
                 ? { nothingBuilt: true }
                 : {}),
               skipReview: (reviewing?.left ?? 0) > 0 && card?.step !== 'publish',
+              ...(shipRoute === undefined ? {} : { shipRoute }),
+              ...(shipping === undefined ? {} : { shipping }),
               // Begun, of its own work, not merged, and ending with no pull request: Make it a change gives it both at once.
               ...(card?.plan != null &&
               card.reviewing == null &&
