@@ -203,6 +203,8 @@ export const AccountStatus = Schema.Struct({
   outUntil: Schema.NullOr(Schema.String),
   /** What made its folder, when Althar didn't. */
   adoptedFrom: Schema.NullOr(Schema.String),
+  /** The selected GitHub sign-in host for the Copilot CLI account. */
+  signInHost: Schema.optional(Schema.String),
   /** When its sign-in ends, where its agent's status says (Claude Code's claude.ai sign-in); not given where it doesn't. */
   endsAt: Schema.optional(Schema.String),
   /** Its sign-in ends within the days the runtime warns in, or has ended: given with `endsAt`, so the row and the warning agree. */
@@ -4235,6 +4237,9 @@ export const WatchEvent = Schema.Union([
     aggregateId: Schema.String,
     projectId: Schema.NullOr(Schema.String),
     threadId: Schema.NullOr(Schema.String),
+    /** On a task's change that was a rename: the title it was given, and whether an agent (a lead or the coordinator) gave it, not the person. */
+    renamedTo: Schema.optional(Schema.String),
+    renamedByAgent: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     _tag: Schema.Literal('Streaming'),
@@ -5516,8 +5521,13 @@ const WorkApi = RpcGroup.make(
   /**
    * Opens the agent's own sign-in for the account, in Terminal, where the
    * person signs in: the line it runs, and whether it could open it.
+   * Copilot CLI accepts a GitHub host, remembered for the account.
    */
-  command('SignInAccount', { accountId: Schema.String }, Schema.Struct({ line: Schema.String, opened: Schema.Boolean })),
+  command(
+    'SignInAccount',
+    { accountId: Schema.String, host: Schema.optional(Schema.String) },
+    Schema.Struct({ line: Schema.String, opened: Schema.Boolean }),
+  ),
   /** Signs an account in inside Althar, this way: its id, to ask how it stands. */
   command(
     'StartAccountSignIn',

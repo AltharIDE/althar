@@ -757,4 +757,5 @@ const accountRefused = {
   no_name: 'Give the account a name.',
   one: "This agent can't have a second account yet.",
   no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
+  host: 'Enter a GitHub Enterprise hostname or HTTPS address for GitHub Copilot CLI.',
 } as const satisfies Record<AccountRefused['reason'], string>

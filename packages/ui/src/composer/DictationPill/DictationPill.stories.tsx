@@ -51,6 +51,18 @@ export const Written: Story = {
 export const SendFailed: Story = {
   args: { ...Written.args, phase: 'written', error: "It didn't send. It's still here." },
 }
+/** Started with no composer to say it to: it chooses where it goes once written, or goes where the person is. */
+export const Unplaced: Story = {
+  args: {
+    phase: 'written',
+    to: 'Not placed yet',
+    elapsed: null,
+    onBack: undefined,
+    onThrow: () => {},
+    place: { label: 'Place it in…', onPlace: () => {} },
+    move: { label: 'Put it in this task', onMove: () => {} },
+  },
+}
 export const Failed: Story = { args: { phase: 'failed', elapsed: null, said: '0:12', onRetry: () => {} } }
 
 /** Words come in; the pill stays as wide as it was. */
@@ -122,6 +134,7 @@ export const AllStates: Story = {
         // It can't go from here (the task's lead isn't on it): back to its composer to send it.
         { state: 'written, can’t go from here', node: <DictationPill {...args} phase="written" elapsed={null} onKeep={() => {}} /> },
         { state: 'didn’t send', node: <DictationPill {...args} {...SendFailed.args} /> },
+        { state: 'written, no composer to say it to', node: <DictationPill {...args} {...Unplaced.args} /> },
         { state: 'not written down', node: <DictationPill {...args} {...Failed.args} /> },
       ]}
     />

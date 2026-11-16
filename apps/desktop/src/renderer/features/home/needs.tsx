@@ -403,11 +403,12 @@ export function needLineOf(
                   ? undefined
                   : labelWords(here, `${ready.task.change.prefix}${ready.task.change.number}`, why !== null)
               }
-              busy={doing?.(ready.task.taskId) === true}
+              // Pressed, it stays its line while it merges (`mergedHere`): Merge answers the press in its place.
+              standing={doing?.(ready.task.taskId) === true ? 'merging' : null}
               onMerge={() => onNext(ready.task, here)}
               {...(ready.task.change?.canBypassQueue === true ? { onBypassQueue: () => onNext(ready.task, here, true) } : {})}
             >
-              {doing?.(ready.task.taskId) === true ? doingWords(here) : why === null ? nextWords(here) : standingText.nextFailed.again}
+              {why === null ? nextWords(here) : standingText.nextFailed.again}
             </MergeButton>
           ) : (
             <Button

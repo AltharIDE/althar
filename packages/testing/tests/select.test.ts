@@ -100,6 +100,29 @@ const runs = (jobs: Plan['jobs']) =>
 const RUNTIME_PARTS = ['packages/runtime 1/4', 'packages/runtime 2/4', 'packages/runtime 3/4', 'packages/runtime 4/4']
 
 describe('the selection', () => {
+  it('checks and tests Node transports and their runtime/desktop consumers on Linux and Windows', () => {
+    const files = {
+      ...FILES,
+      'packages/transport-node/package.json': json({ name: '@althar/transport-node', exports: { '.': './src/index.ts' } }),
+      'packages/transport-node/src/index.ts': "export * from './ssh'",
+      'packages/transport-node/src/ssh.ts': 'export const connect = () => {}',
+      'packages/transport-node/tests/ssh.test.ts': "import { connect } from '../src/ssh'",
+      'packages/runtime/package.json': json({
+        name: '@althar/runtime',
+        exports: { '.': './src/index.ts' },
+        dependencies: { '@althar/transport-node': 'workspace:*' },
+      }),
+      'packages/runtime/src/Runtime.ts': "import { connect } from '@althar/transport-node'",
+    }
+    const at = { files: Object.keys(files), read: (path: string) => files[path as keyof typeof files] ?? '' }
+    const changed = ['packages/transport-node/src/ssh.ts']
+    for (const workflow of ['harness', 'windows'] as const) {
+      const selected = plan(changed, at, workflow).jobs.flatMap((job) => job.parts)
+      expect(selected.find((part) => part.dir === 'packages/transport-node')).toMatchObject({ check: workflow === 'harness', tests: 'all' })
+      expect(selected.some((part) => part.dir === 'packages/runtime')).toBe(true)
+    }
+    expect(plan(changed, at, 'desktop')).toMatchObject({ e2e: true, windowsE2e: true })
+  })
   it('keeps checks and other packages when full runtime coverage replaces the selected tests', () => {
     const selected = plan(['packages/runtime/src/git.ts'], REPO, 'harness').jobs
     const jobs = coveredRuntime(selected)

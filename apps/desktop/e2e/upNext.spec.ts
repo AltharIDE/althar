@@ -10,11 +10,10 @@ import { launch, openFirstProject, planTask, showPanes, shown, startTask, still 
 /*
  * Tasks started while every place is taken wait in the board's Up next, in the
  * order they will start, above the plans, not in Running: nothing of them has
- * had an agent. With one agent at a time, held by a server a finished task
- * left running, three tasks wait, one plan is held and one counts down. Up
- * next is one order: the person drags the held plan to the top, which starts
+ * had an agent. With one agent at a time, held by a task whose lead is working,
+ * three tasks wait, one plan is held and one counts down. Up next is one order: the person drags the held plan to the top, which starts
  * it there, and the first that waited past the plan counting down, which
- * starts that plan ahead of it. When the server is stopped, the plan put
+ * starts that plan ahead of it. When the running task is stopped, the plan put
  * first moves to Running by itself. Shots: test-results/upnext-*.png.
  */
 
@@ -37,14 +36,8 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(settings).toHaveCount(0)
     await tabs.getByRole('button', { name: /^meridian/ }).click()
 
-    await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
-    // Its server is running before the next task is asked for: a task started before that would take the place itself
-    // and leave only two waiting, whatever the test then counted. The place holder shows only over a task that waits,
-    // so the task's own thread says it ran the command that keeps the place.
-    await page.getByRole('button', { name: /Open task/ }).click()
-    await expect(page.getByRole('button', { name: /ran 1 command/ })).toBeVisible()
-    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await startTask(page, 'Check checkout', '[lead:wait]')
+    await expect(page.getByRole('article', { name: 'Check checkout', exact: true })).toContainText('Running')
     // Each waits before the next is asked for, so a plan left counting down is caught where it happens rather than as a
     // row in the wrong place later.
     await startTask(page, 'Add a retry', '[lead:wait]')
@@ -84,7 +77,7 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     await expect(rows.nth(2)).toContainText('Rename the helper')
     await expect(rows.nth(3)).toContainText('Plan the release')
     await expect(rows.nth(4)).toContainText('Hold this plan')
-    await expect(running.getByRole('article')).toHaveCount(0)
+    await expect(running.getByRole('article')).toHaveCount(1)
 
     // Presses a row's grip and drags it, a step at a time, to a point, letting go there.
     const drag = async (title: string, to: { x: number; y: number }) => {
@@ -132,12 +125,10 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
 
     // The place frees: the plan put first starts by itself, and moves to Running, where it keeps the place; the rest wait on
     // in the order put.
-    await showPanes(page, { conversation: true, board: false })
-    await page
-      .getByRole('button', { name: /^Keeping a place/ })
-      .first()
-      .click()
-    await page.getByRole('dialog', { name: 'Keeping a place' }).getByRole('button', { name: /^Stop/ }).click()
+    await running.getByRole('button', { name: 'Check checkout', exact: true }).click()
+    await page.getByRole('button', { name: 'More for this task' }).click()
+    await page.getByRole('menuitem', { name: /Stop the task/ }).click()
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
     await showPanes(page, { conversation: false, board: true })
     await expect(running.getByRole('button', { name: 'Hold this plan' })).toBeVisible()
     await expect(rows.nth(0)).toContainText('Tidy the docs')

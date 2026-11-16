@@ -33,7 +33,7 @@ export type Go =
   | { readonly to: 'merge'; readonly taskId: string; readonly head: string; readonly url: string }
   | { readonly to: 'copy'; readonly text: string }
   | { readonly to: 'file'; readonly threadId: string; readonly path: string }
-  | { readonly to: 'command'; readonly command: 'stop' | 'resume' | 'new-project' | 'usage'; readonly taskId?: string }
+  | { readonly to: 'command'; readonly command: 'stop' | 'resume' | 'new-project' | 'usage' | 'dictate'; readonly taskId?: string }
 
 /** A thing a chosen entry can do, beyond opening. */
 export interface Act {

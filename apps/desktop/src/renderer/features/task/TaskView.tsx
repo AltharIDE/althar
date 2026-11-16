@@ -124,6 +124,7 @@ import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
 import { useSearchReveal } from '../finder/revealSearch'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
 import { pictureOf } from '../../shared/code/FilePicture'
@@ -650,6 +651,8 @@ export function TaskView({
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
+  // An agent's rename types itself into the title; the person's own shows at once.
+  const typedTitle = useTaskTitle(snapshot?.task.id, snapshot?.task.title ?? '')
   if (snapshot === null) {
     return (
       <div className={embedded ? s.aside : s.window}>
@@ -970,6 +973,8 @@ export function TaskView({
       change.head === null
         ? undefined
         : void model.accept([{ head: change.head, url: change.url, ...(bypassQueue ? { bypassQueue: true } : {}) }]),
+    mergeStanding: model.mergeStanding,
+    mergeAwaits: model.mergeAwaits,
     postReview: (draftId) => void model.postReview(draftId),
     stopLaunch: (id) => void model.stopLaunch(id),
     openUrl: (url) => void window.open(url, '_blank'),
@@ -1296,6 +1301,7 @@ export function TaskView({
                 to={snapshot.project.name}
                 kbd="esc"
                 title={snapshot.task.title}
+                shown={typedTitle}
                 titleLevel={1}
                 maxLength={TITLE_LENGTH}
                 editing={renaming}
@@ -1382,6 +1388,8 @@ export function TaskView({
                   onMarkAllReady={(urls) => void model.markAllReady(urls)}
                   merging={model.merging}
                   mergeRefused={model.mergeRefused}
+                  mergeStanding={model.mergeStanding}
+                  mergeAwaits={model.mergeAwaits}
                   onPostScreenshots={model.postScreenshots}
                   onOpenFile={changes.show}
                   conflict={model.conflict}
@@ -1552,6 +1560,9 @@ export function TaskView({
                           agents={model.agents}
                           busy={model.pending}
                           onMerge={(change) => void model.accept([change])}
+                          {...(card.taskId === snapshot.task.id
+                            ? { changes: snapshot.task.changes, mergeStanding: model.mergeStanding }
+                            : {})}
                           {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
                           onShow={showInThread}
                         />

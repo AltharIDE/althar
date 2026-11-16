@@ -26,6 +26,7 @@ export const PostedShot = Schema.Struct({
   caption: Schema.String,
   digest: Schema.String,
   url: Schema.String,
+  note: Schema.optional(Schema.String),
   /** The pull request's head when it was posted; null where it wasn't known. */
   head: Schema.NullOr(Schema.String),
 })
@@ -90,7 +91,9 @@ export const changedBetween = (
   const now = new Set(posting.map((shot) => shot.key))
   const differ = posting.filter(
     (shot) =>
-      before.get(shot.key)?.digest !== shot.digest || (shot.caption !== undefined && before.get(shot.key)?.caption !== shot.caption),
+      before.get(shot.key)?.url === '' ||
+      before.get(shot.key)?.digest !== shot.digest ||
+      (shot.caption !== undefined && before.get(shot.key)?.caption !== shot.caption),
   ).length
   const gone = shown.filter((shot) => !now.has(shot.key)).length
   return differ + gone
@@ -112,7 +115,13 @@ export const standingOf = (now: ReadonlyArray<ScreenshotNow>, kept: Kept | undef
     // Only the views Outputs still shows: one gone is nothing to leave out.
     leftOut: leftOut.filter((key) => now.some((shot) => shot.key === key)),
     commentUrl: kept?.commentUrl ?? null,
-    failed: kept?.failed ?? null,
+    failed:
+      kept?.failed ??
+      (kept?.shown
+        .filter((shot) => shot.url === '' && posting.some((now) => now.key === shot.key && now.digest === shot.digest))
+        .map((shot) => shot.note ?? `Left out: ${shot.caption}`)
+        .join(' ') ||
+        null),
   }
 }
 
@@ -156,7 +165,9 @@ const short = (head: string | null) => (head === null ? null : head.slice(0, 7))
 const SHOWN_WIDTH = 720
 
 const pictureOf = (shot: PostedShot, width = SHOWN_WIDTH) =>
-  `<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${width}">`
+  shot.url === ''
+    ? plain(shot.note ?? 'Left out: this picture could not be uploaded.')
+    : `${shot.note ? `${plain(shot.note)}<br>` : ''}<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${width}">`
 
 /** How wide each picture of a Before | After table shows, so the two fit side by side. */
 const PAIRED_WIDTH = 356

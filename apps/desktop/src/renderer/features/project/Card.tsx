@@ -22,6 +22,7 @@ import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
 import { stepIndex, stepNames, stepText } from '../../shared/steps'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
 import s from './Card.module.css'
@@ -164,6 +165,7 @@ function PlanCard({
   /** Started, waiting for a free agent: what for. */
   queued?: string
 }) {
+  const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
   const effortOf = useEffortNames()
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
@@ -207,7 +209,7 @@ function PlanCard({
             presets: actions.presets.filter((one) => one.reviews === (card.reviewing != null)),
             onPresetChange: (name: string) => actions.onPreset?.(plan.id, name),
           })}
-      title={card.title}
+      title={title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}
       steps={launchSteps({ ...plan, steps }, named, effortOf, card.reviewing != null)}
@@ -293,6 +295,7 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
 }
 
 function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
+  const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
   const effortOf = useEffortNames()
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
@@ -349,7 +352,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
     <TaskCard
       errands={card.errands}
       task={card.slug}
-      title={card.title}
+      title={title}
       status={status}
       steps={steps}
       at={status === TaskStatus.Done || handedBack !== null ? steps.length - 1 : at}

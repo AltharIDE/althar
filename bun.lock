@@ -26,7 +26,9 @@
         "@althar/domain": "workspace:*",
         "@althar/provider-adapters": "workspace:*",
         "@althar/runtime": "workspace:*",
+        "@althar/transport-node": "workspace:*",
         "effect": "4.0.7",
+        "sharp": "^0.35.5",
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
@@ -59,6 +61,7 @@
         "posthog-node": "5.73.1",
         "react": "^19.3.1",
         "react-dom": "^19.3.1",
+        "sharp": "^0.35.5",
         "sherpa-onnx-node": "1.13.8",
       },
       "devDependencies": {
@@ -94,7 +97,9 @@
         "@althar/persistence-sqlite": "workspace:*",
         "@althar/provider-adapters": "workspace:*",
         "@althar/runtime": "workspace:*",
+        "@althar/transport-node": "workspace:*",
         "effect": "4.0.7",
+        "sharp": "^0.35.5",
         "tar": "7.5.22",
       },
       "devDependencies": {
@@ -274,10 +279,12 @@
         "@althar/persistence-sqlite": "workspace:*",
         "@althar/provider-adapters": "workspace:*",
         "@althar/skills": "workspace:*",
+        "@althar/transport-node": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.32.2",
         "effect": "4.0.7",
         "fflate": "0.8.3",
         "jsonc-parser": "3.3.1",
+        "sharp": "^0.35.5",
       },
       "devDependencies": {
         "@althar/testing": "workspace:*",
@@ -318,6 +325,24 @@
         "@playwright/test": "^1.65.1",
         "@types/node": "^24.0.0",
         "oxc-parser": "0.158.0",
+        "typescript": "^7.0.2",
+        "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
+        "vite-plus": "1.6.0",
+        "vitest": "5.1.0",
+      },
+    },
+    "packages/transport-node": {
+      "name": "@althar/transport-node",
+      "version": "0.0.0",
+      "dependencies": {
+        "@althar/contracts": "workspace:*",
+        "effect": "4.0.7",
+      },
+      "devDependencies": {
+        "@althar/testing": "workspace:*",
+        "@effect/vitest": "4.0.7",
+        "@types/node": "^24.0.0",
+        "@vitest/coverage-v8": "5.1.0",
         "typescript": "^7.0.2",
         "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
         "vite-plus": "1.6.0",
@@ -417,6 +442,8 @@
     "@althar/skills": ["@althar/skills@workspace:packages/skills"],
 
     "@althar/testing": ["@althar/testing@workspace:packages/testing"],
+
+    "@althar/transport-node": ["@althar/transport-node@workspace:packages/transport-node"],
 
     "@althar/ui": ["@althar/ui@workspace:packages/ui"],
 

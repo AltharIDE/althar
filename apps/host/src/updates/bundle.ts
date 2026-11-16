@@ -135,7 +135,7 @@ export const assembleBundle = async (source: BundleSource, destination: string) 
     JSON.stringify({ name: '@althar/host-release', type: 'module', version: source.version, license: 'Apache-2.0' }),
     false,
   )
-  await copyDependencies(source.entry, destination, ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp'])
+  await copyDependencies(source.entry, destination, ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp', 'sharp'])
 }
 
 /** Publicly readable is fine; another user must not be able to change the selected trust anchor. */

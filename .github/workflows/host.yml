@@ -9,6 +9,7 @@ on:
     paths:
       - 'apps/host/**'
       - 'packages/contracts/**'
+      - 'packages/transport-node/**'
       - 'packages/domain/**'
       - 'packages/connectors/**'
       - 'packages/persistence-sqlite/**'
@@ -31,6 +32,7 @@ on:
     paths:
       - 'apps/host/**'
       - 'packages/contracts/**'
+      - 'packages/transport-node/**'
       - 'packages/domain/**'
       - 'packages/connectors/**'
       - 'packages/persistence-sqlite/**'
@@ -88,6 +90,12 @@ jobs:
         with:
           binary: 'false'
       - uses: ./.github/actions/flaky/quarantine
+      - name: Prepare isolated OpenSSH integration tests
+        run: |
+          if [ ! -x /usr/sbin/sshd ]; then
+            sudo apt-get update
+            sudo apt-get install -y openssh-server
+          fi
       - run: bun run check
       - run: bun run test:coverage --maxWorkers=2
       - name: Verify a signed portable release with real bundled provider CLIs

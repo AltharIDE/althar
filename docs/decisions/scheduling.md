@@ -65,6 +65,14 @@ its installs, builds and tests easily takes several GB and many cores.
   30 seconds with no work (`busy.quiet`), so a pause in a test run doesn't
   flip it back and forth. Where the CPU can't be read, as on Windows, it
   counts, because when in doubt Althar protects the computer.
+- **A finished task keeps no place through background commands.** Once its
+  latest run succeeds, fails, is cancelled or is suspended, or the task is
+  done or abandoned, anything it left running takes no place. A preview stays
+  available to click around without reserving an agent. CPU accounting above
+  still applies to unfinished work. A live turn always counts, including on
+  a done or suspended task and on a helper whose lead has finished its turn.
+  Stale step and starting records on a done, abandoned or suspended task do
+  not count; the helper's own session decides whether it is working.
 - **One task, one place.** What a task's agents left running is part of the
   task's place, never a second one, so a task never waits behind its own
   server.
@@ -99,7 +107,7 @@ context again when it goes on.
 The step after another on the same task takes the place of the agent before
 it, ahead of anything that waits. This covers the review after the lead's step,
 the lead settling after a review, and a follow-up's review. Servers that agent
-left running go on in the same place. Work of a task that has to wait while
+left running go on without reserving a place once the task finishes. Work of a task that has to wait while
 another of its agents is at work gets the task's place first once it frees.
 What the person said to an agent, and hasn't been delivered yet, counts as that
 agent's next turn on its way, so the place isn't given away between turns.
@@ -382,3 +390,4 @@ justifies a receiver.
 - 12 Nov 2026: leads can yield on durable external conditions and resume when they are met, without holding an agent place (DEV-176).
 - 11 Nov 2026: the runtime reads the computer in the background while the meter is on, so the peek's trace isn't empty when a window comes back into view.
 - 10 Nov 2026: a lead's helpers each take a place of their own, four of a task's at once (ADR-087, [tasks § Helpers](tasks.md#helpers)).
+- 15 Nov 2026: completed or stopped tasks release background-only places; live lead and helper turns still count, whatever the task’s recorded state.

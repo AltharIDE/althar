@@ -10,7 +10,7 @@ import {
 } from '@althar/contracts'
 import {
   Board,
-  BoardCard,
+  BoardCard as KitBoardCard,
   boardCardText,
   type BoardCardProps,
   BoardColumn,
@@ -27,16 +27,16 @@ import {
   FactLine,
   FileChips,
   Findings,
-  KeptRow,
+  KeptRow as KitKeptRow,
   LinkButton,
   MenuItem,
   MergeButton,
   NextLine,
-  NextRow,
+  NextRow as KitNextRow,
   NextStep,
   Outcome,
   PullChip,
-  SettledRow,
+  SettledRow as KitSettledRow,
   ScratchShelf,
   SettleWays,
   StartedBy,
@@ -49,9 +49,10 @@ import {
   Wait,
   Problem,
 } from '@althar/ui'
-import { Fragment, type ReactNode, useEffect, useState } from 'react'
+import { type ComponentProps, Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
+import { MERGING_STEP } from '../../data/merges'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
@@ -72,6 +73,7 @@ import {
   standingText,
 } from '../../shared/standing'
 import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock, runningCalmly } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
@@ -408,6 +410,25 @@ const findingsOf = (reviewing: ReviewBrief) => {
 }
 
 /** The card's own props, without how it opens. */
+/** The kit's card, its title typed in where an agent renames the task (the person's own rename shows at once). */
+function BoardCard({ taskId, ...props }: BoardCardProps & { taskId: string }) {
+  return <KitBoardCard {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+/** The kit's settled and kept rows, typed in the same way. */
+function SettledRow({ taskId, ...props }: ComponentProps<typeof KitSettledRow> & { taskId: string }) {
+  return <KitSettledRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+function KeptRow({ taskId, ...props }: ComponentProps<typeof KitKeptRow> & { taskId: string }) {
+  return <KitKeptRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+/** The kit's queue row, typed in the same way. */
+function NextRow({ taskId, ...props }: ComponentProps<typeof KitNextRow> & { taskId: string }) {
+  return <KitNextRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
 /** What a task handed back, as its card shows it: a row of pictures, or else a few files; nothing where it handed back none. */
@@ -458,7 +479,9 @@ const parentOf = (work: BoardTask, open: (threadId: string) => void): Pick<Board
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
-  const card = withHanded(work, runningCard(work, now, name))
+  const base = withHanded(work, runningCard(work, now, name))
+  // Merge pressed on its strip in Needs you, it is here at once, merging: it answers that press as it comes (MergeFeel).
+  const card = work.step === MERGING_STEP && actions?.merging.has(work.taskId) === true ? { ...base, merge: 'merging' as const } : base
   // Stopped, or its lead not yet started, with a conflict not asked of it: why, in place of its foot, and Resolve now.
   if (work.conflictUnsent != null) return { ...card, ...unsentOf(work, work.conflictUnsent, actions) }
   if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
@@ -584,6 +607,8 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
           ...(sendBack === undefined && !merges
             ? {}
             : {
+                // Its strip is Merge: pressed, the whole card answers.
+                ...(merges ? { merge: actions?.merging?.has(work.taskId) === true ? ('merging' as const) : ('ready' as const) } : {}),
                 next: (
                   <>
                     {merges && (
@@ -1154,6 +1179,7 @@ export function BoardView({
     return (
       <NextRow
         key={work.taskId}
+        taskId={work.taskId}
         data-move={work.taskId}
         place={index + 1}
         task={work.slug}
@@ -1295,6 +1321,7 @@ export function BoardView({
           <BoardList>
             {lanes.stopped.map((work) => (
               <BoardCard
+                taskId={work.taskId}
                 key={work.taskId}
                 data-move={work.taskId}
                 {...stoppedCardOf(work, now, actions)}
@@ -1319,6 +1346,7 @@ export function BoardView({
       <BoardColumn lane={BoardLane.Running} count={shown.atWork} filled={shown.running.length > 0}>
         {shown.running.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...runningCardOf(work, now, name, actions)}
@@ -1333,6 +1361,7 @@ export function BoardView({
         {asks.map((ask) =>
           ask.waiting !== null ? (
             <BoardCard
+              taskId={ask.waiting.task.taskId}
               key={ask.waiting.task.taskId}
               data-move={ask.waiting.task.taskId}
               {...waitingCardOf(ask.waiting, name, onSignIn)}
@@ -1351,6 +1380,7 @@ export function BoardView({
         )}
         {lanes.issues.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...issuesCardOf(work)}
@@ -1361,6 +1391,7 @@ export function BoardView({
         ))}
         {lanes.ready.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...readyCardOf(work, actions)}
@@ -1408,6 +1439,7 @@ export function BoardView({
                 return (
                   <SettledRow
                     key={work.taskId}
+                    taskId={work.taskId}
                     data-move={work.taskId}
                     // Moved into Settled before, or settled before this window looked: drawn there without moving or coming in.
                     {...(arrivesQuietly(work.taskId) ? { 'data-move-seen': '' } : {})}
@@ -1467,6 +1499,7 @@ function Kept({ work, now, onOpen, actions }: { work: BoardTask; now: string; on
   const failed = actions?.failed[work.taskId]
   return (
     <KeptRow
+      taskId={work.taskId}
       data-move={work.taskId}
       title={work.title}
       at={work.keptAt == null ? '' : text.keptAt(ago(work.keptAt, new Date(now)))}
