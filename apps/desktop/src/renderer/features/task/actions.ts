@@ -24,3 +24,13 @@ export const doing = {
   /** Merge, with commits not shipped: Review and merge, or Merge now. */
   leaveAfterMerge: 'leave-after-merge',
 } as const
+
+/** Whether the task's merge is something to say of on its issue: it ends in a pull request, or has one open, and isn't over. */
+export const issuePartShown = (task: {
+  state: string
+  end?: 'draft' | 'ready' | 'none' | null
+  changes: ReadonlyArray<{ state: 'open' | 'merged' | 'closed' }>
+}): boolean =>
+  task.state !== 'done' &&
+  task.state !== 'abandoned' &&
+  (task.end === 'draft' || task.end === 'ready' || task.changes.some((change) => change.state === 'open'))

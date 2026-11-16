@@ -123,6 +123,18 @@ export const PartOfIt: Story = {
   },
 }
 
+/** The same, in a narrow thread: the note wraps under its label, and the switch keeps to the card's edge. */
+export const PartOfItNarrow: Story = {
+  decorators: [
+    (Story) => (
+      <div style={{ width: 300 }}>
+        <Story />
+      </div>
+    ),
+  ],
+  render: PartOfIt.render,
+}
+
 /** A task that ends with no pull request (a prototype, a chat): nothing under the issue, as there is no merge to talk about. */
 export const NoPullRequest: Story = {
   play: async ({ canvasElement }) => {

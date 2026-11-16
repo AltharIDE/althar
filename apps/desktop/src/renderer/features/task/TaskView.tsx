@@ -48,7 +48,7 @@ import {
 
 import { isAnswered, isSettleable, kindWords, takesDone } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
-import { doing } from './actions'
+import { doing, issuePartShown } from './actions'
 import { externalWaitWords, queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
@@ -1550,16 +1550,13 @@ export function TaskView({
                       {...(issue.container === null ? {} : { meta: issue.container })}
                     />
                     {/* Whether the task does all of its issue, so its merge closes it, or only part, so its merge leaves it open. */}
-                    {snapshot.task.state !== 'done' &&
-                      snapshot.task.state !== 'abandoned' &&
-                      // A merge is what it talks about: none where the task ends with no pull request.
-                      (snapshot.task.end === 'draft' || snapshot.task.end === 'ready' || snapshot.task.changes.length > 0) && (
-                        <IssuePart
-                          id={issue.key}
-                          partOf={snapshot.task.issuePartOf === true}
-                          onChange={(partOf) => void model.setIssuePart(partOf)}
-                        />
-                      )}
+                    {issuePartShown(snapshot.task) && (
+                      <IssuePart
+                        id={issue.key}
+                        partOf={snapshot.task.issuePartOf === true}
+                        onChange={(partOf) => void model.setIssuePart(partOf)}
+                      />
+                    )}
                   </div>
                 )}
                 <EarlierTurns
