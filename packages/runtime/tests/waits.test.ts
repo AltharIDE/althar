@@ -1,3 +1,7 @@
+import { execFileSync } from 'node:child_process'
+import { existsSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -27,8 +31,9 @@ const withQueries = (...args: Parameters<typeof runtime>) => Queries.layer.pipe(
 
 const opened = Effect.gen(function* () {
   yield* knownModels
-  const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
-  return { projectId: project.projectId as ProjectId, threadId: yield* (yield* Coordinator).thread(project.projectId) }
+  const path = repository()
+  const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+  return { projectId: project.projectId as ProjectId, threadId: yield* (yield* Coordinator).thread(project.projectId), path }
 })
 
 /** A task drafted, its plan not proposed: a blocker, for these tests, whatever it does. */
@@ -46,8 +51,8 @@ const drafted = (projectId: ProjectId, title: string) =>
     return { taskId: created.taskId, threadId: created.threadId, slug: row?.slug ?? '' }
   })
 
-/** Its plan proposed, to start at once unless something holds it. */
-const planned = (projectId: ProjectId, taskId: string) =>
+/** Its plan proposed, to start at once, or `startsIn` from now, unless something holds it. */
+const planned = (projectId: ProjectId, taskId: string, startsIn: Duration.Duration = Duration.zero) =>
   Effect.gen(function* () {
     return yield* (yield* Plans).propose({
       projectId,
@@ -56,7 +61,7 @@ const planned = (projectId: ProjectId, taskId: string) =>
       reason: null,
       actorId: (yield* Instance).coordinatorId,
       end: null,
-      startsIn: Duration.zero,
+      startsIn,
     })
   })
 
@@ -106,6 +111,109 @@ describe('a task that waits for its blockers', () => {
       // Done after all: nothing it waits for is open, and it starts.
       yield* ended(hosts.taskId, 'done')
       yield* until(planState(planId), (state) => state === 'accepted')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  // A plan counting down whose time comes while it waits, and nothing else happens: looked at again then, and as the record
+  // changes after. Merged or taken off before its time, it starts at its time; after, it starts then.
+  for (const [what, when] of [
+    ['merges', 'before'],
+    ['merges', 'after'],
+    ['is taken off', 'before'],
+    ['is taken off', 'after'],
+  ] as const)
+    it.live(`counting down, starts by itself where the task it waits for ${what} ${when} its time comes`, () =>
+      Effect.gen(function* () {
+        const { projectId } = yield* opened
+        const instance = yield* Instance
+        const pairing = yield* drafted(projectId, 'Pair a device')
+        const reconnect = yield* drafted(projectId, 'Reconnect on wake')
+        yield* waitFor({ taskId: reconnect.taskId, on: [pairing.taskId], actorId: instance.coordinatorId })
+        const planId = yield* planned(projectId, reconnect.taskId, Duration.millis(700))
+        const clear =
+          what === 'merges'
+            ? ended(pairing.taskId, 'done')
+            : Effect.asVoid(stopWaiting({ taskId: reconnect.taskId, on: pairing.taskId, actorId: instance.personId }))
+        if (when === 'before') {
+          // Once the countdown has seen it wait.
+          yield* Effect.sleep('250 millis')
+          yield* clear
+          yield* Effect.sleep('200 millis')
+          assert.strictEqual(yield* planState(planId), 'proposed')
+        } else {
+          yield* Effect.sleep('1200 millis')
+          assert.strictEqual(yield* planState(planId), 'proposed')
+          yield* clear
+        }
+        yield* until(planState(planId), (state) => state === 'accepted')
+      }).pipe(Effect.provide(withQueries())),
+    )
+
+  it.live('a task it waits for that merged stays cleared, though it opens again or is abandoned after', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const instance = yield* Instance
+      const queries = yield* Queries
+      const service = yield* drafted(projectId, 'Host service')
+      const sealing = yield* drafted(projectId, 'Seal secrets')
+      const ssh = yield* drafted(projectId, 'SSH setup')
+      yield* waitFor({ taskId: ssh.taskId, on: [service.taskId, sealing.taskId], actorId: instance.coordinatorId })
+      const planId = yield* planned(projectId, ssh.taskId)
+      yield* ended(service.taskId, 'done')
+      // Follow-up work opens it again, then it is abandoned: it was cleared, and stays so.
+      yield* change('tasks', service.taskId, { state: 'open', settledAt: null })
+      yield* ended(service.taskId, 'abandoned')
+      yield* until(queries.card(ssh.taskId), (card) => card.waitsFor?.[0]?.stands === 'merged')
+      assert.deepStrictEqual(
+        (yield* queries.card(ssh.taskId)).waitsFor?.map((one) => one.stands),
+        ['merged', 'planned'],
+      )
+      assert.isUndefined((yield* queries.card(service.taskId)).waitedBy)
+      yield* Effect.sleep('400 millis')
+      assert.strictEqual(yield* planState(planId), 'proposed')
+      // The other merges: it waits for nothing, and starts.
+      yield* ended(sealing.taskId, 'done')
+      yield* until(planState(planId), (state) => state === 'accepted')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('starts with what the tasks it waits for merged since it was drafted', () =>
+    Effect.gen(function* () {
+      const { projectId, path } = yield* opened
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const pairing = yield* drafted(projectId, 'Pair a device')
+      const reconnect = yield* drafted(projectId, 'Reconnect on wake')
+      yield* waitFor({ taskId: reconnect.taskId, on: [pairing.taskId], actorId: instance.coordinatorId })
+      const worktree = sql<{ path: string; baseCommit: string | null }>`
+        SELECT path, base_commit FROM workspaces WHERE task_id = ${reconnect.taskId}`
+      // Its worktree is made with the draft, from main as it was then.
+      const [made] = yield* until(worktree, (rows) => rows[0] !== undefined && existsSync(rows[0].path))
+      const planId = yield* planned(projectId, reconnect.taskId)
+      // What it waits for merges into main meanwhile.
+      writeFileSync(join(path, 'pairing.ts'), 'export const paired = true\n')
+      const git = (...args: Array<string>) =>
+        execFileSync('git', args, {
+          cwd: path,
+          env: {
+            ...process.env,
+            GIT_AUTHOR_NAME: 'T',
+            GIT_AUTHOR_EMAIL: 't@althar.test',
+            GIT_COMMITTER_NAME: 'T',
+            GIT_COMMITTER_EMAIL: 't@althar.test',
+          },
+        })
+          .toString()
+          .trim()
+      git('add', 'pairing.ts')
+      git('commit', '-q', '-m', 'Pair a device')
+      const merged = git('rev-parse', 'HEAD')
+      assert.isFalse(existsSync(join(made?.path ?? '', 'pairing.ts')))
+      yield* ended(pairing.taskId, 'done')
+      yield* until(planState(planId), (state) => state === 'accepted')
+      // Its lead starts in a worktree that has it.
+      const [now] = yield* until(worktree, (rows) => rows[0]?.baseCommit === merged)
+      assert.isTrue(existsSync(join(now?.path ?? '', 'pairing.ts')))
     }).pipe(Effect.provide(withQueries())),
   )
 

@@ -41,6 +41,8 @@ export const kindWords = {
   replied: 'Replied',
   /** A task whose lead stopped with no agent on it: held Up next until the person resumes it. */
   stopped: 'Stopped',
+  /** A plan waiting for another task that was abandoned (tasks wait for their blockers): the person starts it anyway, reopens that one, or stops waiting. */
+  abandoned: 'Blocker abandoned',
   /** Issues its lead drafted, for the person to file. */
   issues: 'Issues to file',
   /** Changes its lead proposed to its issue, for the person to apply. */
@@ -163,7 +165,17 @@ export interface Placed {
   readonly scratch?: boolean | undefined
   /** Issues its lead drafted, and changes it proposed to its issue, waiting for the person. */
   readonly issues?: { readonly drafts: number; readonly changes: number } | undefined
+  /** The tasks its plan waits for, and how each stands, before it starts (tasks wait for their blockers). */
+  readonly waitsFor?: ReadonlyArray<{ readonly stands: string }> | undefined
 }
+
+/**
+ * Whether a plan not started waits for a task that was abandoned (tasks wait
+ * for their blockers): it starts by itself no more, and waits on the person
+ * instead, in Needs you, to start anyway, reopen that one or stop waiting.
+ */
+export const blockerAbandoned = (task: Pick<Placed, 'phase' | 'waitsFor'>): boolean =>
+  (task.phase === 'planned' || task.phase === 'held') && (task.waitsFor ?? []).some((one) => one.stands === 'abandoned')
 
 /** What of a call placing it reads. */
 export interface Asked {
@@ -208,6 +220,8 @@ export interface WaitingOn<T, C> {
   readonly stopped: ReadonlyArray<T>
   /** Work ready for the person: every ready task, but one its host is merging. */
   readonly ready: ReadonlyArray<T>
+  /** Plans that wait for a task that was abandoned: no longer Up next, but the person's (`blockerAbandoned`). */
+  readonly abandoned: ReadonlyArray<T>
   /** Tasks said to wait whose call isn't read yet: under way until it is, never in Needs you for a moment (DEV-173). */
   readonly unread: ReadonlyArray<T>
 }
@@ -215,7 +229,7 @@ export interface WaitingOn<T, C> {
 /**
  * Where each task waits on the person, if it does, from its card and the
  * calls that wait: on a call (its oldest standing for it), on issues to file
- * or apply, or ready; stopped tasks with no call wait Up next; an aside off all of it. `merging`: tasks the
+ * or apply, or ready, or a plan waiting for a task that was abandoned; stopped tasks with no call wait Up next; an aside off all of it. `merging`: tasks the
  * person is merging, at work until they settle, as one in its merge queue.
  */
 export const waitingOn = <T extends Placed, C extends Asked>(
@@ -240,13 +254,14 @@ export const waitingOn = <T extends Placed, C extends Asked>(
     calls: standing.filter((call) => call.taskId === null || !folded.has(call.taskId)),
     stopped: shown.filter((task) => task.phase === 'stopped' && !held.has(task.taskId)),
     ready: shown.filter((task) => task.phase === 'ready' && !queuedToMerge(task) && !merging.has(task.taskId)),
+    abandoned: shown.filter(blockerAbandoned),
     unread: waits.filter((task) => !held.has(task.taskId) && !asked(task)),
   }
 }
 
 /** How many things wait on the person, each once: what the board's Needs you, its tab, the home, the edge and the Dock count. */
 export const waitingCount = (on: Omit<WaitingOn<unknown, unknown>, 'unread'>): number =>
-  on.waiting.length + on.issues.length + on.calls.length + on.ready.length
+  on.waiting.length + on.issues.length + on.calls.length + on.ready.length + on.abandoned.length
 
 /**
  * How many things wait on the person in each project, by its id, as its board counts them: a project's dot, its tab, its

@@ -13,15 +13,17 @@ import { fact, timestamp } from './records'
  * open, nor once one is abandoned, which waits on the person instead; the
  * person's own Start now still starts it. Each wait is kept in `task_waits`,
  * and said on the task's record (`task.waits_added`, `task.waits_removed`),
- * so its card and those it names are read again.
+ * so its card and those it names are read again. One that merged is cleared
+ * once and stays cleared (`cleared_at`, set as it is done), though it opens
+ * again for follow-up work later.
  */
 
 /**
- * Whether the plan's task waits for a task not done yet: open, drafted, or
- * abandoned. SQL over a `task_plans` row, by its alias.
+ * Whether the plan's task waits for a task not merged yet: open, drafted, or
+ * abandoned, and never cleared. SQL over a `task_plans` row, by its alias.
  */
 export const blockedIn = (plan: string) =>
-  `EXISTS (SELECT 1 FROM task_waits w JOIN tasks b ON b.id = w.on_task_id WHERE w.task_id = ${plan}.task_id AND b.state <> 'done')`
+  `EXISTS (SELECT 1 FROM task_waits w JOIN tasks b ON b.id = w.on_task_id WHERE w.task_id = ${plan}.task_id AND w.cleared_at IS NULL AND b.state <> 'done')`
 
 /** Whether the task hasn't started: no run made for it yet. SQL over a `tasks` row, by its alias. */
 export const unstartedIn = (task: string) => `NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = ${task}.id)`

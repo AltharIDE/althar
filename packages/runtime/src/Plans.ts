@@ -400,8 +400,9 @@ export class Plans extends Context.Service<
       const tries = backoff()
 
       // The countdown: the next plan due starts when its time comes, or sooner if a plan changes. One that couldn't start
-      // is due again once it has waited, and the others start in their time meanwhile. One whose time came while a task it
-      // waits for is open waits for the record to change (a merge, a wait taken off), and is looked at again then.
+      // is due again once it has waited, and the others start in their time meanwhile. One that waits for a task still open
+      // is looked at again when its time comes, and once its time came, whenever the record changes (a merge, a wait taken
+      // off), as nothing else says so.
       const grown = yield* ledger.listen
       const countdown = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -410,23 +411,22 @@ export class Plans extends Context.Service<
             SELECT p.id, p.starts_at, ${sql.unsafe(blockedIn('p'))} AS blocked
             FROM task_plans p WHERE p.state = 'proposed' AND p.starts_at IS NOT NULL`
           const now = yield* Clock.currentTimeMillis
-          const waiting = counting.some((plan) => plan.blocked === 1 && Date.parse(plan.startsAt) <= now)
+          const blocked = counting.filter((plan) => plan.blocked === 1).map((plan) => Date.parse(plan.startsAt))
+          const waiting = blocked.some((at) => at <= now)
           const [next] = counting
             .filter((plan) => plan.blocked !== 1)
             .map((plan) => ({ id: plan.id, at: Math.max(Date.parse(plan.startsAt), tries.until(plan.id)) }))
             .toSorted((a, b) => a.at - b.at)
+          if (next !== undefined && next.at <= now) {
+            yield* tries.attempt(next.id, 'Plans.start', start(next.id, instance.systemId, true))
+            continue
+          }
           // The record changing, gathered for a moment, while a plan due waits for another task.
           const changed = waiting ? Effect.andThen(grown, Effect.sleep(BLOCKED_GATHER)) : Effect.never
-          if (next === undefined) {
-            yield* Effect.raceFirst(Queue.take(wake), changed)
-            continue
-          }
-          const wait = next.at - now
-          if (wait > 0) {
-            yield* Effect.raceAll([Queue.take(wake), Effect.sleep(Duration.millis(wait)), changed])
-            continue
-          }
-          yield* tries.attempt(next.id, 'Plans.start', start(next.id, instance.systemId, true))
+          // The soonest time to look again: the next plan's, or a blocked one's yet to come.
+          const at = Math.min(next?.at ?? Infinity, ...blocked.filter((one) => one > now))
+          const timer = Number.isFinite(at) ? [Effect.sleep(Duration.millis(at - now))] : []
+          yield* Effect.raceAll([Queue.take(wake), changed, ...timer])
         }
       })
 

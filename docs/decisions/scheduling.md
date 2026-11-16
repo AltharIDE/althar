@@ -401,14 +401,20 @@ how it stands.
   order named; adding or removing one is a fact on the task. A task can't
   wait for itself, nor for one that waits for it however far along: neither
   would ever start. One merged already is nothing to wait for.
-- **Merged means done.** A blocker counts once its task is done: its pull
-  request merged, or, for a task with none, marked done. The countdown hears
-  the record change and starts a plan whose time came as soon as its last
+- **Merged means done, once.** A blocker counts once its task is done: its
+  pull request merged, or, for a task with none, marked done. Cleared then, it
+  stays cleared (`cleared_at`), though it opens again for follow-up work or is
+  abandoned after. The countdown looks again when a waiting plan's time comes,
+  and then whenever the record changes, so it starts as soon as its last
   blocker is done. A plan that waits stays waiting across a restart, rather
   than being held as an overdue one is.
-- **Only an abandoned blocker asks the person.** The waiting task's card and
-  page then wait on them, in Needs you: start it anyway, reopen the blocker,
-  or stop waiting for it. Everything else goes on by itself.
+- **It starts with what they merged.** A worktree made with its draft is
+  moved up, unused, to its base as the remote has it when its lead starts, so
+  it has what its blockers merged meanwhile.
+- **Only an abandoned blocker asks the person.** The waiting task leaves Up
+  next for Needs you, counted wherever Needs you is (`waitingOn`), and
+  notified: its page and plan card start it anyway, reopen the blocker, or
+  stop waiting for it. Everything else goes on by itself.
 - **The person's word comes first.** Start now starts a waiting plan at once,
   and a held plan stays held whatever its blockers do. Stop waiting takes one
   blocker off.

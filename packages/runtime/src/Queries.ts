@@ -2230,7 +2230,8 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<{ taskId: string; slug: string; title: string; threadId: string; state: string }>`
-            SELECT b.id AS task_id, b.slug, b.title, t.id AS thread_id, b.state FROM task_waits w
+            SELECT b.id AS task_id, b.slug, b.title, t.id AS thread_id,
+              CASE WHEN w.cleared_at IS NULL THEN b.state ELSE 'done' END AS state FROM task_waits w
             JOIN tasks b ON b.id = w.on_task_id JOIN threads t ON t.task_id = b.id AND t.kind = 'task'
             WHERE w.task_id = ${taskId} ORDER BY w.created_at, w.rowid`
           if (rows.length === 0) return {}
@@ -2251,7 +2252,7 @@ export class Queries extends Context.Service<
           const waitedBy = yield* sql<{ taskId: string; slug: string; title: string; threadId: string }>`
             SELECT k.id AS task_id, k.slug, k.title, t.id AS thread_id FROM task_waits w
             JOIN tasks k ON k.id = w.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            WHERE w.on_task_id = ${taskId} AND k.state IN ('draft', 'open') AND ${sql.unsafe(unstartedIn('k'))}
+            WHERE w.on_task_id = ${taskId} AND w.cleared_at IS NULL AND k.state IN ('draft', 'open') AND ${sql.unsafe(unstartedIn('k'))}
             ORDER BY w.created_at, w.rowid`
           return waitedBy.length === 0 ? {} : { waitedBy }
         })

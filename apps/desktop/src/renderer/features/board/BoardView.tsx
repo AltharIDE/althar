@@ -52,7 +52,7 @@ import {
 import { type ComponentProps, Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
-import { abandonedBlocker, blockerWords } from '../../shared/blockers'
+import { abandonedBlocker, blockerText, blockerWords } from '../../shared/blockers'
 import { MERGING_STEP } from '../../data/merges'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
@@ -711,6 +711,24 @@ export const issuesCardOf = (work: BoardTask): Card => ({
 })
 
 /**
+ * A plan that waits for a task that was abandoned (tasks wait for their blockers): the person's, in Needs you, saying which;
+ * its page and its plan card start it anyway, reopen that one, or stop waiting for it.
+ */
+export const abandonedCardOf = (work: BoardTask): Card => {
+  const gone = abandonedBlocker(work)
+  return {
+    status: TaskStatus.Yours,
+    kind: kindOf(work),
+    ...localOf(work),
+    ...towardOf(work),
+    title: work.title,
+    ...fromOf(work),
+    word: kindWords.abandoned,
+    ...(gone === undefined ? {} : { why: blockerText.abandoned(gone.title) }),
+  }
+}
+
+/**
  * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
@@ -1123,6 +1141,7 @@ export function BoardView({
         ...lanes.waiting.map(({ task }) => task),
         ...lanes.stopped,
         ...lanes.ready,
+        ...lanes.abandoned,
         ...lanes.kept,
       ].map((work) => work.taskId),
     )
@@ -1396,6 +1415,17 @@ export function BoardView({
             key={work.taskId}
             data-move={work.taskId}
             {...issuesCardOf(work)}
+            {...parentOf(work, onOpen)}
+            errands={work.errands}
+            onOpen={() => onOpen(work.threadId)}
+          />
+        ))}
+        {lanes.abandoned.map((work) => (
+          <BoardCard
+            taskId={work.taskId}
+            key={work.taskId}
+            data-move={work.taskId}
+            {...abandonedCardOf(work)}
             {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
