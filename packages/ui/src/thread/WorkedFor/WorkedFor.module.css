@@ -98,31 +98,57 @@ button.head:focus-visible {
   flex: none;
   color: var(--t-4);
 }
+/* the step's words, a light passing over them as Reasoning's thinking does (its .shimmer says how): a copy of them in full
+   ink, seen through a window gliding across while the copy moves back as far, so only transforms run */
 .doing {
+  position: relative;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: linear-gradient(90deg, var(--t-3) 0%, var(--t-3) 40%, var(--t-1) 50%, var(--t-3) 60%, var(--t-3) 100%);
-  background-size: 250% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation:
-    step var(--enter) var(--ease-out),
-    shimmer 2.2s linear infinite;
+  color: var(--t-3);
+  animation: step var(--enter) var(--ease-out);
 }
 @keyframes step {
   from {
     opacity: 0;
   }
 }
-@keyframes shimmer {
+.sheen {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 50%;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 50%, transparent);
+  pointer-events: none;
+  user-select: none;
+  animation: sweep 2.2s linear infinite;
+}
+.sheen::before {
+  content: attr(data-words);
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 200%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-1);
+  animation: stay 2.2s linear infinite;
+}
+@keyframes sweep {
   from {
-    background-position: 125% 0;
+    transform: translateX(-175%);
   }
   to {
-    background-position: -125% 0;
+    transform: translateX(575%);
+  }
+}
+@keyframes stay {
+  from {
+    transform: translateX(87.5%);
+  }
+  to {
+    transform: translateX(-287.5%);
   }
 }
 
@@ -133,7 +159,8 @@ button.head:focus-visible {
   }
   .doing {
     animation: none;
-    color: var(--t-3);
-    background: none;
+  }
+  .sheen {
+    display: none;
   }
 }
