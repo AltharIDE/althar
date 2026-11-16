@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { Activity, useRef, useState } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest'
 
 import { ListMotion } from '../src/lib/ListMotion'
 import { MOTION } from '../src/lib/motion'
@@ -79,6 +79,8 @@ const placed = (el: Element) => {
 let narrowFirst = false
 let reduced = false
 let visible = true
+/** Where each element stands: jsdom lays nothing out, so each is placed by its list (`placed`). */
+let rects: MockInstance<() => DOMRect>
 
 beforeEach(() => {
   played = []
@@ -87,7 +89,7 @@ beforeEach(() => {
   reduced = false
   visible = true
   stubAnimations()
-  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function rect(this: Element) {
+  rects = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function rect(this: Element) {
     return placed(this)
   })
   Object.defineProperty(Element.prototype, 'checkVisibility', { value: () => visible, configurable: true })
@@ -431,7 +433,6 @@ describe('ListMotion', () => {
 
   it('reads nothing of the page where its version stays: drawn again for a word typed or a second ticking, nothing can move', () => {
     const { rerender } = render(<Lists lists={[['a', 'b', 'c']]} version="a b c" />)
-    const rects = vi.mocked(Element.prototype.getBoundingClientRect)
     const found = vi.spyOn(Element.prototype, 'querySelectorAll')
     rects.mockClear()
     rerender(<Lists lists={[['a', 'b', 'c']]} version="a b c" />)
@@ -445,7 +446,6 @@ describe('ListMotion', () => {
 
   it('compares a version made of entries one at a time: a new array of the same keys is the same version', () => {
     const { rerender } = render(<Lists lists={[['a'], ['b']]} version={['a', 'b']} />)
-    const rects = vi.mocked(Element.prototype.getBoundingClientRect)
     rects.mockClear()
     rerender(<Lists lists={[['a'], ['b']]} version={['a', 'b']} />)
     expect(rects).not.toHaveBeenCalled()
@@ -455,7 +455,6 @@ describe('ListMotion', () => {
 
   it('hands the list around it an update only where its own version changed, and moves what is in both then', () => {
     const { rerender } = render(<Nested line={['a', 'b', 'c']} rest={['x']} versioned />)
-    const rects = vi.mocked(Element.prototype.getBoundingClientRect)
     rects.mockClear()
     // Both drawn again, neither's keys changed: nothing reads the page.
     rerender(<Nested line={['a', 'b', 'c']} rest={['x']} versioned />)
