@@ -10,6 +10,7 @@ import {
   probeClaudeSandbox,
   type SandboxPlace,
   sandboxStartsIn,
+  sandboxProbed,
 } from '../src/registry'
 import { CLI_SIGN_INS, SANDBOX_SECRETS, SECRET_PLACES, secretReadRules } from '../src/secrets'
 
@@ -622,7 +623,9 @@ describe('whether Claude Code’s sandbox can start', () => {
   it('is worked out once a launch, off the thread, and every session after reads the same', async () => {
     const starts = await probeClaudeSandbox()
     assert.strictEqual(claudeSandboxStarts(), starts)
-    assert.strictEqual(await agents['claude-code'].ready?.(), starts)
+    // Once it is in, a session has nothing to wait for: it starts with no pause.
+    assert.isUndefined(agents['claude-code'].ready?.())
+    assert.isTrue(sandboxProbed())
     // Asked again of another computer, it is the one this launch found.
     assert.strictEqual(await probeClaudeSandbox(computer('linux', [], !starts).place), starts)
     // Only Claude Code's sessions wait for anything first.

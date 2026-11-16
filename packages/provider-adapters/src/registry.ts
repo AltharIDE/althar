@@ -347,8 +347,11 @@ export interface AgentDefinition<Id extends string = string> {
    * What its sessions wait for before `holds` and `sessionMeta` are asked,
    * once a launch: Claude Code's sandbox probe (`probeClaudeSandbox`), which
    * the app starts as its runtime does, so it is usually in long before.
+   * Nothing where it is in already: a session then starts with no pause, as
+   * it did before the probe moved off the thread, so nothing reads it as not
+   * yet at work in between (Quit asking what it would stop).
    */
-  readonly ready?: () => Promise<unknown>
+  readonly ready?: () => Promise<unknown> | undefined
   /**
    * Where a session's shell is now, from its agent's own record, read again
    * on each call: `home`, the account's folder (`home.variable`), `cwd`, where
@@ -976,6 +979,9 @@ export const probeClaudeSandbox = (place: SandboxPlace = placeHere()): Promise<b
  * meets Althar's rules (ADR-071). A session waits for it first, so its hold
  * and its settings agree.
  */
+/** Whether the probe has its answer, or needs none here (`sandboxStartsIn` without trying): what a session waits for is in. */
+export const sandboxProbed = (): boolean => sandboxStarts !== undefined || startsUntried(placeHere()) !== null
+
 export const claudeSandboxStarts = (): boolean => {
   if (sandboxStarts !== undefined) return sandboxStarts
   const untried = startsUntried(placeHere())
@@ -1168,7 +1174,7 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
       ),
     contains: claudeSandboxStarts,
     // Its sandbox probe, once a launch, which its hold and its settings both read (ADR-071).
-    ready: () => probeClaudeSandbox(),
+    ready: () => (sandboxProbed() ? undefined : probeClaudeSandbox()),
     upFront: true,
     /* A local plugin its session loads (claudeAsks); it dispatches subagents. */
     skills: { layout: 'claude-plugin', capabilities: ['subagents'], via: { kind: 'meta' } },

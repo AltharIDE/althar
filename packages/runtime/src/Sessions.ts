@@ -3313,7 +3313,8 @@ export class Sessions extends Context.Service<
             ...heldSkills,
           }
           // What the agent's hold and settings read first, such as Claude Code's sandbox probe, once a launch and usually in already.
-          if (definition.ready !== undefined) yield* Effect.promise(definition.ready)
+          const waiting = definition.ready?.()
+          if (waiting !== undefined) yield* Effect.promise(() => waiting)
           // Where the session's sandbox holds its shell commands, what it holds runs without being read (ADR-071).
           const hold = definition.holds?.(reads ? 'reader' : 'lead', sessionOptions)
           let held: RequestContext = hold === undefined ? requestContext : { ...requestContext, sandbox: hold }
