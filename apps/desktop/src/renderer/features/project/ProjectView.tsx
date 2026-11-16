@@ -33,7 +33,7 @@ import { useServices } from '../../data/services'
 import { catalogRead } from '../finder/catalog'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, setDraftDictated, useSetDraft } from '../../shared/drafts'
+import { draftKey, draftOf as draftNow, setDraftDictated, useSetDraft } from '../../shared/drafts'
 import { DraftComposer } from '../../shared/DraftComposer'
 import { pillOf, runIdOf } from '../../shared/running'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
@@ -692,7 +692,14 @@ export function ProjectView({
     if (said === undefined || !images.fits(said)) return
     let was: string | null = null
     let put: string | null = null
-    const refused = () => setDraft((current) => (current === put && was !== null ? was : current))
+    // Taken back where the lead had it already: the words, images, files and whether it was dictated, as the composer held them.
+    let unrestore: () => void = () => undefined
+    const dictatedBefore = draftNow(draftOf).dictated
+    const refused = () => {
+      setDraft((current) => (current === put && was !== null ? was : current))
+      unrestore()
+      setDraftDictated(draftOf, dictatedBefore)
+    }
     if (!model.takeBack(id, refused)) return
     setDraft((current) => {
       was = current
@@ -700,7 +707,7 @@ export function ProjectView({
       return put
     })
     if (said.dictated === true) setDraftDictated(draftOf, true)
-    images.restore(said)
+    unrestore = images.restore(said)
   }
 
   // A queued message goes to the coordinator now, interrupting it, rather than when it is done: out of the queue, and said

@@ -131,8 +131,11 @@ export interface Attachments {
   readonly giveBack: (outgoing: Outgoing) => void
   /** Whether a queued message's images and files fit beside those waiting, to take it back to edit; saying why not where they don't. */
   readonly fits: (said: Said) => boolean
-  /** Puts back the images and files of a message taken back from the queue, after any already there. */
-  readonly restore: (said: Said) => void
+  /**
+   * Puts back the images and files of a message taken back from the queue, after any already there; returns how to take
+   * exactly those off again, leaving any added or removed since as they are, as where the lead had the message already.
+   */
+  readonly restore: (said: Said) => () => void
 }
 
 /** A file main measured and granted, as it waits to go and as the window's copy of its message shows it. */
@@ -343,18 +346,19 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
     restore: (said) => {
       // Kept by the store, they go again by their digests; the files by the copies Althar made of them.
       const kept = said.pictures.flatMap((picture) => (picture.digest === null ? [] : [{ ...picture, digest: picture.digest }]))
-      setWaiting((now) => [
-        ...now,
-        ...kept.map((picture, index) => ({
-          id: next(),
-          name: picture.name ?? text.image(index + 1),
-          ready: { data: null, picture, src: previewOf(picture.digest) ?? pictureUrl(picture.digest, true) },
-        })),
-      ])
-      setFiles((now) => [
-        ...now,
-        ...said.files.map((attached) => ({ id: next(), name: attached.name, ready: { sent: { kept: attached.id }, attached } })),
-      ])
+      const pictures = kept.map((picture, index) => ({
+        id: next(),
+        name: picture.name ?? text.image(index + 1),
+        ready: { data: null, picture, src: previewOf(picture.digest) ?? pictureUrl(picture.digest, true) },
+      }))
+      const files = said.files.map((attached) => ({ id: next(), name: attached.name, ready: { sent: { kept: attached.id }, attached } }))
+      setWaiting((now) => [...now, ...pictures])
+      setFiles((now) => [...now, ...files])
+      const put = new Set([...pictures, ...files].map((one) => one.id))
+      return () => {
+        setWaiting((now) => now.filter((one) => !put.has(one.id)))
+        setFiles((now) => now.filter((one) => !put.has(one.id)))
+      }
     },
   }
 }

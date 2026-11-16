@@ -1825,6 +1825,28 @@ describe('a task', () => {
     expect(screen.getByRole('region', { name: 'Queued' })).toBeTruthy()
   })
 
+  it('takes its images off again with its words, leaving the draft as it was, when the lead has the message already', async () => {
+    const picture = { digest: 'e'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'queued.png', unkept: null }
+    const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    let refuse: (failure: Error) => void = () => undefined
+    vi.mocked(client.takeBack).mockImplementationOnce(() => new Promise<never>((_, reject) => (refuse = reject)))
+    withServices(<Task />, client)
+    const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    await userEvent.type(busy, 'My own words')
+    fireEvent.drop(busy, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'mine.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'mine.png' })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    // In the composer at once, its image beside the one there was.
+    expect(await screen.findByRole('img', { name: 'queued.png' })).toBeTruthy()
+    // The lead had it already: the words and the image it brought go, what was there before stays.
+    await act(async () => refuse(new Error('The lead has read it already.')))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    await waitFor(() => expect(screen.queryByRole('img', { name: 'queued.png' })).toBeNull())
+    expect(screen.getByRole('img', { name: 'mine.png' })).toBeTruthy()
+    expect((busy as HTMLTextAreaElement).value).toBe('My own words')
+  })
+
   it('sends a queued message now, with its images by their digests: out of the queue, and said again to interrupt the lead', async () => {
     const picture = { digest: 'f'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }
     const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])
