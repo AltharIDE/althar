@@ -408,26 +408,31 @@ export const useTask = (threadId: string): TaskModel => {
   /** What the window holds of the thread now, for a read that lands later. */
   const held = useCallback(() => cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.items ?? [], [cache, threadId])
 
+  // What a burst of changes touched is read in one call, and shows in one write.
   const readItems = useCallback(
-    (ids: Iterable<string>) =>
-      Promise.all(
-        [...ids].map((itemId) => {
-          const version = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion
-          return newest(
-            itemId,
-            client.getThreadItem(threadId, itemId),
-            // One the thread keeps for Althar alone, such as what its lead could see, is nothing to draw, and nothing wrong.
-            (item) => {
-              if (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion !== version) return
-              return item === null
-                ? setSnapshot((current) => ({ ...current, items: current.items.filter((one) => one.id !== itemId) }))
-                : arrived([item])
-            },
-            fail,
-          )
-        }),
-      ),
-    [client, cache, threadId, newest, arrived, fail, setSnapshot],
+    (ids: Iterable<string>) => {
+      const asked = [...ids]
+      if (asked.length === 0) return Promise.resolve()
+      const version = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion
+      return newest.many(
+        asked,
+        client.getThreadItems(threadId, asked),
+        // One the thread keeps for Althar alone, such as what its lead could see, is nothing to draw, and nothing wrong.
+        (read) => {
+          if (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion !== version) return
+          const found = [...read.values()].filter((item) => item !== null)
+          setSnapshot((current) => ({
+            ...current,
+            items: mergeItems(
+              current.items.filter((one) => read.get(one.id) !== null),
+              found,
+            ),
+          }))
+        },
+        fail,
+      )
+    },
+    [client, cache, threadId, newest, fail, setSnapshot],
   )
 
   // What the lead was last picked to, until the thread says it: a pick made before the last one was taken goes from there.

@@ -288,11 +288,34 @@ export const newestReads = (head?: string) => {
     begun.set(key, { read: mine, landed })
     return landed
   }
+  /**
+   * One read of several things, as `newest` reads each: `keep` is given, at once, those of them no read began after,
+   * so a burst read together is shown in one write.
+   */
+  const many = <A>(
+    keys: ReadonlyArray<string>,
+    read: Promise<ReadonlyMap<string, A>>,
+    keep: (values: ReadonlyMap<string, A>) => void,
+    fail: (failure: unknown) => void,
+  ): Promise<void> => {
+    reads += 1
+    const mine = reads
+    const landed = read.then((values) => {
+      const commit = () => {
+        const kept = new Map([...values].filter(([key]) => begun.get(key)?.read === mine))
+        if (kept.size > 0) keep(kept)
+      }
+      if (held !== null) held.push(commit)
+      else commit()
+    }, fail)
+    for (const key of keys) begun.set(key, { read: mine, landed })
+    return landed
+  }
   const landed = async (key: string) => {
     for (let now = begun.get(key); now !== undefined; now = begun.get(key)) {
       await now.landed
       if (begun.get(key) === now) return
     }
   }
-  return Object.assign(newest, { landed })
+  return Object.assign(newest, { many, landed })
 }

@@ -208,6 +208,54 @@ describe('reads that come back out of order', () => {
     )
     expect(failed).toHaveLength(1)
   })
+
+  it('keeps from one read of several things, at once, those no read began after; behind a head under way, with it', async () => {
+    const newest = newestReads('head')
+    const kept: Array<ReadonlyArray<readonly [string, string]>> = []
+    const keep = (values: ReadonlyMap<string, string>) => void kept.push([...values])
+    const fail = vi.fn()
+    const together = Promise.withResolvers<ReadonlyMap<string, string>>()
+    const reading = newest.many(['a', 'b', 'c'], together.promise, keep, fail)
+    // A later read of b alone answers first.
+    await newest.many(['b'], Promise.resolve(new Map([['b', 'b2']])), keep, fail)
+    together.resolve(
+      new Map([
+        ['a', 'a1'],
+        ['b', 'b1'],
+        ['c', 'c1'],
+      ]),
+    )
+    await reading
+    // One keep for what the first read still says: never the b the later one replaced.
+    expect(kept).toEqual([
+      [['b', 'b2']],
+      [
+        ['a', 'a1'],
+        ['c', 'c1'],
+      ],
+    ])
+    // Wholly overtaken, it keeps nothing.
+    const overtaken = Promise.withResolvers<ReadonlyMap<string, string>>()
+    const late = newest.many(['a'], overtaken.promise, keep, fail)
+    await newest.many(['a'], Promise.resolve(new Map([['a', 'a3']])), keep, fail)
+    overtaken.resolve(new Map([['a', 'a2']]))
+    await late
+    expect(kept.at(-1)).toEqual([['a', 'a3']])
+    expect(kept).toHaveLength(3)
+    // Behind a head under way, it waits, and shows with it.
+    const head = Promise.withResolvers<string>()
+    const heads: Array<string> = []
+    const withHead = newest('head', head.promise, (value) => void heads.push(value), fail)
+    await newest.many(['d'], Promise.resolve(new Map([['d', 'd1']])), keep, fail)
+    expect(kept).toHaveLength(3)
+    head.resolve('head')
+    await withHead
+    expect(heads).toEqual(['head'])
+    expect(kept.at(-1)).toEqual([['d', 'd1']])
+    // A read that fails says so.
+    await newest.many(['e'], Promise.reject(new Error('The port closed')), keep, fail)
+    expect(fail).toHaveBeenCalledOnce()
+  })
 })
 
 describe('a clock', () => {
