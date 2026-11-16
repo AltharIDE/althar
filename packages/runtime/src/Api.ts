@@ -32,7 +32,7 @@ import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
-import { RpcSchema, RpcServer, type RpcMiddleware } from 'effect/rpc'
+import { RpcServer, type RpcMiddleware } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -2504,6 +2504,23 @@ export const isInside = (
 export const BEHIND_AT_ONCE = 2
 
 /**
+ * The reads that go behind when nobody waits on them: the store's large ones,
+ * which the window's feed reads again on almost every change and which hold
+ * the runtime's thread while they run. A read that waits on a process or the
+ * network holds nothing meanwhile, so it would only keep a place in the lane
+ * from the reads that need it: it is answered as it comes, marked or not.
+ */
+export const BEHIND_CALLS: ReadonlySet<string> = new Set([
+  'ListProjects',
+  'GetHome',
+  'GetBoard',
+  'GetCoordinator',
+  'GetThread',
+  'GetThreadItem',
+  'GetThreadItems',
+])
+
+/**
  * The lane every connection's background reads share: the reads the window's
  * change feed starts to keep what a screen holds current. They run a few at a
  * time, in turn; a command, a read a screen waits on and a watch never queue
@@ -2609,8 +2626,8 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
                 })
               })
               if (typeof payload !== 'object' || payload === null || !('commandId' in payload) || typeof payload.commandId !== 'string')
-                // A read nobody waits on goes behind, a few at a time; never a watch, which would hold its place for good.
-                return yield* headers[LANE_HEADER] === BACKGROUND && !RpcSchema.isStreamSchema(rpc.successSchema)
+                // A large read nobody waits on goes behind, a few at a time. Never a watch, which would keep its place for good.
+                return yield* headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
                   ? behind.withPermits(1)(positioned)
                   : positioned
               // Effect RPC erases the handler's success type in middleware. The schema and effect come from the same validated RPC definition.

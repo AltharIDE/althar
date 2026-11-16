@@ -80,6 +80,8 @@ describe('a read nobody waits on, through the API', () => {
           listed.projects.map((one) => one.id),
           [project.id],
         )
+        // And a small read nobody waits on: only the store's large ones keep a place in the lane.
+        assert.isDefined(yield* client.GetSettings({}, behind))
         for (const fiber of queued) assert.isUndefined(fiber.pollUnsafe())
         // Once the lane frees, they are answered, in turn.
         yield* lane.release(BEHIND_AT_ONCE)
