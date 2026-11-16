@@ -328,7 +328,7 @@ const program = Effect.gen(function* () {
   // The ports the runtime listens on, which no canvas may reach (ADR-104).
   parent.postMessage({ type: 'listening', ports: [Context.get(context, ToolServer).port] })
   yield* Effect.logInfo('Runtime ready').pipe(Effect.annotateLogs({ version: options.appVersion, pid: process.pid }))
-  // A development build's log says when the runtime's thread ran late, and which window's calls took long (lag.ts).
+  // The log says when the runtime's thread ran late, and which window's calls took long (lag.ts), packaged or not.
   if (lagLogged()) yield* watchLag()
   // Socket access is opt-in; its private descriptor grants only the restricted socket role.
   if (process.env.ALTHAR_API_SOCKET === '1')

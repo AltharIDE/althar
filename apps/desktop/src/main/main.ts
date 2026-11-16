@@ -22,6 +22,7 @@ import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
 import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
+import { watchLag } from './lag'
 import { startLogs } from './logs'
 import { setAppMenu } from './menu'
 import { dockCount, notificationsShown, soundOf, tells } from './notify'
@@ -236,6 +237,8 @@ const startupMark = (stage: string, duration_ms?: number, window_id?: number) =>
   logs.info('Startup', { stage, elapsed_ms: Math.round(process.uptime() * 1000), duration_ms, pid: process.pid, window_id })
 logs.info('Startup', { stage: 'process-start', elapsed_ms: 0, pid: process.pid })
 startupMark('main-entry')
+// Each few seconds in which this thread ran late, as the runtime's log says of its own (lag.ts).
+watchLag((lag) => logs.warn('Event loop ran late', { max_ms: lag.maxMs, p99_ms: lag.p99Ms, mean_ms: lag.meanMs }))
 let startupStage: StartupStage = 'data'
 let firstScreenDrawn = false
 let releaseBackground: () => void = () => {}
@@ -603,11 +606,13 @@ const startRuntime = () => {
       ALTHAR_WORKTREES: worktrees,
       ALTHAR_APP_VERSION: app.getVersion(),
       ALTHAR_LOGS: logs.dir,
+      // The runtime says in its log when its thread ran late, and which calls took long (lag.ts): packaged or not, so a
+      // slowness a person reports has its evidence in the logs on their computer.
+      ALTHAR_LAG_LOG: '1',
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
       ...(app.isPackaged
         ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node') }
-        : // A development build's runtime says in its log when its thread ran late, and which calls took long (lag.ts).
-          { ALTHAR_LAG_LOG: '1' }),
+        : {}),
     },
   })
   logs.keepOutput(child)

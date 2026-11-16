@@ -21,8 +21,8 @@ import type { PageKey, PageState } from '../main/browser/page'
  * install, and restarting into it. An update that couldn't move the
  * store, with where its copy is as the person knows the place, which main
  * shows in the file manager when asked. Quit with work under way, asking what to do. Whether DO_NOT_TRACK is set, which
- * keeps usage data off. And reporting a problem, and the page's own errors,
- * for the log. And the pages beside the conversations (ADR-100): opening,
+ * keeps usage data off. And reporting a problem, and the page's own errors
+ * and slow frames, for the log. And the pages beside the conversations (ADR-100): opening,
  * placing and pointing at one, as main holds it, and how each stands. The page never sees or sends a path. It gets no Node, no
  * file system, no shell.
  */
@@ -291,6 +291,8 @@ contextBridge.exposeInMainWorld('althar', {
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>
     ipcRenderer.send('althar:window-error', error),
+  // What made the page slow, for main's log: its long frames and slow presses, by what they were on, never what it shows.
+  logFrames: (frames: unknown): void => ipcRenderer.send('althar:window-frames', frames),
   onOpen: (listener: (threadId: string) => void): (() => void) => {
     opening.add(listener)
     if (pending !== undefined) {
