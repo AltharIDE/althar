@@ -116,9 +116,16 @@ export const PartOfIt: Story = {
     const c = within(canvasElement)
     const part = c.getByRole('switch', { name: 'Only part of MER-231' })
     await expect(part).toHaveAttribute('aria-checked', 'false')
-    await expect(part).toHaveAccessibleDescription(/merge closes the issue/)
+    await expect(part).toHaveAccessibleDescription(/Merging closes the issue/)
     await userEvent.click(part)
     await expect(part).toHaveAttribute('aria-checked', 'true')
-    await expect(part).toHaveAccessibleDescription(/says on the issue what landed and leaves it open/)
+    await expect(part).toHaveAccessibleDescription(/comments on the issue and leaves it open/)
+  },
+}
+
+/** A task that ends with no pull request (a prototype, a chat): nothing under the issue, as there is no merge to talk about. */
+export const NoPullRequest: Story = {
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByRole('switch')).toBeNull()
   },
 }

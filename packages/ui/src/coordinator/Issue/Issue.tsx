@@ -177,8 +177,8 @@ export interface IssuePartText {
 
 export const issuePartText: IssuePartText = {
   label: (id) => `Only part of ${id}`,
-  on: 'When its pull request merges, Althar says on the issue what landed and leaves it open.',
-  off: 'Its pull request’s merge closes the issue, where issues move along with their tasks.',
+  on: 'Merging comments on the issue and leaves it open.',
+  off: 'Merging closes the issue.',
 }
 
 export interface IssuePartProps {

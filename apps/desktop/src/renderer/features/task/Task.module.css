@@ -69,6 +69,8 @@
 /* The issue a task came from, heading its thread. */
 .issue {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 .fileAll {
   display: flex;

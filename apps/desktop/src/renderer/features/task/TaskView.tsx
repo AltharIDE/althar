@@ -1550,13 +1550,16 @@ export function TaskView({
                       {...(issue.container === null ? {} : { meta: issue.container })}
                     />
                     {/* Whether the task does all of its issue, so its merge closes it, or only part, so its merge leaves it open. */}
-                    {snapshot.task.state !== 'done' && snapshot.task.state !== 'abandoned' && (
-                      <IssuePart
-                        id={issue.key}
-                        partOf={snapshot.task.issuePartOf === true}
-                        onChange={(partOf) => void model.setIssuePart(partOf)}
-                      />
-                    )}
+                    {snapshot.task.state !== 'done' &&
+                      snapshot.task.state !== 'abandoned' &&
+                      // A merge is what it talks about: none where the task ends with no pull request.
+                      (snapshot.task.end === 'draft' || snapshot.task.end === 'ready' || snapshot.task.changes.length > 0) && (
+                        <IssuePart
+                          id={issue.key}
+                          partOf={snapshot.task.issuePartOf === true}
+                          onChange={(partOf) => void model.setIssuePart(partOf)}
+                        />
+                      )}
                   </div>
                 )}
                 <EarlierTurns

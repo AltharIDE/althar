@@ -143,22 +143,22 @@ a.issue:hover .pixels {
 /* under a task's issue: whether the task does all of it or only part */
 .part {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 2px 0;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 0;
 }
 .partWords {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   min-width: 0;
 }
 .partLabel {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 550;
   color: var(--t-1);
 }
 .partNote {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--t-3);
 }
