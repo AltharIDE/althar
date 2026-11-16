@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useState } from 'react'
 
-import { ApiError, type ProjectSummary, type Status } from '@althar/contracts'
+import { type AgentStatus, ApiError, type ProjectSummary, type Status } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
-import { reads, recheckStatus } from '../../data/reads'
+import { keys, reads, recheckStatus } from '../../data/reads'
 import { useServices } from '../../data/services'
 
 /*
@@ -13,7 +13,9 @@ import { useServices } from '../../data/services'
  * project is the first screen's own (useFirstProject); every later one is
  * made in a tab of its own (features/newProject). Signing an account in is
  * the accounts' own model (features/accounts), which reads the agents from
- * here.
+ * here. An account renamed, moved or removed shows so at once, and the
+ * agents are read again behind it, as the runtime has them: what didn't go
+ * through comes back with that read, and the error says why.
  */
 
 export interface StartModel {
@@ -78,29 +80,39 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     return () => window.removeEventListener('focus', onFocus)
   }, [reloadStatus])
 
-  /** Runs an account change, says what went wrong if it did, and shows the agents as they are after it. */
+  /**
+   * Runs an account change, shown first as it will be (`shows`, each agent as it changes it), says what went wrong if it
+   * did, and shows the agents as they are after it.
+   */
   const changing = useCallback(
-    async (change: () => Promise<unknown>, again = false) => {
+    async (change: () => Promise<unknown>, shows?: (agent: AgentStatus) => AgentStatus) => {
       setError(null)
+      if (shows !== undefined)
+        cache.setQueryData<Status>(keys.status, (was) => (was === undefined ? was : { ...was, agents: was.agents.map(shows) }))
       try {
         await change()
       } catch (failure) {
         setError(messageOf(failure))
       }
-      await reloadStatus(again)
+      await reloadStatus(false)
     },
-    [reloadStatus],
+    [reloadStatus, cache],
   )
 
   const moveAccount = useCallback(
-    (agentId: string, accountId: string, to: 'up' | 'down') =>
-      changing(async () => {
-        const ids = status?.agents.find((agent) => agent.id === agentId)?.accounts.map((account) => account.id) ?? []
-        const at = ids.indexOf(accountId)
-        const next = ids.filter((id) => id !== accountId)
-        next.splice(Math.max(0, to === 'up' ? at - 1 : at + 1), 0, accountId)
-        await client.orderAccounts(agentId, next)
-      }),
+    (agentId: string, accountId: string, to: 'up' | 'down') => {
+      const ids = status?.agents.find((agent) => agent.id === agentId)?.accounts.map((account) => account.id) ?? []
+      const at = ids.indexOf(accountId)
+      const next = ids.filter((id) => id !== accountId)
+      next.splice(Math.max(0, to === 'up' ? at - 1 : at + 1), 0, accountId)
+      return changing(
+        () => client.orderAccounts(agentId, next),
+        (agent) =>
+          agent.id !== agentId
+            ? agent
+            : { ...agent, accounts: next.flatMap((id) => agent.accounts.filter((account) => account.id === id)) },
+      )
+    },
     [changing, client, status],
   )
 
@@ -125,18 +137,26 @@ export const useStart = ({ recheck = false }: { readonly recheck?: boolean } = {
     },
     installFailed,
     checkedAt: statusRead.dataUpdatedAt,
-    renameAccount: (accountId, name) => changing(() => client.renameAccount(accountId, name)),
+    renameAccount: (accountId, name) =>
+      changing(
+        () => client.renameAccount(accountId, name),
+        (agent) => ({ ...agent, accounts: agent.accounts.map((account) => (account.id === accountId ? { ...account, name } : account)) }),
+      ),
     moveAccount,
-    removeAccount: (accountId) =>
-      changing(async () => {
-        setUnremoved(null)
-        try {
-          await client.removeAccount(accountId)
-        } catch (failure) {
-          if (failure instanceof ApiError && failure.reason === 'SignOutFailed') setUnremoved(accountId)
-          throw failure
-        }
-      }),
+    removeAccount: (accountId) => {
+      setUnremoved(null)
+      return changing(
+        async () => {
+          try {
+            await client.removeAccount(accountId)
+          } catch (failure) {
+            if (failure instanceof ApiError && failure.reason === 'SignOutFailed') setUnremoved(accountId)
+            throw failure
+          }
+        },
+        (agent) => ({ ...agent, accounts: agent.accounts.filter((account) => account.id !== accountId) }),
+      )
+    },
     unremoved,
     removeAnyway: () =>
       changing(async () => {
