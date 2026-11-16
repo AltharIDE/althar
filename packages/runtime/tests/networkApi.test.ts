@@ -2,8 +2,9 @@ import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { request, type Agent } from 'node:https'
 
-import { API_VERSION, type PairingCode } from '@althar/contracts'
+import { API_VERSION, clientChallengeMessage, type PairingCode } from '@althar/contracts'
 import {
   apiClient,
   completeDevicePairing,
@@ -11,6 +12,7 @@ import {
   openHttpsConnection,
   signDeviceMessage,
   tlsPublicKeyPin,
+  homeHttpsAgent,
 } from '@althar/transport-node'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
@@ -18,6 +20,7 @@ import { Effect, Layer } from 'effect'
 import { services } from '../src/Api'
 import { DevicePairings } from '../src/DevicePairings'
 import { Instance } from '../src/Instance'
+import { ClientIdentities } from '../src/ClientIdentities'
 import { listenNetworkApi } from '../src/networkApi'
 import { Secrets } from '../src/Secrets'
 import { fakeAgents, fakeConnectors, ROOMY } from './support'
@@ -60,7 +63,68 @@ const home = Effect.gen(function* () {
   return { instance, pairings, code }
 })
 
+const probe = (origin: string, agent: Agent, headers: Record<string, string> = {}, path = '/v1/info', body?: string) =>
+  Effect.promise(
+    () =>
+      new Promise<number>((resolve) => {
+        const req = request(
+          new URL(path, origin),
+          {
+            agent,
+            method: body === undefined ? 'GET' : 'POST',
+            headers,
+          },
+          (response) => {
+            response.resume()
+            resolve(response.statusCode ?? 0)
+          },
+        )
+        req.once('error', () => resolve(0))
+        req.once('upgrade', (_response, socket) => {
+          socket.destroy()
+          resolve(101)
+        })
+        req.end(body)
+      }),
+  )
+
 describe('direct HTTPS and WSS home connections', () => {
+  it.live('rejects foreign browser origins, host headers, malformed bodies and repeated device proofs before admitting RPC', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { code } = yield* home
+        const agent = yield* homeHttpsAgent(code.origin, pin)
+        assert.strictEqual(yield* probe(code.origin, agent), 200)
+        assert.strictEqual(yield* probe(code.origin, agent, { origin: 'https://foreign.test' }), 403)
+        assert.strictEqual(yield* probe(code.origin, agent, { host: 'foreign.test' }), 403)
+        assert.strictEqual(yield* probe(code.origin, agent, { 'content-type': 'application/json' }, '/v1/pairing/complete', '{'), 403)
+        assert.strictEqual(yield* probe(code.origin, agent, { 'content-type': 'application/json' }, '/v1/missing', '{}'), 404)
+        assert.strictEqual(yield* probe(code.origin, agent, { 'content-type': 'text/plain' }, '/v1/pairing/complete', '{}'), 403)
+        assert.strictEqual(
+          yield* probe(code.origin, agent, { 'content-type': 'application/json' }, '/v1/pairing/complete', 'x'.repeat(16 * 1024 + 1)),
+          0,
+        )
+        const key = yield* createDeviceKey
+        const target = yield* completeDevicePairing(code, key, 'Desktop')
+        const identities = yield* ClientIdentities
+        const challenge = yield* identities.challenge(target.deviceId)
+        const signature = yield* signDeviceMessage(key.privateKey, clientChallengeMessage(challenge))
+        const headers = {
+          connection: 'Upgrade',
+          upgrade: 'websocket',
+          'sec-websocket-version': '13',
+          'sec-websocket-key': randomBytes(16).toString('base64'),
+          authorization: `Althar-Device ${Buffer.from(JSON.stringify({ challenge, signature })).toString('base64url')}`,
+        }
+        assert.strictEqual(yield* probe(code.origin, agent, { ...headers, authorization: 'Althar-Device invalid' }, '/v1/api'), 0)
+        assert.strictEqual(yield* probe(code.origin, agent, headers, '/v1/api'), 101)
+        assert.strictEqual(yield* probe(code.origin, agent, headers, '/v1/api'), 0)
+        const statuses = yield* Effect.forEach(Array.from({ length: 60 }), () => probe(code.origin, agent))
+        assert.include(statuses, 429)
+      }).pipe(Effect.provide(environment)),
+    ),
+  )
+
   it.live('pairs once and reconnects to the shared API without an invitation, relay or private socket secret', () =>
     Effect.scoped(
       Effect.gen(function* () {

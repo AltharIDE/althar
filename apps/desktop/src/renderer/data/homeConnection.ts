@@ -53,7 +53,7 @@ export const receiveHomeConnection = async (
         stop(
           new Error(
             state.current.kind !== 'local'
-              ? 'The home did not connect. Check its service and SSH configuration.'
+              ? 'The home did not connect. Check its service and network connection.'
               : 'The runtime didn’t start.',
           ),
         ),

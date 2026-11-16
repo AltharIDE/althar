@@ -14,13 +14,15 @@ import {
   serverProtocol,
 } from '@althar/contracts'
 import { assert, describe, it } from '@effect/vitest'
-import { Clock, Effect, Layer, Schema } from 'effect'
+import { Clock, Deferred, Effect, Layer, Schema } from 'effect'
+import { TestClock } from 'effect/testing'
 import { Rpc, RpcGroup, RpcServer } from 'effect/rpc'
 
 import { homeHttpsAgent, httpsJson, httpsOrigin, tlsPublicKeyPin } from '../src/https'
 import { createDeviceKey, decodePairingCode, encodePairingCode, completeDevicePairing, signDeviceMessage } from '../src/pairing'
 import { openHttpsConnection, webSocketPort, webSocketServer } from '../src/webSocket'
 import { apiClient } from '../src/client'
+import { readFrame } from '../src/authentication'
 
 const certificate = readFileSync(new URL('./fixtures/tls/certificate.pem', import.meta.url))
 const key = readFileSync(new URL('./fixtures/tls/key.pem', import.meta.url))
@@ -279,6 +281,61 @@ describe('secure bootstrap and device keys', () => {
 })
 
 describe('authenticated WebSocket streams', () => {
+  it.effect('keeps responsive peers connected and retires a peer that stops answering pings', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.now())
+        for (const autoPong of [true, false])
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const challenge = {
+                protocol: 1 as const,
+                homeId,
+                deviceId,
+                apiVersion: API_VERSION,
+                nonce: randomBytes(32).toString('base64url'),
+                expiresAt: (yield* Clock.currentTimeMillis) + 30_000,
+              }
+              const server = yield* fixture((_request, response) => json(response, challenge))
+              const ws = webSocketServer()
+              ws.options.autoPong = autoPong
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  ws.close()
+                }),
+              )
+              server.server.on('upgrade', (request, socket, head) =>
+                ws.handleUpgrade(request, socket, head, (peer) => {
+                  const port = webSocketPort(peer)
+                  peer.on('ping', () => port.post('ping-observed'))
+                  port.post({ type: 'Authenticated', identity, apiVersion: API_VERSION })
+                }),
+              )
+              const connection = yield* openHttpsConnection({ origin: server.origin, homeId, deviceId, tlsKeyPin: pin }, () =>
+                Effect.succeed('A'.repeat(86)),
+              )
+              const closed = yield* Deferred.make<void>()
+              const stop = connection.port.closed(() => {
+                Deferred.doneUnsafe(closed, Effect.void)
+              })
+              yield* Effect.addFinalizer(() => Effect.sync(stop))
+              yield* TestClock.adjust('30 seconds')
+              // The peer sends this frame after its automatic pong, if enabled.
+              assert.strictEqual(yield* readFrame(connection.port), 'ping-observed')
+              yield* TestClock.adjust('30 seconds')
+              if (autoPong) {
+                assert.strictEqual(yield* readFrame(connection.port), 'ping-observed')
+                assert.isFalse(yield* Deferred.isDone(closed))
+              } else {
+                yield* Deferred.await(closed)
+                yield* TestClock.adjust('30 seconds')
+              }
+            }),
+          )
+      }),
+    ),
+  )
+
   it.live('rejects an authenticated stream that returns malformed metadata or changes the device, home, API or authority', () =>
     Effect.scoped(
       Effect.gen(function* () {

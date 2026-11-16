@@ -6,6 +6,13 @@ import { Deferred, Effect, Fiber } from 'effect'
 
 import { untilPortCloses } from '../src/lifetime'
 
+it.live('supports a caller-owned port without close notifications while serving completes normally', () =>
+  Effect.gen(function* () {
+    const port = { post: () => {}, listen: () => () => {} }
+    assert.strictEqual(yield* untilPortCloses(port, Effect.succeed('done')), 'done')
+  }),
+)
+
 it.live('releases connection-owned resources before returning after a real peer disconnect', () =>
   Effect.scoped(
     Effect.gen(function* () {
