@@ -1214,6 +1214,7 @@ export class Sessions extends Context.Service<
             prior.started_at DESC, prior.rowid DESC LIMIT 1)
         JOIN user_inputs i ON i.thread_id = t.id AND i.state = 'queued'
         WHERE t.kind IN ('coordinator', 'task') AND p.archived_at IS NULL
+          AND t.waits_for_place IS NULL
           AND NOT EXISTS (SELECT 1 FROM helpers h WHERE h.thread_id = t.id)
           AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.id = t.task_id AND k.state = 'abandoned')
           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.state IN ('running', 'suspended'))
@@ -5257,6 +5258,8 @@ export class Sessions extends Context.Service<
           exclusive(
             threadId,
             Effect.suspend(() => {
+              // A stop also cancels startup recovery that has not yet acquired this thread's lock.
+              for (const one of recovery) if (one.threadId === threadId) recoveryInputs.delete(one.inputId)
               const running = threads.get(threadId)
               return running === undefined
                 ? Effect.fail(new NoSession({ threadId }))
