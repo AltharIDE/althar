@@ -27,6 +27,18 @@
 .both .line {
   grid-template-columns: 42px 42px 18px 1fr;
 }
+/* a long diff's rows, a chunk at a time (lib/chunks.ts): one away from the screen isn't laid out or painted, and holds the
+   size its rows take, a line's height each (a fold's with its padding, a note's a guess) and as wide as its longest line
+   with its numbers and sign, so the scrollbar is right before it is drawn; once drawn, the size it was */
+.chunk {
+  --gutter: 60px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto calc(var(--cols) * 1ch + var(--gutter)) auto
+    calc(var(--rows) * 1.75em + var(--folds) * (1.75em + 6px) + var(--notes) * 48px);
+}
+.both .chunk {
+  --gutter: 102px;
+}
 .n {
   padding-right: 10px;
   text-align: right;
@@ -125,11 +137,12 @@
     inset 0 1px 0 var(--line),
     inset 0 -1px 0 var(--line);
 }
-/* a hunk that opens the diff is its header: flush with the top edge, ruled below */
-.diff:has(> .hunk:first-child) {
+/* a hunk that opens the diff is its header, whether the diff's first row or its first chunk's: flush with the top edge, ruled below */
+.diff:has(> .hunk:first-child, > .chunk:first-child > .hunk:first-child) {
   padding-top: 0;
 }
-.hunk:first-child {
+.diff > .hunk:first-child,
+.diff > :where(.chunk:first-child) > .hunk:first-child {
   border-radius: 8px 8px 0 0;
   box-shadow: inset 0 -1px 0 var(--line);
 }
