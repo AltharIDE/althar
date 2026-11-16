@@ -659,26 +659,35 @@ export function ProjectView({
     void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
-  const edit = async (id: string) => {
+  // Out of the queue and in the composer at once; one the coordinator had already read comes back where it was, said why,
+  // and the composer goes back to what it held, unless written in since.
+  const edit = (id: string) => {
     const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
     // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
     if (said === undefined || !images.fits(said)) return
-    if (await model.takeBack(id)) {
+    let was: string | null = null
+    let put: string | null = null
+    const refused = () => setDraft((current) => (current === put && was !== null ? was : current))
+    if (!model.takeBack(id, refused)) return
+    setDraft((current) => {
+      was = current
+      put = withQueued(current, said.text)
+      return put
+    })
+    if (said.dictated === true) setDraftDictated(draftOf, true)
+    images.restore(said)
+  }
+
+  // A queued message goes to the coordinator now, interrupting it, rather than when it is done: out of the queue, and said
+  // again, at once. One it has already read stays as it was; one Althar didn't take goes back in the composer.
+  const sendQueuedNow = (id: string) => {
+    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
+    if (said === undefined) return
+    model.sayQueuedNow(id, said.text, outgoingOf(said), () => {
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(draftOf, true)
       images.restore(said)
-    }
-  }
-
-  // A queued message goes to the coordinator now, interrupting it, rather than when it is done: out of the queue, and said again. One it has already read stays as it was.
-  const sendQueuedNow = async (id: string) => {
-    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
-    if (said === undefined || !(await model.takeBack(id))) return
-    if (await model.sayNow(said.text, outgoingOf(said))) return
-    // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
-    setDraft((current) => withQueued(current, said.text))
-    if (said.dictated === true) setDraftDictated(draftOf, true)
-    images.restore(said)
+    })
   }
 
   const line: ReactNode =
@@ -762,8 +771,8 @@ export function ProjectView({
         {...(busy && talkingTo.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy && talkingTo.kind !== 'new'}
         queued={talkingTo.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue)}
-        onEditQueued={(id) => void edit(id)}
-        onSendQueuedNow={(id) => void sendQueuedNow(id)}
+        onEditQueued={edit}
+        onSendQueuedNow={sendQueuedNow}
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={
