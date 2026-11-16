@@ -81,14 +81,21 @@ const IMPLIED: Readonly<Record<string, string>> = {
 /** Kept to letters, digits and a few marks, and cut short: nothing else can reach the log. */
 const plain = (text: string, most = 60) => text.replace(/[^\w.:#$<>-]/g, '').slice(0, most)
 
-/** What a press was on: its test id, else its role, and its kind of element from its first class, without the class's hash. */
+/** What can be pressed, which a press on what is inside it, its label or its icon, is said to be on. */
+const PRESSABLE = 'a, button, input, select, summary, textarea, [role]'
+
+/**
+ * What a press was on: its test id, else what can be pressed round it, by its role and its kind of element from its
+ * first class, without the class's hash.
+ */
 export const targetOf = (target: unknown): string | undefined => {
   if (typeof Element === 'undefined' || !(target instanceof Element)) return undefined
   const tested = target.closest('[data-testid]')?.getAttribute('data-testid')
   if (tested !== null && tested !== undefined && tested !== '') return `testid:${plain(tested)}`
-  const tag = target.tagName.toLowerCase()
-  const role = target.getAttribute('role') ?? IMPLIED[tag] ?? tag
-  const [kind] = target.classList
+  const pressed = target.closest(PRESSABLE) ?? target
+  const tag = pressed.tagName.toLowerCase()
+  const role = pressed.getAttribute('role') ?? IMPLIED[tag] ?? tag
+  const [kind] = pressed.classList
   return kind === undefined ? plain(role) : `${plain(role, 30)}.${plain(kind.replace(/_[\w-]{4,5}$/, ''), 40)}`
 }
 
@@ -101,7 +108,7 @@ const scriptOf = (scripts: Entry['scripts']) => {
 }
 
 /** What one entry says, where it took long enough to; nothing for one that didn't, or a press that was no interaction. */
-export const slowOf = (entry: Entry): SlowFrame | undefined => {
+export const slowOf = (entry: Entry): (SlowFrame & { readonly interaction?: number }) | undefined => {
   const ms = Math.round(entry.duration)
   if (ms < SLOW_MS) return undefined
   if (entry.entryType === 'long-animation-frame') {
@@ -116,7 +123,7 @@ export const slowOf = (entry: Entry): SlowFrame | undefined => {
   if (entry.entryType === 'longtask') return { kind: 'task', ms }
   if (entry.entryType === 'event' && (entry.interactionId ?? 0) > 0) {
     const on = targetOf(entry.target)
-    return { kind: 'press', ms, event: plain(entry.name, 30), ...(on === undefined ? {} : { on }) }
+    return { kind: 'press', ms, event: plain(entry.name, 30), ...(on === undefined ? {} : { on }), interaction: entry.interactionId ?? 0 }
   }
   return undefined
 }
@@ -141,6 +148,8 @@ export const watchFrames = (
   if (send === undefined) return () => undefined
   let seen: Array<SlowFrame> = []
   let more = 0
+  /** Where each press of those seen is, by its interaction: its pointerdown, pointerup and click are one press, said once, at its longest. */
+  let presses = new Map<number, number>()
   let waiting: (() => void) | undefined
   const out = () => {
     waiting = undefined
@@ -148,23 +157,34 @@ export const watchFrames = (
     send({ frames: seen, more })
     seen = []
     more = 0
+    presses = new Map()
   }
   const took = (entries: ReadonlyArray<Entry>) => {
     for (const entry of entries) {
-      const slow = slowOf(entry)
-      if (slow === undefined) continue
-      if (seen.length < MOST) seen.push(slow)
-      else more += 1
+      const found = slowOf(entry)
+      if (found === undefined) continue
+      const { interaction, ...slow } = found
+      const at = interaction === undefined ? undefined : presses.get(interaction)
+      if (at !== undefined) {
+        if (slow.ms >= (seen[at]?.ms ?? 0)) seen[at] = slow
+        continue
+      }
+      if (seen.length >= MOST) {
+        more += 1
+        continue
+      }
+      if (interaction !== undefined) presses.set(interaction, seen.length)
+      seen.push(slow)
     }
     if (seen.length > 0) waiting ??= later(out, SENT_EVERY)
   }
   // Long animation frames where Chromium has them, which say which script held the frame; long tasks where it hasn't.
   const frames = observe('long-animation-frame', {}, took) ?? observe('longtask', {}, took)
   // A press's time until its next frame: Chromium says only those over the threshold, from 16 ms up.
-  const presses = observe('event', { durationThreshold: SLOW_MS }, took)
+  const events = observe('event', { durationThreshold: SLOW_MS }, took)
   return () => {
     frames?.()
-    presses?.()
+    events?.()
     waiting?.()
     out()
   }

@@ -85,12 +85,14 @@ describe('what made the page slow', () => {
       ms: 240,
       event: 'click',
       on: 'button.send',
+      interaction: 7,
     })
     expect(slowOf({ entryType: 'event', name: 'pointerover', duration: 240, interactionId: 0, target })).toBeUndefined()
     expect(slowOf({ entryType: 'event', name: 'keydown', duration: 240, interactionId: 3, target: null })).toEqual({
       kind: 'press',
       ms: 240,
       event: 'keydown',
+      interaction: 3,
     })
     expect(slowOf({ entryType: 'paint', name: 'first-paint', duration: 400 })).toBeUndefined()
   })
@@ -102,6 +104,8 @@ describe('what made the page slow', () => {
     expect(targetOf(button('<div role="option" data-pressed class="row_Ab1-2">Dana’s refunds</div>'))).toBe('option.row')
     expect(targetOf(button('<textarea data-pressed>secret plans</textarea>'))).toBe('textbox')
     expect(targetOf(button('<li data-pressed>one</li>'))).toBe('li')
+    // On a button's label or icon: the button.
+    expect(targetOf(button('<button class="send_x7Yz1"><span data-pressed>Send</span></button>'))).toBe('button.send')
     // As a development build names its classes.
     expect(targetOf(button('<a href="#" data-pressed class="Composer-module__send__x1y2">go</a>'))).toBe('link.Composer-module__send')
     expect(targetOf('not an element')).toBeUndefined()
@@ -129,13 +133,21 @@ describe('what made the page slow', () => {
     expect(sent).toHaveLength(1)
     expect(sent[0]?.frames).toHaveLength(MOST)
     expect(sent[0]?.more).toBe(4)
+    // A press's pointerdown, pointerup and click are one press, said once, at its longest.
+    page.see('event', [
+      { entryType: 'event', name: 'pointerdown', duration: 180, interactionId: 9, target: null },
+      { entryType: 'event', name: 'pointerup', duration: 180, interactionId: 9, target: null },
+      { entryType: 'event', name: 'click', duration: 176, interactionId: 9, target: null },
+    ])
+    timer.run()
+    expect(sent[1]).toEqual({ frames: [{ kind: 'press', ms: 180, event: 'pointerup' }], more: 0 })
     // A later one waits for a timer of its own, and what is left goes as it stops.
     page.see('event', [{ entryType: 'event', name: 'keydown', duration: 200, interactionId: 2, target: null }])
     stop()
-    expect(sent[1]).toEqual({ frames: [{ kind: 'press', ms: 200, event: 'keydown' }], more: 0 })
+    expect(sent[2]).toEqual({ frames: [{ kind: 'press', ms: 200, event: 'keydown' }], more: 0 })
     expect(page.stopped).toEqual(['long-animation-frame', 'event'])
     timer.run()
-    expect(sent).toHaveLength(2)
+    expect(sent).toHaveLength(3)
   })
 
   it('watches long tasks where Chromium has no long animation frames, and nothing where there is nowhere to send', () => {
