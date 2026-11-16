@@ -512,6 +512,8 @@ export interface Client {
     readonly taskId?: string
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
+  /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
+  readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
   readonly holdPlan: (planId: string) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
@@ -1046,6 +1048,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
+    stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
     changePlan: (planId, steps, end, worksIn, toward) =>

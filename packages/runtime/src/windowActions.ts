@@ -59,7 +59,9 @@ export const WINDOW_ACTIONS = {
   moveToFront: { tool: 'move_to_front' },
   // The plan card.
   startPlan: { tool: 'restart_task' },
+  reopenBlocker: { tool: 'restart_task' },
   holdPlan: { tool: 'hold_task' },
+  stopWaiting: { tool: 'wait_for_tasks' },
   // Calls that wait on the person.
   answer: { person: 'answers an agent’s permission request: an agent never answers one itself' },
   answerStuck: { tool: 'answer_stuck_step' },

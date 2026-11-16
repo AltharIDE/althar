@@ -229,6 +229,21 @@ export enum TaskStatus {
 }
 
 /**
+ * How a task another waits for stands (tasks wait for their blockers): not
+ * started yet, at work, stuck on you or stopped, in review, merged (its work
+ * in, so it holds nothing up), or abandoned, when what waits for it waits on
+ * you instead.
+ */
+export enum BlockerStands {
+  Planned = 'planned',
+  Working = 'working',
+  Stuck = 'stuck',
+  Review = 'review',
+  Merged = 'merged',
+  Abandoned = 'abandoned',
+}
+
+/**
  * What a task makes, read from what it has (DEV-96): a change ends in a pull
  * request of its own, or has commits; a review reads someone else's; any
  * other task is plain, and has no word on its card.

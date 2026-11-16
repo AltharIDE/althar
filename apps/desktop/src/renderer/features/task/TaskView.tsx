@@ -1,4 +1,5 @@
 import { MessageMotion } from '../../shared/MessageMotion'
+import { blockerText, blockerWords, openBlockers, standsOf } from '../../shared/blockers'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useTurnUndo } from './useTurnUndo'
@@ -42,6 +43,7 @@ import {
   SettleWays,
   TaskParts,
   Problem,
+  TaskWaitedBy,
 } from '@althar/ui'
 
 import { isAnswered, isSettleable, kindWords, takesDone } from '../../shared/calls'
@@ -228,11 +230,14 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string; readonly why?: string } => {
   const { waits, queued, phase, step } = snapshot.task
+  // Its plan waits for other tasks: when it starts, as its row in Up next says it (tasks wait for their blockers).
+  const after = blockerWords(snapshot.task)
   // In its merge queue as its card on the board is: by the pull request the card shows, not every one of the task's.
   const shown = shownChangeOf(snapshot.task.changes)
   const inQueue = queuedToMerge({ phase, change: shown })
   // Where it stands is its card's, as the board and the home say it (`taskStatusOf`); only the words are the header's own.
   const status = taskStatusOf({ ...snapshot.task, inMergeQueue: inQueue, calls: snapshot.attention.length })
+  if (after !== null && snapshot.attention.length === 0) return { status, state: after }
   if (status === TaskStatus.Running && snapshot.task.externalWait !== undefined)
     return { status, state: text.waiting, why: externalWaitWords(snapshot.task.externalWait, clock) }
   // A round of work after its plan is its lead following up, as the person asked (ADR-034).
@@ -454,6 +459,8 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
+  // Tasks the person just stopped this one waiting for: gone from its list at once, until its head is read again.
+  const [letGo, setLetGo] = useState<ReadonlySet<string>>(new Set())
   // Its one repository only on this computer: the connection it is being put on from its card, or a host to connect first.
   const [putting, setPutting] = useState<string | null>(null)
   const [connectService, setConnectService] = useState<Service | null>(null)
@@ -980,6 +987,35 @@ export function TaskView({
                   : {})}
       />
     ) : null
+  // What it waits for and what waits for it (tasks wait for their blockers): its header's words open them while it waits, and a
+  // part of its chip says what waits for it otherwise. One the person stops waiting for goes from the list at once.
+  const waitedBy = (snapshot.task.waitedBy ?? []).map((one) => ({
+    id: one.taskId,
+    title: one.title,
+    meta: blockerText.startsOnce,
+    ...(onOpenTask === undefined ? {} : { onOpen: () => onOpenTask(one.threadId) }),
+  }))
+  const waitsList =
+    openBlockers(snapshot.task).length === 0
+      ? undefined
+      : {
+          waitsFor: (snapshot.task.waitsFor ?? [])
+            .filter((one) => !letGo.has(one.taskId))
+            .map((one) => ({
+              id: one.taskId,
+              title: one.title,
+              stands: standsOf(one.stands),
+              ...(onOpenTask === undefined ? {} : { onOpen: () => onOpenTask(one.threadId) }),
+              onReopen: () => void model.reopenBlocker(one.taskId),
+              onStopWaiting: () => {
+                setLetGo((was) => new Set([...was, one.taskId]))
+                // Read again by then: gone where it went through, back with a line where it didn't.
+                void model.stopWaiting(one.taskId).finally(() => setLetGo((was) => new Set([...was].filter((id) => id !== one.taskId))))
+              },
+            })),
+          waitedBy,
+          ...(planId === null ? {} : { onStartNow: () => void model.startPlan(planId) }),
+        }
   // A change its lead or the coordinator split, before it ships: Keep them together; one its lead's git made: Drop it. Never once
   // it was kept together, dropped, or opened its pull request.
   const settledSteps = new Set(
@@ -1341,7 +1377,12 @@ export function TaskView({
                   face={shown}
                   onFace={setFace}
                   // Finished and the person's to settle: Done and Keep for later, inside where it stands.
-                  {...(settle === null ? {} : { beside: settle })}
+                  {...(settle !== null
+                    ? { beside: settle }
+                    : waitsList === undefined && waitedBy.length > 0
+                      ? { beside: <TaskWaitedBy waitedBy={waitedBy} /> }
+                      : {})}
+                  {...(waitsList === undefined ? {} : { waits: waitsList })}
                   parts={parts}
                   actions={actions}
                 />

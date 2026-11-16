@@ -180,6 +180,10 @@ export interface TaskModel {
   readonly attach: (pullRequest: string, start: boolean) => Promise<Attachment | null>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
+  /** Stops it waiting for another task (tasks wait for their blockers), by that task's id. */
+  readonly stopWaiting: (on: string) => Promise<void>
+  /** Reopens a task it waits for that was abandoned, by its id. */
+  readonly reopenBlocker: (taskId: string) => Promise<void>
   /** Holds its plan until it is started, while it counts down or waits for a free agent. */
   readonly holdPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
@@ -526,7 +530,9 @@ export const useTask = (threadId: string): TaskModel => {
       )
     // Its project's rules, which belong to no thread: by their switch it may allow everything now, or no longer. Its head again.
     const ofItsRules = event._tag === 'Changed' && event.aggregateType === 'policy' && event.projectId === snapshot?.project.id
-    if (event.threadId !== threadId && !ofItsRules) return
+    // Its card, which belongs to no thread: what it waits for moved on, as a task it waits for did (tasks wait for their blockers).
+    const ofItsCard = event._tag === 'Changed' && event.aggregateType === 'card' && event.aggregateId === snapshot?.task.id
+    if (event.threadId !== threadId && !ofItsRules && !ofItsCard) return
     // How full the lead's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context')
       return void setSnapshot((current) =>
@@ -825,6 +831,8 @@ export const useTask = (threadId: string): TaskModel => {
       return done
     },
     startPlan: (planId) => act(() => client.startPlan(planId)),
+    stopWaiting: (on) => onTask((taskId) => client.stopWaiting(taskId, on)),
+    reopenBlocker: (taskId) => act(() => client.reopenTask(taskId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.

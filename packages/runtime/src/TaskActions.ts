@@ -40,6 +40,7 @@ import { addItem, updateItem } from './threads'
 import { touchTask } from './cards'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
+import { blockersOf, stopWaiting, waitFor } from './waits'
 import { expected, words } from './words'
 
 /*
@@ -569,6 +570,12 @@ export class TaskActions extends Context.Service<
         updateItem(projectId, itemId, { ...card, state, said } satisfies TaskAskContent)
 
       const Asked = Schema.Struct({ task: Schema.String, why: Schema.optional(Schema.String) })
+      const Waiting = Schema.Struct({
+        task: Schema.String,
+        on: Schema.optional(Schema.Array(Schema.String)),
+        stop: Schema.optional(Schema.Array(Schema.String)),
+        why: Schema.optional(Schema.String),
+      })
       const Settling = Schema.Struct({
         task: Schema.optional(Schema.String),
         how: Schema.Literals(['done', 'keep', 'discard']),
@@ -1908,6 +1915,65 @@ export class TaskActions extends Context.Service<
           'Holds a task’s plan that is counting down to start, or whose first step still waits for a free agent or its checkout: it leaves the line and waits until it is started (restart_task). For a task already at work, stop it instead. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task, why }, required: ['task'] },
           (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'hold', { why: asked.why })),
+        ),
+        tool(
+          'wait_for_tasks',
+          'Makes a task wait for other tasks, its blockers, or stop waiting for some: its plan starts by itself once every task it waits for has merged, after its countdown, as the board says ("Starts when Pairing merges"). Only a blocker that is abandoned comes to the person, who starts it anyway, reopens the blocker or stops it waiting. Use it when the person says one task should come after another; propose_plan takes waits_for for a task planned to wait. A task can’t wait for itself, nor for one that waits for it, however far along; one merged already is nothing to wait for. The person’s Start now (restart_task) still starts it at once, and a held plan stays held. It acts at once, with a line in the task’s thread.',
+          {
+            type: 'object',
+            properties: {
+              task,
+              on: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Tasks it waits for from now, by slug, as list_tasks shows them.',
+              },
+              stop: { type: 'array', items: { type: 'string' }, description: 'Tasks it stops waiting for, by slug.' },
+              why,
+            },
+            required: ['task'],
+          },
+          (access, input) =>
+            Effect.gen(function* () {
+              const asked = yield* read(Waiting, input)
+              const target = yield* taskOf(access.projectId, asked.task)
+              const on = yield* Effect.forEach(asked.on ?? [], (one) => taskOf(access.projectId, one))
+              const stop = yield* Effect.forEach(asked.stop ?? [], (one) => taskOf(access.projectId, one))
+              if (on.length === 0 && stop.length === 0)
+                return yield* new ToolRefused({ message: 'Name the tasks it waits for (on), or stops waiting for (stop).' })
+              const actorId = actorOf(access)
+              const outcomes = yield* waitFor({ taskId: target.id, on: on.map((one) => one.id), actorId })
+              const stopped: Array<Task> = []
+              for (const one of stop) if (yield* stopWaiting({ taskId: target.id, on: one.id, actorId })) stopped.push(one)
+              const added = on.filter((one) => outcomes.some((outcome) => outcome.on === one.slug && 'added' in outcome && outcome.added))
+              const as = becauseOf(asked.why)
+              const who = access.role === 'lead' && access.taskId === target.id ? 'Its lead' : yield* whoOf(access)
+              const titles = (tasks: ReadonlyArray<Task>) => tasks.map((one) => `“${one.title}”`).join(' and ')
+              if (added.length > 0) yield* line(target.projectId, target.threadId, `${who} made it wait for ${titles(added)}${as}`)
+              if (stopped.length > 0)
+                yield* line(target.projectId, target.threadId, `${who} stopped it waiting for ${titles(stopped)}${as}`)
+              const sql = yield* SqlClient.SqlClient
+              const now = yield* blockersOf(target.id)
+              const named = yield* Effect.forEach(now, (id) =>
+                Effect.map(sql<{ slug: string; state: string }>`SELECT slug, state FROM tasks WHERE id = ${id}`, (rows) => rows[0]),
+              )
+              const [started] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${target.id} LIMIT 1`
+              const said = [
+                ...outcomes.flatMap((outcome) =>
+                  'refused' in outcome
+                    ? [`Not ${outcome.on}: ${outcome.refused}`]
+                    : !outcome.added && outcome.why === 'merged'
+                      ? [`${outcome.on} has merged already: nothing to wait for.`]
+                      : [],
+                ),
+                ...stop.filter((one) => !stopped.includes(one)).map((one) => `It didn’t wait for ${one.slug}.`),
+                named.length === 0
+                  ? `${target.slug} waits for no task now.`
+                  : `${target.slug} waits for ${named.map((one) => (one === undefined ? '' : one.state === 'done' ? `${one.slug} (merged)` : one.state === 'abandoned' ? `${one.slug} (abandoned: the person decides)` : one.slug)).join(', ')}.`,
+                ...(started !== undefined ? ['It has started already: waiting only holds a plan that hasn’t.'] : []),
+              ]
+              return said.join(' ')
+            }),
         ),
         tool(
           'restart_task',

@@ -28,6 +28,8 @@ export interface HomeWaits {
   readonly issues: ReadonlyArray<HomeTask>
   /** Work ready for the person. */
   readonly ready: ReadonlyArray<HomeTask>
+  /** Plans that wait for a task that was abandoned (tasks wait for their blockers). */
+  readonly abandoned: ReadonlyArray<HomeTask>
   /** What is in progress: Running's and Up next's, and what waits on a call, in the home's order. */
   readonly working: ReadonlyArray<HomeTask>
   /** How many things wait, each once, as the tabs count them. */
@@ -50,6 +52,7 @@ export const waitsOf = (home: HomeSnapshot | null, merging: ReadonlySet<string> 
     calls: standingCalls(tasks, calls),
     issues: homeOf(lanes.issues),
     ready: homeOf(lanes.ready),
+    abandoned: homeOf(lanes.abandoned),
     working: tasks.filter((task) => under.has(task.taskId)),
     waiting: yoursOf(lanes),
   }
@@ -85,7 +88,7 @@ export const homeGlanceOf = (
   },
 ): HomeGlance => {
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
-  const { calls: standing, issues, ready: waits, working: all, waiting } = waitsOf(home, merging)
+  const { calls: standing, issues, ready: waits, abandoned, working: all, waiting } = waitsOf(home, merging)
   // Merged from its line here, a ready change stays that line while its merge is under way, not counted as waiting; its
   // host having it, in its queue or merged, it goes on.
   const stays = [...mergedHere].filter((id) => merging.has(id))
@@ -96,7 +99,7 @@ export const homeGlanceOf = (
   const carded = new Set(calls.map((call) => call.threadId))
   // A project not known yet has none of its work shown, nor counted as in progress.
   const working = all.filter((task) => refs.has(task.projectId) && !carded.has(task.threadId) && !kept.has(task.taskId))
-  const needs = needsOf({ calls: standing, answered, issues, ready, refs, agentName, modelName })
+  const needs = needsOf({ calls: standing, answered, issues, abandoned, ready, refs, agentName, modelName })
   const waitsStill = (need: Need) => need.answer === undefined && (need.ready === undefined || !kept.has(need.ready.task.taskId))
   return {
     calls,

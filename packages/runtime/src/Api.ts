@@ -165,6 +165,7 @@ import { Canvases } from './Canvases'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
+import { stopWaiting } from './waits'
 
 /** Runs one of sync's steps against the person's agents' settings, where this runtime reads them; refused where it doesn't. */
 const withSync = (step: (io: mcpSync.SyncIo & skillSync.SkillIo) => Promise<unknown>) =>
@@ -1750,6 +1751,9 @@ export const handlers = apiLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
+      // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
+      StopWaiting: ({ commandId, taskId, on }) =>
+        once(commandId, api(Effect.asVoid(Effect.provideContext(stopWaiting({ taskId, on, actorId }), folderStore)))),
       HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, actorId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, actorId, end, worksIn, toward))),

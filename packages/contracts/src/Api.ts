@@ -2551,6 +2551,22 @@ export const AfterMergeReview = Schema.Struct({
 })
 export type AfterMergeReview = typeof AfterMergeReview.Type
 
+/**
+ * How a task another waits for stands (tasks wait for their blockers): `planned` before its lead starts, `working` while it
+ * does, `stuck` where it waits on the person or stopped, `review` with its pull request open, `merged` once it is done (its
+ * work in), `abandoned` once given up: the task waiting for it then waits on the person.
+ */
+export const BlockerStanding = Schema.Literals(['planned', 'working', 'stuck', 'review', 'merged', 'abandoned'])
+export type BlockerStanding = typeof BlockerStanding.Type
+
+/** Another task named on a task's card: what it waits for, or what waits for it. */
+export const LinkedTask = Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })
+export type LinkedTask = typeof LinkedTask.Type
+
+/** A task this one waits for, and how it stands. */
+export const TaskBlocker = Schema.Struct({ ...LinkedTask.fields, stands: BlockerStanding })
+export type TaskBlocker = typeof TaskBlocker.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2761,6 +2777,14 @@ export const TaskCard = Schema.Struct({
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
+  /**
+   * The tasks it waits for (tasks wait for their blockers), in the order they were named, merged ones included: its plan
+   * starts by itself once they have all merged, and waits on the person once one of them is abandoned. Absent where it waits
+   * for none, and once it started.
+   */
+  waitsFor: Schema.optional(Schema.Array(TaskBlocker)),
+  /** The open tasks that wait for it, whose plans start once it merges. Absent where none does. */
+  waitedBy: Schema.optional(Schema.Array(LinkedTask)),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
   /**
@@ -3994,6 +4018,10 @@ export const ThreadSnapshot = Schema.Struct({
     ),
     /** Started Local, what it waits for before its lead starts, as its card says. */
     waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
+    /** The tasks its plan waits for, and how each stands, as its card says (tasks wait for their blockers). */
+    waitsFor: Schema.optional(Schema.Array(TaskBlocker)),
+    /** The open tasks that wait for it, as its card says. */
+    waitedBy: Schema.optional(Schema.Array(LinkedTask)),
     /** The branch its work goes into, where it isn't its repository's default (ADR-093): release/0.8.0; absent for the default. */
     toward: Schema.optional(Schema.String),
     /**
@@ -5111,6 +5139,8 @@ const ProjectApi = RpcGroup.make(
   ),
   /** Starts a planned task now, rather than when its time runs out. */
   command('StartPlan', { planId: Schema.String }, Schema.Void),
+  /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
+  command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
   command('HoldPlan', { planId: Schema.String }, Schema.Boolean),
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */

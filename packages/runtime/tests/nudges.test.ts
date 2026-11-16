@@ -19,6 +19,7 @@ import { Runs } from '../src/Runs'
 import { shelve } from '../src/scratch'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
+import { waitFor } from '../src/waits'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime, until } from './support'
 
@@ -283,6 +284,46 @@ describe('nudges', () => {
       yield* until(
         Effect.sync(() => busy(events)),
         (seen) => seen.at(-1) === false,
+      )
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
+  it.live('say a plan whose task it waits for was abandoned, naming that one, and count it as the person’s', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const projects = yield* Projects
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const draft = (title: string) =>
+        Effect.flatMap(Runtime.envelope('task.create', {}), (envelope) =>
+          projects.createTask({ envelope, projectId: project.projectId, title, draft: true }),
+        )
+      const sealing = yield* draft('Seal secrets')
+      const ssh = yield* draft('SSH setup')
+      yield* waitFor({ taskId: ssh.taskId, on: [sealing.taskId], actorId: instance.coordinatorId })
+      yield* (yield* Plans).propose({
+        projectId: project.projectId as ProjectId,
+        taskId: ssh.taskId,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.coordinatorId,
+        end: null,
+        startsIn: Duration.hours(1),
+      })
+      yield* (yield* Tasks).abandon({
+        envelope: yield* Runtime.envelope('task.abandon', { taskId: sealing.taskId }),
+        taskId: sealing.taskId,
+      })
+      yield* until(
+        Effect.sync(() => nudged(events)),
+        (said) => said.length === 1,
+      )
+      assert.deepStrictEqual(nudged(events), [['SSH setup', 'Seal secrets was abandoned']])
+      assert.deepStrictEqual(kinds(events), ['call'])
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 1,
       )
       yield* stop
     }).pipe(Effect.provide(withNudges())),
