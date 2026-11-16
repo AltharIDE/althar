@@ -99,7 +99,7 @@ test('Ship to merged waits in place on a required check, nothing to press beside
 
     // The check passes: it merges, and the task settles.
     writeFileSync(passes, '')
-    await expect(page.getByRole('region', { name: 'Settled' }).getByText(title)).toBeAttached({ timeout: 60_000 })
+    await expect(page.getByRole('region', { name: 'Settled' }).getByText(title)).toBeAttached()
   } finally {
     await electronApp.close()
   }
