@@ -189,7 +189,8 @@ export const SLICE = 25
  */
 export const slices = async (text: string, lang: string): Promise<() => Token[][] | null> => {
   const shown = await highlighter()
-  const grammar = GRAMMARS[lang]
+  // Only a grammar of the table's own: a language comes in a message, and a name such as `constructor` is not one.
+  const grammar = Object.hasOwn(GRAMMARS, lang) ? GRAMMARS[lang] : undefined
   if (grammar === undefined) throw new Error(`No grammar for ${lang}`)
   if (!shown.getLoadedLanguages().includes(lang)) await shown.loadLanguage((await grammar()) as never)
   const rows = text.split('\n')
