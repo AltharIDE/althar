@@ -18,6 +18,7 @@ import {
   apiLayer,
   ApiError,
   type AgentStatus,
+  type StorageSize,
   type Attachment,
   type PortLike,
   serverProtocol,
@@ -59,6 +60,7 @@ import { publishRepository } from './publish'
 import { refreshRemotes } from './recordedRemotes'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
+import { storageSizes } from './StorageSizes'
 import { modelNamer } from './coordinatorNews'
 import { teamChanges, teamLine } from './teamWords'
 import { addItem } from './threads'
@@ -372,6 +374,11 @@ export const handlers = apiLayer(
     const openingFolder = (taskId: string) => holdingFolder(taskId, Effect.void)
     const agents = yield* Agents
     const config = yield* RuntimeConfig
+    // What About › Storage measures: kept for the session, and stopped when the window gives up.
+    const sizes =
+      config.storage === undefined
+        ? undefined
+        : storageSizes({ profile: config.storage.profile, logs: config.storage.logs, worktrees: config.worktreeRoot })
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
@@ -1404,6 +1411,12 @@ export const handlers = apiLayer(
       SetNewProjectDefaults: ({ commandId, ...change }) =>
         once(commandId, api(setNewProjectDefaults(change)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       GetTaskFolders: () => api(cleanup.list),
+      GetStorageSize: ({ place, refresh }) =>
+        api(
+          sizes === undefined
+            ? Effect.succeed<StorageSize>({ state: 'failed' })
+            : Effect.promise((signal) => sizes.size(place, refresh, signal).catch(() => ({ state: 'failed' }) as const)),
+        ),
       CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId))),
       RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, actorId))),
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
