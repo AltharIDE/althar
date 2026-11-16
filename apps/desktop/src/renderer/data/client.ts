@@ -1,5 +1,5 @@
 import type { SearchDocuments } from '@althar/contracts'
-import type { AcpCatalog, AcpConnection } from '@althar/contracts'
+import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
 
 import {
   type CanvasDetail,
@@ -289,6 +289,8 @@ export interface Client {
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
   readonly setSendMidTurn: (to: 'queue' | 'steer') => Promise<void>
+  /** Makes a route the person's default for every Ship; null goes back to each task's own. */
+  readonly setShipRoute: (route: ShipRoute | null) => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
@@ -668,7 +670,10 @@ export interface Client {
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Ships what waits on the task's branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
   /** Ships what waits; with a change named, only it, and what waits beneath it in its stack. */
-  readonly ship: (taskId: string, change?: string) => Promise<void>
+  /** Ships what waits, on `route` where the person chose one for this Ship, else the task's own. */
+  readonly ship: (taskId: string, change?: string, route?: ShipRoute) => Promise<void>
+  /** Changes the route of the task's Ship under way. */
+  readonly routeShip: (taskId: string, route: ShipRoute) => Promise<void>
   /** Fix it, on what the task's review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
   readonly fixAfterMerge: (taskId: string, url?: string) => Promise<void>
   /** Leave it, on what the task's review after a merge found: the findings close, and stay in the thread. */
@@ -912,6 +917,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
     setSendMidTurn: (to) => command((commandId) => api.SetSendMidTurn({ commandId, to })),
+    setShipRoute: (route) => command((commandId) => api.SetShipRoute({ commandId, route })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     joinChanges: (taskId, change, into) =>
@@ -1107,7 +1113,11 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startAcpCheck: (agentId) => command((commandId) => api.CheckAcpConnection({ commandId, agentId })),
     removeAcpConnection: (agentId) => command((commandId) => api.RemoveAcpConnection({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
-    ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
+    ship: (taskId, change, route) =>
+      command((commandId) =>
+        api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }), ...(route === undefined ? {} : { route }) }),
+      ),
+    routeShip: (taskId, route) => command((commandId) => api.RouteShip({ commandId, taskId, route })),
     fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
     leaveAfterMerge: (taskId, url) =>
       command((commandId) => api.LeaveAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),

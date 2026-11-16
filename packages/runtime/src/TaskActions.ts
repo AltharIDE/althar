@@ -19,7 +19,7 @@ import { TITLES_FOLLOW_WORK } from './presetBrief'
 import { Agents } from './Config'
 import { envelope } from './envelope'
 import { Errands } from './Errands'
-import { CantMerge, PushRefused } from './errors'
+import { CantMerge, PushRefused, ShipRefused } from './errors'
 import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
@@ -1066,10 +1066,47 @@ export class TaskActions extends Context.Service<
           far: asked.far ?? (own.route.far === 'merge' ? ('ready' as const) : own.route.far),
         }))
 
+      /** How far a Ship goes, as an agent is told. */
+      const FAR_SAID = {
+        push: 'a push (a draft pull request stays a draft, a new one opens as one)',
+        ready: 'ready for review (an open draft is marked ready, a new pull request opens ready)',
+        merge: 'a merge, once the checks its target requires pass',
+      } as const satisfies Record<'push' | 'ready' | 'merge', string>
+
       const shipTask = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(ShipAsked, input)
           const task = yield* named(access, asked.task)
+          // A Ship under way, with a route said: that Ship takes it, as the person's RouteShip does, from where it stands.
+          if (asked.review !== undefined || asked.far !== undefined) {
+            const said = yield* envelope(
+              'task.route_ship',
+              { taskId: task.id, review: asked.review ?? null, far: asked.far ?? null },
+              undefined,
+              actorOf(access),
+            )
+            const rerouted = yield* runs
+              .routeShip({
+                envelope: said,
+                taskId: task.id,
+                route: {
+                  ...(asked.review === undefined ? {} : { review: asked.review }),
+                  ...(asked.far === undefined ? {} : { far: asked.far }),
+                },
+              })
+              .pipe(
+                Effect.catchIf(
+                  (error) => error instanceof ShipRefused && error.why === 'not_shipping',
+                  () => Effect.succeed(undefined),
+                ),
+                (rerouting) => plainly(rerouting, task.slug),
+              )
+            if (rerouted !== undefined) {
+              yield* did(access, input, task, `Changed “${task.title}”’s Ship`, 'changed the route of its Ship')
+              const review = asked.review === false && !rerouted.review ? ', without its review (one under way stops)' : ''
+              return `Changed ${task.slug}’s Ship: it now goes as far as ${FAR_SAID[rerouted.far]}${review}. read_task shows where it stands. ${threadsSaying(access, task)}.`
+            }
+          }
           // Its own lead asks in its turn: it ships once that turn ends, with all the turn committed.
           const own = access.role === 'lead' && task.id === access.taskId
           const route = yield* agentRoute(task.id, asked)
@@ -1939,7 +1976,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'ship_task',
-          'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A task of several changes ships each waiting in a Ship of its own, the bottom of a stack first, each after its own review; with change, only that one, and what waits beneath it in its stack. A lead shipping its own task ships it once its turn ends. It acts at once, with a line in your thread and the task’s.',
+          'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A task of several changes ships each waiting in a Ship of its own, the bottom of a stack first, each after its own review; with change, only that one, and what waits beneath it in its stack. A lead shipping its own task ships it once its turn ends. Where the task has a Ship under way, review and far change that Ship instead, from where it stands, as the person’s own change of its route does: review false stops a review under way, and far applies where it hasn’t gone past it (once ready for review, it can’t be a draft again); with neither, a Ship under way is refused as it is. It acts at once, with a line in your thread and the task’s.',
           {
             type: 'object',
             properties: {
@@ -1952,13 +1989,13 @@ export class TaskActions extends Context.Service<
               review: {
                 type: 'boolean',
                 description:
-                  'Only where the person said: false ships without its review, which then never runs for it. Left out, as the task goes.',
+                  'Only where the person said: false ships without its review, which then never runs for it, and stops one under way. Left out, as the task goes, or as its Ship under way goes now.',
               },
               far: {
                 type: 'string',
                 enum: ['push', 'ready'],
                 description:
-                  'Only where the person said how far: push leaves a draft pull request a draft and opens a new one as a draft; ready marks an open draft ready for review and opens a new one ready. Left out, as the task goes. Merging is the person’s own Ship.',
+                  'Only where the person said how far: push leaves a draft pull request a draft and opens a new one as a draft; ready marks an open draft ready for review and opens a new one ready. Left out, as the task goes, or as its Ship under way goes now. Merging is the person’s own Ship.',
               },
             },
           },

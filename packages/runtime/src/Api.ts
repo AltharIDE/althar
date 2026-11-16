@@ -2140,7 +2140,7 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.flatMap(envelope('task.route_ship', { taskId, route }, commandId), (said) =>
-              runs.routeShip({ envelope: said, taskId, route }),
+              Effect.asVoid(runs.routeShip({ envelope: said, taskId, route })),
             ),
           ),
         ),

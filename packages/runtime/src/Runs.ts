@@ -914,14 +914,15 @@ export class Runs extends Context.Service<
     /**
      * Changes the route of the task's Ship under way, as the person said: how far it goes, where it hasn't gone past that
      * point (a Ship waiting to merge that goes back to ready stops waiting, and ends there), and its review, which stops as
-     * Skip review stops it where the route turns it off. Answered once the route is kept; what it stops goes on behind.
-     * ShipRefused (`not_shipping`) where no Ship is under way.
+     * Skip review stops it where the route turns it off. Answered once the route is kept, with the route as kept; what it
+     * stops goes on behind. What the route leaves out stays as it was (ship_task's, which may say only one). ShipRefused
+     * (`not_shipping`) where no Ship is under way.
      */
     routeShip(input: {
       readonly envelope: CommandEnvelope
       readonly taskId: string
-      readonly route: ShipRoute
-    }): Effect.Effect<void, unknown>
+      readonly route: { readonly review?: boolean | undefined; readonly far?: ShipRoute['far'] | undefined }
+    }): Effect.Effect<ShipRoute, unknown>
     /**
      * Merge, with commits not shipped (a task is a conversation plus parts):
      * `review`, Review and merge, ships them with one review of what waited
@@ -8839,9 +8840,10 @@ export class Runs extends Context.Service<
                 ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1`
               const was = routeOfShip(ships, parameters.steps, parameters.end ?? null)
               const at = shipStopOf({ at: ships.at, step: step?.nodeKey, reviewing: reviewsBeforeShip(parameters) })
+              const wanted = { review: input.route.review ?? was.review, far: input.route.far ?? was.far }
               const route: ShipRoute = {
-                review: at === 'review' ? was.review && input.route.review : was.review,
-                far: (at === 'ready' || at === 'merge') && input.route.far === 'push' ? 'ready' : input.route.far,
+                review: at === 'review' ? was.review && wanted.review : was.review,
+                far: (at === 'ready' || at === 'merge') && wanted.far === 'push' ? 'ready' : wanted.far,
               }
               const revision = yield* change('runs', current.runId, {
                 parameters: JSON.stringify({ ...parameters, ships: { ...ships, route } }),
@@ -8856,7 +8858,11 @@ export class Runs extends Context.Service<
                 actorId: input.envelope.actorId,
                 commandId: input.envelope.commandId,
               })
-              return { at, skips: at === 'review' && was.review && !route.review, stopsWaiting: at === 'merge' && route.far !== 'merge' }
+              return {
+                route,
+                skips: at === 'review' && was.review && !route.review,
+                stopsWaiting: at === 'merge' && route.far !== 'merge',
+              }
             }),
           )
           if (changed === undefined) return yield* notShipping
@@ -8876,6 +8882,7 @@ export class Runs extends Context.Service<
           // Waiting to merge, it looks again now, and ends at ready.
           const wake = mergeWakes.get(current.runId)
           if (changed.stopsWaiting && wake !== undefined) yield* Queue.offer(wake, undefined)
+          return changed.route
         })
 
       return Runs.of({

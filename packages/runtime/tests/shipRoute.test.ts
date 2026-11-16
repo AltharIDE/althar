@@ -23,7 +23,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { setShipRoute } from '../src/shipRoute'
-import { fakeConnectors, HOST, hosted, items, notices, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, notices, runtime, until } from './support'
 
 /*
  * A Ship's route (a task is a conversation plus parts, "Ship"): whether its
@@ -416,6 +416,40 @@ describe('changing a Ship’s route as it goes', () => {
       assert.include(yield* titles(task.threadId), 'The review stopped: skipped, with what it found left open.')
       assert.deepStrictEqual(yield* stepsSaid(task.threadId), ['implement', 'review', 'publish', 'publish'])
       assert.isTrue(github.changes[0]?.draft)
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('takes a route from ship_task while it goes, no further than ready, and with none says it is at work', () => {
+    const { working, bare, github } = onGitHub(requires('test'))
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.setChecks(1, [{ name: 'test', state: 'running' }])
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(header(task.threadId), (seen) => seen.shipping?.at === 'merge')
+      // The coordinator, on the person's word.
+      const threadId = yield* (yield* Coordinator).thread(task.projectId)
+      const coordinator = { role: 'coordinator' as const, projectId: task.projectId, threadId, sessionId: 'none', taskId: null }
+      const slug = (yield* sql<{ slug: string }>`SELECT slug FROM tasks WHERE id = ${task.taskId}`)[0]?.slug ?? ''
+      // With no route said, a Ship under way is refused as it always was.
+      assert.notMatch(yield* callTool(coordinator, 'ship_task', { task: slug }), /^Changed /)
+      assert.strictEqual((yield* shipRuns(task.taskId)).length, 1)
+      // As far as ready for review: it stops waiting to merge, and ends there.
+      assert.strictEqual(
+        yield* callTool(coordinator, 'ship_task', { task: slug, far: 'ready' }),
+        `Changed ${slug}’s Ship: it now goes as far as ready for review (an open draft is marked ready, a new pull request opens ready). read_task shows where it stands. Both threads have a line saying so.`,
+      )
+      yield* shipped(task.taskId)
+      assert.deepStrictEqual(JSON.parse((yield* shipRuns(task.taskId))[0]?.parameters ?? '{}').ships?.route, {
+        review: false,
+        far: 'ready',
+      })
+      assert.lengthOf(github.merged, 0)
+      // It never goes as far as a merge on an agent's word.
+      assert.match(yield* callTool(coordinator, 'ship_task', { task: slug, far: 'merge' }), /far/)
     }).pipe(Effect.provide(withHost(github)))
   })
 
