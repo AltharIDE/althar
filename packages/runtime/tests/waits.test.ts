@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import type { TaskCard, TaskPhase } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -11,7 +12,7 @@ import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
-import { Queries } from '../src/Queries'
+import { blockerStands, Queries } from '../src/Queries'
 import { change, fact, timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
@@ -300,6 +301,72 @@ describe('a task that waits for its blockers', () => {
       yield* (yield* Plans).start(planId, instance.personId)
       yield* until(queries.card(ssh.taskId), (now) => now.waitsFor === undefined)
       assert.isUndefined((yield* queries.card(sealing.taskId)).waitedBy)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('wait_for_tasks says how each it waits for stands, what it didn’t do, and that a started task waits for nothing', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      const service = yield* drafted(projectId, 'Host service')
+      const sealing = yield* drafted(projectId, 'Seal secrets')
+      const docs = yield* drafted(projectId, 'Write the docs')
+      const ssh = yield* drafted(projectId, 'SSH setup')
+      // Its own lead makes it wait.
+      const lead: ToolAccess = { role: 'lead', projectId, threadId: ssh.threadId, sessionId: 'none', taskId: ssh.taskId }
+      yield* callTool(lead, 'wait_for_tasks', { task: ssh.slug, on: [service.slug, sealing.slug] })
+      assert.include(
+        (yield* notices(ssh.threadId)).map((one) => one.title),
+        'Its lead made it wait for “Host service” and “Seal secrets”',
+      )
+      yield* ended(service.taskId, 'done')
+      yield* ended(sealing.taskId, 'abandoned')
+      yield* ended(docs.taskId, 'done')
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const said = yield* callTool(access, 'wait_for_tasks', { task: ssh.slug, on: [docs.slug], stop: [docs.slug] })
+      assert.include(said, `${docs.slug} has merged already: nothing to wait for.`)
+      assert.include(said, `It didn’t wait for ${docs.slug}.`)
+      assert.include(said, `${ssh.slug} waits for ${service.slug} (merged), ${sealing.slug} (abandoned: the person decides).`)
+      assert.notInclude(said, 'started already')
+      // Started, waiting holds nothing.
+      yield* planned(projectId, ssh.taskId)
+      yield* (yield* Plans).start(
+        (yield* (yield* SqlClient.SqlClient)<{ id: string }>`SELECT id FROM task_plans WHERE task_id = ${ssh.taskId}`)[0]?.id ?? '',
+        (yield* Instance).personId,
+      )
+      assert.include(
+        yield* callTool(access, 'wait_for_tasks', { task: ssh.slug, stop: [sealing.slug] }),
+        'It has started already: waiting only holds a plan that hasn’t.',
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it('a task waited for stands by its card: planned, under way, in review, stuck or merged', () => {
+    const stands = (phase: TaskPhase, open = false) =>
+      blockerStands({ phase, change: open ? ({ state: 'open' } as TaskCard['change']) : null })
+    assert.deepStrictEqual(
+      (['drafting', 'planned', 'held', 'running', 'waiting', 'stopped', 'ready', 'kept', 'settled'] as const).map((phase) => stands(phase)),
+      ['planned', 'planned', 'planned', 'working', 'stuck', 'stuck', 'review', 'review', 'merged'],
+    )
+    assert.strictEqual(stands('running', true), 'review')
+  })
+
+  it.live('propose_plan says which it waits for, which merged already, and which it can’t', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const docs = yield* drafted(projectId, 'Write the docs')
+      const pairing = yield* drafted(projectId, 'Pair a device')
+      const reconnect = yield* drafted(projectId, 'Reconnect on wake')
+      yield* ended(docs.taskId, 'done')
+      yield* callTool(access, 'draft_task', { title: 'Ship the host' })
+      const said = yield* callTool(access, 'propose_plan', {
+        task: 'ship-the-host',
+        lead: { agent: 'codex', model: 'large' },
+        waits_for: [docs.slug, pairing.slug, reconnect.slug, 'ship-the-host'],
+      })
+      assert.include(said, `It waits for ${pairing.slug} and ${reconnect.slug}, and starts once they have merged.`)
+      assert.include(said, `${docs.slug} has merged already: nothing to wait for.`)
+      assert.include(said, "It doesn't wait for ship-the-host:")
     }).pipe(Effect.provide(withQueries())),
   )
 

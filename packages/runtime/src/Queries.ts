@@ -155,7 +155,7 @@ const WAITS_BATCH = 500
  * How a task another waits for stands, from its card (waits.ts): before its lead starts, under way (in review once its pull
  * request is open), stuck where it waits on the person or stopped, and in review once it is the person's to merge.
  */
-const blockerStands = (card: TaskCard): BlockerStanding => {
+export const blockerStands = (card: Pick<TaskCard, 'phase' | 'change'>): BlockerStanding => {
   switch (card.phase) {
     case 'drafting':
     case 'planned':
