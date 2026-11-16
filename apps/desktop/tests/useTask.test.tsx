@@ -487,6 +487,27 @@ describe('what a press on a task shows, before the runtime says so', () => {
     expect(task.result.current.snapshot?.task.allowEverything.task).toBe(false)
   })
 
+  it('keeps the last of two presses of one switch when the last is kept first: the earlier one, still waiting, shows no more', async () => {
+    const task = runtimeOf()
+    const first = answered()
+    const second = answered()
+    vi.mocked(task.client.setTaskAllowEverything).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    act(() => void task.result.current.setAllowEverything(true))
+    act(() => void task.result.current.setAllowEverything(false))
+    // The second is kept, and read after, while the first is still on its way: off, as the runtime says.
+    task.now({ task: { ...task.held().task, allowEverything: { task: false, project: false } } })
+    vi.mocked(task.client.getThread).mockClear()
+    await act(async () => second.resolve())
+    await waitFor(() => expect(task.client.getThread).toHaveBeenCalledWith('th1', { limit: 0 }))
+    await act(async () => {})
+    expect(task.result.current.snapshot?.task.allowEverything.task).toBe(false)
+    // The first answers at last: what it showed doesn't come back.
+    await act(async () => first.resolve())
+    await act(async () => {})
+    expect(task.result.current.snapshot?.task.allowEverything.task).toBe(false)
+  })
+
   it('takes a switch back where the runtime refuses it, saying why', async () => {
     const task = runtimeOf()
     vi.mocked(task.client.setTaskAllowEverything).mockRejectedValue(

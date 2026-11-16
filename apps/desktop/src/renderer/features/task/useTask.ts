@@ -86,6 +86,15 @@ type Task = ThreadSnapshot['task']
  */
 type Shown = (task: Task) => Task
 
+/**
+ * A press's change of the task, and the setting it changes: once a press is confirmed, an earlier one of the same setting
+ * still waiting for its answer shows no more, as the later is what the person wants. Without a setting, it stands alone.
+ */
+interface Showing {
+  readonly setting?: string
+  readonly show: Shown
+}
+
 /** The presses that are the task's own, not its outputs'. */
 const OWN: ReadonlySet<string> = new Set(Object.values(presses))
 
@@ -357,7 +366,7 @@ export const useTask = (threadId: string): TaskModel => {
   const read = reads(client)
   const thread = useQuery(read.thread(threadId))
   // What the presses under way show of it, each held over the thread as read until a read after its answer is shown.
-  const [shows, setShows] = useState<ReadonlyMap<number, Shown>>(new Map())
+  const [shows, setShows] = useState<ReadonlyMap<number, Showing>>(new Map())
   // The messages taken back from the queue, out of it at once, until a read of each says so.
   const [withdrawn, setWithdrawn] = useState<ReadonlySet<string>>(new Set())
   const readNow = thread.data ?? null
@@ -373,7 +382,7 @@ export const useTask = (threadId: string): TaskModel => {
         ? readNow
         : {
             ...readNow,
-            task: [...shows.values()].reduce((task, change) => change(task), readNow.task),
+            task: [...shows.values()].reduce((task, change) => change.show(task), readNow.task),
             items:
               withdrawn.size === 0
                 ? readNow.items
@@ -691,15 +700,18 @@ export const useTask = (threadId: string): TaskModel => {
    * says why.
    */
   const act = useCallback(
-    async (action: () => Promise<unknown>, which: string = presses.act, shows?: (task: Task) => Task) => {
+    async (action: () => Promise<unknown>, which: string = presses.act, shows?: Shown | Showing) => {
       setError(null)
       mark(which, 1)
       const press = ++pressedCount.current
+      const showing = typeof shows === 'function' ? { show: shows } : shows
       const unshow = () => setShows((now) => (now.has(press) ? new Map([...now].filter(([one]) => one !== press)) : now))
-      if (shows !== undefined) setShows((now) => new Map([...now, [press, shows]]))
+      if (showing !== undefined) setShows((now) => new Map([...now, [press, showing]]))
+      let failed = false
       try {
         await action()
       } catch (failure) {
+        failed = true
         unshow()
         fail(failure)
       } finally {
@@ -707,7 +719,12 @@ export const useTask = (threadId: string): TaskModel => {
         const was = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.task
         void readHead()
         await shownSince(was)
-        unshow()
+        // Confirmed, it supersedes every earlier press of its setting still waiting: those show no more, whenever they answer.
+        const setting = failed ? undefined : showing?.setting
+        setShows((now) => {
+          const left = [...now].filter(([one, it]) => one !== press && (setting === undefined || one > press || it.setting !== setting))
+          return left.length === now.size ? now : new Map(left)
+        })
         mark(which, -1)
       }
     },
@@ -722,7 +739,7 @@ export const useTask = (threadId: string): TaskModel => {
   }
 
   /** Runs an action on the task, once it has been read, as `act` does: by its key, showing what it changes. */
-  const onTask = (action: (taskId: string) => Promise<unknown>, which: string = presses.act, shows?: (task: Task) => Task) =>
+  const onTask = (action: (taskId: string) => Promise<unknown>, which: string = presses.act, shows?: Shown | Showing) =>
     act(async () => (snapshot === null ? undefined : action(snapshot.task.id)), which, shows)
 
   /**
@@ -789,7 +806,7 @@ export const useTask = (threadId: string): TaskModel => {
           throw new ApiError({ reason: 'Unchanged', message: settleText.stillOpen })
       },
       which,
-      (task) => ({ ...task, phase: how === 'done' ? 'settled' : 'kept' }),
+      { setting: 'phase', show: (task) => ({ ...task, phase: how === 'done' ? 'settled' : 'kept' }) },
     )
 
   return {
@@ -943,18 +960,16 @@ export const useTask = (threadId: string): TaskModel => {
     makeChange: () => onTask((taskId) => client.shapeTask(taskId, 'Change')),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) =>
-      onTask(
-        (taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on }),
-        presses.act,
-        (task) => ({ ...task, resolveConflicts: { ...task.resolveConflicts, task: on } }),
-      ),
+      onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on }), presses.act, {
+        setting: 'resolveConflicts',
+        show: (task) => ({ ...task, resolveConflicts: { ...task.resolveConflicts, task: on } }),
+      }),
     resolveConflictsNow: () => onTask((taskId) => client.resolveConflictsNow(taskId)),
     setAllowEverything: (on) =>
-      onTask(
-        (taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on }),
-        presses.act,
-        (task) => ({ ...task, allowEverything: { ...task.allowEverything, task: on } }),
-      ),
+      onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on }), presses.act, {
+        setting: 'allowEverything',
+        show: (task) => ({ ...task, allowEverything: { ...task.allowEverything, task: on } }),
+      }),
     abandon: async (close = []) => {
       let abandoned = false
       const open: Array<string> = []
@@ -1024,11 +1039,10 @@ export const useTask = (threadId: string): TaskModel => {
     runIt: (how) => onTask((taskId) => client.runIt(taskId, how)),
     stopRunning: () => onTask((taskId) => client.stopRunning(taskId)),
     shelve: (shelf) =>
-      onTask(
-        (taskId) => client.shelveTask(taskId, shelf),
-        presses.act,
-        (task) => ({ ...task, scratch: shelf === 'scratch' }),
-      ),
+      onTask((taskId) => client.shelveTask(taskId, shelf), presses.act, {
+        setting: 'shelf',
+        show: (task) => ({ ...task, scratch: shelf === 'scratch' }),
+      }),
     savePreset: (name) => onTask((taskId) => client.savePreset({ name, taskId })),
     stopHelper: (helper) => onTask((taskId) => client.stopHelper(taskId, helper)),
     joinChanges: (change) => onTask((taskId) => client.joinChanges(taskId, change)),
@@ -1215,11 +1229,10 @@ export const useTask = (threadId: string): TaskModel => {
     discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
     preferIssueCards: (atOnce) => act(() => client.preferIssueCards(threadId, atOnce)),
     setIssuePart: (partOf) =>
-      onTask(
-        (taskId) => client.setTaskIssuePart(taskId, partOf),
-        presses.act,
-        (task) => ({ ...task, issuePartOf: partOf }),
-      ),
+      onTask((taskId) => client.setTaskIssuePart(taskId, partOf), presses.act, {
+        setting: 'issuePartOf',
+        show: (task) => ({ ...task, issuePartOf: partOf }),
+      }),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),
