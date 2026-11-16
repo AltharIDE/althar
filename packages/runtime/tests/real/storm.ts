@@ -9,7 +9,8 @@ import { fakeAgents } from '../support'
  * agent, but where what it is told says `[storm]`, a turn of a working
  * agent's shape, which the fake has no marker for: message after message
  * streamed in small chunks, a tool call between each, until the turn is done
- * or cancelled. Everything else is the fake's own. It sits on the ACP stream
+ * or cancelled; `[storm:until-stopped]`, until it is cancelled, as the turn a
+ * press stops. Everything else is the fake's own. It sits on the ACP stream
  * between the runtime and the fake, so the runtime hears it as it hears any
  * agent: what it records, streams and works out again is all its own.
  */
@@ -52,10 +53,12 @@ const storming = (inner: InProcessAgent, storm: Storm): InProcessAgent => ({
       const send = (message: Message) => out.write({ jsonrpc: '2.0', ...message }).catch(() => undefined)
       const update = (sessionId: string, value: Record<string, unknown>) =>
         send({ method: 'session/update', params: { sessionId, update: value } as never })
-      const turn = async (id: string | number, sessionId: string) => {
+      const turn = async (id: string | number, sessionId: string, stopped: boolean) => {
         cancelled.delete(sessionId)
         let stopReason = 'end_turn'
-        for (let call = 0; call < storm.calls && stopReason === 'end_turn'; call += 1) {
+        // One that goes on until it is stopped ends by itself after a minute all the same, should nothing ever stop it.
+        const until = Date.now() + 60_000
+        for (let call = 0; (stopped ? Date.now() < until : call < storm.calls) && stopReason === 'end_turn'; call += 1) {
           for (let chunk = 0; chunk < storm.chunks; chunk += 1) {
             if (cancelled.has(sessionId)) break
             await update(sessionId, {
@@ -88,13 +91,10 @@ const storming = (inner: InProcessAgent, storm: Storm): InProcessAgent => ({
         for await (const message of readable) {
           const sessionId = message.params?.sessionId
           if (message.method === 'session/cancel' && sessionId !== undefined) cancelled.add(sessionId)
-          if (
-            message.method === 'session/prompt' &&
-            message.id !== undefined &&
-            sessionId !== undefined &&
-            JSON.stringify(message.params?.prompt ?? '').includes('[storm]')
-          ) {
-            void turn(message.id, sessionId)
+          const said = message.method === 'session/prompt' ? JSON.stringify(message.params?.prompt ?? '') : ''
+          const stopped = said.includes('[storm:until-stopped]')
+          if (message.id !== undefined && sessionId !== undefined && (stopped || said.includes('[storm]'))) {
+            void turn(message.id, sessionId, stopped)
             continue
           }
           await forInner.write(message).catch(() => undefined)
