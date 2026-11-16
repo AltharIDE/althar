@@ -8,7 +8,7 @@ ADR-001, the repository's engineering target, is in [`ARCHITECTURE.md`](../../AR
 
 ## The shell and the runtime
 
-Althar is an Electron app. All of its code is TypeScript, and the runtime needs Node to run the agents' ACP adapters, so one runtime and one web engine was the simplest choice. The cost is a larger download and more memory than Tauri, and Electron's hardening is Althar's job.
+Althar is an Electron app. Its shell and existing runtime are TypeScript, and the runtime needs Node to run the agents' ACP adapters, so one runtime and one web engine was the simplest choice. The cost is a larger download and more memory than Tauri, and Electron's hardening is Althar's job. The planned native worker described below does not replace this shell or home runtime.
 
 - **The runtime runs in an Electron utility process.** The main process starts and supervises it, and hands each window a `MessagePort` to it.
 - **`@althar/runtime` imports nothing from Electron.** It also runs under plain Node for tests, the CLI and the standalone Linux host. What a host gives it, such as secrets, fetch and folder grants, comes in as options. What the host does with usage data and crash reports stays the host's (`apps/desktop/src/runtime/runtime.ts`).
@@ -42,9 +42,19 @@ New clients reconnect with a home, cursor and checkpoint identifying the exact h
 
 **SSH attachment, 15 Nov 2026:** `@althar/transport-node` supplies private-socket and system OpenSSH clients. The host's `connect-stdio` authenticates locally and forwards socket-authority RPC without exporting the launch secret. The CLI can inspect, create a task in a provisioned project or join an existing thread; disconnecting leaves work running. Expected home/API identity is checked before commands, and feed recovery uses checked positions. OpenSSH installation, key provisioning and host setup remain operator steps. [Transport architecture](../../packages/transport-node/ARCHITECTURE.md) records the protocol and bounds.
 
-Not built yet: SSH installation/bootstrap UX, protected desktop enrollment, phone pairing, protected mobile key storage, relay transport, worker enrollment and leases, remote filesystem/preview channels, or multiplayer membership and project grants. A socket listener alone does not supply those features.
+Not built yet: direct HTTPS/WSS attachment, SSH installation/bootstrap UX, protected desktop enrollment, phone pairing, protected mobile key storage, relay transport, worker enrollment and leases, remote filesystem/preview channels, or multiplayer membership and project grants. A socket listener alone does not supply those features.
 
-**Proposed:** [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) would let a project live on this computer, on a host the person runs, or on a managed one. It extends the headless foundation with SSH beside a relay, and pools of workers that take work on leases. It keeps one writer per profile and keeps paired input apart from what a socket or an agent may do. Until it is accepted, the state above is the current one.
+### Remote connections and native workers: decided, not built
+
+**Decided, 16 Nov 2026:** keep the existing TypeScript/Node home as the durable project authority. Build the worker supervisor and small sandbox execution agent in Rust. A worker owns execution and its recovery journal, not a second project database, scheduler or permission policy. The desktop can be a client and, later, a worker for a remote home; these are separate identities and capabilities.
+
+- **Clients connect to a home over HTTPS and WSS.** HTTPS handles pairing and connection management; WSS carries bounded commands, replies and event streams using the shared client API. Existing local MessagePorts/private sockets stay. A reachable endpoint may use Tailscale or another private network, or direct HTTPS with valid server identity. No Tailscale dependency, Althar account or relay is required for direct use. SSH remains an optional setup or connection route, using the person's SSH configuration and host-key checks.
+- **Pair once, reconnect with a revocable device identity.** Pairing uses an expiring, single-use challenge bound to the home's identity, confirmed by an already trusted owner client. An initial owner enrollment and recovery path must be reviewed before release. Neither a VPN connection, SSH login nor relay account supplies the person's word. Protected client keys and trusted approval provenance remain release gates; a client whose key agents can read retains socket authority. Pairing alone does not prove a human approved each later action.
+- **Home-to-worker messages use Protobuf**, with generated TypeScript and Rust bindings from one versioned schema. This is a separate execution contract from the shared client API; it does not require replacing every client message with Protobuf. gRPC is the initial transport candidate, to prove in the first cross-language slice. Negotiate versions and capabilities and reject unsupported work before starting it.
+- **No relay in the next implementation slice.** A later relay may carry end-to-end authenticated encrypted traffic and provide discovery. Its accounts, quotas and service entitlements remain separate from home ownership, device authorization and approval authority. Managed homes and workers must not depend on a relay being built first.
+- **Measure the whole execution path.** Record warm/cold allocation to first usable command and first useful agent response, p50/p95, queue time, idle memory and active process-tree memory. Include image/cache preparation, repository setup, toolchains and authentication. Rust alone is not a startup or memory guarantee; provider adapters may still need Node on an execution machine. Managed multi-tenant isolation remains a separate release gate.
+
+These decisions narrow [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md); they do not accept all of its pool, placement, file-transfer, hosting or multiplayer design. Its delivery plan records the remaining work and proof. The implemented state above remains distinct from this direction.
 
 ## The UI is instant
 
@@ -118,7 +128,7 @@ Althar is built to product standard from the first commit. A shortcut is allowed
 
 ## Effect on the runtime side
 
-Code on the runtime side is written with [Effect](https://effect.website) 4, pinned to one exact release across the repository and upgraded on purpose. The runtime supervises agents and processes for a long time: bounded retries, cancellation in stages, owned process trees, named failure classes, ports with fakes in CI, runtime validation of anything untrusted, and tracing across processes. Plain promises give none of that by default.
+TypeScript code on the runtime side is written with [Effect](https://effect.website) 4, pinned to one exact release across the repository and upgraded on purpose. The planned Rust worker must meet the same cancellation, ownership, validation and recovery rules without depending on Effect. The runtime supervises agents and processes for a long time: bounded retries, cancellation in stages, owned process trees, named failure classes, ports with fakes in CI, runtime validation of anything untrusted, and tracing across processes. Plain promises give none of that by default.
 
 - **Where:** `domain`, `persistence-sqlite` (Effect's SQL client and migrator on `node:sqlite`), `runtime`, `provider-adapters`, the workflow kernel, the contract between the window and the runtime (Effect RPC over `MessagePort`), and the CLI.
 - **Where not:** `@althar/ui`, whose components take props and report through callbacks; the desktop app outside its data layer; the public site.
@@ -194,3 +204,4 @@ Not built yet:
 - 14 Nov 2026: shared API identity, private socket attachment, revocable owner devices, durable API command receipts, checked feed positions and native attention. Organization access and commercial entitlements remain separate later work.
 - 16 Nov 2026: Claude Code's sandbox probe runs asynchronously once the window's first screen is drawn, and a Claude Code session waits for it where it isn't in yet (`probeClaudeSandbox`). The lag log is on in packaged builds too, the main process logs its own, and the window logs its long frames and slow presses.
 - 16 Nov 2026: the presses that still waited show at once (deleting an automation, removing a run, asking what the project runs); `althar/press-at-once` reads a busy mark as no result, `.finally` as waiting and handlers named in the same file, and `althar/off-the-thread` follows a renamed import.
+- 16 Nov 2026: direct HTTPS/WSS with optional private networking and SSH, reviewed device pairing, Rust execution workers and a Protobuf worker contract are decided but not built. Keep the Node home, defer relay implementation and separate worker identity from person authority. ADR-103's wider design remains proposed.

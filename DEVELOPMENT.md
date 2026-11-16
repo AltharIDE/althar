@@ -78,12 +78,12 @@ everything, Windows' tests, coverage and the packages too, after merge.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the target every app and package moves toward. In short:
 
-- TypeScript everywhere, strict, with runtime validation of anything untrusted.
+- Strict TypeScript for the existing app and home; Rust for the planned worker supervisor and sandbox execution agent, with a Protobuf worker contract ([Foundations](docs/decisions/foundations.md#remote-connections-and-native-workers-decided-not-built)). Validate anything untrusted at runtime in either language.
 - Tests first for new behaviour, and at least 90% line and branch coverage in each app and package.
 - Accessibility to WCAG 2.2 AA from the first implementation.
-- A consequential decision gets an ADR in [`docs/decisions`](docs/decisions); an exception gets an owner and an expiry.
+- A consequential decision amends its area document in [`docs/decisions`](docs/decisions), with a dated Changes entry; undecided proposals stay in `proposed/`. Do not add numbered ADRs. An exception gets an owner and an expiry.
 
-Runtime-side code is written with Effect 4, with the conventions in
+TypeScript runtime-side code is written with Effect 4, with the conventions in
 [ADR-009](docs/decisions/foundations.md#effect-on-the-runtime-side); the UI kit never
 uses it. The desktop app is MVVM in feature folders
 ([ADR-010](docs/decisions/foundations.md#the-desktop-apps-layers)).
