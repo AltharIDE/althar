@@ -384,6 +384,7 @@ describe('a failed answer', () => {
     readonly retryAt: string | undefined
   }> = [
     { product: 'github', status: 429, sent: { 'retry-after': '30' }, retryAt: '2026-10-01T09:00:30.000Z' },
+    { product: 'github', status: 429, sent: { 'retry-after': 'Thu, 01 Oct 2026 09:02:00 GMT' }, retryAt: '2026-10-01T09:02:00.000Z' },
     {
       product: 'github',
       status: 403,
@@ -391,6 +392,12 @@ describe('a failed answer', () => {
       retryAt: '2026-10-01T09:01:00.000Z',
     },
     { product: 'linear', status: 429, sent: { 'x-ratelimit-requests-reset': String(at + 5000) }, retryAt: '2026-10-01T09:00:05.000Z' },
+    {
+      product: 'linear',
+      status: 429,
+      sent: { 'x-ratelimit-endpoint-requests-reset': String(at + 12000) },
+      retryAt: '2026-10-01T09:00:12.000Z',
+    },
     { product: 'gitlab', status: 429, sent: { 'ratelimit-reset': String(at / 1000 + 90) }, retryAt: '2026-10-01T09:01:30.000Z' },
     // Bitbucket's is the seconds left, not a time.
     { product: 'bitbucket_cloud', status: 429, sent: { 'x-ratelimit-reset': '2374' }, retryAt: '2026-10-01T09:39:34.000Z' },
