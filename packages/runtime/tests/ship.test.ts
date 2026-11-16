@@ -79,6 +79,27 @@ const heldAt = (taskId: string) =>
     return row?.heldAt ?? null
   })
 
+const otherDeviceHold = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const device = `dev_${'e'.repeat(32)}`
+    const workspace = `ws_${'e'.repeat(32)}`
+    const held = '2020-01-01T00:00:00.000Z'
+    yield* sql`INSERT INTO devices (id, name, created_at) VALUES (${device}, 'Other device', ${held})`
+    yield* sql`
+      INSERT INTO workspaces (id, project_id, task_id, binding_id, device_id, access, path, base_ref, base_commit, branch, state, created_at, held_at)
+      SELECT ${workspace}, project_id, task_id, binding_id, ${device}, access, path, base_ref, base_commit, branch, state, created_at, ${held}
+      FROM workspaces WHERE task_id = ${taskId} LIMIT 1`
+    return { workspace, held }
+  })
+
+const holdOn = (workspace: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ heldAt: string | null }>`SELECT held_at FROM workspaces WHERE id = ${workspace}`
+    return row?.heldAt
+  })
+
 const results = (threadId: string) =>
   Effect.map(items(threadId), (all) => all.filter((item) => item.kind === 'step_result').map((item) => item.content))
 
@@ -240,6 +261,7 @@ describe('talking to a lead once its plan is done', () => {
       yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
       yield* answered(task.threadId, task.turns + 1)
       yield* until(heldAt(task.taskId), (at) => at !== null)
+      const other = yield* otherDeviceHold(task.taskId)
       const tweak = git(task.path, 'rev-parse', 'HEAD')
 
       yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
@@ -261,6 +283,7 @@ describe('talking to a lead once its plan is done', () => {
       )
       assert.strictEqual(git(bare, 'log', '-1', '--format=%s', BRANCH), git(task.path, 'log', '-1', '--format=%s', tweak))
       yield* until(heldAt(task.taskId), (at) => at === null)
+      assert.strictEqual(yield* holdOn(other.workspace), other.held)
       const all = yield* runsOf(task.taskId)
       assert.deepStrictEqual(
         all.map((run) => [run.state, run.planId === null, JSON.parse(run.parameters).ships !== undefined]),
@@ -865,6 +888,21 @@ describe('a merge of main into the task’s branch after its pull request opened
   })
 })
 
+describe('releasing holds', () => {
+  it.live('leaves another device’s hold alone when no heads are supplied', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      const other = yield* otherDeviceHold(task.taskId)
+      yield* (yield* Changes).releaseHolds(task.taskId, 'left')
+      assert.isNull(yield* heldAt(task.taskId))
+      assert.strictEqual(yield* holdOn(other.workspace), other.held)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
 describe('Merge, with commits not shipped', () => {
   it.live('Merge now sends what waits up and merges at once, and its review after the merge reads only that', () => {
     const { working, bare, github } = onGitHub()
@@ -875,6 +913,7 @@ describe('Merge, with commits not shipped', () => {
       const reviewed = git(task.path, 'rev-parse', 'HEAD')
       yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
       yield* until(heldAt(task.taskId), (at) => at !== null)
+      const other = yield* otherDeviceHold(task.taskId)
       const tweak = git(task.path, 'rev-parse', 'HEAD')
 
       yield* runs.mergeWaiting({
@@ -889,6 +928,7 @@ describe('Merge, with commits not shipped', () => {
         [[1, 'merge']],
       )
       assert.isNull(yield* heldAt(task.taskId))
+      assert.strictEqual(yield* holdOn(other.workspace), other.held)
       assert.lengthOf(yield* runsOf(task.taskId), 1)
       // Reviewed after the merge, in the task, from what the plan's review read: only the tweak.
       const [owed] = yield* until(
