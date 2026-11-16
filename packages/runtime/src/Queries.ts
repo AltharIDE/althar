@@ -1149,8 +1149,10 @@ export class Queries extends Context.Service<
               Effect.gen(function* () {
                 const sql = yield* SqlClient.SqlClient
                 while (readTo < to) {
+                  // A change of no project is of no task: its task isn't looked for, as a store's history is mostly such.
                   const rows = yield* sql<{ cursor: number; projectId: string | null; taskId: string | null }>`
-                    SELECT c.cursor, c.project_id, ${sql.unsafe(taskOfChange)} AS task_id FROM change_log c
+                    SELECT c.cursor, c.project_id, CASE WHEN c.project_id IS NULL THEN NULL ELSE ${sql.unsafe(taskOfChange)} END AS task_id
+                    FROM change_log c
                     WHERE c.cursor > ${readTo} AND c.cursor <= ${to} AND c.aggregate_type <> 'card' ORDER BY c.cursor LIMIT ${CARD_CHANGES}`
                   for (const row of rows)
                     if (row.projectId === null) anyMovedAt = row.cursor
