@@ -14,7 +14,7 @@ export function HomeButton() {
   return (
     <Button className={s.trigger} onClick={showHomes} aria-label="Homes">
       {state?.current.kind === 'ssh' ? state.current.home.name : 'Homes'}
-      {state?.current.kind === 'ssh' && <span className={s.note}>SSH</span>}
+      {state?.current.kind === 'ssh' && <span className={s.note}> SSH</span>}
     </Button>
   )
 }
