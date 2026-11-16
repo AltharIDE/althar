@@ -590,6 +590,43 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
+  it.live('retries a queue source that could not be read, even without another wake', () =>
+    Effect.gen(function* () {
+      const busy = yield* Busy
+      let reads = 0
+      let available = false
+      let started = false
+      const waiter: Waiter = {
+        taskId: 'waiting-after-read-error',
+        order: 'underway',
+        since: '2026-01-01T00:00:00.000Z',
+        start: Effect.sync(() => {
+          started = true
+        }),
+      }
+      yield* busy.queue(
+        Effect.suspend(() => {
+          reads++
+          return available ? Effect.succeed(started ? [] : [waiter]) : Effect.fail('temporarily unavailable')
+        }),
+      )
+      yield* until(
+        Effect.sync(() => reads),
+        (count) => count > 0,
+      )
+      // Let any startup wakes drain, then check that the timer still retries the failed source.
+      yield* Effect.sleep('200 millis')
+      const before = reads
+      yield* Effect.sleep('200 millis')
+      assert.isAbove(reads, before)
+      available = true
+      yield* until(
+        Effect.sync(() => started),
+        (value) => value,
+      )
+    }).pipe(Effect.provide(machine(1, ':memory:', { every: Duration.millis(50) }))),
+  )
+
   it.live('keep a task’s place between its own steps: its review goes on, ahead of a task that waited longer', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
