@@ -63,6 +63,8 @@ test('Ship to merged waits in place on a required check, nothing to press beside
     // and no Push beside it.
     await expect(page.getByRole('button', { name: 'Ship push', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Push 1 commit' })).toHaveCount(0)
+    await expect(page.getByText('Ship them')).toBeVisible()
+    await expect(page.getByText('Push them')).toHaveCount(0)
 
     // As far as merged, from its chevron: the route on the button follows at once.
     await page.getByRole('button', { name: 'How far it goes' }).click()
