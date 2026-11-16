@@ -182,7 +182,9 @@ describe('a folder that isn’t a repository', () => {
   it.effect('that is the home folder, or one it is in, is refused before anything is made', () =>
     Effect.gen(function* () {
       const home = folderWith({ 'Documents/x.md': '' })
+      // Where each system's homedir() reads it: HOME, or Windows' USERPROFILE.
       vi.stubEnv('HOME', home)
+      vi.stubEnv('USERPROFILE', home)
       assert.deepInclude(yield* Effect.flip(prepareFolder(home)), { reason: 'too_wide' })
       assert.deepInclude(yield* Effect.flip(prepareFolder(join(home, '..'))), { reason: 'too_wide' })
       assert.isFalse(existsSync(join(home, '.git')))
