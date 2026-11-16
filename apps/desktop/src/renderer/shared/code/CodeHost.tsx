@@ -410,6 +410,7 @@ export const useCodeHost = ({
           threadId={threadId}
           taskId={taskId}
           width={width}
+          // oxlint-disable-next-line althar/press-at-once -- Opening what only the answer names: where the name is defined, which the read finds.
           onGo={(name) => go(name, open.onTop)}
           {...(open.onTop ? { onBack: onClose } : {})}
           onClose={onCloseAll}
