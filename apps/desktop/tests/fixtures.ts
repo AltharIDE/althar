@@ -1120,6 +1120,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
+    // Each as `getThreadItem` reads it, whatever a test makes that do.
+    getThreadItems: vi.fn(async (threadId: string, itemIds: Iterable<string>) => {
+      const ids = [...itemIds]
+      const read = await Promise.all(ids.map((id) => client.getThreadItem(threadId, id)))
+      return new Map(ids.map((id, at) => [id, read[at] ?? null]))
+    }),
+    behind: (start) => start(),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
     readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readLaunchOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
