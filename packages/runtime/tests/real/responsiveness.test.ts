@@ -12,7 +12,7 @@ import { Connections } from '../../src/Connections'
 import { Coordinator } from '../../src/Coordinator'
 import { Instance } from '../../src/Instance'
 import { Projects } from '../../src/Projects'
-import { Queries } from '../../src/Queries'
+import { KEPT_FOR, Queries } from '../../src/Queries'
 import { Runs } from '../../src/Runs'
 import * as Runtime from '../../src/Runtime'
 import { Sessions } from '../../src/Sessions'
@@ -49,6 +49,8 @@ const TURNS = Number(setting('ALTHAR_TURNS', '500'))
 const CHANGES = Number(setting('ALTHAR_CHANGES', '1000000'))
 const PROFILE = setting('ALTHAR_PROFILE_CPU', '0') === '1'
 const OUT = setting('ALTHAR_RESPONSIVENESS_OUT', join(import.meta.dirname, '../../test-results/responsiveness.json'))
+/** Whether cards are kept between reads, as Althar keeps them (`0` to read every one afresh, as before they were). */
+const KEEP = setting('ALTHAR_KEEP_CARDS', '1') === '1'
 /** How far away the host is: each of its API's calls waits this long, as GitHub's took on average in the person's log. */
 const HOST_MS = Number(setting('ALTHAR_HOST_MS', '400'))
 
@@ -76,7 +78,8 @@ const onGitHub = () => {
 
 const runtimeWith = (github: FakeService) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(store, {}, { connectors: fakeConnectors({ github }) })),
+    // Cards kept between reads as Althar keeps them, which a test otherwise doesn't.
+    Layer.provideMerge(runtime(store, {}, { connectors: fakeConnectors({ github }), keptFor: KEEP ? KEPT_FOR : Duration.zero })),
     Layer.provide(Layer.succeed(Tracer.Tracer, traced.tracer)),
   )
 

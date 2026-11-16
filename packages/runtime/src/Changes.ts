@@ -5,6 +5,7 @@ import { makeFollowing } from './Follow'
 import { thisDevice } from './device'
 import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
+import { noteUnsure, nowFor, nowUntil, there, unnoted } from './standsOn'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { relative, sep } from 'node:path'
@@ -4886,7 +4887,10 @@ export class Changes extends Context.Service<
               AND NOT EXISTS (SELECT 1 FROM observations o WHERE o.subject_type = 'external_link' AND o.subject_id = l.id
                 AND o.kind = 'taken' AND o.observed_at >= r.ended_at)`
           if (rows.length === 0) return null
-          const now = yield* Clock.currentTimeMillis
+          // A card kept from this is worked out again once its checks have had their moment to show (standsOn.ts).
+          const now = yield* nowUntil(
+            ...rows.map((row) => Math.max(Date.parse(row.endedAt), row.pushedAt === null ? 0 : Date.parse(row.pushedAt)) + checksAppear),
+          )
           const failed = Math.max(...rows.map((row) => row.failed))
           const running = rows.some(
             (row) =>
@@ -4934,7 +4938,14 @@ export class Changes extends Context.Service<
                 WHERE h.task_id = k.id AND a.kind = 'person') AS spoken_at
             FROM tasks k JOIN external_links l ON l.task_id = k.id AND l.kind = 'change'
             WHERE k.id = ${taskId} AND k.state = 'open' AND json_extract(l.snapshot, '$.state') = 'open' AND l.listening = 1`
-          const now = yield* Clock.currentTimeMillis
+          // A card kept from this is worked out again once each one's checks have had their moment to show (standsOn.ts).
+          const now = yield* nowUntil(
+            ...links.map(
+              (link) =>
+                Math.max(link.endedAt === null ? 0 : Date.parse(link.endedAt), link.pushedAt === null ? 0 : Date.parse(link.pushedAt)) +
+                checksAppear,
+            ),
+          )
           return yield* Effect.forEach(links, (link) =>
             Effect.gen(function* () {
               const snapshot = yield* decodeSnapshot(link.snapshot)
@@ -5828,15 +5839,26 @@ export class Changes extends Context.Service<
           if (found?.key === key) return found.value
           const under = unshippedGoing.get(repository.workspaceId)
           // Asked again while it is being answered: that answer; a read of another key, as its refs moved, is its own.
-          if (under !== undefined && under.key === key) return yield* Deferred.await(under.answer)
+          if (under !== undefined && under.key === key)
+            return yield* Deferred.await(under.answer).pipe(
+              // What its asker couldn't keep, a card made of it doesn't keep either.
+              Effect.tapCause(() => noteUnsure('what is unshipped')),
+              Effect.tap(() => (unshippedKept.get(repository.workspaceId)?.key === key ? Effect.void : noteUnsure('what is unshipped'))),
+            )
           const answer = Deferred.makeUnsafe<Unshipped | undefined, unknown>()
           unshippedGoing.set(repository.workspaceId, { key, answer })
           const answered = { sure: true }
-          return yield* unshippedIn(repository, answered).pipe(
+          // Its answer stands on its key, which is noted as it is read (standsOn.ts): what git says as it works it out isn't,
+          // but where git couldn't answer in full, a card made of it isn't kept either.
+          return yield* unnoted(unshippedIn(repository, answered)).pipe(
+            Effect.tapCause(() => noteUnsure('what is unshipped')),
             Effect.tap((value) =>
-              Effect.sync(() => {
+              Effect.gen(function* () {
                 if (answered.sure && commits[0] !== null) unshippedKept.set(repository.workspaceId, { key, value })
-                else unshippedKept.delete(repository.workspaceId)
+                else {
+                  unshippedKept.delete(repository.workspaceId)
+                  yield* noteUnsure('what is unshipped')
+                }
               }),
             ),
             Effect.onExit((exit) =>
@@ -5878,7 +5900,7 @@ export class Changes extends Context.Service<
             ORDER BY b.created_at, b.rowid`
           const found: Array<Unshipped> = []
           for (const repository of repositories) {
-            if (!existsSync(repository.path)) continue
+            if (!(yield* there(repository.path))) continue
             const one = yield* kept ? keptIn(repository) : unshippedIn(repository)
             if (one !== undefined) found.push(one)
           }
@@ -5906,7 +5928,7 @@ export class Changes extends Context.Service<
           if (worktrees.length === 0) return false
           const pictures = yield* evidencePaths(taskId)
           for (const worktree of worktrees) {
-            if (!existsSync(worktree.path)) return false
+            if (!(yield* there(worktree.path))) return false
             const base = worktree.baseCommit ?? worktree.baseRef
             // Where git can't say what it started from, it isn't known to be empty.
             if (base === null) return false
@@ -8278,7 +8300,8 @@ export class Changes extends Context.Service<
             atWork || thread === undefined
               ? []
               : yield* sql<{ ended: string | null }>`SELECT max(ended_at) AS ended FROM turn_deliveries WHERE thread_id = ${thread.id}`
-          const going = atWork || betweenAgents(turn?.ended ?? null, yield* Clock.currentTimeMillis, goingFor)
+          // A card kept from this is worked out again once that moment is over (standsOn.ts).
+          const going = atWork || betweenAgents(turn?.ended ?? null, yield* nowFor(turn?.ended ?? null, goingFor), goingFor)
           const shown = new Map<string, { readonly held: string | null; readonly ship?: boolean }>(forShip)
           for (const link of yield* linksOf(taskId)) {
             const snapshot = yield* decodeSnapshot(link.snapshot)

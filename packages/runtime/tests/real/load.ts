@@ -79,7 +79,14 @@ export const spans = () => {
       span.end = (endTime, exit) => {
         end(endTime, exit)
         const text = span.attributes.get('db.query.text')
-        const name = typeof text === 'string' ? `sql: ${text.replace(/\s+/g, ' ').slice(0, 140)}` : span.name
+        // A card worked out says whether it was kept, and why not (Queries.ts).
+        const kept = span.attributes.get('kept')
+        const name =
+          typeof text === 'string'
+            ? `sql: ${text.replace(/\s+/g, ' ').slice(0, 140)}`
+            : kept === undefined
+              ? span.name
+              : `${span.name}: ${kept === true ? 'kept' : `not kept, ${String(span.attributes.get('unsure'))}`}`
         const ms = Number(endTime - span.startTime) / 1e6
         ended.push({ name, ms })
         if (parent !== undefined) {

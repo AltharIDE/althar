@@ -91,4 +91,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0085_turn_undo': '181bb0764663753ddf0aab5f82febed33a84d9261d58522bf2cb46d6b38d5cd2',
   '0086_client_identities': '2d9cc632d99f47fc9a51925abdc39d0ae56e026e477ad9e2d149d554780ae0c6',
   '0087_errand_words': 'bfe8964d50827d229a3083033f10785a2d608fe290e3c0076c98b09d61a9af78',
+  '0088_card_reads': '2c2b1b4d1c7d62ef08f2dab3f6002a924e9f9f0005be56a4f2e51e10c8c263a0',
 }

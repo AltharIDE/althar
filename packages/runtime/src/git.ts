@@ -10,6 +10,7 @@ import { Cause, Context, Deferred, Duration, Effect } from 'effect'
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
 import { refStamp } from './refStamps'
+import { noteLook, noteUnsure, unnoted } from './standsOn'
 import { Foreground, reachesRemote, startApart } from './spawner'
 import { forkOf } from './forks'
 
@@ -295,7 +296,8 @@ const runProcess = (
   input: string | undefined,
   base64 = false,
 ): Effect.Effect<GitProcessResult> =>
-  Effect.flatMap(Effect.all([Untouched, Foreground]), ([aside, first]) =>
+  // What git says when asked straight out can't be looked at again without asking it again: an answer that waits on it isn't kept.
+  Effect.flatMap(Effect.all([Untouched, Foreground, noteUnsure(`git ${args[0] ?? ''}`)]), ([aside, first]) =>
     Effect.acquireUseRelease(
       Effect.sync(() => spawnGit(cwd, args, { ...aside, ...env }, input, first, base64)),
       (running) =>
@@ -592,6 +594,10 @@ const keptByStamp = (
   Effect.gen(function* () {
     const stamp = yield* Effect.promise(stampOf)
     if (stamp === undefined) return yield* ask
+    // Its answer stands on its stamp, whoever asks git for it: an answer worked out from it holds while the stamp does.
+    yield* noteLook({ key: `refs ${key}`, again: () => stampOf().then((now) => now ?? ''), said: stamp })
+    // Where git couldn't answer, what is made of the commits it gave none of isn't kept.
+    const quietly = unnoted(ask).pipe(Effect.tapCause(() => noteUnsure('git failed')))
     const was = commitsKept.get(key)
     if (was !== undefined && was.stamp === stamp) return was.value
     const asking = `${key}\n${stamp}`
@@ -599,11 +605,13 @@ const keptByStamp = (
     // Asked again while it is being answered: that answer, or its failure; where it was stopped before either, its own.
     if (under !== undefined)
       return yield* Deferred.await(under).pipe(
-        Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? ask : Effect.failCause(cause))),
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause) ? quietly : Effect.andThen(noteUnsure('git failed'), Effect.failCause(cause)),
+        ),
       )
     const answer = Deferred.makeUnsafe<ReadonlyArray<string | null>, GitFailed>()
     commitsGoing.set(asking, answer)
-    return yield* ask.pipe(
+    return yield* quietly.pipe(
       Effect.tap((value) =>
         Effect.sync(() => {
           commitsKept.delete(key)
@@ -628,12 +636,22 @@ const keptByStamp = (
  * its folder in the repository's, where its index is.
  */
 export const indexStamp = (worktree: string): Effect.Effect<string> =>
-  Effect.tryPromise(async () => {
+  Effect.gen(function* () {
+    const said = yield* Effect.promise(() => indexStampOf(worktree))
+    yield* noteLook({ key: `index ${worktree}`, again: () => indexStampOf(worktree), said })
+    return said
+  })
+
+const indexStampOf = async (worktree: string) => {
+  try {
     const dotGit = join(worktree, '.git')
     const linked = (await stat(dotGit)).isFile() ? /^gitdir: (.+)$/m.exec(await readFile(dotGit, 'utf8'))?.[1] : undefined
     const index = await stat(join(linked === undefined ? dotGit : resolve(worktree, linked.trim()), 'index'), { bigint: true })
     return `${index.ino}:${index.size}:${index.mtimeNs}`
-  }).pipe(Effect.orElseSucceed(() => ''))
+  } catch {
+    return ''
+  }
+}
 
 /**
  * Makes a new repository in the empty folder `path`, on `main`, with a first
