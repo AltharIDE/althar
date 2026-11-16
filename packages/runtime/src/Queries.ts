@@ -1161,12 +1161,16 @@ export class Queries extends Context.Service<
               }),
             )
 
-      /** Where the read under way stands in the feed, read once, with every change up to there read for what it moved. */
+      /**
+       * Where the read under way stands in the feed, read once, with every change up to there read for what it moved. Far
+       * behind, as the watcher works through a burst or a store's first launch reads its history, a read doesn't wait to
+       * read it all: it gives out no kept card (`stillHolds`).
+       */
       const readAt = Effect.gen(function* () {
         const held = yield* ReadAt
         if (held?.at !== undefined) return held.at
         const at = yield* cursor
-        yield* readUpTo(at)
+        if (at - readTo <= CARD_CHANGES) yield* readUpTo(at)
         if (held !== null) held.at ??= at
         return held?.at ?? at
       })
@@ -3127,7 +3131,7 @@ export class Queries extends Context.Service<
       /** Whether a kept card would come out the same now. */
       const stillHolds = (taskId: string, kept: Kept) =>
         Effect.gen(function* () {
-          yield* readAt
+          if (readTo < (yield* readAt)) return false
           if ((movedAt.get(taskId)?.cursor ?? 0) > kept.cursor) return false
           if ((projectMovedAt.get(kept.projectId) ?? 0) > kept.cursor || anyMovedAt > kept.cursor) return false
           const now = yield* timeNow
@@ -4472,7 +4476,7 @@ export class Queries extends Context.Service<
       const cardsMoved = (ledger: Ledger['Service'], after: number) =>
         Effect.gen(function* () {
           // Every change up to where the feed stands, read for what it moved (`readUpTo`), by this or a read ahead of it.
-          yield* readAt
+          yield* readUpTo(yield* cursor)
           const to = readTo
           // Each task a change was of, by its project: the change's own, so a task removed is still said of its board.
           const tasks = [...movedAt].filter(([, moved]) => moved.cursor > after)

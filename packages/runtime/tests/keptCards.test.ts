@@ -205,6 +205,40 @@ describe('a board read while the same one is under way', () => {
   })
 })
 
+describe('a board read far behind the feed', () => {
+  it.live('gives out no kept card until the feed is read, and waits on none of it', () => {
+    const traced = cardsWorkedOut()
+    return Effect.gen(function* () {
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const from = yield* queries.cursor
+      const { projectId, made } = yield* tasks('Add a retry')
+      const taskId = made[0]?.taskId ?? ''
+      yield* watched(from, [taskId])
+      yield* quiet(projectId, traced)
+      // A store's history the watcher hasn't read yet, as at a first launch: far more than a read reads on its way.
+      yield* sql.unsafe(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+         INSERT INTO change_log (project_id, aggregate_type, aggregate_id, aggregate_revision, changed_at)
+         SELECT NULL, 'setting', 'set_' || printf('%032x', i), 1, '2026-10-01T09:00:00.000Z' FROM n`,
+      )
+      // Its card is worked out afresh, as nothing it waited for says whether one kept still holds.
+      assert.strictEqual(titleIn(yield* queries.board(projectId), taskId), 'Add a retry')
+      assert.deepStrictEqual(
+        traced.since().map((one) => one.taskId),
+        [taskId],
+      )
+      // Once the watcher has read it, cards are kept again.
+      const before = yield* queries.cursor
+      yield* retitleTask({ envelope: yield* Runtime.envelope('task.retitle', {}), taskId, title: 'Add a retry, renamed' })
+      yield* watched(before, [taskId])
+      traced.since()
+      assert.strictEqual(titleIn(yield* queries.board(projectId), taskId), 'Add a retry, renamed')
+      assert.deepStrictEqual(traced.since(), [])
+    }).pipe(Effect.provide(keeping), Effect.provide(traced.layer))
+  })
+})
+
 describe('a kept card', () => {
   it.live('is never older than what its read has seen of the store, ahead of the watcher or not', () =>
     Effect.gen(function* () {
