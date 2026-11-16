@@ -144,14 +144,17 @@ const later = (one: string | null, other: string) => (one !== null && one > othe
  */
 export const useNow = (ticking: boolean, every = SECOND): string => {
   const [held, setHeld] = useState(fresh)
-  const [was, setWas] = useState(ticking)
-  const pace = paceOf(every)
-  if (was !== ticking) {
-    setWas(ticking)
-    // Stopping, it keeps what its pace says now, which it is still reading.
-    if (!ticking) setHeld(later(pace.timer === undefined ? null : pace.now, held))
+  const [was, setWas] = useState({ ticking, every })
+  /** What a pace says, while it runs: one that doesn't says the time from now as something starts reading it. */
+  const said = (at: number) => {
+    const pace = paceOf(at)
+    return pace.timer === undefined ? null : pace.now
+  }
+  if (was.ticking !== ticking || was.every !== every) {
+    setWas({ ticking, every })
+    // Stopping, or reading another pace, it keeps what the one it read says now, which it is still reading.
+    if (was.ticking) setHeld(later(said(was.every), held))
   }
   const subscribe = useCallback((listener: () => void) => (ticking ? listen(every, listener) : idle()), [ticking, every])
-  // A pace that isn't running says nothing yet: it says the time from now as this starts reading it.
-  return useSyncExternalStore(subscribe, () => (ticking ? later(pace.timer === undefined ? null : pace.now, held) : held))
+  return useSyncExternalStore(subscribe, () => (ticking ? later(said(every), held) : held))
 }

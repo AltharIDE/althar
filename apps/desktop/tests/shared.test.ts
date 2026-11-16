@@ -297,6 +297,32 @@ describe('the one clock', () => {
   })
 })
 
+describe('the time now, read at another pace', () => {
+  it('never goes back as a place goes from each second to each minute', () => {
+    vi.useFakeTimers({ now: new Date('2026-10-03T12:00:00.000Z') })
+    try {
+      const minutes = renderHook(() => useNow(true, 60_000))
+      const thread = renderHook(({ every }) => useNow(true, every), { initialProps: { every: 1000 } })
+      act(() => {
+        vi.advanceTimersByTime(5_000)
+      })
+      expect(thread.result.current).toBe('2026-10-03T12:00:05.000Z')
+      // Its turn over, it reads the minute's clock, which last said 12:00: it still says what it said, then moves on from now.
+      thread.rerender({ every: 60_000 })
+      expect(thread.result.current).toBe('2026-10-03T12:00:05.000Z')
+      act(() => {
+        vi.advanceTimersByTime(55_000)
+      })
+      expect(thread.result.current).toBe('2026-10-03T12:01:00.000Z')
+      expect(minutes.result.current).toBe(thread.result.current)
+      minutes.unmount()
+      thread.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('what the person sends', () => {
   it('shows at once as the window’s copy, after what is there, until the store’s copy of it arrives, or the send fails', () => {
     const held = [{ ...items.you('Add a retry'), id: 'already-held', sequence: 4 }]
