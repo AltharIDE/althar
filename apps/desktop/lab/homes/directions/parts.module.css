@@ -1,0 +1,70 @@
+/* What every direction shares: a home's identity to compare, its host in mono, its options, work in motion. */
+
+.target {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.homeId {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+}
+.copy {
+  flex: none;
+}
+
+/* what the host prints, as a terminal would: the person reads it there and here */
+.terminal {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--term);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--term-t2);
+  overflow-wrap: anywhere;
+}
+.terminal strong {
+  font-weight: 500;
+  color: var(--term-t1);
+}
+.prompt {
+  color: var(--term-t3);
+}
+
+.options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+}
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-2);
+}
+
+.working {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}

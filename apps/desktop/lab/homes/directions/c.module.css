@@ -1,0 +1,374 @@
+/* C · Homes on Home: the homes at the Home screen's foot, connecting in place, a card for a dropped connection. */
+
+/* the Home tab, in a home's window: the home's glyph in the house's place */
+.remote nav > ul:first-child > li:first-child > button:first-child > svg:first-child {
+  display: none;
+}
+.tabGlyph {
+  flex: none;
+  order: -1;
+  color: var(--t-2);
+}
+
+.home {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--n-2);
+}
+.homeTop {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+/* the shelf: a band at the screen's foot, over the same paper */
+.shelf {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 28px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--n-2);
+}
+.shelf[data-bare] {
+  align-items: center;
+  padding: 10px 28px 12px;
+  border-top: 0;
+}
+.bare {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--t-3);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.bare:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+
+.shelfHead {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+}
+.shelfTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.limits {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.card {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+.card:hover {
+  background: var(--hover-paper);
+}
+/* the window's own: lifted paper, as its tab is */
+.card[data-here] {
+  border-color: transparent;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-card);
+}
+.cardOpen {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-rows: auto;
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 1px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  text-align: start;
+}
+.cardOpen:has(.cardHost) {
+  grid-template-rows: auto auto;
+}
+.cardOpen:has(.cardHost) .cardGlyph {
+  grid-row: span 2;
+}
+.card:has(.cardMore) .cardOpen {
+  padding-right: 34px;
+}
+.cardGlyph {
+  color: var(--t-3);
+}
+.card[data-here] .cardGlyph {
+  color: var(--t-1);
+}
+.cardName {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cardWhen {
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.cardHost {
+  grid-column: 2 / 4;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cardState {
+  grid-column: 2 / 4;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.card[data-down] .cardState,
+.card[data-down] .cardGlyph {
+  color: var(--danger);
+}
+.card:has(.cardReconnect) .cardOpen {
+  padding-right: 100px;
+}
+.cardReconnect {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+}
+.cardMore {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--t-3);
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--fast) var(--ease);
+}
+.card:hover .cardMore,
+.card:focus-within .cardMore,
+.cardMore[aria-expanded='true'] {
+  opacity: 1;
+}
+.cardMore:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+
+/* connecting, in the shelf's place: two sides, the host and what the check found */
+.connect {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 28px;
+  padding: 4px 0 0;
+}
+.connectSide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.connectSide + .connectSide {
+  padding-left: 28px;
+  border-left: 1px solid var(--line);
+}
+.connectTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.field {
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 2px 0;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.more:hover {
+  color: var(--t-1);
+}
+.options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+  padding-top: 12px;
+}
+.found {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 92px;
+}
+.note {
+  max-width: 420px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.connectActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* a dropped connection: a card at the window's foot, over the work, not in its way */
+.around {
+  position: relative;
+  height: 100%;
+}
+.dropped {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  z-index: var(--z-float);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(520px, calc(100% - 32px));
+  padding: 10px 10px 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--n-1);
+  box-shadow: var(--lift-pop);
+  transform: translateX(-50%);
+  animation: rise var(--slow) var(--ease) both;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+.droppedGlyph {
+  color: var(--danger);
+}
+.dropped:has(.droppedTitle:only-child) .droppedGlyph,
+.dropped[data-again] .droppedGlyph {
+  color: var(--t-2);
+}
+.droppedWords {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.droppedTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.droppedLine {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+/* on Home, the window's own card in the shelf says it */
+.around:has(.shelf) .dropped {
+  display: none;
+}
+
+/* a home's window before it first connects, and a home with no projects: the shelf still at its foot */
+.opening,
+.emptyWithShelf {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--n-2);
+}
+.openingBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 32px;
+  text-align: center;
+}
+.openingName {
+  margin: 8px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.openingState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  min-height: 72px;
+  margin-top: 18px;
+}
+
+[data-narrow] .connect {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+}
+[data-narrow] .connectSide + .connectSide {
+  padding-left: 0;
+  padding-top: 18px;
+  border-left: 0;
+  border-top: 1px solid var(--line);
+}
+[data-narrow] .shelf {
+  padding-inline: 18px;
+}
