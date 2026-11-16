@@ -1,0 +1,164 @@
+/* What the plan card's looks add, in its own terms (TaskLaunch.module.css). */
+
+/* 2: a task it waits for, as a node on the line: an arc going slowly round while it runs. */
+.node {
+  color: var(--t-2);
+}
+.node[data-state='choosing'] > :first-child {
+  animation-duration: 2.4s;
+}
+.node[data-phase='stuck'] {
+  border-color: color-mix(in oklab, var(--danger) 35%, transparent);
+  color: var(--danger);
+}
+.node[data-phase='abandoned'] {
+  border-color: color-mix(in oklab, var(--danger) 40%, transparent);
+}
+.stands {
+  font-weight: 450;
+  color: var(--t-2);
+}
+.stands[data-phase='implement'],
+.stands[data-phase='review'],
+.stands[data-phase='checks'] {
+  color: var(--live);
+}
+.stands[data-phase='stuck'],
+.stands[data-phase='abandoned'] {
+  color: var(--danger);
+}
+.stands[data-phase='ready'] {
+  color: var(--signal-ink);
+}
+
+/* 3: under its title, what it waits for, each a quiet link with how it stands. */
+.after {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  margin: 4px 0 0 -6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--t-3);
+}
+.afterWord {
+  padding: 0 2px 0 6px;
+}
+.blocker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: inherit;
+  transition: background var(--fast) var(--ease);
+}
+.blocker:hover {
+  background: var(--hover-paper);
+}
+.blockerName {
+  font-weight: 550;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.blockerState {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.blocker[data-phase='implement'] .blockerState,
+.blocker[data-phase='review'] .blockerState,
+.blocker[data-phase='checks'] .blockerState {
+  color: var(--live);
+}
+.blocker[data-phase='stuck'] .blockerState,
+.blocker[data-phase='abandoned'] .blockerState {
+  color: var(--danger);
+}
+.blocker[data-phase='ready'] .blockerState {
+  color: var(--signal-ink);
+}
+
+/* 4: the foot follows what it waits for. */
+.follow {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.follow[data-trouble] {
+  color: var(--danger);
+}
+.ringStuck :last-child {
+  stroke: var(--danger);
+}
+.ringGone {
+  flex: none;
+  color: var(--danger);
+}
+.followBar {
+  background: var(--live);
+  opacity: 0.45;
+  transition: width 900ms var(--ease-out);
+}
+.followBar[data-trouble] {
+  background: var(--danger);
+}
+/* the ring fills as what it waits for gets closer to merging */
+.ring :last-child {
+  stroke: var(--live);
+}
+
+/* 5: folded, its team in a line under the title, which unfolds it. */
+.team {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: start;
+  max-width: 100%;
+  margin: 6px 0 0 -6px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--t-2);
+  transition: background var(--fast) var(--ease);
+}
+.team:hover {
+  background: var(--hover-paper);
+}
+.marks {
+  display: inline-flex;
+  flex: none;
+}
+.markSeat {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-1);
+}
+.markSeat + .markSeat {
+  margin-left: -5px;
+}
+.teamWords {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.teamThen {
+  font-weight: 400;
+  color: var(--t-3);
+}

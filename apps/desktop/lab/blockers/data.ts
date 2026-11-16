@@ -13,8 +13,9 @@ import {
   repositories,
   snapshot,
 } from '../../tests/fixtures'
-import { clock, COORDINATOR, direction, keyOfThread, move, moves, PROJECT, taskIdOf, threadIdOf, worldNow } from './state'
-import { answer, answered, askWords, optionsFor, raisedOf, talk, tell } from './talk'
+import { clock, COORDINATOR, direction, keyOfThread, move, moves, option, PROJECT, taskIdOf, threadIdOf, worldNow } from './state'
+import { answer, answered, askWords, optionsFor, type Raised, raisedOf, talk, tell } from './talk'
+import { linesOf } from './task/lines'
 import { asksOf, listed, shortOf, specOf, type TaskNow, unstarted } from './world'
 
 /*
@@ -299,10 +300,23 @@ const taskItems = (task: TaskNow): ReadonlyArray<ThreadItem> => {
   }
   if (task.phase === 'stuck')
     out.push(althar(`Stuck: ${spec.breaks ?? 'a check'} failed twice, and its lead couldn’t fix it.`, `${id}_stuck`, task.since))
+  // B: Althar's lines about the tasks around it, each at its minute; the coordinator's question with the line that raised it.
+  if (option.task.get() === 'b') {
+    const world = worldNow()
+    const raised = direction.get() === 'c' ? raisedOf(moves.get()) : []
+    const open = new Set(asksOf(world).map((one) => one.blocker.key))
+    for (const line of linesOf(world, task, raised, spec.begun?.startedAt ?? -60)) {
+      out.push(althar(line.text, line.id, line.at))
+      if ('ask' in line) out.push(questionOf(line.ask, open, `${line.id}_q`))
+    }
+  }
+  // In the order they happened.
   return out
+    .toSorted((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+    .map((item, i) => ({ ...item, sequence: i + 1 }) as ThreadItem)
 }
 
-const threadOf = (threadId: string): ThreadSnapshot => {
+export const threadOf = (threadId: string): ThreadSnapshot => {
   const key = keyOfThread(threadId)
   const task = key === null ? undefined : worldNow().byKey.get(key)
   if (task === undefined) return snapshot({ threadId, project: { id: PROJECT, name: 'althar' } })
@@ -356,6 +370,35 @@ const threadOf = (threadId: string): ThreadSnapshot => {
 
 const START = -62
 
+/** The coordinator's question about an abandoned task, as asked: in its conversation, and in B in each thread it concerns. */
+const questionOf = (raised: Raised, open: ReadonlySet<string>, id: string): ThreadItem => {
+  const done = answered.get().get(raised.id)
+  return placed(
+    items.question({
+      attentionId: raised.id,
+      message: `What should ${listed(raised.waiting.map((one) => shortOf(one.key)))} do?`,
+      fields: raised.waiting.map((dep) => ({
+        id: dep.key,
+        question: raised.waiting.length === 1 ? 'What should it do?' : `${shortOf(dep.key)}`,
+        type: 'choice' as const,
+        options: optionsFor(raised.world, raised.blocker, dep).map((one) => ({
+          value: one.value,
+          label: one.label,
+          ...(one.note === undefined ? {} : { note: one.note }),
+        })),
+        multiple: false,
+        wordsField: `${dep.key}_words`,
+        required: false,
+      })),
+      state: done !== undefined ? 'answered' : open.has(raised.blocker) ? 'open' : 'withdrawn',
+      answers: done?.answers ?? null,
+      withdrawn: done === undefined && !open.has(raised.blocker) ? 'Settled from the board' : null,
+    } as Parameters<typeof items.question>[0]),
+    id,
+    raised.at + 0.11,
+  )
+}
+
 /** The cards the coordinator's answer holds: the tasks it set waiting, and the one held. */
 const SET = ['pair', 'ssh', 'hosts', 'guide', 'reconnect']
 
@@ -390,34 +433,8 @@ const coordinatorItems = (): ReadonlyArray<ThreadItem> => {
       continue
     }
     const raised = asks[event.i] as (typeof asks)[number]
-    const done = answered.get().get(raised.id)
     out.push(says(askWords(raised.world, raised.blocker, raised.waiting), `${raised.id}_says`, raised.at + 0.1))
-    out.push(
-      placed(
-        items.question({
-          attentionId: raised.id,
-          message: `What should ${listed(raised.waiting.map((one) => shortOf(one.key)))} do?`,
-          fields: raised.waiting.map((dep) => ({
-            id: dep.key,
-            question: raised.waiting.length === 1 ? 'What should it do?' : `${shortOf(dep.key)}`,
-            type: 'choice' as const,
-            options: optionsFor(raised.world, raised.blocker, dep).map((one) => ({
-              value: one.value,
-              label: one.label,
-              ...(one.note === undefined ? {} : { note: one.note }),
-            })),
-            multiple: false,
-            wordsField: `${dep.key}_words`,
-            required: false,
-          })),
-          state: done !== undefined ? 'answered' : open.has(raised.blocker) ? 'open' : 'withdrawn',
-          answers: done?.answers ?? null,
-          withdrawn: done === undefined && !open.has(raised.blocker) ? 'Settled from the board' : null,
-        } as Parameters<typeof items.question>[0]),
-        `${raised.id}_q`,
-        raised.at + 0.11,
-      ),
-    )
+    out.push(questionOf(raised, open, `${raised.id}_q`))
   }
   return out
 }

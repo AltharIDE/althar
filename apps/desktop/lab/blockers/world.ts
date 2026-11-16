@@ -180,12 +180,25 @@ export interface TaskNow {
   readonly without: ReadonlyArray<string>
 }
 
+/** Something that changed in the day, at its minute: a task's phase, or what it waits for. */
+export type Change =
+  | { readonly at: number; readonly key: string; readonly kind: 'phase'; readonly from: Phase; readonly to: Phase }
+  | {
+      readonly at: number
+      readonly key: string
+      readonly kind: 'blockers'
+      readonly from: ReadonlyArray<string>
+      readonly to: ReadonlyArray<string>
+    }
+
 export interface WorldNow {
   readonly t: number
   readonly tasks: ReadonlyArray<TaskNow>
   readonly byKey: ReadonlyMap<string, TaskNow>
   /** When anything last changed phase. */
   readonly lastChange: number
+  /** Everything that changed by now, in order: what a task's thread tells (task/lines.ts). */
+  readonly changes: ReadonlyArray<Change>
 }
 
 /** How long a task counts down once nothing holds it, before it starts. */
@@ -249,10 +262,17 @@ export function simulate(moves: ReadonlyArray<Move>, until: number): WorldNow {
   const sorted = moves.toSorted((a, b) => a.at - b.at)
   let next = 0
   let lastChange = 0
+  const changes: Change[] = []
   const go = (task: Mutable, phase: Phase, t: number) => {
+    changes.push({ at: t, key: task.key, kind: 'phase', from: task.phase, to: phase })
     task.phase = phase
     task.since = t
     lastChange = t
+  }
+  const wait = (task: Mutable, blockers: string[], t: number) => {
+    if (blockers.length === task.blockers.length && blockers.every((one, i) => one === task.blockers[i])) return
+    changes.push({ at: t, key: task.key, kind: 'blockers', from: task.blockers, to: blockers })
+    task.blockers = blockers
   }
   const apply = (move: Move, t: number) => {
     const task = byKey.get(move.key)
@@ -275,22 +295,26 @@ export function simulate(moves: ReadonlyArray<Move>, until: number): WorldNow {
         task.forced = true
         task.held = false
         task.without = task.blockers.filter((one) => !merged(one))
-        task.blockers = task.blockers.filter(merged)
+        wait(task, task.blockers.filter(merged), t)
         task.word = move.word ?? null
         go(task, 'starting', t)
         return
       case 'block':
         if (unstarted && !task.blockers.includes(move.on) && !wouldLoop((key) => byKey.get(key)?.blockers ?? [], task.key, move.on)) {
-          task.blockers = [...task.blockers, move.on]
+          wait(task, [...task.blockers, move.on], t)
           if (task.phase === 'starting' && !merged(move.on)) go(task, 'waits', t)
         }
         return
       case 'unblock':
-        task.blockers = task.blockers.filter((one) => one !== move.on)
+        wait(
+          task,
+          task.blockers.filter((one) => one !== move.on),
+          t,
+        )
         return
       case 'swap':
         if (!unstarted || wouldLoop((key) => byKey.get(key)?.blockers ?? [], task.key, move.to)) return
-        task.blockers = [...new Set(task.blockers.map((one) => (one === move.from ? move.to : one)))]
+        wait(task, [...new Set(task.blockers.map((one) => (one === move.from ? move.to : one)))], t)
         return
       case 'hold':
         if (!unstarted) return
@@ -373,7 +397,7 @@ export function simulate(moves: ReadonlyArray<Move>, until: number): WorldNow {
     word: one.word,
     without: one.without,
   }))
-  return { t: until, tasks: now, byKey: new Map(now.map((one) => [one.key, one])), lastChange }
+  return { t: until, tasks: now, byKey: new Map(now.map((one) => [one.key, one])), lastChange, changes }
 }
 
 /** When the last thing changes where nobody does anything more. */

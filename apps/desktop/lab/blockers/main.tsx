@@ -13,8 +13,9 @@ import { ServicesProvider } from '../../src/renderer/data/services'
 import { makeRouter } from '../../src/renderer/router'
 import { fakeHost } from '../../tests/fixtures'
 import { Bar } from './Bar'
-import { boardNow, makeClient, TABS } from './data'
-import { clock, COORDINATOR, direction, endNow, moves, playing, PROJECT, router as shared, speed } from './state'
+import { boardNow, makeClient, TABS, threadOf } from './data'
+import { clock, COORDINATOR, direction, endNow, moves, option, playing, PROJECT, router as shared, speed, threadIdOf } from './state'
+import { TASKS } from './world'
 import { answered, talk } from './talk'
 import s from './lab.module.css'
 
@@ -73,6 +74,8 @@ const tell = () => {
     emit({ _tag: 'Changed', cursor, aggregateType: 'card', aggregateId: task.taskId, projectId: PROJECT, threadId: task.threadId })
   }
   if (seen.get('calls') !== calls) told()
+  // What a task's thread says of the tasks around it changes with theirs (B): every task's thread, read again.
+  if (board.tasks.some((task) => seen.get(task.taskId) !== next.get(task.taskId))) threads()
   seen = next
   seen.set('calls', calls)
 }
@@ -81,17 +84,41 @@ const told = () => {
   cursor += 1
   emit({ _tag: 'Changed', cursor, aggregateType: 'thread', aggregateId: COORDINATOR, projectId: PROJECT, threadId: COORDINATOR })
 }
+/*
+ * The day's task threads: a task's page reads its head on a change and takes
+ * its items one by one, so each item that came, changed or went (scrubbed
+ * back) is told by its id, as the runtime tells them.
+ */
+let said = new Map<string, Map<string, string>>()
+const threads = () => {
+  const next = new Map<string, Map<string, string>>()
+  for (const spec of TASKS) {
+    const threadId = threadIdOf(spec.key)
+    const now = new Map(threadOf(threadId).items.map((item) => [item.id, JSON.stringify({ ...item, createdAt: null })]))
+    next.set(threadId, now)
+    const was = said.get(threadId) ?? new Map<string, string>()
+    for (const id of new Set([...now.keys(), ...was.keys()])) {
+      if (now.get(id) === was.get(id)) continue
+      cursor += 1
+      emit({ _tag: 'Changed', cursor, aggregateType: 'thread_item', aggregateId: id, projectId: PROJECT, threadId })
+    }
+  }
+  said = next
+}
 /* Every task's thread, read again: what it waits for, or a direction that says it otherwise. */
 const everything = () => {
   seen = new Map()
   tell()
   told()
+  threads()
 }
 clock.subscribe(tell)
 moves.subscribe(everything)
 direction.subscribe(everything)
+option.task.subscribe(everything)
 talk.subscribe(told)
 answered.subscribe(told)
+answered.subscribe(threads)
 
 function Lab() {
   useEffect(() => {

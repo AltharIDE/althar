@@ -2,13 +2,31 @@ import { useEffect } from 'react'
 
 import { Icon } from '@althar/ui'
 
-import { clock, direction, DIRECTIONS, endNow, moves, narrow, playing, said, SPEEDS, speed, useStore } from './state'
+import {
+  clock,
+  endNow,
+  moves,
+  narrow,
+  onTaskPage,
+  option,
+  OPTIONS,
+  type Part,
+  PART_NAMES,
+  pick,
+  place,
+  playing,
+  said,
+  SPEEDS,
+  speed,
+  useStore,
+} from './state'
 import { restart } from './talk'
 import s from './lab.module.css'
 
 /*
- * The lab's own bar, under the app: the direction on show (1–3, or press its
- * letter), the clock (space plays and pauses, Shift and the arrows step a
+ * The lab's own bar, under the app: how a waiting task's page shows it (A–D)
+ * and how the coordinator's plan card does (1–5), the number keys switching
+ * the one on screen (Shift for the other); the clock (space plays and pauses, Shift and the arrows step a
  * minute, 0 starts the day again, the slider scrubs) and its speed, and the
  * window's width (w). A line over it says what an action would have done.
  */
@@ -24,8 +42,39 @@ const minutes = (m: number) => {
   return whole < 60 ? `${whole}m` : `${Math.floor(whole / 60)}h ${String(whole % 60).padStart(2, '0')}m`
 }
 
+const keep = (event: { preventDefault: () => void }) => event.preventDefault()
+
+/** The part the number keys switch: the task's on a task's page, the plan card's elsewhere; Shift, the other. */
+const keyed = (shift: boolean): Part => (((onTaskPage() ? 'task' : 'card') === 'task') !== shift ? 'task' : 'card')
+
+function PartGroup({ part, active }: { part: Part; active: boolean }) {
+  const picked = useStore(option[part])
+  const chosen = OPTIONS[part].find((one) => one.key === picked)
+  return (
+    <div className={[s.part, active && s.active].filter(Boolean).join(' ')} title={chosen?.line}>
+      <span className={s.partName}>{PART_NAMES[part]}</span>
+      {OPTIONS[part].map((one, i) => (
+        <button
+          key={one.key}
+          type="button"
+          tabIndex={-1}
+          className={s.letter}
+          aria-pressed={picked === one.key}
+          aria-label={`${PART_NAMES[part]} ${one.label}: ${one.name}`}
+          title={`${i + 1} · ${one.name}: ${one.line}`}
+          onMouseDown={keep}
+          onClick={() => pick(part, one.key)}
+        >
+          {one.label}
+        </button>
+      ))}
+      <span className={s.optionName}>{chosen?.name}</span>
+    </div>
+  )
+}
+
 export function Bar() {
-  const picked = useStore(direction)
+  useStore(place)
   const isNarrow = useStore(narrow)
   const isPlaying = useStore(playing)
   const pace = useStore(speed)
@@ -33,23 +82,23 @@ export function Bar() {
   useStore(moves)
   const line = useStore(said)
   const end = endNow() + 4
-  const chosen = DIRECTIONS.find((one) => one.key === picked) ?? DIRECTIONS[0]
   useEffect(() => {
     document.documentElement.dataset.narrow = isNarrow ? '1' : '0'
   }, [isNarrow])
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || typing(event.target)) return
-      const digit = /^Digit([1-3])$/.exec(event.code)?.[1]
+      const digit = /^Digit([1-5])$/.exec(event.code)?.[1]
       const take = () => {
         event.preventDefault()
         event.stopPropagation()
       }
-      if (digit !== undefined && !event.shiftKey) {
-        const one = DIRECTIONS[Number(digit) - 1]
+      if (digit !== undefined) {
+        const part = keyed(event.shiftKey)
+        const one = OPTIONS[part][Number(digit) - 1]
         if (one === undefined) return
         take()
-        direction.set(one.key)
+        pick(part, one.key)
       } else if (event.key === ' ' && !(event.target instanceof HTMLButtonElement)) {
         take()
         playing.set((was) => !was)
@@ -70,30 +119,13 @@ export function Bar() {
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
-  const keep = (event: { preventDefault: () => void }) => event.preventDefault()
+  const onTask = onTaskPage()
   return (
     <>
       {line !== null && <output className={s.said}>{line}</output>}
       <nav className={s.bar} aria-label="Directions" data-lab-bar="" onPointerDown={(event) => event.stopPropagation()}>
-        <div className={[s.part, s.active].join(' ')} title={chosen?.line}>
-          <span className={s.partName}>Blockers</span>
-          {DIRECTIONS.map((one, i) => (
-            <button
-              key={one.key}
-              type="button"
-              tabIndex={-1}
-              className={s.letter}
-              aria-pressed={picked === one.key}
-              aria-label={`${one.key.toUpperCase()}: ${one.name}`}
-              title={`${i + 1} · ${one.name}: ${one.line}`}
-              onMouseDown={keep}
-              onClick={() => direction.set(one.key)}
-            >
-              {one.key.toUpperCase()}
-            </button>
-          ))}
-          <span className={s.optionName}>{chosen?.name}</span>
-        </div>
+        <PartGroup part="task" active={onTask} />
+        <PartGroup part="card" active={!onTask} />
         <span className={s.rule} aria-hidden="true" />
         <div className={s.clock}>
           <button

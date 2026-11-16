@@ -9,6 +9,7 @@
  * Each step after it is done in order before the picture:
  *
  *   hash=#/threads/th_pair            go to a place in the app
+ *   scroll=<selector>                 bring something into view, at the middle of what scrolls it
  *   hover=<selector>                  point at something, and wait for what it opens
  *   click=<selector>                  press something
  *   type=<text>                       type into what has focus, then press Return
@@ -43,7 +44,13 @@ let clip: { x: number; y: number; width: number; height: number } | undefined
 for (const step of steps) {
   const [what, ...rest] = step.split('=')
   const value = rest.join('=')
-  if (what === 'hover') {
+  if (what === 'scroll') {
+    await page
+      .locator(value)
+      .first()
+      .evaluate((node) => node.scrollIntoView({ block: 'center' }))
+    await settle(500)
+  } else if (what === 'hover') {
     await page.hover(value)
     await settle(900)
   } else if (what === 'click') {

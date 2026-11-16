@@ -6,6 +6,7 @@ import type { Patch } from '../patching'
 
 const here = import.meta.dirname
 const boardView = join(here, '../../../src/renderer/features/board/BoardView.tsx')
+const nextRowStyle = join(here, '../../../../../packages/ui/src/board/NextRow/NextRow.module.css')
 
 export const BOARD_PATCHES: ReadonlyArray<Patch> = [
   {
@@ -39,5 +40,17 @@ export const BOARD_PATCHES: ReadonlyArray<Patch> = [
     file: boardView,
     from: '<BoardColumn lane={BoardLane.Yours} count={yoursOf(lanes)}>',
     to: '<BoardColumn lane={BoardLane.Yours} count={yoursOf(lanes) + labAsks()} filled={yoursOf(lanes) + labAsks() > 0}>\n        <LabYours />',
+  },
+  // C's words name what a row waits for, so they take a second line before they're cut: "Starts when SSH setup and Hosts screen merge".
+  {
+    file: nextRowStyle,
+    from: '.reason {\n  display: flex;\n  align-items: center;',
+    to: '.reason {\n  display: flex;\n  align-items: flex-start;',
+  },
+  { file: nextRowStyle, from: '.reason > svg {\n  flex: none;\n}', to: '.reason > svg {\n  flex: none;\n  margin-top: 2.5px;\n}' },
+  {
+    file: nextRowStyle,
+    from: '.words {\n  min-width: 0;\n  overflow: hidden;\n  text-overflow: ellipsis;\n  white-space: nowrap;\n}',
+    to: '.words {\n  min-width: 0;\n  overflow: hidden;\n  display: -webkit-box;\n  -webkit-box-orient: vertical;\n  -webkit-line-clamp: 2;\n}',
   },
 ]

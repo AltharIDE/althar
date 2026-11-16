@@ -1,0 +1,136 @@
+/* What a task's page says of the tasks around it (chain.tsx and the ways). */
+
+/* A · D: a row of the list is one press, opening its task; what can be done to it shows on hover. */
+.open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.open:focus-visible {
+  outline: none;
+}
+li:has(> .open:focus-visible) {
+  box-shadow: inset 0 0 0 1.5px var(--focus, currentColor);
+}
+.title {
+  font-weight: 500;
+}
+li[data-quiet] .title {
+  color: var(--t-3);
+  font-weight: 400;
+}
+.bad {
+  color: var(--danger);
+}
+.gone {
+  color: var(--danger);
+}
+.act {
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+li:hover > .act,
+li:focus-within > .act {
+  opacity: 1;
+}
+
+/* A: each part's glyph, the kit's, centred as Behind's icons are. */
+.chipGlyph {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  color: var(--t-3);
+}
+
+/* D: the header's words are the button that opens the list. */
+.stateButton,
+.beside {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.stateButton:focus-visible,
+.beside:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px currentColor;
+  border-radius: 99px;
+}
+.stateChev {
+  opacity: 0.6;
+  transition: transform var(--fast) var(--ease);
+}
+.stateButton[aria-expanded='true'] .stateChev,
+.beside[aria-expanded='true'] .stateChev {
+  transform: rotate(180deg);
+}
+/* D, on a task something waits for: a part after its own words, a hairline between. */
+.beside {
+  height: 22px;
+  padding: 0 8px 0 9px;
+  border-left: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 0 99px 99px 0;
+  font-weight: 500;
+}
+.beside:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* C: the plan under the brief, as a card in the thread. */
+.plan {
+  margin-top: 4px;
+}
+
+/* B: where its lead's first words will land, how what it still waits for stands, a line each. */
+.end {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.endLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--t-3);
+}
+.endGlyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  color: var(--t-3);
+}
+.endName {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--t-2);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.endName:hover {
+  color: var(--t-1);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

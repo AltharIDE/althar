@@ -68,7 +68,10 @@ export const waitWords = (
     case 'b':
       return { row: `After ${names}`, state: `After ${names}`, ...(task.held ? { why: 'Held' } : {}) }
     // The kit's own words for a row that starts after another task: "Starts when 419 merges".
+    // Once one is abandoned it won't merge: the row says so, and that it waits for the person (the coordinator's question).
     case 'c': {
+      const left = open.find((one) => one.phase === 'abandoned')
+      if (left !== undefined) return { row: `${shortOf(left.key)} was abandoned`, state: 'Needs you' }
       const when = `Starts when ${names} ${open.length === 1 ? 'merges' : 'merge'}`
       const said = task.held ? `Held. ${when}, and you say` : when
       return { row: said, state: said }
@@ -92,7 +95,11 @@ export function BlockersFoot({ task }: { task: TaskNow }) {
 }
 
 export const waitGlyph = (world: WorldNow, task: TaskNow): Wait | null =>
-  waitWords(world, task) === null ? null : task.held ? Wait.You : Wait.After
+  waitWords(world, task) === null
+    ? null
+    : task.held || openBlockers(world, task).some((one) => one.phase === 'abandoned')
+      ? Wait.You
+      : Wait.After
 
 /* ——— the choices for what waited on an abandoned task ——— */
 

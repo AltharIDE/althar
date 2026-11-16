@@ -5,6 +5,7 @@ import { defineConfig, type Plugin } from 'vite-plus'
 
 import { BOARD_PATCHES } from './board/patches'
 import type { Patch } from './patching'
+import { PLAN_PATCHES } from './plan/patches'
 import { PROJECT_PATCHES } from './project/patches'
 import { TASK_PATCHES } from './task/patches'
 
@@ -18,7 +19,7 @@ import { TASK_PATCHES } from './task/patches'
 const here = import.meta.dirname
 
 /** Lines patched in the app's own files, each part's where it needs a word or a place (each part's patches.ts). */
-const patches: ReadonlyArray<Patch> = [...BOARD_PATCHES, ...TASK_PATCHES, ...PROJECT_PATCHES]
+const patches: ReadonlyArray<Patch> = [...BOARD_PATCHES, ...TASK_PATCHES, ...PROJECT_PATCHES, ...PLAN_PATCHES]
 
 const seams = (): Plugin => ({
   name: 'blockers-lab:seams',
