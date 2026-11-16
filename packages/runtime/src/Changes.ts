@@ -158,6 +158,7 @@ import {
   unsettledLine,
   withDescribed,
   commitsWord,
+  type PullRequestIssue,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { retitleTask, TITLE_LENGTH } from './taskTitle'
@@ -1283,7 +1284,7 @@ export class Changes extends Context.Service<
        */
       const bodyFor = (
         threadId: string,
-        issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null,
+        issue: ReadonlyArray<PullRequestIssue>,
         repository: { readonly slug: string; readonly template: string | null },
         since: string | null = null,
         review: { readonly seal: string | null; readonly details: string | null; readonly note?: string | null } | null = null,
@@ -1927,7 +1928,7 @@ export class Changes extends Context.Service<
           yield* settle
           if (input.end === 'none') return { kind: 'pushed', branch: task.branch, left } as const
           const draft = input.end === 'draft' && host.capabilities.drafts
-          const [issueLink] = yield* sql<{
+          const issueLinks = yield* sql<{
             id: string
             product: Product
             key: string
@@ -1936,12 +1937,14 @@ export class Changes extends Context.Service<
             connectionId: string | null
             partOf: number
           }>`
-            SELECT id, product, key, url, ref, connection_id, part_of FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue' LIMIT 1`
+            SELECT id, product, key, url, ref, connection_id, part_of FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue'
+            ORDER BY created_at, rowid`
           // A link's spelling of the repository may differ in case from the host's, which GitHub and GitLab don't mind.
-          const sameHost =
-            issueLink !== undefined &&
-            issueLink.product === host.product &&
-            issueLink.ref.toLowerCase().startsWith(`${path.join('/').toLowerCase()}#`)
+          const sameHostOf = (link: { readonly product: Product; readonly ref: string }) =>
+            link.product === host.product && link.ref.toLowerCase().startsWith(`${path.join('/').toLowerCase()}#`)
+          // Its title carries the first one's key, as its branch does; its description names each.
+          const [issueLink] = issueLinks
+          const sameHost = issueLink !== undefined && sameHostOf(issueLink)
           // The team's conventions, as the task's worktree has them now, under the person's own rule for titles.
           const conventions = yield* conventionsAt(task.path, end)
           const rule = ruleOf('title', (yield* (yield* Policies).current(input.projectId)).rules.titlePattern)
@@ -1960,7 +1963,7 @@ export class Changes extends Context.Service<
           })
           const body = yield* bodyFor(
             task.threadId,
-            issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost, partOf: issueLink.partOf === 1 },
+            issueLinks.map((link) => ({ key: link.key, url: link.url, sameHost: sameHostOf(link), partOf: link.partOf === 1 })),
             { slug: task.slug, template: conventions.template?.text ?? null },
             next?.openedAt ?? null,
             yield* reviewFor({ runId: input.runId, workspaceId: task.workspaceId, cwd: task.path, end, github: host.product === 'github' }),
@@ -2071,19 +2074,20 @@ export class Changes extends Context.Service<
               return id
             }),
           )
-          // The issue it came from gets a link to it, where its tracker has links.
-          if (issueLink !== undefined && issueLink.connectionId !== null && !sameHost)
+          // Each issue it came from gets a link to it, where its tracker has links.
+          for (const linked of issueLinks) {
+            if (linked.connectionId === null || sameHostOf(linked)) continue
             yield* Effect.gen(function* () {
-              const adapters = yield* connections.adapters(issueLink.connectionId ?? '')
+              const adapters = yield* connections.adapters(linked.connectionId ?? '')
               const tracker = adapters.tracker
               if (tracker === undefined || !tracker.capabilities.links) return
-              const issue = yield* tracker.issue(issueLink.ref)
+              const issue = yield* tracker.issue(linked.ref)
               yield* outward({
                 projectId: input.projectId,
-                subject: { type: 'external_link', id: issueLink.id },
-                target: `${tracker.product}:${issueLink.key}`,
+                subject: { type: 'external_link', id: linked.id },
+                target: `${tracker.product}:${linked.key}`,
                 operation: 'link_issue',
-                key: `link_issue:${issueLink.id}:${opened.url}`,
+                key: `link_issue:${linked.id}:${opened.url}`,
                 request: { url: opened.url },
                 retryable: true,
                 perform: Effect.as(tracker.link(issue, { url: opened.url, title: `${nameOf(snapshot)}: ${opened.title}` }), true),
@@ -2092,8 +2096,9 @@ export class Changes extends Context.Service<
                 decode: () => true,
               })
             }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not link the pull request to its issue', cause)))
-          // Its issue, moved on to review.
-          if (issueLink !== undefined) yield* follow(input.taskId, 'opened', snapshot)
+          }
+          // Its issues, moved on to review.
+          if (issueLinks.length > 0) yield* follow(input.taskId, 'opened', snapshot)
           yield* touchCard(input.taskId)
           yield* news(input.taskId)
           wakeNow(input.taskId)
@@ -4412,7 +4417,7 @@ export class Changes extends Context.Service<
           const conventions = where === undefined ? null : yield* conventionsAt(where.path, 'HEAD')
           const rule = ruleOf('title', (yield* (yield* Policies).current(link.projectId)).rules.titlePattern)
           const [issue] = yield* sql<{ product: Product; key: string; ref: string }>`
-            SELECT product, key, ref FROM external_links WHERE task_id = ${link.taskId} AND kind = 'issue' LIMIT 1`
+            SELECT product, key, ref FROM external_links WHERE task_id = ${link.taskId} AND kind = 'issue' ORDER BY created_at, rowid LIMIT 1`
           const sameHost =
             issue !== undefined &&
             issue.product === link.product &&
@@ -4429,11 +4434,13 @@ export class Changes extends Context.Service<
           })
         })
 
-      /** The issue's key the task came from, which the naming puts in a title: null where it came from none. */
+      /** The key of the (first) issue the task came from, which the naming puts in a title: null where it came from none. */
       const issueKeyOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [issue] = yield* sql<{ key: string }>`SELECT key FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' LIMIT 1`
+          const [issue] = yield* sql<{
+            key: string
+          }>`SELECT key FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' ORDER BY created_at, rowid LIMIT 1`
           return issue?.key ?? null
         })
 

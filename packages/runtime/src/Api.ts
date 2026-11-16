@@ -240,6 +240,11 @@ const realOf = (path: string): string => {
   }
 }
 /** What the person asked for, as a task they made says it: what they wrote, or, from an issue, which the thread shows, what they added to it. */
+/** The issues a task is made from, each once, in the order given: issue first, then issues. */
+const issuesOf = (issue: string | undefined, issues: ReadonlyArray<string> | undefined): ReadonlyArray<string> => {
+  const all = [...(issue === undefined ? [] : [issue]), ...(issues ?? [])].map((one) => one.trim()).filter((one) => one !== '')
+  return all.filter((one, index) => all.findIndex((other) => other.toLowerCase() === one.toLowerCase()) === index)
+}
 const requestOf = (title: string, description: string | undefined, issue: string | undefined): { readonly request?: string } => {
   const words = issue === undefined ? [title, description ?? ''].filter((part) => part.trim() !== '').join('\n\n') : (description ?? '')
   return words.trim() === '' ? {} : { request: words }
@@ -1182,10 +1187,14 @@ export const handlers = apiLayer(
             return { tasks: yield* findTasks(input, working) }
           }),
         ),
-      CreateTask: ({ commandId, projectId, title, description, issue, repositories }) =>
+      CreateTask: ({ commandId, projectId, title, description, issue: named, issues: others, repositories }) =>
         api(
           Effect.gen(function* () {
+            const all = issuesOf(named, others)
+            const issue = all[0]
             const from = yield* issueFor(projectId, issue)
+            // Each is read before the task is made, so one no tracker has makes no task.
+            yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
             const created = yield* projects.createTask({
               envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
               projectId,
@@ -1195,7 +1204,7 @@ export const handlers = apiLayer(
               ...(repositories === undefined ? {} : { repositories }),
               ...requestOf(title, description, issue),
             })
-            if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
+            for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })
             return yield* queries.task(created.taskId)
           }),
         ),
@@ -1702,12 +1711,15 @@ export const handlers = apiLayer(
         api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat, taskId }) =>
+      StartTask: ({ commandId, projectId, title, description, steps, issue: named, issues: others, end, repositories, chat, taskId }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
+              const all = issuesOf(named, others)
+              const issue = all[0]
               const from = yield* issueFor(projectId, issue)
+              yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
               const created = yield* projects.createTask({
                 envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
@@ -1724,7 +1736,7 @@ export const handlers = apiLayer(
                   ? { plain: true, shelf: 'scratch' as const, ...(description?.trim() ? { request: description } : {}) }
                   : requestOf(title, description, issue)),
               })
-              if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
+              for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
               const projectEnd = aside ? null : yield* pullRequests.endFor(projectId, created.taskId)
               const planId = yield* plans.propose({
@@ -1847,7 +1859,17 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      SetTaskIssuePart: ({ commandId, taskId, partOf }) => once(commandId, api(issues.setPart(taskId, partOf))),
+      // Without an issue named, its first, as the one switch of a runtime before set.
+      SetTaskIssuePart: ({ commandId, taskId, partOf, issue }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const named = issue ?? (yield* issues.ofTask(taskId))?.ref
+              yield* issues.setPart(taskId, partOf, named ?? '')
+            }),
+          ),
+        ),
       ChangeReviewDraft: ({ commandId, draftId, verdict, summary, comments }) =>
         once(
           commandId,

@@ -1523,6 +1523,10 @@ export const IssueSummary = Schema.Struct({
 })
 export type IssueSummary = typeof IssueSummary.Type
 
+/** An issue a task came from: as last seen, and whether the task does only part of it, so its merge comments on it rather than closing it. */
+export const TaskIssue = Schema.Struct({ ...IssueSummary.fields, partOf: Schema.optional(Schema.Boolean) })
+export type TaskIssue = typeof TaskIssue.Type
+
 export const IssueList = Schema.Struct({ issues: Schema.Array(IssueSummary) })
 export type IssueList = typeof IssueList.Type
 
@@ -2567,6 +2571,16 @@ export type LinkedTask = typeof LinkedTask.Type
 export const TaskBlocker = Schema.Struct({ ...LinkedTask.fields, stands: BlockerStanding })
 export type TaskBlocker = typeof TaskBlocker.Type
 
+/** An issue a task came from, as its card shows it, with the connection Althar reads it and moves it through, where it has one. */
+export const CardIssue = Schema.Struct({
+  product: Product,
+  key: Schema.String,
+  title: Schema.String,
+  url: Schema.String,
+  connectionId: Schema.optional(Schema.String),
+})
+export type CardIssue = typeof CardIssue.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2635,16 +2649,10 @@ export const TaskCard = Schema.Struct({
       repositoryId: Schema.optional(Schema.String),
     }),
   ),
-  /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
-  issue: Schema.NullOr(
-    Schema.Struct({
-      product: Product,
-      key: Schema.String,
-      title: Schema.String,
-      url: Schema.String,
-      connectionId: Schema.optional(Schema.String),
-    }),
-  ),
+  /** The (first) issue it came from, and the connection Althar reads it and moves it through, where it has one. */
+  issue: Schema.NullOr(CardIssue),
+  /** Each issue it came from, on any trackers, the first being `issue`. Absent where it came from one or none, and from a runtime before. */
+  fromIssues: Schema.optional(Schema.Array(CardIssue)),
   /** Its pull request, once opened: the open one, else its latest. */
   change: Schema.NullOr(ChangeSummary),
   /** Its other pull requests, newest first: those of earlier rounds of its work, merged or closed (ADR-034). */
@@ -4080,10 +4088,12 @@ export const ThreadSnapshot = Schema.Struct({
     /** When its work started, and when it settled: how long it has run. */
     startedAt: Schema.NullOr(Schema.String),
     settledAt: Schema.NullOr(Schema.String),
-    /** The issue it came from. */
+    /** The (first) issue it came from. */
     issue: Schema.NullOr(IssueSummary),
-    /** It does only part of its issue: its merge comments on it and leaves it open, rather than closing it. */
+    /** It does only part of its (first) issue: its merge comments on it and leaves it open, rather than closing it. */
     issuePartOf: Schema.optional(Schema.Boolean),
+    /** Each issue it came from, on any trackers, the first being `issue`, each with its own `partOf`. Absent from a runtime before. */
+    fromIssues: Schema.optional(Schema.Array(TaskIssue)),
     /** Its pull requests, as last seen, oldest first. */
     changes: Schema.Array(ChangeSummary),
     /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
@@ -4992,6 +5002,8 @@ const ProjectApi = RpcGroup.make(
       title: Schema.String,
       description: Schema.optional(Schema.String),
       issue: Schema.optional(Schema.String),
+      /** Other issues it comes from, beside issue, on any trackers: each its link or key. */
+      issues: Schema.optional(Schema.Array(Schema.String)),
       /** The project's repositories it changes, by name: needed only in a project of several. */
       repositories: Schema.optional(Schema.Array(Schema.String)),
     },
@@ -5122,6 +5134,8 @@ const ProjectApi = RpcGroup.make(
       steps: Schema.Array(PlanStep),
       /** The issue it comes from: its link or its key. */
       issue: Schema.optional(Schema.String),
+      /** Other issues it comes from, beside issue, on any trackers: each its link or key. */
+      issues: Schema.optional(Schema.Array(Schema.String)),
       /** What happens when the work is done; without it, a draft pull request where the repository's host is connected. */
       end: Schema.optional(Schema.NullOr(TaskEnd)),
       /** The project's repositories it changes, by name: needed only in a project of several. */
@@ -5193,7 +5207,8 @@ const ProjectApi = RpcGroup.make(
    */
   command('PreferIssueCards', { threadId: Schema.String, atOnce: Schema.Boolean }, Schema.Void),
   /** Whether a task does only part of its issue: its merge comments on the issue and leaves it open, rather than closing it. */
-  command('SetTaskIssuePart', { taskId: Schema.String, partOf: Schema.Boolean }, Schema.Void),
+  /** Whether a task does only part of an issue it came from: the one named by its ref or key, or its first where none is. */
+  command('SetTaskIssuePart', { taskId: Schema.String, partOf: Schema.Boolean, issue: Schema.optional(Schema.String) }, Schema.Void),
   /** Discards changes to issues: nothing changes on the tracker. */
   command('DiscardIssueChanges', { changesId: Schema.String }, Schema.Void),
   /**

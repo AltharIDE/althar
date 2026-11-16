@@ -40,11 +40,12 @@ import { ToolRefused, ToolServer } from './ToolServer'
  * Issues, and links to things on connected services (docs/architecture/06;
  * docs/plans/integrations.md). A link the person pastes in a message unfurls
  * there: the issue's key, title and status, or the pull request's. A task can
- * come from an issue, which it keeps as a link of its own; its branch and its
- * pull request carry the issue's key, so the tracker's own Git integration
- * finds them. As the task starts, Althar moves its issue to the tracker's
- * In Progress, where the tracker has one and the project's rules say to:
- * once, never back from further along, and never at the task's cost.
+ * come from an issue, or several on any trackers, each kept as a link of its
+ * own; its branch and its pull request carry the first one's key, so the
+ * tracker's own Git integration finds them, and its pull request names each.
+ * As the task starts, Althar moves each issue to its tracker's In Progress,
+ * where the tracker has one and the project's rules say to: once, never back
+ * from further along, and never at the task's cost.
  */
 
 /** A link, unfurled where it was pasted: an issue or a change, as its service has it, with the address as the message has it (`pasted`), which can differ from the service's own (`url`). */
@@ -70,6 +71,15 @@ export type Unfurl =
       readonly state: 'draft' | 'open' | 'merged' | 'closed'
       readonly repository: string
     }
+
+/** An issue a task came from: as last seen, and whether the task does only part of it. */
+export type TaskIssue = IssueSummary & { readonly partOf: boolean }
+
+/** Whether what was typed names this issue of a task's: its key, its link or its ref, in any case. */
+export const namesIssue = (typed: string, link: { readonly key: string; readonly url: string; readonly ref: string }) => {
+  const wanted = typed.trim().toLowerCase()
+  return wanted !== '' && [link.key, link.url, link.ref].some((one) => one.toLowerCase() === wanted)
+}
 
 /** An issue as a picker lists it: which service, and what it is. */
 export interface IssueSummary {
@@ -356,18 +366,24 @@ export class Issues extends Context.Service<
     readTool(input: unknown, projectId: string): Effect.Effect<string, ToolRefused>
     /** Issues found as an agent narrows them, on the project's trackers or one named; each tracker that couldn't be read said. */
     find(projectId: string, search: IssueSearch): Effect.Effect<IssuesFound, unknown>
-    /** Says whether a task does only part of its issue, so its merge comments on the issue rather than closing it. */
-    setPart(taskId: string, partOf: boolean): Effect.Effect<void, unknown>
+    /**
+     * Says whether a task does only part of an issue it came from, so its
+     * merge comments on that issue rather than closing it: the one named, by
+     * its key, link or ref, or each of the task's where none is.
+     */
+    setPart(taskId: string, partOf: boolean, issue?: string): Effect.Effect<void, unknown>
     /** The person's open issues, on every connected tracker, or the project's own where it is bound to one; a code host's only in the project's repository. */
     mine(projectId: string): Effect.Effect<ReadonlyArray<IssueSummary>, unknown>
-    /** Ties a task to the issue it came from. */
+    /** Ties a task to an issue it comes from, beside any it came from already: on any tracker. */
     attach(input: { readonly projectId: ProjectId; readonly taskId: string; readonly issue: string }): Effect.Effect<IssueSummary, unknown>
-    /** The issue a task came from, as last seen. */
+    /** The first issue a task came from, as last seen. */
     ofTask(taskId: string): Effect.Effect<IssueSummary | null, unknown>
+    /** Every issue a task came from, as last seen, in the order they were tied to it: each with whether it does only part of it. */
+    allOfTask(taskId: string): Effect.Effect<ReadonlyArray<TaskIssue>, unknown>
     /**
-     * Moves the issue a task came from to its tracker's In Progress, as the
-     * task's first step starts: in the background, once. It says how that
-     * went in the task's thread; nothing it meets fails the task.
+     * Moves each issue a task came from to its tracker's In Progress, as the
+     * task's first step starts: in the background, each once. It says how
+     * that went in the task's thread; nothing it meets fails the task.
      */
     started(taskId: string): Effect.Effect<void>
   }
@@ -690,26 +706,30 @@ export class Issues extends Context.Service<
           )
         })
 
-      const setPart = (taskId: string, partOf: boolean) =>
+      const setPart = (taskId: string, partOf: boolean, named?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [link] = yield* sql<{ id: string; projectId: ProjectId; key: string; partOf: number }>`
-            SELECT id, project_id, key, part_of FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' ORDER BY created_at LIMIT 1`
-          if (link === undefined) return yield* new NotFound({ kind: 'task issue', id: taskId })
-          if ((link.partOf === 1) === partOf) return
+          const links = yield* sql<{ id: string; projectId: ProjectId; key: string; url: string; ref: string; partOf: number }>`
+            SELECT id, project_id, key, url, ref, part_of FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' ORDER BY created_at`
+          const chosen = named === undefined ? links : links.filter((link) => namesIssue(named, link))
+          if (chosen.length === 0) return yield* new NotFound({ kind: 'task issue', id: named ?? taskId })
+          const changing = chosen.filter((link) => (link.partOf === 1) !== partOf)
+          if (changing.length === 0) return
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const at = yield* timestamp
-              const revision = yield* change('external_links', link.id, { partOf: partOf ? 1 : 0, updatedAt: at })
-              yield* fact({
-                projectId: link.projectId,
-                aggregateType: 'external_link',
-                aggregateId: link.id,
-                revision,
-                type: 'external_link.issue_part',
-                payload: { key: link.key, partOf },
-                actorId: instance.personId,
-              })
+              for (const link of changing) {
+                const revision = yield* change('external_links', link.id, { partOf: partOf ? 1 : 0, updatedAt: at })
+                yield* fact({
+                  projectId: link.projectId,
+                  aggregateType: 'external_link',
+                  aggregateId: link.id,
+                  revision,
+                  type: 'external_link.issue_part',
+                  payload: { key: link.key, partOf },
+                  actorId: instance.personId,
+                })
+              }
             }),
           )
           yield* touchCard(taskId)
@@ -794,24 +814,35 @@ export class Issues extends Context.Service<
           return issue
         })
 
-      const ofTask = (taskId: string) =>
+      const allOfTask = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [link] = yield* sql<{ product: Product; ref: string; key: string; url: string; snapshot: string }>`
-            SELECT product, ref, key, url, snapshot FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' ORDER BY created_at LIMIT 1`
-          if (link === undefined) return null
-          const kept = JSON.parse(link.snapshot) as Partial<IssueSummary>
-          return {
-            product: link.product,
-            ref: link.ref,
-            key: link.key,
-            url: link.url,
-            title: kept.title ?? link.key,
-            status: kept.status ?? { name: 'Todo', category: 'todo' },
-            priority: kept.priority ?? null,
-            container: kept.container ?? null,
-            updatedAt: kept.updatedAt ?? '',
-          } satisfies IssueSummary
+          const links = yield* sql<{ product: Product; ref: string; key: string; url: string; snapshot: string; partOf: number }>`
+            SELECT product, ref, key, url, snapshot, part_of FROM external_links WHERE task_id = ${taskId} AND kind = 'issue'
+            ORDER BY created_at, rowid`
+          return links.map((link): TaskIssue => {
+            const kept = JSON.parse(link.snapshot) as Partial<IssueSummary>
+            return {
+              product: link.product,
+              ref: link.ref,
+              key: link.key,
+              url: link.url,
+              title: kept.title ?? link.key,
+              status: kept.status ?? { name: 'Todo', category: 'todo' },
+              priority: kept.priority ?? null,
+              container: kept.container ?? null,
+              updatedAt: kept.updatedAt ?? '',
+              partOf: link.partOf === 1,
+            }
+          })
+        })
+
+      const ofTask = (taskId: string) =>
+        Effect.map(allOfTask(taskId), (all): IssueSummary | null => {
+          const [first] = all
+          if (first === undefined) return null
+          const { partOf: _partOf, ...summary } = first
+          return summary
         })
 
       /** What kept an issue where it was, in a line: the tracker's own words where it gave some. */
@@ -827,6 +858,18 @@ export class Issues extends Context.Service<
       const start = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          const links = yield* sql<{ id: string }>`
+            SELECT id FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' ORDER BY created_at, rowid`
+          // Each on its own: one its tracker refuses leaves the others to move.
+          for (const { id } of links)
+            yield* startOne(taskId, id).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not move one of a task’s issues to In Progress', cause)),
+            )
+        })
+
+      const startOne = (taskId: string, linkId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
           const [link] = yield* sql<{
             id: string
             projectId: ProjectId
@@ -838,7 +881,7 @@ export class Issues extends Context.Service<
           }>`
             SELECT x.id, x.project_id, x.ref, x.key, x.snapshot, x.connection_id,
               (SELECT id FROM threads WHERE task_id = x.task_id AND kind = 'task') AS thread_id
-            FROM external_links x WHERE x.task_id = ${taskId} AND x.kind = 'issue' ORDER BY x.created_at LIMIT 1`
+            FROM external_links x WHERE x.id = ${linkId}`
           if (link === undefined || link.connectionId === null || link.threadId === null) return
           if (!movesIssues((yield* (yield* Policies).current(link.projectId)).rules)) return
           // Once: a task started again, by a plan after its first, leaves its issue to the person.
@@ -953,10 +996,11 @@ export class Issues extends Context.Service<
         words: (text, projectId) => provide(words(text, projectId)),
         readTool: (input, projectId) => provide(readIssues(input, projectId)),
         find: (projectId, search) => provide(find(projectId, search)),
-        setPart: (taskId, partOf) => provide(setPart(taskId, partOf)),
+        setPart: (taskId, partOf, issue) => provide(setPart(taskId, partOf, issue)),
         mine: (projectId) => provide(mine(projectId)),
         attach: (input) => provide(attach(input)),
         ofTask: (taskId) => provide(ofTask(taskId)),
+        allOfTask: (taskId) => provide(allOfTask(taskId)),
         started: (taskId) =>
           Effect.asVoid(
             Effect.forkIn(

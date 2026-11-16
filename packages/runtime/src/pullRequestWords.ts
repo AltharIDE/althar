@@ -252,6 +252,15 @@ const said = (text: string | null | undefined) => (text === undefined || text ==
  * review its change had goes with it (pullRequestReview.ts): the seal at its
  * head, in its corner, and the review folded after it.
  */
+/** An issue a pull request comes from, as its description names it. */
+export interface PullRequestIssue {
+  readonly key: string
+  readonly url: string
+  /** It lives on the pull request's own host, which links its key by itself. */
+  readonly sameHost: boolean
+  readonly partOf?: boolean
+}
+
 export const bodyOf = (input: {
   /** What the task built, as the lead last said it: the description where the lead wrote none. */
   readonly built?: string | null
@@ -259,8 +268,8 @@ export const bodyOf = (input: {
   readonly lead: string | null
   /** What to say where the lead said nothing at all, as a next pull request's finding and commits do: never an empty description. */
   readonly fallback?: string | null
-  /** The issue it came from; `partOf` where it does only part of it, said in the words trackers read as not closing it. */
-  readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null
+  /** The issue it came from, or each of several; `partOf` where it does only part of one, said in the words trackers read as not closing it. */
+  readonly issue: PullRequestIssue | ReadonlyArray<PullRequestIssue> | null
   /** The repository's template, if it has one. */
   readonly template?: string | null
   /** The description the lead wrote for the pull request: in the template, where there is one. */
@@ -281,9 +290,18 @@ export const bodyOf = (input: {
   const described = describedOf(input)
   if (described !== '') parts.push(described)
   if (input.review?.details != null) parts.push(input.review.details)
-  if (input.issue !== null) {
-    const named = input.issue.sameHost ? input.issue.key : `[${input.issue.key}](${input.issue.url})`
-    parts.push(input.issue.partOf === true ? `Part of ${named}` : `Issue: ${named}`)
+  const issues: ReadonlyArray<PullRequestIssue> = input.issue === null ? [] : 'key' in input.issue ? [input.issue] : input.issue
+  if (issues.length > 0) {
+    const named = (issue: PullRequestIssue) => (issue.sameHost ? issue.key : `[${issue.key}](${issue.url})`)
+    // Those it does all of, then those it does part of, each in a line of its own: a tracker reads its keys there.
+    const whole = issues.filter((issue) => issue.partOf !== true).map(named)
+    const part = issues.filter((issue) => issue.partOf === true).map(named)
+    parts.push(
+      [
+        ...(whole.length === 0 ? [] : [`${whole.length === 1 ? 'Issue' : 'Issues'}: ${whole.join(', ')}`]),
+        ...(part.length === 0 ? [] : [`Part of ${part.join(', ')}`]),
+      ].join('\n'),
+    )
   }
   if (input.automation !== undefined && input.automation !== null)
     parts.push(`Opened by [Althar](https://github.com/AltharIDE/althar)’s ${nameInLine(input.automation)}.`)
