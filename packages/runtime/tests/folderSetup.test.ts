@@ -14,6 +14,7 @@ import { cloneFolderOf, cloneRepository, IGNORED, prepareFolder, whyCloneFailed 
 import { readFolder } from '../src/Projects'
 import { publishRepository } from '../src/publish'
 import { words } from '../src/words'
+import { until } from '@althar/testing/effect'
 
 /*
  * A project set up where it starts: a folder made ready to be its repository
@@ -57,7 +58,8 @@ const bareWith = (files: Readonly<Record<string, string>>) => {
   const work = folderWith(files)
   git(work, 'init', '--quiet', '--initial-branch=main')
   git(work, 'add', '--all')
-  git(work, 'commit', '--quiet', '--message', 'Start')
+  // Its own author: the host's commit, whoever runs the tests and whatever identity they have.
+  git(work, '-c', 'user.name=Host', '-c', 'user.email=host@example.test', 'commit', '--quiet', '--message', 'Start')
   const bare = join(temp(), 'origin.git')
   git(work, 'clone', '--quiet', '--bare', work, bare)
   return bare
@@ -301,7 +303,7 @@ describe('a clone', () => {
     }),
   )
 
-  it.effect('stopped after it wrote something takes that away, and leaves an empty folder that was there as it was', () =>
+  it.live('stopped after it wrote something takes that away, and leaves an empty folder that was there as it was', () =>
     Effect.gen(function* () {
       // A host that takes the connection and never answers: git has made its .git by then, and waits.
       const sockets: Array<Socket> = []
@@ -319,7 +321,10 @@ describe('a clone', () => {
           target: { url: `http://127.0.0.1:${port}/held.git`, header: null },
         }),
       )
-      yield* Effect.promise(() => vi.waitFor(() => assert.include(readdirSync(join(parent, 'held')), '.git'), { timeout: 10_000 }))
+      yield* until(
+        Effect.sync(() => readdirSync(join(parent, 'held'))),
+        (names) => names.includes('.git'),
+      )
       yield* Fiber.interrupt(fiber)
       for (const socket of sockets) socket.destroy()
       server.close()

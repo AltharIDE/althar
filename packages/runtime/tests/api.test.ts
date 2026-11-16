@@ -3558,7 +3558,10 @@ describe('a project set up where it starts, through the API', () => {
         config,
         [
           '[user]\n\tname = Dana\n\temail = dana@example.test',
-          ...['you/tidepool', 'you/fresh'].map((path) => `[url "${bareOf(path)}"]\n\tinsteadOf = ${HOST}/${path}.git`),
+          // With forward slashes: a config's quoted name reads a backslash, as Windows' paths have, as an escape.
+          ...['you/tidepool', 'you/fresh'].map(
+            (path) => `[url "${bareOf(path).replaceAll('\\', '/')}"]\n\tinsteadOf = ${HOST}/${path}.git`,
+          ),
           '',
         ].join('\n'),
       )

@@ -341,7 +341,7 @@ test('the first run clones an empty repository from GitHub, gives it a first com
     expect(git(cloned, 'remote', 'get-url', 'origin')).toBe(api)
     // A task branches from it: its worktree is made.
     await startTask(page, 'Write the README')
-    await expect.poll(() => git(cloned, 'worktree', 'list').split('\n').length, { timeout: 30_000 }).toBeGreaterThan(1)
+    await expect.poll(() => git(cloned, 'worktree', 'list').split('\n').length).toBeGreaterThan(1)
   } finally {
     await electronApp.close()
   }
