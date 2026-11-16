@@ -102,12 +102,15 @@ import {
   commitOf,
   commitsAhead,
   commitsOf,
+  countBetween,
   git,
   fetchInto,
   gitOutcome,
   patchIdsOf,
   gitWithin,
   namedRemotes,
+  isUnder,
+  logBetween,
   onHead,
   pushTo,
   branchRemoteIn,
@@ -3151,13 +3154,6 @@ export class Changes extends Context.Service<
           return [commit, ...rows.map((row) => row.original).filter((original) => original !== commit)]
         }).pipe(Effect.orElseSucceed(() => [commit]))
 
-      /** The first of `commits` the branch has. */
-      const firstOnHead = (path: string, commits: ReadonlyArray<string>) =>
-        Effect.gen(function* () {
-          for (const commit of commits) if (yield* onHead(path, commit)) return commit
-          return undefined
-        })
-
       /**
        * What a task's branch has that its pull request doesn't, as a push the
        * lead asks for shows it: from what the pull request has to the branch's
@@ -3173,17 +3169,25 @@ export class Changes extends Context.Service<
        */
       const aheadOf = (path: string, tip: string | null, known: ReadonlyArray<string | null>) =>
         Effect.gen(function* () {
-          const head = yield* commitOf(path, 'HEAD')
+          // Its head as the refs stamp it, so a card standing on it is kept while they don't move; asked of git where they can't say.
+          const [stamped] = yield* commitsOf(path, ['HEAD'])
+          const head = stamped ?? (yield* commitOf(path, 'HEAD'))
           const [latest] = (yield* commitsOf(
             path,
             [tip, ...known].filter((commit) => commit !== null),
           )).filter((commit) => commit !== null)
           if (tip !== null && latest !== tip) return { kind: 'behind', head } as const
           if (latest === undefined) return { kind: 'unknown', head } as const
-          const from = yield* firstOnHead(path, yield* madeFrom(latest))
+          // From here every question is of commits by their ids, whose answers never change and are kept (git.ts `isUnder`).
+          let from: string | undefined
+          for (const commit of yield* madeFrom(latest))
+            if (yield* isUnder(path, commit, head)) {
+              from = commit
+              break
+            }
           if (from === undefined) return { kind: 'rewritten', from: latest, head } as const
-          const count = yield* commitsAhead(path, from, head)
-          const listed = count === 0 ? '' : yield* git(path, 'log', '--reverse', '--format=%h%x1f%s', `${from}..${head}`)
+          const count = yield* countBetween(path, from, head)
+          const listed = count === 0 ? '' : yield* logBetween(path, from, head, '%h%x1f%s')
           const commits = listed
             .split('\n')
             .filter((line) => line !== '')
@@ -7769,10 +7773,9 @@ export class Changes extends Context.Service<
             const pinned = heads?.[workspace.id]
             const head = pinned === undefined ? here.head : yield* acceptedHead(taskId, workspace.path, pinned)
             // Already sent by an earlier try, or from elsewhere: a retry never replaces it with a later local head.
-            if ((yield* gitOutcome(workspace.path, 'merge-base', '--is-ancestor', head, here.from)).code === 0) continue
-            if ((yield* gitOutcome(workspace.path, 'merge-base', '--is-ancestor', here.from, head)).code !== 0)
-              return yield* new ChangedSinceSeen({ taskId, what: 'branch' })
-            const count = yield* commitsAhead(workspace.path, here.from, head)
+            if (yield* isUnder(workspace.path, head, here.from)) continue
+            if (!(yield* isUnder(workspace.path, here.from, head))) return yield* new ChangedSinceSeen({ taskId, what: 'branch' })
+            const count = yield* countBetween(workspace.path, here.from, head)
             if (count === 0) continue
             if (send) yield* push(taskId, head, seen.url, 'ship')
             const sql = yield* SqlClient.SqlClient
