@@ -192,8 +192,11 @@ export class ChangeRefused extends Schema.TaggedError<ChangeRefused>()('ChangeRe
 
 export class ShipRefused extends Schema.TaggedError<ShipRefused>()('ShipRefused', {
   taskId: Schema.String,
-  /** `not_shipping`: no Ship of the task is under way, for RouteShip to change the route of. */
-  why: Schema.Literals(['held', 'working', 'nothing', 'not_shipping']),
+  /**
+   * `not_shipping`: no Ship of the task is under way, for RouteShip to change the route of. `merging`: its merge went to
+   * its host before RouteShip took it no further than ready.
+   */
+  why: Schema.Literals(['held', 'working', 'nothing', 'not_shipping', 'merging']),
 }) {}
 
 /**

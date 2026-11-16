@@ -2635,6 +2635,11 @@ export const TaskCard = Schema.Struct({
   reviewOffer: Schema.optional(PlanStep),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
+  /**
+   * Its Ship's stop past its push, while `step` is still `publish`: marking its pull request ready, or waiting to merge on the
+   * checks main requires. Its card and header say that stop, not the opening of a pull request. Absent otherwise.
+   */
+  shipAt: Schema.optional(Schema.Literals(['ready', 'merge'])),
   /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
   followUp: Schema.optional(Schema.Boolean),
   /** The latest summary the lead reported. */

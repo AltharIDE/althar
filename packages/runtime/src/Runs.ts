@@ -347,6 +347,9 @@ export type PlanParameters = typeof PlanParameters.Type
 const farOf = (ships: PlanParameters['ships']): ShipRoute['far'] | undefined =>
   ships?.route?.far ?? (ships?.merges === true ? 'merge' : undefined)
 
+/** A Ship's merge, not sent: its route goes no further than ready now, or the Ship is over (`stillMerges`). */
+class NotMergingNow extends Schema.TaggedError<NotMergingNow>()('NotMergingNow', {}) {}
+
 /** How a Ship goes, beside its task (`ship`). */
 interface ShipOptions {
   /** Its route, as the person chose it for this Ship; without it, the task's own (`taskShipRoute`). */
@@ -3816,11 +3819,42 @@ export class Runs extends Context.Service<
             return [] as ReadonlyArray<string>
           }
           const waiting: Array<string> = []
-          for (const url of urls) if ((yield* mergeOne(run, url, told)) === 'waiting') waiting.push(url)
+          for (const url of urls) {
+            const one = yield* mergeOne(run, url, told)
+            if (one === 'rerouted') return yield* notMergedNow(run)
+            if (one === 'waiting') waiting.push(url)
+          }
           return waiting as ReadonlyArray<string>
         })
 
-      /** One pull request at a Ship's merge stop: merged, or not with why, or still waiting on its required checks. */
+      /**
+       * Whether a Ship still merges, read as its merge is sent (`mergeAsItStands`' `stands`): its run under way, its route as
+       * far as merged. A RouteShip made while its merge stop read the host lands before this, and nothing is sent; or after
+       * the merge's intent is kept, which it reads, and refuses.
+       */
+      const stillMerges = (run: RunRow) =>
+        provide(
+          Effect.gen(function* () {
+            if (!(yield* going(run)) || farOf((yield* parametersNow(run)).ships) !== 'merge') return yield* new NotMergingNow()
+          }),
+        )
+
+      /** Its route goes no further than ready now: said, and nothing more merges. */
+      const notMergedNow = (run: RunRow) =>
+        Effect.as(
+          addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: 'Not merged: the Ship goes as far as ready for review now.',
+            description: null,
+          }),
+          [] as ReadonlyArray<string>,
+        )
+
+      /**
+       * One pull request at a Ship's merge stop: merged, or not with why, or still waiting on its required checks; or not sent,
+       * its route changed while it read the host (`rerouted`).
+       */
       const mergeOne = (run: RunRow, url: string, told: boolean) =>
         Effect.gen(function* () {
           const say = (title: string, severity: 'info' | 'warning' = 'warning') =>
@@ -3849,11 +3883,12 @@ export class Runs extends Context.Service<
             }
             if (now.kind === 'waiting') return yield* waits(now)
           }
-          // To merge, or its host couldn't say: merged as it stands, as Review and merge always did. Refused while its required
-          // checks still run, it waits on them after all.
-          const merged = yield* Effect.exit(changes.mergeAsItStands(run.taskId, url))
+          // To merge, or its host couldn't say: merged as it stands, as Review and merge always did, where its route still
+          // goes that far as the merge is sent. Refused while its required checks still run, it waits on them after all.
+          const merged = yield* Effect.exit(changes.mergeAsItStands(run.taskId, url, stillMerges(run)))
           if (Exit.isSuccess(merged)) return 'done' as const
           if (Cause.hasInterruptsOnly(merged.cause)) return yield* Effect.interrupt
+          if (Option.getOrUndefined(Cause.findErrorOption(merged.cause)) instanceof NotMergingNow) return 'rerouted' as const
           const again = yield* Effect.exit(mergeStandingOf(changes, run.taskId, url))
           if (Exit.isSuccess(again) && again.value.kind === 'waiting') return yield* waits(again.value)
           yield* say(`Shipped, but not merged: ${summarize(merged.cause) || 'its host refused the merge.'}`)
@@ -3876,22 +3911,27 @@ export class Runs extends Context.Service<
           const wake = yield* Queue.sliding<void>(1)
           const waits = Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
+            // Changed before it could be woken, it looks again at once.
+            if (farOf((yield* parametersNow(run)).ships) !== 'merge') yield* Queue.offer(wake, undefined)
             let left = waiting
             while (left.length > 0) {
               yield* Effect.raceFirst(Queue.take(wake), Effect.sleep(Duration.millis(externalEvery)))
               const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attempt.id}`
               if (still?.state !== 'running' || !(yield* going(run))) return
               if (farOf((yield* parametersNow(run)).ships) !== 'merge') {
-                yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
-                  source: 'runtime',
-                  severity: 'info',
-                  title: 'Not merged: the Ship goes as far as ready for review now.',
-                  description: null,
-                })
+                left = yield* notMergedNow(run)
                 break
               }
               const next: Array<string> = []
-              for (const url of left) if ((yield* mergeOne(run, url, true)) === 'waiting') next.push(url)
+              for (const url of left) {
+                const one = yield* mergeOne(run, url, true)
+                if (one === 'rerouted') {
+                  next.length = 0
+                  yield* notMergedNow(run)
+                  break
+                }
+                if (one === 'waiting') next.push(url)
+              }
               left = next
             }
             yield* shipOver(run, attempt, over)
@@ -8845,6 +8885,16 @@ export class Runs extends Context.Service<
                 review: at === 'review' ? was.review && wanted.review : was.review,
                 far: (at === 'ready' || at === 'merge') && wanted.far === 'push' ? 'ready' : wanted.far,
               }
+              // Its merge went to the host before this (its intent kept, as `stillMerges` read it): it can't be called back.
+              if (at === 'merge' && route.far !== 'merge') {
+                const [sent] = yield* sql<{ n: number }>`
+                  SELECT count(*) AS n FROM mutation_receipts m JOIN work_items w ON w.id = m.work_item_id
+                  JOIN external_links l ON l.id = w.subject_id AND w.subject_type = 'external_link'
+                  JOIN runs r ON r.id = ${current.runId}
+                  WHERE l.task_id = ${input.taskId} AND m.operation = 'merge' AND m.state IN ('intended', 'uncertain')
+                    AND m.created_at >= r.created_at`
+                if ((sent?.n ?? 0) > 0) return 'merging' as const
+              }
               const revision = yield* change('runs', current.runId, {
                 parameters: JSON.stringify({ ...parameters, ships: { ...ships, route } }),
               })
@@ -8866,6 +8916,7 @@ export class Runs extends Context.Service<
             }),
           )
           if (changed === undefined) return yield* notShipping
+          if (changed === 'merging') return yield* new ShipRefused({ taskId: input.taskId, why: 'merging' })
           yield* touchCard(input.taskId)
           // Its review stops behind the press, as Skip review stops it, and the Ship goes on to its push.
           if (changed.skips)

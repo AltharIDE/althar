@@ -305,6 +305,10 @@ describe('how far a Ship goes', () => {
       )
       assert.deepStrictEqual(waiting, { route: { review: false, far: 'merge' }, at: 'merge' })
       yield* until(titles(task.threadId), (all) => all.includes('PR #1 merges once test passes, as main requires.'))
+      // Its card says the stop, not the opening of a pull request.
+      const [card] = yield* cards(task.projectId)
+      assert.strictEqual(card?.step, 'publish')
+      assert.strictEqual(card?.shipAt, 'merge')
       // Waiting, it stays under way, ready for review and not merged.
       assert.lengthOf(github.merged, 0)
       assert.isFalse(github.changes[0]?.draft)
@@ -317,6 +321,7 @@ describe('how far a Ship goes', () => {
         [1],
       )
       assert.isUndefined((yield* header(task.threadId)).shipping)
+      assert.isUndefined((yield* cards(task.projectId))[0]?.shipAt)
     }).pipe(Effect.provide(withHost(github)))
   })
 
@@ -363,6 +368,71 @@ describe('how far a Ship goes', () => {
       const refused = yield* Effect.flip(routeShip(task.taskId, { review: true, far: 'merge' }))
       assert.instanceOf(refused, ShipRefused)
       assert.strictEqual((refused as ShipRefused).why, 'not_shipping')
+    }).pipe(Effect.provide(withHost(github)))
+  })
+})
+
+describe('changing a Ship’s route at its merge stop, against its host', () => {
+  it.live('sends no merge where its route goes back to ready while it reads the host, its checks then passing', () => {
+    const gate = Deferred.makeUnsafe<void>()
+    const reading = Deferred.makeUnsafe<void>()
+    let holds = false
+    const { working, bare, github } = onGitHub({
+      ...requires('test'),
+      waitsFor: (method) =>
+        method === 'checks' && holds ? Effect.andThen(Deferred.succeed(reading, undefined), Deferred.await(gate)) : Effect.void,
+    })
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.setChecks(1, [{ name: 'test', state: 'running' }])
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(titles(task.threadId), (all) => all.includes('PR #1 merges once test passes, as main requires.'))
+      // Its next look at the host is held on reading the checks, which pass meanwhile; the person takes it back to ready.
+      holds = true
+      github.setChecks(1, [{ name: 'test', state: 'passed' }])
+      yield* Deferred.await(reading)
+      yield* routeShip(task.taskId, { review: false, far: 'ready' })
+      holds = false
+      yield* Deferred.succeed(gate, undefined)
+      yield* shipped(task.taskId)
+      assert.lengthOf(github.merged, 0)
+      assert.notInclude(github.calls, 'merge')
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      assert.include(yield* titles(task.threadId), 'Not merged: the Ship goes as far as ready for review now.')
+    }).pipe(Effect.provide(withHost(github)))
+  })
+
+  it.live('refuses to go back to ready once its merge went to the host, and merges', () => {
+    const gate = Deferred.makeUnsafe<void>()
+    const merging = Deferred.makeUnsafe<void>()
+    const { working, bare, github } = onGitHub({
+      ...requires('test'),
+      waitsFor: (method) => (method === 'merge' ? Effect.andThen(Deferred.succeed(merging, undefined), Deferred.await(gate)) : Effect.void),
+    })
+    return Effect.gen(function* () {
+      const task = yield* opened(working, '[coordinator:plan-no-review]')
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      github.setChecks(1, [{ name: 'test', state: 'running' }])
+      commitIn(task.path, 'Retry twice')
+      yield* ship(task.taskId, { review: false, far: 'merge' })
+      yield* wentUp(bare, task.path, pushed)
+      yield* until(header(task.threadId), (seen) => seen.shipping?.at === 'merge')
+      github.setChecks(1, [{ name: 'test', state: 'passed' }])
+      // Its merge is on its way to the host: that can't be called back, so the route stays, and says why.
+      yield* Deferred.await(merging)
+      const refused = yield* Effect.flip(routeShip(task.taskId, { review: false, far: 'ready' }))
+      assert.instanceOf(refused, ShipRefused)
+      assert.strictEqual((refused as ShipRefused).why, 'merging')
+      assert.strictEqual(JSON.parse((yield* shipRuns(task.taskId))[0]?.parameters ?? '{}').ships?.route?.far, 'merge')
+      yield* Deferred.succeed(gate, undefined)
+      yield* shipped(task.taskId)
+      assert.deepStrictEqual(
+        github.merged.map((one) => one.number),
+        [1],
+      )
     }).pipe(Effect.provide(withHost(github)))
   })
 })

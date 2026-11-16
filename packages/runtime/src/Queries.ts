@@ -2213,6 +2213,7 @@ export class Queries extends Context.Service<
             runAt: string | null
             attemptAt: string | null
             step: string | null
+            shipAt: string | null
             waiting: number
             issueDrafts: number
             issueChanges: number
@@ -2247,6 +2248,8 @@ export class Queries extends Context.Service<
               (SELECT max(started_at) FROM run_attempts WHERE run_id = r.id) AS attempt_at,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
+              -- Its Ship's stop past its push, kept on its run as it gets there.
+              CASE WHEN r.state = 'running' THEN json_extract(r.parameters, '$.ships.at') END AS ship_at,
               -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
               (SELECT a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state = 'held' ORDER BY a.admitted_at DESC LIMIT 1) AS held,
@@ -2744,6 +2747,7 @@ export class Queries extends Context.Service<
                         : asked
                           ? 'implement'
                           : goes),
+            ...(task.step === 'publish' && (task.shipAt === 'ready' || task.shipAt === 'merge') ? { shipAt: task.shipAt } : {}),
             followUp: (task.runState === 'running' && task.runPlan === null) || asked,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: team?.current?.agentId ?? task.lead ?? (implement?.agentId || null),

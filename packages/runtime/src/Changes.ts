@@ -880,9 +880,13 @@ export class Changes extends Context.Service<
      * Merges the task's pull request at the head its host has now, where the
      * person's word covered what waited and has just gone up: Review and merge
      * once its review passed, or Merge now (a task is a conversation plus
-     * parts, "Merge, with commits not shipped").
+     * parts, "Merge, with commits not shipped"). `stands`, where given, is
+     * read in the transaction that records the merge's intent, after the lock
+     * and the host's reads, as the last thing before the merge request: its
+     * failure sends none, and is mergeAsItStands' (a Ship's route, changed by
+     * RouteShip while its merge stop read the host).
      */
-    mergeAsItStands(taskId: string, url: string): Effect.Effect<void, unknown>
+    mergeAsItStands(taskId: string, url: string, stands?: Effect.Effect<void, unknown>): Effect.Effect<void, unknown>
     /**
      * Points a running task's change at another branch to work toward, or back at its repository's default with null (a
      * task is a conversation plus parts, "Changing the branch a task works toward"), between its lead's turns. Nothing pushed
@@ -3500,7 +3504,13 @@ export class Changes extends Context.Service<
        * settles then: reading it back can still say open for a moment, and
        * what was said on it last is listened to after, not before.
        */
-      const merge = (taskId: string, head: string, url?: string, bypassQueue = false): Effect.Effect<void, unknown, Store> =>
+      const merge = (
+        taskId: string,
+        head: string,
+        url?: string,
+        bypassQueue = false,
+        stands?: Effect.Effect<void, unknown>,
+      ): Effect.Effect<void, unknown, Store> =>
         Effect.gen(function* () {
           const { link, snapshot, host, repository } = yield* current(taskId, url)
           if (snapshot.state !== 'open') return
@@ -3517,11 +3527,11 @@ export class Changes extends Context.Service<
           if (below !== undefined) {
             const under = yield* current(taskId, below.url)
             const now = yield* under.host.change(under.repository, under.snapshot.number)
-            yield* merge(taskId, now.headSha ?? under.snapshot.headSha ?? '', below.url)
+            yield* merge(taskId, now.headSha ?? under.snapshot.headSha ?? '', below.url, false, stands)
             const after = yield* current(taskId, below.url)
             if (after.snapshot.state !== 'merged')
               return yield* sayOn(link, `${nameOf(snapshot)} merges once ${nameOf(under.snapshot)} below it has: press Merge again then.`)
-            return yield* merge(taskId, head, snapshot.url, bypassQueue)
+            return yield* merge(taskId, head, snapshot.url, bypassQueue, stands)
           }
           const read = yield* host.change(repository, snapshot.number, { queue: true })
           // In its merge queue already, put there from outside Althar before a turn heard it, it isn't merged again: it is kept
@@ -3541,6 +3551,7 @@ export class Changes extends Context.Service<
               key: `merge:${link.id}:${head}${snapshot.leftQueue === undefined ? '' : `:${snapshot.leftQueue}`}${bypassQueue ? ':without_queue' : ''}`,
               request: { number: snapshot.number, head, ...(bypassQueue ? { bypassQueue: true } : {}) },
               retryable: false,
+              ...(stands === undefined ? {} : { stands }),
               perform: (bypassQueue
                 ? host.mergeWithoutQueue === undefined
                   ? Effect.fail(
@@ -9465,14 +9476,14 @@ export class Changes extends Context.Service<
         joinChanges: (taskId, change, into, actorId) => provide(locked(taskId)(joinChanges(taskId, change, into, actorId))),
         dropChange: (taskId, change, actorId) => provide(locked(taskId)(dropChange(taskId, change, actorId))),
         leaveWorktree: (taskId, actorId) => provide(locked(taskId)(leaveWorktree(taskId, actorId))),
-        mergeAsItStands: (taskId, url) =>
+        mergeAsItStands: (taskId, url, stands) =>
           provide(
             locked(taskId)(
               Effect.gen(function* () {
                 const { snapshot, host, repository } = yield* current(taskId, url)
                 if (snapshot.state !== 'open') return
                 const read = yield* host.change(repository, snapshot.number)
-                yield* merge(taskId, read.headSha ?? snapshot.headSha ?? '', url)
+                yield* merge(taskId, read.headSha ?? snapshot.headSha ?? '', url, false, stands)
               }),
             ),
           ),
