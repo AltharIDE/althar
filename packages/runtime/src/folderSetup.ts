@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, parse } from 'node:path'
+import { dirname, join, parse, sep } from 'node:path'
 
 import { cleanUp } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
@@ -64,7 +64,8 @@ const real = (path: string) => {
 /** Whether `path` is too wide to be a project: the disk's root, the home folder, or a folder the home folder is in. */
 const tooWide = (path: string) => {
   const home = real(homedir())
-  return path === parse(path).root || path === home || home.startsWith(`${path}/`)
+  // By the system's separator: on Windows a folder the home is in is `C:\Users`, followed by a backslash.
+  return path === parse(path).root || path === home || home.startsWith(path.endsWith(sep) ? path : `${path}${sep}`)
 }
 
 /** What is staged, as git lists it: each file's mode and path. */
