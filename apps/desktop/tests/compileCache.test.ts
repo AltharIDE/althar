@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { type CompileCaching, keepCompiled, keepCompiledNow } from '../src/compileCache'
-import { compiledIn, windowFolderOf } from '../src/main/windowFolder'
+import { compiledFolderOf, compiledIn, windowFolderOf } from '../src/main/windowFolder'
 
 const constants = { compileCacheStatus: { ENABLED: 1, ALREADY_ENABLED: 2, FAILED: 0, DISABLED: 3 } } as CompileCaching['constants']
 
@@ -61,5 +61,15 @@ describe('V8’s compiled code, kept between launches', () => {
     expect(compiledIn(windowFolderOf('/tmp/e2e/profile', '/home/dana/.config'))).toBe(join('/tmp/e2e/profile', 'window', 'compile-cache'))
     expect(windowFolderOf(undefined, '/home/dana/.config')).toBe(join('/home/dana/.config', '@althar', 'desktop'))
     expect(windowFolderOf('', '/home/dana/.config')).toBe(join('/home/dana/.config', '@althar', 'desktop'))
+  })
+
+  it('is the profile’s without asking for the app’s data folder, and none where that can’t be named: the launch goes on', () => {
+    const unnamed = () => {
+      throw new Error("Failed to get 'appData' path")
+    }
+    expect(compiledFolderOf('/tmp/e2e/profile', unnamed)).toBe(join('/tmp/e2e/profile', 'window', 'compile-cache'))
+    expect(compiledFolderOf(undefined, () => '/home/dana/.config')).toBe(join('/home/dana/.config', '@althar', 'desktop', 'compile-cache'))
+    expect(compiledFolderOf(undefined, unnamed)).toBeNull()
+    expect(compiledFolderOf('', unnamed)).toBeNull()
   })
 })

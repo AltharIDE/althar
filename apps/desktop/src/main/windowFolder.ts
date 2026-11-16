@@ -13,3 +13,17 @@ export const windowFolderOf = (ownProfile: string | undefined, appData: string) 
 
 /** Where the main process and the runtime keep V8's compiled code between launches (compileCache.ts). */
 export const compiledIn = (windowFolder: string) => join(windowFolder, 'compile-cache')
+
+/**
+ * Where V8's compiled code is kept as the main process starts: the profile's own window folder, else the app's; none where
+ * Electron can't name the app's data folder yet, as on Windows where APPDATA names one not made. The code is then compiled
+ * afresh: keeping it only makes a launch quicker, and never stops one.
+ */
+export const compiledFolderOf = (profile: string | undefined, appData: () => string): string | null => {
+  if (profile !== undefined && profile !== '') return compiledIn(windowFolderOf(profile, ''))
+  try {
+    return compiledIn(windowFolderOf(undefined, appData()))
+  } catch {
+    return null
+  }
+}
