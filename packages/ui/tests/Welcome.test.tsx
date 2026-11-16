@@ -291,3 +291,28 @@ describe('a scene in the welcome', () => {
     delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight
   })
 })
+
+describe('a project step of the consumer’s own', () => {
+  it('sets it in place of the repositories found, and leaves out the code step without hosts', () => {
+    render(
+      <Welcome
+        toured
+        defaultStep="project"
+        runtimes={[]}
+        repositories={[]}
+        picked={[]}
+        onPick={() => undefined}
+        onAdd={() => undefined}
+        project={<p>Clone a repository</p>}
+        name=""
+        onNameChange={() => undefined}
+        onCreate={() => undefined}
+        onOpen={() => undefined}
+        still
+      />,
+    )
+    expect(screen.getByText('Clone a repository')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Choose a folder/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('Code')).not.toBeInTheDocument()
+  })
+})

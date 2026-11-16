@@ -27,6 +27,7 @@ import type {
   IssuePage,
   IssueQuery,
   ListedChange,
+  ListedRepository,
   MergeMethod,
   MergeRules,
   Person,
@@ -769,6 +770,38 @@ const Listed = Schema.Struct({
   archived: Schema.optional(Schema.Boolean),
 })
 
+/** A repository the account can reach, as a list of them says it, for choosing one to clone. */
+const ReachedRepository = Schema.Struct({
+  full_name: Schema.String,
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  private: Schema.Boolean,
+  pushed_at: Schema.optional(Schema.NullOr(Schema.String)),
+  html_url: Schema.String,
+  archived: Schema.optional(Schema.Boolean),
+  // Disabled by GitHub's staff, as for a billing or legal hold: still listed, never pushed to.
+  disabled: Schema.optional(Schema.Boolean),
+})
+
+/** An organization the account is a member of. */
+const Organization = Schema.Struct({ login: Schema.String })
+
+/**
+ * A repository as GitHub answers for one: read, or just made. Its
+ * merge settings are said only to someone who can push.
+ */
+const repositoryOf = (answer: typeof RepositoryAnswer.Type): Repository => ({
+  id: String(answer.id),
+  path: answer.full_name.split('/'),
+  defaultBranch: answer.default_branch,
+  webUrl: answer.html_url,
+  canPush: answer.permissions?.push ?? false,
+  merges: [
+    ...(answer.allow_squash_merge === true ? (['squash'] as const) : []),
+    ...(answer.allow_merge_commit !== false ? (['merge'] as const) : []),
+    ...(answer.allow_rebase_merge === true ? (['rebase'] as const) : []),
+  ],
+})
+
 /**
  * How long a listing is kept: a GraphQL search is a POST, with no ETag to ask
  * "anything new?" by, so the same search again within a minute is answered
@@ -1429,19 +1462,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       ...TRACKING,
     },
     account,
-    repository: (path) =>
-      Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
-        id: String(answer.id),
-        path: answer.full_name.split('/'),
-        defaultBranch: answer.default_branch,
-        webUrl: answer.html_url,
-        canPush: answer.permissions?.push ?? false,
-        merges: [
-          ...(answer.allow_squash_merge === true ? (['squash'] as const) : []),
-          ...(answer.allow_merge_commit !== false ? (['merge'] as const) : []),
-          ...(answer.allow_rebase_merge === true ? (['rebase'] as const) : []),
-        ],
-      })),
+    repository: (path) => Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), repositoryOf),
     findChange,
     openChange: (repository, change) =>
       http
@@ -2033,6 +2054,82 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         (comment) => commentOf(comment, false),
       ),
     pushTarget,
+    // Its own, its collaborations and its organizations', last pushed to first; a page short of a hundred is the last.
+    repositories: () =>
+      paged(1, (page) =>
+        Effect.map(
+          http.json(
+            Schema.Array(ReachedRepository),
+            'GET',
+            `${api}/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&page=${page}`,
+          ),
+          (repositories) => ({
+            items: repositories.map((found): ListedRepository => ({
+              path: found.full_name.split('/'),
+              description: found.description == null || found.description === '' ? null : found.description,
+              private: found.private,
+              pushedAt: found.pushed_at ?? null,
+              webUrl: found.html_url,
+              archived: found.archived === true || found.disabled === true,
+            })),
+            next: repositories.length < 100 ? undefined : page + 1,
+          }),
+        ),
+      ),
+    /*
+     * The account, then each organization it is a member of. Whether a member
+     * may make repositories is the organization's setting, which GitHub says
+     * only to its owners, one organization a call: one that doesn't let it is
+     * listed, and refuses the repository as forbidden.
+     */
+    owners: () =>
+      Effect.gen(function* () {
+        const [me, organizations] = yield* Effect.all(
+          [
+            account,
+            paged(1, (page) =>
+              Effect.map(http.json(Schema.Array(Organization), 'GET', `${api}/user/orgs?per_page=100&page=${page}`), (found) => ({
+                items: found,
+                next: found.length < 100 ? undefined : page + 1,
+              })),
+            ),
+          ],
+          { concurrency: 2 },
+        )
+        return [
+          { id: me.login, name: me.login, kind: 'user' as const },
+          ...organizations.map((organization) => ({ id: organization.login, name: organization.login, kind: 'organization' as const })),
+        ]
+      }),
+    // Empty: no README, licence or .gitignore, so the project's own first commit is pushed as it is.
+    createRepository: (made) =>
+      http
+        .json(
+          RepositoryAnswer,
+          'POST',
+          made.owner.kind === 'user' ? `${api}/user/repos` : `${api}/orgs/${encodeURIComponent(made.owner.id)}/repos`,
+          {
+            name: made.name,
+            private: made.private,
+            ...(made.description === undefined || made.description === '' ? {} : { description: made.description }),
+            auto_init: false,
+          },
+        )
+        .pipe(
+          // The account made it, so it may push to it, whatever the answer says.
+          Effect.map((answer) => ({ ...repositoryOf(answer), canPush: true })),
+          // An organization GitHub hides from the account is one it may not make a repository in.
+          Effect.mapError((error) =>
+            error.reason === 'not_found' && made.owner.kind !== 'user'
+              ? new ConnectorFailed({
+                  product,
+                  reason: 'forbidden',
+                  ...(error.status === undefined ? {} : { status: error.status }),
+                  message: `The account may not make a repository in ${made.owner.name}`,
+                })
+              : error,
+          ),
+        ),
     issue: (ref) =>
       Effect.gen(function* () {
         const { owner, name, number } = yield* parseRef(ref)
