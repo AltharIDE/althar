@@ -2,7 +2,15 @@ import { existsSync } from 'node:fs'
 
 import { assert, describe, it } from '@effect/vitest'
 
-import { agents, claudeSandboxStarts, type Contained } from '../src/registry'
+import {
+  agents,
+  BWRAP_TRY,
+  claudeSandboxStarts,
+  type Contained,
+  probeClaudeSandbox,
+  type SandboxPlace,
+  sandboxStartsIn,
+} from '../src/registry'
 import { CLI_SIGN_INS, SANDBOX_SECRETS, SECRET_PLACES, secretReadRules } from '../src/secrets'
 
 describe('the agent registry', () => {
@@ -425,7 +433,9 @@ describe('the agent registry', () => {
     }
   })
 
-  it('says which of Claude Code’s sessions its sandbox holds, and what a held read may retry outside (ADR-071)', () => {
+  it('says which of Claude Code’s sessions its sandbox holds, and what a held read may retry outside (ADR-071)', async () => {
+    // As a session does, once the probe is in.
+    await agents['claude-code'].ready?.()
     const holds = agents['claude-code'].holds
     if (holds === undefined) return assert.fail('Claude Code says what its sandbox holds')
     type Sandbox = { failIfUnavailable: boolean }
@@ -565,6 +575,63 @@ describe('the agent registry', () => {
     // Neither provider's read-only mode is proof that it cannot read the rest of the disk.
     assert.isUndefined(agents.codex.permissionJudge)
     assert.isUndefined(agents.opencode.permissionJudge)
+  })
+})
+
+describe('whether Claude Code’s sandbox can start', () => {
+  /** A computer the test makes: its system, its PATH, the files on it, and whether bubblewrap runs there. */
+  const computer = (platform: string, files: ReadonlyArray<string>, runs: boolean | 'fails' = true, env: Record<string, string> = {}) => {
+    const tried: Array<readonly [string, ReadonlyArray<string>]> = []
+    const place: SandboxPlace = {
+      platform,
+      env: { PATH: '/usr/local/bin:/usr/bin', ...env },
+      exists: (path) => files.includes(path),
+      run: (command, args) => {
+        tried.push([command, args])
+        return runs === 'fails' ? Promise.reject(new Error('spawn bwrap EACCES')) : Promise.resolve(runs)
+      },
+    }
+    return { place, tried }
+  }
+
+  it('is macOS’s own sandbox there, and none on Windows or in a Flatpak, with nothing started to find out', async () => {
+    for (const [platform, files, env, starts] of [
+      ['darwin', ['/usr/bin/sandbox-exec'], {}, true],
+      ['darwin', [], {}, false],
+      ['win32', ['/usr/bin/bwrap', '/usr/bin/socat'], {}, false],
+      ['linux', ['/usr/bin/bwrap', '/usr/bin/socat'], { FLATPAK_ID: 'dev.althar.Althar' }, false],
+    ] as const) {
+      const { place, tried } = computer(platform, files, true, env)
+      assert.strictEqual(await sandboxStartsIn(place), starts, platform)
+      assert.deepStrictEqual(tried, [])
+    }
+  })
+
+  it('on Linux, needs bubblewrap and socat on the PATH, and bubblewrap to start a user and network namespace', async () => {
+    assert.isFalse(await sandboxStartsIn(computer('linux', ['/usr/bin/bwrap']).place))
+    assert.isFalse(await sandboxStartsIn(computer('linux', ['/usr/bin/socat']).place))
+    assert.isFalse(await sandboxStartsIn(computer('linux', ['/usr/bin/bwrap', '/usr/bin/socat'], true, { PATH: '' }).place))
+    const tried = computer('linux', ['/usr/local/bin/bwrap', '/usr/bin/socat'])
+    assert.isTrue(await sandboxStartsIn(tried.place))
+    assert.deepStrictEqual(tried.tried, [['bwrap', BWRAP_TRY]])
+    // Where unprivileged namespaces are off, or bubblewrap can't run at all, it doesn't start.
+    assert.isFalse(await sandboxStartsIn(computer('linux', ['/usr/bin/bwrap', '/usr/bin/socat'], false).place))
+    assert.isFalse(await sandboxStartsIn(computer('linux', ['/usr/bin/bwrap', '/usr/bin/socat'], 'fails').place))
+  })
+
+  it('is worked out once a launch, off the thread, and every session after reads the same', async () => {
+    const starts = await probeClaudeSandbox()
+    assert.strictEqual(claudeSandboxStarts(), starts)
+    assert.strictEqual(await agents['claude-code'].ready?.(), starts)
+    // Asked again of another computer, it is the one this launch found.
+    assert.strictEqual(await probeClaudeSandbox(computer('linux', [], !starts).place), starts)
+    // Only Claude Code's sessions wait for anything first.
+    assert.deepStrictEqual(
+      Object.values(agents)
+        .filter((agent) => agent.ready !== undefined)
+        .map((agent) => agent.id),
+      ['claude-code'],
+    )
   })
 })
 

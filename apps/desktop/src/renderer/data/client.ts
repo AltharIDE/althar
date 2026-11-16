@@ -57,6 +57,7 @@ import {
   type DocumentText,
   type DomMessagePort,
   domPort,
+  untraced,
   type FileDiff,
   type TaskFindings,
   type FolderHeld,
@@ -856,7 +857,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
   const api = await Effect.runPromise(
     Effect.gen(function* () {
       const protocol = yield* Layer.build(clientProtocol(domPort(port)))
-      return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+      return yield* RpcClient.make(Api, untraced).pipe(Effect.provideContext(protocol))
     }).pipe(Scope.provide(scope)),
   )
   return {
