@@ -117,6 +117,8 @@ export const startHomeConnections = ({
   ipcMain.handle('althar:homes-reconnect', (event) => {
     const id = owner(event)
     if (controller.state(id).current.kind !== 'ssh') return
+    // The replacement renderer must not read the previous disconnected state before its port is ready.
+    controller.begin(id)
     BrowserWindow.fromWebContents(event.sender)?.webContents.reload()
   })
   return {
