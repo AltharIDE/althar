@@ -20,6 +20,7 @@ import {
   apiLayer,
   ApiError,
   type AgentStatus,
+  type StorageSize,
   type Attachment,
   type PortLike,
   serverProtocol,
@@ -27,6 +28,7 @@ import {
   type ProjectRulesView,
   type SentFile,
   type SentImage,
+  type LineComment,
 } from '@althar/contracts'
 import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
@@ -61,6 +63,7 @@ import { publishRepository } from './publish'
 import { refreshRemotes } from './recordedRemotes'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
+import { storageSizes } from './StorageSizes'
 import { modelNamer } from './coordinatorNews'
 import { teamChanges, teamLine } from './teamWords'
 import { addItem } from './threads'
@@ -134,6 +137,7 @@ import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, runOutside, sendMidTurn, setPostTeamReviews, setRunOutside, setSendMidTurn } from './Reviews'
+import { setShipRoute, shipRouteSetting } from './shipRoute'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
 import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
@@ -163,6 +167,7 @@ import { Canvases } from './Canvases'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
+import { stopWaiting } from './waits'
 
 /** Runs one of sync's steps against the person's agents' settings, where this runtime reads them; refused where it doesn't. */
 const withSync = (step: (io: mcpSync.SyncIo & skillSync.SkillIo) => Promise<unknown>) =>
@@ -374,6 +379,11 @@ export const handlers = apiLayer(
     const openingFolder = (taskId: string) => holdingFolder(taskId, Effect.void)
     const agents = yield* Agents
     const config = yield* RuntimeConfig
+    // What About › Storage measures: kept for the session, and stopped when the window gives up.
+    const sizes =
+      config.storage === undefined
+        ? undefined
+        : storageSizes({ profile: config.storage.profile, logs: config.storage.logs, worktrees: config.worktreeRoot })
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
@@ -426,6 +436,10 @@ export const handlers = apiLayer(
           })
     /** What a message's command says of its files: how many, never their names or paths; nothing where it has none. */
     const filesSaid = (kept: ReadonlyArray<InputFile>) => (kept.length === 0 ? {} : { files: kept.length })
+    /** A message's comments on the diff, kept with the files as they are now (decisions: desktop-app § Comments on the diff); none where it has none. */
+    const commentsFor = (threadId: string, comments: ReadonlyArray<LineComment> | undefined) =>
+      comments === undefined || comments.length === 0 ? Effect.succeed([]) : queries.keepLineComments(threadId, comments)
+    const commentsSaid = (kept: ReadonlyArray<unknown>) => (kept.length === 0 ? {} : { comments: kept.length })
 
     const failures = yield* Failures
     /** The call being answered, by the name the RPC server gives its span: `Status`, `ListProjects`. */
@@ -1210,6 +1224,7 @@ export const handlers = apiLayer(
         api(image === true ? queries.readCodeImage(threadId, path) : queries.readCode(threadId, path, commit, line)),
       GetFileDiff: ({ taskId, path, untouched }) => api(queries.fileDiff(taskId, path, untouched === true)),
       GetTaskFindings: ({ taskId, review }) => api(queries.findings(taskId, review)),
+      GetLineComments: ({ taskId }) => api(queries.lineComments(taskId)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
       GetOlderSettled: ({ projectId, before, taskId }) =>
         api(Effect.map(queries.olderSettled(projectId, before, taskId), (tasks) => ({ tasks }))),
@@ -1231,7 +1246,7 @@ export const handlers = apiLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated, comments }) =>
         once(
           commandId,
           api(
@@ -1239,6 +1254,7 @@ export const handlers = apiLayer(
               // Its images and files are read and kept first, outside any transaction; one that can't be sent refuses the switch.
               const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = body === undefined ? [] : yield* filesFor(threadId, files)
+              const commented = body === undefined ? [] : yield* commentsFor(threadId, comments)
               // What the person said with it is said to the thread, under a command of its own.
               const message =
                 body === undefined
@@ -1253,6 +1269,7 @@ export const handlers = apiLayer(
                           disposition: 'after_current',
                           ...imagesSaid(kept),
                           ...filesSaid(copied),
+                          ...commentsSaid(commented),
                           ...(dictated === true ? { dictated } : {}),
                         },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
@@ -1261,6 +1278,7 @@ export const handlers = apiLayer(
                       sender,
                       ...(kept.length === 0 ? {} : { images: kept }),
                       ...(copied.length === 0 ? {} : { files: copied }),
+                      ...(commented.length === 0 ? {} : { comments: commented }),
                       ...(dictated === true ? { dictated: true } : {}),
                     }
               // Written to again with the switch, a task kept for later is back, as when it is sent on its own.
@@ -1295,6 +1313,7 @@ export const handlers = apiLayer(
           Effect.gen(function* () {
             const on = yield* coAuthorOn
             const atOnce = yield* busy.atOnce
+            const shipRoute = yield* shipRouteSetting
             return {
               plansAndReviews: yield* plansAndReviewsOf,
               newProjects: yield* newProjectDefaultsOf,
@@ -1303,6 +1322,7 @@ export const handlers = apiLayer(
               postTeamReviews: yield* postTeamReviews,
               runOutside: yield* runOutside,
               sendMidTurn: yield* sendMidTurn,
+              ...(shipRoute === undefined ? {} : { shipRoute }),
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
               agentsAtOnce: {
@@ -1410,6 +1430,12 @@ export const handlers = apiLayer(
       SetNewProjectDefaults: ({ commandId, ...change }) =>
         once(commandId, api(setNewProjectDefaults(change)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       GetTaskFolders: () => api(cleanup.list),
+      GetStorageSize: ({ place, refresh }) =>
+        api(
+          sizes === undefined
+            ? Effect.succeed<StorageSize>({ state: 'failed' })
+            : Effect.promise((signal) => sizes.size(place, refresh, signal).catch(() => ({ state: 'failed' }) as const)),
+        ),
       CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId))),
       RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, actorId))),
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
@@ -1418,6 +1444,8 @@ export const handlers = apiLayer(
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetShipRoute: ({ commandId, route }) =>
+        once(commandId, api(setShipRoute(route)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetRunOutside: ({ commandId, to }) => once(commandId, api(setRunOutside(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       RunIt: ({ commandId, taskId, how }) => once(commandId, api(reviews.runIt({ taskId, ...(how === undefined ? {} : { how }) }))),
       StopRunning: ({ commandId, taskId }) => once(commandId, api(reviews.stopRunning({ taskId, actorId: actorId }))),
@@ -1621,7 +1649,7 @@ export const handlers = apiLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition, images, files, dictated, canvasComments }) =>
+      Send: ({ commandId, threadId, body, disposition, images, files, dictated, comments, canvasComments }) =>
         api(
           sessions.accepting(
             threadId,
@@ -1629,8 +1657,10 @@ export const handlers = apiLayer(
               // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
               const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = yield* filesFor(threadId, files)
+              // Its comments on the diff, each with the files as they are now, so a commit since can be told to change their lines.
+              const commented = yield* commentsFor(threadId, comments)
               const message = {
-                // The command says its images by their digests, never their bytes, and how many files, never their paths.
+                // The command says its images by their digests, never their bytes, and how many files and comments, never their paths.
                 envelope: yield* envelope(
                   'thread.send',
                   {
@@ -1639,6 +1669,7 @@ export const handlers = apiLayer(
                     disposition,
                     ...imagesSaid(kept),
                     ...filesSaid(copied),
+                    ...commentsSaid(commented),
                     ...(dictated === true ? { dictated } : {}),
                     ...(canvasComments === undefined || canvasComments.length === 0 ? {} : { canvasComments }),
                   },
@@ -1650,6 +1681,7 @@ export const handlers = apiLayer(
                 disposition,
                 ...(kept.length === 0 ? {} : { images: kept }),
                 ...(copied.length === 0 ? {} : { files: copied }),
+                ...(commented.length === 0 ? {} : { comments: commented }),
                 ...(dictated === true ? { dictated } : {}),
                 ...(canvasComments === undefined || canvasComments.length === 0 ? {} : { canvasComments }),
               }
@@ -1725,6 +1757,9 @@ export const handlers = apiLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
+      // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
+      StopWaiting: ({ commandId, taskId, on }) =>
+        once(commandId, api(Effect.asVoid(Effect.provideContext(stopWaiting({ taskId, on, actorId }), folderStore)))),
       HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, actorId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, actorId, end, worksIn, toward))),
@@ -2229,12 +2264,26 @@ export const handlers = apiLayer(
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
       DeclineReview: ({ commandId, taskId }) => once(commandId, api(runs.declineReview(taskId, actorId))),
-      Ship: ({ commandId, taskId, change }) =>
+      Ship: ({ commandId, taskId, change, route }) =>
         once(
           commandId,
           api(
-            Effect.flatMap(envelope('task.ship', { taskId, change: change ?? null }, commandId), (said) =>
-              runs.ship({ envelope: said, taskId, ...(change === undefined ? {} : { change }) }),
+            Effect.flatMap(envelope('task.ship', { taskId, change: change ?? null, route: route ?? null }, commandId), (said) =>
+              runs.ship({
+                envelope: said,
+                taskId,
+                ...(change === undefined ? {} : { change }),
+                ...(route === undefined ? {} : { route }),
+              }),
+            ),
+          ),
+        ),
+      RouteShip: ({ commandId, taskId, route }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.route_ship', { taskId, route }, commandId), (said) =>
+              Effect.asVoid(runs.routeShip({ envelope: said, taskId, route })),
             ),
           ),
         ),

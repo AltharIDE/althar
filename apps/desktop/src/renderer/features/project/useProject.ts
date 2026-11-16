@@ -127,6 +127,10 @@ export interface ProjectModel {
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly startPlan: (planId: string) => Promise<void>
+  /** Stops a task waiting for another (tasks wait for their blockers). */
+  readonly stopWaiting: (taskId: string, on: string) => Promise<void>
+  /** Reopens a task, as one a plan waits for that was abandoned. */
+  readonly reopenTask: (taskId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
@@ -660,6 +664,8 @@ export const useProject = (projectId: string): ProjectModel => {
         (failure: unknown) => messageOf(failure),
       ),
     startPlan: (planId) => act(() => client.startPlan(planId)),
+    stopWaiting: (taskId, on) => act(() => client.stopWaiting(taskId, on)),
+    reopenTask: (taskId) => act(() => client.reopenTask(taskId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
     holdDraft: (threadId, key) =>

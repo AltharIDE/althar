@@ -659,6 +659,8 @@ const shipRefused = {
   held: 'These commits wait for Ship, which runs the review first.',
   working: 'The task is at work. Ship once it’s done.',
   nothing: 'Nothing waits to ship.',
+  not_shipping: 'The task isn’t shipping now, so there is no route to change.',
+  merging: 'It’s merging already: the merge reached its host before the change.',
 } as const satisfies Record<ShipRefused['why'], string>
 
 /** Why a task can't be abandoned, reopened or renamed, by reason. */

@@ -1,7 +1,9 @@
 import type { SearchDocuments } from '@althar/contracts'
-import type { AcpCatalog, AcpConnection } from '@althar/contracts'
+import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
 
 import {
+  type PlaceId,
+  type StorageSize,
   type CanvasDetail,
   type CanvasSummary,
   type CanvasText,
@@ -63,6 +65,8 @@ import {
   untraced,
   type FileDiff,
   type TaskFindings,
+  type TaskLineComments,
+  type LineComment,
   type FolderHeld,
   type FolderReading,
   type MadeRepository,
@@ -234,6 +238,8 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
   readonly getTaskFindings: (taskId: string, review?: string) => Promise<TaskFindings>
+  /** The comments the person sent on lines of a task's diff, each where it is now and whether a commit since addressed it (decisions: desktop-app § Comments on the diff). */
+  readonly getLineComments: (taskId: string) => Promise<TaskLineComments>
   /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
   readonly findCode: (
     threadId: string,
@@ -265,6 +271,7 @@ export interface Client {
       readonly images?: ReadonlyArray<SentImage>
       readonly files?: ReadonlyArray<SentFile>
       readonly dictated?: boolean
+      readonly comments?: ReadonlyArray<LineComment>
     },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -313,6 +320,8 @@ export interface Client {
   readonly setPlansAndReviews: (change: PlansAndReviewsChange) => Promise<void>
   /** What the rules of projects made from now on start with; what isn't given stays. */
   readonly setNewProjectDefaults: (change: NewProjectDefaultsChange) => Promise<void>
+  /** What a place Althar keeps data in takes on disk (About › Storage), kept for the session by the runtime, or measured again on a refresh; `signal` gives up on it, which stops the walk when no one else waits. */
+  readonly getStorageSize: (place: PlaceId, refresh: boolean, signal?: AbortSignal) => Promise<StorageSize>
   /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
@@ -328,6 +337,8 @@ export interface Client {
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
   readonly setSendMidTurn: (to: 'queue' | 'steer') => Promise<void>
+  /** Makes a route the person's default for every Ship; null goes back to each task's own. */
+  readonly setShipRoute: (route: ShipRoute | null) => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
@@ -474,6 +485,8 @@ export interface Client {
     readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
+    /** Comments on lines of the task's diff, each with its file, lines and code (decisions: desktop-app § Comments on the diff). */
+    readonly comments?: ReadonlyArray<LineComment>
     /** The person's comments on canvases, kept with it (ADR-104). */
     readonly canvasComments?: ReadonlyArray<SentCanvasComment>
   }) => Promise<void>
@@ -514,6 +527,8 @@ export interface Client {
     readonly taskId?: string
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
+  /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
+  readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
   readonly holdPlan: (planId: string) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
@@ -707,7 +722,10 @@ export interface Client {
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Ships what waits on the task's branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
   /** Ships what waits; with a change named, only it, and what waits beneath it in its stack. */
-  readonly ship: (taskId: string, change?: string) => Promise<void>
+  /** Ships what waits, on `route` where the person chose one for this Ship, else the task's own. */
+  readonly ship: (taskId: string, change?: string, route?: ShipRoute) => Promise<void>
+  /** Changes the route of the task's Ship under way. */
+  readonly routeShip: (taskId: string, route: ShipRoute) => Promise<void>
   /** Fix it, on what the task's review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
   readonly fixAfterMerge: (taskId: string, url?: string) => Promise<void>
   /** Leave it, on what the task's review after a merge found: the findings close, and stay in the thread. */
@@ -851,11 +869,15 @@ let behindNow = 0
 const laneHeaders = { [LANE_HEADER]: BACKGROUND }
 
 /**
- * Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. One made while
- * `behind` runs says so; the runtime puts a read so marked behind, and answers a command as it comes either way.
+ * Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it, or stops it with
+ * `signal`. One made while `behind` runs says so; the runtime puts a read so marked behind, and answers a command as it
+ * comes either way.
  */
-const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
-  Effect.runPromiseExit(behindNow > 0 ? RpcClient.withHeaders(effect, laneHeaders) : effect).then((exit) => {
+const settle = <A>(effect: Effect.Effect<A, unknown>, signal?: AbortSignal): Promise<A> =>
+  Effect.runPromiseExit(
+    behindNow > 0 ? RpcClient.withHeaders(effect, laneHeaders) : effect,
+    signal === undefined ? undefined : { signal },
+  ).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
@@ -967,6 +989,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
+    getLineComments: (taskId) => settle(api.GetLineComments({ taskId })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
     readCode: (threadId, path, at = {}) =>
       settle(
@@ -1011,6 +1034,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
     setSendMidTurn: (to) => command((commandId) => api.SetSendMidTurn({ commandId, to })),
+    setShipRoute: (route) => command((commandId) => api.SetShipRoute({ commandId, route })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     joinChanges: (taskId, change, into) =>
@@ -1064,6 +1088,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
     setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),
+    getStorageSize: (place, refresh, signal) => settle(api.GetStorageSize({ place, refresh }), signal),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
     cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),
@@ -1096,6 +1121,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
+    stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
     changePlan: (planId, steps, end, worksIn, toward) =>
@@ -1206,7 +1232,11 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     startAcpCheck: (agentId) => command((commandId) => api.CheckAcpConnection({ commandId, agentId })),
     removeAcpConnection: (agentId) => command((commandId) => api.RemoveAcpConnection({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
-    ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
+    ship: (taskId, change, route) =>
+      command((commandId) =>
+        api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }), ...(route === undefined ? {} : { route }) }),
+      ),
+    routeShip: (taskId, route) => command((commandId) => api.RouteShip({ commandId, taskId, route })),
     fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
     leaveAfterMerge: (taskId, url) =>
       command((commandId) => api.LeaveAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),

@@ -547,6 +547,15 @@ describe('a task’s menu, through the API, with nothing for it to act on', () =
           yield* refused(client.Ship({ commandId: commandId(), taskId: task.id, change: 'api' })),
           'Nothing waits to ship.',
         )
+        // Nor with a route of the person's; and with no Ship under way, there is no route to change.
+        assert.strictEqual(
+          yield* refused(client.Ship({ commandId: commandId(), taskId: task.id, route: { review: false, far: 'merge' } })),
+          'Nothing waits to ship.',
+        )
+        assert.strictEqual(
+          yield* refused(client.RouteShip({ commandId: commandId(), taskId: task.id, route: { review: true, far: 'ready' } })),
+          'The task isn’t shipping now, so there is no route to change.',
+        )
         // Merged at the head the person saw: there's no pull request to merge.
         assert.strictEqual(yield* reasonOf(client.Merge({ commandId: commandId(), taskId: task.id, head: 'a'.repeat(40) })), 'NotFound')
         // Review and merge, or Merge now, with nothing waiting and nothing open: nothing goes up, and the task stays as it was.

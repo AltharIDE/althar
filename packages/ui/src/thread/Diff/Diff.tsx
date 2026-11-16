@@ -1,4 +1,4 @@
-import { Fragment, memo, type ReactNode, useCallback, useMemo, useRef, useState } from 'react'
+import { Fragment, type KeyboardEvent, memo, type MouseEvent, type ReactNode, useCallback, useMemo, useRef, useState } from 'react'
 
 import { DiffLineKind, unreachable } from '../../foundations/vocabulary'
 import { CHUNK, chunkOf, useNear, widthOf } from '../../lib/chunks'
@@ -20,12 +20,21 @@ export type DiffLine =
   | { kind: DiffLineKind.Added; new: number; text: string; changed?: readonly string[] }
   | { kind: DiffLineKind.Removed; old: number; text: string; changed?: readonly string[] }
 
-/** Something said about a line of the new file, shown under it: a review's finding, there. */
+/** Something said about a line, shown under it: a review's finding, or a comment of the person's, there. */
 export interface DiffNote {
   readonly key: string
-  /** The line of the new file it is about, from 1. */
+  /** The line it is about, from 1: of the new file, or with `old`, of the file as it was, for a line taken out. */
   readonly line: number
+  readonly old?: boolean
+  /** Where it goes among the lines given, by its place in them, in place of its line: a comment being written, under the lines picked. */
+  readonly at?: number
   readonly node: ReactNode
+}
+
+/** A stretch of the lines picked, by where they are in the lines given, `from` to `to` inclusive. */
+export interface DiffPick {
+  readonly from: number
+  readonly to: number
 }
 
 export interface DiffText {
@@ -35,6 +44,8 @@ export interface DiffText {
   removed: string
   /** A folded stretch of unchanged lines, which opens in place. */
   unchanged: (count: number) => string
+  /** A line's number, where lines can be picked: picks it, to comment on. */
+  pick: (line: number, removed: boolean) => string
 }
 
 export const diffText: DiffText = {
@@ -42,6 +53,7 @@ export const diffText: DiffText = {
   added: 'added',
   removed: 'removed',
   unchanged: (count) => (count === 1 ? 'Show 1 unchanged line' : `Show ${count} unchanged lines`),
+  pick: (line, removed) => (removed ? `Comment on removed line ${line}` : `Comment on line ${line}`),
 }
 
 export type DiffProps = RootProps<
@@ -62,6 +74,14 @@ export type DiffProps = RootProps<
     fold?: number
     /** Notes under the lines they are about, those lines kept out of the folds. */
     notes?: readonly DiffNote[]
+    /**
+     * Makes each line's number a button that picks it, to comment on: with
+     * `extend` (Shift held), from the line picked already to this one. The
+     * arrows go from line to line among them, Shift with them widening.
+     */
+    onPick?: (at: number, extend: boolean) => void
+    /** The lines picked, marked; those beside them kept out of the folds. */
+    picked?: DiffPick | null
     text?: Partial<DiffText>
   }
 >
@@ -150,7 +170,12 @@ const folded = (lines: readonly DiffLine[], keep: number, opened: ReadonlySet<nu
  * line, or where it isn't among them (taken out, or in a stretch a diff read
  * in hunks skips), the last line before it; the first line, with none.
  */
-export const noteAt = (lines: readonly DiffLine[], line: number): number => {
+export const noteAt = (lines: readonly DiffLine[], line: number, old = false): number => {
+  if (old) {
+    // A line taken out goes under itself where it shows; else as the new file's line it was taken out after would.
+    const found = lines.findIndex((one) => (one.kind === DiffLineKind.Removed || one.kind === DiffLineKind.Context) && one.old === line)
+    if (found >= 0) return found
+  }
   let before = -1
   for (const [at, one] of lines.entries()) {
     if (one.kind !== DiffLineKind.Context && one.kind !== DiffLineKind.Added) continue
@@ -203,23 +228,52 @@ const tokensOf = (line: DiffLine, at: number, sides: Sides, old: TokenLines | nu
  */
 const Line = memo(function Line({
   line,
+  at,
   tokens,
   oldNumbers,
+  pickable,
+  picked,
+  focusable,
   t,
 }: {
   line: DiffLine
+  at: number
   tokens: ReadonlyArray<Token> | undefined
   oldNumbers: boolean
+  /** Its number is a button that picks it (the Diff's own handlers hear it, by `data-at`). */
+  pickable: boolean
+  picked: boolean
+  /** The one line number in the tab order: the arrows go to the others. */
+  focusable: boolean
   t: DiffText
 }) {
   const l = look(line, t)
   // tokens that don't spell the line, as a side cut short would give, leave it plain
   const spelt = tokens !== undefined && tokens.map((token) => token.content).join('') === line.text ? tokens : undefined
-  return (
-    <div className={cx(s.line, l.className)}>
+  const numbers = (
+    <>
       {oldNumbers && <span className={s.n}>{l.old}</span>}
       {/* a removed line has no new number; in the one-column form it shows its old one */}
       <span className={s.n}>{oldNumbers ? l.new : (l.new ?? l.old)}</span>
+    </>
+  )
+  const number = l.new ?? l.old
+  return (
+    <div className={cx(s.line, l.className, picked && s.picked)} data-picked={picked || undefined}>
+      {pickable && number !== undefined ? (
+        <button
+          type="button"
+          className={s.pick}
+          data-at={at}
+          tabIndex={focusable ? 0 : -1}
+          aria-label={t.pick(number, l.new === undefined)}
+          aria-pressed={picked}
+        >
+          {numbers}
+        </button>
+      ) : (
+        numbers
+      )}
       <span className={s.sign}>
         {l.sign}
         {l.said && <VisuallyHidden> {l.said}</VisuallyHidden>}
@@ -239,6 +293,10 @@ interface RowsProps {
   next: TokenLines | null
   under: ReadonlyMap<number, readonly DiffNote[]>
   oldNumbers: boolean
+  /** Its line numbers pick their lines; the lines picked, and the one whose number is in the tab order. */
+  pickable: boolean
+  picked: { readonly from: number; readonly to: number } | null | undefined
+  tabAt: number | undefined
   t: DiffText
   onOpen: (fold: number) => void
 }
@@ -250,6 +308,7 @@ const lineTokens = (line: DiffLine, at: number, sides: Sides | null, old: TokenL
 /** The same rows, with the same notes and words, each line in the same colours: as a side's colours come, only rows that took them are drawn again. */
 const sameRows = (a: RowsProps, b: RowsProps) => {
   if (a.rows !== b.rows || a.sides !== b.sides || a.under !== b.under || a.oldNumbers !== b.oldNumbers || a.t !== b.t) return false
+  if (a.pickable !== b.pickable || a.tabAt !== b.tabAt || a.picked?.from !== b.picked?.from || a.picked?.to !== b.picked?.to) return false
   if (a.old === b.old && a.next === b.next) return true
   return a.rows.every(
     (row) =>
@@ -258,7 +317,7 @@ const sameRows = (a: RowsProps, b: RowsProps) => {
 }
 
 /** Rows of a diff: its lines, in their colours where they have them, with the notes under them; its folds and its gaps. */
-const Rows = memo(function Rows({ rows, sides, old, next, under, oldNumbers, t, onOpen }: RowsProps) {
+const Rows = memo(function Rows({ rows, sides, old, next, under, oldNumbers, pickable, picked, tabAt, t, onOpen }: RowsProps) {
   return rows.map((row) => {
     if ('gap' in row)
       return (
@@ -277,7 +336,19 @@ const Rows = memo(function Rows({ rows, sides, old, next, under, oldNumbers, t, 
       )
     const { line, at } = row
     const said = under.get(at)
-    const one = <Line key={at} line={line} tokens={lineTokens(line, at, sides, old, next)} oldNumbers={oldNumbers} t={t} />
+    const one = (
+      <Line
+        key={at}
+        line={line}
+        at={at}
+        tokens={lineTokens(line, at, sides, old, next)}
+        oldNumbers={oldNumbers}
+        pickable={pickable}
+        picked={picked != null && at >= picked.from && at <= picked.to}
+        focusable={at === tabAt}
+        t={t}
+      />
+    )
     if (said === undefined) return one
     return (
       <Fragment key={at}>
@@ -322,20 +393,57 @@ function Chunk({ initially, ...drawn }: RowsProps & { initially: boolean }) {
 }
 
 /** The file's own lines in their colours, with the changed words inside a line marked more strongly, so the eye lands on what moved. */
-export function Diff({ lines, label, path, oldNumbers = false, fold, notes, text, className, ...rest }: DiffProps) {
+export function Diff({ lines, label, path, oldNumbers = false, fold, notes, onPick, picked, text, className, ...rest }: DiffProps) {
   // the same words while the text given is, so the lines needn't be drawn again for them
   const t = useMemo(() => ({ ...diffText, ...text }), [text])
   const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set())
+  // The line number in the tab order, where lines can be picked: the last one picked, else the first line.
+  const [focusAt, setFocusAt] = useState<number | null>(null)
   // The notes by the line they go under, in the order given.
   const under = useMemo(() => {
     const placed = new Map<number, DiffNote[]>()
     for (const note of notes ?? []) {
-      const at = noteAt(lines, note.line)
+      const at = note.at ?? noteAt(lines, note.line, note.old === true)
       placed.set(at, [...(placed.get(at) ?? []), note])
     }
     return placed
   }, [lines, notes])
-  const kept = useMemo(() => new Set(under.keys()), [under])
+  const kept = useMemo(() => {
+    const keep = new Set(under.keys())
+    if (picked != null) for (let at = picked.from; at <= picked.to; at += 1) keep.add(at)
+    return keep
+  }, [under, picked])
+  const pickable = onPick !== undefined
+  // The line numbers are buttons the Diff hears as one: a press picks, the arrows move among them.
+  const pickFrom = (event: { readonly target: EventTarget }) => {
+    const at = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-at]')?.dataset.at : undefined
+    return at === undefined ? null : Number(at)
+  }
+  const onClick = (event: MouseEvent<HTMLDivElement>) => {
+    const at = pickFrom(event)
+    if (at === null || onPick === undefined) return
+    setFocusAt(at)
+    onPick(at, event.shiftKey)
+  }
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    const at = pickFrom(event)
+    if (at === null || !(event.target instanceof HTMLElement)) return
+    const buttons = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-at]')]
+    const next =
+      buttons[buttons.indexOf(event.target.closest<HTMLElement>('[data-at]') ?? event.target) + (event.key === 'ArrowDown' ? 1 : -1)]
+    // The view's own arrows, which go through the files, aren't heard while a line number has focus.
+    event.preventDefault()
+    if (next === undefined) return
+    const to = Number(next.dataset.at)
+    setFocusAt(to)
+    next.focus()
+    // Shift with nothing picked yet starts from the line it moves from.
+    if (event.shiftKey) {
+      if (picked == null) onPick?.(at, false)
+      onPick?.(to, true)
+    }
+  }
   const rows: readonly Row[] = useMemo(
     () => (fold === undefined ? lines.map((line, at) => ({ line, at })) : folded(lines, fold, opened, kept)),
     [lines, fold, opened, kept],
@@ -352,13 +460,23 @@ export function Diff({ lines, label, path, oldNumbers = false, fold, notes, text
     }
     return [...made]
   }, [rows])
+  // Of the lines shown, the one whose number is in the tab order: the last gone to, else the last picked, else the first.
+  const shownAt = rows.flatMap((row) => ('line' in row && row.line.kind !== DiffLineKind.Hunk ? [row.at] : []))
+  const tabAt = [focusAt, picked?.to].find((at) => at != null && shownAt.includes(at)) ?? shownAt[0]
   const sides = useMemo(() => (path === undefined ? null : sidesOf(lines)), [lines, path])
   const old = useTokens(sides === null || sides.old === '' ? null : sides.old, path ?? '')
   const next = useTokens(sides === null || sides.new === '' ? null : sides.new, path ?? '')
   const open = useCallback((at: number) => setOpened((now) => new Set(now).add(at)), [])
-  const drawn = { sides, old, next, under, oldNumbers, t, onOpen: open }
+  const drawn = { sides, old, next, under, oldNumbers, pickable, picked, tabAt, t, onOpen: open }
   return (
-    <div className={cx(s.diff, oldNumbers && s.both, className)} data-diff="" role="group" aria-label={label ?? t.changes} {...rest}>
+    <div
+      className={cx(s.diff, oldNumbers && s.both, className)}
+      data-diff=""
+      role="group"
+      aria-label={label ?? t.changes}
+      {...(pickable ? { onClick, onKeyDown } : {})}
+      {...rest}
+    >
       {chunks === null ? (
         <Rows rows={rows} {...drawn} />
       ) : (

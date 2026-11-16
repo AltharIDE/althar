@@ -45,6 +45,23 @@
   outline: none;
   box-shadow: 0 0 0 1.5px currentColor;
 }
+/* words that open what the task waits for */
+.opens {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.opens .chev {
+  margin-left: -2px;
+  opacity: 0.6;
+  transition: transform var(--fast) var(--ease);
+}
+.opens[aria-expanded='true'] .chev {
+  transform: rotate(180deg);
+}
 /* its steps while its plan runs, small, inside */
 .track {
   flex: none;

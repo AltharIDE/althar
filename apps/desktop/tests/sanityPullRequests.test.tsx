@@ -35,8 +35,15 @@ const show = (snap: ThreadSnapshot) =>
       onConnect={vi.fn()}
       onReplace={vi.fn()}
       onBringIn={vi.fn()}
-      onShip={vi.fn()}
-      onMergeWaiting={vi.fn()}
+      ship={{
+        ship: vi.fn(async () => {}),
+        shipChoice: null,
+        chooseShipRoute: vi.fn(),
+        shipPressed: null,
+        routeShip: vi.fn(async () => {}),
+        shipRerouted: null,
+        skipReview: vi.fn(async () => {}),
+      }}
     />,
     fakeClient().client,
   )
@@ -76,12 +83,13 @@ describe('commits held for Ship, as the task’s pull request card offers them',
   // Ship's button waits for the task to be ready.
   it('offers no Push for the commits Ship’s review is reading', () => {
     show(heldForShip('ready', null))
-    expect(screen.getByRole('button', { name: 'Ship 2 commits' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Ship/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Push 2 commits' })).toBeNull()
     cleanup()
-    // The person pressed Ship: its review reads the two commits.
-    show(heldForShip('running', 'review'))
+    // The person pressed Ship: its review reads the two commits, and Ship stays where it was, greyed at its review.
+    const reviewing = heldForShip('running', 'review')
+    show({ ...reviewing, task: { ...reviewing.task, shipping: { route: { review: true, far: 'ready' }, at: 'review' } } })
     expect(screen.queryByRole('button', { name: 'Push 2 commits' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Ship 2 commits' })).toBeNull()
+    expect(screen.getByRole('button', { name: /^Reviewing/ }).getAttribute('aria-disabled')).toBe('true')
   })
 })

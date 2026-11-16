@@ -99,6 +99,7 @@ import {
 } from './drafts'
 import { stepOf, StepPick } from './stepPick'
 import { describeModels, usableModels } from './usableModels'
+import { waitFor } from './waits'
 
 /**
  * How many tasks a lead may start (ADR-097): in one turn, and from its task in all. Beyond them it says what else it would
@@ -245,6 +246,8 @@ const Proposed = Schema.Struct({
   small_change: Schema.optional(Schema.Boolean),
   /* The preset its parts are, by name: its parts replace the plan's. */
   preset: Schema.optional(Schema.String),
+  /* The tasks it waits for, by slug (waits.ts): its plan starts once they have all merged. */
+  waits_for: Schema.optional(Schema.Array(Schema.String)),
   ...Where,
 })
 /* A mini task: what to do, and the one model that does it. */
@@ -1688,6 +1691,26 @@ export class Coordinator extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [held] = yield* sql<{ id: string }>`
             SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' AND starts_at IS NULL`
+          // What it waits for, recorded before its plan, so no countdown can start it first.
+          const blockers = yield* Effect.forEach(proposed.waits_for ?? [], (one) => taskOf(access, one))
+          const waits =
+            blockers.length === 0
+              ? []
+              : yield* waitFor({ taskId: task.id, on: blockers.map((one) => one.id), actorId: instance.coordinatorId })
+          const waitsLine = waits
+            .map((outcome) =>
+              'refused' in outcome
+                ? ` It doesn't wait for ${outcome.on}: ${outcome.refused}`
+                : outcome.added || outcome.why === 'waits'
+                  ? ''
+                  : ` ${outcome.on} has merged already: nothing to wait for.`,
+            )
+            .join('')
+          const waitsFor = waits.filter((outcome) => !('refused' in outcome) && (outcome.added || outcome.why === 'waits'))
+          const waitsSaid =
+            waitsFor.length === 0
+              ? waitsLine
+              : ` It waits for ${waitsFor.map((outcome) => outcome.on).join(' and ')}, and starts once ${waitsFor.length === 1 ? 'it has' : 'they have'} merged.${waitsLine}`
           // The person held it while it was drafted: it comes held, a small change too, whatever the window is doing.
           const heldWhileDrafted = heldTasks.delete(task.id)
           const planId = yield* plans.propose({
@@ -1724,7 +1747,7 @@ export class Coordinator extends Context.Service<
                       ),
                     ),
                   )
-          const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}`
+          const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}${waitsSaid}`
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
           if (small) {
@@ -2829,6 +2852,12 @@ export class Coordinator extends Context.Service<
                 type: 'string',
                 description:
                   "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
+              },
+              waits_for: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  'Tasks it waits for, by slug, where the person said it comes after them: its plan starts by itself once they have all merged (wait_for_tasks changes it later).',
               },
               preset: {
                 type: 'string',

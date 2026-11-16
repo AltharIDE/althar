@@ -52,6 +52,7 @@ import {
 import { type ComponentProps, Fragment, type ReactNode, useEffect, useMemo, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
+import { abandonedBlocker, blockerText, blockerWords } from '../../shared/blockers'
 import { MERGING_STEP } from '../../data/merges'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
@@ -72,7 +73,7 @@ import {
   standingOf,
   standingText,
 } from '../../shared/standing'
-import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
+import { afterSteps, isAutomatedStep, stepNow, stepText } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock, runningCalmly } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -395,7 +396,7 @@ const empty = (size: { readonly add: number; readonly del: number } | null | und
 
 /** The step a change is on, in its word: its step's name on its track, or what it does once its steps are done. */
 const stepWordOf = (work: BoardTask): string => {
-  if (work.step === 'publish' || afterSteps(work.step)) return stepText.now[work.step ?? ''] ?? ''
+  if (work.step === 'publish' || afterSteps(work.step)) return stepNow(work.step, work.shipAt) ?? ''
   const { steps, at } = trackOf(work)
   return steps[at] ?? text.status[TaskStatus.Running]
 }
@@ -708,6 +709,24 @@ export const issuesCardOf = (work: BoardTask): Card => ({
   ...fromOf(work),
   word: issuesWordOf(work.issues),
 })
+
+/**
+ * A plan that waits for a task that was abandoned (tasks wait for their blockers): the person's, in Needs you, saying which;
+ * its page and its plan card start it anyway, reopen that one, or stop waiting for it.
+ */
+export const abandonedCardOf = (work: BoardTask): Card => {
+  const gone = abandonedBlocker(work)
+  return {
+    status: TaskStatus.Yours,
+    kind: kindOf(work),
+    ...localOf(work),
+    ...towardOf(work),
+    title: work.title,
+    ...fromOf(work),
+    word: kindWords.abandoned,
+    ...(gone === undefined ? {} : { why: blockerText.abandoned(gone.title) }),
+  }
+}
 
 /**
  * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
@@ -1122,6 +1141,7 @@ export function BoardView({
         ...lanes.waiting.map(({ task }) => task),
         ...lanes.stopped,
         ...lanes.ready,
+        ...lanes.abandoned,
         ...lanes.kept,
       ].map((work) => work.taskId),
     )
@@ -1177,6 +1197,9 @@ export function BoardView({
         : startsAt === null
           ? text.held
           : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
+    // A plan that waits for other tasks says what for, in place of its countdown: "Starts when Pairing merges"; and that it
+    // waits on the person once one of them was abandoned, or it is held.
+    const after = waits || pausedRow ? null : blockerWords(work)
     return (
       <NextRow
         key={work.taskId}
@@ -1188,8 +1211,16 @@ export function BoardView({
         {...(goesOn ? { continues: work.kind === 'change' ? stepWordOf(work) : '' } : {})}
         {...(parent === undefined ? {} : { foot: <StartedBy task={parent.title} onOpen={() => onOpen(parent.threadId)} /> })}
         title={work.title}
-        wait={waits || pausedRow || startsAt !== null ? Wait.Workers : Wait.You}
-        reason={reason}
+        wait={
+          after !== null
+            ? abandonedBlocker(work) !== undefined || startsAt === null
+              ? Wait.You
+              : Wait.After
+            : waits || pausedRow || startsAt !== null
+              ? Wait.Workers
+              : Wait.You
+        }
+        reason={after ?? reason}
         onOpen={() => onOpen(work.threadId)}
         {...teamOf(work)}
         text={{ task: unnamed }}
@@ -1402,6 +1433,17 @@ export function BoardView({
             key={work.taskId}
             data-move={work.taskId}
             {...issuesCardOf(work)}
+            {...parentOf(work, onOpen)}
+            errands={work.errands}
+            onOpen={() => onOpen(work.threadId)}
+          />
+        ))}
+        {lanes.abandoned.map((work) => (
+          <BoardCard
+            taskId={work.taskId}
+            key={work.taskId}
+            data-move={work.taskId}
+            {...abandonedCardOf(work)}
             {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}

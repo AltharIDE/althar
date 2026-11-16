@@ -15,6 +15,7 @@ import {
   RuleKind,
   SealStyle,
   SETTINGS_SECTIONS,
+  ShipRoute,
   settingsSectionOf,
   type SettingChangeCard,
   type SettingChanged,
@@ -63,6 +64,7 @@ import { PullRequestScreenshots } from './PullRequestScreenshots'
 import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestReview'
 import { fact, timestamp } from './records'
 import { postTeamReviews, sendMidTurn, setPostTeamReviews, setSendMidTurn } from './Reviews'
+import { setShipRoute, shipRouteSetting } from './shipRoute'
 import { applyRules, type RulesSent } from './rulesChange'
 import { workedOutReach } from './sandboxReach'
 import { listSkills } from './Skills'
@@ -228,6 +230,16 @@ const field = (label: string, takes: string, schema: Schema.Top, more: Pick<Fiel
 })
 
 const SWITCH = 'true or false'
+
+/**
+ * Whether a default route for Ship asks less of the person than the one before: merging where it didn't, or no review
+ * where there was one. None (each task's own) reviews first and goes no further than ready.
+ */
+const shipGoesFurther = (before: unknown, after: unknown) => {
+  const was = (before ?? { review: true, far: 'ready' }) as ShipRoute
+  const now = (after ?? { review: true, far: 'ready' }) as ShipRoute
+  return (now.far === 'merge' && was.far !== 'merge') || (was.review && !now.review)
+}
 const kinds = `a list of the rules' kinds: ${RuleKind.literals.join(', ')}`
 
 /** What a row of setting_changes keeps. */
@@ -868,6 +880,12 @@ export class SettingsTools extends Context.Service<
             coAuthor: field('Althar as co-author', SWITCH, Schema.Boolean),
             reviewSeal: field('The review seal', SWITCH, Schema.Boolean),
             reviewSealStyle: field('The seal’s look', SealStyle.literals.join(', '), SealStyle),
+            shipRoute: field(
+              'Ship’s default route',
+              '{ review: true or false, far: push, ready or merge }, or null for each task’s own (its review, then as far as its ending)',
+              Schema.NullOr(ShipRoute),
+              { loosens: shipGoesFurther, loosening: 'merging, or no review first' },
+            ),
           },
           read: () =>
             Effect.gen(function* () {
@@ -877,6 +895,7 @@ export class SettingsTools extends Context.Service<
                 coAuthor: yield* coAuthorOn,
                 reviewSeal: seal.on,
                 reviewSealStyle: seal.style,
+                shipRoute: (yield* shipRouteSetting) ?? null,
               }
             }),
           write: (_projectId, change) =>
@@ -885,6 +904,7 @@ export class SettingsTools extends Context.Service<
               if (change['coAuthor'] !== undefined) yield* setCoAuthor(change['coAuthor'] as boolean)
               if (change['reviewSeal'] !== undefined) yield* setReviewSeal(change['reviewSeal'] as boolean)
               if (change['reviewSealStyle'] !== undefined) yield* setReviewSealStyle(change['reviewSealStyle'] as typeof SealStyle.Type)
+              if (change['shipRoute'] !== undefined) yield* setShipRoute(change['shipRoute'] as ShipRoute | null)
             }),
         },
         ...(['notifications', 'appearance', 'editor-and-browser'] as const).map((id): Section => ({
@@ -1442,6 +1462,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   setReviewSeal: 'althar/pull-requests.reviewSeal',
   setRunOutside: 'person: how far an outside author’s code is trusted without asking is the person’s word alone, as Run it is',
   setReviewSealStyle: 'althar/pull-requests.reviewSealStyle',
+  setShipRoute: 'althar/pull-requests.shipRoute',
   // althar/tasks: presets (a task is a conversation plus parts)
   editPreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',
   removePreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',

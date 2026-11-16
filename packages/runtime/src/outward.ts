@@ -23,7 +23,7 @@ import { change, fact, timestamp } from './records'
 /** How long a launch holds an action it is doing. */
 const LEASE_MILLIS = 5 * 60_000
 
-export interface Outward<A, E, R> {
+export interface Outward<A, E, R, ES = never, RS = never> {
   readonly projectId: ProjectId
   /** What it is done for: a repository change, an external link. */
   readonly subject: { readonly type: string; readonly id: string }
@@ -41,6 +41,12 @@ export interface Outward<A, E, R> {
   /** What the record keeps of the answer, and reads back. */
   readonly encode: (answer: A) => unknown
   readonly decode: (kept: unknown) => A | undefined
+  /**
+   * Whether it is still wanted, read in the transaction that records its intent: failing, nothing is recorded or done, and
+   * outward fails with it. So a change of mind made in a transaction of its own lands either before it, and it isn't done,
+   * or after its intent is recorded, where that change can read it was sent (a Ship's merge, whose route RouteShip changes).
+   */
+  readonly stands?: Effect.Effect<void, ES, RS>
 }
 
 /**
@@ -50,7 +56,7 @@ export interface Outward<A, E, R> {
  */
 const lost = (error: unknown) => error instanceof ConnectorFailed && (error.reason === 'unreachable' || error.reason === 'invalid_response')
 
-export const outward = <A, E, R>(action: Outward<A, E, R>) =>
+export const outward = <A, E, R, ES = never, RS = never>(action: Outward<A, E, R, ES, RS>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
@@ -61,6 +67,7 @@ export const outward = <A, E, R>(action: Outward<A, E, R>) =>
           WHERE idempotency_key = ${action.key} AND project_id = ${action.projectId} ORDER BY created_at DESC LIMIT 1`
         if (earlier?.state === 'confirmed') return { _tag: 'Done', answer: action.decode(JSON.parse(earlier.response ?? 'null')) } as const
         if (earlier !== undefined && earlier.state !== 'failed' && !action.retryable) return { _tag: 'Uncertain' } as const
+        if (action.stands !== undefined) yield* action.stands
         const at = yield* timestamp
         const lease = new Date(Date.parse(at) + LEASE_MILLIS).toISOString()
         const workItemId = yield* newId(Ids.workItem)
