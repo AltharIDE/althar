@@ -19,7 +19,6 @@ import {
   type FileView,
   commandDown,
   Behind,
-  Composer,
   keys,
   modKey,
   DictationTray,
@@ -52,7 +51,8 @@ import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
+import { draftKey, setDraftDictated, useSetDraft } from '../../shared/drafts'
+import { DraftComposer } from '../../shared/DraftComposer'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
@@ -420,7 +420,8 @@ export function TaskView({
 }) {
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
-  const [draft, setDraft] = useDraft(kept)
+  // The words themselves are its composer's to show (DraftComposer): a word typed doesn't draw the task again.
+  const setDraft = useSetDraft(kept)
   const threadId = model.snapshot?.threadId ?? null
   const voice = useDictation(kept, {
     projectId: model.snapshot?.project.id ?? null,
@@ -1100,9 +1101,8 @@ export function TaskView({
 
   const composer = (
     <div className={s.composer}>
-      <Composer
-        value={draft}
-        onChange={setDraft}
+      <DraftComposer
+        draft={kept}
         // What a task that finished and isn't a change is likely told next, for Tab to take; its lead marks it done (settle_task). A
         // review's draft is posted by the person, on it, so nothing is suggested there.
         {...(settleable && done && !embedded ? { suggestion: text.suggest } : {})}
@@ -1275,7 +1275,11 @@ export function TaskView({
   return (
     <PageOpenerProvider value={opener}>
       <OpenFinding.Provider value={changes.showFindings}>
-        <MessageMotion className={embedded ? s.aside : s.window}>
+        <MessageMotion
+          className={embedded ? s.aside : s.window}
+          // What moves a message between the thread and its composer: not a word typed or streamed, nor a second ticking.
+          version={[snapshot.items, queue, model.pending, shown]}
+        >
           {/* The bar is the header: the way back and which task, then where it stands, its faces and what it opens. */}
           {!embedded && (
             <TitleBar

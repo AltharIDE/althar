@@ -10,7 +10,6 @@ import type { BoardTask, ThreadItem } from '@althar/contracts'
 
 import {
   Behind,
-  Composer,
   DictationTray,
   LinkButton,
   ResizeHandle,
@@ -34,7 +33,8 @@ import { useServices } from '../../data/services'
 import { catalogRead } from '../finder/catalog'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
+import { draftKey, setDraftDictated, useSetDraft } from '../../shared/drafts'
+import { DraftComposer } from '../../shared/DraftComposer'
 import { pillOf, runIdOf } from '../../shared/running'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -355,8 +355,12 @@ export function ProjectView({
   // The board as the person's moves on asides leave it, at once: one cleared gone, one made a task on it as work (`useAsideMoves`).
   const asideMoves = useAsideMoves(useServices().client, board.board, model.project?.id ?? model.coordinator?.project.id ?? null)
   const seen = asideMoves.over
-  const lanes = seen === null ? null : lanesOf(seen, board.merging)
+  // The same lanes while the board and what merges stay as they were: the board's cards are measured, and drawn, only then.
+  const lanes = useMemo(() => (seen === null ? null : lanesOf(seen, board.merging)), [seen, board.merging])
   const yours = lanes === null ? 0 : yoursOf(lanes)
+  // Beside the conversation, its asides are there; the board alone keeps them behind its chip.
+  const talkShown = panes.talk
+  const boardLanes = useMemo(() => (lanes === null || !talkShown ? lanes : { ...lanes, scratch: NO_TASKS }), [lanes, talkShown])
   // An abandoned task's pull request left open, closed from its row.
   const closing = useClosePullRequests()
   /** A pane shown or hidden, from ⋯ or its key. */
@@ -386,7 +390,8 @@ export function ProjectView({
   const said = useQuery({ ...catalogRead(catalogClient), enabled: asideSearching }).data
   const passages = useMemo(() => (said === undefined ? undefined : passagesOf(said, about)), [said, about])
   const draftOf = draftKey.coordinator(about ?? '')
-  const [draft, setDraft] = useDraft(draftOf)
+  // The words themselves are its composer's to show (DraftComposer): a word typed doesn't draw the project again.
+  const setDraft = useSetDraft(draftOf)
   // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
   // The room it stepped aside from is kept with the page, in the window's storage, so closing the page brings the board back even after a reload.
   const beforeKey = `althar.before.${about ?? ''}`
@@ -700,9 +705,8 @@ export function ProjectView({
 
   const composer = (
     <div className={s.composer}>
-      <Composer
-        value={draft}
-        onChange={setDraft}
+      <DraftComposer
+        draft={draftOf}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
@@ -885,7 +889,23 @@ export function ProjectView({
 
   return (
     <PageOpenerProvider value={opener}>
-      <MessageMotion className={s.window}>
+      <MessageMotion
+        className={s.window}
+        // What moves a message between the conversation and its composer, or what shows with the rooms: not a word typed or
+        // streamed, nor a second ticking. The board's cards are its own (BoardView).
+        version={[
+          coordinator?.items,
+          queue,
+          model.pending,
+          asides.items,
+          room,
+          panes.talk,
+          panes.board,
+          swapped,
+          aside.kind === 'aside' ? aside.threadId : aside.kind,
+          teamFor,
+        ]}
+      >
         {header}
         {room === Room.Automations ? (
           <AutomationsView
@@ -1095,8 +1115,7 @@ export function ProjectView({
                     )}
                     {!panes.talk && <AsideMoveFailed moves={asideMoves} className={s.failure} />}
                     <BoardView
-                      // Beside the conversation, its asides are there; the board alone keeps them behind its chip.
-                      lanes={panes.talk ? { ...lanes, scratch: [] } : lanes}
+                      lanes={boardLanes ?? lanes}
                       agents={model.agents}
                       now={now}
                       onOpen={onTask}

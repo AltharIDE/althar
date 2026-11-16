@@ -192,8 +192,30 @@ export const useDraftOf = <Image, File = unknown>(key: string): Draft<Image, Fil
 /** A thread's words, and the way to change them: as useState, but kept by the thread. */
 export const useDraft = (key: string): readonly [string, Dispatch<SetStateAction<string>>] => {
   const { text } = useDraftOf(key)
-  const set = useCallback((change: SetStateAction<string>) => setDraftText(key, change), [key])
-  return [text, set]
+  return [text, useSetDraft(key)]
+}
+
+/**
+ * The way to change a thread's words, for a screen that doesn't show them itself: its composer does
+ * (`DraftComposer`), so the screen isn't drawn again for each word typed.
+ */
+export const useSetDraft = (key: string): Dispatch<SetStateAction<string>> =>
+  useCallback((change: SetStateAction<string>) => setDraftText(key, change), [key])
+
+/** What a screen reads of a thread's words, as it changes: drawn again only where that does, not for each word typed. */
+export const useDraftWords = <T>(key: string, read: (text: string) => T): T =>
+  useSyncExternalStore(
+    useCallback((listener: () => void) => subscribeDraft(key, listener), [key]),
+    () => read(draftOf(key).text),
+  )
+
+/** A thread's images and files, and whether its words were dictated, as they change: each the same until it does, whatever is typed. */
+export const useDraftAttached = <Image, File = unknown>(key: string): Pick<Draft<Image, File>, 'images' | 'files' | 'dictated'> => {
+  const subscribe = useCallback((listener: () => void) => subscribeDraft(key, listener), [key])
+  const images = useSyncExternalStore(subscribe, () => draftOf<Image, File>(key).images)
+  const files = useSyncExternalStore(subscribe, () => draftOf<Image, File>(key).files)
+  const dictated = useSyncExternalStore(subscribe, () => draftOf(key).dictated)
+  return { images, files, dictated }
 }
 
 /* Each image's id, unique in the window, so ones kept in a draft from before never share one with ones added since. */
