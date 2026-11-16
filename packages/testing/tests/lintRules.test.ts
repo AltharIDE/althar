@@ -1,5 +1,5 @@
 import { RuleTester } from 'vite-plus/lint/plugins-dev'
-import { describe, it } from 'vite-plus/test'
+import { describe, expect, it } from 'vite-plus/test'
 
 /*
  * Althar's own lint rules (lint/, run on every package by the root vite.config.ts), as they read the code they check:
@@ -7,8 +7,9 @@ import { describe, it } from 'vite-plus/test'
  * They are plain JavaScript, outside any package, so they are read here by their address.
  */
 
-RuleTester.describe = describe
-RuleTester.it = it
+// RuleTester runs what it is given at once: each case below is a test of its own, which gives it its cases one at a time.
+RuleTester.describe = (_name, run) => run()
+RuleTester.it = (_name, run) => run()
 
 /** A rule of lint/, by its file and its name there. */
 const rule = async (file: string, name: string) =>
@@ -20,10 +21,30 @@ const offTheThread = await rule('thread.js', 'offTheThread')
 const tsx = new RuleTester({ languageOptions: { sourceType: 'module', parserOptions: { lang: 'tsx' } } })
 const ts = new RuleTester({ languageOptions: { sourceType: 'module', parserOptions: { lang: 'ts' } } })
 
+type Cases = Parameters<RuleTester['run']>[2]
+type Case = Cases['valid'][number] | Cases['invalid'][number]
+
+/** A case's code, as its test is named. */
+const codeOf = (test: Case) => (typeof test === 'string' ? test : test.code)
+
+/**
+ * Each case a test of its own, read by a run of RuleTester's own: within a run it refuses a case it has read, so a test
+ * the stress run repeats would read as one written twice. A case that is written twice is still refused, here.
+ */
+const check = (tester: RuleTester, name: string, rule: Parameters<RuleTester['run']>[1], { valid, invalid }: Cases) =>
+  describe(name, () => {
+    const codes = [...valid, ...invalid].map(codeOf)
+    it('has no case written twice', () => {
+      expect(codes.filter((code, at) => codes.indexOf(code) !== at)).toEqual([])
+    })
+    for (const test of valid) it(`leaves ${codeOf(test)}`, () => tester.run(name, rule, { valid: [test], invalid: [] }))
+    for (const test of invalid) it(`fails ${codeOf(test)}`, () => tester.run(name, rule, { valid: [], invalid: [test] }))
+  })
+
 /** A component, with what it declares before it returns `jsx`. */
 const component = (jsx: string, before = '') => `export function View({ model, close }) {\n${before}\n  return ${jsx}\n}`
 
-tsx.run('press-at-once', pressAtOnce, {
+check(tsx, 'press-at-once', pressAtOnce, {
   valid: [
     // What shows changes first; the call catches up, and its failure takes it back.
     component(`<Button onClick={() => { close(); void model.save().catch(() => model.reopen()) }} />`),
@@ -88,7 +109,7 @@ tsx.run('press-at-once', pressAtOnce, {
   ],
 })
 
-ts.run('off-the-thread', offTheThread, {
+check(ts, 'off-the-thread', offTheThread, {
   valid: [
     `import { execFile, spawn } from 'node:child_process'\nexecFile('git', ['status'])\nspawn('git')`,
     `import { cp } from 'node:fs/promises'\nawait cp('a', 'b', { recursive: true })`,
