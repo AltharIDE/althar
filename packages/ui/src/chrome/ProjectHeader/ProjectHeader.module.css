@@ -27,10 +27,10 @@
   cursor: pointer;
 }
 .home:hover {
-  background: var(--hover, rgba(128, 128, 128, 0.12));
+  background: var(--line);
 }
 .home:focus-visible {
-  outline: 2px solid var(--focus, currentColor);
+  outline: 2px solid var(--signal-fill, currentColor);
   outline-offset: 1px;
 }
 .mark {
