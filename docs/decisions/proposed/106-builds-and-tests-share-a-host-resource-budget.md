@@ -1,119 +1,66 @@
-# ADR-106: Builds and tests share a host resource budget
+# ADR-106: Althar quietly backs off when its work crowds the machine
 
-> A proposal, not built. DEV-86's Vitest-only implementation has been withdrawn from this change. This document does not claim resource enforcement exists today.
+> Proposed, not implemented. This replaces the earlier resource-broker proposal with a smaller, best-effort improvement. The Vitest-only implementation remains withdrawn.
 
 - **Status:** Proposed
 - **Date:** 2026-11-15
+- **Revised:** 2026-11-16
 - **Owner:** Runtime and provider-adapter maintainers
-- **Related:** [ADR-032, admission of agents](../scheduling.md#how-many-agents-work-at-once), [ADR-007, provider permissions](../what-agents-may-do.md#how-a-request-reaches-althar), and [proposed ADR-103, worker hosts](103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md).
-- **Context:** Leads independently start builds, tests and simulators. Each tool can use the whole computer, and one command can launch many workers or nested builds. Several leads multiply that load. Rust linking and simulators also consume enough memory that counting CPUs alone is inadequate. Setting a Vitest environment variable fixes one runner's fanout, while leaving the same problem in other tools.
+- **Related:** [ADR-032, admission of agents](../scheduling.md#how-many-agents-work-at-once), [the instant UI requirement](../foundations.md#the-ui-is-instant), and [proposed ADR-103, execution hosts](103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md).
+- **Context:** Several agents building or testing at once can make the computer unpleasant to use. The useful outcome is that Althar quietly gives the person's apps room and starts less additional work when the machine is already struggling. It does not need to establish a security boundary, intercept every command or prove an exact resource quota first.
 
 ## Decision
 
-Schedule expensive execution on the computer that runs it. One host resource broker admits managed jobs against shared capacity across projects, leads and runtime profiles. The unit of scheduling is a job and its actual execution lifetime, rather than an agent turn or a particular test framework.
+Add a small, automatic governor around Althar's existing background processes and admission queue. Use the machine's observed pressure and the work Althar already tracks. It applies regardless of whether a process happens to run Rust, Go, Python, a test runner or a custom script.
 
-The broker, managed executor, tool adapters and platform enforcement have separate responsibilities:
+The feature runs with sensible defaults. It needs no new setup, resource panel, permission prompts or per-language configuration. Agents use their ordinary tools. A person should mostly notice that the computer remains usable while Althar works.
 
-| Part | Responsibility |
+## First version
+
+1. **Keep agent work in the background.** Althar already starts agent processes and native command children at lower priority through `provider-adapters/src/process.ts`. Keep that behavior and cover ordinary descendant processes where the platform permits. The runtime and work the person directly waits on keep their existing priority.
+2. **Watch the machine while Althar has active work.** Reuse the existing process and machine readings, including descendants, for sustained CPU contention and memory pressure. Monitoring must work while the load meter is closed, stay off the UI thread and avoid frequent expensive scans.
+3. **Ease back on new work when pressure persists.** Extend the existing admission queue so fewer additional autonomous agent turns start while the machine is struggling. Include Althar-owned heavy setup and launch work where it can use the same policy without changing ordinary command authorization. Use the configured agent cap as an upper bound; keep any temporary reduction separate from the person's saved setting.
+4. **Recover gradually.** After pressure stays low, let more queued work start again. Use different backoff and recovery thresholds or a short stable period so the limit does not oscillate on every reading. Keep useful progress possible and preserve the existing queue priorities, stop behavior and priority of the person's direct actions.
+5. **Use practical process controls where available.** Group scheduling controls can improve sharing between worker trees on platforms that already support them. They are an incremental improvement. Lack of cgroup delegation, a denied OS call or weaker macOS controls must not prevent normal work from starting.
+
+High CPU utilization alone is not a fault. One build on an otherwise idle computer should be able to use spare CPU. Backoff should respond to sustained contention or memory pressure, rather than trying to keep CPU usage permanently low.
+
+The first version primarily changes what starts next. It does not promise to resize an already running compiler's workers or rebalance every ongoing command instantly. Let running work finish; do not freeze or kill builds merely because the governor sees pressure. Explicit user stop and existing process cleanup still work as before.
+
+## Integrate with what exists
+
+| Existing part | Role in this change |
 | --- | --- |
-| Host resource broker | Own capacity, queue jobs fairly, grant allocations and account for them until execution has ended |
-| Managed executor | Authorize and launch a command, own its process group or job, retain output, handle cancellation and reconcile after a crash |
-| Tool adapter | Make a known tool use its granted allocation efficiently; configure Cargo, a test runner or Xcode without making that tool the scheduler |
-| Platform controller | Apply and report the CPU and memory controls the host actually supports, and own named resources such as simulator devices |
-| Provider integration | Route execution through the executor before launch; report unsupported paths explicitly |
+| `runtime/src/Busy.ts` | Own the temporary admission reduction and recovery alongside the existing agent cap and queue |
+| `runtime/src/MachineLoad.ts`, `machine.ts`, `processTree.ts` | Reuse cheap background observations and existing process ownership; distinguish stale or unavailable readings |
+| `provider-adapters/src/process.ts`, `processTrees.ts`, `keeper.ts` | Keep background priority and use available worker-tree controls without making them a startup requirement |
+| `runtime/src/Launches.ts`, `Setups.ts` | Share pressure policy for Althar-owned heavy work where practical, while preserving the person's existing run and stop semantics |
 
-This is local execution infrastructure. It does not implement cloud placement or the mobile companion. Under ADR-103 the same broker belongs on each worker host; a remote project home must not budget execution against its own cores.
+The governor observes processes and machine pressure, rather than maintaining a list of command names or toolchains. A new language needs no scheduler change. Framework worker flags can be optional tuning later; they are not prerequisites for useful behavior.
 
-## Allocation and admission
+Do not introduce a new MCP command runner, make agents acquire resource leases, patch every provider's shell execution or move commands outside their existing sandbox for this first version. Provider loops and command permissions continue through their current paths.
 
-A job request carries an authenticated owner (task, thread and session), execution target, command and working directory, and a host-owned resource profile. Its grant records CPU capacity, memory reservation and any named exclusive slots. CPU capacity is an amount of execution capacity, not a count of processes or test files.
+## Best-effort boundaries
 
-The host's capacity policy leaves headroom for the person's applications and Althar. CPU availability, physical memory and current pressure are inputs to that policy. Exact defaults need measurements on supported hosts; copying the agent cap's assumptions into a hard memory limit would risk killing legitimate builds.
+Normal descendants usually inherit background priority. A provider may change its children's priority, detach work or launch something through an external service. A simulator or container daemon may therefore sit outside the tree Althar can directly influence. Overall machine pressure should still cause Althar to start less additional work. We can improve ownership of a specific backend later if measurements show it matters.
 
-- Acquire the whole resource vector atomically before launch. A job must not hold a simulator while waiting indefinitely for memory, or hold CPU while waiting for a simulator.
-- Queue owners fairly. A lead flooding the queue must not get every subsequent grant. Use round-robin admission between owners, with FIFO within each owner and aging or reservations for large jobs so a stream of small jobs cannot starve them.
-- Allocate from current available capacity. One busy lead can borrow spare capacity; four active leads share it. A saved cap on active agents remains a separate admission setting.
-- Reject a request larger than host policy can ever admit, with its reason. Temporary pressure queues it. Do not silently reduce a request into something unable to run.
-- A command whose resource behavior is unknown gets a conservative exclusive heavy-work reservation by default. A smaller concurrent profile must be backed by host controls or a validated adapter, rather than an agent declaring that its command is cheap.
-- Lower capacity or growing memory pressure holds back new grants. Pausing a process does not reclaim its memory, and a pressure response must not pretend it does.
+Linux and Windows can offer stronger process-group controls than a portable priority adjustment; macOS needs its own practical behavior and measurement. Exact CPU shares, hard RAM ceilings and exclusive simulator-device ownership are not promises of this feature. Do not add privileged helpers, VMs or a mandatory machine-wide daemon to obtain those promises before shipping a useful improvement.
 
-Resource reservations bound admission. Hard CPU or memory limits are a distinct capability. Record which a job received; do not label estimates or worker flags as OS enforcement.
+If a reading or optional control fails, retain normal background priority and the existing agent cap, retry observations with bounded backoff and keep the diagnostic in the app's log. Do not leave work queued forever, disable a provider or ask the person to repair resource-control permissions. Keep policy state within the current runtime and rebuild it from observations after startup; a durable cross-profile lease journal is not required.
 
-## A common execution path
+Pressure policy must not repeatedly lower Unix niceness in a way it cannot later undo without privilege. Preserve existing background priority as the dependable baseline; use reversible controls only where their behavior has been checked.
 
-Provide one managed execution API to native adapters and provider bridges, with an MCP interface for agents. Submission returns a job ID promptly, including while queued. Reading output, reading state and cancelling refer to that ID and authenticated owner. A long build must not depend on one HTTP tool call remaining connected.
+## Verification and delivery
 
-The executor owns the real launch. A model asking for a lease and later claiming that its command ended is not sufficient. Built-in tools, scripts and nested shells must enter the managed path before they start expensive work. No command-name allowlist can establish that an arbitrary script is cheap.
+Build an integrated change in the existing runtime, then measure it. The acceptance target is a clear improvement in responsiveness under ordinary mixed load, with no added workflow friction:
 
-Keep command authorization separate from resource admission. A grant never permits a command that project rules or a sandbox forbid. Revalidate authorization and the session's authority immediately before a queued command starts. Moving execution into the runtime must not bypass the provider's filesystem or network restrictions: the managed launcher needs the equivalent approved execution boundary.
+- With fake machine readings and the test clock, sustained pressure reduces new admissions, brief spikes do not, and sustained recovery restores capacity within the configured cap.
+- Missing or stale telemetry and denied optional controls fall back without blocking progress, prompting the user or flooding the log.
+- Queue order and direct user actions retain their existing semantics. Stop works while work waits, and reducing admission does not kill or suspend running commands.
+- Real subprocess tests cover a command starting several children, without depending on a particular language or test framework.
+- Measure CPU contention, peak memory, concurrent work and app responsiveness before and after with several builds or test commands running together. Check that a single workload can still make good use of an idle machine and that the governor's own monitoring is cheap.
+- Exercise the default fallback on macOS, Linux and Windows, and any optional platform control on the host where it will run. Do not require identical enforcement mechanisms or eliminate every load spike to call the improvement useful.
 
-The current code has useful pieces, but no universal execution boundary:
+Start with background priority, observed pressure and paced admission. Add stronger controls or special handling only when an observed problem justifies them. Cloud placement, companion features, per-language adapters and a universal execution service are separate work.
 
-- `provider-adapters/src/native/tools.ts` owns native tool subprocess launches, so its execution path can be integrated directly.
-- `runtime/src/Launches.ts` and `Setups.ts` own project and setup commands. Heavy work there must share the same host budget, including work started by a person's button.
-- ACP providers run their own commands. `Sessions.ts` receives permission callbacks and tool-call updates, but updates can arrive after launch. Codex's documented safe-command path can also bypass a permission callback. Permission callbacks alone cannot guarantee admission.
-- `ToolServer.ts` supplies a session-authenticated MCP surface, but an MCP tool plus instructions does not prevent a provider's built-in executor bypassing it.
-
-For each provider, verify a mandatory pre-execution integration or disable its competing execution tools and use the managed executor. Use a capability record rather than assuming all providers behave like one. An unsupported path must be identified as unmanaged; it cannot silently inherit the managed-execution guarantee. Resource scheduling must not introduce per-command user confirmations for ordinary authorized work.
-
-## Job lifetime, cancellation and recovery
-
-Use an explicit lifecycle: queued, starting, running, stopping, then exited, failed or cancelled. Keep the allocation through starting and stopping. Release only after the command and the children it owns have ended, or after cleanup has proved they are gone.
-
-- Cancel while queued: remove the request without spawning anything.
-- Cancel while starting: coordinate the grant and launch so a process cannot start after cancellation has returned.
-- Cancel while running: stop the owned process group or job, collect the result and only then release the allocation.
-- A shell exiting does not mean its children have exited. A provider reporting tool completion does not prove it either.
-- Session or task shutdown cancels its queued jobs and stops its running jobs. A long-lived development server remains an explicit project run, rather than holding an anonymous build lease forever; its resources are accounted for as a service.
-- Keep bounded output and an exit result independently of a model turn. Bound retained job history and output storage so finished work does not grow the broker indefinitely.
-- Journal allocations and OS identities before launch, using process start identity as well as PID. On restart, reconcile surviving work before issuing replacements. A lost owner or expired heartbeat does not make capacity free while its processes still run. Never blindly retry a command with an uncertain outcome.
-
-There is one broker per execution host and OS user, reached through authenticated local IPC and singleton ownership, not one independent pool for each project or profile. Multiple desktop or CLI runtimes on the same computer must share it. A worker-host journal records local execution, rather than making several project databases competing capacity authorities.
-
-## Tool and platform support
-
-Any executable can use the managed executor. Adapters improve its behavior within an allocation; an unknown executable must still be schedulable without inventing a framework adapter first.
-
-| Workload | Adapter responsibility beyond generic execution |
-| --- | --- |
-| Rust | Budget Cargo build jobs and Rust test-harness threads separately; account for compiler/linker children and memory, including build scripts |
-| JavaScript and Python tests | Configure each runner's workers; coordinate workspace packages and nested runners within the same allocation |
-| Xcode and simulator tests | Coordinate build jobs, test parallelism and owned simulator devices; retain device slots through actual teardown |
-| Unknown scripts and custom tools | Use the conservative profile and available host controls; report capability limits rather than guessing from the command's name |
-
-Framework knobs such as `VITEST_MAX_WORKERS` are optional outputs of an adapter. Root package scripts and all user repositories must not become prerequisites for the resource manager's correctness. Competing jobs cannot each be given the entire machine merely because their tools use different flags.
-
-Platform support must be demonstrated, not inferred from a process-tree abstraction:
-
-| Host | Enforcement work and limits |
-| --- | --- |
-| Linux | Investigate delegated cgroup v2 CPU and memory control with children attached before execution. An unprivileged desktop or Flatpak may lack delegation; report that limitation and use the stated conservative admission policy, rather than claiming a cgroup was installed. |
-| Windows | Extend the existing keeper's Job Object with supported CPU and memory controls, set before resuming the child. Test nested jobs and denied assignments on real Windows. |
-| macOS | Establish what a native launcher can enforce on supported releases. Niceness, QoS and a process group are not aggregate CPU or RAM limits. Use conservative admission where hard controls are unavailable and state that capability explicitly. |
-
-Simulators and other services can be launched by system daemons outside the command's descendant tree. A simulator controller must allocate specific devices and verify ownership and teardown. A generic process-group quota cannot be advertised as controlling those services. The person's pre-existing simulator or service must not be commandeered or stopped.
-
-Admission and cleanup run off the thread answering the window, following the [instant UI requirement](../foundations.md#the-ui-is-instant). Queued work and stop requests use the existing asynchronous progress paths; this proposal does not introduce a new screen design.
-
-## Delivery and verification
-
-Deliver integrated slices, with capability boundaries visible throughout:
-
-1. Build the host broker, journal, allocation model and fair queue. Demonstrate two runtime clients sharing one budget and crash recovery that does not double-allocate surviving work.
-2. Connect the managed executor to a real native command path and its existing permission and sandbox boundary. Exercise an unknown CPU-heavy executable and its children, queued jobs, output and cancellation. A broker module without a launch integration is not a completed slice.
-3. Add provider integrations with verified pre-execution behavior, and route project/setup heavy work through the broker. Test any bypass or unsupported capability explicitly. Do not broaden authorization while replacing execution.
-4. Add tool adapters for Rust and multiple test runners. Test composed workspace commands as well as one runner. Tool knobs must not be the only mechanism sharing host capacity.
-5. Validate Windows controls, native macOS builds and simulator ownership on their actual hosts. The simulator contract can be developed alongside existing mobile work, without implementing companion features here.
-
-Acceptance includes:
-
-- Mixed Rust builds, another test runner and an unknown executable contend for one CPU/memory budget, with bounded reservations, fair progress and borrowing of idle capacity.
-- An owner submitting many jobs cannot monopolize the next grants; large jobs eventually run.
-- Queued cancellation never launches a process. Failed launch returns capacity. A surviving child prevents premature release. Restart does not duplicate jobs or grants.
-- Jobs requesting a simulator slot cannot overlap on the same device; cancellation and failures retain ownership until cleanup is verified.
-- Capacity changes, memory pressure and oversized requests have explicit outcomes. An agent cannot evade accounting by declaring an arbitrary command to be cheap.
-- Provider tests prove admission happens before launch, including parallel calls, background commands and scripts. Existing command permissions and sandbox limits still hold after queueing.
-- Each supported host reports its actual admission and enforcement capabilities. Linux test success does not certify native Windows or macOS behavior.
-- Measure sustained CPU use, peak memory, process fanout, queue fairness and UI responsiveness before and after with mixed workloads. The earlier Vitest-only worker-count benchmark is not validation of this design.
-
-DEV-86 remains in progress until execution integration and the relevant host checks exist. This proposal is reviewable groundwork, not evidence that those acceptance criteria pass.
+DEV-86 stays in progress until this runtime behavior is implemented and measured. This document describes the intended first version; it is not evidence that the governor already exists.
