@@ -7,15 +7,7 @@ import { expect, test } from '@playwright/test'
 import { repository } from '../tests/repository'
 import { launch, openFirstProject, sizeWindow, startTask, still, toConversation, showPanes } from './support'
 
-/*
- * Why a task waits, over its composer, in a real window with the fake agent:
- * with one agent at a time, held by a server a finished task left running,
- * two tasks wait in Up next. The second, opened from the board, says it waits
- * in a few words on the chip over its composer, at the window's widest and its
- * narrowest; the chip opens who holds the place, and from there it goes to the
- * front of the line, and the server is stopped, so it starts.
- * Shots: test-results/waiting-*.png.
- */
+/* A finished preview leaves capacity free; real work names the place it holds. */
 
 test('says over the composer why the task waits, opens who holds the place, and moves it to the front and frees the place from there', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
@@ -36,12 +28,30 @@ test('says over the composer why the task waits, opens who holds the place, and 
     await page.keyboard.press('Escape')
     await tabs.getByRole('button', { name: /^meridian/ }).click()
 
-    // A task whose server keeps the one place, then two that wait for it.
+    // The finished preview takes no place; the next lead runs, and two wait for it.
     await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await startTask(page, 'Add a retry', '[lead:wait]')
+    await startTask(page, 'Check links', '[lead:wait]')
     await startTask(page, 'Tidy the docs', '[lead:wait]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(2)
+    await expect(page.getByText(/^Waiting: 1 of 1 agents busy.*Add a retry/)).toHaveCount(2)
+    await page
+      .getByText(/^Waiting: 1 of 1 agents busy.*Add a retry/)
+      .last()
+      .scrollIntoViewIfNeeded()
+    await still(page)
+    await page.screenshot({ path: 'test-results/slots-holders-light.png', scale: 'css', animations: 'disabled' })
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'))
+    await still(page)
+    await page.screenshot({ path: 'test-results/slots-holders-dark.png', scale: 'css', animations: 'disabled' })
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'))
+    await sizeWindow(electronApp, page, 880, 700)
+    const holderLine = page.getByText(/^Waiting: 1 of 1 agents busy.*Add a retry/).last()
+    await holderLine.scrollIntoViewIfNeeded()
+    await expect(holderLine).toBeVisible()
+    await still(page)
+    await page.screenshot({ path: 'test-results/slots-holders-narrow.png', scale: 'css', animations: 'disabled' })
+    await sizeWindow(electronApp, page, 1440, 900)
 
     // The second in line, opened from the board.
     await showPanes(page, { conversation: false, board: true })
@@ -73,10 +83,10 @@ test('says over the composer why the task waits, opens who holds the place, and 
     await still(page)
     await shoot('test-results/waiting-chip.png')
 
-    // It opens who holds the place: the task by its title, what keeps it, and Stop; and the way to the front.
+    // It opens who holds the place by title, with the way to the front.
     await chip.click()
     const behind = page.getByRole('dialog', { name: 'Behind this task' })
-    await expect(behind.getByText('Serve the prototype')).toBeVisible()
+    await expect(behind.getByText('Add a retry')).toBeVisible()
     await still(page)
     await behind.screenshot({ path: 'test-results/waiting-open.png', scale: 'css', animations: 'disabled' })
     await page.keyboard.press('Escape')
@@ -97,9 +107,16 @@ test('says over the composer why the task waits, opens who holds the place, and 
     await expect(page.getByRole('button', { name: 'Waiting for a place, First in Up next' })).toBeVisible()
     await expect(behind.getByRole('button', { name: 'Move to the front of the line' })).toHaveCount(0)
 
-    // Stopping the server frees the place: it starts, and no longer waits.
-    await behind.getByRole('button', { name: 'Stop what Serve the prototype left running' }).click()
-    await expect(page.getByRole('button', { name: /^Waiting for a place/ })).toHaveCount(0)
+    // Open the named holder and stop it: the first task in line starts.
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await showPanes(page, { conversation: false, board: true })
+    await page.getByRole('region', { name: 'Running' }).getByRole('button', { name: 'Add a retry', exact: true }).click()
+    await page.getByRole('button', { name: 'More for this task' }).click()
+    await page.getByRole('menuitem', { name: /Stop the task/ }).click()
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await showPanes(page, { conversation: false, board: true })
+    await expect(page.getByRole('region', { name: 'Running' }).getByText('Tidy the docs')).toBeVisible()
   } finally {
     await electronApp.close()
   }

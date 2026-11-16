@@ -170,6 +170,9 @@ contextBridge.exposeInMainWorld('althar', {
   sounds: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:sounds'),
   editorPicture: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:editor-picture', id),
   findRepositories: (): Promise<unknown> => ipcRenderer.invoke('althar:find-repositories'),
+  clonePlace: (): Promise<unknown> => ipcRenderer.invoke('althar:clone-place'),
+  openFolderAccess: (): Promise<boolean> => ipcRenderer.invoke('althar:open-folder-access'),
+  pickClonePlace: (): Promise<unknown> => ipcRenderer.invoke('althar:pick-clone-place'),
   grantFound: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:grant-found', id),
   playSound: (name: string): Promise<void> => ipcRenderer.invoke('althar:play-sound', name),
   edge: (): Promise<{ place: string; notch: boolean; platform: string; tray: boolean } | null> => ipcRenderer.invoke('althar:edge'),
@@ -216,6 +219,10 @@ contextBridge.exposeInMainWorld('althar', {
     return () => void storeFailed.delete(listener)
   },
   showBackup: (): Promise<void> => ipcRenderer.invoke('althar:show-backup'),
+  storage: {
+    places: (): Promise<Record<string, string>> => ipcRenderer.invoke('althar:storage-places'),
+    show: (place: string): Promise<void> => ipcRenderer.invoke('althar:storage-show', place),
+  },
   tryAgain: (): Promise<void> => ipcRenderer.invoke('althar:try-again'),
   // Report a problem (DEV-61): the page's dialog opens, about what it was asked from; main takes the screenshot as it opens, gathers the rest, and sends or saves it.
   reportProblem: (about: unknown): void => reportAsked(about),

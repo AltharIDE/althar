@@ -72,6 +72,87 @@ const copilotStatus = (installed = true): Status => ({
   ],
 })
 
+const copilotCliStatus = (host?: string): Status => ({
+  ...copilotStatus(),
+  agents: copilotStatus().agents.map((agent) => ({
+    ...agent,
+    id: 'copilot',
+    name: 'GitHub Copilot CLI',
+    login: 'copilot login',
+    ways: [],
+    accounts: agent.accounts.map((account) => ({ ...account, ...(host === undefined ? {} : { signInHost: host }) })),
+  })),
+})
+
+describe('Copilot CLI enterprise sign-in', () => {
+  it('offers the enterprise address in Settings and forwards it to terminal sign-in', async () => {
+    const { client } = fakeClient({ status: vi.fn(async () => copilotCliStatus()) })
+    function Asked() {
+      return <SettingsPage start={useStart()} section="agents" onSection={() => {}} signIn="copilot" />
+    }
+    withServices(<Asked />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Use a GitHub Enterprise address…' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'GitHub Enterprise address' }), 'company.ghe.com')
+    await userEvent.click(screen.getByRole('button', { name: /^Continue$/ }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_copilot', 'company.ghe.com'))
+    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+  })
+
+  it('offers the host choice before opening a terminal', () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotCliStatus()))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    expect(result.current.signingIn?.step).toEqual({ kind: 'choose' })
+    expect(client.signInAccount).not.toHaveBeenCalled()
+  })
+
+  it('opens CLI sign-in with the normalized enterprise host', async () => {
+    const { client } = fakeClient()
+    vi.spyOn(client, 'signInAccount').mockResolvedValue({ line: "copilot login --host 'https://company.ghe.com'", opened: true })
+    const { result } = signInOf(client, startOf(copilotCliStatus()))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    act(() => result.current.enterprise('https://Company.GHE.com/'))
+    await waitFor(() =>
+      expect(result.current.signingIn?.step).toEqual({
+        kind: 'terminal',
+        line: "copilot login --host 'https://company.ghe.com'",
+        opened: true,
+      }),
+    )
+    expect(client.signInAccount).toHaveBeenCalledWith('acc_copilot', 'company.ghe.com')
+    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+  })
+
+  it('prefills the remembered host and lets the person switch back to github.com', async () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotCliStatus('company.ghe.com')))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    expect(result.current.signingIn?.step).toEqual({ kind: 'choose', enterprise: 'company.ghe.com' })
+    act(() => result.current.way(SignInWay.Terminal))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_copilot', 'github.com'))
+  })
+
+  it('keeps a failed CLI sign-in’s host when trying again', async () => {
+    const { client } = fakeClient()
+    vi.spyOn(client, 'signInAccount').mockRejectedValue(new ApiError({ reason: 'SignInFailed', message: 'Terminal could not open.' }))
+    const { result } = signInOf(client, startOf(copilotCliStatus()))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    act(() => result.current.enterprise('company.ghe.com'))
+    await waitFor(() => expect(result.current.signingIn?.step.kind).toBe('failed'))
+    act(() => result.current.back())
+    expect(result.current.signingIn?.step).toEqual({ kind: 'choose', enterprise: 'company.ghe.com' })
+  })
+
+  it('rejects an invalid host at its field before opening a terminal', () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotCliStatus()))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    act(() => result.current.enterprise('https://company.ghe.com/path'))
+    expect(result.current.signingIn?.step).toMatchObject({ kind: 'choose', error: expect.any(String) })
+    expect(client.signInAccount).not.toHaveBeenCalled()
+  })
+})
+
 describe('Copilot sign-in without a terminal', () => {
   it('keeps the enterprise address when retrying a failed sign-in', async () => {
     const { client } = fakeClient()

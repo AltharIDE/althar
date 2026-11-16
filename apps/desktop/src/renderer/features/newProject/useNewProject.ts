@@ -12,6 +12,7 @@ import { contractInk, kitInk } from '../../shared/inks'
 import { productBrand } from '../../shared/products'
 import { changesOn, codeHostOf, remoteOf } from '../../shared/remotes'
 import { type Draft, type DraftFolder, draftActions, draftsOf, inkOf } from './draft'
+import { type SetupActions, type SetupModel, useSetup } from './useSetup'
 
 /*
  * A new project's view model: the draft its tab holds, and what the page
@@ -43,6 +44,12 @@ export interface NewProjectModel {
   readonly drop: (files: ReadonlyArray<File>) => Promise<void>
   readonly add: (id: string) => Promise<void>
   readonly leaveOut: (path: string) => void
+  /** Asks where a clone goes. */
+  readonly chooseCloneInto: () => Promise<void>
+  /** Asks for another folder in place of one. */
+  readonly replace: (path: string) => Promise<void>
+  /** Where its code comes from, where it lives and where its issues go. */
+  readonly setup: (SetupModel & SetupActions) | null
   /** Makes the project; it, or null when it couldn't. */
   readonly create: () => Promise<ProjectSummary | null>
 }
@@ -142,25 +149,49 @@ export const useNewProject = (): NewProjectModel => {
     const tail = where.startsWith('~/') ? where.slice(1) : where
     return roots.find((root) => root.path === where || root.path.endsWith(tail))?.project
   }
-  const inProject = (folder: DraftFolder) => folder.project ?? roots.find((root) => root.path === folder.path)?.project ?? null
+  const inProject = (folder: DraftFolder) => folder.project?.name ?? roots.find((root) => root.path === folder.path)?.project ?? null
 
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const project of projects) taken[kitInk(project.ink)] ??= project.name
 
+  const setup = useSetupOf(draft, store, list)
+  const way = setup?.way ?? 'folder'
+  const clone = setup?.clone ?? null
+  // What it's made of, as the way chosen brings it: the clone, the new repository, or the folders.
+  const mine = (came: 'clone' | 'new' | 'folder') => (draft?.folders ?? []).filter((folder) => (folder.came ?? 'folder') === came)
   const folders: ReadonlyArray<NewProjectFolder> =
     draft === null
       ? []
-      : [
-          ...draft.folders.map((folder) => folderOf(folder, list)),
-          ...(draft.fresh === null
+      : way === 'clone'
+        ? mine('clone').length > 0
+          ? mine('clone').map((folder) => folderOf(folder, list))
+          : clone === null
             ? []
-            : [{ id: draft.fresh.path, fresh: true as const, name: draft.fresh.name, where: draft.fresh.where }]),
-          ...draft.reading.map((reading): NewProjectFolder => ({
-            id: reading.key,
-            reading: true,
-            ...(reading.name === undefined ? {} : { name: reading.name }),
-          })),
-        ]
+            : [
+                {
+                  id: clone.id,
+                  name: clone.remote.split('/').at(-1) ?? clone.remote,
+                  where: clone.where ?? clone.hostName,
+                  host: { name: clone.hostName, ...(clone.brand === null ? {} : { brand: clone.brand }) },
+                  remote: clone.remote,
+                },
+              ]
+        : way === 'new'
+          ? [
+              ...mine('new').map((folder) => folderOf(folder, list)),
+              ...(draft.fresh === null
+                ? []
+                : [{ id: draft.fresh.path, fresh: true as const, name: draft.fresh.name, where: draft.fresh.where }]),
+              ...draft.reading.map((reading): NewProjectFolder => ({ id: reading.key, reading: true })),
+            ]
+          : [
+              ...mine('folder').map((folder) => folderOf(folder, list)),
+              ...draft.reading.map((reading): NewProjectFolder => ({
+                id: reading.key,
+                reading: true,
+                ...(reading.name === undefined ? {} : { name: reading.name }),
+              })),
+            ]
 
   const offered = (() => {
     if (draft === null) return null
@@ -197,7 +228,7 @@ export const useNewProject = (): NewProjectModel => {
     taken,
     folders,
     found: offered,
-    findings: draft === null ? [] : findingsOf(draft.folders, list, inProject),
+    findings: draft === null || way !== 'folder' ? [] : findingsOf(mine('folder'), list, inProject),
     rename: (name) => {
       if (draft !== null) store.change(draft.id, (now) => ({ ...now, name }))
     },
@@ -211,6 +242,9 @@ export const useNewProject = (): NewProjectModel => {
       const repository = found.data?.repositories.find((one) => one.id === id)
       return repository === undefined ? Promise.resolve() : actions.addFound(id, { name: repository.name, where: repository.where })
     },
+    chooseCloneInto: actions.chooseCloneInto,
+    replace: actions.replace,
+    setup,
     leaveOut: (path) => {
       if (draft !== null)
         store.change(draft.id, (now) => ({
@@ -219,6 +253,33 @@ export const useNewProject = (): NewProjectModel => {
           fresh: now.fresh?.path === path ? null : now.fresh,
         }))
     },
-    create: () => (draft === null ? Promise.resolve(null) : actions.create(inkOf(draft, projects))),
+    create: () => (draft === null || setup === null ? Promise.resolve(null) : actions.create(inkOf(draft, projects), setup.plan)),
   }
+}
+
+/** The setup of the draft there is; none once it is made or closed. Hooks run either way, so the page's order of them holds. */
+const useSetupOf = (draft: Draft | null, store: ReturnType<typeof draftsOf>, list: ConnectionList | null) => {
+  const setup = useSetup(draft ?? PLACEHOLDER, store, list)
+  return draft === null ? null : setup
+}
+
+/** What the setup reads while there's no draft: nothing chosen. */
+const PLACEHOLDER: Draft = {
+  id: '',
+  name: '',
+  ink: null,
+  way: null,
+  folders: [],
+  fresh: null,
+  reading: [],
+  clone: null,
+  query: '',
+  cloneInto: null,
+  home: null,
+  issues: null,
+  creating: false,
+  steps: { source: 'idle', home: 'idle', issues: 'idle' },
+  made: false,
+  error: null,
+  homeError: null,
 }

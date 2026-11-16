@@ -1,5 +1,7 @@
 import { isoAfter } from '@althar/testing'
 import type {
+  HostRepository,
+  RepositoryOwner,
   AccountSignInState,
   AgentModels,
   AgentStatus,
@@ -27,6 +29,7 @@ import type {
   ProjectRulesView,
   ProjectRepository,
   TaskFindings,
+  TaskLineComments,
   ProjectSummary,
   RepositoryScript,
   SkillReviewCard,
@@ -1094,6 +1097,23 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       grant: 'grant_made',
       path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     })),
+    prepareFolder: vi.fn(async (grant: string, path?: string) => ({
+      did: 'started' as const,
+      path: path ?? `/Users/ada/code/${grant.replace(/^grant_/, '')}`,
+      branch: 'main',
+      files: 1,
+    })),
+    listHostRepositories: vi.fn(async (): Promise<ReadonlyArray<HostRepository>> => []),
+    listRepositoryOwners: vi.fn(async (): Promise<ReadonlyArray<RepositoryOwner>> => [{ id: 'ada', name: 'ada', kind: 'user' as const }]),
+    cloneRepository: vi.fn(async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }) => {
+      const name = ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')
+      return { grant: `grant_${name}`, path: `/Users/ada/code/${name}` }
+    }),
+    publishRepository: vi.fn(async (input: { readonly owner: RepositoryOwner; readonly name: string }) => ({
+      remote: `${input.owner.id}/${input.name}`,
+      webUrl: `https://github.com/${input.owner.id}/${input.name}`,
+      branch: 'main',
+    })),
     listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
     getSearchDocuments: vi.fn(async () => ({ documents: [], next: null })),
     getSearchFiles: vi.fn(async () => ({ files: [] })),
@@ -1163,6 +1183,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       truncated: false,
     })),
     getTaskFindings: vi.fn(async (_taskId: string, _review?: string): Promise<TaskFindings> => ({ findings: [], review: null })),
+    getLineComments: vi.fn(async (_taskId: string): Promise<TaskLineComments> => ({ comments: [] })),
     startSession: vi.fn(async () => 's1'),
     switchAgent: vi.fn(async () => 's2'),
     setModel: vi.fn(async () => {}),
@@ -1249,6 +1270,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setFolderWait: vi.fn(async () => {}),
     setPlansAndReviews: vi.fn(async () => {}),
     setNewProjectDefaults: vi.fn(async () => {}),
+    getStorageSize: vi.fn(async () => ({ state: 'done' as const, bytes: 3 * 1024 ** 3, approximate: false, unreadable: 0 })),
     getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),
     cleanUpFolders: vi.fn(async () => ({ freed: 0, failed: 0 })),
     removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
@@ -1477,9 +1499,20 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   attachPasted: vi.fn(async () => []),
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
+  clonePlace: vi.fn(async () => ({ grant: 'grant_code', where: '~/code' })),
+  openFolderAccess: vi.fn(async () => true),
+  pickClonePlace: vi.fn(async () => ({ grant: 'grant_elsewhere', where: '~/elsewhere' })),
   onOpen: vi.fn(() => () => {}),
   onStoreFailed: vi.fn(() => () => {}),
   showBackup: vi.fn(async () => {}),
+  storage: {
+    places: vi.fn(async () => ({
+      profile: '/home/me/.local/share/althar',
+      logs: '/home/me/.local/share/althar/logs',
+      worktrees: '/home/me/Althar',
+    })),
+    show: vi.fn(async () => {}),
+  },
   tryAgain: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),

@@ -370,11 +370,11 @@ describe('a task’s card in the Talk room', () => {
         queued: { busy: 4, atOnce: 4, holders },
       })
     const client = await talking(waiting(1), waiting(2), waiting(3))
-    expect(await screen.findAllByText('Waiting: 4 of 4 agents busy on this Mac')).toHaveLength(3)
+    expect(await screen.findAllByText('Waiting: 4 of 4 agents busy on this Mac: Start the dev server')).toHaveLength(3)
     const pills = screen.getAllByRole('button', { name: /^Keeping a place/ })
     expect(pills).toHaveLength(1)
     // It sits under the lowest card.
-    const last = screen.getAllByText('Waiting: 4 of 4 agents busy on this Mac').at(-1)!
+    const last = screen.getAllByText('Waiting: 4 of 4 agents busy on this Mac: Start the dev server').at(-1)!
     expect(last.compareDocumentPosition(pills[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await userEvent.click(pills[0]!)
     const list = within(await screen.findByRole('dialog', { name: 'Keeping a place' }))
@@ -382,14 +382,13 @@ describe('a task’s card in the Talk room', () => {
     await waitFor(() => expect(client.stopBackground).toHaveBeenCalledWith('th9', 'bg1'))
   })
 
-  it('shows its card alone when only agents at work hold the places, naming none of them', async () => {
+  it('names active holders in the card without offering background stop controls', async () => {
     const holders = [
       { taskId: 't9', title: 'Run the suite', threadId: 'th9', kept: false, running: [] },
       { taskId: 't8', title: 'Fix the login', threadId: null, kept: false, running: [] },
     ]
     await talking(card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4, holders } }))
-    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
-    expect(screen.queryByText(/Run the suite|Fix the login/)).toBeNull()
+    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac: Run the suite; Fix the login')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Keeping a place/ })).toBeNull()
   })
 

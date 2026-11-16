@@ -1,21 +1,25 @@
 # ADR-103: A project lives locally or on a host, and places its work across its pools
 
-> A proposal, not built. Where it would fold in: [foundations.md § Where the runtime runs, and who may reach it](../foundations.md#where-the-runtime-runs-and-who-may-reach-it).
+> The wider design remains a proposal. The shared API and host foundations below are built; the transport and language choices accepted on 16 Nov are recorded as decided, not built in [Foundations](../foundations.md#remote-connections-and-native-workers-decided-not-built). Other proposed decisions would fold into [Foundations § Where the runtime runs, and who may reach it](../foundations.md#where-the-runtime-runs-and-who-may-reach-it).
 
 - **Status:** Proposed
 - **Date:** 2026-11-07
+- **Updated:** 2026-11-16
 - **Owner:** Runtime and desktop maintainers
 - **Amends:** [ADR-048](../foundations.md#where-the-runtime-runs-and-who-may-reach-it),
   not replaces it: the local utility process, one writer per profile and
   separation of clients from agents stay. The headless host becomes a
   persistent service; remote project ownership need not wait for multiplayer;
-  SSH joins the relay; provider support decides which sign-ins a host can use.
+  direct HTTPS/WSS works with or without a private network, SSH remains
+  optional, and a relay may follow later; provider support decides which
+  sign-ins a host can use.
   Also amends [ADR-003](../foundations.md#the-shell-and-the-runtime) (remote project connections),
   [ADR-028](../packaging.md#off-a-mac-windows-and-the-keyring) (headless sealing),
   [ADR-091](../workspaces-and-runs.md#local)
   (Local belongs to a particular computer), and
   [ADR-100](../desktop-app.md#a-web-page-beside-the-conversation)
-  (forwarded previews). These are proposed amendments until this ADR is accepted.
+  (forwarded previews). Except for the accepted subset recorded in Foundations,
+  these remain proposed amendments.
 - **Context:** Several leads, worktrees and builds exhaust the person's
   laptop. They want agents on their own VPS, controlled from Althar, with
   work continuing when that laptop sleeps. They also want to use another
@@ -50,19 +54,21 @@ flowchart TB
         UI --- Native
     end
     Phone[Later: paired phone or web client]
-    Relay[Optional Connect relay: encrypted transport]
-    UI <-->|SSH tunnel or local MessagePort| Home
-    UI <--> Relay
-    Phone <--> Relay
-    Relay <--> Home
+    Relay[Later optional relay: encrypted transport]
+    UI <-->|HTTPS/WSS: direct or private network| Home
+    UI <-->|Optional SSH; MessagePort when local| Home
+    Phone <-->|Later: direct HTTPS/WSS| Home
+    UI -.-> Relay
+    Phone -.-> Relay
+    Relay -.-> Home
     subgraph Authority[Project home: this computer, own host or Althar hosting]
-        Home[Runtime, always-on coordinator and scheduler]
+        Home[TypeScript/Node home, coordinator and scheduler]
         DB[(SQLite and durable artifacts)]
         Home --> DB
     end
-    Home <-->|Leased work and results| Worker
+    Home <-->|Protobuf: leased work and results| Worker
     subgraph Pool[Project-assigned pool]
-        Worker[Worker supervisor]
+        Worker[Rust worker supervisor and execution agent]
         Worker --> Agents[Claude Code, Codex or OpenCode]
         Worker --> Work[Worktrees, builds and running services]
     end
@@ -186,37 +192,52 @@ or shell command supplied by a worker.
 
 ### Connections and the person's word
 
-Use SSH to bootstrap and connect a personal Linux host. Respect SSH config,
-pinned host keys and the person's normal authentication, including their
-own proxy/jump configuration. Install a versioned, signed host bundle,
-check prerequisites, then start a supervised user service. Use systemd with
-linger where needed so logging out does not stop it. State which setup step
-needs administrative access. No Docker, VPN or public API port is required.
+Connect directly to a reachable home with HTTPS for pairing and connection
+management, and WSS for commands, replies and streamed events. Carry the
+shared versioned client API with bounded messages and backpressure; do not
+create a second set of task or permission semantics. Local MessagePorts and
+private sockets remain. Support Tailscale or another private network as a
+route, and direct HTTPS with valid server identity without a VPN. Network
+membership never authenticates a person or authorizes an approval.
 
-Carry the versioned Effect RPC contract over framed, bounded messages on
-the private socket through SSH. Adapt it to `PortLike`; a native MessagePort
-cannot be sent across a network. Authenticate before attaching the API or
-opening preview/file channels. Never tunnel `ToolServer` as the client API.
-An SSH login reaches the host; it is not proof that a command is the
-person's own input.
+SSH is an optional setup or connection route, not a prerequisite for normal
+paired connections. Respect SSH config, pinned host keys and the person's
+normal authentication, including proxy/jump configuration. The existing
+SSH adapter uses system OpenSSH key/agent authentication without password
+prompts. Installing a versioned, signed bundle, checking prerequisites and
+starting a supervised user service remain separate setup work. Use systemd
+with linger where needed so logging out does not stop it, and state which
+setup step needs administrative access. A private-network route or SSH
+tunnel need not expose a public API port.
 
-Connect adds an outbound WebSocket relay with end-to-end authenticated
-encryption between paired endpoints. The relay holds routing and service
-entitlements, not project content or approval authority. Direct SSH remains
-independent of an Althar account. A relay account can handle discovery and
-billing without becoming the key that signs the person's commands. No
-Tailscale dependency. Phone and web access build on this connection; web
-pairing and key recovery need their own reviewed protocol before shipping.
+The existing SSH path carries bounded, framed Effect RPC through the
+private socket, adapted to `PortLike`; a native MessagePort cannot be sent
+across a network. Authenticate before attaching any API or opening
+preview/file channels. Never tunnel `ToolServer` as the client API. An SSH
+login reaches the host; it is not proof of the person's own input.
+
+Do not build a relay in the next slice. A later Connect service can provide
+an outbound relay with end-to-end authenticated encryption between paired
+endpoints. It holds routing and service entitlements, not project content
+or approval authority. Local and direct connections remain independent of
+an Althar account. Relay accounts can provide discovery without becoming
+the keys that sign person commands. Phone and web access need not wait for
+a relay, but their pairing, protected keys, origin trust and recovery need
+review before shipping.
 
 Each client has a revocable identity; record actor and device per command.
-Bootstrap pairing is confirmed in the app through a one-time challenge,
-pinned to the host identity. Its private device key stays on the client,
-outside host workspaces and agents' readable files. The home verifies a
-connection challenge, command id and replay protection. Several paired
+Bootstrap pairing is confirmed by a trusted owner client through an
+expiring, single-use challenge, pinned to the home identity. Review the
+initial owner enrollment and recovery path before release. Its private
+device key stays on the client, outside host workspaces and agents' readable
+files. The home verifies a connection challenge, command id and replay
+protection. Several paired
 devices can connect; revoking one stops its streams and future commands.
 CLI/socket callers and worker tokens cannot claim to be a paired person.
 If a client cannot protect its key from agents on its own computer, it has
 socket authority until it can; calling its key paired is not a boundary.
+Pairing authenticates a device, not physical human intent for every action.
+The trusted approval path must preserve that distinction.
 
 ADR-081/086's rule stays: fresh words from the window or a paired device,
 or an authorized errand, supply the person's word in the turn they start.
@@ -228,6 +249,22 @@ execution creates no new approval category; permissive defaults and the
 person's Never rules stay.
 
 ### Worker protocol, failure and recovery
+
+Build the worker supervisor and small sandbox execution agent in Rust;
+keep the existing TypeScript/Node home and scheduler. Define their separate
+worker protocol in Protobuf, generating TypeScript and Rust bindings from
+one versioned schema. gRPC is the initial transport candidate to validate
+across the real boundary, including authentication, cancellation,
+backpressure, reconnect and compatible upgrades. Do not convert the client
+API to Protobuf just because the worker uses it. The worker can invoke
+provider adapters and toolchains that still require Node; do not duplicate
+the home runtime or claim the execution environment is Node-free.
+
+Enrollment grants a worker identity scoped to its home and assigned work,
+never person authority. Negotiate versions and capabilities before
+admitting work. A decoded Protobuf message still needs bounds, semantic
+validation and authorization. Pin generators/toolchains, verify generated
+binding drift and test old/new peers before requiring a protocol feature.
 
 The home issues an attempt id, controller generation, lease and fencing
 token. The worker journals accepted commands and ordered events before
@@ -319,16 +356,29 @@ Choose containers on tenant-isolated machines or microVMs after measuring
 real builds and escape exposure; ordinary shared-kernel containers alone
 are not an assumed boundary for unrelated customers. Cache prepared images
 and dependencies, restore snapshots and add credentials after restoration.
-Measure allocation to first usable command, warm and cold, plus queue time.
-Do not infer task startup speed from VM boot alone.
+Measure warm/cold allocation to first usable command and first useful agent
+response, p50/p95, queue time, idle memory and active process-tree memory.
+Include repository setup, caches, toolchains, provider startup and
+authentication. Report the home, supervisor and guest process costs
+separately. Do not infer task startup speed from VM boot or Rust alone.
 
 Client, home and worker exchange protocol versions, build versions and
 capabilities before use. Refuse incompatible commands with a route to
 update; a stale client must not make a home migrate or downgrade its store.
 The app manages signed host updates, backups and rollback of binaries.
-Schema rollback requires restoring a compatible backup. Drain active work
-before a service update; installing a new desktop alone does not restart a
-remote home. Roll out compatible workers before requiring their features.
+The first standalone host checks/downloads/verifies automatically and applies
+explicitly by default. Optional automatic activation happens on the next
+service start before work begins, only for compatible releases. Explicit
+maintenance stops agents; finish active work first. Idle-time application
+needs a real admission/drain barrier and is not implemented. Schema rollback
+may restore a snapshot only during storage-only preparation; after an
+incompatible runtime may have acted, keep data and require a corrected
+release. Installing a new desktop alone does not restart a remote home.
+Roll out compatible workers before requiring their features.
+The native worker needs its own signed artifact, version/capability checks
+and process-ownership proof before updates may replace it. Reuse the host
+release trust and recovery rules; the existing Node host updater does not
+already provide a Rust worker rollout or an admission/drain barrier.
 
 Keep structured logs on both sides with home, host, task, attempt, command
 and event ids. Show connection loss, queue reason, last heartbeat, version,
@@ -339,12 +389,14 @@ health and any managed-service metering are separate from product analytics.
 
 ### Local, Connect, Hosted and cloud workers
 
-Keep these independent: free local/self-hosted single-player; **Connect**
-for relay access to running homes; **Hosted** for a managed single-player
-home including Connect; cloud workers as optional compute; multiplayer as
-collaboration on either hosting arrangement. Hosting does not imply unlimited
-agent compute, model usage or artifacts. Entitlements cannot change who owns
-a local record or force a self-hosted project through the relay.
+Keep these independent: local/self-hosted single-player; optional **Connect**
+relay access to running homes; **Hosted** for a managed single-player home;
+cloud workers as optional compute; and multiplayer collaboration. This is
+a technical service boundary, not a relay pricing decision. Direct use and
+managed hosting do not require a relay. Hosting does not imply unlimited
+agent compute, model usage or artifacts. Service entitlements cannot change
+who owns a local record, grant person authority or force a self-hosted
+project through the relay.
 
 Managed single-player initially keeps one home writer and isolated profile,
 using the same runtime and SQLite. Placement, backups and failover must
@@ -361,7 +413,9 @@ New hosts and protocols named here still have to be built.
 
 | Package/app | Change and starting files |
 | --- | --- |
-| `apps/host` (new) | Plain Node host and worker entry points; configuration, service install, shutdown, health, sealing and signed updates. Extract host wiring from [`runtime.ts`](../../../apps/desktop/src/runtime/runtime.ts), not Electron imports into the runtime. |
+| `apps/host` | Existing plain Node home, service lifecycle, secrets and signed updates. Add direct HTTPS/WSS and reviewed enrollment without moving project authority into a worker. Keep Electron imports out of the runtime. |
+| Native worker and worker protocol (new; paths to choose in the first slice) | Rust supervisor and sandbox execution agent, canonical Protobuf schemas and generated TypeScript/Rust bindings. Build the authenticated execution/journal/recovery boundary, not another home. Pin toolchains and add language-specific CI before shipping. |
+| `packages/transport-node` | Existing bounded socket/SSH clients; add the Node side of direct HTTPS/WSS while keeping authority, version and checked-feed rules shared with other client transports. |
 | `apps/desktop` main/preload | Route local and remote connections in [`main.ts`](../../../apps/desktop/src/main/main.ts), `startRuntime` and `connect`; keep local supervision. Implement pairing, tunnels and client-side file/editor grants. Split native actions out of [`runtime.ts`](../../../apps/desktop/src/runtime/runtime.ts); route forwarded runs through [`browser/pages.ts`](../../../apps/desktop/src/main/browser/pages.ts). |
 | `apps/desktop` renderer | Home-aware clients and caches in [`data/client.ts`](../../../apps/desktop/src/renderer/data/client.ts); host/pool setup, connection state, run location and local test copies. Never resolve a remote path with the client's filesystem. |
 | `apps/cli` | [`main.ts`](../../../apps/cli/src/main.ts) attaches through the API (DEV-128), locally or remotely. An attached CLI is not the person's paired device merely because SSH authenticated it. |
@@ -389,46 +443,101 @@ an opt-in private local socket, durable command admission/results, checked
 home/cursor/checkpoint reconnect and typed native attention. See
 [architecture 02](../../architecture/02-desktop-runtime.md#local-transport)
 for the contracts and limits. This does not accept the rest of this proposal
-or complete phase 1: headless lifecycle, SSH bootstrap, protected client keys,
+or complete a usable remote project: SSH bootstrap, protected client keys,
 remote files/previews, provider validation, pools and workers remain ahead.
 Registered devices currently act for one profile owner; they are not a
 multiplayer permission model. Pricing and entitlements remain separate.
 
-1. **One usable personal Linux host.** Build `apps/host`, sealing, versioned
-   private-socket RPC, pairing and SSH bootstrap. Co-locate a remote project
-   home and one worker in its one-host pool. The app still opens local
-   projects too. Create a remote project and clone its repositories rather
-   than silently moving an existing local one. Ship host-side agent login,
-   setup, files/diffs/artifacts, run forwarding, editor handoff and reconnect.
-   Prove on a real VPS that a task builds and records its result with the
-   Mac asleep, then reconnect and answer an ask. Prove another unpaired
-   process cannot submit a person-only answer. Gate each agent on its
-   headless subscription sign-in, refresh and plan usage working on that
-   VPS; an agent that fails stays off remote hosts until it passes. This is
-   the first usable slice.
-2. **Several workers and local testing.** Automatic placement across assigned
+**Host service foundation implemented, 15 Nov 2026:** [`apps/host`](../../../apps/host/README.md) now supplies a persistent Node home, versioned private API, separate-key authenticated encryption, health, restart/signal cleanup and a systemd user service with delivered credentials. Signed portable Linux releases and managed updates include independent supervision, verified staging, explicit application by default, optional compatible next-start activation and phase-aware database/code recovery. This is a trusted single-user process, with co-located agents rather than isolated workers. Production signing-key provisioning/publication, actual VPS/systemd reboot validation, provider headless login/refresh, protected client enrollment, SSH bootstrap and remote files/previews remain work before a usable remote project ships. No pools, worker leases, relay or multiplayer authorization are implied.
+
+**SSH attachment implemented, 15 Nov 2026:** the host's `connect-stdio`
+bridge and CLI attach through the private socket or system OpenSSH with
+socket authority, expected home/API checks and checked feed positions.
+[Desktop SSH attachment #982](https://github.com/AltharIDE/althar/pull/982)
+is in review as of 16 Nov, not merged. It does not provide protected device
+enrollment or person-only approvals.
+
+The next two slices can be developed independently against the existing
+home. Deliver direct connectivity first for the client path; neither slice
+needs a relay. The following work remains proposed beyond the accepted
+transport and language choices.
+
+```mermaid
+flowchart TD
+    Existing[Built: shared API and persistent Node home]
+    Existing --> Direct[Next client slice: HTTPS/WSS and reviewed device pairing]
+    Existing --> Worker[Next execution slice: Rust worker and Protobuf contract]
+    Direct --> Personal[Usable personal remote project]
+    Worker --> Personal
+    Personal --> Pools[Several assigned workers and local testing]
+    Personal --> Hosted[Managed home: lifecycle, backups and recovery]
+    Pools --> Cloud[Isolated managed compute]
+    Hosted --> Cloud
+    Direct -. Later optional .-> Relay[Account-backed encrypted relay]
+    Direct -. Key and origin review .-> Clients[Phone and web clients]
+    Hosted -. Separate authorization work .-> Multiplayer[Organization and project collaboration]
+```
+
+1. **Direct home connection and device lifecycle.** Add HTTPS/WSS adapters
+   to the existing API, with TLS/server identity, authenticated attachment,
+   explicit origin policy, bounded frames/queues, timeouts and checked-feed
+   reconnect. Support a private-network endpoint and a directly reachable
+   HTTPS endpoint without requiring Tailscale, SSH or a relay account. Pair
+   once with a home-bound, expiring, single-use challenge; reconnect and
+   revoke a device. Review initial owner enrollment, protected key storage,
+   recovery and approval provenance before granting person authority. Keep
+   clients that cannot meet that boundary at socket authority. Prove a
+   revoked connection stops, an unpaired process cannot answer an ask, and
+   reconnect neither loses history silently nor replays an external action.
+2. **One native worker execution path.** Add a pinned Rust workspace,
+   canonical Protobuf schemas and reproducible TypeScript/Rust bindings.
+   Validate gRPC as the first transport candidate. Enroll one authenticated
+   worker and run one real command from the Node home with a durable
+   attempt/lease/fencing record, a worker journal and bounded streamed
+   output. Prove process-tree cancellation, dropped acknowledgements,
+   reconnect replay, stale attempts, worker/home restart reconciliation and
+   explicit unknown outcomes for unconfirmed external effects. Capture the
+   warm/cold and memory baseline described above. Do not start with a broad
+   rewrite of provider adapters, a new scheduler or managed sandbox fleet.
+3. **One usable personal remote project.** Connect the client and worker
+   paths. Co-locate a personal Linux home and worker initially; create a
+   remote project and clone its repositories rather than silently moving a
+   local one. Ship host-side agent login, setup, files/diffs/artifacts,
+   run forwarding and editor handoff. Complete signed release publication
+   and installation/bootstrap UX. Prove on a real VPS that a task builds
+   and records its result with the desktop asleep, then reconnect. Gate
+   each provider on supported headless sign-in, refresh and plan usage on
+   that VPS. An unsupported provider remains unavailable there.
+4. **Several workers and local testing.** Automatic placement across assigned
    pools, resource reservations, fenced leases, host outages and snapshots;
    Run on this computer and platform-qualified setup. Prove a saturated host
    sends a new task to another approved worker, unassigned pools stay unused,
    concurrent homes cannot overbook, a stale attempt cannot complete, and
    local verification includes uncommitted remote source without losing edits.
-3. **Connect and more clients.** Reviewed encrypted relay, pairing/revocation,
-   notifications and multi-desktop access; phone/web clients after their
-   key-storage and input-provenance work. Prove direct and relayed commands
-   obey the same authority rules and that a client reconnect cannot replay
-   an irreversible action. Show a local home as unavailable when asleep.
-4. **Hosted single-player.** Managed regional homes, recovery and export,
+5. **Hosted single-player.** Managed regional homes, recovery and export,
    secrets, independent updates and entitlements. Use the person's own pools
-   first; include coordinator availability while distinguishing provider
-   usage and worker capacity. Prove restore, key recovery, writer fencing,
-   offline clients and a complete export back to a personal host.
-5. **Managed cloud workers and multiplayer.** Isolated environments, prepared
-   snapshots, capacity controls, retention and measured startup; collaboration
-   adds people, roles and a shared authority. Reuse placement and lease
-   protocols. Prove tenant separation, cancellation, no secret in a reusable
-   snapshot, regional placement, and export of unpushed work before retiring
-   capacity. Provider sign-in in managed environments is its own release
-   gate, checked again rather than carried over from phase 1.
+   first; distinguish coordinator availability, provider usage and worker
+   capacity. Prove restore, key recovery, writer fencing, offline clients and
+   a complete export back to a personal host. This does not wait for relay.
+6. **Managed cloud workers.** Isolated environments, prepared snapshots,
+   capacity controls, retention and measured startup. Reuse placement and
+   lease protocols. Prove tenant separation, cancellation, no secret in a
+   reusable snapshot, regional placement and export of unpushed work before
+   retiring capacity. Supported provider sign-in in managed environments is
+   a separate release gate, checked again rather than inherited from a VPS.
+
+**Optional later connection work:** an encrypted relay can reuse the paired
+client API after a routing, abuse-control, privacy and operating-cost review.
+Prove relayed and direct commands have identical authority and revocation
+rules; relay availability does not keep a sleeping local home running.
+Phone/web clients additionally need their protected-key, recovery, origin
+and input-provenance proof, whether they connect directly or through a relay.
+
+**Separate later collaboration work:** organization membership, project
+invites, roles and shared authority build on the actor/project identities.
+Owner-device registration is not a substitute for that authorization model.
+Collaboration need not block a managed single-player home, and a relay
+account alone never grants access to someone's project.
 
 Each slice includes focused contract/failure tests. Fake agents prove protocol
 behavior, not Linux isolation, provider sign-in, real Git credentials or
@@ -480,9 +589,13 @@ SSH-worktree and full-server modes; Amp offers personal runners and explicit
 copies of remote changes for local testing. These are documented behaviors,
 not independent VPS tests:
 
-- [Orca run modes](https://www.onorca.dev/docs/ways-to-run),
-  [SSH worktrees](https://www.onorca.dev/docs/ssh),
-  [remote servers](https://www.onorca.dev/docs/remote-servers).
+- [Orca run modes](https://orca.dev/docs/ways-to-run),
+  [SSH worktrees](https://orca.dev/docs/ssh),
+  [remote servers](https://orca.dev/docs/remote-servers),
+  [mobile connections](https://orca.dev/docs/mobile).
+- [T3 remote access](https://github.com/pingdotgg/t3code/blob/main/docs/user/remote-access.md):
+  direct LAN/Tailscale, optional SSH and account-backed Connect are separate
+  connection routes. This is a product reference, not an Althar trust proof.
 - [Amp runners](https://ampcode.com/docs/cli/runners),
   [local sync](https://ampcode.com/docs/orbs#sync-changes-to-your-computer).
 - [DEV-128: CLI attachment](https://linear.app/althar/issue/DEV-128),

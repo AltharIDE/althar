@@ -6,6 +6,7 @@ import { Rhythm } from '../../lib/rhythm'
 import { AskCard } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
 import { MergeButton } from '../../primitives/MergeButton/MergeButton'
+import { MergeFeel } from '../../primitives/MergeFeel/MergeFeel'
 import { HoverCard } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
@@ -282,7 +283,6 @@ export function SmallChange({
   const adding = choosing && review.when === 'none'
   const columns = { gridTemplateColumns: `repeat(${stops.length + (adding ? 1 : 0)}, minmax(0, 1fr))` }
   const under = (key: Stop['key']) => ({ gridColumn: stops.findIndex((stop) => stop.key === key) + 1 })
-  const ready = merge.state === 'ready' || merge.state === 'merging'
   const found = review.state === 'found' && onFindings !== undefined
   const kicker = full ? t.fullTask : t.kicker
 
@@ -327,7 +327,8 @@ export function SmallChange({
       <ol className={s.route} style={columns}>
         {stops.map((stop) => (
           <li key={stop.key} className={s.stop} data-at={stop.at} data-later={stop.later || undefined}>
-            <span className={s.knot} aria-hidden="true">
+            {/* Merge's knot is where a merge goes once pressed, and fills as it lands. */}
+            <span className={s.knot} aria-hidden="true" data-merge-target={stop.key === 'merge' ? 'knot' : undefined}>
               {stop.at === 'done' && <Icon name="check" size={9} />}
               {stop.at === 'failed' && <Icon name="close" size={9} />}
               {stop.at === 'found' && review.findings < 10 && review.findings}
@@ -352,17 +353,20 @@ export function SmallChange({
         )}
       </ol>
       {/* What waits on the person sits under its stop: Merge under Merge, See findings under Review. */}
-      {(ready && onMerge !== undefined) || (merge.state === 'queued' && onBypassQueue !== undefined) ? (
+      {/* Pressed, Merge gives its place at once to where the merge stands: never Merge again while its host has it. */}
+      {(merge.state === 'ready' && onMerge !== undefined) ||
+      merge.state === 'merging' ||
+      (merge.state === 'queued' && onBypassQueue !== undefined) ? (
         <div className={s.foot} style={columns}>
           <MergeButton
             size="small"
             variant="signal"
             className={s.act}
             style={under('merge')}
-            busy={busy || merge.state === 'merging'}
+            busy={busy}
             onMerge={onMerge}
             onBypassQueue={onBypassQueue}
-            queued={merge.state === 'queued'}
+            standing={merge.state === 'merging' || merge.state === 'queued' ? merge.state : null}
           >
             {t.merge}
           </MergeButton>
@@ -374,6 +378,7 @@ export function SmallChange({
           </Button>
         </div>
       ) : null}
+      <MergeFeel stage={merge.state === 'waiting' ? null : merge.state} />
     </AskCard>
   )
 }

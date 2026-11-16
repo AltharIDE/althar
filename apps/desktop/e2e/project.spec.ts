@@ -152,24 +152,29 @@ test('makes a project in a tab of its own: named first, then its folders, found 
     await openFirstProject(electronApp, page, meridian)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
 
-    // The + opens a tab of its own, named as it is typed, on what this computer has named like it.
+    // The + opens a tab of its own, named as it is typed; a folder of this computer's, what it has named like it.
     await tabs.getByRole('button', { name: 'New project' }).click()
     const name = page.getByRole('textbox', { name: 'Name' })
     await expect(name).toBeFocused()
     await name.fill('Northwind')
     await expect(tabs.getByRole('button', { name: /^Northwind/ })).toHaveAttribute('aria-current', 'page')
+    await page
+      .getByRole('radiogroup', { name: 'Where its code comes from' })
+      .getByRole('radio', { name: /^A folder/ })
+      .click()
     await expect(page.getByRole('heading', { name: /named like Northwind/ })).toBeVisible()
     await page.getByRole('button', { name: 'Add northwind-app' }).click()
-    const folders = page.getByRole('list', { name: 'Its folders' })
-    await expect(folders.getByText('northwind-co/app')).toBeVisible()
+    // Each folder a card on the page's side, which leaves it out where there are several.
+    const folders = page.getByRole('region', { name: 'Its folders' })
+    await expect(folders.getByText('northwind-app', { exact: true })).toBeVisible()
     // One from anywhere, by the picker.
     await chooseFolder(electronApp, ops)
-    await page.getByRole('button', { name: 'Choose a folder…' }).click()
-    await expect(folders.getByText('northwind/ops')).toBeVisible()
+    await page.getByRole('button', { name: 'Add a folder…' }).click()
+    await expect(folders.getByText('northwind-ops', { exact: true })).toBeVisible()
     const read = page.getByRole('region', { name: 'What Althar read' })
     await expect(read.getByText(/is on GitLab, which isn’t connected/)).toBeVisible()
     await expect(read.getByRole('button', { name: 'Connect GitHub' })).toBeVisible()
-    await expect(folders.getByRole('listitem')).toHaveCount(2)
+    await expect(folders.getByRole('button', { name: 'Leave out' })).toHaveCount(2)
     await still(page)
     await page.screenshot({ path: 'test-results/new-project.png' })
 
@@ -177,7 +182,7 @@ test('makes a project in a tab of its own: named first, then its folders, found 
     await tabs.getByRole('button', { name: /^meridian/ }).click()
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await tabs.getByRole('button', { name: /^Northwind/ }).click()
-    await expect(folders.getByRole('listitem')).toHaveCount(2)
+    await expect(folders.getByRole('button', { name: 'Leave out' })).toHaveCount(2)
 
     // Made, its tab is the project's, open on its conversation.
     await page.getByRole('button', { name: /^Create Northwind/ }).click()

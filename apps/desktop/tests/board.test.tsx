@@ -1244,6 +1244,39 @@ describe('the board', () => {
       expect(getBoard).toHaveBeenCalledTimes(reads + 1)
     })
 
+    it('rings the card as it comes into Running, for the press of Merge on its strip in Needs you', async () => {
+      // The browser's animations, as asked for: what each animated, and in which card.
+      const runs: Array<{ target: Element; card: Element | null }> = []
+      const animate = vi.fn(function (this: Element) {
+        runs.push({ target: this, card: this.closest('article') })
+        return {
+          cancel: vi.fn(),
+          finished: new Promise(() => undefined),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        } as unknown as Animation
+      })
+      Object.defineProperty(HTMLElement.prototype, 'animate', { value: animate, configurable: true, writable: true })
+      Object.defineProperty(Element.prototype, 'getAnimations', { value: () => [], configurable: true, writable: true })
+      try {
+        const merge = vi.fn(() => new Promise<void>(() => undefined))
+        const { client } = fakeClient({ merge, getBoard: vi.fn(async () => board()) })
+        withServices(<Project />, client)
+        await pickLayout('Conversation')
+        const ready = (await lane('Needs you').findByText('Rate-limit refunds')).closest('article') as HTMLElement
+        await userEvent.click(within(ready).getByRole('button', { name: /merge/i }))
+        const there = (await lane('Running').findByText('Rate-limit refunds')).closest('article')
+        expect(lane('Running').getByText('Merging')).toBeTruthy()
+        // One ring, around the card where it is now, merging, as the host holds the merge.
+        const rings = () => runs.filter((run) => String((run.target as HTMLElement).className).includes('ring'))
+        await waitFor(() => expect(rings()).toHaveLength(1))
+        expect(rings()[0]?.card).toBe(there)
+      } finally {
+        Reflect.deleteProperty(HTMLElement.prototype, 'animate')
+        Reflect.deleteProperty(Element.prototype, 'getAnimations')
+      }
+    })
+
     it('is in Running, in the merge queue, for as long as the board reads it so, and the person’s again once the queue takes it out', async () => {
       const queued = board({
         tasks: board().tasks.map((one) => (one.taskId === 't4' ? { ...one, change: change({ queued: true }) } : one)),

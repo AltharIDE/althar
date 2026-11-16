@@ -7,7 +7,7 @@ import { Model, ModelList, type ModelInfo } from '../../primitives/Model/Model'
 import { useRefocus } from '../../lib/refocus'
 import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
-import { MergeButton } from '../../primitives/MergeButton/MergeButton'
+import { MergeButton, type MergeStanding } from '../../primitives/MergeButton/MergeButton'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Checks, type ChangeCheck } from '../../primitives/Checks/Checks'
 import { CheckState } from '../../foundations/vocabulary'
@@ -110,6 +110,8 @@ export interface AcceptPeekProps {
   onOpenFile?: (path: string) => void
   /** Accepting is under way: Accept shows it and ignores presses. */
   accepting?: boolean
+  /** Where its merge stands once pressed, in Accept's place: Merging, then In the queue or Merged as its host says. */
+  standing?: MergeStanding | null
   /** The note is on its way to the lead: Ask for changes shows it and ignores presses. */
   sendingBack?: boolean
   /** Why the last answer did not go through, said in the foot. */
@@ -140,6 +142,7 @@ export function AcceptPeek({
   shipping = false,
   onOpenFile,
   accepting = false,
+  standing = null,
   sendingBack = false,
   error,
   text,
@@ -220,8 +223,8 @@ export function AcceptPeek({
               </>
             ) : going > 0 ? (
               <span className={s.wait}>{t.going(going)}</span>
-            ) : passed ? (
-              <MergeButton variant="signal" busy={accepting} onMerge={onAccept} onBypassQueue={onBypassQueue}>
+            ) : passed || standing !== null ? (
+              <MergeButton variant="signal" busy={accepting} onMerge={onAccept} onBypassQueue={onBypassQueue} standing={standing}>
                 {t.accept}
               </MergeButton>
             ) : (

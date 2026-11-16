@@ -199,16 +199,21 @@ export const failedNote = (
   request: Readonly<Record<string, unknown>>,
   message: string,
   uncertain: boolean,
+  /** The errand's step, where it was one: its own words say what was tried. */
+  step?: SaidStep,
 ): StepNote => {
   const at = subject(target)
   const link = labelOf(at)
   const named = phrase(tool, request, link?.label ?? shortTarget(at)) ?? `${asWords(tool)} ${shortTarget(at)}`
-  const what = `${named.charAt(0).toLowerCase()}${named.slice(1)}`
-  const why = message.trim().replace(/\s+/g, ' ')
+  const what = step === undefined ? `${named.charAt(0).toLowerCase()}${named.slice(1)}` : lower(stepWords(step))
+  const whole = message.trim().replace(/\s+/g, ' ')
+  // What the host or Althar said to the agent (a tool, an order) stays out of the line, and folds under Details whole.
+  const plain = forThePerson(whole)
+  const why = plain === '' ? (uncertain ? 'it is not known whether it happened' : 'it did not go through') : plain
   const line = uncertain ? `Not sure this went through: ${what} — ${why}` : `Couldn’t do this: ${what} — failed: ${why}`
   const shown = linkProse(line.length > TITLE_MOST ? `${line.slice(0, TITLE_MOST - 1).trimEnd()}…` : line)
   const links = link === null ? shown.links : [link, ...shown.links.filter((one) => one.label !== link.label)]
-  return { title: shown.text, links }
+  return { title: shown.text, links, ...(plain === whole ? {} : { details: trimmed(whole, DETAILS_MOST) }) }
 }
 
 /** A step as the person reads it: what it does, and what it waits for, in Althar's words where the agent left none. */
@@ -268,8 +273,8 @@ export const stepWords = (step: SaidStep): string => {
   }
 }
 
-/** A wait's clause, to follow "once": the agent's words, else the kind Althar knows, else the kind made plain. */
-const waitClause = (wait: SaidStep['waits'][number]): string => {
+/** A wait's clause, to follow "once": the agent's words, else the kind Althar knows; nothing where it is neither. */
+const knownClause = (wait: SaidStep['waits'][number]): string | null => {
   const said = unstop(wait.says ?? '')
   if (said !== '') return lower(said.replace(/^(?:once|when|after|until)\s+/i, ''))
   const kind = wait.kind.toLowerCase().replace(/[-\s]+/g, '_')
@@ -283,8 +288,11 @@ const waitClause = (wait: SaidStep['waits'][number]): string => {
   if (/merged/.test(kind)) return 'it’s merged'
   if (/open/.test(kind)) return 'it’s open'
   if (/release|publish/.test(kind)) return 'it’s published'
-  return wait.kind.replaceAll('_', ' ').trim()
+  return null
 }
+
+/** A wait's clause, to follow "once": the agent's words, else the kind Althar knows, else the kind made plain. */
+const waitClause = (wait: SaidStep['waits'][number]): string => knownClause(wait) ?? wait.kind.replaceAll('_', ' ').trim()
 
 /** What a step waits for, as "once it’s open and its checks pass"; empty where it waits on nothing. */
 export const waitsWords = (step: SaidStep): string => {
@@ -310,18 +318,27 @@ const linksIn = (line: string, steps: ReadonlyArray<SaidStep>): ReadonlyArray<No
 /** How many steps the kept line names before it counts the rest. */
 const NAMED_MOST = 3
 
+/** Steps in order as one phrase: the first (with its waits, where asked), then the next two, then a count of the rest. */
+const inOrder = (steps: ReadonlyArray<SaidStep>, waits: boolean): string => {
+  const [first, ...rest] = steps
+  if (first === undefined) return ''
+  const named = rest.slice(0, NAMED_MOST - 1).map((step) => lower(stepWords(step)))
+  const more = rest.length - named.length
+  const then = [...named, ...(more > 0 ? [`${more} more ${more === 1 ? 'step' : 'steps'}`] : [])].map((step) => `, then ${step}`).join('')
+  return `${lower(waits ? withWaits(first) : stepWords(first))}${then}`
+}
+
+/** A line cut to the longest a line may be, at a word, with an ellipsis. */
+const fit = (line: string, most = TITLE_MOST): string =>
+  line.length <= most ? line : `${line.slice(0, Math.max(line.lastIndexOf(' ', most - 1), most / 2)).trimEnd()}…`
+
 /**
  * The line Althar says when it keeps an errand: its steps in plain words, in order, with what the first waits for (each later one
  * waits for the one before). The person's own words and every step with its waits fold under it.
  */
 export const keptNote = (words: string, steps: ReadonlyArray<SaidStep>): StepNote => {
-  const [first, ...rest] = steps
-  if (first === undefined) return { title: 'Kept your errand', links: [] }
-  const named = rest.slice(0, NAMED_MOST - 1).map((step) => lower(stepWords(step)))
-  const more = rest.length - named.length
-  const then = [...named, ...(more > 0 ? [`${more} more ${more === 1 ? 'step' : 'steps'}`] : [])].map((step) => `, then ${step}`).join('')
-  const full = `Kept your errand: ${lower(withWaits(first))}${then}`
-  const title = full.length <= TITLE_MOST ? full : `${full.slice(0, full.lastIndexOf(' ', TITLE_MOST - 1)).trimEnd()}…`
+  if (steps[0] === undefined) return { title: 'Kept your errand', links: [] }
+  const title = fit(`Kept your errand: ${inOrder(steps, true)}`)
   const details = [`You said: “${words.trim()}”`, '', ...steps.map((step, at) => `${at + 1}. ${withWaits(step)}`)].join('\n')
   return { title, links: linksIn(title, steps), details: trimmed(details, DETAILS_MOST) }
 }
@@ -337,12 +354,101 @@ export const afterStep = (note: StepNote, next: SaidStep | undefined): StepNote 
   return { ...note, title, links }
 }
 
-/** Why an errand is held or called off, to follow a colon: the reason without its stop, lower-cased where it starts a sentence. */
-export const why = (reason: string | null, otherwise = 'it waits for your word'): string => lower(unstop(reason ?? '') || otherwise)
+/** Sentences that speak to the agent, not the person: a tool's name, an order, or where the errand waits for the person's word. */
+const forTheAgent = (sentence: string): boolean =>
+  /\b[a-z]+_[a-z_]+\b/.test(sentence) ||
+  /^\s*(?:read|use|say|keep|ask|try|tell|resume|call|name)\b/i.test(sentence) ||
+  /(?:waits? for|on|needs?) the person’s (?:fresh )?(?:word|message)|word again/i.test(sentence)
 
-/** Where an errand still waits, for its daily reminder: its first step to go and what that waits for, or why it is on hold. */
-export const stillNote = (paused: boolean, reason: string | null, step: SaidStep | undefined): StepNote => {
-  if (paused) return { title: `Errand still on hold: ${why(reason)}`, links: [] }
-  const line = step === undefined ? 'Errand still waits' : `Errand still waits to ${lower(withWaits(step))}`
-  return { title: line, links: step === undefined ? [] : linksIn(line, [step]) }
+/** A reason as written to the person: what it says of them, to them; what it says to the agent (tools, orders) left out. */
+const forThePerson = (reason: string | null): string =>
+  (
+    (reason ?? '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) ?? []
+  )
+    .map((sentence) => sentence.trim())
+    // "A new objection needs the person’s word again" is for the agent, but that there was an objection is the person's to know.
+    .map((sentence) => (/\bobjection\b/i.test(sentence) && forTheAgent(sentence) ? 'There was a new objection.' : sentence))
+    .filter((sentence) => sentence !== '' && !forTheAgent(sentence))
+    .map((sentence) => sentence.replace(/\bthe person’s\b/gi, 'your').replace(/\bthe person\b/gi, 'you'))
+    .join(' ')
+
+/** That reason to follow a dash: lower-cased where it starts a sentence, without its stop. */
+export const plainReason = (reason: string | null): string => {
+  const said = unstop(forThePerson(reason))
+  return said === '' ? '' : lower(said)
+}
+
+/** What an unwatched wait means to the person: the step that has one, why Althar cannot go on, and how to get it going. */
+export const unwatched = (
+  steps: ReadonlyArray<SaidStep>,
+  watched: ReadonlyArray<string>,
+): { readonly why: string; readonly can: string } | undefined => {
+  const waits = steps.flatMap((step) => step.waits).filter((wait) => !watched.includes(wait.kind))
+  if (waits.length === 0) return undefined
+  const clauses = [...new Set(waits.flatMap((wait) => knownClause(wait) ?? []))]
+  return {
+    why: clauses.length === 0 ? 'Althar can’t tell what it waits for' : `Althar can’t tell when ${list(clauses)}`,
+    can: 'Ask for it again to keep it another way.',
+  }
+}
+
+/** The reason Althar itself gives when it holds an errand for a wait it cannot watch; its lines say it in words instead. */
+export const UNWATCHED_REASON = 'Althar cannot watch wait kinds:'
+
+/**
+ * A line of a lead, what the errand is, and why, cut to the longest a line may be. The reason is kept: the steps are cut first,
+ * down to what leaves the reason room. Whatever was cut folds under Details, whole.
+ */
+const compose = (lead: string, what: string, because: string, tail = ''): Omit<StepNote, 'links'> => {
+  const closing = tail === '' ? 0 : tail.length + 2
+  const room = TITLE_MOST - closing
+  const whole = `${lead}${what === '' ? '' : `: ${what}`}${because === '' ? '' : ` — ${because}`}`
+  const join = (head: string) => (tail === '' ? head : `${head}${head.endsWith('…') ? ' ' : '. '}${tail}`)
+  if (whole.length <= room) return { title: join(whole) }
+  const reason = because === '' ? '' : fit(because, Math.max(Math.floor(room / 2), room - lead.length - 2 - what.length - 3))
+  const steps = fit(what, Math.max(room - lead.length - 2 - (reason === '' ? 0 : reason.length + 3), 24))
+  const head = `${lead}${steps === '' ? '' : `: ${steps}`}${reason === '' ? '' : ` — ${reason}`}`
+  return { title: join(fit(head, room)), details: trimmed(join(whole), DETAILS_MOST) }
+}
+
+/**
+ * An errand put on hold, in the person's words: what is left of it (the held step first), why in a phrase they know, and what
+ * they can do. The reason the agents read stays on the errand, not here.
+ */
+export const heldNote = (
+  steps: ReadonlyArray<SaidStep>,
+  reason: string | null,
+  plain?: { readonly why: string; readonly can?: string },
+  lead = 'Errand on hold',
+): StepNote => {
+  const line = compose(lead, inOrder(steps, false), plain?.why ?? plainReason(reason), plain?.can ?? 'Say go ahead to continue.')
+  return { ...line, links: linksIn(line.title, steps) }
+}
+
+/** An errand called off: what it was, and why where it was not the person's own word. */
+export const calledOffNote = (steps: ReadonlyArray<SaidStep>, reason: string | null, byPerson: boolean): StepNote => {
+  const line = compose('Errand called off', inOrder(steps, false), byPerson ? '' : plainReason(reason))
+  return { ...line, links: linksIn(line.title, steps) }
+}
+
+/** An errand the person set going again: what it goes on with. */
+export const resumedNote = (steps: ReadonlyArray<SaidStep>): StepNote => {
+  const line = compose('Errand resumed', inOrder(steps, true), '')
+  return { ...line, links: linksIn(line.title, steps) }
+}
+
+/** Where an errand still waits, for its daily reminder: its steps to go and what the first waits for, or why it is on hold. */
+export const stillNote = (
+  paused: boolean,
+  reason: string | null,
+  steps: ReadonlyArray<SaidStep>,
+  plain?: { readonly why: string; readonly can?: string },
+): StepNote => {
+  if (paused) return heldNote(steps, reason, plain, 'Errand still on hold')
+  const full = steps[0] === undefined ? 'Errand still waits' : `Errand still waits to ${inOrder(steps, true)}`
+  const title = fit(full)
+  return { title, links: linksIn(title, steps), ...(title === full ? {} : { details: trimmed(full, DETAILS_MOST) }) }
 }

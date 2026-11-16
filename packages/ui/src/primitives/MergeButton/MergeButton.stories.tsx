@@ -29,6 +29,11 @@ export const PermissionUnknown: Story = { args: { onBypassQueue: undefined } }
 export const NoQueue: Story = { args: { onBypassQueue: undefined } }
 export const Busy: Story = { args: { busy: true, children: 'Merging' } }
 export const Disabled: Story = { args: { disabled: true } }
+/** Pressed: where the merge stands, in the button's place, at once. */
+export const Merging: Story = { args: { standing: 'merging' } }
+export const InTheQueue: Story = { args: { standing: 'queued' } }
+export const InTheQueueNoBypass: Story = { args: { standing: 'queued', onBypassQueue: undefined } }
+export const Merged: Story = { args: { standing: 'merged' } }
 export const AlreadyQueued: Story = { args: { queued: true } }
 export const QueuedWithoutPermission: Story = { args: { queued: true, onBypassQueue: undefined } }
 export const Settled: Story = { args: { onMerge: undefined, onBypassQueue: undefined } }
