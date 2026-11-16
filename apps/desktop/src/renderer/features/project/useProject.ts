@@ -213,26 +213,32 @@ export const useProject = (projectId: string): ProjectModel => {
   /** What the window holds of the thread now, for a read that lands later. */
   const held = useCallback(() => cache.getQueryData<CoordinatorSnapshot>(keys.coordinator(projectId))?.items ?? [], [cache, projectId])
 
+  // What a burst of changes touched (every card the coordinator's thread holds, as tasks move) is read in one call, and
+  // shows in one write.
   const readItems = useCallback(
-    (ids: Iterable<string>) =>
-      threadId === null
-        ? Promise.resolve()
-        : Promise.all(
-            [...ids].map((itemId) => {
-              const version = viewVersion()
-              // One the thread keeps for Althar alone is nothing to draw, and nothing wrong: it goes, if the window held it.
-              return newest(
-                itemId,
-                client.getThreadItem(threadId, itemId),
-                (item) =>
-                  item === null
-                    ? setCoordinator((current) => ({ ...current, items: current.items.filter((one) => one.id !== itemId) }))
-                    : arrived([item], version),
-                fail,
-              )
-            }),
-          ),
-    [client, threadId, newest, arrived, viewVersion, fail, setCoordinator],
+    (ids: Iterable<string>) => {
+      const asked = [...ids]
+      if (threadId === null || asked.length === 0) return Promise.resolve()
+      const version = viewVersion()
+      return newest.many(
+        asked,
+        client.getThreadItems(threadId, asked),
+        // One the thread keeps for Althar alone is nothing to draw, and nothing wrong: it goes, if the window held it.
+        (read) =>
+          setCoordinator((current) => {
+            const kept = current.items.filter((one) => read.get(one.id) !== null)
+            // Read before the thread was rewritten: what it found is of another thread, and only what went, goes.
+            if (version !== undefined && current.view.version !== version)
+              return kept.length === current.items.length ? current : { ...current, items: kept }
+            const found = [...read.values()].filter(
+              (item): item is ThreadItem => item !== null && inView(current.view, current.items, item),
+            )
+            return { ...current, items: mergeItems(kept, found) }
+          }),
+        fail,
+      )
+    },
+    [client, threadId, newest, viewVersion, fail, setCoordinator],
   )
 
   // What the coordinator was last picked to, until the thread says it: a pick made before the last one was taken goes from there.

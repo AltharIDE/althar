@@ -34,11 +34,14 @@ saw came from screens starting empty, not from slow reads.
 
 - **Reads go out of date by change, never by age.** The window watches the
   runtime's change feed once, for every screen. A change reads again every
-  whole read it touches, on screen or not, so the next place the person goes
-  is already right. A change to a thread only marks it out of date; the
-  screen showing it reads what changed, item by item, and a thread not on
-  screen is read when it next opens. A read under way is let finish and
-  read once more, never cut short to begin again.
+  whole read it touches that shows; one off screen (a board, the home, the
+  projects) is marked, and read as the person goes back, behind what was
+  read before, which shows at once. A change to a thread only marks it out
+  of date; the screen showing it reads what changed, in one call for a
+  burst, and a thread not on screen is read when it next opens. A read under
+  way is let finish and read once more, never cut short to begin again.
+  What the feed reads goes behind: the runtime answers those a few at a
+  time, after a press.
 - **A board follows its cards, as the runtime says they changed.** The
   runtime works a task's card out again as anything of the task changes,
   whatever kind of record it is, and says `card` on the feed only where it

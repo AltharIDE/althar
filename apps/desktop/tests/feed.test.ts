@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ProjectList, ThreadSnapshot } from '@althar/contracts'
 
 import { follow, GATHER } from '../src/renderer/data/feed'
-import { continued, homeSince, keys, makeQueryClient, readFirst, reads, recheckStatus } from '../src/renderer/data/reads'
+import { continued, held, homeSince, keys, makeQueryClient, readFirst, reads, recheckStatus } from '../src/renderer/data/reads'
 import {
   automationView,
   changed,
@@ -88,7 +88,9 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.planUsage)?.isInvalidated).toBe(true)
   })
 
-  it('reads again what a change ends, gathered, on screen or not; and nothing else', async () => {
+  // Off screen, these used to be read again too, on every card an agent's edit moved: every board the window ever opened,
+  // on the runtime's one thread. They are marked instead, and read as the person goes back (the test below this one).
+  it('reads again what a change ends while it shows, gathered; marks what doesn’t, for its next visit; and nothing else', async () => {
     const { client, cache, emit, read } = opened()
     await Promise.all([
       cache.fetchQuery(read.projects()),
@@ -97,6 +99,12 @@ describe('the window’s watch', () => {
       cache.fetchQuery(read.board('p2')),
       cache.fetchQuery(read.connections()),
     ])
+    const showing = [
+      new QueryObserver(cache, read.projects()).subscribe(() => undefined),
+      new QueryObserver(cache, read.home()).subscribe(() => undefined),
+      new QueryObserver(cache, read.board('p1')).subscribe(() => undefined),
+      new QueryObserver(cache, read.board('p2')).subscribe(() => undefined),
+    ]
     // A burst of changes to tasks in p1, two of whose cards came out different, reads each once.
     emit(changed('task', 't1', 'th1', 'p1'))
     emit(changed('run', 'r1', 'th1', 'p1'))
@@ -116,10 +124,85 @@ describe('the window’s watch', () => {
     expect(client.getBoard).toHaveBeenCalledTimes(3)
     expect(client.getHome).toHaveBeenCalledTimes(2)
 
-    // A connection reads the connections again.
+    // A connection reads the connections again, which show in other windows too, on screen or not.
     emit(changed('connection', 'c1', null, null))
     await settle()
     expect(client.listConnections).toHaveBeenCalledTimes(2)
+
+    // Off screen, the same burst only marks them, for their next visit. (A run, above, moved the projects as listed.)
+    for (const stop of showing) stop()
+    emit(changed('card', 't1', 'th1', 'p1'))
+    emit(changed('card', 't2', 'th2', 'p2'))
+    await settle()
+    expect(client.listProjects).toHaveBeenCalledTimes(3)
+    expect(client.getHome).toHaveBeenCalledTimes(2)
+    expect(client.getBoard).toHaveBeenCalledTimes(3)
+    for (const key of [keys.projects, keys.home, keys.board('p1'), keys.board('p2')])
+      expect(cache.getQueryState(key)?.isInvalidated).toBe(true)
+  })
+
+  it('never makes a place the person has been wait: what it read shows at once as they go back, and is read again behind it', async () => {
+    const { client, cache, emit, read } = opened()
+    const was = await cache.fetchQuery(read.board('p1'))
+    emit(changed('card', 't1', 'th1', 'p1'))
+    await settle()
+    expect(client.getBoard).toHaveBeenCalledTimes(1)
+    const again = later<typeof was>()
+    vi.mocked(client.getBoard).mockImplementationOnce(() => again.promise)
+    // Going back: the board as it was read, at once, while the runtime reads it again.
+    expect(await held(cache, read.board('p1'))).toEqual(was)
+    expect(client.getBoard).toHaveBeenCalledTimes(2)
+    again.resolve({ ...was, cursor: 42 })
+    await vi.waitFor(() => expect(cache.getQueryData(keys.board('p1'))).toEqual({ ...was, cursor: 42 }))
+    expect(cache.getQueryState(keys.board('p1'))?.isInvalidated).toBe(false)
+  })
+
+  it('starts every read behind, which a press goes past', async () => {
+    const lanes: Array<readonly [string, boolean]> = []
+    let behind = false
+    const fake = fakeClient({
+      behind: (start) => {
+        behind = true
+        try {
+          return start()
+        } finally {
+          behind = false
+        }
+      },
+    })
+    const cache = makeQueryClient()
+    follow(fake.client, cache, 7)
+    const read = reads(fake.client)
+    const lane = (name: string) => () => void lanes.push([name, behind])
+    vi.mocked(fake.client.getBoard).mockImplementation(async () => {
+      lane('board')()
+      return { cursor: 1, tasks: [], calls: [], settledTotal: 0 }
+    })
+    vi.mocked(fake.client.getThread).mockImplementation(async () => {
+      lane('thread')()
+      return snapshot()
+    })
+    // As a screen first reads them: not behind.
+    await cache.fetchQuery(read.board('p1'))
+    await cache.fetchQuery(read.thread('th1'))
+    const showing = [
+      new QueryObserver(cache, read.board('p1')).subscribe(() => undefined),
+      new QueryObserver(cache, read.thread('th1')).subscribe(() => undefined),
+    ]
+    // As the feed reads them again: a board's card moved, a project renamed.
+    fake.emit(changed('card', 't1', 'th1', 'p1'))
+    await settle()
+    fake.emit(changed('project', 'p1', null, 'p1'))
+    await settle()
+    // The project's new name: its thread at once, its board gathered.
+    expect(lanes).toEqual([
+      ['board', false],
+      ['thread', false],
+      ['board', true],
+      ['thread', true],
+      ['board', true],
+    ])
+    for (const stop of showing) stop()
   })
 
   it('reads the connections again when a project changes, which says where its code is', async () => {
@@ -131,21 +214,22 @@ describe('the window’s watch', () => {
     expect(client.listConnections).toHaveBeenCalledTimes(2)
   })
 
-  it('reads the home again for a permission the rules answered only while it shows; off screen, on its next visit', async () => {
+  it('reads the home again only while it shows, for a permission the rules answered too; off screen, on its next visit', async () => {
     const { client, cache, emit, read } = opened()
     await cache.fetchQuery(read.home())
     emit(changed('decision', 'd1', 'th1', 'p1'))
     await settle()
     expect(client.getHome).toHaveBeenCalledTimes(1)
     expect(cache.getQueryState(keys.home)?.isInvalidated).toBe(true)
-    // Gathered with a change that moves more of it, it is read off screen too.
+    // Gathered with a change that moves more of it, it is still only marked off screen.
     emit(changed('decision', 'd2', 'th1', 'p1'))
     emit(changed('card', 't1', 'th1', 'p1'))
     await settle()
-    expect(client.getHome).toHaveBeenCalledTimes(2)
-    // While the home shows, it is read at once.
+    expect(client.getHome).toHaveBeenCalledTimes(1)
+    // Shown, it reads what it was marked for, and after that each change at once.
     const showing = new QueryObserver(cache, read.home())
     const stop = showing.subscribe(() => undefined)
+    await vi.waitFor(() => expect(client.getHome).toHaveBeenCalledTimes(2))
     emit(changed('decision', 'd3', 'th1', 'p1'))
     await settle()
     expect(client.getHome).toHaveBeenCalledTimes(3)
@@ -308,14 +392,16 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(false)
   })
 
-  it('reads once more what was being read when a change touched it', async () => {
+  it('reads once more what was being read when a change touched it, while it shows; marks it, where it doesn’t', async () => {
     const { client, cache, emit, read } = opened()
     const first = later<ProjectList>()
     vi.mocked(client.listProjects).mockImplementationOnce(() => first.promise)
-    const reading = cache.fetchQuery(read.projects())
+    const showing = new QueryObserver(cache, read.projects())
+    const stop = showing.subscribe(() => undefined)
+    await vi.waitFor(() => expect(client.listProjects).toHaveBeenCalledTimes(1))
     emit(changed('project', 'p1', null, 'p1'))
     first.resolve({ cursor: 3, projects: [project] })
-    await reading
+    await vi.waitFor(() => expect(cache.getQueryData(keys.projects)).toBeDefined())
     await settle()
     // The first read, and one more for the change it may have missed; not a third when the gathered changes are read.
     expect(client.listProjects).toHaveBeenCalledTimes(2)
@@ -324,11 +410,24 @@ describe('the window’s watch', () => {
     emit(changed('project', 'p1', null, 'p1'))
     await settle()
     expect(client.listProjects).toHaveBeenCalledTimes(3)
+    stop()
+
+    // Off screen, a read under way as a change touched it is marked as it lands, for the next visit.
+    const second = later<ProjectList>()
+    vi.mocked(client.listProjects).mockImplementationOnce(() => second.promise)
+    const reading = cache.fetchQuery({ ...read.projects(), staleTime: 0 })
+    emit(changed('project', 'p1', null, 'p1'))
+    second.resolve({ cursor: 4, projects: [project] })
+    await reading
+    await settle()
+    expect(client.listProjects).toHaveBeenCalledTimes(4)
+    expect(cache.getQueryState(keys.projects)?.isInvalidated).toBe(true)
   })
 
   it('lets a board read under way land while its cards keep changing, then reads it once more', async () => {
     const { client, cache, emit, read } = opened()
     const was = await cache.fetchQuery(read.board('p1'))
+    const stop = new QueryObserver(cache, read.board('p1')).subscribe(() => undefined)
     const slow = later<typeof was>()
     vi.mocked(client.getBoard).mockImplementationOnce(() => slow.promise)
     const landed: Array<number> = []
@@ -347,6 +446,7 @@ describe('the window’s watch', () => {
     // One read under way, and one more as it ends, for what changed while it ran.
     expect(landed).toEqual([99, was.cursor])
     expect(client.getBoard).toHaveBeenCalledTimes(3)
+    stop()
   })
 
   it('forgets a read the cache lets go, so reads keyed anew each time don’t pile up', async () => {
