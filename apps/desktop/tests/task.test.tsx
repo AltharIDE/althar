@@ -484,6 +484,7 @@ describe('a task', () => {
         thread({
           task: {
             ...base.task,
+            end: 'ready',
             issue: {
               product: 'linear',
               ref: 'MER-231',
@@ -503,6 +504,33 @@ describe('a task', () => {
     expect(part.getAttribute('aria-checked')).toBe('false')
     await userEvent.click(part)
     await waitFor(() => expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true))
+  })
+
+  it('leaves the switch out where the task ends with no pull request', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          task: {
+            ...base.task,
+            end: 'none',
+            issue: {
+              product: 'linear',
+              ref: 'MER-231',
+              key: 'MER-231',
+              title: 'Rate-limit refunds',
+              url: 'https://linear.app/m/issue/MER-231',
+              status: { name: 'Todo', category: 'todo' },
+              priority: null,
+              container: 'Meridian',
+            },
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await screen.findByText('Rate-limit refunds')
+    expect(screen.queryByRole('switch', { name: 'Only part of MER-231' })).toBeNull()
   })
 
   it('shows the issues its lead drafted as cards in the thread, files them one by one or all at once, and waits on the person', async () => {
