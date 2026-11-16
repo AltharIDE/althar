@@ -149,6 +149,9 @@ const REPORTS = 200
 /** How many of a task's rounds of work its graph reads, newest: far more than a task has. */
 const GRAPH_ROUNDS = 100
 
+/** How many of its lead's latest tool calls a task's files are read again on as each ends: calls run together end in any order. */
+const LATEST_CALLS = 20
+
 /** What a revision of a run's graph keeps of its steps, by key. */
 const GraphSteps = Schema.fromJsonString(
   Schema.Struct({ steps: Schema.optional(Schema.Array(Schema.Struct({ key: Schema.String, skipped: Schema.optional(Schema.Boolean) }))) }),
@@ -1480,11 +1483,16 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const worktrees = yield* worktreesOf(taskId)
-          // The lead's tool calls, and how often they changed: how its edits that nobody staged show.
+          // The lead's tool calls, how many and how its latest stand: how its edits that nobody staged show, once a call starts
+          // or ends. Not as a call goes on, which moves its item with every word of its progress and would read git again each
+          // time; nor by reading every call the thread ever had, thousands in a long one.
           const [lead] = wants.changed
             ? yield* sql<{ calls: string }>`
-                SELECT count(*) || ':' || coalesce(sum(revision), 0) AS calls FROM thread_items
-                WHERE thread_id = (SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task') AND kind = 'tool_call'`
+                SELECT (SELECT count(*) FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'tool_call') || ':' ||
+                  coalesce((SELECT group_concat(status, ',') FROM (SELECT coalesce(json_extract(i.content, '$.status'), '') AS status
+                    FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'tool_call' ORDER BY i.sequence DESC LIMIT ${LATEST_CALLS})), '')
+                  AS calls
+                FROM threads t WHERE t.task_id = ${taskId} AND t.kind = 'task'`
             : []
           // A screenshot the lead handed as evidence, left uncommitted, isn't part of what it changed.
           const pictures = wants.changed ? yield* evidencePaths(taskId) : () => false

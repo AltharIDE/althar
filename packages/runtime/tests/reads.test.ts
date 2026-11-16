@@ -154,6 +154,27 @@ describe('what screens read from git', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('reads it again as a call starts and ends, never as it goes on', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId, worktree } = yield* ready
+      quiet(worktree)
+      const place = { projectId: projectId as ProjectId, threadId }
+      const call = { title: 'Run the tests', kind: 'execute' }
+      const id = yield* addItem(place, 'tool_call', { ...call, status: 'in_progress' }, { toolCallId: 'run-tests' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+      // What it writes as it goes on waits for it to end: its progress moves its item with every line, and git isn't asked each time.
+      writeFileSync(join(worktree, 'report.md'), 'report\n')
+      yield* updateItem(place.projectId, id, { ...call, title: 'Run the tests, 3 of 9', status: 'in_progress' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+      // Another call starts: what was written shows. And one that ends after a later one began is read as it ends.
+      yield* addItem(place, 'tool_call', { ...call, status: 'in_progress' }, { toolCallId: 'run-more' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'report.md'])
+      writeFileSync(join(worktree, 'notes.md'), 'notes\n')
+      yield* updateItem(place.projectId, id, { ...call, status: 'completed' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'notes.md', 'report.md'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('says a task is merged here once its default branch has its head, however it got there', () =>
     Effect.gen(function* () {
       const queries = yield* Queries
