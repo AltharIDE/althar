@@ -171,3 +171,76 @@ describe('The fake, reviewing someone else’s pull request', () => {
     }),
   )
 })
+
+// Only the fake makes repositories in the suite: a real service's contract would make real ones, which can't be taken back.
+describe('The fake, listing and making repositories', () => {
+  it.effect('lists its repositories last pushed first, as each was added, and makes an empty one where the account may', () =>
+    Effect.gen(function* () {
+      const service = makeFakeService({ pushUrl: (path) => `/tmp/fake/${path.join('/')}.git` })
+      service.addRepository(['meridian', 'old'], 'main', { archived: true, pushedAt: '2025-01-01T00:00:00.000Z' })
+      service.addRepository(['meridian', 'api'], 'main', { private: true, description: 'The API', pushedAt: '2026-10-01T09:00:00.000Z' })
+      service.addRepository(['you', 'scratch'])
+      assert.deepStrictEqual(yield* service.repositories(), [
+        {
+          path: ['meridian', 'api'],
+          description: 'The API',
+          private: true,
+          pushedAt: '2026-10-01T09:00:00.000Z',
+          webUrl: 'https://github.com/meridian/api',
+          archived: false,
+        },
+        {
+          path: ['meridian', 'old'],
+          description: null,
+          private: false,
+          pushedAt: '2025-01-01T00:00:00.000Z',
+          webUrl: 'https://github.com/meridian/old',
+          archived: true,
+        },
+        {
+          path: ['you', 'scratch'],
+          description: null,
+          private: false,
+          pushedAt: null,
+          webUrl: 'https://github.com/you/scratch',
+          archived: false,
+        },
+      ])
+      assert.deepStrictEqual(yield* service.owners(), [{ id: 'you', name: 'You', kind: 'user' }])
+      const meridian = { id: 'meridian', name: 'Meridian', kind: 'organization' } as const
+      // An owner it isn't given is one the account may not make a repository in.
+      assert.deepInclude(yield* Effect.flip(service.createRepository({ owner: meridian, name: 'atlas', private: true })), {
+        reason: 'forbidden',
+      })
+      service.setOwners([{ id: 'you', name: 'You', kind: 'user' }, meridian])
+      const made = yield* service.createRepository({ owner: meridian, name: 'atlas', private: true, description: 'Maps' })
+      assert.deepStrictEqual(made.path, ['meridian', 'atlas'])
+      assert.isTrue(made.canPush)
+      assert.deepStrictEqual(yield* service.repository(['meridian', 'atlas']), made)
+      assert.strictEqual((yield* service.pushTarget(made)).url, '/tmp/fake/meridian/atlas.git')
+      assert.deepInclude((yield* service.repositories()).at(-1), {
+        path: ['meridian', 'atlas'],
+        private: true,
+        description: 'Maps',
+        pushedAt: null,
+      })
+      // One of that path already, whatever the case, is refused.
+      assert.deepInclude(yield* Effect.flip(service.createRepository({ owner: meridian, name: 'API', private: false })), {
+        reason: 'rejected',
+      })
+      assert.deepStrictEqual(service.repositoriesMade, [{ owner: meridian, name: 'atlas', private: true, description: 'Maps' }])
+      // A failure a test asks for comes first, as for any call.
+      service.failNext('owners', 'unreachable')
+      assert.strictEqual((yield* Effect.flip(service.owners())).reason, 'unreachable')
+    }),
+  )
+
+  it.effect('makes them where each product’s account would', () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(yield* makeFakeService({ product: 'bitbucket_cloud' }).owners(), [
+        { id: 'you', name: 'You', kind: 'workspace' },
+      ])
+      assert.deepStrictEqual(yield* makeFakeService({ product: 'bitbucket_dc' }).owners(), [{ id: '~YOU', name: 'You', kind: 'user' }])
+    }),
+  )
+})

@@ -233,8 +233,8 @@ describe.skipIf(windows)('a task that settles', () => {
       const instance = yield* Instance
       yield* (yield* Connections).connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
       const { task, marked } = yield* started('Retry checkout [lead:serve-apart] [lead:edit] [lead:finish]', { root: working })
-      // The server it left keeps a place for it, before.
-      assert.isNotEmpty(yield* holdersOf(task.taskId))
+      // Its preview remains running before merge, but completed work reserves no agent place.
+      yield* until(holdersOf(task.taskId), (holders) => holders.length === 0)
       github.mergeByHand(1)
       yield* (yield* Changes).refresh(task.taskId)
       yield* until(sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${task.taskId}`, (rows) => rows[0]?.state === 'done')

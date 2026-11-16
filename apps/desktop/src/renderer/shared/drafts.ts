@@ -177,4 +177,6 @@ export const forgetDrafts = () => {
 export const draftKey = {
   coordinator: (projectId: string) => `coordinator:${projectId}`,
   task: (threadId: string) => `thread:${threadId}`,
+  /** What was dictated with no composer to say it to, until it is placed (`dictation/Loose.tsx`). */
+  loose: 'dictation:loose',
 }

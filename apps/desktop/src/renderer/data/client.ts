@@ -2,6 +2,8 @@ import type { SearchDocuments } from '@althar/contracts'
 import type { AcpCatalog, AcpConnection } from '@althar/contracts'
 
 import {
+  type PlaceId,
+  type StorageSize,
   type CanvasDetail,
   type CanvasSummary,
   type CanvasText,
@@ -59,9 +61,16 @@ import {
   domPort,
   type FileDiff,
   type TaskFindings,
+  type TaskLineComments,
+  type LineComment,
   type FolderHeld,
   type FolderReading,
   type MadeRepository,
+  type PreparedFolder,
+  type HostRepository,
+  type RepositoryOwner,
+  type ClonedRepository,
+  type PublishedRepository,
   type PlacedRepository,
   type FoldersFreed,
   type FolderWait,
@@ -142,6 +151,25 @@ export interface Client {
   readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
   /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
   readonly makeRepository: (grant: string, name: string) => Promise<MadeRepository>
+  /** Makes a folder chosen ready to be a project's repository: git, and a first commit, where it hasn't them; `path`, a repository inside it. */
+  readonly prepareFolder: (grant: string, path?: string) => Promise<PreparedFolder>
+  /** Every repository a code host's connection reaches, last pushed to first. */
+  readonly listHostRepositories: (connectionId: string) => Promise<ReadonlyArray<HostRepository>>
+  /** Where a code host's connection can make a repository. */
+  readonly listRepositoryOwners: (connectionId: string) => Promise<ReadonlyArray<RepositoryOwner>>
+  /** Clones a repository into a folder of its name in the folder a grant names: from a connection's host, or by its URL. */
+  readonly cloneRepository: (
+    grant: string,
+    from: { readonly connectionId: string; readonly path: ReadonlyArray<string> } | { readonly url: string },
+  ) => Promise<ClonedRepository>
+  /** Puts a repository only on this computer on a code host: a project's, or one in a folder chosen, before its project is made. */
+  readonly publishRepository: (input: {
+    readonly at: { readonly projectId: string; readonly repositoryId: string } | { readonly grant: string; readonly path?: string }
+    readonly connectionId: string
+    readonly owner: RepositoryOwner
+    readonly name: string
+    readonly private: boolean
+  }) => Promise<PublishedRepository>
   /**
    * Opens the folder a grant names: one the person chose in the picker or
    * dropped on the window. A folder of several repositories opens with the
@@ -195,6 +223,8 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
   readonly getTaskFindings: (taskId: string, review?: string) => Promise<TaskFindings>
+  /** The comments the person sent on lines of a task's diff, each where it is now and whether a commit since addressed it (decisions: desktop-app § Comments on the diff). */
+  readonly getLineComments: (taskId: string) => Promise<TaskLineComments>
   /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
   readonly findCode: (
     threadId: string,
@@ -226,6 +256,7 @@ export interface Client {
       readonly images?: ReadonlyArray<SentImage>
       readonly files?: ReadonlyArray<SentFile>
       readonly dictated?: boolean
+      readonly comments?: ReadonlyArray<LineComment>
     },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -274,6 +305,8 @@ export interface Client {
   readonly setPlansAndReviews: (change: PlansAndReviewsChange) => Promise<void>
   /** What the rules of projects made from now on start with; what isn't given stays. */
   readonly setNewProjectDefaults: (change: NewProjectDefaultsChange) => Promise<void>
+  /** What a place Althar keeps data in takes on disk (About › Storage), kept for the session by the runtime, or measured again on a refresh; `signal` gives up on it, which stops the walk when no one else waits. */
+  readonly getStorageSize: (place: PlaceId, refresh: boolean, signal?: AbortSignal) => Promise<StorageSize>
   /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
@@ -435,6 +468,8 @@ export interface Client {
     readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
+    /** Comments on lines of the task's diff, each with its file, lines and code (decisions: desktop-app § Comments on the diff). */
+    readonly comments?: ReadonlyArray<LineComment>
     /** The person's comments on canvases, kept with it (ADR-104). */
     readonly canvasComments?: ReadonlyArray<SentCanvasComment>
   }) => Promise<void>
@@ -593,7 +628,7 @@ export interface Client {
   /** Folders account switchers keep the agent's accounts in, not added yet. */
   readonly findAccounts: (agentId: string) => Promise<ReadonlyArray<FoundAccount>>
   /** Opens the agent's own sign-in for the account in Terminal: the line it runs, and whether it could. */
-  readonly signInAccount: (accountId: string) => Promise<{ readonly line: string; readonly opened: boolean }>
+  readonly signInAccount: (accountId: string, host?: string) => Promise<{ readonly line: string; readonly opened: boolean }>
   /** Signs an account in inside Althar, this way; its id, to ask how it stands. */
   readonly startAccountSignIn: (
     accountId: string,
@@ -803,8 +838,8 @@ const uuidV7 = (now: number) => {
 }
 
 /** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
-const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
-  Effect.runPromiseExit(effect).then((exit) => {
+const settle = <A>(effect: Effect.Effect<A, unknown>, signal?: AbortSignal): Promise<A> =>
+  Effect.runPromiseExit(effect, signal === undefined ? undefined : { signal }).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
@@ -841,6 +876,12 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
     makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
+    prepareFolder: (grant, path) =>
+      command((commandId) => api.PrepareFolder({ commandId, grant, ...(path === undefined ? {} : { path }) })),
+    listHostRepositories: (connectionId) => settle(api.ListHostRepositories({ connectionId })),
+    listRepositoryOwners: (connectionId) => settle(api.ListRepositoryOwners({ connectionId })),
+    cloneRepository: (grant, from) => command((commandId) => api.CloneRepository({ commandId, grant, from })),
+    publishRepository: (input) => command((commandId) => api.PublishRepository({ commandId, ...input })),
     openProject: (grant, options = {}) =>
       command((commandId) =>
         api.OpenProject({
@@ -868,6 +909,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
+    getLineComments: (taskId) => settle(api.GetLineComments({ taskId })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
     readCode: (threadId, path, at = {}) =>
       settle(
@@ -965,6 +1007,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
     setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),
+    getStorageSize: (place, refresh, signal) => settle(api.GetStorageSize({ place, refresh }), signal),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
     cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),
@@ -1064,7 +1107,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.RemoveAccount({ commandId, accountId, ...(anyway === undefined ? {} : { anyway }) })),
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
-    signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),
+    signInAccount: (accountId, host) =>
+      command((commandId) => api.SignInAccount({ commandId, accountId, ...(host === undefined ? {} : { host }) })),
     startAccountSignIn: (accountId, way, host) =>
       command((commandId) => api.StartAccountSignIn({ commandId, accountId, way, ...(host === undefined ? {} : { host }) })),
     getAccountSignIn: (flowId) => settle(api.GetAccountSignIn({ flowId })),

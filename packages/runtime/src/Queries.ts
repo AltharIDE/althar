@@ -55,6 +55,8 @@ import {
   type TurnTime,
   type ScreenshotsOnChange,
   type TaskFindings,
+  type TaskLineComments,
+  type LineComment,
   waitingIn,
   plainTitle,
   toolPhrase,
@@ -85,6 +87,7 @@ import { evidenceGallery, galleryUpdateIn } from './evidenceGallery'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
+import { type KeptLineComment, keepLineComments, keptIn, lineCommentsOf, sentOf } from './lineComments'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { handedOf, issueCardsWaiting, issueChangesWaiting, issueDraftsWaiting, kindOf } from './kinds'
 import { reviewOfferOf } from './reviewOffer'
@@ -584,7 +587,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
     ...(row.deliveryId == null ? {} : { turn: row.deliveryId }),
   }
   switch (row.kind) {
-    case 'user_message':
+    case 'user_message': {
+      const comments = keptIn(field(content, 'comments'))
       return {
         ...base,
         kind: 'user_message',
@@ -593,6 +597,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []),
           pictures: picturesOf(field(content, 'pictures')),
           files: Option.getOrElse(decodeAttached(field(content, 'files') ?? []), () => []),
+          ...(comments.length === 0 ? {} : { comments: sentOf(row.id, comments) }),
         },
         input:
           row.inputState === null
@@ -603,6 +608,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
                 ...(row.dictated === 1 ? { dictated: true } : {}),
               },
       }
+    }
     case 'agent_message':
     case 'agent_thought': {
       const answer = field(content, 'answer')
@@ -948,6 +954,9 @@ export interface ThreadChange {
   readonly aggregateId: string
   readonly projectId: string | null
   readonly threadId: string | null
+  /** A task's rename this change is, by its recorded event: the title, and whether an agent gave it (1) or the person (0). */
+  readonly renamedTo: string | null
+  readonly renamedByAgent: number | null
 }
 
 type Store =
@@ -1012,6 +1021,10 @@ export class Queries extends Context.Service<
     fileDiff(taskId: string, path: string, untouched?: boolean): Effect.Effect<FileDiff, unknown>
     /** What the reviews of a task's latest run found, each where it is in the change now and what became of it. */
     findings(taskId: string, review?: string): Effect.Effect<TaskFindings, unknown>
+    /** The comments the person sent on a task's diff, each where its lines are now and whether a commit since changed them (decisions: desktop-app § Comments on the diff). */
+    lineComments(taskId: string): Effect.Effect<TaskLineComments, unknown>
+    /** Comments on a task's diff about to be sent in a thread, each with the tree of its worktree's files as they are now; none for a thread with no task. */
+    keepLineComments(threadId: string, comments: ReadonlyArray<LineComment>): Effect.Effect<ReadonlyArray<KeptLineComment>, unknown>
     /** Where a thread's agent works, for the code it names: its task's worktrees here, or the project's repositories at their default branches. */
     codeRoots(threadId: string): Effect.Effect<CodeRoots, SqlError.SqlError | NotFound>
     /** What the names in a thread's messages name there, each message as it was when said where it is an item of the thread. */
@@ -1723,6 +1736,20 @@ export class Queries extends Context.Service<
             { concurrency: 'unbounded' },
           )
           return yield* taskFindingsOf(taskId, placed, review)
+        })
+
+      /** A task's worktrees here, by their slugs, as its comments name their files. */
+      const commentedWorktrees = (taskId: string) =>
+        Effect.map(worktreesOf(taskId), (worktrees) =>
+          worktrees.filter((worktree) => existsSync(worktree.path)).map((worktree) => ({ slug: worktree.slug, path: worktree.path })),
+        )
+
+      const keptComments = (threadId: string, comments: ReadonlyArray<LineComment>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
+          const worktrees = thread?.taskId == null ? [] : yield* commentedWorktrees(thread.taskId)
+          return yield* keepLineComments(worktrees, comments)
         })
 
       /** Where a folder really is, as an agent may write it: its links followed. */
@@ -4103,7 +4130,13 @@ export class Queries extends Context.Service<
                 WHEN 'node_attempt' THEN (SELECT t.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
                   JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
                   JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task' WHERE a.id = c.aggregate_id)
-              END AS thread_id
+              END AS thread_id,
+              -- A rename is told with who made it: the task's event of that revision, by the person, an agent, or Althar itself.
+              (SELECT json_extract(e.payload, '$.title') FROM record_events e WHERE c.aggregate_type = 'task' AND e.aggregate_type = 'task'
+                AND e.aggregate_id = c.aggregate_id AND e.aggregate_revision = c.aggregate_revision AND e.type = 'task.renamed' LIMIT 1) AS renamed_to,
+              (SELECT e.actor_id NOT IN (${instance.personId}, ${instance.systemId}) FROM record_events e WHERE c.aggregate_type = 'task'
+                AND e.aggregate_type = 'task' AND e.aggregate_id = c.aggregate_id AND e.aggregate_revision = c.aggregate_revision
+                AND e.type = 'task.renamed' LIMIT 1) AS renamed_by_agent
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
 
@@ -4275,6 +4308,8 @@ export class Queries extends Context.Service<
         thread: (threadId, page) => run(thread(threadId, page)),
         fileDiff: (taskId, path, untouched) => run(diffOf(taskId, path, untouched)),
         findings: (taskId, review) => run(findingsOf(taskId, review)),
+        lineComments: (taskId) => run(Effect.flatMap(commentedWorktrees(taskId), (worktrees) => lineCommentsOf(taskId, worktrees))),
+        keepLineComments: (threadId, comments) => run(keptComments(threadId, comments)),
         codeRoots: (threadId) => run(codeRoots(threadId)),
         findCode: (threadId, messages) => run(codeFound(threadId, messages)),
         readCode: (threadId, path, commit, line) =>

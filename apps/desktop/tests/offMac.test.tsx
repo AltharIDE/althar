@@ -94,7 +94,9 @@ describe('a new project off a Mac', () => {
     const { client } = fakeClient()
     draftsOf(client).start()
     function NewProject() {
-      return <NewProjectView model={useNewProject()} connections={useConnections()} onCreated={vi.fn()} onClose={vi.fn()} />
+      return (
+        <NewProjectView model={useNewProject()} connections={useConnections()} onCreated={vi.fn()} onOpen={vi.fn()} onClose={vi.fn()} />
+      )
     }
     withServices(<NewProject />, client, fakeHost({ findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })) }))
     expect((await screen.findByRole('button', { name: /^Create/ })).textContent).toContain('Ctrl+Enter')

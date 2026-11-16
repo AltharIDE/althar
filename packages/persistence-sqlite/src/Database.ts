@@ -4,7 +4,8 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { camelToSnake, snakeToCamel } from 'effect/String'
 
 import { BackupFailed, backUpBeforeMigrating, latestBackup, reasonOf } from './backups'
-import { loaderFor, type Migration, MIGRATIONS_TABLE, migrations } from './migrations'
+import { idOf, loaderFor, type Migration, MIGRATIONS_TABLE, migrations } from './migrations'
+import { checkMaintenance, DatabaseInMaintenance } from './maintenance'
 
 /** Timings stay in the runtime log even if opening or migration fails. */
 const timed = <A, E, R>(stage: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
@@ -23,6 +24,7 @@ const timed = <A, E, R>(stage: string, effect: Effect.Effect<A, E, R>): Effect.E
   })
 
 export { BackupFailed }
+export { DatabaseInMaintenance }
 
 export interface DatabaseOptions {
   /** A file path, or `:memory:` for tests. */
@@ -33,7 +35,16 @@ export interface DatabaseOptions {
   readonly backups?: string
   /** How long a statement waits for a lock another connection holds before it gives up: the client's five seconds unless a test asks for less. */
   readonly busyTimeout?: Duration.Duration
+  /** Supplied by a trusted host during its reserved update; never accepted from RPC or environment. */
+  readonly maintenanceToken?: string
 }
+
+/** Older code must not open a database whose recorded schema is newer than it understands. */
+export class DatabaseSchemaTooNew extends Schema.TaggedError<DatabaseSchemaTooNew>()('DatabaseSchemaTooNew', {
+  filename: Schema.String,
+  applied: Schema.Int,
+  supported: Schema.Int,
+}) {}
 
 /** Another runtime has the database open. One runtime at a time writes a profile (docs/architecture/02). */
 export class DatabaseInUse extends Schema.TaggedError<DatabaseInUse>()('DatabaseInUse', {
@@ -73,10 +84,11 @@ export class MigrationFailed extends Schema.TaggedError<MigrationFailed>()('Migr
  * an earlier launch's and reconcile them. The lock is taken by the first
  * statement and held until the connection closes.
  */
-const beforeMigrations = (filename: string) =>
+const beforeMigrations = (filename: string, maintenanceToken?: string) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      yield* checkMaintenance(filename, maintenanceToken)
       if (filename !== ':memory:') {
         // A commit waits for nothing but the write: the WAL is synced at its checkpoints (SQLite's own advice for WAL), not on
         // every commit, which on a disk agents' builds keep busy took up to a second each, with the runtime's one thread
@@ -90,6 +102,9 @@ const beforeMigrations = (filename: string) =>
           ),
         )
       }
+      // A caller may have waited for the previous writer after passing the first
+      // check. Recheck while owning SQLite's exclusive lock, before any migration.
+      yield* checkMaintenance(filename, maintenanceToken)
       yield* sql`PRAGMA foreign_keys = OFF`
     }),
   )
@@ -106,6 +121,13 @@ const migrate = (options: DatabaseOptions) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const list = options.migrations ?? migrations
+      const tables = yield* sql<{ name: string }>`SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ${MIGRATIONS_TABLE}`
+      if (tables.length > 0) {
+        const [row] = yield* sql<{ latest: number | null }>`SELECT max(migration_id) AS latest FROM ${sql(MIGRATIONS_TABLE)}`
+        const supported = Math.max(0, ...list.map(idOf))
+        if ((row?.latest ?? 0) > supported)
+          return yield* new DatabaseSchemaTooNew({ filename: options.filename, applied: row?.latest ?? 0, supported })
+      }
       const backups = options.filename === ':memory:' ? undefined : options.backups
       const copy = backups === undefined ? null : yield* backUpBeforeMigrating(backups, list)
       yield* SqliteMigrator.run({ loader: loaderFor(list), table: MIGRATIONS_TABLE }).pipe(
@@ -137,10 +159,12 @@ export const layer = (
   options: DatabaseOptions,
 ): Layer.Layer<
   SqlClient.SqlClient | SqliteClient.SqliteClient,
-  MigrationFailed | BackupFailed | SqlError.SqlError | ForeignKeyViolations | DatabaseInUse
-> =>
-  Layer.fromBuildMemo((memo, scope) => timed('store-migrations', Layer.buildWithMemoMap(migrate(options), memo, scope))).pipe(
-    Layer.provideMerge(beforeMigrations(options.filename)),
+  MigrationFailed | BackupFailed | SqlError.SqlError | ForeignKeyViolations | DatabaseInUse | DatabaseInMaintenance | DatabaseSchemaTooNew
+> => {
+  const opened = Layer.fromBuildMemo((memo, scope) =>
+    timed('store-migrations', Layer.buildWithMemoMap(migrate(options), memo, scope)),
+  ).pipe(
+    Layer.provideMerge(beforeMigrations(options.filename, options.maintenanceToken)),
     Layer.provideMerge(
       Layer.fromBuildMemo((memo, scope) =>
         timed(
@@ -169,3 +193,5 @@ export const layer = (
           ),
     ),
   )
+  return Layer.unwrap(Effect.as(checkMaintenance(options.filename, options.maintenanceToken), opened))
+}

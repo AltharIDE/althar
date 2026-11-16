@@ -94,8 +94,8 @@ const RELEASES = { provider: 'github', owner: 'AltharIDE', repo: 'althar' } as c
 
 /** The packages the runtime starts as processes, at the versions the app depends on. */
 const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
-/** What the bundles load from node_modules: dictation's speech engine, with its binaries for this platform (ADR-017), and the updater (ADR-024). */
-const NATIVE = ['sherpa-onnx-node', 'electron-updater']
+/** What stays in node_modules: speech and image processing with their platform binaries, and the updater. */
+const NATIVE = ['sherpa-onnx-node', 'electron-updater', 'sharp']
 
 /** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
 const BINARIES: Record<string, string> = {

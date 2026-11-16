@@ -22,7 +22,7 @@ import { Sessions } from './Sessions'
  * settle), it is asked about a conflict or the checks on one, it is starting,
  * or it is in a turn; and a task's reviewer, while a review is admitted or
  * under way, or in a turn. Either one with something it left running that is
- * at work takes its place too, though its step is done: its process tree uses
+ * at work takes its place too while the task is unfinished: its process tree uses
  * real CPU, or did within the last `quiet` (`working`). A server left running
  * and sitting idle takes none. What a task's agents left running is part of
  * the task's place, not another: kept only by that, a task holds one place,
@@ -475,6 +475,29 @@ export class Busy extends Context.Service<
             CASE WHEN h.node_key LIKE 'helper:%' THEN h.id END
           FROM provider_sessions p JOIN threads h ON h.id = p.thread_id
           WHERE p.state = 'starting' AND h.kind IN ('task', 'step') AND h.task_id IS NOT NULL`
+        // Ended tasks cannot retain places through stale step records or background commands.
+        // Their live turns still count, including a helper working after its lead finishes.
+        const taskSessions = yield* sessions.onTasks
+        const candidateIds = [...starting.keys()]
+          .map((key) => agentOf(key).taskId)
+          .concat(
+            under.map((row) => row.taskId),
+            taskSessions.map((session) => session.taskId),
+          )
+        const ended = yield* sql<{ id: string; state: string; runState: string | null }>`
+          SELECT k.id, k.state,
+            (SELECT r.state FROM runs r WHERE r.task_id = k.id ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1) AS run_state
+          FROM tasks k WHERE k.id IN (SELECT value FROM json_each(${JSON.stringify([...new Set(candidateIds)])}))`
+        const stale = new Set(
+          ended
+            .filter((task) => task.state === 'done' || task.state === 'abandoned' || task.runState === 'suspended')
+            .map((task) => task.id),
+        )
+        const finished = new Set(
+          ended
+            .filter((task) => stale.has(task.id) || (task.runState !== null && task.runState !== 'running' && task.runState !== 'admitted'))
+            .map((task) => task.id),
+        )
         // An agent waiting on the person's answer, to a question or a permission, keeps its place a few minutes, so an answer
         // soon goes on where it was; past that it isn't using the machine, nor while an answer kept before waits for a place.
         // What it left running still is.
@@ -501,7 +524,7 @@ export class Busy extends Context.Service<
           take(agent.taskId, agent.review === true, null, false, agent.helper)
         }
         for (const row of under)
-          if (row.threadId === null || !asking.has(row.threadId))
+          if (!stale.has(row.taskId) && (row.threadId === null || !asking.has(row.threadId)))
             take(row.taskId, row.review === 1, row.threadId, false, row.helper ?? undefined)
         // What the person said to an agent, still to be delivered, is its next turn on its way: the place isn't given to
         // anything else in between.
@@ -510,9 +533,9 @@ export class Busy extends Context.Service<
             SELECT DISTINCT i.thread_id FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
             WHERE i.state = 'queued' AND a.kind = 'person'`).map((row) => row.threadId),
         )
-        for (const session of yield* sessions.onTasks) {
+        for (const session of taskSessions) {
           // Left running and idle, it is nothing to wait for; not yet read, it counts.
-          const working = session.background && (sampled.get(session.threadId)?.working ?? true)
+          const working = !finished.has(session.taskId) && session.background && (sampled.get(session.threadId)?.working ?? true)
           const turning =
             (session.turnRunning || (session.acceptingTurns !== false && told.has(session.threadId))) && !asking.has(session.threadId)
           if (working || turning)

@@ -4,3 +4,51 @@
   min-height: 0;
   background: var(--n-2);
 }
+
+/* The setup, on the page's right. */
+.fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.stack {
+  display: grid;
+  gap: 22px;
+}
+.folders {
+  display: grid;
+  gap: 8px;
+}
+.addFolder {
+  justify-self: start;
+}
+/* A host or tracker connected in place: its walk, and the way back to what was there. */
+.inPlace {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding: 16px 18px 14px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.inPlace > :first-child {
+  width: 100%;
+}
+.inPlaceBack {
+  font-size: 12px;
+}
+.cloneWhere {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 2px 0;
+  color: var(--t-3);
+  font-size: 12px;
+}
+.link {
+  color: var(--signal);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

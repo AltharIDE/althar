@@ -1,7 +1,7 @@
 import { isStartupStage, type StartupStage } from '../startup'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -24,6 +24,7 @@ import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
 import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
 import { startLogs } from './logs'
+import { isPlace, showPlace } from './storage'
 import { setAppMenu } from './menu'
 import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
@@ -41,7 +42,7 @@ import { takeScreenshot } from './screenshots'
 import { storeFacts } from './report/mainFacts'
 import { factsIn, type RuntimeFacts } from './report/facts'
 import { factsAsker, startReports } from './report/reports'
-import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
+import { clonePlaceFor, findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from './repositories'
 import { watchOnline } from './online'
 import { afterExit } from './restarts'
 import { alertSounds, playSound } from './sounds'
@@ -997,6 +998,41 @@ ipcMain.handle('althar:find-repositories', async () => {
   return forWindow(found, home, foundHere.idOf)
 })
 
+// Where the person lets Althar into a folder the system keeps closed, as macOS keeps Documents and Desktop: false off a Mac, where there's no such place.
+ipcMain.handle('althar:open-folder-access', async () => {
+  if (process.platform !== 'darwin') return false
+  await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders').catch(() => undefined)
+  return true
+})
+
+// Where a clone for a new project goes, as the person knows the place, and a grant for it; null where there is nowhere usual, and the person is asked.
+ipcMain.handle('althar:clone-place', async () => {
+  const home = process.env.ALTHAR_CODE_HOME || homedir()
+  const places = placesFor(home, process.platform)
+  const path = await clonePlaceFor(await findRepositories(places), places)
+  const grant = path === null ? null : await allowFolder(path)
+  // The place is read with its links followed, as the home may not be (a Mac's /var is /private/var): each is shown from ~.
+  const real = await realpath(home).catch(() => home)
+  return path === null || grant === null ? null : { grant, where: shownAt(path, path.startsWith(real) ? real : home) }
+})
+
+// Another place for it, chosen by the person: as above, or null where they cancel.
+ipcMain.handle('althar:pick-clone-place', async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const home = process.env.ALTHAR_CODE_HOME || homedir()
+  const options = {
+    properties: ['openDirectory' as const, 'createDirectory' as const],
+    title: 'Choose where to clone it',
+    message: 'Choose the folder the repository is cloned into',
+    buttonLabel: 'Clone here',
+    defaultPath: home,
+  }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  const path = result.canceled ? undefined : result.filePaths[0]
+  const grant = path === undefined ? null : await allowFolder(path)
+  return path === undefined || grant === null ? null : { grant, where: shownAt(path, home) }
+})
+
 // A grant for one of them, once the person ticks or adds it: one main found, still where it was found, and nothing else.
 ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
   const repository = typeof id === 'string' ? foundHere.found(id) : undefined
@@ -1015,6 +1051,14 @@ ipcMain.handle('althar:try-again', () => {
 ipcMain.handle('althar:show-backup', () => {
   const backup = storeFailure?.backup
   if (typeof backup === 'string') shell.showItemInFolder(backup)
+})
+
+// About › Storage (DEV-147): where Althar keeps its data, and the system's file manager opened on one. How big each is, the runtime measures. The window names a place by id, never by path.
+const storagePlaces = () => ({ profile: locations().profile, logs: logs.dir, worktrees: locations().worktrees })
+ipcMain.handle('althar:storage-places', () => storagePlaces())
+ipcMain.handle('althar:storage-show', async (_event, place: unknown) => {
+  if (!isPlace(place)) throw new Error(`Althar keeps nothing in ${String(place)}.`)
+  await showPlace(storagePlaces(), place, (path) => shell.openPath(path))
 })
 
 // The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.

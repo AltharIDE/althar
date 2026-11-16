@@ -27,37 +27,160 @@
 
 <img src="brand/export/screenshots/framed/project-home.jpg" width="100%" alt="A project's home: you ask for a fix to the VAT rate on EU invoices and the coordinator answers with a plan, one agent implementing and another reviewing, starting on its own. Beside it, the board: what's up next, what's running, and what needs you." />
 
-## You manage the project. Not the agents.
+## Features
 
-Stop re-explaining your project every time you start a new chat.
+<table>
+  <tr>
+    <td width="36%" valign="middle">
 
-In Althar your work lives in projects, each with one repository or several. Each project has a coordinator, and you tell it what you want as you would a project manager:
+### Coordinator
 
-- It reads the project's repositories and rules before it plans, and keeps the decisions you make as notes it starts every session with.
-- It splits what you ask into tasks, picks an agent and a model to lead each, and runs several side by side.
-- You hear from it when something needs you: a question, a permission, or work to accept.
+Tell it what you want, as you would a project manager. It knows your repositories, rules and past decisions, splits the work into tasks, picks an agent and a model to lead each, and starts them unless you change or hold it.
 
-<img src="brand/export/screenshots/framed/plan.jpg" width="100%" alt="You ask for a fix to the VAT rate on EU invoices; the coordinator answers with one task: one agent implements, another reviews, then a draft pull request. It starts on its own unless changed or held." />
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/coordinator-dark.gif" />
+        <img src="brand/export/reels/coordinator.gif" width="100%" alt="A plan the coordinator drew for a fix to the VAT rate on EU invoices: Opus 5 leads, Codex reviews, and it ends as a draft pull request. Opening the reviewer's menu shows the other models to pick, before it starts on its own in 23 seconds." />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="36%" valign="middle">
 
-## Review by a model from another lab.
+### Review by another lab
 
-A task's work can be reviewed by a model from another lab you're signed in to: Claude's work checked by GPT, or GPT's by Claude. The lead fixes each finding or sets it aside with its reason.
+A model from another lab checks each task's work: Claude's by GPT, or GPT's by Claude. The lead fixes each finding or sets it aside with its reason, and you decide what merges. Review is optional.
 
-When the work is done, the task comes to Needs you with its diff, its checks, screenshots of it working and, where it was reviewed, each finding and how it was settled. You decide whether it merges.
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/review-dark.gif" />
+        <img src="brand/export/reels/review.gif" width="100%" alt="A review settled: its findings, by severity and file, from two reviewers, each fixed by the lead in the second round or set aside with its reason, folding away and opening again." />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="36%" valign="middle">
 
-Review is optional: pick another reviewer, skip it once, or turn it off.
+### One board
 
-<img src="brand/export/screenshots/framed/review.jpg" width="100%" alt="A review settled: what two reviewers found, by severity and file, and what the lead fixed in the second round or set aside, with its reason." />
+Up next, running, needs you, settled: every task in the project, whichever lab's agent has it. Finished work waits in Needs you with its diff, its checks and screenshots of it working.
 
-## One board. No sidebar full of chats.
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/board-dark.gif" />
+        <img src="brand/export/reels/board.gif" width="100%" alt="A project's board with its four lanes: up next, running, needs you and settled. Collapsing up next gives the settled lane its room." />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="36%" valign="middle">
 
-Up next, running, needs you, settled: every task in the project, whichever lab's agent has it. When one plan runs out of usage, the work can move to another account you're signed in to, on the same thread and the same branch.
+### Switch plans mid-task
 
-<img src="brand/export/screenshots/framed/board.jpg" width="100%" alt="A project's board: up next, running, needs you, and settled, with each running task's steps and its lead." />
+Althar runs the agents under your own sign-ins. When one plan runs out of usage, another account you're signed in to carries on, on the same thread and the same branch, unless the project keeps to its first.
+
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/usage-dark.gif" />
+        <img src="brand/export/reels/usage.gif" width="100%" alt="A task out of usage: Claude Code reached its limit, and the menu offers to continue the step with Codex, on either of its accounts, or with Gemini, which is then moved to." />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="36%" valign="middle">
+
+### Automations
+
+Work that starts itself, at set times or every hour, such as a review of each new pull request. It runs on your computer while Althar is open, once you turn it on.
+
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/automations-dark.gif" />
+        <img src="brand/export/reels/automations.gif" width="100%" alt="An automation, Morning review, with its schedule and what each run ends in: a review of each new pull request." />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="36%" valign="middle">
+
+### Skills, set up once
+
+Add a skill once, and Claude Code, Codex and OpenCode all get it, in the roles and projects you pick. MCP servers work the same way.
+
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/skills-dark.gif" />
+        <img src="brand/export/reels/skills.gif" width="100%" alt="A skill opened in place: where it comes from, who gets it (leads, reviewers, the coordinator), its projects and the agents that have it." />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="36%" valign="middle">
+
+### Canvases
+
+Leads draw pages, mockups and diagrams. Comment on a version, and the next one answers it.
+
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/canvas-dark.gif" />
+        <img src="brand/export/reels/canvas.gif" width="100%" alt="A diagram a lead drew on the canvas, with a comment typed on it and added to the message." />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="36%" valign="middle">
+
+### Voice
+
+Dictate to the coordinator or any task, transcribed on your computer.
+
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/dictation-dark.gif" />
+        <img src="brand/export/reels/dictation.gif" width="100%" alt="Dictating to a lead: the voice as bars, and the words arriving in the field as they're said." />
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <td width="36%" valign="middle">
+
+### Always in reach
+
+Round the notch or in the menu bar on a Mac, in the tray on Windows and Linux: answer a permission or open a pull request without leaving what you're in.
+
+</td>
+    <td width="64%" valign="middle">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="brand/export/reels/island-dark.gif" />
+        <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer one." />
+      </picture>
+    </td>
+  </tr>
+</table>
+
+**Also in the box:**
+
+- **Ten at once.** Each task gets a worktree of its own, so no two agents work in the same files. Each lead settles its own conflicts; only the odd one needs you.
+- **See it running.** Run the project from the window, with no agent. The page a task builds opens beside it, in a browser session of its own, and the lead tries its work there.
+- **A task as a graph.** A lane for each agent and a card for each step, round after round until the review passes.
+- **Review pull requests.** Paste a pull request's link and ask: a lead reads a copy of it, runs nothing of it, and drafts a review you post in one press.
+- **Presets.** Start work as a chat, a prototype, a small change, a full change or a pull request review, and change any part of it later, such as its reviewer or how it ends, by saying so.
+- **Your tracker.** Issues come in from Linear, Jira, Trello or GitHub; pull requests go out to GitHub, GitLab or Bitbucket.
+- **Merge line.** Pull requests merge one at a time, in the order you asked, or through the host's own merge queue.
+- **Asks only before what can't be undone.** Agents work without asking about each command; a force push or a push to the default branch waits for you. Your project's rules can ask about more.
 
 ## Bring the agents you already pay for.
 
-Althar runs each one under your own sign-in: your Claude plan, your ChatGPT plan, your keys. No new account, no new bill, nothing of ours between you and the model. When one runs out of usage, another account you're signed in to can pick up the same thread, on the same branch, unless the project keeps to its first account.
+Althar runs each one under your own sign-in: your Claude plan, your ChatGPT plan, your keys. No new account, no new bill, nothing of ours between you and the model.
 
 Switch labs whenever you like: your projects, their history and their decisions stay with you, on your computer.
 
@@ -156,31 +279,6 @@ The agents below are built in. Soon, other agents that speak the [Agent Client P
       </picture><br />
       <b>More on the way</b><br />
       Other ACP agents, from the ACP registry, such as Cursor, Gemini CLI or Goose, or your own command, once each passes a check that it asks before it acts (<a href="docs/decisions/agents.md#which-agents-join">which, and why</a>)
-    </td>
-  </tr>
-</table>
-
-## And everything around it
-
-- **See it running.** Run the project from the window, with no agent. The page a task builds opens beside it, in a browser session of its own, and the lead tries its work there.
-- **Review pull requests.** Paste a pull request's link and ask: a lead reads a copy of it, runs nothing of it, and drafts a review you post in one press.
-- **Presets.** Start work as a chat, a prototype, a small change, a full change or a pull request review, and change any part of it later, such as its reviewer or how it ends, by saying so.
-- **Canvases.** Leads draw pages, mockups and diagrams; comment on a version, and the next one answers it.
-- **Your tracker.** Issues come in from Linear, Jira, Trello or GitHub; pull requests go out to GitHub, GitLab or Bitbucket.
-- **Merge line.** Pull requests merge one at a time, in the order you asked, or through the host's own merge queue.
-- **Automations.** Work on a schedule, at set times or every hour, such as a review of each new pull request. It runs on your computer while Althar is open, once you turn it on.
-- **Asks only before what can't be undone.** Agents work without asking about each command; a force push or a push to the default branch waits for you. Your project's rules can ask about more.
-- **Your skills and MCP servers.** The skills and MCP servers you set up for your agents reach Althar's agents too, in the roles and projects you pick in Settings.
-- **Voice.** Dictate to the coordinator or any task, transcribed on your computer.
-- **Always in reach.** Round the notch or in the menu bar on a Mac, in the tray on Windows and Linux: answer a permission or open a pull request without leaving what you're in.
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <img src="brand/export/screenshots/framed/browser.jpg" width="100%" alt="A task with the browser beside it: the refunds page its run serves, the failed refund now refunded, while the lead tries the fix it just made." />
-    </td>
-    <td width="50%" valign="top">
-      <img src="brand/export/reels/island.gif" width="100%" alt="The island round the notch: two calls wait, and pointing at it drops it open to answer them." />
     </td>
   </tr>
 </table>

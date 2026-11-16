@@ -29,6 +29,7 @@ From the repository root:
 | `bun run dev` | The public site, at `http://localhost:5320` |
 | `bun --filter @althar/desktop dev` | Builds the desktop app and opens it |
 | `bun --filter @althar/ui storybook` | The UI package's Storybook, at `http://localhost:6006` (see [Showing a change works](#showing-a-change-works) for a port of a task's own) |
+| `bun --filter @althar/host build` | Builds the standalone Linux host; [setup, operation and tests](apps/host/README.md) |
 | `bun run check` | Format, type-aware lint and type checks, in every package |
 | `bun run fix` | The same, fixing what can be fixed |
 | `bun run test` | Unit and component tests, in every package |
@@ -58,8 +59,10 @@ everything, Windows' tests, coverage and the packages too, after merge.
 | [`packages/skills`](packages/skills) | `@althar/skills`: skill validation, the shared store, adding from GitHub, per-run projection and the repository boundary |
 | [`packages/runtime`](packages/runtime) | `@althar/runtime`: the store's one writer, which owns projects, tasks, agent sessions, turns and permissions |
 | [`packages/contracts`](packages/contracts) | `@althar/contracts`: the API between the runtime and its clients, and the transport it runs over |
+| [`packages/transport-node`](packages/transport-node) | `@althar/transport-node`: authenticated private-socket and SSH clients for the shared API |
 | [`packages/testing`](packages/testing) | `@althar/testing`: how the tests run in CI, retried once, with the flaky ones reported and quarantined |
 | [`apps/desktop`](apps/desktop) | `@althar/desktop`: the desktop app, Electron with the runtime in a utility process |
+| [`apps/host`](apps/host) | `@althar/host`: a persistent Linux home with encrypted secrets and a systemd user service |
 | [`apps/cli`](apps/cli) | `@althar/cli`: a command-line client for the runtime, which runs a task with a real agent in a terminal |
 | [`brand`](brand) | `@althar/brand`: the mark, lockups, avatars, banners and screenshots, ready to use, and the code that draws them |
 | [`docs/architecture`](docs/architecture) | The working architecture: a local-first desktop app, with seams for a later cloud |
@@ -75,12 +78,12 @@ everything, Windows' tests, coverage and the packages too, after merge.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the target every app and package moves toward. In short:
 
-- TypeScript everywhere, strict, with runtime validation of anything untrusted.
+- Strict TypeScript for the existing app and home; Rust for the planned worker supervisor and sandbox execution agent, with a Protobuf worker contract ([Foundations](docs/decisions/foundations.md#remote-connections-and-native-workers-decided-not-built)). Validate anything untrusted at runtime in either language.
 - Tests first for new behaviour, and at least 90% line and branch coverage in each app and package.
 - Accessibility to WCAG 2.2 AA from the first implementation.
-- A consequential decision gets an ADR in [`docs/decisions`](docs/decisions); an exception gets an owner and an expiry.
+- A consequential decision amends its area document in [`docs/decisions`](docs/decisions), with a dated Changes entry; undecided proposals stay in `proposed/`. Do not add numbered ADRs. An exception gets an owner and an expiry.
 
-Runtime-side code is written with Effect 4, with the conventions in
+TypeScript runtime-side code is written with Effect 4, with the conventions in
 [ADR-009](docs/decisions/foundations.md#effect-on-the-runtime-side); the UI kit never
 uses it. The desktop app is MVVM in feature folders
 ([ADR-010](docs/decisions/foundations.md#the-desktop-apps-layers)).

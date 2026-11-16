@@ -102,6 +102,23 @@ export const hostContract = (subject: HostSubject) =>
         }
       }),
     )
+
+    // Only read: a repository made can't be taken back, so the fake alone makes one (contract.fake.test.ts).
+    it.live('lists the repository among those it reaches, and says where it can make one', () =>
+      Effect.gen(function* () {
+        const listed = yield* subject.host.repositories()
+        const wanted = subject.path.join('/').toLowerCase()
+        const found = listed.find((one) => one.path.join('/').toLowerCase() === wanted)
+        assert.isDefined(found, 'the repository is among those listed')
+        assert.isNotEmpty(found?.webUrl ?? '')
+        const owners = yield* subject.host.owners()
+        assert.isNotEmpty(owners)
+        assert.isTrue(owners.every((owner) => owner.id !== '' && owner.name !== ''))
+        // Itself first, where it is one at all.
+        const own = owners.findIndex((owner) => owner.kind === 'user')
+        assert.isTrue(own <= 0)
+      }),
+    )
   })
 
 export interface MergeSubject {
