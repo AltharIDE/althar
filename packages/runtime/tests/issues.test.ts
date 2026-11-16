@@ -258,6 +258,82 @@ describe('an issue', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
   })
 
+  it.live('moves each of several issues to In Progress as its task starts, and one added after at once', () => {
+    const { working } = hosted()
+    const tracker = linear()
+    tracker.addIssue({ ref: 'MER-233', title: 'Charge limits too' })
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, taskId, threadId, slug, start } = yield* fromIssue(working)
+      const issues = yield* Issues
+      yield* issues.attach({ projectId, taskId, issue: 'MER-232' })
+      yield* start
+      yield* until(outcomes(taskId), (rows) => rows.length === 2)
+      assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'started')
+      assert.strictEqual((yield* tracker.issue('MER-232')).status.category, 'started')
+      yield* until(notices(threadId), (said) => said.length === 2)
+      assert.sameMembers(yield* notices(threadId), ['Moved MER-231 to In Progress', 'Moved MER-232 to In Progress'])
+      // Its thread heads with each, in the order they were tied to it; the first is the one a task always had.
+      const snapshot = yield* (yield* Queries).thread(threadId)
+      assert.strictEqual(snapshot.task.issue?.key, 'MER-231')
+      assert.deepStrictEqual(
+        snapshot.task.fromIssues?.map((one) => one.key),
+        ['MER-231', 'MER-232'],
+      )
+      // Added once it is under way, it moves at once; added again, it is the same issue.
+      const coordinatorThread = yield* (yield* Coordinator).thread(projectId)
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId: coordinatorThread, sessionId: 'none', taskId: null }
+      assert.match(
+        yield* callTool(access, 'add_issue', { task: slug, issue: 'MER-233', part_of: true }),
+        /comes from MER-233 too, only part of it/,
+      )
+      yield* until(outcomes(taskId), (rows) => rows.length === 3)
+      assert.strictEqual((yield* tracker.issue('MER-233')).status.category, 'started')
+      assert.match(yield* callTool(access, 'add_issue', { task: slug, issue: 'MER-233' }), /came from MER-233 already/)
+      assert.deepStrictEqual(
+        (yield* issues.allOfTask(taskId)).map((one) => [one.key, one.partOf]),
+        [
+          ['MER-231', false],
+          ['MER-232', false],
+          ['MER-233', true],
+        ],
+      )
+      // The coordinator reads each, and sets which it does only part of by its key.
+      const read = yield* callTool(access, 'read_task', { task: slug })
+      assert.include(read, 'Issue: MER-232')
+      assert.include(read, 'only part of it')
+      assert.match(yield* callTool(access, 'set_part_of_issue', { task: slug, issue: 'MER-232', part_of: true }), /only part of MER-232/)
+      assert.match(yield* callTool(access, 'set_part_of_issue', { task: slug, issue: 'MER-9', part_of: true }), /didn't come from MER-9/)
+    }).pipe(
+      Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))),
+    )
+  })
+
+  it.live('is drafted from several issues by the coordinator, each with whether it does only part of it', () => {
+    const { working } = hosted()
+    const tracker = linear()
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, threadId } = yield* opened(working)
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const said = yield* callTool(access, 'draft_task', {
+        title: 'Prototype the import',
+        // The same issue by its link and its key is tied once.
+        issues: ['MER-231', { issue: 'MER-232', part_of: true }, LINK],
+      })
+      assert.match(said, /^Drafted [^,]+, from MER-231 and part of MER-232\./)
+      const sql = yield* SqlClient.SqlClient
+      const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE title = 'Prototype the import'`
+      assert.deepStrictEqual(
+        (yield* (yield* Issues).allOfTask(task?.id ?? '')).map((one) => [one.key, one.partOf]),
+        [
+          ['MER-231', false],
+          ['MER-232', true],
+        ],
+      )
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
+  })
+
   it.live('says in a line when it can’t be moved, and the task goes on', () => {
     const { working } = hosted()
     const tracker = linear()

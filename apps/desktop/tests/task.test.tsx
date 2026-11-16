@@ -502,7 +502,45 @@ describe('a task', () => {
     const part = await screen.findByRole('switch', { name: 'Only part of MER-231' })
     expect(part.getAttribute('aria-checked')).toBe('false')
     await userEvent.click(part)
-    await waitFor(() => expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true))
+    await waitFor(() => expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true, 'MER-231'))
+  })
+
+  it('heads its thread with each issue it came from, on any tracker, each with its own switch, shown at once', async () => {
+    const base = snapshot()
+    const issue = (product: 'linear' | 'github', key: string, ref = key) => ({
+      product,
+      ref,
+      key,
+      title: `Work for ${key}`,
+      url: `https://example.com/${key}`,
+      status: { name: 'Todo', category: 'todo' as const },
+      priority: null,
+      container: null,
+    })
+    let answer: () => void = () => {}
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          task: {
+            ...base.task,
+            issue: issue('linear', 'DEV-211'),
+            fromIssues: [issue('linear', 'DEV-211'), { ...issue('github', '#37', 'meridian/api#37'), partOf: true }],
+          },
+        }),
+      ),
+      setTaskIssuePart: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))),
+    })
+    withServices(<Task />, client)
+    const first = await screen.findByRole('switch', { name: 'Only part of DEV-211' })
+    const second = screen.getByRole('switch', { name: 'Only part of #37' })
+    expect(first.getAttribute('aria-checked')).toBe('false')
+    expect(second.getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(first)
+    // Shown at once, before Althar answers; for that one issue alone, by its ref.
+    expect(first.getAttribute('aria-checked')).toBe('true')
+    expect(second.getAttribute('aria-checked')).toBe('true')
+    expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true, 'DEV-211')
+    answer()
   })
 
   it('shows the issues its lead drafted as cards in the thread, files them one by one or all at once, and waits on the person', async () => {

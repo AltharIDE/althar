@@ -134,6 +134,18 @@ describe('what Althar writes about a pull request', () => {
       bodyOf({ lead: '', issue: { key: 'MER-231', url: 'https://linear.app/m/issue/MER-231', sameHost: false, partOf: true } }),
       `Part of [MER-231](https://linear.app/m/issue/MER-231)\n\n${credit}`,
     )
+    // A task from several issues names each, on whichever tracker: those it does whole, then those it does part of.
+    assert.strictEqual(
+      bodyOf({
+        lead: '',
+        issue: [
+          { key: 'DEV-211', url: 'https://linear.app/m/issue/DEV-211', sameHost: false },
+          { key: '#12', url: 'u', sameHost: true },
+          { key: 'DEV-37', url: 'https://linear.app/m/issue/DEV-37', sameHost: false, partOf: true },
+        ],
+      }),
+      `Issues: [DEV-211](https://linear.app/m/issue/DEV-211), #12\nPart of [DEV-37](https://linear.app/m/issue/DEV-37)\n\n${credit}`,
+    )
     // The lead's description is the body, above the issue's link: not what the task built, which is the person's.
     assert.strictEqual(
       bodyOf({
