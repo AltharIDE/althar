@@ -15,6 +15,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 
 import { useServices } from '../../data/services'
+import { openBlockers, standsOf } from '../../shared/blockers'
 import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
@@ -72,6 +73,10 @@ export interface CardActions {
   readonly agentName: (id: string | null) => string
   readonly onStart: (planId: string) => void
   readonly onHold: (planId: string) => void
+  /** Stops a task waiting for another (tasks wait for their blockers); done once it has gone through or failed. */
+  readonly onStopWaiting?: (taskId: string, on: string) => Promise<void>
+  /** Reopens a task a plan waits for, once abandoned. */
+  readonly onReopen?: (taskId: string) => void
   readonly onChange: (
     planId: string,
     steps: ReadonlyArray<PlanStep>,
@@ -166,6 +171,28 @@ function PlanCard({
 }) {
   const named = useModelNames()
   const effortOf = useEffortNames()
+  // What it waits for (tasks wait for their blockers), a row each before its lead: one the person stops waiting for goes at once.
+  const [letGo, setLetGo] = useState<ReadonlySet<string>>(new Set())
+  const waitsFor = openBlockers(card)
+    .filter((one) => !letGo.has(one.taskId))
+    .map((one) => ({
+      id: one.taskId,
+      name: one.title,
+      stands: standsOf(one.stands),
+      onOpen: () => actions.onOpen(one.threadId),
+      ...(actions.onReopen === undefined ? {} : { onReopen: () => actions.onReopen?.(one.taskId) }),
+      ...(actions.onStopWaiting === undefined
+        ? {}
+        : {
+            onStopWaiting: () => {
+              setLetGo((was) => new Set([...was, one.taskId]))
+              // Read again by then: gone where it went through, back with a line where it didn't.
+              void actions
+                .onStopWaiting?.(card.taskId, one.taskId)
+                .finally(() => setLetGo((was) => new Set([...was].filter((id) => id !== one.taskId))))
+            },
+          }),
+    }))
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
   const [shown, setShown] = useState<{
     readonly from: Plan
@@ -234,6 +261,7 @@ function PlanCard({
       }}
       wait={Math.max(1, plan.startsAfter ?? COUNTDOWN)}
       {...(queued === undefined ? {} : { queued })}
+      {...(waitsFor.length === 0 ? {} : { waitsFor })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
       onHeldChange={(held) => {

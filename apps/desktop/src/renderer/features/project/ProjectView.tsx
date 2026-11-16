@@ -550,6 +550,8 @@ export function ProjectView({
     agentName,
     onStart: (planId) => void model.startPlan(planId),
     onHold: (planId) => void model.holdPlan(planId),
+    onStopWaiting: (taskId, on) => model.stopWaiting(taskId, on),
+    onReopen: (taskId) => void model.reopenTask(taskId),
     onChange: (planId, steps, end, worksIn, toward) => void model.changePlan(planId, steps, end, worksIn, toward),
     onCreateBranch: (planId, steps, end, repositoryId, branch) =>
       void model.changePlanToNewBranch(planId, steps, end, repositoryId, branch),

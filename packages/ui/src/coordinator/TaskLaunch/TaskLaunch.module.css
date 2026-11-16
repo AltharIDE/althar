@@ -450,3 +450,28 @@
     display: none;
   }
 }
+
+/* A task it waits for, as a node on the line: its glyph in the seat, its arc going slowly round while it runs. */
+.blockerNode {
+  color: var(--t-2);
+}
+.blockerNode[data-state='choosing'] .arc {
+  animation-duration: 2.4s;
+}
+.blockerNode[data-stands='stuck'],
+.blockerNode[data-stands='abandoned'] {
+  border-color: color-mix(in oklab, var(--danger) 40%, transparent);
+  color: var(--danger);
+}
+.stands {
+  font-weight: 450;
+  color: var(--t-2);
+}
+.stands[data-stands='working'],
+.stands[data-stands='review'] {
+  color: var(--live);
+}
+.stands[data-stands='stuck'],
+.stands[data-stands='abandoned'] {
+  color: var(--danger);
+}

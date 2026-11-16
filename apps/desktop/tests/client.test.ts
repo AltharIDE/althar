@@ -368,6 +368,7 @@ describe('the client', () => {
           GetCoordinator: () => Effect.die('unused'),
           StartTask: () => Effect.die('unused'),
           StartPlan: () => Effect.die('unused'),
+          StopWaiting: () => Effect.die('unused'),
           HoldPlan: () => Effect.die('unused'),
           HoldDraft: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),

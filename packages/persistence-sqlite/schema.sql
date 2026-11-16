@@ -1697,3 +1697,13 @@ CREATE TABLE api_commands (
   ) STRICT;
 
 CREATE INDEX api_commands_pending ON api_commands(runtime_instance_id) WHERE state = 'pending';
+
+CREATE TABLE task_waits (
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    on_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (task_id, on_task_id),
+    CHECK (task_id <> on_task_id)
+  ) STRICT;
+
+CREATE INDEX task_waits_on ON task_waits(on_task_id);

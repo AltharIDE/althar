@@ -52,6 +52,7 @@ import {
 import { Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
+import { abandonedBlocker, blockerWords } from '../../shared/blockers'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
@@ -1151,6 +1152,9 @@ export function BoardView({
         : startsAt === null
           ? text.held
           : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
+    // A plan that waits for other tasks says what for, in place of its countdown: "Starts when Pairing merges"; and that it
+    // waits on the person once one of them was abandoned, or it is held.
+    const after = waits || pausedRow ? null : blockerWords(work)
     return (
       <NextRow
         key={work.taskId}
@@ -1161,8 +1165,16 @@ export function BoardView({
         {...(goesOn ? { continues: work.kind === 'change' ? stepWordOf(work) : '' } : {})}
         {...(parent === undefined ? {} : { foot: <StartedBy task={parent.title} onOpen={() => onOpen(parent.threadId)} /> })}
         title={work.title}
-        wait={waits || pausedRow || startsAt !== null ? Wait.Workers : Wait.You}
-        reason={reason}
+        wait={
+          after !== null
+            ? abandonedBlocker(work) !== undefined || startsAt === null
+              ? Wait.You
+              : Wait.After
+            : waits || pausedRow || startsAt !== null
+              ? Wait.Workers
+              : Wait.You
+        }
+        reason={after ?? reason}
         onOpen={() => onOpen(work.threadId)}
         {...teamOf(work)}
         text={{ task: unnamed }}

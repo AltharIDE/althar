@@ -616,6 +616,7 @@ describe('the API', () => {
               GetCoordinator: () => Effect.die('unused'),
               StartTask: () => Effect.die('unused'),
               StartPlan: () => Effect.void,
+              StopWaiting: () => Effect.void,
               HoldPlan: () => Effect.succeed(true),
               HoldDraft: () => Effect.void,
               ChangePlan: () => Effect.void,
