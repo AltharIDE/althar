@@ -1451,6 +1451,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     ...makeGitHubReleases({ http, repo }),
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
     capabilities: {
+      pictureLimit: 10_000_000,
       drafts: true,
       checkLogs: true,
       threads: true,

@@ -47,6 +47,7 @@ describe('the agent registry', () => {
     assert.deepInclude(copilot.launch('/usr/bin/node').env ?? {}, { COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' })
     // A GHE.com tenant's Copilot is named by GH_HOST, which crosses the allowlist to it.
     assert.include(copilot.launch('/usr/bin/node').inheritEnv ?? [], 'GH_HOST')
+    assert.include(copilot.launch('/usr/bin/node').inheritEnv ?? [], 'COPILOT_GH_HOST')
     assert.deepInclude(junie.launch('/usr/bin/node').env ?? {}, { JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false' })
     // Node's fetch takes the proxy a Claude Code sandbox names, so a Node tool's download reaches a host it allows.
     assert.deepInclude(agents['claude-code'].launch('/usr/bin/node').env ?? {}, { NODE_USE_ENV_PROXY: '1' })

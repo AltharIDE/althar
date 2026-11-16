@@ -2516,6 +2516,35 @@ describe('GitHub’s pictures', () => {
   const picture = { bytes: Uint8Array.of(137, 80, 78, 71), name: 'empty state.png', mediaType: 'image/png' }
   const UPLOADS = /^https:\/\/uploads\.github\.com\/user-attachments\/assets\?/
 
+  it.effect('keeps an upload size rejection distinct from a response size failure', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        [
+          'POST',
+          UPLOADS,
+          {
+            status: 422,
+            json: {
+              message: 'Validation Failed',
+              errors: [
+                {
+                  message: `Yowza that's a big file. <span class="drag-and-drop-error-info"><span class="btn-link">Try again</span> with a file size less than 10MB.</span>`,
+                },
+              ],
+            },
+          },
+        ],
+      ])
+      const error = yield* Effect.flip(host.uploadPicture!(repository, picture))
+      assert.strictEqual(error.reason, 'rejected')
+      assert.strictEqual(error.status, 422)
+      assert.strictEqual(error.uploadLimit, 10_000_000)
+      assert.isUndefined(error.sizeLimit)
+      assert.notInclude(error.message, '<span')
+      assert.include(error.message, 'less than 10MB')
+    }),
+  )
+
   it.effect('uploads one for the repository, by its number, as GitHub’s own CLI attaches one', () =>
     Effect.gen(function* () {
       const asset = 'https://github.com/user-attachments/assets/0c8e1a2b-3f4d-4e5f-9a6b-7c8d9e0f1a2b'

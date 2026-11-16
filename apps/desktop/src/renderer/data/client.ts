@@ -617,7 +617,7 @@ export interface Client {
   /** Folders account switchers keep the agent's accounts in, not added yet. */
   readonly findAccounts: (agentId: string) => Promise<ReadonlyArray<FoundAccount>>
   /** Opens the agent's own sign-in for the account in Terminal: the line it runs, and whether it could. */
-  readonly signInAccount: (accountId: string) => Promise<{ readonly line: string; readonly opened: boolean }>
+  readonly signInAccount: (accountId: string, host?: string) => Promise<{ readonly line: string; readonly opened: boolean }>
   /** Signs an account in inside Althar, this way; its id, to ask how it stands. */
   readonly startAccountSignIn: (
     accountId: string,
@@ -1094,7 +1094,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.RemoveAccount({ commandId, accountId, ...(anyway === undefined ? {} : { anyway }) })),
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
-    signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),
+    signInAccount: (accountId, host) =>
+      command((commandId) => api.SignInAccount({ commandId, accountId, ...(host === undefined ? {} : { host }) })),
     startAccountSignIn: (accountId, way, host) =>
       command((commandId) => api.StartAccountSignIn({ commandId, accountId, way, ...(host === undefined ? {} : { host }) })),
     getAccountSignIn: (flowId) => settle(api.GetAccountSignIn({ flowId })),

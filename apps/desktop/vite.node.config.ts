@@ -42,7 +42,14 @@ export default defineConfig(({ mode }) => ({
     sourcemap: true,
     rollupOptions: {
       input: { 'main/main': 'src/main/main.ts', 'runtime/runtime': 'src/runtime/runtime.ts', 'speech/speech': 'src/speech/speech.ts' },
-      external: ['electron', 'sherpa-onnx-node', 'electron-updater', ...builtinModules, ...builtinModules.map((name) => `node:${name}`)],
+      external: [
+        'sharp',
+        'electron',
+        'sherpa-onnx-node',
+        'electron-updater',
+        ...builtinModules,
+        ...builtinModules.map((name) => `node:${name}`),
+      ],
       output: {
         format: 'es',
         entryFileNames: '[name].js',

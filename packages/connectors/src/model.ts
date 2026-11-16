@@ -429,6 +429,8 @@ export interface HostCapabilities {
    * not on Enterprise Server, which takes no such upload.
    */
   readonly pictures: boolean
+  /** Conservative upload ceiling in bytes, before any smaller limit the server reports. */
+  readonly pictureLimit?: number
   /**
    * A closed change can be opened again. Not on Bitbucket Cloud, where a
    * declined pull request is final: `reopenChange` is refused there.

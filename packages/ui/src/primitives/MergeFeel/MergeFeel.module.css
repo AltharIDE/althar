@@ -1,0 +1,27 @@
+/* Over its card and of its size, for what a merge draws as it goes: a ring, the pressed Merge gathering, a dot, a few marks. */
+.layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+.layer > * {
+  position: absolute;
+}
+/* the pressed Merge, after it has gone from the card: its colour, its check */
+.ghost {
+  display: grid;
+  place-items: center;
+}
+.dot {
+  border-radius: 50%;
+}
+.ring {
+  border: 1.5px solid var(--signal);
+  opacity: 0;
+}
+/* thrown out from where it landed, turned to its way out */
+.spark {
+  border-radius: 1px;
+  transform-origin: 0 50%;
+}

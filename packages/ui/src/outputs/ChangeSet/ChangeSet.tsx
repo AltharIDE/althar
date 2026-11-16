@@ -12,6 +12,7 @@ import { Delta, FileChanges, type ChangedFile } from '../../primitives/FileChang
 import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fold/Fold'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { MergeFeel, type MergeFeelStage } from '../../primitives/MergeFeel/MergeFeel'
 import { ModelList, type ModelInfo } from '../../primitives/Model/Model'
 import { Problem } from '../../primitives/Problem/Problem'
 import s from './ChangeSet.module.css'
@@ -235,8 +236,16 @@ export function ChangeSet({
           <ChangeFiles files={files} root={root} folders={folders} onOpenFile={onOpenFile} t={t} />
         </div>
       )}
+      <MergeFeel stage={feelOf[state] ?? null} />
     </article>
   )
+}
+
+/** Where its merge stands, as its feel plays it: Merging shows on its button, in its actions. */
+const feelOf: Partial<Record<ChangeState, MergeFeelStage>> = {
+  [ChangeState.Ready]: 'ready',
+  [ChangeState.Queued]: 'queued',
+  [ChangeState.Merged]: 'merged',
 }
 
 /** A repository by its name alone: `meridian-api` for `stripe-internal/meridian-api`. */
@@ -280,7 +289,13 @@ function Head({
                   <Icon name="external" size={10} />
                 </a>
               )}
-              {i === 0 && said !== null && <span className={s.state}>{said}</span>}
+              {/* Where a merge goes once pressed, and what fills as it lands: merged, with its check. */}
+              {i === 0 && said !== null && (
+                <span className={s.state} data-merge-target="words">
+                  {said}
+                  {state === ChangeState.Merged && <Icon name="check" size={11} className={s.merged} />}
+                </span>
+              )}
             </p>
           )
         })}

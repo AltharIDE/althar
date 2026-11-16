@@ -128,5 +128,6 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   },
 ]
 
-/** Where a story is shown, on a Storybook served at `origin`. */
-export const storyUrl = (origin: string, story: string): string => `${origin}/iframe.html?id=${story}&viewMode=story`
+/** Where a story is shown, on a Storybook served at `origin`, in the app's light unless `theme` says dark. */
+export const storyUrl = (origin: string, story: string, theme: 'light' | 'dark' = 'light'): string =>
+  `${origin}/iframe.html?id=${story}&viewMode=story${theme === 'dark' ? '&globals=theme:dark' : ''}`

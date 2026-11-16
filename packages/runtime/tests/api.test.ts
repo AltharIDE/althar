@@ -1037,6 +1037,42 @@ describe('accounts, through the API', () => {
   )
 })
 
+it.live('opens Copilot CLI on the selected enterprise host and reports that host through the API', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const cliAgents = Layer.effect(
+        Agents,
+        Effect.gen(function* () {
+          const agents = yield* Agents
+          const cli = yield* agents.get('copilot').pipe(Effect.orDie)
+          return Agents.from([
+            ...agents.list,
+            { ...cli, definition: { ...cli.definition, signIn: { ...cli.definition.signIn, login: 'copilot login' } } },
+          ])
+        }),
+      ).pipe(Layer.provide(fakeAgents()))
+      const { client } = yield* connected({ agents: cliAgents })
+      const [account] = (yield* client.Status({})).agents.find((agent) => agent.id === 'copilot')?.accounts ?? []
+      assert.isDefined(account)
+      const result = yield* client.SignInAccount({ commandId: commandId(), accountId: account!.id, host: 'https://Company.GHE.com/' })
+      assert.deepStrictEqual(result, { line: "copilot login --host 'https://company.ghe.com'", opened: true })
+      assert.include(opened, result.line)
+      const [saved] = (yield* client.Status({})).agents.find((agent) => agent.id === 'copilot')?.accounts ?? []
+      assert.strictEqual(saved?.signInHost, 'company.ghe.com')
+      const count = opened.length
+      const rejected = yield* Effect.flip(
+        client.SignInAccount({
+          commandId: commandId(),
+          accountId: account!.id,
+          host: 'https://user:password@company.ghe.com',
+        }),
+      )
+      assert.strictEqual(rejected.reason, 'AccountRefused')
+      assert.lengthOf(opened, count)
+    }),
+  ),
+)
+
 describe('a project’s vocabulary, through the API', () => {
   it.live('says the names its code uses that have parts, its files’ among them, and not plain words', () =>
     Effect.scoped(
