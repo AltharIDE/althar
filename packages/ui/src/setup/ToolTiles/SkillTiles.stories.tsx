@@ -119,7 +119,7 @@ export const Usual: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getAllByRole('switch')[0]).toHaveAccessibleName('release-checklist')
     await expect(canvas.getByText('Update ready')).toBeVisible()
-    await expect(canvas.getByText('Leads and reviewers · not in fnt')).toBeVisible()
+    await expect(canvas.getByText('Leads and reviewers only · not in fnt')).toBeVisible()
     await expect(canvas.getByRole('heading', { name: 'In althar’s repository' })).toBeVisible()
   },
 }

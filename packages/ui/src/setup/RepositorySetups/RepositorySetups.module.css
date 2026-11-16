@@ -69,12 +69,6 @@
 .part:first-child {
   border-top: 0;
 }
-.error {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--danger);
-}
-
 /* Lines of code, numbered, coloured with the kit's syntax tokens, set like CodeBlock. */
 .lines {
   display: grid;

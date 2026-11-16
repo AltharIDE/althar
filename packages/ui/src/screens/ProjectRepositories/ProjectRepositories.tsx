@@ -3,6 +3,7 @@ import { useDragOver } from '../../lib/dragOver'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
 import { below, type HeadingLevel } from '../../primitives/Heading/Heading'
+import { Problem } from '../../primitives/Problem/Problem'
 import { EmptyState } from '../../setup/EmptyState/EmptyState'
 import { SettingGroup } from '../../setup/Preferences/Preferences'
 import { RepositoryMap, type RepositoryMapProps } from '../../setup/RepositoryMap/RepositoryMap'
@@ -47,7 +48,16 @@ export type ProjectRepositoriesProps = RootProps<
   'section',
   Pick<
     RepositoryMapProps,
-    'repositories' | 'hosts' | 'reading' | 'worktrees' | 'onRoleChange' | 'onTargetChange' | 'onLeaveOut' | 'onOpen' | 'onConnect'
+    | 'repositories'
+    | 'hosts'
+    | 'reading'
+    | 'worktrees'
+    | 'onRoleChange'
+    | 'onTargetChange'
+    | 'onLeaveOut'
+    | 'onOpen'
+    | 'onConnect'
+    | 'putOnHost'
   > & {
     project: string
     /** Opens the system's folder picker. Without it, nothing is added here. */
@@ -83,6 +93,7 @@ export function ProjectRepositories({
   onLeaveOut,
   onOpen,
   onConnect,
+  putOnHost,
   className,
   ...rest
 }: ProjectRepositoriesProps) {
@@ -113,11 +124,7 @@ export function ProjectRepositories({
       {...handlers}
       {...rest}
     >
-      {error !== undefined && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== undefined && <Problem>{error}</Problem>}
       {repositories.length === 0 && (reading === undefined || reading.length === 0) ? (
         <EmptyState icon="folder" title={t.none} line={t.noneLine} headingLevel={below(headingLevel)} />
       ) : (
@@ -134,6 +141,7 @@ export function ProjectRepositories({
           {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
           {...(onOpen === undefined ? {} : { onOpen })}
           {...(onConnect === undefined ? {} : { onConnect })}
+          {...(putOnHost === undefined ? {} : { putOnHost })}
         />
       )}
     </SettingGroup>

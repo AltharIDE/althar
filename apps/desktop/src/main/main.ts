@@ -1,7 +1,7 @@
 import { isStartupStage, type StartupStage } from '../startup'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { homedir, hostname, userInfo } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -14,21 +14,24 @@ import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, theme
 import { CHROME_ARG, decideChrome, type DesktopChrome, parseHexAccent } from './desktop'
 import { chromeOf, FIRST_CHROME_WAIT, type FollowedChrome, followDesktopChrome, systemSources } from './desktopChrome'
 import { keepingAwake } from './awake'
-import { bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
+import { availableWindows, bringForward as raiseWindow, focusedLast, openFromEdge } from './bringForward'
 import { attachedOf, clipboardPaths, pastedOf, rawFormat } from './attachments'
 import { tokenIn } from './clipboard'
 import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
+import { crashConsent } from './crashConsent'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
 import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
 import { startLogs } from './logs'
+import { isPlace, showPlace } from './storage'
 import { setAppMenu } from './menu'
 import { dockCount, notificationsShown, soundOf, tells } from './notify'
 import { idle, isQuitAnswer, type QuitAnswer, type QuitQuestion, type Work, workIn } from './quitWork'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
-import { CANVAS_SCHEME } from '@althar/contracts'
+import { CANVAS_SCHEME, emitterPort, type AttentionEvent } from '@althar/contracts'
+import { watchRuntimeAttention } from './runtimeAttention'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
 import { type Canvases, startCanvases } from './canvases/views'
@@ -39,7 +42,7 @@ import { takeScreenshot } from './screenshots'
 import { storeFacts } from './report/mainFacts'
 import { factsIn, type RuntimeFacts } from './report/facts'
 import { factsAsker, startReports } from './report/reports'
-import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
+import { clonePlaceFor, findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from './repositories'
 import { watchOnline } from './online'
 import { afterExit } from './restarts'
 import { alertSounds, playSound } from './sounds'
@@ -133,7 +136,7 @@ let quitting = false
 let quitConfirmed = false
 /* Quit asked what it stops and is waiting on the person: another Quit meanwhile is their yes. */
 let quitAsking: { readonly settle: (answer: QuitAnswer) => void } | undefined
-/* The person chose to keep working in the background: closing the last window doesn't quit, until a window opens again. */
+/* The person chose to keep working in the background: closing the last window doesn't quit, even after reopening it. */
 let keepingOn = false
 let dictation: ReturnType<typeof startDictation> | undefined
 
@@ -274,7 +277,7 @@ const facts = factsAsker()
  * registered before the app is ready, as Electron asks.
  */
 protocol.registerSchemesAsPrivileged([
-  { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true } },
+  { scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } },
   // An HTML canvas's files (ADR-104): an origin for each canvas, handled only in its project's canvas partition (canvases/views.ts).
   { scheme: CANVAS_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
 ])
@@ -308,15 +311,6 @@ interface RuntimeMessage {
   readonly owners?: unknown
   /** The ports the runtime listens on, which no canvas may reach (ADR-104). */
   readonly ports?: unknown
-  readonly event?: {
-    readonly _tag?: string
-    readonly kind?: unknown
-    readonly count?: unknown
-    readonly working?: unknown
-    readonly title?: unknown
-    readonly body?: unknown
-    readonly threadId?: unknown
-  }
 }
 
 /* Notifications the person may still click: kept, so they aren't collected before then. */
@@ -340,6 +334,7 @@ let waiting = 0
  * as kept. A change waits for that read, so the read can't undo it.
  */
 let preferences: AppPreferences = DEFAULT_PREFERENCES
+const crashPolicy = crashConsent(() => preferences.crashReports && !doNotTrack(process.env))
 
 /*
  * Light, dark or as the system is (Settings › Appearance): Electron's nativeTheme is told, and every window's page
@@ -361,6 +356,7 @@ if (process.platform === 'linux') {
 
 const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   preferences = kept
+  keepingOn = kept.keepWorkingOnClose
   awake.wants(kept)
   applyAppearance()
   // A count the runtime gave before the file was read is shown again as the person has it.
@@ -439,7 +435,8 @@ const crashes = Promise.all([install, ready]).then(([install]) => {
     ...usageTarget,
     installId: install.id,
     app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
-    allowed: () => preferences.crashReports && !doNotTrack(process.env),
+    allowed: crashPolicy.allowed,
+    generation: crashPolicy.generation,
     fetch: (url, options) => net.fetch(url, options),
     mask: maskHere,
   })
@@ -451,7 +448,15 @@ const crashes = Promise.all([install, ready]).then(([install]) => {
   return sender
 })
 /** Reports a crash once the sender is there; reporting never fails into what failed. */
-const reportCrash = (report: (sender: CrashReports) => void) => void crashes.then(report).catch(() => undefined)
+const reportCrash = (report: (sender: CrashReports) => void) => {
+  if (!crashPolicy.allowed()) return
+  const accepted = crashPolicy.generation()
+  void crashes
+    .then((sender) => {
+      if (crashPolicy.allowed() && crashPolicy.generation() === accepted) report(sender)
+    })
+    .catch(() => undefined)
+}
 /** Lets crash reports and usage data on their way go, a few seconds at most. */
 const sendersStopped = () =>
   Promise.race([
@@ -476,6 +481,7 @@ app.on('child-process-gone', (_event, details) => {
 
 /* Althar's own windows, apart from the edge's pages. */
 const windows = new Set<BrowserWindow>()
+const closingWindows = new WeakSet<BrowserWindow>()
 let edge: Edge | undefined
 
 /* The pages beside the conversations (browser/pages.ts), once the app is ready. */
@@ -502,7 +508,7 @@ const ownersIn = (said: unknown): ReadonlyArray<string> =>
 
 /** Brings Althar's window forward, a window there is or a new one, from wherever the person is. */
 const bringForward = () => {
-  return raiseWindow(windows, openWindow, () => app.focus({ steal: true }), quiet)
+  return raiseWindow(availableWindows(windows, closingWindows), openWindow, () => app.focus({ steal: true }), quiet)
 }
 
 /** Opens the window on a thread, as a notification or the edge asks. */
@@ -519,7 +525,7 @@ const openThread = (threadId: string) => {
  * and how many things wait, on the Dock while its count is on. Never for
  * progress. And whether any work runs, to keep the Mac awake by.
  */
-const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
+const nudged = (event: AttentionEvent) => {
   if (event._tag === 'Working' && typeof event.working === 'boolean') {
     // Nothing restarts into an update while work runs.
     updates?.working(event.working)
@@ -622,6 +628,11 @@ const startRuntime = () => {
     },
   })
   logs.keepOutput(child)
+  const attention = new MessageChannelMain()
+  const stopAttention = watchRuntimeAttention(emitterPort(attention.port1), nudged, (reason) => {
+    if (runtime === child && !quitting) logs.error('Runtime attention connection failed', { reason })
+  })
+  child.postMessage({ type: 'connect', role: 'internal' }, [attention.port2])
   child.once('spawn', () => logs.info('Runtime started', { pid: child.pid }))
   // Whether the computer is online, so work waits out a lost connection rather than fail on it (ADR-060).
   const stopWatchingOnline = watchOnline(
@@ -664,7 +675,6 @@ const startRuntime = () => {
     if (message.type === 'facts') return facts.answer(message)
     if (message.type === 'names') return names.answer(message)
     if (message.type === 'work') return works.answer(message)
-    if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
     if (message.type === 'usage') return recordUsage(message.usage)
     if (message.type === 'crash') return reportCrash((sender) => sender.fromRuntime(message.crash))
     if (message.type === 'store-failed' || message.type === 'profile-in-use') {
@@ -682,6 +692,7 @@ const startRuntime = () => {
     granting.delete(message.requestId)
   })
   child.once('exit', (code) => {
+    stopAttention()
     stopWatchingOnline()
     runtime = undefined
     if (quitting) logs.info('Runtime exited', { code })
@@ -790,8 +801,9 @@ nativeTheme.on('updated', paintPaper)
 /*
  * The desktop the windows sit on, and how they are dressed for it (desktopChrome.ts, ADR-098): read once the app is ready, handed
  * to each window as it opens so its first frame draws its buttons where they go, and sent to every window as the desktop changes.
- * Whether the windows have the window manager's own frame is decided as the first one opens, from what is known then: a window's
- * frame can't change once it is open, and every window of a run has the same.
+ * On Linux every window is frameless with Althar's own bar, but where an X11 window manager can't move a frameless one (desktop.ts):
+ * that is decided as the first window opens, from what is known then, since a window's frame can't change once it is open, and
+ * every window of a run has the same.
  */
 let desktopLook: FollowedChrome | undefined
 let framed: boolean | undefined
@@ -844,8 +856,8 @@ const openWindow = () => {
     minWidth: 880,
     minHeight: 600,
     show: false,
-    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), but where a Linux window manager draws a good
-    // frame of its own (desktop.ts); there it carries Althar's icon.
+    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), but where an X11 window manager couldn't
+    // move it so (desktop.ts); there the system's frame carries Althar's icon.
     ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors, framedNow()),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
@@ -864,7 +876,7 @@ const openWindow = () => {
   }
   windows.add(window)
   window.on('focus', () => focusedLast(windows, window))
-  keepingOn = false
+  window.on('close', () => closingWindows.add(window))
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
   window.on('maximize', () => window.webContents.send('althar:maximized', true))
   window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
@@ -986,6 +998,41 @@ ipcMain.handle('althar:find-repositories', async () => {
   return forWindow(found, home, foundHere.idOf)
 })
 
+// Where the person lets Althar into a folder the system keeps closed, as macOS keeps Documents and Desktop: false off a Mac, where there's no such place.
+ipcMain.handle('althar:open-folder-access', async () => {
+  if (process.platform !== 'darwin') return false
+  await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders').catch(() => undefined)
+  return true
+})
+
+// Where a clone for a new project goes, as the person knows the place, and a grant for it; null where there is nowhere usual, and the person is asked.
+ipcMain.handle('althar:clone-place', async () => {
+  const home = process.env.ALTHAR_CODE_HOME || homedir()
+  const places = placesFor(home, process.platform)
+  const path = await clonePlaceFor(await findRepositories(places), places)
+  const grant = path === null ? null : await allowFolder(path)
+  // The place is read with its links followed, as the home may not be (a Mac's /var is /private/var): each is shown from ~.
+  const real = await realpath(home).catch(() => home)
+  return path === null || grant === null ? null : { grant, where: shownAt(path, path.startsWith(real) ? real : home) }
+})
+
+// Another place for it, chosen by the person: as above, or null where they cancel.
+ipcMain.handle('althar:pick-clone-place', async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const home = process.env.ALTHAR_CODE_HOME || homedir()
+  const options = {
+    properties: ['openDirectory' as const, 'createDirectory' as const],
+    title: 'Choose where to clone it',
+    message: 'Choose the folder the repository is cloned into',
+    buttonLabel: 'Clone here',
+    defaultPath: home,
+  }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  const path = result.canceled ? undefined : result.filePaths[0]
+  const grant = path === undefined ? null : await allowFolder(path)
+  return path === undefined || grant === null ? null : { grant, where: shownAt(path, home) }
+})
+
 // A grant for one of them, once the person ticks or adds it: one main found, still where it was found, and nothing else.
 ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
   const repository = typeof id === 'string' ? foundHere.found(id) : undefined
@@ -1004,6 +1051,14 @@ ipcMain.handle('althar:try-again', () => {
 ipcMain.handle('althar:show-backup', () => {
   const backup = storeFailure?.backup
   if (typeof backup === 'string') shell.showItemInFolder(backup)
+})
+
+// About › Storage (DEV-147): where Althar keeps its data, and the system's file manager opened on one. How big each is, the runtime measures. The window names a place by id, never by path.
+const storagePlaces = () => ({ profile: locations().profile, logs: logs.dir, worktrees: locations().worktrees })
+ipcMain.handle('althar:storage-places', () => storagePlaces())
+ipcMain.handle('althar:storage-show', async (_event, place: unknown) => {
+  if (!isPlace(place)) throw new Error(`Althar keeps nothing in ${String(place)}.`)
+  await showPlace(storagePlaces(), place, (path) => shell.openPath(path))
 })
 
 // The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.
@@ -1031,11 +1086,18 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
   if (!isPreferenceKey(key)) throw new Error(`Althar has no preference ${String(key)}.`)
   // Checked before it is kept, so it goes through choose-task-folder.
   if (key === 'worktrees') throw new Error('The task folder is chosen with its own dialog.')
-  await preferencesRead
-  // Merged into the preferences as they stand once it is kept, so changes made together each stay.
-  const kept = await writeAppPreference(locations().profile, key, value)
-  preferences = { ...preferences, [key]: kept }
+  // Stop crash reporting before any asynchronous work, including the preference's disk write.
+  const finish = key === 'crashReports' && typeof value === 'boolean' ? crashPolicy.changing() : undefined
+  try {
+    await preferencesRead
+    // Merged into the preferences as they stand once it is kept, so changes made together each stay.
+    const kept = await writeAppPreference(locations().profile, key, value)
+    preferences = { ...preferences, [key]: kept }
+  } finally {
+    finish?.()
+  }
   if (key === 'openAtLogin') startAtLogin(preferences.openAtLogin)
+  if (key === 'keepWorkingOnClose') keepingOn = preferences.keepWorkingOnClose
   awake.wants(preferences)
   if (key === 'appearance') applyAppearance()
   if (key === 'showLoad') meterLoad(runtime)
@@ -1326,7 +1388,7 @@ void ready.then(() => {
   app.on('browser-window-blur', focusChanged)
   focusChanged()
   app.on('activate', () => {
-    if (windows.size === 0) openWindow()
+    if (availableWindows(windows, closingWindows).size === 0) openWindow()
   })
 })
 
@@ -1414,11 +1476,19 @@ const askToQuit = async () => {
       answer = await askInWindow({ work: work ?? NOT_COUNTED, background, update: updates?.glance().ready ?? null }, asked)
     }
     if (answer === 'quit') {
+      preferences = { ...preferences, keepWorkingOnClose: false }
+      await writeAppPreference(locations().profile, 'keepWorkingOnClose', false).catch((error: unknown) =>
+        logs.error('Could not remember the close choice', { error: String(error) }),
+      )
       quitConfirmed = true
       app.quit()
     } else if (answer === 'background') {
       keepingOn = true
+      preferences = { ...preferences, keepWorkingOnClose: true }
       for (const window of windows) window.close()
+      await writeAppPreference(locations().profile, 'keepWorkingOnClose', true).catch((error: unknown) =>
+        logs.error('Could not remember the close choice', { error: String(error) }),
+      )
     } else if (windows.size === 0 && process.platform !== 'darwin') {
       // The window that asked was closed, which is a Cancel; with no edge page either, Althar would be left with nothing to see.
       bringForward()

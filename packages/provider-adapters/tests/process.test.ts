@@ -420,6 +420,27 @@ describe('childEnvironment', () => {
     )
   })
 
+  it('passes the base URLs through when set, and nothing when not, keeping provider keys out', () => {
+    const spec = { command: 'agent', args: [] }
+    assert.deepStrictEqual(
+      childEnvironment(
+        spec,
+        { ...parent, ANTHROPIC_BASE_URL: 'http://127.0.0.1:8787', OPENAI_BASE_URL: 'http://127.0.0.1:8787/v1' },
+        false,
+      ),
+      {
+        PATH: '/usr/bin',
+        HOME: '/Users/someone',
+        LC_ALL: 'C',
+        HTTPS_PROXY: 'http://proxy',
+        ANTHROPIC_BASE_URL: 'http://127.0.0.1:8787',
+        OPENAI_BASE_URL: 'http://127.0.0.1:8787/v1',
+      },
+    )
+    const bare = childEnvironment(spec, parent, false)
+    assert.ok(!('ANTHROPIC_BASE_URL' in bare) && !('OPENAI_BASE_URL' in bare))
+  })
+
   it('inherits the person’s code-host sign-ins and SSH agent, while provider keys stay out', () => {
     const signIns = {
       GH_TOKEN: 'test-gh',

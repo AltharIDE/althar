@@ -11,6 +11,7 @@ import {
   ControlSheet,
   IconButton,
   LinkButton,
+  Problem,
 } from '@althar/ui'
 
 import { notesOf } from '../../../main/updates'
@@ -65,9 +66,9 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
       <div className={s.quick}>
         <QuickCards preferences={preferences} sounds={sounds.list} onSection={settings} />
         {preferences.failed && (
-          <p role="alert" className={s.failed}>
+          <Problem size="small" className={s.failed}>
             {text.failed}
-          </p>
+          </Problem>
         )}
         {atOnce !== null && (
           <ControlSheet>
@@ -81,9 +82,9 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
               text={{ value: text.atOnceValue }}
             />
             {atOnce.failed && (
-              <p role="alert" className={s.failed}>
+              <Problem size="small" className={s.failed}>
                 {text.failed}
-              </p>
+              </Problem>
             )}
           </ControlSheet>
         )}

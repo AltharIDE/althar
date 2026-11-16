@@ -5,6 +5,7 @@ import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
 import {
+  apiLayer,
   AgentsAtOnce,
   Api,
   ApiError,
@@ -457,16 +458,33 @@ describe('the API', () => {
       Effect.gen(function* () {
         const channel = new MessageChannel()
         yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
-        const handlers = Api.toLayer(
+        const handlers = apiLayer(
           Effect.succeed(
             Api.of({
+              GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),
+              SaveAcpConnection: () => Effect.succeed(1),
+              CheckAcpConnection: () => Effect.succeed(1),
+              RemoveAcpConnection: () => Effect.succeed(1),
+              WatchAttention: () => Stream.die('unused'),
+              GetConnectionInfo: () => Effect.die('unused'),
+              ListClientDevices: () => Effect.die('unused'),
+              RegisterClientDevice: () => Effect.die('unused'),
+              RevokeClientDevice: () => Effect.die('unused'),
+              WatchFrom: () => Stream.die('unused'),
               Status: ({ recheck }) => Effect.succeed({ apiVersion: 1, appVersion: recheck === true ? 'rechecked' : 'cached', agents: [] }),
               ListProjects: () => Effect.succeed({ cursor: 0, projects: [] }),
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
               ReadFolder: () => Effect.die('unused'),
               PlaceRepository: () => Effect.die('unused'),
               MakeRepository: () => Effect.die('unused'),
+              PrepareFolder: () => Effect.die('unused'),
+              ListHostRepositories: () => Effect.die('unused'),
+              ListRepositoryOwners: () => Effect.die('unused'),
+              CloneRepository: () => Effect.die('unused'),
+              PublishRepository: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
+              GetSearchDocuments: () => Effect.succeed({ documents: [], next: null }),
+              GetSearchFiles: () => Effect.succeed({ files: [] }),
               SearchTasks: ({ text, projectId }) =>
                 Effect.succeed({
                   tasks: [
@@ -491,6 +509,7 @@ describe('the API', () => {
               GetThread: () => Effect.die('unused'),
               GetFileDiff: () => Effect.die('unused'),
               GetTaskFindings: () => Effect.die('unused'),
+              GetLineComments: () => Effect.die('unused'),
               GetBoard: () => Effect.die('unused'),
               GetOlderSettled: () => Effect.die('unused'),
               GetHome: () => Effect.die('unused'),
@@ -540,6 +559,7 @@ describe('the API', () => {
               SignInToolServer: () => Effect.die('unused'),
               SetCoAuthor: () => Effect.die('unused'),
               SetPostTeamReviews: () => Effect.die('unused'),
+              SetSendMidTurn: () => Effect.die('unused'),
               SetReviewSeal: () => Effect.die('unused'),
               SetReviewSealStyle: () => Effect.die('unused'),
               GetAutomations: () => Effect.die('unused'),
@@ -565,6 +585,7 @@ describe('the API', () => {
               ListPresets: () => Effect.die('unused'),
               SavePreset: () => Effect.die('unused'),
               RemovePreset: () => Effect.die('unused'),
+              DeclinePresetOffer: () => Effect.die('unused'),
               RunIt: () => Effect.die('unused'),
               StopRunning: () => Effect.die('unused'),
               ApplyPreset: () => Effect.die('unused'),
@@ -581,6 +602,7 @@ describe('the API', () => {
               SetPlansAndReviews: () => Effect.die('unused'),
               SetNewProjectDefaults: () => Effect.die('unused'),
               GetTaskFolders: () => Effect.die('unused'),
+              GetStorageSize: () => Effect.die('unused'),
               CleanUpFolders: () => Effect.die('unused'),
               RemoveTaskFolder: () => Effect.die('unused'),
               MoveInLine: () => Effect.die('unused'),
@@ -601,7 +623,8 @@ describe('the API', () => {
               GetCoordinator: () => Effect.die('unused'),
               StartTask: () => Effect.die('unused'),
               StartPlan: () => Effect.void,
-              HoldPlan: () => Effect.void,
+              HoldPlan: () => Effect.succeed(true),
+              HoldDraft: () => Effect.void,
               ChangePlan: () => Effect.void,
               ChangeTeam: () => Effect.void,
               DeclineReview: () => Effect.void,
@@ -645,6 +668,7 @@ describe('the API', () => {
                   ? Effect.void
                   : Effect.fail(new ApiError({ reason: 'Echo', message: `${body}: ${images.map((image) => image.name ?? '').join(',')}` })),
               TakeBack: () => Effect.die('unused'),
+              UndoTurn: () => Effect.die('unused'),
               AnswerQuestion: () => Effect.void,
               Answer: () => Effect.void,
               ListSkills: () => Effect.die('unused'),
@@ -704,6 +728,7 @@ describe('the API', () => {
               SignInAccount: () => Effect.succeed({ line: 'codex login', opened: false }),
               OpenChange: () => Effect.void,
               SkipReview: () => Effect.void,
+              ShapeTask: () => Effect.void,
               SetReviewAfterMerge: () => Effect.void,
               Ship: () => Effect.void,
               FixAfterMerge: () => Effect.die('unused'),
@@ -722,6 +747,7 @@ describe('the API', () => {
               GetRepositoryScripts: () => Effect.succeed([]),
               GetRunnableRefs: () => Effect.succeed([]),
               StopLaunch: () => Effect.void,
+              ReadLaunchOutput: () => Effect.succeed({ text: '', dropped: 0 }),
               ClearLaunch: () => Effect.void,
               PreferIssueCards: () => Effect.void,
               SetTaskIssuePart: () => Effect.void,
@@ -796,7 +822,7 @@ describe('the API', () => {
           Effect.gen(function* () {
             const channel = new MessageChannel()
             yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
-            const handlers = Api.toLayer({
+            const handlers = apiLayer({
               Status: () => Effect.succeed({ apiVersion: API_VERSION, appVersion: 'x', agents: [] }),
             } as never)
             yield* Effect.forkScoped(

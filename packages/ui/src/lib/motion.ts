@@ -1,7 +1,21 @@
+import { useSyncExternalStore } from 'react'
+
 import { springEasing } from './spring'
 
 /** Whether the person asked their system for less motion. False where there is no window to ask. */
 export const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+
+/** Whether the person asks for less motion, kept as they change it. */
+export const useReducedMotion = () =>
+  useSyncExternalStore(
+    (changed) => {
+      const query = typeof window === 'undefined' ? undefined : window.matchMedia?.('(prefers-reduced-motion: reduce)')
+      query?.addEventListener?.('change', changed)
+      return () => query?.removeEventListener?.('change', changed)
+    },
+    reducedMotion,
+    () => false,
+  )
 
 /** A motion as the Web Animations API takes it: how long, and on what curve. */
 export interface Timing {

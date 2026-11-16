@@ -57,6 +57,177 @@ const signInOf = (client: Client, start: StartModel, host: Host = fakeHost()) =>
 
 const usualCodex = usual('acc_usual', 'signed_in')
 
+const copilotStatus = (installed = true): Status => ({
+  ...codexWith(['browser'], usual('acc_copilot', 'signed_out')),
+  agents: [
+    {
+      ...agents[1]!,
+      id: 'copilot-direct',
+      name: 'GitHub Copilot',
+      login: '',
+      installed,
+      ways: ['browser'],
+      accounts: [usual('acc_copilot', 'signed_out')],
+    },
+  ],
+})
+
+const copilotCliStatus = (host?: string): Status => ({
+  ...copilotStatus(),
+  agents: copilotStatus().agents.map((agent) => ({
+    ...agent,
+    id: 'copilot',
+    name: 'GitHub Copilot CLI',
+    login: 'copilot login',
+    ways: [],
+    accounts: agent.accounts.map((account) => ({ ...account, ...(host === undefined ? {} : { signInHost: host }) })),
+  })),
+})
+
+describe('Copilot CLI enterprise sign-in', () => {
+  it('offers the enterprise address in Settings and forwards it to terminal sign-in', async () => {
+    const { client } = fakeClient({ status: vi.fn(async () => copilotCliStatus()) })
+    function Asked() {
+      return <SettingsPage start={useStart()} section="agents" onSection={() => {}} signIn="copilot" />
+    }
+    withServices(<Asked />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Use a GitHub Enterprise address…' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'GitHub Enterprise address' }), 'company.ghe.com')
+    await userEvent.click(screen.getByRole('button', { name: /^Continue$/ }))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_copilot', 'company.ghe.com'))
+    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+  })
+
+  it('offers the host choice before opening a terminal', () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotCliStatus()))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    expect(result.current.signingIn?.step).toEqual({ kind: 'choose' })
+    expect(client.signInAccount).not.toHaveBeenCalled()
+  })
+
+  it('opens CLI sign-in with the normalized enterprise host', async () => {
+    const { client } = fakeClient()
+    vi.spyOn(client, 'signInAccount').mockResolvedValue({ line: "copilot login --host 'https://company.ghe.com'", opened: true })
+    const { result } = signInOf(client, startOf(copilotCliStatus()))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    act(() => result.current.enterprise('https://Company.GHE.com/'))
+    await waitFor(() =>
+      expect(result.current.signingIn?.step).toEqual({
+        kind: 'terminal',
+        line: "copilot login --host 'https://company.ghe.com'",
+        opened: true,
+      }),
+    )
+    expect(client.signInAccount).toHaveBeenCalledWith('acc_copilot', 'company.ghe.com')
+    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+  })
+
+  it('prefills the remembered host and lets the person switch back to github.com', async () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotCliStatus('company.ghe.com')))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    expect(result.current.signingIn?.step).toEqual({ kind: 'choose', enterprise: 'company.ghe.com' })
+    act(() => result.current.way(SignInWay.Terminal))
+    await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_copilot', 'github.com'))
+  })
+
+  it('keeps a failed CLI sign-in’s host when trying again', async () => {
+    const { client } = fakeClient()
+    vi.spyOn(client, 'signInAccount').mockRejectedValue(new ApiError({ reason: 'SignInFailed', message: 'Terminal could not open.' }))
+    const { result } = signInOf(client, startOf(copilotCliStatus()))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    act(() => result.current.enterprise('company.ghe.com'))
+    await waitFor(() => expect(result.current.signingIn?.step.kind).toBe('failed'))
+    act(() => result.current.back())
+    expect(result.current.signingIn?.step).toEqual({ kind: 'choose', enterprise: 'company.ghe.com' })
+  })
+
+  it('rejects an invalid host at its field before opening a terminal', () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotCliStatus()))
+    act(() => result.current.again('copilot', 'acc_copilot'))
+    act(() => result.current.enterprise('https://company.ghe.com/path'))
+    expect(result.current.signingIn?.step).toMatchObject({ kind: 'choose', error: expect.any(String) })
+    expect(client.signInAccount).not.toHaveBeenCalled()
+  })
+})
+
+describe('Copilot sign-in without a terminal', () => {
+  it('keeps the enterprise address when retrying a failed sign-in', async () => {
+    const { client } = fakeClient()
+    vi.spyOn(client, 'startAccountSignIn').mockRejectedValue(
+      new ApiError({ reason: 'SignInFailed', message: 'GitHub could not be reached.' }),
+    )
+    const { result } = signInOf(client, startOf(copilotStatus()))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.enterprise('company.ghe.com'))
+    await waitFor(() => expect(result.current.signingIn?.step.kind).toBe('failed'))
+    act(() => result.current.back())
+    expect(result.current.signingIn?.step).toEqual({ kind: 'choose', enterprise: 'company.ghe.com' })
+  })
+  it('uses the selected enterprise hostname and never opens Terminal', async () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotStatus()))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.enterprise('https://Company.GHE.com/'))
+    await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalledWith('acc_copilot', 'browser', 'company.ghe.com'))
+    expect(client.signInAccount).not.toHaveBeenCalled()
+  })
+
+  it('puts an invalid enterprise address back at its field', () => {
+    const { client } = fakeClient()
+    const { result } = signInOf(client, startOf(copilotStatus()))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.enterprise('https://user:password@company.ghe.com'))
+    expect(result.current.signingIn?.step).toMatchObject({
+      kind: 'choose',
+      enterprise: 'https://user:password@company.ghe.com',
+      error: expect.any(String),
+    })
+    expect(client.startAccountSignIn).not.toHaveBeenCalled()
+  })
+
+  it('starts native sign-in without downloading an engine and cancels a late flow', async () => {
+    const { client } = fakeClient()
+    let finish: (value: { flowId: string; state: { state: 'starting' } }) => void = () => {}
+    const starting = new Promise<{ flowId: string; state: { state: 'starting' } }>((resolve) => {
+      finish = resolve
+    })
+    const install = vi.spyOn(client, 'installAgent')
+    const cancel = vi.spyOn(client, 'cancelAccountSignIn')
+    vi.spyOn(client, 'startAccountSignIn').mockReturnValue(starting)
+    const { result } = signInOf(client, startOf(copilotStatus(false)))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.way(SignInWay.Browser))
+    expect(result.current.signingIn?.step.kind).toBe('checking')
+    expect(install).not.toHaveBeenCalled()
+    await waitFor(() => expect(client.startAccountSignIn).toHaveBeenCalled())
+    act(() => result.current.cancel())
+    await act(async () => {
+      finish({ flowId: 'late-native-flow', state: { state: 'starting' } })
+      await starting
+    })
+    expect(cancel).toHaveBeenCalledWith('late-native-flow')
+    expect(result.current.signingIn).toBeNull()
+  })
+
+  it('explains a native sign-in failure and returns to a usable sign-in', async () => {
+    const { client } = fakeClient()
+    vi.spyOn(client, 'startAccountSignIn').mockRejectedValue(
+      new ApiError({ reason: 'CopilotFailed', message: 'GitHub did not approve this application.' }),
+    )
+    const { result } = signInOf(client, startOf(copilotStatus(false)))
+    act(() => result.current.again('copilot-direct', 'acc_copilot'))
+    act(() => result.current.way(SignInWay.Browser))
+    await waitFor(() =>
+      expect(result.current.signingIn?.step).toEqual({ kind: 'failed', said: 'GitHub did not approve this application.' }),
+    )
+    act(() => result.current.back())
+    expect(result.current.signingIn?.step.kind).toBe('choose')
+  })
+})
+
 describe('an account’s sign-in, with nothing under way', () => {
   it('takes no way, opens nothing, pastes nothing, adds no folder, and keeps nothing', async () => {
     const { client } = fakeClient()

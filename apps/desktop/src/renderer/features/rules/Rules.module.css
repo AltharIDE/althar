@@ -1,6 +1,4 @@
 /* What didn't hold, above the sentences. */
 .error {
   margin: 0;
-  font-size: 12.5px;
-  color: var(--danger);
 }

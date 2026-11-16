@@ -13,10 +13,11 @@
   text-align: left;
   transition: background var(--fast) var(--ease);
 }
-.option:hover:not(:disabled) {
+/* the chosen one keeps its paper under the pointer */
+.option:hover:not(:disabled, [aria-checked='true']) {
   background: var(--sunk);
 }
-.option:active:not(:disabled) {
+.option:active:not(:disabled, [aria-checked='true']) {
   background: var(--pressed-paper);
 }
 .option[aria-checked='true'] {
@@ -66,10 +67,11 @@
   text-align: center;
   transition: background var(--fast) var(--ease);
 }
-.tile:hover:not(:disabled) {
+/* the chosen one keeps its paper under the pointer */
+.tile:hover:not(:disabled, [aria-checked='true']) {
   background: var(--sunk);
 }
-.tile:active:not(:disabled) {
+.tile:active:not(:disabled, [aria-checked='true']) {
   background: var(--pressed-paper);
 }
 .tile[aria-checked='true'] {

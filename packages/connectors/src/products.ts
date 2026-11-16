@@ -4,7 +4,7 @@ import type { Access } from './access'
 import { accessBitbucketCloud, makeBitbucketCloud } from './bitbucketCloud'
 import { accessBitbucketDataCenter, makeBitbucketDataCenter } from './bitbucketDataCenter'
 import type { AdapterOptions, Credential } from './credential'
-import type { Fetch } from './http'
+import { type Fetch, withoutTrailingSlashes } from './http'
 import { accessGitHub, classicTokenPage, makeGitHub } from './github'
 import { accessGitLab, makeGitLab } from './gitlab'
 import { accessJira, makeJiraCloud, makeJiraDataCenter, siteOf } from './jira'
@@ -129,7 +129,7 @@ const fineGrained = (webUrl: string, made: TokenMade) => {
 /** GitHub's page for a classic token, filled in, which its adapter keeps: a check links to it too. */
 export { classicTokenPage }
 
-const trimmed = (url: string) => url.replace(/\/+$/, '')
+const trimmed = withoutTrailingSlashes
 
 /** Where an Atlassian account's API tokens are made and listed, for Jira Cloud and Bitbucket Cloud alike. */
 const ATLASSIAN_TOKENS = 'https://id.atlassian.com/manage-profile/security/api-tokens'

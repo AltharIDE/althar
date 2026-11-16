@@ -55,13 +55,14 @@ was decided. These are what they leave open.
 
 **Code hosts and trackers**
 
-- [ ] **The gated host and tracker calls.** `code_host_api` and
-  `tracker_api`, with a never list by family of paths, aren't built. Still
-  planned, or dropped? ([not built yet](decisions/code-hosts.md#not-built-yet))
+- [x] **The gated host and tracker calls.** Built on 12 November:
+  `code_host_api` and `tracker_api`, with parsed GraphQL, protected API
+  families, asked-for writes, durable receipts and explicit pagination.
 - [ ] **A red main.** Should a failing default branch start one fix task by
   itself? Today the coordinator is only woken to read it.
-- [ ] **Posting a review and deleting a branch as tools.** `post_review` and
-  `delete_branch` on the person's word, and declining on Bitbucket Cloud.
+- [ ] **Deleting a branch as a tool.** `delete_branch` on the person's word,
+  and declining on Bitbucket Cloud. `post_review` is built, bound to the
+  commit actually read and refusing self-approval.
 - [ ] **A lead's tags.** Should a lead's `push_tag` go ahead on the person's
   word in its thread, rather than asking every time?
 - [ ] **A contributor's fork.** Attaching a fork's pull request, and pushing
@@ -336,9 +337,12 @@ page.
   Remove.
 - [x] **A shortcut to dictate.** ⌘⇧D starts and stops it; held, letting go
   stops it (ADR-017).
-- [ ] **Dictating from anywhere.** The shortcut works while Althar's window
-  is in front. A global one, from another app into a task, would need the
-  window to come forward first, or the island to take it.
+- [x] **Dictating from anywhere in the window.** The shortcut works on every
+  screen, with or without a composer: with none, it listens in the pill at
+  the window's foot and the person places it afterwards (ADR-017).
+- [ ] **Dictating from outside Althar.** A global shortcut, from another app
+  into a task, would need the window to come forward first, or the island to
+  take it.
 - [ ] **Windows on Arm.** sherpa-onnx has no prebuilt binary for it yet;
   the microphone would not show there until it does.
 

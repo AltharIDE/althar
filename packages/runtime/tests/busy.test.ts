@@ -341,7 +341,7 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('leave a quick task the coordinator starts waiting, and say so to the coordinator', () =>
+  it.live('start an aside the coordinator asks for while every task place is taken, without joining the line', () =>
     Effect.gen(function* () {
       const { projectId, threadId } = yield* opened
       const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
@@ -352,19 +352,15 @@ describe('Agents at once', () => {
         description: 'Jump twice and say whether it lands. [lead:finish]',
         lead: { agent: 'codex' },
       })
-      assert.match(said, /^Started try-the-double-jump, but it waits for a free agent: 1 of the 1 this computer runs at once are busy\./)
+      assert.match(said, /^Started try-the-double-jump: its lead is on it now/)
       const sql = yield* SqlClient.SqlClient
       const [quick] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE slug = 'try-the-double-jump'`
       const taskId = quick?.id ?? ''
-      yield* waiting(taskId)
-      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, taskId))?.queued), { busy: 1, atOnce: 1 })
-      // Nothing of it has had an agent: it is in the line, up next, as a plan's task is.
-      assert.isTrue((yield* cardOf(projectId, taskId))?.inLine)
-      assert.strictEqual((yield* cardOf(projectId, taskId))?.place, 1)
-      // A place frees when the first is stopped: the quick task starts, and finishes.
-      const tasks = yield* Tasks
-      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
       yield* until(attempts(taskId), (rows) => rows[0]?.state === 'succeeded')
+      assert.isNull((yield* cardOf(projectId, taskId))?.queued)
+      assert.isUndefined((yield* cardOf(projectId, taskId))?.inLine)
+      assert.isUndefined((yield* cardOf(projectId, taskId))?.place)
+      assert.strictEqual((yield* (yield* Busy).now).busy, 1)
     }).pipe(Effect.provide(machine(1))),
   )
 
@@ -556,18 +552,20 @@ describe('Agents at once', () => {
       assert.isFalse((yield* facts(task.taskId)).includes('node_attempt.held'), 'the review never waited for a place')
       const left = yield* sessions.running(task.threadId)
       assert.strictEqual(Option.isSome(left) ? left.value.background.filter((one) => one.ended === null).length : 0, 1)
-      // The server still counts, once, for its task.
-      assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+      // The completed task holds no place, though its preview remains available.
+      yield* idle(task.threadId)
+      yield* busyAt(0)
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('start a task’s waiting work in the place it keeps only by what its lead left running, ahead of what waited longer', () =>
+  it.live('a preview gives no priority over work that waited longer', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
       const busy = yield* Busy
       const task = yield* started(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
       yield* until(attempts(task.taskId), (rows) => rows[0]?.state === 'succeeded')
-      yield* busyAt(1)
+      yield* idle(task.threadId)
+      yield* busyAt(0)
       // Work of another task under way waited first; then the task's own, as a review that waited from before a restart.
       const begun: Array<string> = []
       const waiters = [
@@ -587,7 +585,7 @@ describe('Agents at once', () => {
         (rows) => rows.length === 1,
       )
       yield* Effect.sleep('300 millis')
-      assert.deepStrictEqual(begun, [task.taskId])
+      assert.deepStrictEqual(begun, ['other'])
       assert.strictEqual((yield* busy.now).busy, 1)
     }).pipe(Effect.provide(machine(1))),
   )
@@ -776,25 +774,91 @@ describe('Agents at once', () => {
       assert.isTrue(Option.isNone(yield* sessions.running(first.threadId)))
     }).pipe(Effect.provide(machine(1))),
   )
+})
 
-  it.live('count a lead whose step is done while what it left running still runs, and free its place when that stops', () =>
+/** Waits for the slot count to catch up with a session event. */
+const busyAt = (n: number) =>
+  Effect.flatMap(Busy, (busy) =>
+    until(
+      Effect.map(busy.now, (now) => [now.busy]),
+      (rows) => rows[0] === n,
+    ),
+  )
+
+describe('Agent places belong to work, not previews', () => {
+  it.live('a finished task leaves its preview up without holding a place', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
       const sessions = yield* Sessions
-      const first = yield* started(projectId, 'First', 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
-      // Its step is done and the task ready, but the server it left running still runs: it holds its place.
+      const first = yield* started(projectId, 'Preview', 'Serve then finish. [lead:serve] [lead:finish]', 'claude-code')
       yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
-      const running = yield* until(
-        Effect.map(sessions.running(first.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-        (left) => left.length === 1,
-      )
-      const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-      assert.strictEqual(second.outcome, 'waiting')
-      yield* waiting(second.taskId)
-      yield* sessions.stopBackground(first.threadId, running[0]?.id ?? '')
-      yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* idle(first.threadId)
+      const left = yield* sessions.running(first.threadId)
+      assert.isTrue(Option.isSome(left) && left.value.background.some((command) => command.ended === null))
+      assert.deepStrictEqual((yield* (yield* Busy).now).holders, [])
+      const second = yield* started(projectId, 'Next', 'Work. [lead:wait]')
+      assert.strictEqual(second.outcome, 'running')
+      yield* working(second.taskId)
     }).pipe(Effect.provide(machine(1))),
   )
+
+  it.live('completion wakes the queue with its preview still running', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const first = yield* started(projectId, 'Preview', 'Serve and wait. [lead:serve] [lead:wait]', 'claude-code')
+      yield* working(first.taskId)
+      const second = yield* started(projectId, 'Second', 'Work. [lead:wait]')
+      yield* waiting(second.taskId)
+      yield* say(first.threadId, '[lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* working(second.taskId)
+      const live = yield* (yield* Sessions).running(first.threadId)
+      assert.isTrue(Option.isSome(live) && live.value.background.some((command) => command.ended === null))
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  for (const state of ['stopped', 'abandoned'] as const) {
+    it.live(`ignore stale work records after a task is ${state}`, () =>
+      Effect.gen(function* () {
+        const { projectId } = yield* opened
+        const first = yield* started(projectId, 'Stale', 'Work. [lead:wait]')
+        yield* working(first.taskId)
+        const second = yield* started(projectId, 'Next', 'Work. [lead:wait]')
+        yield* waiting(second.taskId)
+        yield* (yield* Sessions).interrupt(first.threadId)
+        yield* idle(first.threadId)
+        const sql = yield* SqlClient.SqlClient
+        if (state === 'stopped') yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${first.taskId}`
+        else yield* sql`UPDATE tasks SET state = 'abandoned' WHERE id = ${first.taskId}`
+        const busy = yield* Busy
+        yield* busy.wake
+        yield* working(second.taskId)
+        assert.deepStrictEqual(
+          (yield* busy.now).holders.map((holder) => holder.taskId),
+          [second.taskId],
+        )
+      }).pipe(Effect.provide(machine(1))),
+    )
+
+    it.live(`a ${state} task frees its place and wakes the queue`, () =>
+      Effect.gen(function* () {
+        const { projectId } = yield* opened
+        const tasks = yield* Tasks
+        const first = yield* started(projectId, 'First', 'Work. [lead:wait]')
+        yield* working(first.taskId)
+        const second = yield* started(projectId, 'Second', 'Work. [lead:wait]')
+        assert.strictEqual(second.outcome, 'waiting')
+        yield* waiting(second.taskId)
+        if (state === 'stopped') yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+        else yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: first.taskId })
+        yield* working(second.taskId)
+        assert.deepStrictEqual(
+          (yield* (yield* Busy).now).holders.map((holder) => holder.taskId),
+          [second.taskId],
+        )
+      }).pipe(Effect.provide(machine(1))),
+    )
+  }
 })
 
 /**
@@ -828,27 +892,26 @@ const withCpu = <A, E, R>(n: number, body: (cpu: ReturnType<typeof fakeCpu>['cpu
   )
 }
 
-/** The lead of a task that served and finished: its step is done, and what it left running is the only thing that may hold its place. */
+/** Unfinished work with a background command, outside a plan: CPU activity keeps its place. */
 const served = (projectId: ProjectId, title: string) =>
   Effect.gen(function* () {
+    const task = yield* (yield* Projects).createTask({
+      envelope: yield* Runtime.envelope('task.create', { title }),
+      projectId,
+      title,
+      description: 'Background work.',
+      draft: true,
+    })
     const sessions = yield* Sessions
-    const task = yield* started(projectId, title, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
-    yield* until(attempts(task.taskId), (rows) => rows[0]?.state === 'succeeded')
+    yield* sessions.start({ threadId: task.threadId, agentId: 'claude-code' })
+    yield* say(task.threadId, 'Serve it. [lead:serve]')
+    yield* idle(task.threadId)
     const running = yield* until(
       Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
       (left) => left.length === 1,
     )
     return { ...task, serverId: running[0]?.id ?? '' }
   })
-
-/** Waits until this many agents are counted at work. */
-const busyAt = (n: number) =>
-  Effect.flatMap(Busy, (busy) =>
-    until(
-      Effect.map(busy.now, (now) => [now.busy]),
-      (rows) => rows[0] === n,
-    ),
-  )
 
 describe('Agents at once, and what they left running', () => {
   it.live('take no place for a server left running that sits idle', () =>
@@ -1052,6 +1115,51 @@ describe('Agents at once, and what they left running', () => {
   )
 })
 
+describe('Finished previews cannot keep places through CPU samples', () => {
+  for (const unreadable of [false, true]) {
+    it.live(`a finished preview takes no place with ${unreadable ? 'unreadable' : 'busy'} CPU`, () =>
+      withCpu(1, (cpu) =>
+        Effect.gen(function* () {
+          cpu.burning = true
+          cpu.unreadable = unreadable
+          const { projectId } = yield* opened
+          const first = yield* started(projectId, 'Finished preview', 'Serve then finish. [lead:serve] [lead:finish]', 'claude-code')
+          yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+          yield* idle(first.threadId)
+          yield* Effect.sleep('1200 millis')
+          assert.deepStrictEqual((yield* (yield* Busy).now).holders, [])
+          const second = yield* started(projectId, 'Next', 'Work. [lead:wait]')
+          assert.strictEqual(second.outcome, 'running')
+        }),
+      ),
+    )
+  }
+})
+
+describe('Live turns after the task stops or finishes', () => {
+  for (const state of ['done', 'abandoned', 'suspended'] as const) {
+    it.live(`a live turn still takes a place with ${state} records`, () =>
+      Effect.gen(function* () {
+        const { projectId } = yield* opened
+        const first = yield* started(projectId, 'Still working', 'Work. [lead:wait]')
+        yield* working(first.taskId)
+        const sessions = yield* Sessions
+        yield* until(sessions.busy(first.threadId), (busy) => busy)
+        const sql = yield* SqlClient.SqlClient
+        if (state === 'suspended') yield* sql`UPDATE runs SET state = 'suspended' WHERE task_id = ${first.taskId}`
+        else yield* sql`UPDATE tasks SET state = ${state} WHERE id = ${first.taskId}`
+        const busy = yield* Busy
+        assert.isTrue((yield* busy.now).holders.some((holder) => holder.taskId === first.taskId && !holder.kept))
+        const second = yield* started(projectId, 'Next', 'Work. [lead:wait]')
+        assert.strictEqual(second.outcome, 'waiting')
+        yield* waiting(second.taskId)
+        yield* sessions.stop(first.threadId)
+        yield* working(second.taskId)
+      }).pipe(Effect.provide(machine(1))),
+    )
+  }
+})
+
 describe('Agents at once, across a restart', () => {
   it.live('carry on a stuck step at once as the person answered, though every place is taken', () =>
     Effect.gen(function* () {
@@ -1156,11 +1264,11 @@ describe('Agents at once, across a restart', () => {
         yield* working(second.taskId)
         yield* tell(first.threadId, 'The checks failed.')
         yield* queuedOn(projectId, first.taskId)
-        return { projectId, first, second, turns: (yield* turnsOn(first.threadId)).length }
+        return { projectId, first, second }
       }).pipe(Effect.provide(machine(1, file)))
 
       yield* Effect.gen(function* () {
-        const { projectId, first, second, turns } = before
+        const { projectId, first, second } = before
         const tasks = yield* Tasks
         yield* until(sessionsOn(second.threadId), (rows) => rows.length === 2)
         // Nothing is on the first, but it waits: the person can stop it, and then it waits no more.
@@ -1169,6 +1277,7 @@ describe('Agents at once, across a restart', () => {
         assert.isNull(yield* waitsOn(first.threadId))
         assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
         const sessions = (yield* sessionsOn(first.threadId)).length
+        const turns = (yield* turnsOn(first.threadId)).length
         // A place frees: the first isn't started for it.
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
         yield* Effect.sleep('1 second')

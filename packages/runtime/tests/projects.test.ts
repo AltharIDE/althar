@@ -203,7 +203,7 @@ describe('projects', () => {
         const sql = yield* SqlClient.SqlClient
         const upstream = repository()
         const clone = mkdtempSync(join(tmpdir(), 'althar-clone-'))
-        execFileSync('git', ['clone', '-q', upstream, clone])
+        execFileSync('git', ['clone', '-q', '--', upstream, clone])
         // Someone else moves main on after the clone.
         writeFileSync(join(upstream, 'later.md'), 'later\n')
         git(upstream, 'add', '.')

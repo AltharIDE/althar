@@ -1,4 +1,9 @@
+import type { SearchDocuments } from '@althar/contracts'
+import type { AcpCatalog, AcpConnection } from '@althar/contracts'
+
 import {
+  type PlaceId,
+  type StorageSize,
   type CanvasDetail,
   type CanvasSummary,
   type CanvasText,
@@ -56,9 +61,16 @@ import {
   domPort,
   type FileDiff,
   type TaskFindings,
+  type TaskLineComments,
+  type LineComment,
   type FolderHeld,
   type FolderReading,
   type MadeRepository,
+  type PreparedFolder,
+  type HostRepository,
+  type RepositoryOwner,
+  type ClonedRepository,
+  type PublishedRepository,
   type PlacedRepository,
   type FoldersFreed,
   type FolderWait,
@@ -93,6 +105,7 @@ import {
   type TaskSummary,
   type ThreadItem,
   type ThreadSnapshot,
+  type UndoTurnResult,
   type TrackerContainer,
   type WatchEvent,
   type Launch,
@@ -138,6 +151,25 @@ export interface Client {
   readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
   /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
   readonly makeRepository: (grant: string, name: string) => Promise<MadeRepository>
+  /** Makes a folder chosen ready to be a project's repository: git, and a first commit, where it hasn't them; `path`, a repository inside it. */
+  readonly prepareFolder: (grant: string, path?: string) => Promise<PreparedFolder>
+  /** Every repository a code host's connection reaches, last pushed to first. */
+  readonly listHostRepositories: (connectionId: string) => Promise<ReadonlyArray<HostRepository>>
+  /** Where a code host's connection can make a repository. */
+  readonly listRepositoryOwners: (connectionId: string) => Promise<ReadonlyArray<RepositoryOwner>>
+  /** Clones a repository into a folder of its name in the folder a grant names: from a connection's host, or by its URL. */
+  readonly cloneRepository: (
+    grant: string,
+    from: { readonly connectionId: string; readonly path: ReadonlyArray<string> } | { readonly url: string },
+  ) => Promise<ClonedRepository>
+  /** Puts a repository only on this computer on a code host: a project's, or one in a folder chosen, before its project is made. */
+  readonly publishRepository: (input: {
+    readonly at: { readonly projectId: string; readonly repositoryId: string } | { readonly grant: string; readonly path?: string }
+    readonly connectionId: string
+    readonly owner: RepositoryOwner
+    readonly name: string
+    readonly private: boolean
+  }) => Promise<PublishedRepository>
   /**
    * Opens the folder a grant names: one the person chose in the picker or
    * dropped on the window. A folder of several repositories opens with the
@@ -156,6 +188,8 @@ export interface Client {
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   /** Tasks found by what they were about, best first: in one project, or every one; with no words, the ones changed last. */
+  readonly getSearchDocuments: (after?: string) => Promise<SearchDocuments>
+  readonly getSearchFiles: (threadId: string) => Promise<{ readonly files: ReadonlyArray<string> }>
   readonly searchTasks: (input: { readonly projectId?: string; readonly text: string; readonly limit?: number }) => Promise<FoundTasks>
   readonly createTask: (input: {
     readonly projectId: string
@@ -169,11 +203,14 @@ export interface Client {
     threadId: string,
     page?: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean },
   ) => Promise<ThreadSnapshot>
-  readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem>
+  /** One item of a thread; null for one it keeps for Althar and never shows. */
+  readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem | null>
   /** What a command in a thread printed, as kept once it ended. */
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
   /** What a command a thread's session left running has printed so far. */
   readonly readBackgroundOutput: (threadId: string, id: string) => Promise<OutputText>
+  /** What a run of the project has printed so far: the end of it. */
+  readonly readLaunchOutput: (id: string) => Promise<OutputText>
   /** A markdown document an agent in a thread wrote, as it is now in the task's worktree. */
   readonly readDocument: (threadId: string, path: string) => Promise<DocumentText>
   /** A project's canvases (ADR-104), newest first; archived ones too where asked. */
@@ -186,13 +223,19 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
   readonly getTaskFindings: (taskId: string, review?: string) => Promise<TaskFindings>
+  /** The comments the person sent on lines of a task's diff, each where it is now and whether a commit since addressed it (decisions: desktop-app § Comments on the diff). */
+  readonly getLineComments: (taskId: string) => Promise<TaskLineComments>
   /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
   readonly findCode: (
     threadId: string,
     messages: ReadonlyArray<{ readonly itemId?: string; readonly names: ReadonlyArray<string> }>,
   ) => Promise<{ readonly place: CodePlace; readonly messages: ReadonlyArray<{ readonly found: ReadonlyArray<CodeFound> }> }>
   /** A file a thread's agent named, by its path as findCode named it: as it is now, or at the commit it was when a message was said. */
-  readonly readCode: (threadId: string, path: string, at?: { readonly commit?: string; readonly line?: number }) => Promise<CodeText>
+  readonly readCode: (
+    threadId: string,
+    path: string,
+    at?: { readonly commit?: string; readonly line?: number; readonly image?: boolean },
+  ) => Promise<CodeText>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
   /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
@@ -213,6 +256,7 @@ export interface Client {
       readonly images?: ReadonlyArray<SentImage>
       readonly files?: ReadonlyArray<SentFile>
       readonly dictated?: boolean
+      readonly comments?: ReadonlyArray<LineComment>
     },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -261,6 +305,8 @@ export interface Client {
   readonly setPlansAndReviews: (change: PlansAndReviewsChange) => Promise<void>
   /** What the rules of projects made from now on start with; what isn't given stays. */
   readonly setNewProjectDefaults: (change: NewProjectDefaultsChange) => Promise<void>
+  /** What a place Althar keeps data in takes on disk (About › Storage), kept for the session by the runtime, or measured again on a refresh; `signal` gives up on it, which stops the walk when no one else waits. */
+  readonly getStorageSize: (place: PlaceId, refresh: boolean, signal?: AbortSignal) => Promise<StorageSize>
   /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
@@ -275,6 +321,7 @@ export interface Client {
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
+  readonly setSendMidTurn: (to: 'queue' | 'steer') => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
@@ -294,15 +341,19 @@ export interface Client {
   }) => Promise<void>
   /** Picks another preset for a plan before it starts: its parts change to match. The preset's name. */
   readonly applyPreset: (planId: string, preset: string) => Promise<string>
-  /** Saves a preset from a task, or the parts the coordinator offered. */
+  /** Saves a preset from a task: its parts, or the parts its card offered. */
   readonly savePreset: (input: {
     readonly name: string
     readonly taskId?: string
     readonly parts?: PresetParts
     readonly projectOnly?: boolean
+    /** Only as a new preset: a name another preset has is refused rather than replaced. */
+    readonly asNew?: boolean
   }) => Promise<{ readonly name: string }>
   /** Removes one of the person's presets. */
   readonly removePreset: (id: string) => Promise<void>
+  /** Says not to offer a task's parts as a preset again. */
+  readonly declinePresetOffer: (taskId: string) => Promise<void>
   /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
   readonly runIt: (
     taskId: string,
@@ -417,11 +468,14 @@ export interface Client {
     readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
+    /** Comments on lines of the task's diff, each with its file, lines and code (decisions: desktop-app § Comments on the diff). */
+    readonly comments?: ReadonlyArray<LineComment>
     /** The person's comments on canvases, kept with it (ADR-104). */
     readonly canvasComments?: ReadonlyArray<SentCanvasComment>
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
+  readonly undoTurn: (itemId: string) => Promise<UndoTurnResult>
   /** The person's answer to a permission; with `always`, kept in the project's rules by that scope, one of those offered. */
   readonly answer: (input: {
     readonly attentionId: string
@@ -447,11 +501,19 @@ export interface Client {
     readonly end?: TaskEnd | null
     /** The project's repositories it changes, by name: needed only in a project of several. */
     readonly repositories?: ReadonlyArray<string>
-    /** An aside: a chat of the person's own, on Scratch, with no card in the coordinator's thread; its words are `description`. */
+    /**
+     * An aside: a chat of the person's own, on Scratch, with no card in the coordinator's thread. Started as + is pressed, with
+     * no `description`: its lead waits for the person's first words, sent to its thread.
+     */
     readonly chat?: boolean
+    /** The id the window made for it (`newTaskId`): an aside's pill is keyed by it from the moment + is pressed. */
+    readonly taskId?: string
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
-  readonly holdPlan: (planId: string) => Promise<void>
+  /** Whether it was held: false where the task had begun already. */
+  readonly holdPlan: (planId: string) => Promise<boolean>
+  /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
+  readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Changes a plan before its first step starts: who does its steps, how it ends, and where it works (ADR-091). */
   readonly changePlan: (
     planId: string,
@@ -566,11 +628,12 @@ export interface Client {
   /** Folders account switchers keep the agent's accounts in, not added yet. */
   readonly findAccounts: (agentId: string) => Promise<ReadonlyArray<FoundAccount>>
   /** Opens the agent's own sign-in for the account in Terminal: the line it runs, and whether it could. */
-  readonly signInAccount: (accountId: string) => Promise<{ readonly line: string; readonly opened: boolean }>
+  readonly signInAccount: (accountId: string, host?: string) => Promise<{ readonly line: string; readonly opened: boolean }>
   /** Signs an account in inside Althar, this way; its id, to ask how it stands. */
   readonly startAccountSignIn: (
     accountId: string,
     way: 'browser' | 'device',
+    host?: string,
   ) => Promise<{ readonly flowId: string; readonly state: AccountSignInState }>
   readonly getAccountSignIn: (flowId: string) => Promise<AccountSignInState>
   readonly pasteAccountSignInCode: (flowId: string, code: string) => Promise<void>
@@ -589,13 +652,15 @@ export interface Client {
   readonly openChange: (taskId: string) => Promise<void>
   /** Skips the review of the task's work under way. */
   readonly skipReview: (taskId: string) => Promise<void>
+  /** Gives a task another preset's parts at once, as Make it a change does with Change: its review, ending and worktree. */
+  readonly shapeTask: (taskId: string, preset: string) => Promise<void>
   /**
-   * One small change's own word on its review after the merge, over its project's rule, until it merges: `review`, `none`,
-   * or null for the rule. Its card reads what holds (`afterMerge` on the small change's card).
+   * The person's explicit choice of review after merge, over its project's rule, until it merges: `review`, `none`,
+   * or null for the rule. Its card reads what holds (`afterMerge` on the explicitly configured after-merge card).
    */
   readonly setReviewAfterMerge: (taskId: string, review: 'review' | 'none' | null) => Promise<void>
   /** Merges the task's pull request at the head the person saw, as they said to; a draft is marked ready first. */
-  readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now') => Promise<void>
+  readonly merge: (taskId: string, head: string, url?: string, how?: 'review' | 'now', bypassQueue?: boolean) => Promise<void>
   /** Merges a task without a pull request into its repositories' default branches on this Mac, up to the commit the person saw in each. */
   readonly mergeHere: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** Pushes the default branches the task merged into here to their remotes, with the person's own git sign-in. */
@@ -616,6 +681,10 @@ export interface Client {
   readonly getMissedReports: () => Promise<ReadonlyArray<MissedReports>>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
+  readonly getAgentCatalog: (refresh?: boolean) => Promise<AcpCatalog>
+  readonly saveAcpConnection: (connection: AcpConnection) => Promise<number>
+  readonly startAcpCheck: (agentId: string) => Promise<number>
+  readonly removeAcpConnection: (agentId: string) => Promise<number>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
   readonly openInEditor: (input: {
     readonly taskId: string
@@ -753,18 +822,24 @@ export const newCommandId = (): string => `cmd_${globalThis.crypto.randomUUID().
  * ids sort by when they were made. The window makes one for a project before
  * it is made, to draw its mark from as it is named.
  */
-export const newProjectId = (now: number = Date.now()): string => {
+export const newProjectId = (now: number = Date.now()): string => `proj_${uuidV7(now)}`
+
+/** A new task's id, as the runtime makes them: the window makes one for an aside as + is pressed, to key its pill from then. */
+export const newTaskId = (now: number = Date.now()): string => `task_${uuidV7(now)}`
+
+/** A UUIDv7 as 32 hex digits: ids sort by when they were made. */
+const uuidV7 = (now: number) => {
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
   // 48 bits of milliseconds, then the version and the variant over the random rest.
   for (let i = 0; i < 6; i++) bytes[i] = Math.floor(now / 2 ** (8 * (5 - i))) % 256
   bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70
   bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80
-  return `proj_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 /** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
-const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
-  Effect.runPromiseExit(effect).then((exit) => {
+const settle = <A>(effect: Effect.Effect<A, unknown>, signal?: AbortSignal): Promise<A> =>
+  Effect.runPromiseExit(effect, signal === undefined ? undefined : { signal }).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
@@ -801,6 +876,12 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
     makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
+    prepareFolder: (grant, path) =>
+      command((commandId) => api.PrepareFolder({ commandId, grant, ...(path === undefined ? {} : { path }) })),
+    listHostRepositories: (connectionId) => settle(api.ListHostRepositories({ connectionId })),
+    listRepositoryOwners: (connectionId) => settle(api.ListRepositoryOwners({ connectionId })),
+    cloneRepository: (grant, from) => command((commandId) => api.CloneRepository({ commandId, grant, from })),
+    publishRepository: (input) => command((commandId) => api.PublishRepository({ commandId, ...input })),
     openProject: (grant, options = {}) =>
       command((commandId) =>
         api.OpenProject({
@@ -813,18 +894,22 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
+    getSearchDocuments: (after) => settle(api.GetSearchDocuments(after === undefined ? {} : { after })),
+    getSearchFiles: (threadId) => settle(api.GetSearchFiles({ threadId })),
     searchTasks: (input) => settle(api.SearchTasks(input)),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
+    readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     listCanvases: (projectId, archived) => settle(api.ListCanvases({ projectId, ...(archived === true ? { archived } : {}) })),
     getCanvas: (canvasId) => settle(api.GetCanvas({ canvasId })),
     readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
+    getLineComments: (taskId) => settle(api.GetLineComments({ taskId })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
     readCode: (threadId, path, at = {}) =>
       settle(
@@ -833,6 +918,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           path,
           ...(at.commit === undefined ? {} : { commit: at.commit }),
           ...(at.line === undefined ? {} : { line: at.line }),
+          ...(at.image === true ? { image: true } : {}),
         }),
       ),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
@@ -867,6 +953,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
+    setSendMidTurn: (to) => command((commandId) => api.SetSendMidTurn({ commandId, to })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     joinChanges: (taskId, change, into) =>
@@ -877,6 +964,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     editPreset: (input) => command((commandId) => api.EditPreset({ commandId, ...input })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
+    declinePresetOffer: (taskId) => command((commandId) => api.DeclinePresetOffer({ commandId, taskId })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
     stopRunning: (taskId) => command((commandId) => api.StopRunning({ commandId, taskId })),
     setReviewSeal: (on) => command((commandId) => api.SetReviewSeal({ commandId, on })),
@@ -919,6 +1007,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
     setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),
+    getStorageSize: (place, refresh, signal) => settle(api.GetStorageSize({ place, refresh }), signal),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
     cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),
@@ -945,12 +1034,14 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
+    undoTurn: (itemId) => command((commandId) => api.UndoTurn({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
     answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
+    holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
     changePlan: (planId, steps, end, worksIn, toward) =>
       command((commandId) =>
         api.ChangePlan({
@@ -1016,8 +1107,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.RemoveAccount({ commandId, accountId, ...(anyway === undefined ? {} : { anyway }) })),
     orderAccounts: (agentId, accountIds) => command((commandId) => api.OrderAccounts({ commandId, agentId, accountIds })),
     findAccounts: (agentId) => settle(api.FindAccounts({ agentId })).then((list) => list.found),
-    signInAccount: (accountId) => command((commandId) => api.SignInAccount({ commandId, accountId })),
-    startAccountSignIn: (accountId, way) => command((commandId) => api.StartAccountSignIn({ commandId, accountId, way })),
+    signInAccount: (accountId, host) =>
+      command((commandId) => api.SignInAccount({ commandId, accountId, ...(host === undefined ? {} : { host }) })),
+    startAccountSignIn: (accountId, way, host) =>
+      command((commandId) => api.StartAccountSignIn({ commandId, accountId, way, ...(host === undefined ? {} : { host }) })),
     getAccountSignIn: (flowId) => settle(api.GetAccountSignIn({ flowId })),
     pasteAccountSignInCode: (flowId, code) => command((commandId) => api.PasteAccountSignInCode({ commandId, flowId, code })),
     cancelAccountSignIn: (flowId) => command((commandId) => api.CancelAccountSignIn({ commandId, flowId })),
@@ -1026,10 +1119,18 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     postScreenshots: (input) => command((commandId) => api.PostScreenshots({ commandId, ...input })),
     openChange: (taskId) => command((commandId) => api.OpenChange({ commandId, taskId })),
     skipReview: (taskId) => command((commandId) => api.SkipReview({ commandId, taskId })),
+    shapeTask: (taskId, preset) => command((commandId) => api.ShapeTask({ commandId, taskId, preset })),
     setReviewAfterMerge: (taskId, review) => command((commandId) => api.SetReviewAfterMerge({ commandId, taskId, review })),
-    merge: (taskId, head, url, how) =>
+    merge: (taskId, head, url, how, bypassQueue) =>
       command((commandId) =>
-        api.Merge({ commandId, taskId, head, ...(url === undefined ? {} : { url }), ...(how === undefined ? {} : { how }) }),
+        api.Merge({
+          commandId,
+          taskId,
+          head,
+          ...(url === undefined ? {} : { url }),
+          ...(how === undefined ? {} : { how }),
+          ...(bypassQueue === true ? { bypassQueue: true } : {}),
+        }),
       ),
     mergeHere: (taskId, heads) => command((commandId) => api.MergeHere({ commandId, taskId, heads })),
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
@@ -1044,6 +1145,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     openCode: (input) => command((commandId) => api.OpenCode({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
+    getAgentCatalog: (refresh = false) => settle(api.GetAgentCatalog({ refresh })),
+    saveAcpConnection: (connection) => command((commandId) => api.SaveAcpConnection({ commandId, connection })),
+    startAcpCheck: (agentId) => command((commandId) => api.CheckAcpConnection({ commandId, agentId })),
+    removeAcpConnection: (agentId) => command((commandId) => api.RemoveAcpConnection({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
     fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),

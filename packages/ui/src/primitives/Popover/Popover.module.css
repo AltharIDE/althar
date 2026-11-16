@@ -2,7 +2,7 @@
   z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
-  max-width: calc(100vw - 16px);
+  max-width: min(100vw - 16px, var(--radix-popover-content-available-width));
   max-height: var(--radix-popover-content-available-height);
   overflow-y: auto;
   background: var(--paper);

@@ -60,6 +60,9 @@
   /* where its tabs' places are taken from, to keep the one with the window in sight */
   position: relative;
   min-width: 0;
+  /* room for a focus ring at either end, which the scrolling would cut, without moving the tabs */
+  margin-inline: -3px;
+  padding-inline: 3px;
   overflow-x: auto;
   scrollbar-width: none;
   /* a tab scrolled into sight stops clear of the fading edge */

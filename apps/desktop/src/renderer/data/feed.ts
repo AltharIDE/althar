@@ -2,6 +2,7 @@ import { hashKey, type QueryClient, type QueryKey } from '@tanstack/react-query'
 
 import type { AutomationSnapshot, CoordinatorSnapshot, ThreadSnapshot, WatchEvent } from '@althar/contracts'
 
+import { heardRename } from './agentRenames'
 import type { Client } from './client'
 import { keys } from './reads'
 
@@ -83,7 +84,7 @@ export const CARDS = new Set(['card', 'provider_session', 'attention_request', '
  * Each moves the Automations tab, the page of the automation it is of, and
  * the automation's cards in the coordinator's thread, which say where it stands.
  */
-export const AUTOMATIONS = new Set(['automation', 'automation_occurrence'])
+export const AUTOMATIONS = new Set(['automation', 'automation_occurrence', 'attention_request'])
 
 export interface Feed {
   /** Calls `listener` with every change from now on, until the returned function is called. */
@@ -163,6 +164,12 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
           .getQueryCache()
           .findAll({ predicate: (query) => SETTING_READS.has(String(query.queryKey[0])) })
           .map((query) => ({ key: query.queryKey, offScreen: false })),
+      ]
+    : []),
+  ...(event.aggregateType === 'setting' && event.aggregateId.startsWith('acp-catalog:')
+    ? [
+        { key: keys.agentCatalog, offScreen: false },
+        { key: keys.status, offScreen: true },
       ]
     : []),
   // The project's canvases and the one that changed (ADR-104): a version published, a comment sent or answered, one archived.
@@ -262,6 +269,7 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
   const heard = (event: WatchEvent) => {
     if (event._tag === 'Changed') {
       heardSoFar += 1
+      if (event.renamedTo !== undefined) heardRename(event.aggregateId, event.renamedTo, event.renamedByAgent === true)
       for (const read of wholeReads(cache, event)) {
         const hash = hashKey(read.key)
         // Only a read the cache holds can be under way, and needs its change remembered.

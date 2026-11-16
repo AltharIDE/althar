@@ -99,6 +99,8 @@ export const PREFERENCES = {
   openAtLogin: onOff(false),
   /** Where new tasks' worktrees go, chosen in Settings; ALTHAR_WORKTREES wins where it is set. Worktrees already made stay where they are. */
   worktrees: folder,
+  /** The last choice to keep work running after the last window closes; an explicit Quit clears it. */
+  keepWorkingOnClose: onOff(false),
   /** Where a link in a thread opens: beside the conversation, or in the person's browser (browser/, ADR-100). */
   browserLinks: links,
   /** How long pages beside a conversation keep cookies and storage; the main process clears them at that moment (browser/cookies.ts). */

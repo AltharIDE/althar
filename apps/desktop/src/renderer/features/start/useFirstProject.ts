@@ -37,6 +37,8 @@ export interface Candidate {
     readonly alone: boolean
     /** The repository's name, when it was added as a folder inside it, one package of a monorepo; null for the repository itself. */
     readonly insideOf: string | null
+    /** What git it lacks, made as the project is: git itself, for a folder that isn't a repository yet, or a first commit. */
+    readonly lacks?: 'git' | 'commit'
   } | null
 }
 
@@ -111,10 +113,31 @@ export const useFirstProject = (): FirstProjectModel => {
           id: repository.path,
           name: alone ? reading.name : repository.name,
           where: shortFolder(repository.folder === null ? repository.path : `${repository.path}/${repository.folder}`),
-          facts: 'added',
+          facts: repository.commits === false ? 'no commits yet' : 'added',
           found: null,
-          added: { grant, path: repository.path, alone, insideOf: alone && repository.folder !== null ? repository.name : null },
+          added: {
+            grant,
+            path: repository.path,
+            alone,
+            insideOf: alone && repository.folder !== null ? repository.name : null,
+            ...(repository.commits === false ? { lacks: 'commit' as const } : {}),
+          },
         }))
+        // A folder that isn't a repository yet is one: git starts in it as the project is made.
+        if (more.length === 0 && reading.kind === 'folder' && reading.path !== undefined) {
+          const path = reading.path
+          const folder: Candidate = {
+            id: path,
+            name: reading.name,
+            where: shortFolder(path),
+            facts: reading.empty === true ? 'empty, git starts in it' : 'no git yet, git starts in it',
+            found: null,
+            added: { grant, path, alone: true, insideOf: null, lacks: 'git' },
+          }
+          setAdded((now) => [folder, ...now.filter((candidate) => candidate.id !== path)])
+          setPicked((now) => (now.includes(path) ? now : [...now, path]))
+          return
+        }
         if (more.length === 0) return setError(`There’s no git repository in ${reading.name}.`)
         setAdded((now) => [...more, ...now.filter((candidate) => !more.some((m) => m.id === candidate.id))])
         setPicked((now) => [...now, ...more.map((m) => m.id).filter((id) => !now.includes(id))])
@@ -162,9 +185,15 @@ export const useFirstProject = (): FirstProjectModel => {
           const reading = await client.readFolder(grant)
           const [root] = reading.kind === 'repository' ? reading.repositories : []
           if (root === undefined) throw new Unopened(`${candidate.name} isn’t a git repository any more.`)
-          return { grant, path: root.path, alone: true, insideOf: null }
+          return { grant, path: root.path, alone: true, insideOf: null, ...(root.commits === false ? { lacks: 'commit' as const } : {}) }
         }),
       )
+      // What isn't ready to be a project's repository is made so: git, or a first commit, each where it is.
+      for (const [at, repository] of repositories.entries()) {
+        if (repository.lacks === undefined) continue
+        const prepared = await client.prepareFolder(repository.grant, repository.path)
+        repositories[at] = { ...repository, path: prepared.path }
+      }
       const [first] = repositories
       if (first === undefined) return null
       const title = name.trim() === '' ? undefined : name.trim()

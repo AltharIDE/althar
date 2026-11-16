@@ -1,6 +1,7 @@
 import { SqliteMigrator } from '@effect/sql-sqlite-node'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { statements as clientIdentities } from './0086_client_identities'
 
 import { statements as initial } from './0001_initial'
 import { statements as permissionScopeTurn } from './0002_permission_scope_turn'
@@ -84,6 +85,10 @@ import { statements as cards } from './0079_cards'
 import { statements as keyReads } from './0080_key_reads'
 import { statements as mergeLineCard } from './0081_merge_line_card'
 import { statements as notedInput } from './0082_noted_input'
+import { statements as externalWaits } from './0083_external_waits'
+import { statements as evidenceGalleries } from './0084_evidence_galleries'
+import { statements as turnUndo } from './0085_turn_undo'
+import { statements as errandWords } from './0087_errand_words'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -185,6 +190,11 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0080_key_reads', statements: keyReads },
   { key: '0081_merge_line_card', statements: mergeLineCard },
   { key: '0082_noted_input', statements: notedInput },
+  { key: '0083_external_waits', statements: externalWaits },
+  { key: '0084_evidence_galleries', statements: evidenceGalleries },
+  { key: '0085_turn_undo', statements: turnUndo },
+  { key: '0086_client_identities', statements: clientIdentities },
+  { key: '0087_errand_words', statements: errandWords },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

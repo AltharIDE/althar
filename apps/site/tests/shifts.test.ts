@@ -126,13 +126,13 @@ describe('the upcoming changes we list', () => {
 })
 
 describe('what is still to come', () => {
-  const NOW = Date.parse('2026-10-10T15:30:00Z')
+  const NOW = Date.parse('2025-10-10T15:30:00Z')
   const list = [
-    shift('a', '2026-12-11'),
-    shift('b', '2026-10-10'),
-    shift('c', '2026-10-14'),
-    shift('d', '2026-10-09'),
-    shift('e', '2026-10-14'),
+    shift('a', '2025-12-11'),
+    shift('b', '2025-10-10'),
+    shift('c', '2025-10-14'),
+    shift('d', '2025-10-09'),
+    shift('e', '2025-10-14'),
   ]
 
   it('puts the soonest first, and same-day ones in a stable order', () => {
@@ -146,16 +146,16 @@ describe('what is still to come', () => {
   it('groups by month from the soonest, with the soonest first inside it', () => {
     const months = byMonth(list, soonestFirst)
     expect(months.map((m) => [m.key, m.items.map((s) => s.id)])).toEqual([
-      ['2026-10', ['d', 'b', 'c', 'e']],
-      ['2026-12', ['a']],
+      ['2025-10', ['d', 'b', 'c', 'e']],
+      ['2025-12', ['a']],
     ])
   })
 
   it('says how far off a day is', () => {
-    expect(untilWord('2026-10-10', NOW)).toBe('today')
-    expect(untilWord('2026-10-11', NOW)).toBe('tomorrow')
-    expect(untilWord('2026-10-14', NOW)).toBe('in 4 days')
-    expect(untilWord('2026-11-24', NOW)).toBe('in 45 days')
-    expect(untilWord('2027-04-01', NOW)).toBe('in 6 months')
+    expect(untilWord('2025-10-10', NOW)).toBe('today')
+    expect(untilWord('2025-10-11', NOW)).toBe('tomorrow')
+    expect(untilWord('2025-10-14', NOW)).toBe('in 4 days')
+    expect(untilWord('2025-11-24', NOW)).toBe('in 45 days')
+    expect(untilWord('2026-04-01', NOW)).toBe('in 6 months')
   })
 })

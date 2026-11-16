@@ -121,8 +121,13 @@ describe('what a project runs, from the window', () => {
           snapshot.launches.some((launch) => launch.ended !== null),
         )).launches
         assert.deepInclude(ended?.ended, { code: 0 })
+        // What it printed is read from its card, and still once it has left the list.
+        assert.strictEqual((yield* client.ReadLaunchOutput({ id: first.id })).text.trim(), 'done')
         yield* client.ClearLaunch({ commandId: commandId(), id: first.id })
         assert.deepStrictEqual((yield* client.GetCoordinator({ projectId })).launches, [])
+        assert.strictEqual((yield* client.ReadLaunchOutput({ id: first.id })).text.trim(), 'done')
+        const missing = yield* Effect.flip(client.ReadLaunchOutput({ id: 'nothing' }))
+        assert.strictEqual(missing instanceof ApiError ? missing.reason : '', 'NotFound')
 
         yield* client.DropRunnable({ commandId: commandId(), projectId, id: once.id })
         assert.deepStrictEqual(
@@ -273,6 +278,10 @@ describe('a project’s accounts, from the window', () => {
         // Every account again: none named.
         const all = yield* client.SetProjectRules({ commandId: commandId(), projectId, onlyAccounts: null })
         assert.deepStrictEqual([all.rotateAccounts, all.onlyAccounts], [false, null])
+        const strategy = yield* client.SetProjectRules({ commandId: commandId(), projectId, accountStrategy: 'least_room' })
+        assert.deepStrictEqual([strategy.accountStrategy, strategy.rotateAccounts], ['least_room', true])
+        const restricted = yield* client.SetProjectRules({ commandId: commandId(), projectId, onlyAccounts: { codex: ['acct_work'] } })
+        assert.strictEqual(restricted.accountStrategy, 'least_room')
       }),
     ),
   )
@@ -372,7 +381,7 @@ describe('what can’t be done, from the window', () => {
     ),
   )
 
-  it.live('gives a retried command its first answer, for as many commands as it keeps, and forgets the oldest', () =>
+  it.live('retains a command’s first answer after a thousand later commands', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, task } = yield* connected
@@ -380,13 +389,13 @@ describe('what can’t be done, from the window', () => {
         const sessionId = yield* client.StartSession(start)
         // Retried, it is the same start, not another.
         assert.strictEqual(yield* client.StartSession(start), sessionId)
-        // A thousand commands later, it is forgotten: run again, it finds the agent it started at work.
+        // Durable receipts are never evicted by the old per-connection cache limit.
         yield* Effect.forEach(
           Array.from({ length: 1_000 }, () => commandId()),
           (id) => client.CancelAccountSignIn({ commandId: id, flowId: 'signin_none' }),
           { discard: true, concurrency: 16 },
         )
-        assert.strictEqual(yield* refused(client.StartSession(start)), 'An agent is already working on this task.')
+        assert.strictEqual(yield* client.StartSession(start), sessionId)
       }),
     ),
   )

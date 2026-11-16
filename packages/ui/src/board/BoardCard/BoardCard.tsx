@@ -6,7 +6,9 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { MergeFeel, type MergeFeelStage } from '../../primitives/MergeFeel/MergeFeel'
 import { NextSteps } from '../../primitives/NextStep/NextStep'
+import { Problem } from '../../primitives/Problem/Problem'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -20,7 +22,8 @@ import s from './BoardCard.module.css'
  * what's next (only its next steps, in the strip at its foot, may be buttons
  * of their own, as NextStep says). Its top says where it stands in a word, in the lane's colour
  * (cobalt while it runs, violet when it needs you), then its kind's word,
- * then how long. Then its title, and, where the word isn't enough, why.
+ * then how long. Then its title, and, where the word isn't enough, why, or
+ * what went wrong, as a problem.
  * Under them, at most, its steps, one card in the card (the pull request,
  * the branch, what it handed back) and one fact. A task an automation's run
  * started says which, quietly, at its foot, as one another task's lead
@@ -61,7 +64,8 @@ export interface BoardCardText {
 
 export const boardCardText: BoardCardText = {
   kind: {
-    [TaskKind.Change]: 'Change',
+    // A change is the usual kind: unsaid, so the word only shows where a task is something else.
+    [TaskKind.Change]: '',
     [TaskKind.Review]: 'Review',
     [TaskKind.Plain]: '',
   },
@@ -91,6 +95,11 @@ export type BoardCardProps = RootProps<
     title: string
     /** Under the title, where the word isn't enough to say why it needs you. */
     why?: string
+    /**
+     * What went wrong, where something did (Claude Code is signed out.): said as a problem, in place of `why`, first
+     * under the title. What fixes it goes in `next`, as a NextStep that does it (Sign in again).
+     */
+    problem?: string
     /** Its steps, where it has some worth seeing. */
     track?: readonly TrackItem[]
     /** The card in the card: what this kind makes, at a glance. */
@@ -123,6 +132,8 @@ export type BoardCardProps = RootProps<
     changes?: number
     /** A mark for each of its several changes, beside the count, in the task's order. */
     marks?: ReadonlyArray<BoardChangeMark>
+    /** Where its merge stands, where its strip is Merge: pressed, a ring spreads from the whole card, its strip the button. */
+    merge?: MergeFeelStage | null
     /** Open beside the board. */
     current?: boolean
     onOpen?: () => void
@@ -139,11 +150,11 @@ const markClass: Record<ChangeMarkTone, string | undefined> = {
   still: undefined,
 }
 
-/** The word's glyph: a live dot while it runs, none when it needs you (the violet says it), else the still state's own. */
+/** The word's glyph: a live dot while it runs, still, as a board is glanced at; none when it needs you (the violet says it), else the still state's own. */
 function Glyph({ status }: { status: TaskStatus }) {
   switch (status) {
     case TaskStatus.Running:
-      return <LiveDot pulse />
+      return <LiveDot />
     case TaskStatus.Yours:
       return null
     case TaskStatus.Queued:
@@ -193,6 +204,7 @@ export function BoardCard({
   title,
   errands,
   why,
+  problem,
   track,
   object,
   foot,
@@ -204,6 +216,7 @@ export function BoardCard({
   toward,
   changes,
   marks,
+  merge,
   current,
   onOpen,
   text,
@@ -215,21 +228,31 @@ export function BoardCard({
   const named = local ? t.local(own) : own
   return (
     <article className={cx(b.card, s.card, s[status], className)} aria-current={current || undefined} {...rest}>
-      <div className={b.top}>
+      {/* One line however narrow the lane: its kind gives way first, then its word; how long stays whole. */}
+      <div className={cx(b.top, s.top)}>
         <span className={s.word}>
           <Glyph status={status} />
-          {word}
+          <span className={s.cut}>{word}</span>
         </span>
-        {named !== '' && <span className={s.kind}>{named}</span>}
+        {named !== '' && <span className={cx(s.kind, s.cut)}>{named}</span>}
         {at !== undefined && at !== '' && <span className={b.at}>{at}</span>}
       </div>
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>
-      {why !== undefined && why !== '' && (
-        <p className={s.why} title={why}>
-          {why}
-        </p>
+      {problem !== undefined && problem !== '' ? (
+        <Problem size="small">
+          <span className={s.clamp} title={problem}>
+            {problem}
+          </span>
+        </Problem>
+      ) : (
+        why !== undefined &&
+        why !== '' && (
+          <p className={s.why} title={why}>
+            {why}
+          </p>
+        )
       )}
       {errands?.map((line) => (
         <p className={s.errand} key={line} title={line}>
@@ -270,6 +293,7 @@ export function BoardCard({
       {startedBy !== undefined && startedBy !== '' && <StartedBy task={startedBy} onOpen={onOpenStartedBy} text={text} />}
       {next !== undefined && next !== null && next !== false && <NextSteps className={b.strip}>{next}</NextSteps>}
       {corner !== undefined && corner !== null && <div className={s.corner}>{corner}</div>}
+      {merge !== undefined && <MergeFeel stage={merge} ringCard />}
     </article>
   )
 }

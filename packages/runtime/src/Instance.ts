@@ -1,4 +1,4 @@
-import { type ActorId, type DeviceId, Ids, newId, now, type RuntimeInstanceId } from '@althar/domain'
+import { type ActorId, type DeviceId, type HomeId, Ids, newId, now, type RuntimeInstanceId } from '@althar/domain'
 import { Cause, Context, Crypto, Effect, Exit, Layer, type Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -8,6 +8,8 @@ import { RuntimeConfig } from './Config'
 import { reconcile } from './reconcile'
 
 export interface InstanceInfo {
+  /** The durable profile home. This does not change on restart or when a client device is registered. */
+  readonly homeId: HomeId
   /** This launch of the runtime. */
   readonly id: RuntimeInstanceId
   readonly deviceId: DeviceId
@@ -60,11 +62,24 @@ export class Instance extends Context.Service<Instance, InstanceInfo>()('@althar
       const config = yield* RuntimeConfig
       const info = yield* sql.withTransaction(
         Effect.gen(function* () {
-          const [device] = yield* sql<{ id: DeviceId }>`SELECT id FROM devices ORDER BY created_at, id LIMIT 1`
+          const [home] = yield* sql<{
+            id: HomeId
+            deviceId: DeviceId
+            personId: ActorId
+          }>`SELECT id, device_id, person_id FROM runtime_homes WHERE singleton = 1`
+          const [device] =
+            home === undefined
+              ? yield* sql<{
+                  id: DeviceId
+                }>`SELECT d.id FROM devices d ORDER BY EXISTS (SELECT 1 FROM runtime_instances r WHERE r.device_id = d.id) DESC, d.created_at, d.id LIMIT 1`
+              : [{ id: home.deviceId }]
           const deviceId = device?.id ?? (yield* newId(Ids.device))
           if (device === undefined)
             yield* sql`INSERT INTO devices ${sql.insert({ id: deviceId, name: config.deviceName, createdAt: yield* now })}`
-          const personId = yield* findOrCreateActor('person', 'You')
+          const personId = home?.personId ?? (yield* findOrCreateActor('person', 'You'))
+          const homeId = home?.id ?? (yield* newId(Ids.home))
+          if (home === undefined)
+            yield* sql`INSERT INTO runtime_homes ${sql.insert({ singleton: 1, id: homeId, deviceId, personId, createdAt: yield* now })}`
           const systemId = yield* findOrCreateActor('system', 'Althar')
           const coordinatorId = yield* findOrCreateActor('agent', 'Coordinator', 'coordinator')
           // Read before reconciling closes it: a launch that closed cleanly says when it ended; one that crashed, failed or was killed, never.
@@ -73,7 +88,7 @@ export class Instance extends Context.Service<Instance, InstanceInfo>()('@althar
           const afterCrash = before !== undefined && before.endedAt === null
           const id = yield* newId(Ids.runtimeInstance)
           yield* sql`INSERT INTO runtime_instances ${sql.insert({ id, deviceId, pid: process.pid, appVersion: config.appVersion, startedAt: yield* now })}`
-          return { id, deviceId, personId, systemId, coordinatorId, afterCrash }
+          return { id, homeId, deviceId, personId, systemId, coordinatorId, afterCrash }
         }),
       )
       yield* reconcile(info)

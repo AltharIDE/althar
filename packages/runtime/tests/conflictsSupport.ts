@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { type FakeCheck, type FakeService, makeFakeService } from '@althar/connectors/testing'
+import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -26,19 +27,16 @@ export const runtimeWith = (
   idle: IdleOptions = {},
   /** How long checks may run before Althar gives up on them; its own default unless a test says. */
   checksStuck?: Duration.Duration,
+  agent: FakeAgentOptions = {},
 ) =>
   Queries.layer.pipe(
     Layer.provideMerge(
-      runtime(
-        ':memory:',
-        {},
-        {
-          connectors: fakeConnectors(services),
-          listenEvery: Duration.millis(100),
-          idle: { quiet: Duration.millis(300), ...idle },
-          ...(checksStuck === undefined ? {} : { checksStuck }),
-        },
-      ),
+      runtime(':memory:', agent, {
+        connectors: fakeConnectors(services),
+        listenEvery: Duration.millis(100),
+        idle: { quiet: Duration.millis(300), ...idle },
+        ...(checksStuck === undefined ? {} : { checksStuck }),
+      }),
     ),
   )
 
@@ -149,7 +147,7 @@ export const taskSays = (taskId: string, resolveConflicts: boolean | null) =>
     yield* (yield* Changes).setResolveConflicts({ envelope, taskId, resolveConflicts })
   })
 
-export type Checks = ReadonlyArray<{ readonly name: string; readonly state: 'passed' | 'failed' | 'running'; readonly log?: string }>
+export type Checks = ReadonlyArray<FakeCheck>
 export const PASSED: Checks = [{ name: 'test', state: 'passed' }]
 export const RUNNING: Checks = [{ name: 'test', state: 'running' }]
 export const FAILED: Checks = [{ name: 'test', state: 'failed', log: 'FAIL limit.test.ts' }]

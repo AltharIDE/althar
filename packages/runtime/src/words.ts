@@ -1,4 +1,4 @@
-import { basename } from 'node:path'
+import { basename, dirname } from 'node:path'
 
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
@@ -104,6 +104,9 @@ export const signInEndedWords = 'Its sign-in has ended. Sign it in again in Sett
 /** An agent that couldn't reach its servers: nothing to sign in, the connection to look at. */
 export const unreachableWords = (device: string) => `Its servers can't be reached. Check ${device}'s connection, then try again.`
 
+/** An agent that couldn't start where the folder it starts in is gone: deleted by hand, or a Local task's checkout moved. */
+export const folderGoneWords = (path: string) => `Its folder isn't there any more: ${path}.`
+
 /** An agent that isn't there to start, by the command Althar ran: installing it is the way on. */
 const notInstalledWords = (command: string) =>
   `${command === '' ? 'The agent' : command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
@@ -158,6 +161,7 @@ const own = (line: string): string => redact(line)
 export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
     case 'StartTimedOut':
+    case 'ModelSwitchedOff':
       return text(error, 'message')
     case 'AgentStartFailed': {
       const command = text(error, 'command')
@@ -254,6 +258,54 @@ export const words = (
     switch (reason) {
       case 'NotARepository':
         return `${text(error, 'path')} isn't a git repository. Choose another folder.`
+      case 'FolderRefused': {
+        const folder = basename(text(error, 'path'))
+        switch (text(error, 'reason')) {
+          case 'unreadable':
+            return `Althar can’t read ${folder}. Give it access to the folder, then choose it again.`
+          case 'too_wide':
+            return `${folder} holds too much to be one project. Choose the folder its code is in.`
+          case 'too_many': {
+            const count = fieldOf(error, 'count')
+            return `${folder} has ${typeof count === 'number' ? count.toLocaleString('en') : 'too many'} files, too many to start a repository with. Choose the folder its code is in.`
+          }
+          case 'broken_repository':
+            return `${folder} has a .git that git can’t read. Mend it, or choose another folder.`
+          case 'repositories_inside': {
+            const names = fieldOf(error, 'names')
+            const listed = Array.isArray(names) ? names.filter((one): one is string => typeof one === 'string') : []
+            return listed.length === 0
+              ? `${folder} has git repositories inside it. Choose one of them instead.`
+              : `${folder} has git repositories inside it: ${listed.slice(0, 3).join(', ')}${listed.length > 3 ? ` and ${listed.length - 3} more` : ''}. Choose one of them, or the folder each is in.`
+          }
+          default:
+            return `There’s a folder named ${folder} in ${basename(dirname(text(error, 'path')))} already, with something in it. Choose another place.`
+        }
+      }
+      case 'CloneRefused': {
+        const remote = text(error, 'remote')
+        const host = text(error, 'host')
+        switch (text(error, 'reason')) {
+          case 'sso':
+            return `${host} wants you signed in to its organization’s single sign-on before ${remote} can be cloned.`
+          case 'not_found':
+            return host === '' ? `${remote} isn’t a repository’s address.` : `${host} has no ${remote} that Althar can see.`
+          default:
+            return `${remote} couldn’t be cloned from ${host}.`
+        }
+      }
+      case 'PublishRefused': {
+        const remote = text(error, 'remote')
+        const host = text(error, 'host')
+        switch (text(error, 'reason')) {
+          case 'has_remote':
+            return `Its repository is on ${remote} already.`
+          case 'taken':
+            return `There’s a ${remote} on ${host} already. Choose another name.`
+          default:
+            return `${remote} is made on ${host}, but pushing to it didn’t work. Try again.`
+        }
+      }
       case 'RepositoryRefused':
         return text(error, 'reason') === 'taken'
           ? `There’s a folder named ${text(error, 'name')} in ${basename(text(error, 'parent'))} already. Choose another place, or rename the project.`
@@ -298,6 +350,8 @@ export const words = (
         return 'An agent is already working on this task.'
       case 'RetryRefused':
         return 'There is no failed turn or lost connection to try again.'
+      case 'UndoRefused':
+        return `${text(error, 'message')}${Array.isArray(fieldOf(error, 'files')) ? ` ${(fieldOf(error, 'files') as unknown[]).join(', ')}` : ''}`.trim()
       case 'NoSession':
         return 'The task isn’t running.'
       case 'NothingToClear':
@@ -347,7 +401,7 @@ export const words = (
         // git said nothing: what Althar knows of how it ended.
         if (fieldOf(error, 'timedOut') === true) {
           const timeout = fieldOf(error, 'timeout')
-          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped it. Try again.`
+          return `${command} got no answer in ${secondsOf(typeof timeout === 'number' ? timeout : undefined)}, so Althar stopped waiting. Try again.`
         }
         const signal = text(error, 'signal')
         if (signal !== '') return `${command} was stopped (${signal}) before it was done. Try again.`
@@ -398,7 +452,7 @@ export const words = (
         if (why === 'unreachable')
           return `Althar couldn’t reach ${where}, so nothing was pushed. Check this computer’s connection, then try again.`
         if (why === 'unanswered')
-          return `${where} didn’t answer in time, so the push was stopped. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
+          return `${where} didn’t answer in time, so Althar stopped waiting for the push. git may have been waiting for a sign-in it couldn’t ask for here: sign git in to ${where} from a terminal, then try again.`
         if (why === 'failed') return `Althar couldn’t push to ${where}. What git said is under Details.`
         // The person's own git pushed: signing git in is what puts it right, as connecting doesn't change how it pushes.
         if (host !== '')
@@ -481,6 +535,22 @@ export const words = (
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
+  // Undo names its affected files separately, so the window can open their changes without parsing prose.
+  if (reason === 'UndoRefused') {
+    const files = fieldOf(error, 'files')
+    return {
+      reason,
+      message,
+      ...(text(error, 'why') === '' ? {} : { why: text(error, 'why') }),
+      ...(Array.isArray(files) && files.length > 0 ? { detail: JSON.stringify(files) } : {}),
+    }
+  }
+  // A folder, clone or publish refused says why, for the window to offer what puts it right; with git's words, where git said any.
+  if (reason === 'FolderRefused' || reason === 'CloneRefused' || reason === 'PublishRefused') {
+    const url = text(error, 'url')
+    const detail = url !== '' ? url : text(error, 'detail')
+    return { reason, message, why: text(error, 'reason'), ...(detail === '' ? {} : { detail }) }
+  }
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
@@ -600,7 +670,6 @@ const taskRefused = {
   title_too_long: 'Keep the title to a few words.',
   folder_in_use: 'Something is running in the task’s folder. Stop it, then remove the folder.',
   folder_in_way: 'Something else is where the task’s folder goes. Move it away, then try again.',
-  review_done: 'Its review is done, so its reviewer can’t change.',
   no_lead: 'The task has no lead to change.',
 } as const satisfies Record<TaskRefused['why'], string>
 
@@ -634,6 +703,9 @@ const reviewIncomplete = {
 
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'FolderRefused',
+  'CloneRefused',
+  'PublishRefused',
   'ChangeRefused',
   'MergeReviewRefused',
   'ToolRefused',
@@ -673,6 +745,7 @@ export const expected = new Set([
   'SessionRunning',
   'NoSession',
   'RetryRefused',
+  'UndoRefused',
   'NothingToClear',
   'AttentionClosed',
   'AlwaysNotOffered',
@@ -717,6 +790,8 @@ const fileRefused = {
   unreadable: (name) => `Althar couldn't read ${name}.`,
   missing: (name) => `${name} isn't there any more. Add it again.`,
   nowhere: () => "The task's folder isn't ready yet.",
+  gone: () => 'The task’s worktree and branch are gone, so there is nowhere to put the file.',
+  in_way: () => 'Something else is where the task’s folder goes. Move it away, then send the file again.',
 } as const satisfies Record<FileRefused['reason'], (name: string) => string>
 
 /** Why a project can't be changed so, by reason. */
@@ -739,4 +814,5 @@ const accountRefused = {
   no_name: 'Give the account a name.',
   one: "This agent can't have a second account yet.",
   no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
+  host: 'Enter a GitHub Enterprise hostname or HTTPS address for GitHub Copilot CLI.',
 } as const satisfies Record<AccountRefused['reason'], string>

@@ -69,10 +69,13 @@ describe('a lead settling its task as the person says', () => {
       assert.match(yield* settle('keep'), /^Kept which-partners-still-call-v1 for later: out of Needs you as it is/)
       assert.isNotNull((yield* stateOf(task.taskId))[0]?.keptAt)
       assert.match(yield* settle('keep'), /^Nothing changed: which-partners-still-call-v1 is kept for later already\./)
-      // The coordinator finds it as kept for later.
+      // The coordinator finds it as kept for later: an aside, as start_task starts one.
       const threadId = yield* (yield* Coordinator).thread(project.projectId)
       const coordinator: ToolAccess = { role: 'coordinator', projectId: project.projectId, threadId, sessionId: 'none', taskId: null }
-      assert.include(yield* callTool(coordinator, 'find_tasks', { text: 'partners' }), '(kept for later; id ')
+      assert.include(
+        yield* callTool(coordinator, 'find_tasks', { text: 'partners' }),
+        '(an aside on Scratch, a chat rather than a task, kept for later; id ',
+      )
       assert.match(yield* settle('done'), /^Marked which-partners-still-call-v1 done: it is in Settled/)
       assert.strictEqual((yield* stateOf(task.taskId))[0]?.state, 'done')
       // Its own thread says so, once: the lead acted in it.
@@ -208,6 +211,51 @@ describe('the coordinator’s tools, at their other turns', () => {
       assert.include(read, 'What it built, as its lead says it now stands:\nRefunds retry once on a failed call.')
       assert.include(read, "What its lead couldn't show working:\n- The retry under the payment provider’s rate limit")
       assert.include(read, 'implement: Retried refunds once.')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('lets a lead read the coordinator conversation and page back without changing its own default', () =>
+    Effect.gen(function* () {
+      const project = yield* open
+      const task = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Read the draft',
+      })
+      const threadId = yield* (yield* Coordinator).thread(project.projectId)
+      yield* addItem({ projectId: project.projectId as ProjectId, threadId: task.threadId }, 'agent_message', { text: 'Own task note' })
+      yield* (yield* Sessions).send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId,
+        body: 'Use my draft',
+        disposition: 'after_current',
+        sender: { kind: 'window' },
+      })
+      for (let at = 0; at < 40; at += 1)
+        yield* addItem({ projectId: project.projectId as ProjectId, threadId }, 'agent_message', {
+          text: `Draft ${at}: ${'Coordinator wording. '.repeat(50)}`,
+        })
+      const lead: ToolAccess = {
+        role: 'lead',
+        projectId: project.projectId,
+        threadId: task.threadId,
+        sessionId: 'none',
+        taskId: task.taskId,
+      }
+      assert.include(yield* callTool(lead, 'read_thread', {}), 'Own task note')
+      assert.include(yield* callTool(lead, 'read_thread', { task: task.slug }), 'Own task note')
+      const latest = yield* callTool(lead, 'read_thread', { coordinator: true })
+      assert.include(latest, 'Draft 39:')
+      assert.notInclude(latest, 'Own task note')
+      assert.notInclude(latest, '[you]')
+      const omitted = Number(/The (\d+) earliest items/.exec(latest)?.[1])
+      assert.isAbove(omitted, 0)
+      const earlier = yield* callTool(lead, 'read_thread', { coordinator: true, before: omitted })
+      assert.include(earlier, 'Use my draft')
+      assert.include(earlier, 'Draft 0:')
+      assert.notInclude(earlier, 'Draft 39:')
+      assert.strictEqual(yield* callTool(lead, 'read_thread', { coordinator: true, before: 0 }), 'Nothing comes before that.')
+      assert.include(yield* callTool(lead, 'read_thread', { coordinator: true, task: task.slug }), 'Choose either')
     }).pipe(Effect.provide(runtime())),
   )
 

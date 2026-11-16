@@ -21,12 +21,15 @@ import type {
   IssueComment,
   IssueField,
   ListedChange,
+  ListedRepository,
   MergeMethod,
   MergeRules,
+  NewHostRepository,
   NewReview,
   Person,
   Product,
   Repository,
+  RepositoryOwner,
   Review,
   Tracker,
   TrackerCapabilities,
@@ -88,6 +91,8 @@ export interface FakeServiceOptions {
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** What merging a change needs, as the host says now (DEV-204); without it, the host doesn't read it at all. */
   readonly rulesOf?: (number: number) => MergeRules
+  /** The viewer's current permission for the explicit GitHub queue bypass. False unless given. */
+  readonly canBypassQueue?: () => boolean
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<FakeCheck> | undefined
   /** The checks a commit that is no change's head has, such as its default branch's latest: none without it. */
@@ -100,7 +105,7 @@ export interface FakeServiceOptions {
   readonly listReads?: number
   /** Whether the host can run a check again; it can, unless a test says. A check run again is in `reruns`. */
   readonly reruns?: boolean
-  /** Whether it reads changes to review: as GitHub does, unless said, and no other. */
+  /** Whether it reads and posts reviews: every code host does unless a test says otherwise. */
   readonly reviews?: boolean
   /** Whether it takes pictures in its conversations: as GitHub and GitLab do, unless said, and no other. */
   readonly pictures?: boolean
@@ -190,7 +195,19 @@ const COMPONENTS = ['API', 'Web']
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
 export interface FakeControls {
-  addRepository(path: ReadonlyArray<string>, defaultBranch?: string): Repository
+  /**
+   * A repository the account can reach, as `repositories` lists it: public,
+   * with no description, never pushed to and not archived, unless `listed` says.
+   */
+  addRepository(
+    path: ReadonlyArray<string>,
+    defaultBranch?: string,
+    listed?: Partial<Pick<ListedRepository, 'description' | 'private' | 'pushedAt' | 'archived'>>,
+  ): Repository
+  /** Where the account can make a repository, in place of itself alone, as `owners` says. */
+  setOwners(owners: ReadonlyArray<RepositoryOwner>): void
+  /** Every repository `createRepository` made, in order, as it was asked for. */
+  readonly repositoriesMade: ReadonlyArray<NewHostRepository>
   /** Lets the account push to a repository, or no longer, as its owners would: it can until it is told otherwise. */
   letPush(path: ReadonlyArray<string>, can: boolean): void
   addIssue(issue: {
@@ -363,6 +380,19 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   let tick = 0
   const now = () => new Date(START + (tick += 1) * 1000).toISOString()
   const repositories = new Map<string, Repository>()
+  /** How `repositories` lists each, by its path in lower case. */
+  const listings = new Map<string, Pick<ListedRepository, 'description' | 'private' | 'pushedAt' | 'archived'>>()
+  /** Where the account can make a repository: itself, as its product has it, unless a test says. */
+  let owners: ReadonlyArray<RepositoryOwner> = [
+    product === 'bitbucket_cloud'
+      ? { id: account.login, name: account.name ?? account.login, kind: 'workspace' }
+      : {
+          id: product === 'bitbucket_dc' ? `~${account.login.toUpperCase()}` : account.login,
+          name: account.name ?? account.login,
+          kind: 'user',
+        },
+  ]
+  const made: Array<NewHostRepository> = []
   const changes: Array<ChangeRequest> = []
   /** Each change's repository, by number. */
   const repositoryOf = new Map<number, string>()
@@ -458,7 +488,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     inQueue.delete(number)
     autoMerging.delete(number)
     if (change.state !== 'open') return
-    update(number, { state: 'merged' })
+    update(number, { state: 'merged', mergeCommit: `merge-${number}` })
     historyOf(repositoryOf.get(number) ?? '', change.target).push(`merge-${number}`)
   }
 
@@ -618,7 +648,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       drafts: true,
       checkLogs: true,
       threads: true,
-      reviews: options.reviews ?? product === 'github',
+      reviews: options.reviews ?? ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc'].includes(product),
       pictures: options.pictures ?? (product === 'github' || product === 'gitlab'),
       // As each adapter declares: a declined Bitbucket Cloud pull request is final, and Data Center's builds are another service's.
       reopen: product !== 'bitbucket_cloud',
@@ -801,6 +831,23 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         if (!landsLater) land(change.number)
         return Effect.succeed(changeNumbered(change.number))
       }),
+    ...(product === 'github'
+      ? {
+          mergeWithoutQueue: (_repository: Repository, change: ChangeRequest) =>
+            Effect.andThen(called('mergeWithoutQueue'), () => {
+              if (options.canBypassQueue?.() !== true)
+                return Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', message: 'Queue bypass is not allowed' }))
+              const now = changeNumbered(change.number)
+              if (now.draft || now.state !== 'open')
+                return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'Pull request is not mergeable' }))
+              if (change.headSha !== (options.headOf?.(change.number) ?? now.headSha))
+                return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
+              mergesAsked.push({ number: change.number, how: 'merge', method: null, head: change.headSha })
+              land(change.number)
+              return Effect.succeed({ ...changeNumbered(change.number), queued: false })
+            }),
+        }
+      : {}),
     mergeWays: () =>
       Effect.andThen(called('mergeWays'), () =>
         Effect.succeed({
@@ -849,8 +896,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     // As GitHub's alone, which merges in the background: whether a head is the merge its update made from another.
     ...(product === 'github'
       ? {
-          madeFrom: (_repository: Repository, change: ChangeRequest, from: string) =>
-            Effect.andThen(called('madeFrom'), () => Effect.succeed(change.headSha?.startsWith(`${from}+`) === true)),
+          madeFrom: (repository: Repository, change: ChangeRequest, from: string, base?: string) =>
+            Effect.andThen(called('madeFrom'), () => {
+              if (change.headSha?.startsWith(`${from}+`) !== true) return Effect.succeed(false)
+              if (base === undefined) return Effect.succeed(true)
+              // Its target's head asked for, or a later one, where the target moved on before the merge.
+              const merged = change.headSha.slice(from.length + 1)
+              const history = historyOf(repository.id, change.target)
+              return Effect.succeed(merged === base || (history.includes(base) && history.indexOf(merged) >= history.indexOf(base)))
+            }),
         }
       : {}),
     closeChange: (_repository, change) =>
@@ -1044,6 +1098,51 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ? Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', message: 'The fake takes no pushes' }))
           : Effect.succeed({ url: options.pushUrl(repository.path), header: options.pushHeader ?? null }),
       ),
+    // Every one it has, last pushed to first, then those never pushed to, as they were added.
+    repositories: () =>
+      Effect.andThen(called('repositories'), () =>
+        Effect.succeed(
+          [...repositories.entries()]
+            .map(([key, repository]): ListedRepository => {
+              const listed = listings.get(key)
+              return {
+                path: repository.path,
+                description: listed?.description ?? null,
+                private: listed?.private ?? false,
+                pushedAt: listed?.pushedAt ?? null,
+                webUrl: repository.webUrl,
+                archived: listed?.archived ?? false,
+              }
+            })
+            .toSorted((a, b) => (b.pushedAt ?? '').localeCompare(a.pushedAt ?? '')),
+        ),
+      ),
+    owners: () => Effect.andThen(called('owners'), () => Effect.succeed(owners)),
+    // As a host: in one of its owners alone, and never over one of that path already, whatever the case.
+    createRepository: (asked) =>
+      Effect.andThen(called('createRepository'), () => {
+        if (!owners.some((owner) => owner.id === asked.owner.id && owner.kind === asked.owner.kind))
+          return Effect.fail(
+            new ConnectorFailed({
+              product,
+              reason: 'forbidden',
+              status: 403,
+              message: `The account may not make a repository in ${asked.owner.name}`,
+            }),
+          )
+        const path = [asked.owner.id, asked.name]
+        if (repositories.has(path.join('/').toLowerCase()))
+          return Effect.fail(
+            new ConnectorFailed({ product, reason: 'rejected', status: 422, message: 'name already exists on this account' }),
+          )
+        made.push(asked)
+        return Effect.succeed(
+          service.addRepository(path, 'main', {
+            private: asked.private,
+            ...(asked.description === undefined || asked.description === '' ? {} : { description: asked.description }),
+          }),
+        )
+      }),
     issue: (ref) =>
       Effect.andThen(called('issue'), () => {
         // A key in any case, as Linear's adapter takes one.
@@ -1185,7 +1284,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         ),
       ),
 
-    addRepository: (path, defaultBranch = 'main') => {
+    addRepository: (path, defaultBranch = 'main', listed = {}) => {
       const repository: Repository = {
         id: `repo-${repositories.size + 1}`,
         path: [...path],
@@ -1195,7 +1294,17 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         merges: ['squash', 'merge'],
       }
       repositories.set(path.join('/').toLowerCase(), repository)
+      listings.set(path.join('/').toLowerCase(), {
+        description: listed.description ?? null,
+        private: listed.private ?? false,
+        pushedAt: listed.pushedAt ?? null,
+        archived: listed.archived ?? false,
+      })
       return repository
+    },
+    setOwners: (set) => void (owners = [...set]),
+    get repositoriesMade() {
+      return [...made]
     },
     letPush: (path, can) => {
       const key = path.join('/').toLowerCase()

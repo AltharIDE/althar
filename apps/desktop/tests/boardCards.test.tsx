@@ -592,6 +592,25 @@ describe('the dock, for each', () => {
     await waitFor(() => expect(client.merge).toHaveBeenCalledWith('r', '', 'https://github.com/meridian/api/pull/12'))
   })
 
+  it('offers Ship, never Accept or Push, for a pull request whose commits wait for Ship', async () => {
+    const ready = task({
+      taskId: 'h',
+      threadId: 'thh',
+      title: 'A tweak not shipped',
+      phase: 'ready',
+      change: change({ draft: false, localHead: 'def456', unpushed: 2, pushing: { held: 'Held for Ship', ship: true } }),
+      held: { since: NOW, commits: 2 },
+    })
+    const { client, docked } = dock(board([ready]), { kind: 'task', id: 'h' })
+    const shown = await docked()
+    expect(await shown.findByText('2 commits aren’t shipped yet')).toBeTruthy()
+    expect(shown.queryByRole('button', { name: /^Accept/ })).toBeNull()
+    expect(shown.queryByRole('button', { name: 'Push' })).toBeNull()
+    await userEvent.click(shown.getByRole('button', { name: 'Ship' }))
+    await waitFor(() => expect(client.ship).toHaveBeenCalledWith('h'))
+    expect(client.merge).not.toHaveBeenCalled()
+  })
+
   it('sends a note back quietly where another start of the lead took over first', async () => {
     const ready = task({ taskId: 't4', threadId: 'th4', title: 'Rate-limit refunds', phase: 'ready', change: change({ draft: false }) })
     const startSession = vi.fn(async () => {

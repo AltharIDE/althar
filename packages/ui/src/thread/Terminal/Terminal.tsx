@@ -88,6 +88,8 @@ export interface TerminalProps {
   failure?: string
   /** Which lines read as errors. By default, isTerminalError. */
   isError?: (line: string) => boolean
+  /** Its host frames it already, as a run's console does: the lines alone, without a block of their own. */
+  flush?: boolean
   text?: Partial<TerminalText>
 }
 
@@ -111,6 +113,7 @@ export function Terminal({
   error,
   failure,
   isError = isTerminalError,
+  flush = false,
   text,
 }: TerminalProps) {
   const t = { ...terminalText, ...text }
@@ -129,7 +132,7 @@ export function Terminal({
   )
   const quiet = lines.length === 0 && earlier.length === 0 && live === undefined && !loading && error === undefined && failure === undefined
   return (
-    <div className={s.term} aria-busy={loading || live !== undefined || undefined}>
+    <div className={cx(s.term, flush && s.flush)} aria-busy={loading || live !== undefined || undefined}>
       {earlier.length > 0 && (
         <button type="button" className={s.earlier} aria-expanded={open} onClick={() => setOpen(!open)}>
           <Icon name="chevronU" size={10} className={s.chevron} />

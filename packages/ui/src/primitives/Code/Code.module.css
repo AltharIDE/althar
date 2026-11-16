@@ -4,4 +4,7 @@
   background: var(--chip);
   font: 0.88em var(--mono);
   color: var(--t-1);
+  /* a long path breaks rather than running past the edge, its chip on every line */
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
 }

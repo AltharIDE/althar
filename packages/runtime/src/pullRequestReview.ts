@@ -331,7 +331,17 @@ const tinyOf = (runId: string) =>
  * Whether the run went on after its rounds of review ran out, the lead's last fixes never read (Runs.ts marks the settle that
  * made them).
  */
-export const unreviewedOf = (runId: string) => Effect.map(carriedOn(runId), (carried) => carried !== null)
+export const unreviewedOf = (runId: string) =>
+  Effect.gen(function* () {
+    if ((yield* carriedOn(runId)) !== null) return true
+    const sql = yield* SqlClient.SqlClient
+    // Skipping a later check accepts the fixes without reading them. A first pass skipped before its verdict made no review record.
+    const [skipped] = yield* sql<{ id: string }>`
+      SELECT a.id FROM workflow_executions e JOIN nodes n ON n.execution_id = e.id AND n.node_key = 'review'
+      JOIN node_attempts a ON a.node_id = n.id
+      WHERE e.run_id = ${runId} AND n.iteration > 0 AND a.state = 'cancelled' AND json_extract(a.output, '$.skipped') = 1 LIMIT 1`
+    return skipped !== undefined
+  })
 
 /**
  * The commit that holds exactly what a review pass read, or null. A pass

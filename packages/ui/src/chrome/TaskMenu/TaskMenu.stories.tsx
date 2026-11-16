@@ -26,12 +26,17 @@ type Story = StoryObj<typeof meta>
 export const Closed: Story = {}
 /** While it works, waits on you, or waits out a limit: stop it, or abandon it. */
 export const Working: Story = { args: { defaultOpen: true } }
-/** Stopped by you, its step cut short: resume it, or abandon it. */
 /** A task at work: its team still changes, as a task that hasn't begun does. */
 export const ChangingTheTeam: Story = { args: { onChangeTeam: fn(), defaultOpen: true } }
 
 export const ChangingTheTeamDark: Story = { ...ChangingTheTeam, globals: { theme: 'dark' } }
 
+/** A prototype, finished on its branch: made a change in one move, a reviewer on and a pull request to end in. */
+export const MakingItAChange: Story = { args: { onChangeTeam: fn(), onMakeChange: fn(), defaultOpen: true } }
+
+export const MakingItAChangeDark: Story = { ...MakingItAChange, globals: { theme: 'dark' } }
+
+/** Stopped by you, its step cut short: resume it, or abandon it. */
 export const Stopped: Story = { args: { onStop: undefined, onResume: fn(), defaultOpen: true } }
 /** Its plan waits to start, counting down or held: start it now, or abandon it. */
 export const Planned: Story = { args: { onOpen: undefined, onStop: undefined, onStartNow: fn(), defaultOpen: true } }
@@ -45,7 +50,7 @@ export const Merged: Story = { args: { onStop: undefined, onAbandon: undefined, 
 export const MergedWithCommitsAfter: Story = { args: { onStop: undefined, merged: true, defaultOpen: true } }
 /** With no editor found, nothing but abandoning. */
 export const OnlyAbandon: Story = { args: { onOpen: undefined, onStop: undefined, defaultOpen: true } }
-/** Long words, as a translation might have them, wrap inside the menu. */
+/** Long words, as a translation might have them: each row stays one line and ends short with “…”. */
 export const LongWords: Story = {
   args: {
     onResume: fn(),
@@ -83,7 +88,6 @@ export const AllowedEverything: Story = {
 export const AllowedByProject: Story = {
   args: { allowEverything: { on: false, project: true, onChange: fn() }, onRules: fn(), defaultOpen: true },
 }
-/** With nothing it can do, there is no menu at all. */
 /** Working toward a release branch rather than the default (ADR-093): the branch first, its name copied when chosen. */
 export const TowardARelease: Story = {
   args: { toward: 'release/0.8.0', defaultOpen: true },
@@ -92,6 +96,7 @@ export const TowardARelease: Story = {
   },
 }
 export const TowardAReleaseDark: Story = { ...TowardARelease, globals: { theme: 'dark' } }
+/** With nothing it can do, there is no menu at all. */
 export const NothingToDo: Story = { args: { onOpen: undefined, onStop: undefined, onAbandon: undefined } }
 
 const opened = async (canvasElement: HTMLElement) => {

@@ -1,7 +1,8 @@
 import { Lexer, type MarkedToken, type Token } from 'marked'
-import { createContext, Fragment, memo, useContext, useMemo, useState, type ReactNode } from 'react'
+import { cloneElement, createContext, Fragment, isValidElement, memo, useContext, useMemo, useState, type ReactNode } from 'react'
 
 import { cx } from '../../lib/cx'
+import { useTheme } from '../../lib/theme'
 import { usePacedText } from '../../lib/pace'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
@@ -15,8 +16,10 @@ import { type CodeShell, useThreadShell } from '../Shell/Shell'
 import { Table, type TableText } from '../Table/Table'
 import { closedFence, isDiagram } from './drawing'
 import { Fresh, FreshWhole, useFreshly, useFreshness } from './fresh'
+import { isRelative, type MarkdownMarks, resolvePath } from './changes'
 import { CodeBlock, Diagram, type DiagramText } from './Diagram'
-import { blocksOf, type Lexed, lexAll, lexOn } from './lexed'
+import { drawHtml, type HtmlParts, tagOf } from './html'
+import { blocksOf, type Lexed, lexAll, lexOn, lexWith } from './lexed'
 import s from './Markdown.module.css'
 import { streamable } from './streaming'
 
@@ -29,6 +32,11 @@ import { streamable } from './streaming'
  * path in backticks, a name in code, a path written into the words) are
  * the files they name, to peek at and open. A ```mermaid block is drawn
  * (Diagram), mermaid fetched the first time one shows.
+ *
+ * A file's markdown (`file`) knows where it is: a relative image is drawn
+ * by the host, and a relative link opens the file it names, both from the
+ * file's folder. With `marks`, what a change added is tinted, and what it
+ * took out is drawn where it stood, as it was (changes.ts).
  *
  * Still being written (`streaming`), it is shown at an even pace
  * (lib/pace), its newest words fading in (fresh.tsx), and without what
@@ -82,9 +90,42 @@ export interface MarkdownText {
   copy?: Partial<CopyButtonText>
   /** A ```mermaid block's, drawn. */
   diagram?: Partial<DiagramText>
+  /** What a change marks, for a screen reader: blocks it added, and text it took out. */
+  added: string
+  removed: string
+  /** A GitHub alert's name (`> [!NOTE]`), as its callout says it. */
+  alerts?: Partial<Record<AlertKind, string>>
 }
 
-export const markdownText: MarkdownText = { newTab: '(opens in a new tab)', done: 'done', notDone: 'not done' }
+export type AlertKind = 'note' | 'tip' | 'important' | 'warning' | 'caution'
+
+const ALERTS: Record<AlertKind, string> = {
+  note: 'Note',
+  tip: 'Tip',
+  important: 'Important',
+  warning: 'Warning',
+  caution: 'Caution',
+}
+
+export const markdownText: MarkdownText = {
+  newTab: '(opens in a new tab)',
+  done: 'done',
+  notDone: 'not done',
+  added: 'Added',
+  removed: 'Removed',
+}
+
+/** Where a file's markdown is, so what it names beside it can be found: the host draws its images and opens its links. */
+export interface MarkdownFile {
+  /** The file's folder, from the top of its repository: empty at the top. */
+  readonly folder: string
+  /** Draws an image the file names, by its path from the top of its repository; without it, an image's words stand in. */
+  readonly image?: (image: { readonly path: string; readonly alt: string; readonly title?: string; readonly width?: string }) => ReactNode
+  /** Opens a file the file links to, by its path from the top of its repository; without it, such a link is only its words. */
+  readonly open?: (path: string) => void
+}
+
+const FileContext = createContext<MarkdownFile | null>(null)
 
 export type MarkdownProps = RootProps<
   'div',
@@ -99,6 +140,10 @@ export type MarkdownProps = RootProps<
     headingLevel?: HeadingLevel
     /** Still being written: shown at an even pace as it grows, and whole at once when it stops being. */
     streaming?: boolean
+    /** The markdown is a file, beside what it names. */
+    file?: MarkdownFile
+    /** What a change marks in it, by block. */
+    marks?: MarkdownMarks
     text?: Partial<MarkdownText>
   }
 >
@@ -140,6 +185,8 @@ export function Markdown({
   size = 'thread',
   headingLevel = 3,
   streaming = false,
+  file,
+  marks,
   text,
   className,
   ...rest
@@ -162,18 +209,93 @@ export function Markdown({
   // names nothing. So they are read again only as a block settles.
   const named = read === null ? blocks : read.settled
   const names = useMemo(() => (finds ? codeNamesIn(blocksOf(named).slice(from, to)) : []), [finds, named, from, to])
-  const drawn = blocks.slice(from, to).map((b, i) => <Block key={i} token={b} defs={doc.defs} base={headingLevel} t={t} />)
+  const drawn =
+    marks === undefined ? (
+      blocks.slice(from, to).map((b, i) => <Block key={i} token={b} defs={doc.defs} base={headingLevel} t={t} />)
+    ) : (
+      <Marked blocks={blocks} from={from} to={to} marks={marks} defs={doc.defs} base={headingLevel} t={t} />
+    )
   return (
-    <div className={cx(s.md, size === 'panel' && s.panel, className)} aria-busy={streaming || undefined} {...rest}>
+    <div
+      data-thread-preview=""
+      className={cx(s.md, size === 'panel' && s.panel, file !== undefined && s.file, className)}
+      aria-busy={streaming || undefined}
+      {...rest}
+    >
       <Fresh.Provider value={fresh}>
-        {code !== undefined && names.length > 0 ? (
-          <WithCode code={code} names={names}>
-            {drawn}
-          </WithCode>
-        ) : (
-          drawn
-        )}
+        <FileContext.Provider value={file ?? null}>
+          {code !== undefined && names.length > 0 ? (
+            <WithCode code={code} names={names}>
+              {drawn}
+            </WithCode>
+          ) : (
+            drawn
+          )}
+        </FileContext.Provider>
       </Fresh.Provider>
+    </div>
+  )
+}
+
+interface MarkedProps {
+  readonly blocks: readonly Token[]
+  readonly from: number
+  readonly to: number | undefined
+  readonly marks: MarkdownMarks
+  readonly defs: string
+  readonly base: HeadingLevel
+  readonly t: MarkdownText
+}
+
+/**
+ * Blocks with what a change marks: runs of added blocks in one tint, and what was taken out, drawn before the block it
+ * stood at, as it was. Each run is a group with its name for a screen reader; the sign in its margin is for those who
+ * don't tell the tints apart.
+ */
+function Marked({ blocks, from, to, marks, defs, base, t }: MarkedProps) {
+  const end = to === undefined ? blocks.length : Math.min(to, blocks.length)
+  const out: ReactNode[] = []
+  let run: ReactNode[] = []
+  let runKey = 0
+  const flush = () => {
+    if (run.length === 0) return
+    out.push(
+      <div key={`+${runKey}`} className={s.added} data-change="added" role="group" aria-label={t.added}>
+        {run}
+      </div>,
+    )
+    run = []
+  }
+  for (let at = from; at <= end; at++) {
+    const taken = marks.removed.get(at)
+    // Past the last block shown, only what was taken out at its end.
+    if (taken !== undefined && (at < end || end === blocks.length)) {
+      flush()
+      taken.forEach((text, i) => out.push(<Removed key={`-${at}.${i}`} text={text} base={base} t={t} />))
+    }
+    const block = blocks[at]
+    if (at === end || block === undefined) break
+    const element = <Block key={at} token={block} defs={defs} base={base} t={t} />
+    if (marks.added.has(at)) {
+      if (run.length === 0) runKey = at
+      run.push(element)
+    } else {
+      flush()
+      out.push(element)
+    }
+  }
+  flush()
+  return <>{out}</>
+}
+
+/** Text a change took out, as it was. */
+function Removed({ text, base, t }: { text: string; base: HeadingLevel; t: MarkdownText }) {
+  const doc = useMemo(() => lexAll(text), [text])
+  return (
+    <div className={s.removed} data-change="removed" role="group" aria-label={t.removed}>
+      {blocksOf(doc.tokens).map((token, i) => (
+        <Block key={i} token={token} defs={doc.defs} base={base} t={t} />
+      ))}
     </div>
   )
 }
@@ -213,7 +335,7 @@ function BlockOf({ token, defs, base, t }: BlockProps): ReactNode {
   switch (token.type) {
     case 'heading':
       return (
-        <Heading level={LEVELS[base + token.depth - 2] ?? 6} className={token.depth === 1 ? s.title : s.heading}>
+        <Heading level={LEVELS[base + token.depth - 2] ?? 6} className={headingClass(token.depth)}>
           {inline(token.tokens, t)}
         </Heading>
       )
@@ -248,7 +370,17 @@ function BlockOf({ token, defs, base, t }: BlockProps): ReactNode {
       ) : (
         <CodeBlock text={token.text} copy={t.copy} />
       )
-    case 'blockquote':
+    case 'blockquote': {
+      const alert = alertOf(token.text)
+      if (alert !== null)
+        return (
+          <div className={s.alert} data-alert={alert.kind} role="note" aria-label={t.alerts?.[alert.kind] ?? ALERTS[alert.kind]}>
+            <p className={s.alertName}>{t.alerts?.[alert.kind] ?? ALERTS[alert.kind]}</p>
+            {lexWith(alert.rest, defs).map((c, j) => (
+              <Block key={j} token={c} defs={defs} base={base} t={t} />
+            ))}
+          </div>
+        )
       return (
         <blockquote>
           {token.tokens.map((c, j) => (
@@ -256,6 +388,7 @@ function BlockOf({ token, defs, base, t }: BlockProps): ReactNode {
           ))}
         </blockquote>
       )
+    }
     case 'table': {
       /* the kit's table, as rows of words in what is said rather than a box: its cells wrap, so nothing is cut off at the column's edge */
       return (
@@ -275,15 +408,130 @@ function BlockOf({ token, defs, base, t }: BlockProps): ReactNode {
     case 'text':
       return <p>{inline(token.tokens ?? [token], t)}</p>
     case 'html':
-      /* raw HTML is shown, never run */
-      return <p>{token.text}</p>
+      return <HtmlBlock html={token.text} base={base} />
     default:
       return inline([token], t)
   }
 }
 
+/** A heading's look by its depth: a file's page sets `##` apart from `###` (the CSS keeps a message's all one size). */
+const headingClass = (depth: number) => (depth === 1 ? s.title : cx(s.heading, depth === 2 && s.section))
+
+/** A GitHub alert (`> [!NOTE]` and what follows it): its kind, and the markdown in it. */
+const alertOf = (text: string): { readonly kind: AlertKind; readonly rest: string } | null => {
+  const m = /^\[!(note|tip|important|warning|caution)\][ \t]*(?:\n|$)/i.exec(text)
+  return m === null ? null : { kind: m[1]!.toLowerCase() as AlertKind, rest: text.slice(m[0].length) }
+}
+
+/**
+ * HTML in what is said is shown, never run. A file's is drawn as GitHub draws it, from an allow-list (html.ts): a README's
+ * banner, its centred lines, its table of pictures.
+ */
+function HtmlBlock({ html, base }: { html: string; base: HeadingLevel }): ReactNode {
+  const file = useContext(FileContext)
+  const parts = useHtmlParts(base)
+  if (file === null) return <p>{html}</p>
+  return drawHtml(html, parts)
+}
+
+function useHtmlParts(base: HeadingLevel): HtmlParts {
+  const dark = useTheme() === 'dark'
+  return useMemo(
+    () => ({
+      dark,
+      link: (href, title, children) => (
+        <AnyLink href={href} title={title}>
+          {children}
+        </AnyLink>
+      ),
+      image: (src, alt, title, width) => <Picture href={src} alt={alt} title={title} width={width} />,
+      heading: (depth, children, style) => (
+        <Heading level={LEVELS[base + depth - 2] ?? 6} className={headingClass(depth)} style={style}>
+          {children}
+        </Heading>
+      ),
+    }),
+    [dark, base],
+  )
+}
+
+/** An inline tag and what it holds (`<sub>…</sub>`), or one that stands alone (`<br />`): in a file, drawn; else its words. */
+function HtmlInline({ open, close, children }: { open: string; close?: string; children?: ReactNode }): ReactNode {
+  const file = useContext(FileContext)
+  const parts = useHtmlParts(3)
+  if (file === null)
+    return (
+      <>
+        {open}
+        {children}
+        {close}
+      </>
+    )
+  const tag = tagOf(open)
+  if (tag === null || tag.kind === 'alone' || children === undefined) return drawHtml(open, parts)
+  // The tag drawn around a mark, which what it holds then takes the place of: what it holds stays markdown.
+  const shell = drawHtml(`${open}\uE000${close ?? ''}`, { ...parts })
+  return <Holding shell={shell}>{children}</Holding>
+}
+
+/** A drawn tag with what it holds put where its mark is. */
+function Holding({ shell, children }: { shell: ReactNode; children: ReactNode }): ReactNode {
+  const put = (node: ReactNode): ReactNode => {
+    if (typeof node === 'string') {
+      const at = node.indexOf('\uE000')
+      return at < 0 ? (
+        node
+      ) : (
+        <>
+          {node.slice(0, at)}
+          {children}
+          {node.slice(at + 1)}
+        </>
+      )
+    }
+    if (Array.isArray(node)) return node.map((n, i) => <Fragment key={i}>{put(n)}</Fragment>)
+    if (isValidElement<{ children?: ReactNode }>(node) && node.props.children !== undefined)
+      return cloneElement(node, undefined, put(node.props.children))
+    return node
+  }
+  return put(shell)
+}
+
 function inline(tokens: readonly Token[], t: MarkdownText): ReactNode {
-  return tokens.map((token, i) => <Inline key={i} token={token} t={t} />)
+  const out: ReactNode[] = []
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!
+    const tag = token.type === 'html' ? tagOf(token.raw) : null
+    if (tag !== null && tag.kind === 'open') {
+      // What it holds, to the tag that closes it.
+      let depth = 0
+      let end = -1
+      for (let j = i + 1; j < tokens.length; j++) {
+        const other = tokens[j]!.type === 'html' ? tagOf(tokens[j]!.raw) : null
+        if (other === null || other.name !== tag.name) continue
+        if (other.kind === 'open') depth++
+        else if (other.kind === 'close' && depth-- === 0) {
+          end = j
+          break
+        }
+      }
+      if (end > i) {
+        out.push(
+          <HtmlInline key={i} open={token.raw} close={tokens[end]!.raw}>
+            {inline(tokens.slice(i + 1, end), t)}
+          </HtmlInline>,
+        )
+        i = end
+        continue
+      }
+    }
+    if (tag !== null && tag.kind === 'alone') {
+      out.push(<HtmlInline key={i} open={token.raw} />)
+      continue
+    }
+    out.push(<Inline key={i} token={token} t={t} />)
+  }
+  return out
 }
 
 /** Words, with the paths written into them that name code as the files they name; those that came in lately fading in. */
@@ -339,6 +587,76 @@ function Link({ href, title, newTab, children }: { href: string; title: string |
   )
 }
 
+/** A link in a file's HTML: out, to a file beside it, or to a heading on its page. */
+function AnyLink({ href, title, children }: { href: string; title: string | undefined; children: ReactNode }): ReactNode {
+  const out = safeHref(href)
+  if (out && !href.startsWith('#'))
+    return (
+      <Link href={out} title={title} newTab={markdownText.newTab}>
+        {children}
+      </Link>
+    )
+  return (
+    <FileLink href={href} title={title}>
+      {children}
+    </FileLink>
+  )
+}
+
+/** GitHub's name for a heading, as a link on its page names it: `## Get started` is `#get-started`. */
+const slug = (text: string) =>
+  text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .replace(/\s/g, '-')
+
+/** A link to a heading on the page, which brings it into view. */
+function Anchor({ href, title, children }: { href: string; title: string | undefined; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      title={title}
+      onClick={(event) => {
+        event.preventDefault()
+        const page = event.currentTarget.closest('[data-thread-preview]')
+        const wanted = decodeURIComponent(href.slice(1)).toLowerCase()
+        const heading = [...(page?.querySelectorAll('h1, h2, h3, h4, h5, h6') ?? [])].find((h) => slug(h.textContent ?? '') === wanted)
+        heading?.scrollIntoView({ block: 'start' })
+      }}
+    >
+      <InLink>{children}</InLink>
+    </a>
+  )
+}
+
+/** A link to a file beside this one, where the host opens files; otherwise only its words. */
+function FileLink({ href, title, children }: { href: string; title: string | undefined; children: ReactNode }) {
+  const file = useContext(FileContext)
+  if (file !== null && href.startsWith('#') && href.length > 1)
+    return (
+      <Anchor href={href} title={title}>
+        {children}
+      </Anchor>
+    )
+  const path = file?.open === undefined || !isRelative(href) ? null : resolvePath(file.folder, href)
+  const open = file?.open
+  if (path === null || open === undefined) return children
+  return (
+    <button type="button" className={s.fileLink} title={title ?? path} onClick={() => open(path)}>
+      <InLink>{children}</InLink>
+    </button>
+  )
+}
+
+/** An image the file names beside it, as the host draws it; otherwise its words. */
+function Picture({ href, alt, title, width }: { href: string; alt: string; title: string | undefined; width?: string | undefined }) {
+  const file = useContext(FileContext)
+  const path = file?.image === undefined || !isRelative(href) ? null : resolvePath(file.folder, href)
+  if (path === null || file?.image === undefined) return alt
+  return <>{file.image({ path, alt, ...(title === undefined ? {} : { title }), ...(width === undefined ? {} : { width }) })}</>
+}
+
 function InLink({ children }: { children: ReactNode }) {
   const found = useContext(Found)
   const value = useMemo(() => ({ ...found, inLink: true }), [found])
@@ -368,7 +686,12 @@ function Inline({ token, t }: { token: Token; t: MarkdownText }): ReactNode {
       return <br />
     case 'link': {
       const href = safeHref(token.href)
-      if (!href) return inline(token.tokens, t)
+      if (!href)
+        return (
+          <FileLink href={token.href} title={token.title ?? undefined}>
+            {inline(token.tokens, t)}
+          </FileLink>
+        )
       return (
         <Link href={href} title={token.title ?? undefined} newTab={t.newTab}>
           {inline(token.tokens, t)}
@@ -376,8 +699,8 @@ function Inline({ token, t }: { token: Token; t: MarkdownText }): ReactNode {
       )
     }
     case 'image':
-      /* images from a message are not fetched; their words stand in */
-      return token.text
+      /* images are not fetched; their words stand in, unless the host draws one the file names beside it */
+      return <Picture href={token.href} alt={token.text} title={token.title ?? undefined} />
     case 'html':
       return token.text
     case 'checkbox':

@@ -26,7 +26,7 @@ export default defineConfig({
     overrides: [
       /* The runtime and the packages it uses read the time and wait only through Effect's Clock (lint/clock.js). */
       {
-        files: ['packages/{runtime,domain,contracts,persistence-sqlite,provider-adapters,connectors}/src/**'],
+        files: ['packages/{runtime,domain,contracts,persistence-sqlite,provider-adapters,connectors,transport-node}/src/**'],
         rules: { 'althar/one-clock': 'error' },
       },
       /* But the fake agent, which runs outside any effect, as a process of its own too, and times what a test asks of it. */
@@ -43,6 +43,24 @@ export default defineConfig({
       {
         files: ['packages/provider-adapters/src/removal.ts', 'packages/provider-adapters/src/testing/**'],
         rules: { 'althar/one-removal': 'off' },
+      },
+      /* The runtime, what it runs, and the app's main process start no process and copy no folder synchronously (lint/thread.js). */
+      {
+        files: [
+          'packages/{runtime,domain,contracts,persistence-sqlite,provider-adapters,connectors,skills,transport-node}/src/**',
+          'apps/desktop/src/{main,preload,runtime,speech,logs}/**',
+        ],
+        rules: { 'althar/off-the-thread': 'error' },
+      },
+      /* But the fake agent and the fake services, which run beside a test, never in the app. */
+      {
+        files: ['packages/{provider-adapters,connectors}/src/testing/**'],
+        rules: { 'althar/off-the-thread': 'off' },
+      },
+      /* A press in the window or the kit shows its result at once, never after a call answers (lint/press.js). */
+      {
+        files: ['apps/desktop/src/renderer/**/*.tsx', 'packages/ui/src/**/*.tsx'],
+        rules: { 'althar/press-at-once': 'error' },
       },
     ],
   },

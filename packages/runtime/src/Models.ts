@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Ids, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { type AgentDefinition, type AgentSession, cleanUp, type ConfigOption, connect } from '@althar/provider-adapters'
-import { Context, type Crypto, Duration, Effect, Exit, Layer } from 'effect'
+import { Clock, Context, type Crypto, Duration, Effect, Exit, Layer, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
@@ -15,6 +15,7 @@ import { Instance } from './Instance'
 import { blockedModelsOf, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
 import { change, timestamp } from './records'
 import { SignIns } from './SignIns'
+import { Accounts } from './Accounts'
 
 /*
  * The models each agent offers, and how hard each can be asked to think, in
@@ -30,6 +31,9 @@ import { SignIns } from './SignIns'
  * does. Until it has said, the latest session it had says, for the model it
  * was on, and what it is on is always what that session was last set to.
  * What can't be read is left empty; a picker offers the agent's own default.
+ * An agent that couldn't say, as one asked before its sign-in is done, is
+ * asked again once it is found signed in, and otherwise at a read a minute
+ * on, rather than offer only its default until Althar opens again.
  */
 
 export interface AgentModels {
@@ -48,7 +52,7 @@ export interface AgentModels {
   readonly images: boolean | null
 }
 
-type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns | Installs | RuntimeConfig
+type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns | Installs | RuntimeConfig | Accounts
 
 export interface OfferedModel {
   readonly id: string
@@ -68,6 +72,9 @@ const PROBE_TIMEOUT = Duration.seconds(30)
 
 /** How long putting it on each model in turn may take: Claude Code takes over a second a model. */
 const WALK_TIMEOUT = Duration.seconds(40)
+
+/** How long after an agent couldn't say its models it is asked again, at the next read. */
+const ASK_AGAIN = Duration.minutes(1)
 
 // Settings kept before names were, by their values alone.
 const choices = (option: ConfigOption | undefined) =>
@@ -204,6 +211,7 @@ export class Models extends Context.Service<
       const sql = yield* SqlClient.SqlClient
       const agents = yield* Agents
       const signIns = yield* SignIns
+      const accounts = yield* Accounts
       const installs = yield* Installs
       const instance = yield* Instance
       const context = yield* Effect.context<Store>()
@@ -211,12 +219,27 @@ export class Models extends Context.Service<
       const scope = yield* Effect.scope
       /* What asking each agent found this launch; an agent being asked has no entry yet. */
       const probed = new Map<string, Offered | null>()
+      const lastEntries = new Map<string, AgentEntry>()
+      /* When each agent that couldn't say was asked, so it is asked again a while on. */
+      const failedAt = new Map<string, number>()
+      const askAgain = Duration.toMillis(config.modelsAgain ?? ASK_AGAIN)
       /* Which asking owns each reservation, so forgetting it cannot let stale work affect a newer asking. */
       const probing = new Map<string, symbol>()
       const ownsProbe = (agentId: string, reservation: symbol) => probing.get(agentId) === reservation
       const releaseProbe = (agentId: string, reservation: symbol) => {
         if (ownsProbe(agentId, reservation)) probing.delete(agentId)
       }
+      /** Lets an agent that couldn't say be asked again; what one did say, or an asking under way, stays. */
+      const forgetFailure = (agentId: string) => {
+        if (probed.get(agentId) !== null) return
+        probed.delete(agentId)
+        failedAt.delete(agentId)
+      }
+      // Found signed in: one asked before its sign-in was done said nothing, and is asked again at the next read.
+      yield* Effect.forkIn(
+        Stream.runForEach(signIns.signedIn, ({ agentId }) => Effect.sync(() => forgetFailure(agentId))),
+        scope,
+      )
 
       /**
        * Starts the agent in an empty folder, read-only, to read its settings,
@@ -233,7 +256,9 @@ export class Models extends Context.Service<
           (folder) =>
             Effect.gen(function* () {
               const { definition } = entry
-              const transport = entry.transport(folder)
+              // Copilot CLI's probe must use the same account host as its login and sessions.
+              const account = entry.definition.id === 'copilot' ? (yield* accounts.of('copilot'))[0] : undefined
+              const transport = account === undefined ? entry.transport(folder) : entry.transport(folder, accounts.env(account))
               const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
               if (transport._tag === 'Process' && processId !== undefined)
                 yield* sql`INSERT INTO processes ${sql.insert({
@@ -287,13 +312,27 @@ export class Models extends Context.Service<
           removeFolder,
         ).pipe(
           Effect.orElseSucceed(() => null),
-          Effect.tap((found) => Effect.sync(() => ownsProbe(entry.definition.id, reservation) && probed.set(entry.definition.id, found))),
+          Effect.tap((found) =>
+            Effect.gen(function* () {
+              if (!ownsProbe(entry.definition.id, reservation)) return
+              probed.set(entry.definition.id, found)
+              if (found === null) failedAt.set(entry.definition.id, yield* Clock.currentTimeMillis)
+              else failedAt.delete(entry.definition.id)
+            }),
+          ),
           Effect.ensuring(Effect.sync(() => releaseProbe(entry.definition.id, reservation))),
         )
 
       const of = (entry: AgentEntry) =>
         Effect.gen(function* () {
           const { definition } = entry
+          const previous = lastEntries.get(definition.id)
+          if (previous !== undefined && previous !== entry) {
+            probed.delete(definition.id)
+            failedAt.delete(definition.id)
+            probing.delete(definition.id)
+          }
+          lastEntries.set(definition.id, entry)
           const defaults = yield* defaultEffortsOf(definition.id)
           const blocked = yield* blockedModelsOf(definition.id)
           // Its settings as the session started; what it is on now, as the person last set it.
@@ -303,6 +342,10 @@ export class Models extends Context.Service<
           const settings = latest === undefined ? [] : settingsIn(latest.config)
           const seen = modelsOf(definition, settings, latest === undefined ? null : imagesIn(latest.config))
           const now = latest === undefined ? {} : { model: latest.model, effort: latest.effort }
+          // One that couldn't say is asked again once a while has passed.
+          const failed = failedAt.get(definition.id)
+          if (probed.get(definition.id) === null && failed !== undefined && (yield* Clock.currentTimeMillis) - failed >= askAgain)
+            forgetFailure(definition.id)
           // What it said when asked this launch is newer than any session: a model it offers since then is there.
           const asked = probed.get(definition.id)
           if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
@@ -325,7 +368,10 @@ export class Models extends Context.Service<
         })
 
       return Models.of({
-        catalog: Effect.provide(Effect.forEach(agents.list, of), context),
+        catalog: Effect.provide(
+          Effect.suspend(() => Effect.forEach(agents.list, of)),
+          context,
+        ),
         setDefaultEffort: (input) =>
           Effect.gen(function* () {
             const entry = yield* agents.get(input.agentId)
@@ -339,6 +385,7 @@ export class Models extends Context.Service<
         forget: (agentId) =>
           Effect.sync(() => {
             probed.delete(agentId)
+            failedAt.delete(agentId)
             probing.delete(agentId)
           }),
       })

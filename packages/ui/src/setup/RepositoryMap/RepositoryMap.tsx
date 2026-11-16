@@ -9,6 +9,7 @@ import { repositoryRoleText } from '../../foundations/vocabularyText'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import { below, Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
@@ -108,6 +109,10 @@ export interface RepositoryMapText {
   /** The group for repositories with no remote. */
   nowhere: string
   stays: string
+  pushTo: string
+  putOn: (name: string) => string
+  newOn: (thing: string, host: string) => string
+  connectFor: (host: string) => string
   /** Where a repository's work goes, said on its card for a screen reader, as the wires draw it. */
   goes: (path: string, host: string) => string
   forkGoes: (fork: string, pullRequests: string, host: string) => string
@@ -155,6 +160,10 @@ export const repositoryMapText: RepositoryMapText = {
   signInAgain: (host) => `Sign in to ${host} again`,
   nowhere: 'No remote',
   stays: `Stays on ${device.this}`,
+  pushTo: 'Push to…',
+  putOn: (name: string) => `Put ${name} on a host`,
+  newOn: (thing: string, host: string) => `A new ${thing} on ${host}`,
+  connectFor: (host: string) => `Connect ${host}…`,
   goes: (path, host) => `Its work goes to ${path} on ${host}.`,
   forkGoes: (fork, pullRequests, host) => `It pushes to ${fork} on ${host}, and its pull requests open on ${pullRequests}.`,
   staysHere: `Its work stays on ${device.this}.`,
@@ -179,6 +188,22 @@ export type RepositoryMapProps = RootProps<
     onOpen?: (href: string) => void
     /** Connects a host, or signs in to it again. Without it, there is no way to here. */
     onConnect?: (host: string) => void
+    /**
+     * For a repository only on this computer: the code hosts it can be put
+     * on, connected or to connect first, offered beside it; and, once one is
+     * chosen, the form that puts it there, under it.
+     */
+    putOnHost?: {
+      readonly hosts: ReadonlyArray<{
+        readonly id: string
+        readonly name: string
+        readonly brand: Brand
+        readonly thing: string
+        readonly connected: boolean
+      }>
+      readonly onPut: (repository: string, host: string) => void
+      readonly putting: { readonly repository: string; readonly form: ReactNode } | null
+    }
     /** The rank of the columns' headings; the hosts' are one below. */
     headingLevel?: HeadingLevel
     text?: Partial<RepositoryMapText>
@@ -318,6 +343,7 @@ export function RepositoryMap({
   onLeaveOut,
   onOpen,
   onConnect,
+  putOnHost,
   headingLevel = 2,
   text,
   className,
@@ -454,7 +480,9 @@ export function RepositoryMap({
                   {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
                 />
               </div>
-              <span className={cx(s.where, repository.where === undefined && s.elsewhere)}>{repository.where ?? t.elsewhere}</span>
+              <span className={cx(s.where, repository.where === undefined && s.elsewhere)}>
+                {repository.where === undefined ? t.elsewhere : <Path path={repository.where} />}
+              </span>
               {/* What the wires draw, said: where its work goes. */}
               <VisuallyHidden>{goesWords(repository, hostOf, t)}</VisuallyHidden>
               <div className={s.foot}>
@@ -482,7 +510,9 @@ export function RepositoryMap({
                 <Spinner size="small" />
                 <span className={s.name}>{folder.name}</span>
               </div>
-              <span className={s.where}>{folder.where}</span>
+              <span className={s.where}>
+                <Path path={folder.where} />
+              </span>
               <span className={s.readingNote}>{t.reading}</span>
             </li>
           ))}
@@ -507,7 +537,12 @@ export function RepositoryMap({
                 <div className={s.off}>
                   <p className={s.what}>{t.what[host.reach]}</p>
                   {button !== null && (
-                    <Button size="small" onClick={() => onConnect?.(host.id)}>
+                    // Signing in again waits on the person, in violet, as it does everywhere; connecting one is theirs to choose.
+                    <Button
+                      size="small"
+                      variant={host.reach === HostReach.SignInAgain ? 'signal' : 'default'}
+                      onClick={() => onConnect?.(host.id)}
+                    >
                       {button}
                     </Button>
                   )}
@@ -524,12 +559,38 @@ export function RepositoryMap({
                 {t.nowhere}
               </Heading>
             </div>
-            {nowhere.map((repository) => (
-              <div key={repository.id} className={s.node}>
-                <code>{repository.name}</code>
-                <span className={s.nodeNote}>{t.stays}</span>
-              </div>
-            ))}
+            {nowhere.map((repository) =>
+              putOnHost?.putting?.repository === repository.id ? (
+                <div key={repository.id} className={s.putting}>
+                  {putOnHost.putting.form}
+                </div>
+              ) : (
+                <div key={repository.id} className={s.node}>
+                  <code>{repository.name}</code>
+                  <span className={s.nodeNote}>{t.stays}</span>
+                  {putOnHost !== undefined && putOnHost.hosts.length > 0 && (
+                    <Menu
+                      label={t.putOn(repository.name)}
+                      trigger={
+                        <Button size="small" trailingIcon="chevronD" className={s.putOn}>
+                          {t.pushTo}
+                        </Button>
+                      }
+                    >
+                      {putOnHost.hosts.map((host) => (
+                        <MenuItem
+                          key={host.id}
+                          lead={<BrandMark brand={host.brand} size={14} />}
+                          onSelect={() => putOnHost.onPut(repository.id, host.id)}
+                        >
+                          {host.connected ? t.newOn(host.thing, host.name) : t.connectFor(host.name)}
+                        </MenuItem>
+                      ))}
+                    </Menu>
+                  )}
+                </div>
+              ),
+            )}
           </section>
         )}
       </div>
@@ -552,7 +613,7 @@ function HostGroup({ host, level, t, children }: { host: MapHost; level: Heading
           {host.name}
         </Heading>
         {host.instance !== undefined && <span className={s.instance}>{host.instance}</span>}
-        <span className={s.reach}>{reachWords(host, t)}</span>
+        <span className={cx(s.reach, host.reach === HostReach.SignInAgain && s.yours)}>{reachWords(host, t)}</span>
       </div>
       {children}
     </section>

@@ -301,6 +301,17 @@ export function Stuck({
     ),
   }
   const order: ReadonlyArray<StuckWay> = ['tell', 'retry', 'again', 'abandon']
+  // What puts it right, the way to take, then the others; Report this goes with the last of them, so it never wraps alone.
+  const buttons: ReactNode[] = [
+    fix && (
+      <Button key="fix" variant="signal" onClick={fix.onFix}>
+        {fix.label}
+      </Button>
+    ),
+    chosen !== undefined && ways[chosen],
+    ...order.filter((way) => way !== chosen).map((way) => ways[way]),
+  ].filter(Boolean)
+  const last = onReport ? buttons.pop() : undefined
   return (
     <AskCard icon="stop" kicker={t.kicker} who={t.after(step, tries)} what={what} className={className}>
       {said !== undefined && <p className={s.said}>{said}</p>}
@@ -352,17 +363,14 @@ export function Stuck({
       ) : (
         (fix || onTell || retrying || onAgain || onAbandon || onReport) && (
           <AskFoot className={s.foot}>
-            {fix && (
-              <Button variant="signal" onClick={fix.onFix}>
-                {fix.label}
-              </Button>
-            )}
-            {chosen !== undefined && ways[chosen]}
-            {order.filter((way) => way !== chosen).map((way) => ways[way])}
+            {buttons}
             {onReport && (
-              <LinkButton className={s.report} onClick={onReport}>
-                {t.report}
-              </LinkButton>
+              <span className={s.tail}>
+                {last}
+                <LinkButton className={s.report} onClick={onReport}>
+                  {t.report}
+                </LinkButton>
+              </span>
             )}
           </AskFoot>
         )

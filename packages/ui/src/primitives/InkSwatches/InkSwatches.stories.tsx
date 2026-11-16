@@ -22,12 +22,6 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Rose chosen; the four others' inks say whose they are. */
-export const Default: Story = {}
-
-/** No other project yet: each ink by its name alone. */
-export const NoneTaken: Story = { args: { taken: {} } }
-
 /** A press chooses; another project's ink can still be chosen, and says whose it is. */
 export const Choosing: Story = {
   render: () => <Example />,

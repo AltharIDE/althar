@@ -8,6 +8,7 @@ import { Dialog } from '../../primitives/Dialog/Dialog'
 import { Field, FieldError } from '../../primitives/Field/Field'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Segmented } from '../../primitives/Segmented/Segmented'
 import type { NewServerView, ServerStarter, ToolAgentView } from './tools'
 import s from './ToolTiles.module.css'
@@ -385,11 +386,7 @@ export function AddServerDialog({
             <span className={s.quiet}>{t.writesInto}</span>
           </div>
         )}
-        {error !== null && (
-          <p className={s.error} role="alert">
-            {error}
-          </p>
-        )}
+        {error !== null && <Problem>{error}</Problem>}
       </div>
     </Dialog>
   )

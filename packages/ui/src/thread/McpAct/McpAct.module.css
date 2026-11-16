@@ -1,8 +1,7 @@
-/* An MCP call that acted outside: a card in the thread, quieter than an ask, louder than a row of work. */
+/* An MCP call that acted outside: a card in the thread, quieter than an ask, louder than a row of work. The turn spaces it (data-rhythm). */
 .card {
   display: grid;
   gap: 4px;
-  margin: 6px 0;
   padding: 9px 12px;
   border-radius: var(--r);
   background: var(--paper);

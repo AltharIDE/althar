@@ -19,7 +19,8 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "effect": "4.0.7"
+    "effect": "4.0.7",
+    "graphql": "16.11.0"
   },
   "devDependencies": {
     "@althar/testing": "workspace:*",
@@ -27,8 +28,8 @@
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "5.1.0",
     "typescript": "^7.0.2",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0",
-    "vite-plus": "1.5.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
+    "vite-plus": "1.6.0",
     "vitest": "5.1.0"
   },
   "engines": {

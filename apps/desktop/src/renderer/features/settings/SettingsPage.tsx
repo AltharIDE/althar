@@ -36,17 +36,19 @@ import {
   SettingsLayout,
   SettingsNav,
   SettingSwitch,
+  Storage,
   TaskFolderLocation,
   TaskFolders,
   UpdateReady,
   UsageData,
+  Problem,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
 import type { AccentSource, Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { notesOf } from '../../../main/updates'
-import { useServices } from '../../data/services'
+import { type StoragePlace, useServices } from '../../data/services'
 import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
@@ -81,10 +83,12 @@ import { TasksSection } from './TasksSection'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { PresetsSection, presetsText } from './PresetsSection'
 import { usePostTeamReviews } from './usePostTeamReviews'
+import { PLACES, useStorage } from './useStorage'
 import { type RunOutside, useRunOutside } from './useRunOutside'
 import { useTaskFolderLocation } from './useTaskFolderLocation'
 import { useTaskFolders } from './useTaskFolders'
 import { ServersSection, SkillsSection } from './ToolSections'
+import { AgentCatalogSection } from './AgentCatalogSection'
 
 /*
  * Althar's settings, as a tab of the window beside the home's. Down the
@@ -185,6 +189,9 @@ export function SettingsPage({ start, section, onSection, onTask, signIn, accoun
         {...(asked === undefined ? {} : { asked })}
         {...(onTask === undefined ? {} : { onTask })}
       />
+      <div hidden={section !== 'agents'}>
+        <AgentCatalogSection start={start} active={section === 'agents'} />
+      </div>
     </SettingsLayout>
   )
 }
@@ -256,11 +263,7 @@ function SectionBody({
 /** What couldn't be kept, said where it was made. */
 function Failed({ when, children = text.failed }: { when: boolean; children?: string }) {
   if (!when) return null
-  return (
-    <p role="alert" className={s.failed}>
-      {children}
-    </p>
-  )
+  return <Problem className={s.failed}>{children}</Problem>
 }
 
 /* ---- the agents ------------------------------------------------------------------- */
@@ -276,13 +279,19 @@ const tabOf = (agent: AgentStatus): AgentTab => {
     ...(line === undefined ? {} : { line }),
     ...(agent.accounts.some((account) => account.signIn === 'signed_out') ? { yours: true } : {}),
     // Not on this computer: its tab quieter, after those that are.
-    ...(agent.installed ? {} : { away: true }),
+    ...(agent.installed || agent.id === 'copilot-direct' ? {} : { away: true }),
   }
 }
 
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts: AccountSignInModel; asked?: string }) {
   const [agentId, setAgentId] = useState<string | null>(null)
+  // Looking for an agent again, after the person installed it themselves: the agents are read afresh, sign-ins too.
+  const [checking, setChecking] = useState(false)
+  const checkAgain = () => {
+    setChecking(true)
+    void start.recheck().finally(() => setChecking(false))
+  }
   // Those on this computer first, then the others Althar runs, each in the registry's order.
   const all = start.status?.agents ?? []
   const agents = [...all.filter((agent) => agent.installed), ...all.filter((agent) => !agent.installed)]
@@ -313,7 +322,7 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
       >
         {chosen.problem !== null ? (
           <AgentProblem why={chosen.problem} model={start} />
-        ) : chosen.installed && chosen.download?.installing !== true ? (
+        ) : chosen.id === 'copilot-direct' || (chosen.installed && chosen.download?.installing !== true) ? (
           <AgentAccounts agent={chosen} start={start} signIn={accounts} />
         ) : (
           <AgentInstall
@@ -331,6 +340,8 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
             }
             onInstall={() => void start.install(chosen.id)}
             {...(chosen.guide === null ? {} : { onHelp: () => openGuide(start, chosen.id) })}
+            onCheck={checkAgain}
+            checking={checking}
           />
         )}
       </AgentTabPanel>
@@ -769,6 +780,7 @@ function AboutSection({ start }: { start: StartModel }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
   const { host } = useServices()
+  const storage = useStorage()
   const version = start.status?.appVersion
   return (
     <>
@@ -779,6 +791,18 @@ function AboutSection({ start }: { start: StartModel }) {
           <LinkButton onClick={() => host.reportProblem?.({ kind: 'asked', from: 'settings' })}>{text.report}</LinkButton>
         )}
       </div>
+      <Storage
+        places={PLACES.map((place) => ({
+          id: place,
+          ...text.storage[place],
+          path: storage.paths[place] ?? '',
+          figure: storage.figures[place],
+          ...(storage.problems[place] === undefined ? {} : { problem: storage.problems[place] }),
+        }))}
+        onShow={(id) => storage.show(id as StoragePlace)}
+        onMeasureAgain={storage.measureAgain}
+        text={{ note: text.storage.note, show: text.storage.show }}
+      />
       <SettingList>
         <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />
         <CrashReports on={preferences.crashReports} onChange={(on) => set('crashReports', on)} doNotTrack={host.doNotTrack === true} />

@@ -40,7 +40,6 @@ export const ChoosingAnother: Story = {
 }
 
 /** You chose another. */
-export const YourChoice: Story = { args: { value: CODEX.id } }
 
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button:first-of-type', focus: 'button:first-of-type', pressed: 'button:first-of-type' }),

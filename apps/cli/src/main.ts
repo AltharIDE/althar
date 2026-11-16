@@ -10,6 +10,41 @@ import { Cause, type Crypto, Effect, Exit, Option, Queue, References, Stream } f
 import { type Action, HELP, parseLine } from './input'
 import { defaultProfile, defaultWorktrees, parseOptions, taskFolders, USAGE } from './options'
 import { printer } from './printer'
+import { attachmentFailure, runAttachment } from './attachment'
+import { ATTACH_USAGE, parseAttachmentOptions } from './attachmentOptions'
+import { terminalWrite } from './terminalWrite'
+
+if (process.argv[2] === 'attach' || process.argv[2] === 'inspect') {
+  const stop = new AbortController()
+  const disconnect = () => stop.abort()
+  process.once('SIGINT', disconnect)
+  process.once('SIGTERM', disconnect)
+  let code = 0
+  try {
+    const attachment = parseAttachmentOptions(process.argv.slice(2))
+    const exit = await Effect.runPromiseExit(
+      runAttachment(attachment, {
+        input: process.stdin,
+        write: (text) => terminalWrite(process.stdout, text),
+      }),
+      { signal: stop.signal },
+    )
+    if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
+      process.stderr.write(`${attachmentFailure(Cause.squash(exit.cause))}\n`)
+      code = 1
+    }
+  } catch (error) {
+    process.stderr.write(`${attachmentFailure(error)}\n\n${ATTACH_USAGE}\n`)
+    code = 2
+  } finally {
+    process.off('SIGINT', disconnect)
+    process.off('SIGTERM', disconnect)
+  }
+  await new Promise<void>((resolve) => {
+    process.stderr.write('', () => resolve())
+  })
+  process.exit(code)
+}
 
 const write = (text: string) => {
   if (text !== '') process.stdout.write(text)

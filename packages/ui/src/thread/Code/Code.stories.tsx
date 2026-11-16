@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import {
+  decisionChange,
   decisionFound,
   decisionRead,
   iconsFound,
@@ -21,7 +22,7 @@ import { Markdown } from '../Markdown/Markdown'
 import { type CodeShell, ThreadShellProvider } from '../Shell/Shell'
 import { TaskFace } from '../TaskFace/TaskFace'
 import { Workbench } from '../Workbench/Workbench'
-import { codeKey, type CodeMode, type CodeWhere, firstMode, type FoundCode } from './code'
+import { codeKey, type CodeMode, type CodeWhere, type FoundCode, panelMode } from './code'
 import { CodePanel, CodePeek } from './CodeView'
 
 const meta = {
@@ -138,14 +139,16 @@ function Stateful({
   found,
   where,
   read = limitsRead,
+  change = limitsChange,
   back = false,
 }: {
   found: FoundCode
   where: CodeWhere
-  read?: typeof limitsRead
+  read?: typeof limitsRead | null
+  change?: typeof limitsChange
   back?: boolean
 }) {
-  const [mode, setMode] = useState<CodeMode>(firstMode(found))
+  const [mode, setMode] = useState<CodeMode>(panelMode(found))
   return (
     <CodePanel
       found={found}
@@ -153,7 +156,8 @@ function Stateful({
       mode={mode}
       onMode={setMode}
       read={read}
-      change={limitsChange}
+      change={change}
+      changeWhole
       actions={actions}
       nav={{ at: 2, of: 5, onStep: fn() }}
       onGo={fn()}
@@ -192,13 +196,31 @@ export const PanelMoved: Story = {
   },
 }
 
-/** Opened from the lead's document: on top of it, with the way back. A decision is prose, and wraps. */
+/** Opened from the lead's document: on top of it, with the way back. A markdown file is a page first. */
 export const PanelProse: Story = {
   args: Peek.args,
   decorators: [beside],
-  render: () => <Stateful found={decisionFound} where={TASK} read={decisionRead} back />,
+  render: () => <Stateful found={decisionFound} where={TASK} read={decisionRead} change={decisionChange} back />,
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByRole('button', { name: 'Back to the document' })).toBeInTheDocument()
+  },
+}
+
+/** A markdown file the task changed opens as a page with that marked (Changes); Rendered is the page as it is, and Source its lines. */
+export const PanelMarkdown: Story = {
+  args: Peek.args,
+  decorators: [beside],
+  render: () => <Stateful found={decisionFound} where={TASK} read={decisionRead} change={decisionChange} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('radio', { name: /Changes/ })).toBeChecked()
+    await expect(c.getByRole('heading', { name: /Refunds are limited per merchant/ })).toBeInTheDocument()
+    await expect(c.getByRole('group', { name: 'Added' })).toBeInTheDocument()
+    await userEvent.click(c.getByRole('radio', { name: 'Rendered' }))
+    await expect(c.getByRole('heading', { name: /Refunds are limited per merchant/ })).toBeInTheDocument()
+    await expect(c.queryByRole('group', { name: 'Added' })).toBeNull()
+    await userEvent.click(c.getByRole('radio', { name: 'Source' }))
+    await expect(c.queryByRole('heading', { name: /Refunds are limited per merchant/ })).toBeNull()
   },
 }
 
@@ -217,6 +239,16 @@ export const PanelBinary: Story = {
   args: Peek.args,
   decorators: [beside],
   render: () => <Stateful found={iconsFound} where={TASK} />,
+}
+
+/** Its lines couldn't be read: said as a problem in their place; Open in the editor is still there. */
+export const PanelUnreadable: Story = {
+  args: Peek.args,
+  decorators: [beside],
+  render: () => <Stateful found={limitsFound} where={TASK} read={null} />,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('alert')).toHaveTextContent('Couldn’t read this file.')
+  },
 }
 
 const SAID = `The limiter is in \`src/refunds/limits.ts:22-33\`: \`checkRefundLimit\` counts the merchant's refunds since the window opened. I also wrote docs/decisions/012-refund-limits.md. The old path \`src/refund/limit.ts\` is gone, and \`npm test\` passes.`

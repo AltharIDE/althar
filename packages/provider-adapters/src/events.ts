@@ -8,7 +8,7 @@ import type { Classified } from './failures'
 import { type SeenSkill, skillLoadedBy, skillsAmong } from './skills'
 import { serverOfCall, serverStatusOf, type ServerStatus } from './serverStatus'
 import { claudeRateLimitWindows, record, type UsageWindow } from './usage'
-import { type McpCall, mcpCallOf } from './mcpCalls'
+import { altharToolOf, type McpCall, mcpCallOf } from './mcpCalls'
 
 /*
  * What an agent's updates become inside Althar. The runtime turns these
@@ -129,6 +129,8 @@ export type SessionEvent =
       readonly mcp?: McpCall
       /** The person's MCP server it calls, where it is a call to one (`serverStatus.ts`). */
       readonly server?: string
+      /** The tool of Althar's own server it calls, by its name there, where it is one: draft_task. */
+      readonly althar?: string
     }
   | {
       readonly _tag: 'ToolCallUpdate'
@@ -404,6 +406,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         ...defined('skill', skillLoadedBy(update)),
         ...defined('mcp', mcpCallOf(update.title, update._meta)),
         ...defined('server', serverOfCall(update.title, update._meta)),
+        ...defined('althar', altharToolOf(update.title, update._meta)),
       }
     case 'tool_call_update':
       return {

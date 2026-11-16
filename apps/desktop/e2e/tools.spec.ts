@@ -101,7 +101,7 @@ test('shows an agent’s own server as a tile, a round switch giving it to every
     const main = page.getByRole('main')
     const toggle = main.getByRole('switch', { name: 'context7' })
     await expect(toggle).toBeChecked()
-    await expect(main.getByRole('button', { name: 'context7 Every role' })).toBeVisible()
+    await expect(main.getByRole('button', { name: 'context7' })).toBeVisible()
     await toggle.click()
     await expect(toggle).not.toBeChecked()
     await expect(main.getByRole('button', { name: 'context7 Off' })).toBeVisible()

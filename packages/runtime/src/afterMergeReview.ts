@@ -5,17 +5,16 @@ import { SqlClient } from 'effect/sql'
 import { afterMergeReviewOf, ProjectRules } from './Policies'
 
 /*
- * What a small change's review after it merges brings back (docs/decisions/reviews.md, "A small change is reviewed after it
- * merges"). The project's rule (`afterMergeReview`, set on its Tasks settings, new projects starting from the person's default)
+ * What an explicitly configured review after merge brings back (docs/decisions/reviews.md, "An explicit review after merge"). The project's rule (`afterMergeReview`, set on its Tasks settings, new projects starting from the person's default)
  * says it: `major`, the reviewer reads what merged and only blocking and major findings put the task in Needs you, the rest
  * a quiet line in its thread; `all`, any finding does; `none`, no review is owed after the merge.
  *
- * One small change may say otherwise (`task.after_merge_review_set`): `review`, it is reviewed after its merge where the
+ * One task may explicitly say otherwise (`task.after_merge_review_set`): `review`, it is reviewed after its merge where the
  * project's rule has none (bringing back what `major` does); `none`, it isn't, whatever the rule. Null goes back to the
  * project's. Both are read when the merge is heard (MergeReviews.merged), and what the review brings back is kept on it then.
  */
 
-/** A small change's own word on its review after the merge. */
+/** The person's explicit choice of review after merge. */
 export const TaskAfterMerge = Schema.Literals(['review', 'none'])
 export type TaskAfterMerge = typeof TaskAfterMerge.Type
 

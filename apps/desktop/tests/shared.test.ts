@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { act, renderHook } from '@testing-library/react'
 import { Brand } from '@althar/ui'
 import { describe, expect, it, vi } from 'vitest'
@@ -19,7 +20,7 @@ import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
 import { change, items } from './fixtures'
 import { latestOf } from '../src/renderer/features/task/Outputs'
 import { stepIndex, stepNames, trackFor } from '../src/renderer/shared/steps'
-import { ago, clock, took, useNow } from '../src/renderer/shared/time'
+import { ago, clock, runningCalmly, took, useNow } from '../src/renderer/shared/time'
 
 describe('agents', () => {
   it('draws each agent with its maker’s mark, when it has one', () => {
@@ -119,9 +120,59 @@ describe('times', () => {
     expect(took('2026-09-29T12:00:00Z', '2026-09-29T13:04:00Z')).toBe('1h 4m')
     expect(took('2026-09-29T12:00:00Z', '2026-09-29T11:00:00Z')).toBe('0s')
   })
+
+  it('says how long something has run calmly, for the board: no seconds counting up', () => {
+    expect(runningCalmly('2026-09-29T12:00:00Z', '2026-09-29T12:00:03Z')).toBe('just now')
+    expect(runningCalmly('2026-09-29T12:00:00Z', '2026-09-29T12:00:59Z')).toBe('just now')
+    expect(runningCalmly('2026-09-29T12:00:00Z', '2026-09-29T12:06:30Z')).toBe('6m')
+    expect(runningCalmly('2026-09-29T12:00:00Z', '2026-09-29T13:04:00Z')).toBe('1h 4m')
+    expect(runningCalmly('', '2026-09-29T13:04:00Z')).toBe('')
+  })
 })
 
 describe('reads that come back out of order', () => {
+  it('publishes a head with only the newest of its buffered item reads', async () => {
+    const newest = newestReads('head')
+    const head = Promise.withResolvers<string>()
+    const kept: Array<string> = []
+    const fail = vi.fn()
+    const reading = newest('head', head.promise, (value) => kept.push(value), fail)
+    await newest('item', Promise.resolve('old'), (value) => kept.push(value), fail)
+    await newest('item', Promise.resolve('new'), (value) => kept.push(value), fail)
+    expect(kept).toEqual([])
+    head.resolve('head')
+    await reading
+    expect(kept).toEqual(['head', 'new'])
+    expect(fail).not.toHaveBeenCalled()
+  })
+
+  it('keeps items buffered when a head needs a new whole conversation or a read fails', async () => {
+    const newest = newestReads('head')
+    const first = Promise.withResolvers<string>()
+    const fresh = Promise.withResolvers<string>()
+    const kept: Array<string> = []
+    const fail = vi.fn()
+    let readingFresh: Promise<void> | undefined
+    const reading = newest(
+      'head',
+      first.promise,
+      () => {
+        readingFresh = newest('head', fresh.promise, (value) => kept.push(value), fail)
+      },
+      fail,
+    )
+    await newest('item', Promise.resolve('item'), (value) => kept.push(value), fail)
+    first.resolve('rewritten')
+    await reading
+    expect(kept).toEqual([])
+    fresh.reject(new Error('The port closed'))
+    await readingFresh
+    expect(fail).toHaveBeenCalledOnce()
+    expect(kept).toEqual([])
+    await newest('head', Promise.resolve('reconnected'), (value) => kept.push(value), fail)
+    expect(kept).toEqual(['reconnected', 'item'])
+  })
+
   it('keep only the newest answer for each thing read', async () => {
     const newest = newestReads()
     const kept: Array<string> = []
@@ -168,7 +219,7 @@ describe('a clock', () => {
     expect(clock(monday.toISOString(), now)).toBe(
       `${monday.toLocaleDateString(undefined, { weekday: 'short' })} ${monday.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`,
     )
-    const november = new Date('2026-11-20T09:00:00')
+    const november = new Date(isoAfter(48 * 86_400_000 - 3 * 3_600_000, +now))
     expect(clock(november.toISOString(), now)).toContain(november.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }))
   })
 })
@@ -198,7 +249,7 @@ describe('the time now', () => {
 
 describe('what the person sends', () => {
   it('shows at once as the window’s copy, after what is there, until the store’s copy of it arrives, or the send fails', () => {
-    const held = [{ ...items.you('Add a retry'), sequence: 4 }]
+    const held = [{ ...items.you('Add a retry'), id: 'already-held', sequence: 4 }]
     const first = sending(held, { text: 'Use the helper', queued: false, interrupting: false })
     expect(isSending(first.id)).toBe(true)
     expect(first.items.at(-1)).toMatchObject({
@@ -220,7 +271,11 @@ describe('what the person sends', () => {
   })
 
   it('never asks Althar for a copy, and keeps copies straight when two say the same', () => {
-    const queued = sending([{ ...items.you('Add a retry'), sequence: 4 }], { text: 'Retry', queued: true, interrupting: false })
+    const queued = sending([{ ...items.you('Add a retry'), id: 'already-held', sequence: 4 }], {
+      text: 'Retry',
+      queued: true,
+      interrupting: false,
+    })
     expect(waiting(queued.items)).toEqual([])
     // Two the same: the store's copy of the second arrives first, then the first fails; one copy of each stays shown, and no more.
     const one = sending(queued.items, { text: 'Again', queued: false, interrupting: false })
@@ -235,24 +290,27 @@ describe('what the person sends', () => {
 })
 
 describe('the composer queue', () => {
-  it('leaves what the person is sending out of the queue, while what waited before it is there', () => {
+  it('shows what the person is sending in the queue with what waited before it', () => {
     const onItsWay = sending([{ ...items.you('Add a retry'), sequence: 4 }], {
       text: 'Retry',
       queued: true,
       interrupting: false,
     })
-    expect(queuedOf(onItsWay.items, true)).toEqual([])
+    expect(queuedOf(onItsWay.items, true).map((one) => one.text)).toEqual(['Retry'])
     const waited = { ...items.you('Also this'), id: 'i5', sequence: 5, input: { state: 'queued' as const, interrupting: false } }
-    expect(queuedOf([...onItsWay.items, waited], true).map((one) => one.text)).toEqual(['Also this'])
+    expect(queuedOf([...onItsWay.items, waited], true).map((one) => one.text)).toEqual(['Retry', 'Also this'])
   })
 
-  it('shows behind a turn running, or with no agent to take what waits, but not while the person is sending', () => {
+  it('shows behind a turn running, or with no agent to take what waits, including while the person is sending behind a running turn', () => {
     expect(queueShown({ turnRunning: true }, false)).toBe(true)
     expect(queueShown({ turnRunning: false }, false)).toBe(false)
     expect(queueShown(null, false)).toBe(true)
     expect(queueShown(null, true)).toBe(false)
-    // What the person just sent goes straight to the thread though a turn runs, rather than flash in the queue.
-    expect(queueShown({ turnRunning: true }, true)).toBe(false)
+    // Sending behind a running turn never puts the message in the thread.
+    expect(queueShown({ turnRunning: true }, true)).toBe(true)
+    // The runtime's accepting is enough, even when the cached turnRunning is stale.
+    expect(queueShown({ turnRunning: false }, true, 'queued')).toBe(true)
+    expect(queueShown({ turnRunning: false }, true, 'now')).toBe(false)
   })
 
   it('has what waits read now while the person sends, or the agent holds the thread or starts, but not behind a turn or a wait', () => {

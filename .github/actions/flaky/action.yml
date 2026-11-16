@@ -12,3 +12,16 @@ runs:
         GH_TOKEN: ${{ github.token }}
         GH_REPO: ${{ github.repository }}
       run: bun "$GITHUB_WORKSPACE/packages/testing/src/report.ts"
+    # Reusable workflows can each have a job named verify in the same run.
+    - id: timings
+      if: ${{ always() && hashFiles('test-results/timings.jsonl') != '' }}
+      shell: bash
+      run: echo "name=test-timings-$(bun -e 'process.stdout.write(crypto.randomUUID())')" >> "$GITHUB_OUTPUT"
+    - uses: actions/upload-artifact@v6
+      if: ${{ always() && steps.timings.outputs.name != '' }}
+      continue-on-error: true
+      with:
+        name: ${{ steps.timings.outputs.name }}
+        path: test-results/timings.jsonl
+        if-no-files-found: ignore
+        retention-days: 7

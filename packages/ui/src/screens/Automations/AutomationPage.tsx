@@ -10,6 +10,7 @@ import { Field, FieldError } from '../../primitives/Field/Field'
 import { Heading, type HeadingLevel, below } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Select, type SelectOption } from '../../primitives/Select/Select'
 import { Switch } from '../../primitives/Switch/Switch'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -36,6 +37,7 @@ export interface AutomationPageText {
   namePlaceholder: string
   nameMissing: string
   runNow: string
+  openRun: string
   tryOnce: string
   /** Keeps a new one, off. */
   save: string
@@ -68,6 +70,7 @@ export const automationPageText: AutomationPageText = {
   namePlaceholder: 'Name it',
   nameMissing: 'Give it a name first',
   runNow: 'Run now',
+  openRun: 'Open run',
   tryOnce: 'Try it once now',
   save: 'Save',
   turnOn: 'Turn on',
@@ -83,13 +86,14 @@ export const automationPageText: AutomationPageText = {
   runItNow: 'Run it now',
   turnBackOn: 'Turn it back on',
   does: 'What it does',
-  doesNote: 'Holds from its next run.',
+  doesNote: 'Changes apply to future runs.',
   limits: 'Limits',
   runs: 'Runs',
   noRuns: 'No runs yet.',
   said: {
     [AutomationRunState.Starting]: 'Starting',
     [AutomationRunState.Running]: 'Running',
+    [AutomationRunState.NeedsYou]: 'Needs you',
     [AutomationRunState.Made]: 'Made something',
     [AutomationRunState.Nothing]: 'Nothing to do',
     [AutomationRunState.Failed]: 'Failed',
@@ -128,6 +132,8 @@ export type AutomationPageProps = RootProps<
     on: boolean
     onSwitch?: (on: boolean) => void
     onRunNow?: () => void
+    /** Opens the task of a run already under way, instead of starting a second. */
+    onOpenCurrentRun?: () => void
     onTryOnce?: () => void
     /** Makes a new one, off: it can be tried once from its page, and turned on. */
     onSave?: () => void
@@ -316,6 +322,7 @@ export function AutomationPage({
   on,
   onSwitch,
   onRunNow,
+  onOpenCurrentRun,
   onTryOnce,
   onSave,
   onTurnOn,
@@ -396,10 +403,16 @@ export function AutomationPage({
     </>
   ) : (
     <>
-      {onRunNow !== undefined && (
-        <Button variant="quiet" icon="play" onClick={onRunNow} disabled={busy}>
-          {t.runNow}
+      {onOpenCurrentRun !== undefined ? (
+        <Button variant="quiet" icon="chevron" onClick={onOpenCurrentRun}>
+          {t.openRun}
         </Button>
+      ) : (
+        onRunNow !== undefined && (
+          <Button variant="quiet" icon="play" onClick={onRunNow} disabled={busy}>
+            {t.runNow}
+          </Button>
+        )
       )}
       {onSwitch !== undefined && (
         <span className={p.switch}>
@@ -473,11 +486,7 @@ export function AutomationPage({
             </p>
           </div>
         </header>
-        {error !== undefined && (
-          <p className={p.error} role="alert">
-            {error}
-          </p>
-        )}
+        {error !== undefined && <Problem className={p.error}>{error}</Problem>}
         {pausedItself !== undefined && (
           <div className={p.needs}>
             <div className={p.needsWords}>
@@ -499,13 +508,16 @@ export function AutomationPage({
         <Section title={t.does} {...(making ? {} : { note: t.doesNote })} level={inner}>
           {card}
         </Section>
-        <Section title={t.limits} level={inner}>
-          <div className={p.sheet}>
-            {limits.map((limit) => (
-              <Limit key={limit.id} limit={limit} />
-            ))}
-          </div>
-        </Section>
+        {/* no limits to set, no heading over nothing */}
+        {limits.length > 0 && (
+          <Section title={t.limits} level={inner}>
+            <div className={p.sheet}>
+              {limits.map((limit) => (
+                <Limit key={limit.id} limit={limit} />
+              ))}
+            </div>
+          </Section>
+        )}
         {runs !== undefined && (
           <Section title={t.runs} level={inner}>
             <div className={p.sheet}>

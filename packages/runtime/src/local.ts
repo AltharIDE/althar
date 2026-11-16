@@ -7,6 +7,7 @@ import { removeFully } from '@althar/provider-adapters'
 import { Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { withFolder } from './bringBack'
 import { type Checkout, giveBack, holdupOf, isClean, readCheckout, takeCheckout } from './checkouts'
 import { RuntimeConfig } from './Config'
 import { makeScratch } from './firstWrite'
@@ -16,6 +17,7 @@ import { Instance } from './Instance'
 import { branchName, prepareWorktree, startCommitOf, startOf, towardHere } from './Projects'
 import { change, fact, timestamp } from './records'
 import { addItem } from './threads'
+import { removeWorktree } from './worktreeRemoval'
 
 /*
  * Local tasks (ADR-091). A task works either in worktrees of its own, as
@@ -133,6 +135,15 @@ const lockingCheckouts = <A, E, R>(paths: ReadonlyArray<string>, effect: Effect.
   [...new Set(paths.map(checkoutKey))]
     .toSorted()
     .reduceRight<Effect.Effect<A, E, R>>((inner, key) => checkoutLocks.withLock(key, inner), effect)
+
+/**
+ * The checkouts, then the task's folders, held while its workspaces move
+ * between a worktree and its checkout: a worktree removed for the move,
+ * before its row says the task is in the checkout, is never taken for one
+ * deleted by hand and brought back meanwhile (bringBack.ts).
+ */
+const lockingFor = <A, E, R>(taskId: string, paths: ReadonlyArray<string>, effect: Effect.Effect<A, E, R>) =>
+  lockingCheckouts(paths, withFolder(taskId, effect))
 
 /**
  * The tasks with something of theirs still at work here: an agent, in a turn
@@ -405,7 +416,8 @@ export const place = (
   atWork: AtWork = nobodyAtWork,
 ) =>
   Effect.flatMap(spotsOf(taskId), (spots) =>
-    lockingCheckouts(
+    lockingFor(
+      taskId,
       spots.map((spot) => spot.repository),
       placing(taskId, worksIn, consents, told ?? (() => false), atWork),
     ),
@@ -604,7 +616,8 @@ const commitLeft = (spot: Spot) =>
  */
 export const moveToLocal = (taskId: string, change: string | null = null, consent?: MoveConsent) =>
   Effect.flatMap(changeSpots(taskId, change), (before) =>
-    lockingCheckouts(
+    lockingFor(
+      taskId,
       before.map((spot) => spot.repository),
       Effect.gen(function* () {
         // Read again once the checkouts are held: a move that waited may have gone through since, from the loop that retries it.
@@ -650,9 +663,7 @@ export const moveToLocal = (taskId: string, change: string | null = null, consen
         }
         // Then each moves: the worktree lets go of the branch, and the checkout takes it.
         for (const { spot, was } of taking) {
-          yield* git(spot.repository, 'worktree', 'remove', spot.path).pipe(
-            Effect.catch(() => git(spot.repository, 'worktree', 'remove', '--force', spot.path)),
-          )
+          yield* removeWorktree(spot.repository, spot.path)
           yield* git(spot.repository, 'switch', '--quiet', spot.branch)
           const returnsTo = was.branch ?? was.head
           yield* record(
@@ -677,7 +688,8 @@ export const moveToLocal = (taskId: string, change: string | null = null, consen
  */
 export const moveToWorktree = (taskId: string, change: string | null = null) =>
   Effect.flatMap(changeSpots(taskId, change), (before) =>
-    lockingCheckouts(
+    lockingFor(
+      taskId,
       before.map((spot) => spot.repository),
       Effect.gen(function* () {
         // Read again once the checkouts are held, as a move to Local is.

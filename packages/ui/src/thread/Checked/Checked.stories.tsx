@@ -55,15 +55,6 @@ export const Shown: Story = {
   },
 }
 
-/** A run that failed is crossed. */
-export const Failed: Story = { args: { pieces: [FAILED, TESTS], unverified: [] } }
-
-/** A note with nothing more to say doesn't open. */
-export const NothingToOpen: Story = { args: { pieces: [BUMP], unverified: [] } }
-
-/** Only what it couldn't check. */
-export const OnlyUnchecked: Story = { args: { pieces: [], unverified: UNVERIFIED } }
-
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button', focus: 'button', pressed: 'button' }),
   render: (args) => (
@@ -71,13 +62,12 @@ export const AllStates: Story = {
       size="thread"
       cells={[
         { state: 'shown', node: <Checked {...args} /> },
-        { state: 'failed', node: <Checked pieces={[FAILED, TESTS]} /> },
+        { state: 'failed, first', node: <Checked pieces={[TESTS, FAILED]} /> },
         { state: 'nothing to open', node: <Checked pieces={[BUMP]} /> },
         { state: 'only unchecked', node: <Checked pieces={[]} unverified={UNVERIFIED} /> },
         { state: 'hover', node: <Checked pieces={[TESTS]} /> },
         { state: 'focus', node: <Checked pieces={[TESTS]} /> },
         { state: 'pressed', node: <Checked pieces={[TESTS]} /> },
-        { state: 'dark', node: <Checked {...args} />, dark: true },
       ]}
     />
   ),

@@ -81,12 +81,10 @@ export const Everything: Story = {
   ),
 }
 
-/** On a paper tile, beside a product's name: an agent in Settings, a code host. Without a mark, a plug. */
-export const Chip: Story = {
-  render: () => <BrandChip brand={Brand.ClaudeCode} size={44} />,
-}
-
-/** A mark at each size, in each ink it is drawn in, Linear's on its own card, and on a chip. */
+/**
+ * A mark at each size, in each ink it is drawn in, Linear's on its own card, and on a chip: on a paper tile, beside a
+ * product's name (an agent in Settings, a code host). Without a mark, a plug.
+ */
 export const AllStates: Story = {
   render: () => (
     <States

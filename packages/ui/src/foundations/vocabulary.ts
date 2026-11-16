@@ -563,6 +563,7 @@ export enum Room {
 export enum AutomationRunState {
   Starting = 'starting',
   Running = 'running',
+  NeedsYou = 'needs-you',
   Made = 'made',
   Nothing = 'nothing',
   Failed = 'failed',

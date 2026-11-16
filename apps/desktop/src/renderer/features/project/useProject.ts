@@ -5,6 +5,7 @@ import {
   ApiError,
   type AgentStatus,
   type CoordinatorSnapshot,
+  type Draft,
   PAGE,
   type PlanStep,
   type ProjectRepository,
@@ -22,9 +23,10 @@ import { useServices, useWatch } from '../../data/services'
 import type { OutputSoFar } from '../../shared/handed'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
+import { useDrafts } from '../../shared/useDrafts'
 import { useStreamed } from '../../shared/useStreamed'
 import { canPick } from '../../shared/agents'
-import { inView, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { inView, isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
@@ -50,6 +52,8 @@ export interface ProjectModel {
   readonly coordinator: CoordinatorSnapshot | null
   /** Text still streaming, by thread item. */
   readonly streaming: ReadonlyMap<string, Streamed>
+  /** The tasks the coordinator is drafting now, as far as written (useDrafts). */
+  readonly drafts: ReadonlyArray<Draft>
   /** Commands' output as far as it has come, by their tool call's item, while they run. */
   readonly outputs: ReadonlyMap<string, OutputSoFar>
   /** Agents that could work: signed in, or that don't say. */
@@ -96,6 +100,7 @@ export interface ProjectModel {
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
+  readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   readonly changePlan: (
@@ -147,13 +152,14 @@ export const useProject = (projectId: string): ProjectModel => {
   const [pending, setPending] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const [newest] = useState(newestReads)
+  const [newest] = useState(() => newestReads('head'))
   const changed = useRef({ head: false, cards: false, automations: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
   // What the coordinator's commands have printed so far, while they run.
   const outputs = useOutputs(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.session?.turnRunning ?? false)
   // What it is still saying, while the window hears it.
   const streaming = useStreamed(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.view)
+  const drafts = useDrafts(threadId)
 
   /** Changes the coordinator's thread as the window keeps it; nothing before it is first read. */
   const setCoordinator = useCallback(
@@ -205,8 +211,7 @@ export const useProject = (projectId: string): ProjectModel => {
   )
 
   /** What the window holds of the thread now, for a read that lands later. */
-  const held = useRef<ReadonlyArray<ThreadItem>>([])
-  held.current = coordinator?.items ?? []
+  const held = useCallback(() => cache.getQueryData<CoordinatorSnapshot>(keys.coordinator(projectId))?.items ?? [], [cache, projectId])
 
   const readItems = useCallback(
     (ids: Iterable<string>) =>
@@ -215,10 +220,19 @@ export const useProject = (projectId: string): ProjectModel => {
         : Promise.all(
             [...ids].map((itemId) => {
               const version = viewVersion()
-              return newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item], version), fail)
+              // One the thread keeps for Althar alone is nothing to draw, and nothing wrong: it goes, if the window held it.
+              return newest(
+                itemId,
+                client.getThreadItem(threadId, itemId),
+                (item) =>
+                  item === null
+                    ? setCoordinator((current) => ({ ...current, items: current.items.filter((one) => one.id !== itemId) }))
+                    : arrived([item], version),
+                fail,
+              )
             }),
           ),
-    [client, threadId, newest, arrived, viewVersion, fail],
+    [client, threadId, newest, arrived, viewVersion, fail, setCoordinator],
   )
 
   // What the coordinator was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
@@ -226,16 +240,15 @@ export const useProject = (projectId: string): ProjectModel => {
   /**
    * The thread's head again: the agent working, the one it would start on.
    * Its items stay as they are, but for those it may have moved on, read after
-   * it and landing before it: what still waits its turn, and what else is
-   * asked. The runtime has a message delivered before it says the turn on it
-   * runs, so the thread never shows the turn running while what it took still
-   * waits in the queue.
+   * it and published with it: what still waits its turn, and what else is
+   * asked. The thread never shows new work under an idle head, nor the turn
+   * running while what it took still waits in the queue.
    */
   const readHead = useCallback(
     (also: Iterable<string> = []) =>
       newest(
         'head',
-        client.getCoordinator(projectId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held.current)]))),
+        client.getCoordinator(projectId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held())]))),
         (head) =>
           cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) =>
             current === undefined
@@ -250,7 +263,7 @@ export const useProject = (projectId: string): ProjectModel => {
           ),
         fail,
       ),
-    [client, cache, projectId, newest, readItems, fail],
+    [client, cache, projectId, newest, readItems, held, fail],
   )
 
   /** The thread read whole again, as a clear or a forgotten conversation rewrote it: what is held of it before is not kept. */
@@ -266,15 +279,17 @@ export const useProject = (projectId: string): ProjectModel => {
     changed.current = { head: false, cards: false, automations: false, items: new Set() }
     if (threadId === null) return
     const read = new Set(items)
-    if (cards) for (const item of coordinator?.items ?? []) if (item.kind === 'task') read.add(item.id)
+    if (cards) for (const item of held()) if (item.kind === 'task') read.add(item.id)
     // An automation's cards say where it stands, as it changes or runs.
-    if (automations) for (const item of coordinator?.items ?? []) if (item.kind === 'automation') read.add(item.id)
+    if (automations) for (const item of held()) if (item.kind === 'automation') read.add(item.id)
     void (head ? readHead(read) : readItems(read))
-  }, [threadId, coordinator, readHead, readItems])
+  }, [threadId, held, readHead, readItems])
 
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running; plan usage is the plan gauge's and the pickers'.
     if (event._tag === 'Output' || event._tag === 'Background' || event._tag === 'PlanUsage') return
+    // The tasks the coordinator is drafting, as far as written, are useDrafts'.
+    if (event._tag === 'Drafting') return
     // Every run in the project, the tasks' too, whole each time, which the pill over the composer shows.
     if (event._tag === 'Launches') {
       if (event.projectId === projectId) setCoordinator((current) => ({ ...current, launches: event.launches }))
@@ -301,7 +316,7 @@ export const useProject = (projectId: string): ProjectModel => {
       if (event.aggregateType === 'thread_item') changed.current.items.add(event.aggregateId)
       else changed.current.head = true
       // A message delivered changes its input, not its item: read again what still shows as queued.
-      if (event.aggregateType === 'user_input') for (const id of waiting(coordinator?.items ?? [])) changed.current.items.add(id)
+      if (event.aggregateType === 'user_input') for (const id of waiting(held())) changed.current.items.add(id)
     } else if (event.aggregateType === 'connection') changed.current.head = true
     else if (event.projectId === projectId && CARDS.has(event.aggregateType)) changed.current.cards = true
     else if (event.projectId === projectId && AUTOMATIONS.has(event.aggregateType)) changed.current.automations = true
@@ -385,7 +400,7 @@ export const useProject = (projectId: string): ProjectModel => {
     disposition: 'after_current' | 'interrupt_and_continue',
     action: () => Promise<unknown>,
     images: Outgoing | undefined,
-    queued = disposition === 'interrupt_and_continue' || coordinator?.session?.turnRunning === true,
+    queued = disposition === 'interrupt_and_continue' || queueShown(coordinator?.session ?? null, true, coordinator?.accepting),
   ) => {
     let id = ''
     setCoordinator((current) => {
@@ -416,6 +431,7 @@ export const useProject = (projectId: string): ProjectModel => {
     repositories,
     coordinator,
     streaming,
+    drafts,
     outputs,
     agents,
     agentsKnown: status !== undefined,
@@ -523,6 +539,12 @@ export const useProject = (projectId: string): ProjectModel => {
       ),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
+    // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
+    holdDraft: (threadId, key) =>
+      client.holdDraft(threadId, key).catch((failure: unknown) => {
+        fail(failure)
+        throw failure
+      }),
     stopBackground: (threadId, id) => act(() => client.stopBackground(threadId, id)),
     changePlan: (planId, steps, end, worksIn, toward) =>
       act(() =>

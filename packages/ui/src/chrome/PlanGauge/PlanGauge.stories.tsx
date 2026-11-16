@@ -64,26 +64,30 @@ export const Open: Story = {
   },
 }
 
-/** Codex signed out, its last 80% saved: the figure is Claude Code's, which can run, and Codex's row says why it runs nothing. */
+/* Signed out, as the app gives it: put right from its row. */
+const CODEX_OUT = { ...CODEX_SIGNED_OUT, signIn: true }
+
+/** Codex signed out, its last 80% saved: the figure is Claude Code's, which can run, and Codex's row signs it in again. */
 export const SignedOut: Story = {
-  args: { agents: [CLAUDE_PLENTY, CODEX_SIGNED_OUT], defaultOpen: true },
-  play: async ({ canvasElement }) => {
+  args: { agents: [CLAUDE_PLENTY, CODEX_OUT], defaultOpen: true, onSignIn: fn() },
+  play: async ({ args, canvasElement }) => {
     const page = within(document.body)
     await expect(
       within(canvasElement).getByRole('button', { name: 'Plan usage: Claude Code has 62% left, until 17:00' }),
     ).toBeInTheDocument()
     await expect(page.getByText('Plenty left')).toBeInTheDocument()
-    await expect(page.getByText('Signed out')).toBeInTheDocument()
+    await userEvent.click(page.getByRole('button', { name: 'Sign in again' }))
+    await expect(args.onSignIn).toHaveBeenCalledWith(CODEX_SIGNED_OUT.id)
     // Its saved numbers stay in its detail, with why it runs nothing.
-    await userEvent.click(page.getByRole('button', { name: /Codex/ }))
+    await userEvent.click(page.getByRole('button', { name: /^Codex/ }))
     await expect(page.getByText('Sign in to Codex to see its usage.')).toBeInTheDocument()
     await expect(page.getByText('80%')).toBeInTheDocument()
   },
 }
 
-/** Every agent read signed out: the gauge unlit, and the peek says no work can start. */
+/** Every agent read signed out: the gauge unlit, and the peek says no work can start, with the way to sign in again. */
 export const AllSignedOut: Story = {
-  args: { agents: [CODEX_SIGNED_OUT], defaultOpen: true },
+  args: { agents: [CODEX_OUT], defaultOpen: true, onSignIn: fn() },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Codex can’t start work' })).toBeInTheDocument()
     await expect(within(document.body).getByText('Codex can’t start work')).toBeInTheDocument()

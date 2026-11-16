@@ -1,3 +1,4 @@
+import { removeTreeSync } from '@althar/testing'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -189,7 +190,7 @@ describe('files sent with a message, asked of the runtime', () => {
         )
 
         // Their copies in the task's folder go, and the coordinator's copy of the log too: the folder is copied again, the log can't be.
-        rmSync(request, { recursive: true, force: true })
+        removeTreeSync(request)
         const [log] = yield* sql<{ path: string }>`SELECT path FROM user_input_files WHERE name = 'build.log'`
         rmSync(log?.path ?? '')
         const again = yield* provided(setup, requestFilesForTurn(threadId, taskId))

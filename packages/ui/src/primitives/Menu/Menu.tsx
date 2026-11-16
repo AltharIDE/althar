@@ -3,7 +3,7 @@ import { createContext, type ReactElement, type ReactNode, useContext, useId, us
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
-import { radixSide, type OverlayAlign, type OverlayPlacement } from '../../lib/overlay'
+import { OverlayBoundary, radixSide, type OverlayAlign, type OverlayPlacement } from '../../lib/overlay'
 import { Kbd } from '../Kbd/Kbd'
 import seg from '../Segmented/Segmented.module.css'
 import sw from '../Switch/Switch.module.css'
@@ -76,6 +76,7 @@ export function Menu({
   className,
 }: MenuProps) {
   const noteId = useId()
+  const boundary = useContext(OverlayBoundary)
   const [said, setSaid] = useState<ReactNode>(null)
   const [shown, setShown] = useState(defaultOpen ?? false)
   const button = useRef<HTMLButtonElement>(null)
@@ -105,6 +106,7 @@ export function Menu({
           align={align}
           sideOffset={6}
           collisionPadding={8}
+          {...(boundary === null ? {} : { collisionBoundary: boundary })}
           loop
           onCloseAutoFocus={(event) => {
             if (returnFocus !== undefined && !returnFocus()) event.preventDefault()
@@ -115,6 +117,7 @@ export function Menu({
            * chosen item put it, such as a field to type in.
            */
           inert={!(open ?? shown)}
+          onClick={(event) => event.stopPropagation()}
           /* Its button opens and closes it: pressed as the menu goes, it opens it again, which a dismissal would undo at once. */
           onInteractOutside={(event) => {
             if (event.target instanceof Node && button.current?.contains(event.target)) event.preventDefault()

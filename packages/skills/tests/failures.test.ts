@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, stat, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -27,23 +27,45 @@ afterEach(async () => {
 const unlicensed = (name: string) => skillMd(`name: ${name}\ndescription: Use when testing ${name}.`)
 
 describe('read-only copies', () => {
-  it('keeps a stored version’s folders read-only, so nothing can be added to it', async () => {
+  // Windows chmod sets the read-only attribute but has no execute bits or POSIX directory-entry protection.
+  const directoryMode = process.platform === 'win32' ? 0o444 : 0o555
+
+  it('marks a stored version read-only and verifies its contents', async () => {
     const hash = await run(putObject(root, tree({ ...good(), 'references/a.md': 'more' })))
-    for (const folder of ['', 'references']) expect((await stat(join(root, 'objects', hash, folder))).mode & 0o777).toBe(0o555)
-    await expect(writeFile(join(root, 'objects', hash, 'extra.md'), 'x')).rejects.toThrow()
-    await expect(mkdir(join(root, 'objects', hash, 'references', 'more'))).rejects.toThrow()
+    const directory = join(root, 'objects', hash)
+    for (const folder of ['', 'references']) expect((await stat(join(directory, folder))).mode & 0o777).toBe(directoryMode)
+    await expect(writeFile(join(directory, 'SKILL.md'), 'changed')).rejects.toThrow()
+    const extra = join(directory, 'extra.md')
+    if (process.platform === 'win32') {
+      // Directory attributes cannot refuse new entries there; a changed object must still fail its integrity check.
+      await writeFile(extra, 'x')
+      expect(await failure(readObject(root, hash))).toMatchObject({
+        _tag: 'SkillStoreFailed',
+        message: expect.stringContaining('no longer matches its hash'),
+      })
+      await unlink(extra)
+    } else {
+      await expect(writeFile(extra, 'x')).rejects.toThrow()
+      await expect(mkdir(join(directory, 'references', 'more'))).rejects.toThrow()
+    }
     expect([...(await run(readObject(root, hash))).keys()].toSorted()).toEqual(['SKILL.md', 'references/a.md'])
   })
 
-  it('keeps a run’s copy read-only to its folders, and still replaces and removes it', async () => {
+  it('marks a run’s copy read-only, and still replaces and removes it', async () => {
     const hash = await run(putObject(root, tree({ ...good('plain'), 'references/a.md': 'more' })))
     const input = { root, runId: 'run-1', agent: 'codex', capabilities: [], keepOutOf: [], selected: [{ id: 'plain', treeHash: hash }] }
     const first = await run(projectRun(input))
-    expect((await stat(join(first.directory, 'plain', 'references'))).mode & 0o777).toBe(0o555)
-    await expect(writeFile(join(first.directory, 'plain', 'new.md'), 'x')).rejects.toThrow()
-    await expect(writeFile(join(first.directory, 'new.md'), 'x')).rejects.toThrow()
+    expect((await stat(join(first.directory, 'plain', 'references'))).mode & 0o777).toBe(directoryMode)
+    await expect(writeFile(join(first.directory, 'plain', 'SKILL.md'), 'changed')).rejects.toThrow()
+    const extra = join(first.directory, 'new.md')
+    if (process.platform === 'win32') await writeFile(extra, 'x')
+    else {
+      await expect(writeFile(join(first.directory, 'plain', 'new.md'), 'x')).rejects.toThrow()
+      await expect(writeFile(extra, 'x')).rejects.toThrow()
+    }
     const again = await run(projectRun({ ...input, layout: 'agents' }))
     expect(again.projected).toEqual(['plain'])
+    await expect(stat(extra)).rejects.toThrow()
     await run(releaseRun(root, 'run-1'))
     await expect(stat(join(root, 'runs', 'run-1'))).rejects.toThrow()
   })

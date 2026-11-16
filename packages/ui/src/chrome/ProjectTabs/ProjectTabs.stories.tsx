@@ -1,17 +1,17 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
+import { type CSSProperties, useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { LOAD_BUSY, LOAD_SLOTS } from '../../fixtures/load'
 import { MARKED } from '../../fixtures/marks'
-import { Room } from '../../foundations/vocabulary'
+import { CLAUDE_PLENTY, CODEX_PLENTY } from '../../fixtures/plan'
 import { States, statesOn } from '../../storybook/States'
 import { IconButton } from '../../primitives/IconButton/IconButton'
-import { ChromeButton } from '../ChromeButton/ChromeButton'
+import { LoadMeter } from '../LoadMeter/LoadMeter'
 import { Offline } from '../Offline/Offline'
-import { RoomSwitch } from '../RoomSwitch/RoomSwitch'
+import { PlanGauge } from '../PlanGauge/PlanGauge'
 import { SignInEnds } from '../SignInEnds/SignInEnds'
 import { UpdateReady } from '../UpdateReady/UpdateReady'
-import { WorkStatus } from '../WorkStatus/WorkStatus'
 import { type ProjectTab, ProjectTabs, type ProjectTabsProps } from './ProjectTabs'
 
 /* The projects on this Mac (marks.ts), with how many calls wait in each. */
@@ -47,9 +47,10 @@ const TWENTY: ProjectTab[] = Array.from({ length: 20 }, (_, i) => {
 })
 
 /*
- * The bar at the top of a window, with the screen's own controls at its end, as the app puts them; with `withSettings`,
- * Althar's settings open in their tab; `offline`, the computer offline, as the app's line says before them; `notices`, every
- * line the window's bar can hold at once: offline, an update ready and a sign-in that ends soon.
+ * The bar at the top of a window, with what the app keeps at its end: the machine's load, the plans' gauge and the quick
+ * settings (the screen's own controls are its header's, under the bar); with `withSettings`, Althar's settings open in their
+ * tab; `offline`, the computer offline, as the app's line says before them; `notices`, every line the window's bar can hold
+ * at once: offline, an update ready and a sign-in that ends soon.
  */
 function Window({
   initial,
@@ -63,7 +64,6 @@ function Window({
   const [current, setCurrent] = useState<string | null>(start)
   const [settings, setSettings] = useState<'none' | 'open' | 'current'>(withSettings ? 'current' : 'none')
   const others = ALL.filter((p) => !open.some((tab) => tab.id === p.id))
-  const shown = current === null ? undefined : open.find((tab) => tab.id === current)
   return (
     <div>
       <ProjectTabs
@@ -104,24 +104,18 @@ function Window({
         }}
         onNewProject={fn()}
         end={
-          notices ? (
-            // As the app's bar holds them (TabsFrame): every line it can show at once, then its settings.
-            <>
-              <Offline />
-              <UpdateReady version="0.1.1" onRestart={fn()} />
-              <SignInEnds whose="Claude Code (work)" when="Mon 14:00" onSignIn={fn()} onDismiss={fn()} />
-              <IconButton icon="gear" label="Settings" size="small" onClick={fn()} />
-            </>
-          ) : shown ? (
-            <>
-              {offline && <Offline />}
-              <RoomSwitch value={Room.Talk} onChange={fn()} />
-              {shown.yours > 0 && <WorkStatus yours={shown.yours} onYours={fn()} />}
-              <ChromeButton icon="plus" label="New task" onClick={fn()} />
-            </>
-          ) : (
+          <>
+            <LoadMeter load={LOAD_BUSY} slots={LOAD_SLOTS} />
+            <PlanGauge agents={[CLAUDE_PLENTY, CODEX_PLENTY]} />
+            {(offline || notices) && <Offline />}
+            {notices && (
+              <>
+                <UpdateReady version="0.1.1" onRestart={fn()} />
+                <SignInEnds whose="Claude Code (work)" when="Mon 14:00" onSignIn={fn()} onDismiss={fn()} />
+              </>
+            )}
             <IconButton icon="gear" label="Settings" size="small" onClick={fn()} />
-          )
+          </>
         }
         {...props}
       />
@@ -141,7 +135,7 @@ type Story = StoryObj<typeof meta>
 export const InAProject: Story = {}
 /** The home has the window; its tab counts what waits across every project. */
 export const AtHome: Story = { args: { current: null } }
-/** The computer is offline: one quiet line for the whole app, before the screen's own controls. */
+/** The computer is offline: one quiet line for the whole app, before the settings. */
 export const WhileOffline: Story = { args: { offline: true } }
 
 /**
@@ -311,20 +305,25 @@ export const NewProjectAtOnce: Story = {
   },
 }
 
+/* The bar needs a window's width, not a thread's: each cell takes the whole row. */
+const WINDOW_WIDE = { '--measure': '100vw' } as CSSProperties
+
 export const AllStates: Story = {
   render: () => (
-    <States
-      size="wide"
-      cells={[
-        { state: 'in a project', node: <Window /> },
-        { state: 'at home', node: <Window current={null} /> },
-        { state: 'many open', node: <Window initial={MANY} current="billing-web" /> },
-        { state: 'only home', node: <Window initial={[]} current={null} /> },
-        { state: 'hover', node: <Window /> },
-        { state: 'focus', node: <Window /> },
-        { state: 'pressed', node: <Window /> },
-      ]}
-    />
+    <div style={WINDOW_WIDE}>
+      <States
+        size="thread"
+        cells={[
+          { state: 'in a project', node: <Window /> },
+          { state: 'at home', node: <Window current={null} /> },
+          { state: 'many open', node: <Window initial={MANY} current="billing-web" /> },
+          { state: 'only home', node: <Window initial={[]} current={null} /> },
+          { state: 'hover', node: <Window /> },
+          { state: 'focus', node: <Window /> },
+          { state: 'pressed', node: <Window /> },
+        ]}
+      />
+    </div>
   ),
   // On Halyard's tab, beside Meridian's, which has the window.
   parameters: statesOn({

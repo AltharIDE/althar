@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 
 import {
   type Account,
+  type AdapterOptions,
   type AccessLine,
   addressOf,
   authorizeUrl,
@@ -18,6 +19,7 @@ import {
   type KnownHosts,
   type LinkRef,
   makePkce,
+  makeServiceApi,
   parseLink,
   parseRemote,
   type Product,
@@ -25,6 +27,7 @@ import {
   refreshToken,
   type RemoteRef,
   type Service,
+  type ServiceApi,
   SignInEnded,
   startDeviceFlow,
   type TokenSet,
@@ -301,6 +304,7 @@ export const pageOf = (product: Product, web: string, path: ReadonlyArray<string
 export interface Adapters {
   readonly host?: CodeHost
   readonly tracker?: Tracker
+  readonly api?: ServiceApi
 }
 
 export class Connections extends Context.Service<
@@ -774,7 +778,7 @@ export class Connections extends Context.Service<
       const adaptersOf = (row: Row): Adapters => {
         const known = adapterCache.get(row.id)
         if (known !== undefined) return known
-        const made = infoOf(row.product)?.make?.({
+        const options: AdapterOptions = {
           fetch: connectors.fetch,
           apiUrl: row.apiUrl,
           webUrl: row.webUrl,
@@ -794,8 +798,10 @@ export class Connections extends Context.Service<
               )
             }),
           ),
-        })
+        }
+        const made = infoOf(row.product)?.make?.(options)
         const adapters: Adapters = {
+          api: guarded(makeServiceApi(row.product, options), row.id),
           ...(made?.host === undefined ? {} : { host: guarded(made.host, row.id) }),
           ...(made?.tracker === undefined ? {} : { tracker: guarded(made.tracker, row.id) }),
         }

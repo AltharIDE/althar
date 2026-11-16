@@ -4,8 +4,9 @@
   gap: 16px;
   color: var(--t-1);
 }
+/* the island's black, the same in every theme */
 .onInk {
-  color: var(--n-1);
+  color: var(--on-dark);
 }
 .lockup {
   display: inline-flex;
@@ -20,12 +21,14 @@
   font-size: 32px;
   letter-spacing: -0.025em;
 }
+/* the favicon is a picture: light cobalt in every theme, the point the tile showing through */
 .tile {
+  --live: #2b3bff;
   display: grid;
   place-items: center;
   width: 64px;
   height: 64px;
   border-radius: 14px;
   background: var(--live);
-  color: var(--n-1);
+  color: #fcfbf8;
 }

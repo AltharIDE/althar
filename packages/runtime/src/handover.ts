@@ -8,6 +8,7 @@ import { thisDevice } from './device'
 import { endWords, type ModelNamer, teamOf, withEffort } from './coordinatorNews'
 import { git } from './git'
 import { Instance } from './Instance'
+import { asideIn } from './kinds'
 import { type Note, notesOf, sayNotes } from './notes'
 import { Policies, ruleSetOf } from './Policies'
 import { withRole } from './roles'
@@ -96,8 +97,10 @@ export const projectOverview = (projectId: string) =>
       JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
       WHERE b.project_id = ${projectId} AND b.detached_at IS NULL
       ORDER BY b.created_at, b.rowid`
+    // Asides are chats on Scratch, not tasks: none is counted.
     const [counts] = yield* sql<{ open: number; drafts: number }>`
-      SELECT sum(state = 'open') AS open, sum(state = 'draft') AS drafts FROM tasks WHERE project_id = ${projectId}`
+      SELECT sum(k.state = 'open') AS open, sum(k.state = 'draft') AS drafts FROM tasks k
+      WHERE k.project_id = ${projectId} AND NOT ${sql.unsafe(asideIn('k'))}`
     return [
       `Project: ${project?.name ?? ''}`,
       `Repositories:\n${repositories
@@ -138,10 +141,36 @@ const callWords = (call: { readonly kind: string; readonly payload: string; read
   }
 }
 
+/** The calls of a task that wait on the person, oldest first. */
+const callsOf = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    return yield* sql<{ kind: string; payload: string; title: string | null }>`
+      SELECT a.kind, a.payload, p.title FROM attention_requests a LEFT JOIN permission_requests p ON p.id = a.permission_request_id
+      WHERE a.task_id = ${taskId} AND a.state = 'open' ORDER BY a.created_at`
+  })
+
+/** What a task's lead said last, finishing its work: nothing where it hasn't yet. */
+const lastReport = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [report] = yield* sql<{ content: string }>`
+      SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
+        AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
+    return report === undefined ? '' : ((JSON.parse(report.content) as { summary?: string }).summary ?? '').trim()
+  })
+
+/** The lines under a task in a brief: what waits on the person, and what its lead last reported. */
+const underIt = (waits: ReadonlyArray<string>, summary: string) => [
+  ...(waits.length === 0 ? [] : [`  Waiting on the person: ${waits.join('; ')}.`]),
+  ...(summary === '' ? [] : [`  Its lead last reported: ${cut(summary, REPORT_LENGTH).replaceAll('\n', ' ')}`]),
+]
+
 /**
  * Every open task, newest first, as a brief describes it: where it stands,
- * who does it, and what waits on the person, none left out. Past the newest
- * TASKS_IN_FULL, each is shorter, without its plan or its lead's last report,
+ * who does it, and what waits on the person, none left out. Asides, chats on
+ * Scratch, stay out of its task brief. Past the newest TASKS_IN_FULL, each
+ * is shorter, without its plan or its lead's last report,
  * which read_task gives. Read from the records and the task's worktree;
  * `working` says whether an agent is at work on a thread now.
  */
@@ -173,7 +202,7 @@ export const openTasks = (projectId: string, modelOf: ModelNamer, working: (thre
       JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
       LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1)
       LEFT JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
-      WHERE k.project_id = ${projectId} AND k.state IN ('draft', 'open')
+      WHERE k.project_id = ${projectId} AND k.state IN ('draft', 'open') AND NOT ${sql.unsafe(asideIn('k'))}
       ORDER BY k.created_at DESC, k.rowid DESC`
     const described = yield* Effect.forEach(tasks, (task, index) =>
       Effect.gen(function* () {
@@ -211,9 +240,7 @@ export const openTasks = (projectId: string, modelOf: ModelNamer, working: (thre
             [lead ?? (planned === undefined ? null : modelOf(planned))].flatMap((name) => (name === null ? [] : [`Led by ${name}.`]))
 
         // What waits on the person: calls, a pull request with commits they haven't pushed, and a change ready to look over.
-        const calls = yield* sql<{ kind: string; payload: string; title: string | null }>`
-          SELECT a.kind, a.payload, p.title FROM attention_requests a LEFT JOIN permission_requests p ON p.id = a.permission_request_id
-          WHERE a.task_id = ${task.id} AND a.state = 'open' ORDER BY a.created_at`
+        const calls = yield* callsOf(task.id)
         // Each in its repository's worktree here, as the record of its push says; the task's first, where it doesn't.
         const changes = yield* sql<{ url: string; snapshot: string; pushed: string | null; worktree: string | null }>`
           SELECT l.url, l.snapshot,
@@ -246,18 +273,8 @@ export const openTasks = (projectId: string, modelOf: ModelNamer, working: (thre
         const waits = [...calls.map(callWords), ...pulls.flat(), ...(ready ? ['the change, to look over and accept'] : [])]
 
         // What its lead said last, with anything it left open.
-        const [report] = !full
-          ? []
-          : yield* sql<{ content: string }>`
-          SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
-            AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
-        const summary = report === undefined ? '' : ((JSON.parse(report.content) as { summary?: string }).summary ?? '').trim()
-
-        return [
-          `- ${task.slug}: ${task.title}. ${[stands, ...who].join(' ')}`,
-          ...(waits.length === 0 ? [] : [`  Waiting on the person: ${waits.join('; ')}.`]),
-          ...(summary === '' ? [] : [`  Its lead last reported: ${cut(summary, REPORT_LENGTH).replaceAll('\n', ' ')}`]),
-        ].join('\n')
+        const summary = full ? yield* lastReport(task.threadId) : ''
+        return [`- ${task.slug}: ${task.title}. ${[stands, ...who].join(' ')}`, ...underIt(waits, summary)].join('\n')
       }),
     )
     return {
@@ -289,6 +306,8 @@ export const handoverRecord = (input: {
       kinds: ['user_message', 'agent_message', 'question'],
       last: RECENT_MESSAGES,
       agent: 'you',
+      // What waits for the fresh session is its first turn's message, said there.
+      waiting: false,
     })
     return {
       open: tasks.count,

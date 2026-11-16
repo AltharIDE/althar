@@ -33,6 +33,8 @@ export const printer = (threadId: string): Printer => {
   const print = (event: LiveEvent): string => {
     // What Althar runs of the project itself, what the plans have left, and the computer's connection, are the window's to show, not a thread's.
     if (event._tag === 'Launches' || event._tag === 'PlanUsage' || event._tag === 'Connection' || event.threadId !== threadId) return ''
+    // A task the coordinator is drafting is its card's to show, in the window; the plan it comes to is said here as its tool call.
+    if (event._tag === 'Drafting') return ''
     switch (event._tag) {
       case 'SessionStarted':
         return line(`● ${event.agentId}${event.model === undefined ? '' : ` (${event.model})`} started.`)

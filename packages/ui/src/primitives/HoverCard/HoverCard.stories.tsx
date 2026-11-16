@@ -46,7 +46,6 @@ export const Default: Story = {
     await waitFor(() => expect(within(document.body).queryByRole('tooltip')).toBeNull())
   },
 }
-export const Open: Story = { args: { defaultOpen: true } }
 export const Below: Story = {
   args: { defaultOpen: true, placement: 'below' },
   decorators: [
@@ -65,7 +64,9 @@ export const Citation: Story = {
     defaultOpen: true,
     card: (
       <>
-        <Code>src/refunds/router.ts</Code>
+        <span>
+          <Code>src/refunds/router.ts</Code>
+        </span>
         <span>Lines 88–121, read at the start of this step.</span>
       </>
     ),

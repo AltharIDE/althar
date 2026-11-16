@@ -48,3 +48,10 @@
   line-height: 1.55;
   color: var(--t-2);
 }
+
+/* Quit first where it is offered, Try again beside it */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

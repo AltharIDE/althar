@@ -1018,7 +1018,7 @@ describe('Jira Cloud', () => {
           'rejected',
           'Althar can’t change an issue’s cycle here: Jira’s sprints belong to its boards: Althar can’t set one yet',
         ])
-        assert.deepStrictEqual(said(yield* Effect.flip(tracker.update(issue(), { due: '2026-11-30', estimate: 3 }))), [
+        assert.deepStrictEqual(said(yield* Effect.flip(tracker.update(issue(), { due: '2025-11-30', estimate: 3 }))), [
           'rejected',
           'Althar can’t change an issue’s estimate here: Jira’s story points are a field each site names: Althar can’t set them yet',
         ])
@@ -1036,7 +1036,7 @@ describe('Jira Cloud', () => {
         ])
         yield* tracker.update(issue(), {
           description: 'Fails on **bootstrap**.',
-          due: '2026-11-30',
+          due: '2025-11-30',
           milestone: { id: '32100', name: '7.2.0' },
           components: [
             { id: '10220', name: 'hibernate-core' },
@@ -1061,7 +1061,7 @@ describe('Jira Cloud', () => {
                 },
               ],
             },
-            duedate: '2026-11-30',
+            duedate: '2025-11-30',
             components: [{ id: '10220' }, { id: '10221' }],
             parent: { key: 'HHH-20000' },
             issuetype: { id: '10003' },
@@ -1222,7 +1222,7 @@ describe('Jira Cloud', () => {
             { id: '10221', name: 'hibernate-envers' },
           ],
           parent: { id: '115000', ref: 'HHH-20000', key: 'HHH-20000' },
-          due: '2026-11-30',
+          due: '2025-11-30',
         },
       })
       // A type chosen needs no looking up.
@@ -1239,7 +1239,7 @@ describe('Jira Cloud', () => {
           fixVersions: [{ id: '32100' }],
           components: [{ id: '10220' }, { id: '10221' }],
           parent: { key: 'HHH-20000' },
-          duedate: '2026-11-30',
+          duedate: '2025-11-30',
         },
       })
     }),
@@ -1265,7 +1265,7 @@ describe('Jira Cloud', () => {
                 fields: { summary: 'Bootstrap fails for composite ids', status: { name: 'Open' }, issuetype: { name: 'Bug' } },
               },
               issuetype: { id: '10002', name: 'Sub-task', subtask: true },
-              duedate: '2026-11-30',
+              duedate: '2025-11-30',
             }),
           },
         ],
@@ -1278,7 +1278,7 @@ describe('Jira Cloud', () => {
           ['hibernate-core'],
           { key: 'HHH-20000', title: 'Bootstrap fails for composite ids' },
           'Sub-task',
-          '2026-11-30',
+          '2025-11-30',
         ],
       )
     }),

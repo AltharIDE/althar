@@ -1,3 +1,4 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -22,11 +23,11 @@ const git = (cwd: string, ...args: Array<string>) =>
 const asGit = (path: string) => path.split(sep).join('/')
 
 /** A remote with `main`, a branch and a tag, the person's clone of it, and where the coordinator's copy goes. */
-const place = () => {
+const place = (format?: 'sha256') => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-copies-')))
   const remote = join(home, 'remote.git')
   const seed = join(home, 'seed')
-  git(home, 'init', '-q', '--bare', '-b', 'main', remote)
+  git(home, 'init', '-q', '--bare', '-b', 'main', ...(format === undefined ? [] : [`--object-format=${format}`]), remote)
   git(home, 'clone', '-q', remote, seed)
   writeFileSync(join(seed, 'README.md'), '# Meridian\n')
   git(seed, 'add', '.')
@@ -48,6 +49,101 @@ const place = () => {
 }
 
 describe("the coordinator's copies", () => {
+  it.effect('make SHA-256 copies with the repository’s object format, including the next refresh', () =>
+    Effect.gen(function* () {
+      const { person, copy } = place('sha256')
+      const before = git(person, 'rev-parse', 'HEAD')
+      assert.strictEqual(before.length, 64)
+      for (let refresh = 0; refresh < 2; refresh++) {
+        yield* freshCopy(person, copy, 'main')
+        assert.strictEqual(git(copy, 'rev-parse', '--show-object-format'), 'sha256')
+        assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), before)
+        assert.strictEqual(git(person, 'rev-parse', 'HEAD'), before)
+        assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+      }
+    }),
+  )
+
+  for (const marker of ['empty', 'missing record', 'person’s git folder'] as const)
+    it.effect(`rebuild a copy with a git marker naming ${marker} without touching the person’s repository`, () =>
+      Effect.gen(function* () {
+        const { person, copy } = place()
+        const before = git(person, 'rev-parse', 'HEAD')
+        mkdirSync(copy, { recursive: true })
+        writeFileSync(
+          join(copy, '.git'),
+          marker === 'empty'
+            ? ''
+            : `gitdir: ${asGit(marker === 'missing record' ? join(person, '.git', 'worktrees', 'missing') : join(person, '.git'))}\n`,
+        )
+        yield* freshCopy(person, copy, 'main')
+        assert.strictEqual(git(copy, 'rev-parse', '--path-format=absolute', '--git-common-dir'), asGit(join(copy, '.git')))
+        assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), before)
+        assert.strictEqual(git(person, 'rev-parse', 'HEAD'), before)
+        assert.strictEqual(readFileSync(join(person, 'README.md'), 'utf8'), '# Meridian\n')
+        assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+      }),
+    )
+
+  it.effect('return a typed failure when the copy’s parent is a file, and release the refresh lock for recovery', () =>
+    Effect.gen(function* () {
+      const { home, person } = place()
+      const obstruction = join(home, 'blocked')
+      const copy = join(obstruction, 'copy')
+      writeFileSync(obstruction, 'Keep this file.\n')
+      const before = git(person, 'rev-parse', 'HEAD')
+      const error = yield* Effect.flip(freshCopy(person, copy, 'main'))
+      assert.strictEqual(error._tag, 'GitFailed')
+      assert.strictEqual(error.cwd, copy)
+      assert.deepStrictEqual(error.args, ['init'])
+      assert.strictEqual(readFileSync(obstruction, 'utf8'), 'Keep this file.\n')
+      assert.strictEqual(git(person, 'rev-parse', 'HEAD'), before)
+      rmSync(obstruction)
+      yield* freshCopy(person, copy, 'main')
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), before)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+    }),
+  )
+
+  it.effect('return a typed failure when a mirror cannot borrow objects, and refresh after the obstruction is removed', () =>
+    Effect.gen(function* () {
+      const { home, person, copy } = place()
+      const mirror = join(home, 'mirror.git')
+      git(home, 'init', '-q', '--bare', mirror)
+      const obstruction = join(mirror, 'objects', 'info', 'alternates')
+      mkdirSync(obstruction)
+      const before = git(person, 'rev-parse', 'HEAD')
+      const error = yield* Effect.flip(freshCopy(person, copy, 'main', mirror))
+      assert.strictEqual(error._tag, 'GitFailed')
+      assert.strictEqual(error.cwd, mirror)
+      assert.deepStrictEqual(error.args, ['init'])
+      assert.isFalse(existsSync(copy))
+      assert.strictEqual(git(person, 'rev-parse', 'HEAD'), before)
+      assert.strictEqual(readFileSync(join(person, 'README.md'), 'utf8'), '# Meridian\n')
+      removeTreeSync(obstruction)
+      yield* freshCopy(person, copy, 'main', mirror)
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), before)
+      assert.strictEqual(git(copy, 'remote', 'get-url', 'origin'), mirror)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+    }),
+  )
+
+  it.effect('finish overlapping refreshes without removing another refresh’s git files', () =>
+    Effect.gen(function* () {
+      const { home, person, copy } = place()
+      const mirror = join(home, 'mirror.git')
+      yield* freshCopy(person, copy, 'main', mirror)
+      yield* Effect.all(
+        Array.from({ length: 3 }, () => freshCopy(person, copy, 'main', mirror)),
+        { concurrency: 'unbounded' },
+      )
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), git(person, 'rev-parse', 'main'))
+      assert.strictEqual(git(copy, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD')
+      assert.strictEqual(git(copy, 'remote', 'get-url', 'origin'), mirror)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+    }),
+  )
+
   it.effect('are repositories of their own: a tag or a fetch there writes only the copy, and brings what Althar fetched', () =>
     Effect.gen(function* () {
       const { person, copy } = place()
@@ -163,6 +259,27 @@ describe("the coordinator's copies", () => {
     }),
   )
 
+  it.effect('check out with the index the last copy ended with, kept beside the mirror, and without one git can’t read', () =>
+    Effect.gen(function* () {
+      const { home, person, copy } = place()
+      const mirrors = join(home, 'worktrees', 'meridian', '.coordinator-mirrors')
+      const mirror = join(mirrors, 'meridian.git')
+      const kept = join(mirrors, 'meridian.index')
+      yield* freshCopy(person, copy, 'main', mirror)
+      assert.isTrue(existsSync(kept))
+      // What was written in the copy since is put back.
+      writeFileSync(join(copy, 'README.md'), 'changed\n')
+      yield* freshCopy(person, copy, 'main', mirror)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+      // One it can't read: checked out without it, and the one kept after is one it can.
+      writeFileSync(kept, 'not an index')
+      yield* freshCopy(person, copy, 'main', mirror)
+      assert.strictEqual(readFileSync(join(copy, 'README.md'), 'utf8'), '# Meridian\n')
+      assert.strictEqual(git(copy, 'status', '--porcelain'), '')
+      assert.notStrictEqual(readFileSync(kept, 'utf8'), 'not an index')
+    }),
+  )
+
   it('may read git’s config files but never its credential store, which is in the same folder', () => {
     const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
     const projectFolder = join(home, 'worktrees', 'meridian')
@@ -194,8 +311,8 @@ describe("the coordinator's copies", () => {
     // Where XDG_CONFIG_HOME is set, outside the home folder, as git reads it.
     const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'althar-xdg-')))
     holds(join(elsewhere, 'git'), elsewhere)
-    rmSync(home, { recursive: true, force: true })
-    rmSync(elsewhere, { recursive: true, force: true })
+    removeTreeSync(home)
+    removeTreeSync(elsewhere)
   })
 
   it('denies the whole of the root and of an earlier one, outside home, with two projects, and gives back only the coordinator’s own folder', () => {

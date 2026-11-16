@@ -121,6 +121,9 @@ const LOCAL = /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|[\w-]+
 /** What a terminal shows, without its colours. */
 export const uncoloured = (text: string) => text.replace(COLOURS, '')
 
+/** What a command printed, to read: without its colours, and from its first whole line where only the end was kept. */
+export const readable = (printed: string) => uncoloured(printed.length < TAIL ? printed : printed.slice(printed.indexOf('\n') + 1))
+
 /**
  * Where a command serves, as its output says: the first address on this
  * machine it prints, as a browser opens it. A server that prints none,

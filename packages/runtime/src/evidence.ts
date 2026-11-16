@@ -46,6 +46,22 @@ export const EvidenceGiven = Schema.Struct({
 })
 export type EvidenceGiven = typeof EvidenceGiven.Type
 
+/** What a note's caption says where it says only that there was nothing to show: "Nothing to show", "No evidence to check". */
+const NOTHING_TO_SHOW =
+  /^(?:there (?:is|was|'s) )?(?:nothing|none|no evidence)\b[^.\n]{0,40}?\b(?:show|shown|check|checked|verify|verified|test|tested|evidence)\b/i
+
+/**
+ * A note that says only that there was nothing to show, as the lead's brief once asked for where nothing fits: blank, or
+ * captioned "Nothing to show" over a line of why. It shows nothing, so it isn't kept, and a step with nothing else draws no
+ * "What it checked". Every other note is kept, whatever its task changed.
+ */
+export const saysNothing = (given: EvidenceGiven) => {
+  if (given.kind !== 'note') return false
+  const caption = given.caption.trim()
+  const text = (given.text ?? '').trim()
+  return (caption === '' && text === '') || (NOTHING_TO_SHOW.test(caption) && text.length <= 280)
+}
+
 /** A piece of evidence as a step result keeps it. */
 export interface KeptEvidence {
   readonly kind: Kind

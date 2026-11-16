@@ -100,7 +100,7 @@ describe('issue drafts', () => {
         cycle: 'current',
         assignee: 'sam',
         estimate: 3,
-        due: '2026-11-30',
+        due: '2025-11-30',
         type: 'Bug',
       })
       assert.strictEqual(
@@ -115,7 +115,7 @@ describe('issue drafts', () => {
         { field: 'milestone', to: 'Beta' },
         { field: 'cycle', to: 'Cycle 12' },
         { field: 'estimate', to: '3' },
-        { field: 'due', to: '2026-11-30' },
+        { field: 'due', to: '2025-11-30' },
       ])
       // Linear takes them all as it files one: nothing is left for after.
       yield* (yield* IssueDrafts).file(card?.draftId ?? '', instance.personId)
@@ -129,7 +129,7 @@ describe('issue drafts', () => {
           estimate: filed.estimate,
           due: filed.due,
         },
-        { project: 'Q4 launch', milestone: 'Beta', cycle: 'Cycle 12', assignees: ['sam'], estimate: 3, due: '2026-11-30' },
+        { project: 'Q4 launch', milestone: 'Beta', cycle: 'Cycle 12', assignees: ['sam'], estimate: 3, due: '2025-11-30' },
       )
       assert.lengthOf(linear.issueChanges, 0)
     }).pipe(Effect.provide(withQueries({ linear })))
@@ -843,15 +843,8 @@ describe('issue drafts', () => {
         assert.includeMembers(reviewer, ['read_issue', 'find_issues'])
         assert.notInclude(reviewer, 'draft_issue')
 
-        // What the project says waits, less the calls open on it: what the lead's drafts add.
-        const waitingOnDrafts = Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [calls] = yield* sql<{
-            n: number
-          }>`SELECT count(*) AS n FROM attention_requests WHERE project_id = ${projectId} AND state = 'open'`
-          const shown = (yield* queries.projects).projects.find((one) => one.id === projectId)?.waiting ?? -1
-          return shown - (calls?.n ?? 0)
-        })
+        // What the project says waits on the person: the task, once, whatever waits of it.
+        const yours = Effect.map(queries.projects, (list) => list.projects.find((one) => one.id === projectId)?.yours ?? -1)
         assert.match(yield* callTool(lead, 'find_issues'), /^The person has no open issues/)
         const said = yield* callTool(lead, 'draft_issue', { title: 'Refunds skip the limiter', description: 'Found while here.' })
         assert.match(
@@ -873,7 +866,8 @@ describe('issue drafts', () => {
         assert.lengthOf(linear.created, 0)
         // The task waits on the person while drafts do, and the project counts it.
         assert.strictEqual((yield* queries.card(task.id)).phase, 'waiting')
-        assert.strictEqual(yield* waitingOnDrafts, 2)
+        assert.deepStrictEqual((yield* queries.card(task.id)).issues, { drafts: 2, changes: 0 })
+        yield* until(yours, (n) => n === 1)
 
         // The person files one, discards the other: the lead hears the key and link of the one filed.
         const [first, second] = cards
@@ -884,7 +878,8 @@ describe('issue drafts', () => {
         const sql = yield* SqlClient.SqlClient
         const [open] = yield* sql<{ n: number }>`SELECT count(*) AS n FROM attention_requests WHERE task_id = ${task.id} AND state = 'open'`
         if ((open?.n ?? 0) === 0) assert.notStrictEqual((yield* queries.card(task.id)).phase, 'waiting')
-        assert.strictEqual(yield* waitingOnDrafts, 0)
+        assert.isUndefined((yield* queries.card(task.id)).issues)
+        yield* until(yours, (n) => n === ((open?.n ?? 0) > 0 ? 1 : 0))
         const prompts = yield* until(
           turns(task.threadId),
           (all) =>

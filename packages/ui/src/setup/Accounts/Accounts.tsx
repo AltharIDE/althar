@@ -296,7 +296,14 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
               {account.providers.map((provider) =>
                 provider.refused === true ? (
                   onSignIn && !busy ? (
-                    <ActionButton key={provider.name} tone="strong" size="small" flush="end" onClick={() => onSignIn(account.id)}>
+                    <ActionButton
+                      key={provider.name}
+                      tone="strong"
+                      size="small"
+                      flush="start"
+                      className={s.endAction}
+                      onClick={() => onSignIn(account.id)}
+                    >
                       {t.providerSignIn(provider.name)}
                     </ActionButton>
                   ) : (
@@ -330,7 +337,7 @@ function Row({ account, number, first, last, busy, t, onSignIn, onRename, onMove
         )
       case 'signedOut':
         return onSignIn && !busy ? (
-          <ActionButton tone="strong" size="small" flush="end" onClick={() => onSignIn(account.id)}>
+          <ActionButton tone="strong" size="small" flush="start" className={s.endAction} onClick={() => onSignIn(account.id)}>
             {t.signIn}
           </ActionButton>
         ) : (

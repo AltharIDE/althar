@@ -62,12 +62,11 @@
   text-overflow: ellipsis;
   color: var(--t-2);
 }
-.note {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* how long it took stays whole: the outcome gives way first */
+.took {
+  flex: none;
   color: var(--t-3);
+  font-variant-numeric: tabular-nums;
 }
 .why {
   font-size: 12px;

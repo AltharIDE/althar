@@ -1,4 +1,5 @@
 import {
+  AccountStrategy,
   AtOnceCount,
   CommandRule,
   FolderWait,
@@ -42,6 +43,7 @@ import { Permissions } from './Permissions'
 import { newProjectDefaultsOf, plansAndReviewsOf, setNewProjectDefaults, setPlansAndReviews } from './plansAndReviews'
 import {
   accountsOf,
+  accountStrategyOf,
   allowsEverything,
   modeOf,
   movesIssues,
@@ -60,7 +62,7 @@ import { projectTracker } from './projectTracker'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import { reviewSeal, setReviewSeal, setReviewSealStyle } from './pullRequestReview'
 import { fact, timestamp } from './records'
-import { postTeamReviews, setPostTeamReviews } from './Reviews'
+import { postTeamReviews, sendMidTurn, setPostTeamReviews, setSendMidTurn } from './Reviews'
 import { applyRules, type RulesSent } from './rulesChange'
 import { workedOutReach } from './sandboxReach'
 import { listSkills } from './Skills'
@@ -296,6 +298,7 @@ export class SettingsTools extends Context.Service<
               leadsReachWeb: rules.leadsReachWeb ?? true,
               usageLimit: usageLimitOf(rules),
               rotateAccounts: accounts.rotate,
+              accountStrategy: accountStrategyOf(rules),
               onlyAccounts: accounts.only ?? null,
               end: rules.end ?? null,
               repositoryFiles: repositoryFilesOf(rules),
@@ -320,6 +323,7 @@ export class SettingsTools extends Context.Service<
         'leadsReachWeb',
         'usageLimit',
         'rotateAccounts',
+        'accountStrategy',
         'onlyAccounts',
         'end',
         'repositoryFiles',
@@ -468,6 +472,7 @@ export class SettingsTools extends Context.Service<
             ),
             usageLimit: field('At an agent’s usage limit', 'move (to another), wait, or ask', UsageLimit),
             rotateAccounts: field('Move to an agent’s next account', SWITCH, Schema.Boolean),
+            accountStrategy: field('Account strategy', 'first, most_room, least_room, random, or in_order', AccountStrategy),
             onlyAccounts: field(
               'Accounts its work runs on',
               'by agent id, the account ids it may use, or null for every account',
@@ -512,6 +517,7 @@ export class SettingsTools extends Context.Service<
                   'worksIn',
                   'usageLimit',
                   'rotateAccounts',
+                  'accountStrategy',
                   'onlyAccounts',
                   'branchPattern',
                   'titlePattern',
@@ -547,6 +553,7 @@ export class SettingsTools extends Context.Service<
                 'worksIn',
                 'usageLimit',
                 'rotateAccounts',
+                'accountStrategy',
                 'onlyAccounts',
                 'branchPattern',
                 'titlePattern',
@@ -804,11 +811,16 @@ export class SettingsTools extends Context.Service<
           id: 'althar/tasks',
           title: 'Tasks',
           scope: 'althar',
-          note: 'How every task goes (the first three), and what the rules of a new project start with (the rest): changing one of those leaves the projects there already as they are; a project’s own is project/tasks. Allow everything is the default for every project.',
+          note: 'How every task goes (the first four), and what the rules of a new project start with (the rest): changing one of those leaves the projects there already as they are; a project’s own is project/tasks. Allow everything is the default for every project.',
           fields: {
             countdown: field('Plan countdown', 'seconds: 0, 10, 25 or 60', PlansAndReviews.fields.countdown),
             rounds: field('Review rounds', '1, 2, 3 or 5', PlansAndReviews.fields.rounds),
             roundsOut: field('When rounds run out', 'settled (go on once findings are settled) or ask', PlansAndReviews.fields.roundsOut),
+            sendMidTurn: field(
+              'What sending does while an agent is mid-turn',
+              'queue (it waits for the turn to end) or steer (it goes to the agent at once)',
+              Schema.Literals(['queue', 'steer']),
+            ),
             end: field('New projects: when a task is done', 'draft, ready or none', NewProjectDefaults.fields.end),
             pushCommits: field('New projects: push the lead’s commits automatically', SWITCH, NewProjectDefaults.fields.pushCommits),
             postScreenshots: field(
@@ -829,14 +841,16 @@ export class SettingsTools extends Context.Service<
             ),
             usageLimit: field('New projects: at an agent’s usage limit', 'move, wait or ask', NewProjectDefaults.fields.usageLimit),
             rotateAccounts: field('New projects: try an agent’s other accounts first', SWITCH, NewProjectDefaults.fields.rotateAccounts),
+            accountStrategy: field('New projects: account strategy', 'first, most_room, least_room, random, or in_order', AccountStrategy),
           },
           read: () =>
             Effect.gen(function* () {
-              return { ...(yield* plansAndReviewsOf), ...(yield* newProjectDefaultsOf) }
+              return { ...(yield* plansAndReviewsOf), sendMidTurn: yield* sendMidTurn, ...(yield* newProjectDefaultsOf) }
             }),
           write: (_projectId, change) =>
             Effect.gen(function* () {
-              const { countdown, rounds, roundsOut, ...defaults } = change
+              const { countdown, rounds, roundsOut, sendMidTurn: sending, ...defaults } = change
+              if (sending !== undefined) yield* setSendMidTurn(sending as 'queue' | 'steer')
               const plans = Object.fromEntries(Object.entries({ countdown, rounds, roundsOut }).filter(([, value]) => value !== undefined))
               if (Object.keys(plans).length > 0) yield* setPlansAndReviews(plans as Partial<typeof PlansAndReviews.Type>)
               if (Object.keys(defaults).length > 0) yield* setNewProjectDefaults(defaults as Partial<typeof NewProjectDefaults.Type>)
@@ -1391,6 +1405,9 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   setDefaultEffort: 'althar/agents.efforts',
   setModelBlocked: 'althar/agents.turnedOff',
   installAgent: 'person: installing an agent on this computer',
+  saveAcpConnection: 'person: choosing an executable and the agent account it runs on',
+  startAcpCheck: 'person: starting an agent and sending prompts on its own account',
+  removeAcpConnection: 'person: removing an agent connection from this computer',
   addAccount: 'person: an agent’s accounts and their sign-ins',
   startAccountSignIn: 'person: an agent’s accounts and their sign-ins',
   signInAccount: 'person: an agent’s accounts and their sign-ins',
@@ -1419,6 +1436,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   // althar/tasks, althar/pull-requests
   setPlansAndReviews: 'althar/tasks.countdown',
   setNewProjectDefaults: 'althar/tasks.end',
+  setSendMidTurn: 'althar/tasks.sendMidTurn',
   setPostTeamReviews: 'althar/pull-requests.postTeamReviews',
   setCoAuthor: 'althar/pull-requests.coAuthor',
   setReviewSeal: 'althar/pull-requests.reviewSeal',

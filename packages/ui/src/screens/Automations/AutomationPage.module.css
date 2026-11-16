@@ -119,8 +119,6 @@
 
 .error {
   margin: 16px 0 0;
-  font-size: 12.5px;
-  color: var(--danger);
 }
 
 /* ——— What waits on you ——— */
@@ -254,7 +252,7 @@ button.run {
 }
 
 button.run:hover {
-  background: var(--n-2);
+  background: var(--hover-paper);
 }
 
 button.run:focus-visible {

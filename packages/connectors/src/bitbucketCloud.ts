@@ -6,8 +6,9 @@ import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { tail } from './github'
 import { CloudParticipants, CloudRestrictions, cloudRulesOf } from './bitbucketRules'
-import { makeHttp } from './http'
+import { makeHttp, paged, withoutTrailingSlashes } from './http'
 import { makeBitbucketCloudReleases } from './bitbucketCloudReleases'
+import { postHostReview } from './hostReviews'
 import type {
   Account,
   Activity,
@@ -19,6 +20,7 @@ import type {
   CodeHost,
   Comment,
   ListedChange,
+  ListedRepository,
   MergeHow,
   MergeMethod,
   Person,
@@ -26,7 +28,7 @@ import type {
   Review,
   Verdict,
 } from './model'
-import { branchPath, lacking, noReopen, noReviews, stillOpen } from './model'
+import { branchPath, lacking, noReopen, stillOpen } from './model'
 import {
   type Answer,
   answered,
@@ -71,6 +73,36 @@ const RepositoryAnswer = Schema.Struct({
   links: Schema.Struct({ html: Schema.Struct({ href: Schema.String }) }),
 })
 
+/** A repository the account can reach, as a list of them says it, for choosing one to clone. Bitbucket archives none. */
+const ReachedRepository = Schema.Struct({
+  full_name: Schema.String,
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  is_private: Schema.Boolean,
+  updated_on: Schema.optional(Schema.NullOr(Schema.String)),
+  links: Schema.Struct({ html: Schema.Struct({ href: Schema.String }) }),
+})
+
+/** A workspace the account is a member of: its own, or a team's. */
+const WorkspaceAccess = Schema.Struct({ workspace: Schema.Struct({ slug: Schema.String, name: Schema.String }) })
+
+/**
+ * The slug Bitbucket makes a repository's name into, as its own form does:
+ * lower case, each run of anything but letters, digits, `.`, `_` and `-`
+ * one dash, and none at either end. Bitbucket takes the slug in the address
+ * it is made at, so it is made here.
+ */
+export const slugOf = (name: string): string => {
+  const dashed = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+  let start = 0
+  let end = dashed.length
+  while (start < end && dashed[start] === '-') start++
+  while (end > start && dashed[end - 1] === '-') end--
+  return dashed.slice(start, end)
+}
+
 const Permissions = Schema.Struct({
   values: Schema.Array(Schema.Struct({ permission: Schema.String, repository: Schema.Struct({ full_name: Schema.String }) })),
 })
@@ -82,6 +114,7 @@ const Strategies = Schema.Struct({
 })
 
 const PullAnswer = Schema.Struct({
+  merge_commit: Schema.optional(Schema.NullOr(Schema.Struct({ hash: Schema.String }))),
   id: Schema.Number,
   title: Schema.String,
   description: Schema.optional(Schema.NullOr(Schema.String)),
@@ -94,7 +127,10 @@ const PullAnswer = Schema.Struct({
     // The repository the branch is on: a fork's, for a branch from one; null where the fork is gone.
     repository: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
   }),
-  destination: Schema.Struct({ branch: Schema.Struct({ name: Schema.String }) }),
+  destination: Schema.Struct({
+    branch: Schema.Struct({ name: Schema.String }),
+    commit: Schema.optional(Schema.Struct({ hash: Schema.String })),
+  }),
   author: Schema.optional(Schema.NullOr(User)),
   reviewers: Schema.optional(Schema.Array(User)),
   // Who took part, and how each left it: given in a list only when asked for.
@@ -263,6 +299,7 @@ const changeOf = (repository: Repository, pull: PullAnswer, size: Size | null = 
   source: pull.source.branch.name,
   target: pull.destination.branch.name,
   headSha: pull.source.commit?.hash ?? null,
+  ...(pull.state === 'MERGED' && pull.merge_commit != null ? { mergeCommit: pull.merge_commit.hash } : {}),
   author: pull.author == null ? null : personOf(pull.author),
   // Bitbucket counts lines only file by file, in the diff's stat, which only reading one pull request asks for.
   additions: size?.additions ?? null,
@@ -312,15 +349,15 @@ const listedOf = (repository: Repository, pull: PullAnswer): ListedChange => {
 
 /** Where a commit status points at a Pipelines run of this repository: its build number. */
 const pipelineOf = (repository: Repository, url: string | null | undefined) => {
-  const home = repository.webUrl.replace(/\/+$/, '').toLowerCase()
+  const home = withoutTrailingSlashes(repository.webUrl).toLowerCase()
   if (url == null || !url.toLowerCase().startsWith(`${home}/`)) return undefined
   return /^\/(?:pipelines\/results|addon\/pipelines\/home#!\/results)\/(\d+)/.exec(url.slice(home.length))?.[1]
 }
 
 export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   const product = 'bitbucket_cloud' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
-  const web = options.webUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
+  const web = withoutTrailingSlashes(options.webUrl)
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
   const repo = (path: ReadonlyArray<string>) => `${api}/repositories/${path.map(encodeURIComponent).join('/')}`
   const pull = (repository: Repository, number: number) => `${repo(repository.path)}/pullrequests/${number}`
@@ -419,6 +456,17 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       }
       return found
     })
+
+  /** Every page of a list asked anew, by its `next`, as far as `paged` follows. */
+  const pages = <A>(item: Schema.Codec<A, unknown>, first: string) =>
+    paged(first, (url) =>
+      Effect.map(http.json(Page(item), 'GET', url), (answer) => ({ items: answer.values, next: onApi(answer.next) ?? undefined })),
+    )
+
+  /** The workspaces the account is a member of: Bitbucket lists them for it alone, since the list of every workspace went. */
+  const workspaces = Effect.map(pages(WorkspaceAccess, `${api}/user/workspaces?pagelen=100`), (found) =>
+    found.map((access) => access.workspace),
+  )
 
   const findChange = (repository: Repository, source: string, from?: Repository) =>
     Effect.map(
@@ -534,7 +582,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false, pictures: false, reopen: false, rerun: true },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, pictures: false, reopen: false, rerun: true },
     ...makeBitbucketCloudReleases({ http, repo }),
     account,
     repository: (path) =>
@@ -815,10 +863,92 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(comment, reply.threadId ?? String(comment.id), true),
       ),
-    // Reviews of a change Althar didn't open are GitHub's alone, for now.
-    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
-    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    changeToReview: (repository, number) =>
+      Effect.gen(function* () {
+        const one = yield* http.json(PullAnswer, 'GET', pull(repository, number))
+        const source = one.source.repository?.full_name
+        return {
+          ...changeOf(repository, one),
+          fork: source === undefined || source === repository.path.join('/') ? null : source.split('/'),
+          baseSha: one.destination.commit?.hash ?? null,
+          member: source === undefined || one.author?.uuid === undefined ? false : yield* memberOf(repository, one.author.uuid),
+        }
+      }),
+    postReview: (repository, number, review) => postHostReview(product, http, pull(repository, number), review, account),
     pushTarget,
+    /*
+     * Each workspace's repositories the account is a member of, all of them
+     * last updated first: Bitbucket keeps no time of the last push, and lists
+     * them a workspace at a time, since its list across workspaces went.
+     */
+    repositories: () =>
+      Effect.gen(function* () {
+        const found = yield* Effect.forEach(
+          yield* workspaces,
+          (workspace) =>
+            pages(ReachedRepository, `${api}/repositories/${encodeURIComponent(workspace.slug)}?role=member&sort=-updated_on&pagelen=100`),
+          { concurrency: 4 },
+        )
+        return found
+          .flat()
+          .map((one): ListedRepository => ({
+            path: one.full_name.split('/'),
+            description: one.description == null || one.description === '' ? null : one.description,
+            private: one.is_private,
+            pushedAt: one.updated_on ?? null,
+            webUrl: one.links.html.href,
+            archived: false,
+          }))
+          .toSorted((a, b) => (b.pushedAt ?? '').localeCompare(a.pushedAt ?? ''))
+      }),
+    // Every workspace the account is a member of, its own among them: Bitbucket keeps no repository outside one.
+    owners: () =>
+      Effect.map(workspaces, (found) =>
+        found.map((workspace) => ({ id: workspace.slug, name: workspace.name, kind: 'workspace' as const })),
+      ),
+    /*
+     * Empty: no README, so the project's own first commit is pushed as it is.
+     * Bitbucket puts it in the workspace's oldest project, as none is named.
+     */
+    createRepository: (made) =>
+      Effect.gen(function* () {
+        const slug = slugOf(made.name)
+        if (slug === '' || slug === '.' || slug === '..')
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'rejected',
+            message: `“${made.name}” has no letters or digits for Bitbucket to make the repository’s slug of`,
+          })
+        const answer = yield* http
+          .json(RepositoryAnswer, 'POST', repo([made.owner.id, slug]), {
+            scm: 'git',
+            name: made.name,
+            is_private: made.private,
+            ...(made.description === undefined || made.description === '' ? {} : { description: made.description }),
+          })
+          .pipe(
+            // A workspace Bitbucket hides from the account is one it may not make a repository in.
+            Effect.mapError((error) =>
+              error.reason === 'not_found'
+                ? new ConnectorFailed({
+                    product,
+                    reason: 'forbidden',
+                    ...(error.status === undefined ? {} : { status: error.status }),
+                    message: `The account may not make a repository in ${made.owner.name}`,
+                  })
+                : error,
+            ),
+          )
+        // As `repository` reads an empty one: no main branch yet, so no branch's strategies either. The account made it, so may push to it.
+        return {
+          id: answer.uuid,
+          path: answer.full_name.split('/'),
+          defaultBranch: answer.mainbranch?.name ?? 'main',
+          webUrl: answer.links.html.href,
+          canPush: true,
+          merges: mergesOf([]),
+        } satisfies Repository
+      }),
   }
 }
 
@@ -854,7 +984,7 @@ interface Found {
 
 export const accessBitbucketCloud: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
     const ask = (url: string) => probe(input, url)
     const repo = (path: ReadonlyArray<string>) => `${api}/repositories/${path.map(encodeURIComponent).join('/')}`
     /** The scopes the token was given, once a refusal says. */

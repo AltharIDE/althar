@@ -3,8 +3,7 @@ import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 
 /*
  * Auto moving a task's lead to a lighter model, in its thread (README
- * section 7): from and to which model, how much of the plan is used and when
- * it resets, and the way back for this task. Its words after the line are the
+ * section 7): from and to which model, and the way back for this task. Its words after the line are the
  * new model's; once the person keeps the heavier one, one line says so, with
  * Undo.
  */
@@ -17,10 +16,9 @@ export interface ModelMoveText {
 }
 
 export const modelMoveText: ModelMoveText = {
-  moved: (to, percent, plan, window, until) =>
-    `Moved to ${to}: your ${plan} plan is at ${percent}% for ${window}${until === '' ? '' : `, until ${until}`}.`,
+  moved: (to) => `Moved to ${to}.`,
   keep: (from) => `Keep ${from}`,
-  back: (from) => `Back on ${from} for this task.`,
+  back: (from) => `${from} from the next turn.`,
   undo: 'Undo',
 }
 

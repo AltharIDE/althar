@@ -69,30 +69,31 @@ export function NoteForm({ onSubmit, onCancel, defaultValue = '', pending = fals
         onCancel()
       }}
     >
-      <Field
-        ref={field}
-        className={s.field}
-        value={draft}
-        aria-label={t.placeholder}
-        placeholder={t.placeholder}
-        invalid={missing}
-        aria-describedby={missing ? errorId : undefined}
-        onChange={(e) => {
-          setDraft(e.target.value)
-          if (e.target.value.trim()) setMissing(false)
-        }}
-      />
-      <Button variant="quiet" onClick={onCancel}>
-        {t.cancel}
-      </Button>
-      <Button type="submit" busy={pending}>
-        {t.submit}
-      </Button>
-      {missing && (
-        <span className={s.error}>
-          <FieldError id={errorId}>{t.empty}</FieldError>
-        </span>
-      )}
+      {/* what is missing says so under the field, so the buttons beside it stay put */}
+      <span className={s.entry}>
+        <Field
+          ref={field}
+          value={draft}
+          aria-label={t.placeholder}
+          placeholder={t.placeholder}
+          invalid={missing}
+          aria-describedby={missing ? errorId : undefined}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            if (e.target.value.trim()) setMissing(false)
+          }}
+        />
+        {missing && <FieldError id={errorId}>{t.empty}</FieldError>}
+      </span>
+      {/* the two buttons go together: where the line is short they move under the field as a pair, at its end */}
+      <span className={s.actions}>
+        <Button variant="quiet" onClick={onCancel}>
+          {t.cancel}
+        </Button>
+        <Button type="submit" busy={pending}>
+          {t.submit}
+        </Button>
+      </span>
     </form>
   )
 }

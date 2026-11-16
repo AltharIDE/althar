@@ -14,6 +14,13 @@ import type { Product } from './model'
 /** `fetch`, or a stand-in for it in tests. */
 export type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 
+/** Trim a URL's trailing separators in linear time, including on untrusted input. */
+export const withoutTrailingSlashes = (value: string): string => {
+  let end = value.length
+  while (end > 0 && value[end - 1] === '/') end--
+  return value.slice(0, end)
+}
+
 export interface HttpOptions {
   readonly product: Product
   readonly fetch: Fetch
@@ -63,6 +70,12 @@ export const allowanceHeaders = (headers: Headers, now: number): Omit<Allowance,
 }
 
 export interface Http {
+  /** One bounded JSON response, without following redirects with the connection's credential. */
+  request(
+    method: string,
+    url: string,
+    body?: unknown,
+  ): Effect.Effect<{ readonly status: number; readonly headers: Headers; readonly body: unknown }, ConnectorFailed>
   /** What the service has let this connection ask of it so far. */
   allowance(): Allowance
   /** A JSON call, its answer read by `schema`. */
@@ -163,15 +176,32 @@ const wordsOf = (said: unknown): string => {
 /** Bitbucket Cloud's error: a message, and what it is about, in words or, for missing scopes, as data. */
 const NestedError = Schema.Struct({ message: Schema.String, detail: Schema.optional(Schema.Unknown) })
 
+/** Host errors are text, including HTML embedded inside a JSON message. Remove markup before decoding escaped text. */
+export const plainError = (value: string): string =>
+  value
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>|<style\b[^>]*>[\s\S]*?<\/style[^>]*>/gi, ' ')
+    .replace(/<\/?[a-z][a-z0-9-]*(?:\s[^<>]*|\s*\/?)>/gi, ' ')
+    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (_, code: string) => {
+      const n = code[0]?.toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : Number(code)
+      return n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : ''
+    })
+    .replace(
+      /&(lt|gt|amp|quot|apos|nbsp);/gi,
+      (_, name: string) => ({ lt: '<', gt: '>', amp: '&', quot: '"', apos: "'", nbsp: ' ' })[name.toLowerCase()] ?? '',
+    )
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MESSAGE_KEPT)
+
 /** What a service said went wrong, from its JSON body or a line of plain words (Trello's), or the status's own words. */
-export const messageOf = (body: string, fallback: string): string => {
+const rawMessageOf = (body: string, fallback: string): string => {
   let json: unknown
   try {
     json = JSON.parse(body)
   } catch {
     // Not JSON: a line of plain words is the service's own; a page, or nothing, and the status says it.
     const said = body.trim()
-    return said !== '' && !said.startsWith('<') && !said.includes('\n') ? said.slice(0, MESSAGE_KEPT) : fallback
+    return said !== '' && !said.startsWith('<') && !said.includes('\n') ? said : fallback
   }
   // JSON of another shape says nothing Althar can read: the status says it.
   const parsed = Option.getOrUndefined(Schema.decodeUnknownOption(ErrorBody)(json))
@@ -184,15 +214,17 @@ export const messageOf = (body: string, fallback: string): string => {
         ? first.message
         : undefined
   const said = [wordsOf(parsed.message), detail].filter((part) => part !== undefined && part !== '').join(': ')
-  if (said !== '') return said.slice(0, MESSAGE_KEPT)
-  if (parsed.error_description !== undefined) return parsed.error_description.slice(0, MESSAGE_KEPT)
-  if (typeof parsed.error === 'string') return parsed.error.slice(0, MESSAGE_KEPT)
+  if (said !== '') return said
+  if (parsed.error_description !== undefined) return parsed.error_description
+  if (typeof parsed.error === 'string') return parsed.error
   const nested = Option.getOrUndefined(Schema.decodeUnknownOption(NestedError)(parsed.error))
   const words = [nested?.message, typeof nested?.detail === 'string' ? nested.detail : '']
     .filter((part) => part !== undefined && part !== '')
     .join(': ')
-  return words === '' ? fallback : words.slice(0, MESSAGE_KEPT)
+  return words === '' ? fallback : words
 }
+
+export const messageOf = (body: string, fallback: string): string => plainError(rawMessageOf(body, fallback)) || plainError(fallback)
 
 /** When a rate-limited call may be tried again, from whichever header the service sends. */
 const retryAtOf = (headers: Headers, now: number): string | undefined => {
@@ -233,17 +265,26 @@ export const failureOf = (
           : status >= 500
             ? 'unreachable'
             : 'rejected'
-  return new ConnectorFailed({ product, reason, status, message })
+  const size =
+    /(?:less than|max(?:imum)?(?: allowed)?(?: attachment| file)? ?size(?: is|:)?\s*|exceeds?(?: the)?(?: maximum)?(?: attachment)?(?: size)?(?: of)?)\s*(\d+(?:\.\d+)?)\s*(MiB|MB|KiB|KB)/i.exec(
+      message,
+    )
+  const uploadLimit =
+    size === null
+      ? undefined
+      : Number(size[1]) *
+        (/^m/i.test(size[2] ?? '') ? (/i/i.test(size[2] ?? '') ? 1024 * 1024 : 1_000_000) : /i/i.test(size[2] ?? '') ? 1024 : 1000)
+  return new ConnectorFailed({ product, reason, status, message, ...(uploadLimit === undefined ? {} : { uploadLimit }) })
 }
 
-const GraphqlError = Schema.Struct({
+export const GraphqlError = Schema.Struct({
   message: Schema.String,
   type: Schema.optional(Schema.String),
   extensions: Schema.optional(Schema.Struct({ code: Schema.optional(Schema.String), type: Schema.optional(Schema.String) })),
 })
 
 /** Classifies a GraphQL `errors` entry: GitHub names a `type`, Linear an extension code. */
-const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, status: number): ConnectorFailed => {
+export const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, status: number): ConnectorFailed => {
   const code = (error.type ?? error.extensions?.code ?? error.extensions?.type ?? '').toUpperCase()
   // The service failing as it worked on it (a 5xx, an internal error) is no refusal: a mutation may have gone through.
   const reason =
@@ -258,7 +299,7 @@ const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, statu
             : /NOT_FOUND|ENTITY_NOT_FOUND/.test(code)
               ? 'not_found'
               : 'rejected'
-  return new ConnectorFailed({ product, reason, message: error.message.slice(0, MESSAGE_KEPT) })
+  return new ConnectorFailed({ product, reason, message: plainError(error.message) || 'The service refused the request' })
 }
 
 class ResponseTooLarge extends Error {
@@ -467,15 +508,42 @@ export const makeHttp = (options: HttpOptions): Http => {
 
   return {
     allowance: () => allowance,
+    request: (method, url, body) =>
+      Effect.gen(function* () {
+        const answer = yield* call(method, url, { body, manual: true, maxBytes: 4 * 1024 * 1024 }).pipe(
+          Effect.flatMap(success),
+          Effect.mapError((error) =>
+            error.sizeLimit !== undefined && method !== 'GET' && method !== 'HEAD'
+              ? new ConnectorFailed({
+                  product,
+                  reason: 'invalid_response',
+                  message: 'The write’s response exceeded its size cap; its outcome is uncertain.',
+                  sizeLimit: error.sizeLimit,
+                })
+              : error,
+          ),
+        )
+        return { status: answer.status, headers: answer.headers, body: yield* decode(Schema.Unknown, answer.body) }
+      }),
     json: (schema, method, url, body) =>
       call(method, url, { body }).pipe(
         Effect.flatMap(success),
         Effect.flatMap((answer) => decode(schema, answer.body)),
       ),
     upload: (schema, url, bytes, mediaType) =>
-      call('POST', url, { raw: { bytes, type: mediaType } }).pipe(
+      call('POST', url, { raw: { bytes, type: mediaType }, manual: true }).pipe(
         Effect.flatMap(success),
         Effect.flatMap((answer) => decode(schema, answer.body)),
+        Effect.mapError((error) =>
+          error.sizeLimit === undefined
+            ? error
+            : new ConnectorFailed({
+                product,
+                reason: 'invalid_response',
+                message: 'The upload response exceeded its size cap; its outcome is uncertain.',
+                sizeLimit: error.sizeLimit,
+              }),
+        ),
       ),
     cached: (schema, url) =>
       Effect.gen(function* () {

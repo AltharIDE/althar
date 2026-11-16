@@ -6,6 +6,7 @@ import type { RootProps } from '../../lib/props'
 import { AskAnswered, AskCard, AskFoot } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
 import { Field, FieldError } from '../../primitives/Field/Field'
+import { Problem } from '../../primitives/Problem/Problem'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './Question.module.css'
 import { focusQuietly, revealInScroller } from '../../lib/focusQuietly'
@@ -445,9 +446,9 @@ export function Question({
             {t.answer}
           </Button>
           {error && (
-            <span className={s.error} role="alert">
+            <Problem as="span" size="small">
               {error}
-            </span>
+            </Problem>
           )}
         </AskFoot>
       </form>

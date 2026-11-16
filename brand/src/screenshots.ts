@@ -66,28 +66,32 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   },
   {
     file: 'canvas',
-    bar: true,
-    story: 'thread-taskface--with-a-canvas',
+    story: 'screens-windows--task-with-a-canvas',
     width: 1440,
     height: 900,
     shows: 'A task with its canvas beside it: the launch page its lead drew, at the version that answers a comment',
   },
   {
     file: 'browser',
-    bar: true,
-    story: 'thread-taskface--with-the-browser',
+    story: 'screens-windows--task-with-the-browser',
     width: 1440,
     height: 900,
     shows: 'A task with the browser beside it: the page its run serves, and the lead trying the fix on it',
   },
   {
     file: 'automations',
-    bar: true,
-    story: 'screens-automations--a-good-morning',
+    story: 'screens-windows--project-automations',
     /* Small, so the cards fill it. */
-    width: 900,
-    height: 690,
-    shows: 'Automations: work that starts itself, on a schedule, and how each has run',
+    width: 1280,
+    height: 860,
+    shows: "A project's automations: work that starts itself, on a schedule, and how each has run",
+  },
+  {
+    file: 'review-code',
+    story: 'screens-windows--review-in-the-code',
+    width: 1440,
+    height: 900,
+    shows: "A review's findings in the code, over the task: the files they name, worst first, each finding under its line",
   },
   {
     file: 'plan',
@@ -99,11 +103,11 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   },
   {
     file: 'graph',
-    story: 'thread-stepgraph--round-until-clean',
-    width: 1360,
-    height: 900,
+    story: 'screens-windows--task-as-a-graph',
+    /* Short, as the graph's lanes are: a window of it, without the empty ground below them. */
+    width: 1440,
+    height: 600,
     shows: 'A task as a graph: a lane for each agent, and a card for each step, round until the review passes',
-    crop: true,
   },
   {
     file: 'dictation',
@@ -124,5 +128,6 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   },
 ]
 
-/** Where a story is shown, on a Storybook served at `origin`. */
-export const storyUrl = (origin: string, story: string): string => `${origin}/iframe.html?id=${story}&viewMode=story`
+/** Where a story is shown, on a Storybook served at `origin`, in the app's light unless `theme` says dark. */
+export const storyUrl = (origin: string, story: string, theme: 'light' | 'dark' = 'light'): string =>
+  `${origin}/iframe.html?id=${story}&viewMode=story${theme === 'dark' ? '&globals=theme:dark' : ''}`

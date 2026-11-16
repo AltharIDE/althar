@@ -1,0 +1,142 @@
+name: host-release
+
+# A separate tag/feed from the desktop. All assets remain in a draft until a
+# person publishes; this workflow never changes GitHub's desktop latest release.
+on:
+  push:
+    tags: ['host-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.what.outputs.version }}
+      tag: ${{ steps.what.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: what
+        name: Check version, main, release notes and completed validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(jq -r .version apps/host/package.json)"
+          tag="host-v$version"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo '::error::Only stable host versions may be released.'
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            test "$GITHUB_REF_NAME" = "$tag"
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          else
+            test "$GITHUB_REF" = refs/heads/main
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo '::error::This version is tagged already. Re-run its tag workflow or raise the version.'
+              exit 1
+            fi
+          fi
+          test -s "apps/host/release-notes/$version.md"
+          if gh release view "$tag" --json isDraft --jq .isDraft >/dev/null 2>&1; then
+            echo '::error::A release already exists for this version. Never replace signed assets; use a new version.'
+            exit 1
+          fi
+          for workflow in post-merge.yml host.yml; do
+            passed="$(gh run list --workflow "$workflow" --commit "$GITHUB_SHA" --status success --json databaseId --jq length)"
+            if [ "$passed" = 0 ]; then
+              echo "::error::$workflow has not passed on this exact commit. Complete validation before releasing."
+              exit 1
+            fi
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  bundle:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    environment: release
+    defaults:
+      run:
+        working-directory: apps/host
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
+      - run: bun run check
+      - run: bun run test --maxWorkers=1
+      - name: Assemble and sign the complete native Linux release
+        env:
+          ALTHAR_HOST_RELEASE_SIGNING_KEY: ${{ secrets.ALTHAR_HOST_RELEASE_SIGNING_KEY }}
+          RELEASE_BASE: https://github.com/${{ github.repository }}/releases/download/${{ needs.check.outputs.tag }}/
+          RELEASE_SEQUENCE: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ALTHAR_HOST_RELEASE_SIGNING_KEY" ]; then
+            echo '::error::The protected release environment needs ALTHAR_HOST_RELEASE_SIGNING_KEY (Ed25519 private PEM).'
+            exit 1
+          fi
+          node dist/althar-host.js package-release \
+            --release-base-url "$RELEASE_BASE" --release-sequence "$RELEASE_SEQUENCE" \
+            --output "$RUNNER_TEMP/host-release" --json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-release-${{ matrix.arch }}
+          path: ${{ runner.temp }}/host-release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    needs: [check, bundle]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: host-release-*
+          path: host-release
+          merge-multiple: true
+      - name: Create one draft with both architectures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.check.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          test "$(find host-release -type f | wc -l)" -eq 4
+          gh release create "$RELEASE_TAG" host-release/* --target "$GITHUB_SHA" \
+            --draft --latest=false --title "Althar host $RELEASE_VERSION" \
+            --notes-file "apps/host/release-notes/$RELEASE_VERSION.md"

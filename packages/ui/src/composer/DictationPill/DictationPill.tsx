@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { Icon } from '../../foundations/Icon/Icon'
 import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import s from './DictationPill.module.css'
 
@@ -72,8 +72,8 @@ export interface DictationPillProps {
   onStop?: () => void
   /** Throws away what is being heard. */
   onDiscard?: () => void
-  /** Goes back to the composer it was started in. */
-  onBack: () => void
+  /** Goes back to the composer it was started in; absent where it was started with none, from anywhere. */
+  onBack?: () => void
   /** Closes it, leaving what was written in its composer. */
   onKeep?: () => void
   onRetry?: () => void
@@ -81,6 +81,10 @@ export interface DictationPillProps {
   send?: { readonly label: string; readonly onSend: () => void; readonly busy?: boolean }
   /** Moves it into the composer on screen instead. */
   move?: { readonly label: string; readonly onMove: () => void }
+  /** Chooses where it goes, for what was said with no composer to say it to: a project, its coordinator, a task, an aside. */
+  place?: { readonly label: string; readonly onPlace: () => void }
+  /** Throws away what was written down, where it has no composer to stay in. */
+  onThrow?: () => void
   /** Why it didn't send. */
   error?: string | null
   /** The shortcut that stops it. */
@@ -116,6 +120,8 @@ export function DictationPill({
   onRetry,
   send,
   move,
+  place,
+  onThrow,
   error = null,
   kbd,
   text,
@@ -167,9 +173,11 @@ export function DictationPill({
       <header className={s.head}>
         {status}
         <span className={s.to}>{to}</span>
-        <Button size="small" variant="quiet" onClick={onBack}>
-          {t.back}
-        </Button>
+        {onBack && (
+          <Button size="small" variant="quiet" onClick={onBack}>
+            {t.back}
+          </Button>
+        )}
         {!settled && <IconButton icon="chevronD" size="small" label={t.close} onClick={() => setOpened(false)} />}
       </header>
       {phase === 'written' ? (
@@ -183,20 +191,13 @@ export function DictationPill({
           onChange={(event) => onChange?.(event.target.value)}
         />
       ) : phase === 'failed' ? (
-        <p className={s.failed}>
-          <Icon name="stop" size={12} />
-          {t.failed(said)}
-        </p>
+        <Problem>{t.failed(said)}</Problem>
       ) : (
         <div className={s.words} ref={end} aria-live="off">
           {words === '' ? <span className={s.faint}>{t.nothing}</span> : words}
         </div>
       )}
-      {error !== null && (
-        <p className={s.error} role="alert">
-          {error}
-        </p>
-      )}
+      {error !== null && <Problem size="small">{error}</Problem>}
       <footer className={s.foot}>
         {phase === 'failed' ? (
           <>
@@ -219,10 +220,20 @@ export function DictationPill({
                 {t.keep}
               </Button>
             )}
+            {onThrow && (
+              <Button size="small" variant="quiet" onClick={onThrow}>
+                {t.discard}
+              </Button>
+            )}
             <span className={s.grow} />
             {move && (
               <Button size="small" onClick={move.onMove}>
                 {move.label}
+              </Button>
+            )}
+            {place && (
+              <Button size="small" variant="ink" disabled={words.trim() === ''} onClick={place.onPlace}>
+                {place.label}
               </Button>
             )}
             {send && (
