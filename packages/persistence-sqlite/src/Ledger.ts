@@ -81,6 +81,16 @@ export class Ledger extends Context.Service<
       const grew = yield* PubSub.sliding<void>(1)
       const signal = PubSub.publish(grew, undefined)
 
+      /*
+       * A change on the feed, with its checkpoint made in the same statement:
+       * the trigger that would set one after it (0086) is left nothing to do,
+       * so a change costs one write, not a second to its row and index.
+       */
+      const feed = (change: ChangeInput, changedAt: string) =>
+        sql`INSERT INTO change_log (project_id, aggregate_type, aggregate_id, aggregate_revision, changed_at, checkpoint)
+          VALUES (${change.projectId ?? null}, ${change.aggregateType}, ${change.aggregateId}, ${change.aggregateRevision}, ${changedAt},
+            lower(hex(randomblob(16))))`
+
       const record = Effect.fn('Ledger.record')(function* (input: RecordEventInput) {
         const event = yield* Schema.decodeUnknownEffect(RecordEventInput)(input)
         const id = yield* Effect.provideService(newId(Ids.recordEvent), Crypto.Crypto, crypto)
@@ -100,26 +110,14 @@ export class Ledger extends Context.Service<
             occurredAt,
           })}
           RETURNING sequence`
-        yield* sql`INSERT INTO change_log ${sql.insert({
-          projectId: event.projectId ?? null,
-          aggregateType: event.aggregateType,
-          aggregateId: event.aggregateId,
-          aggregateRevision: event.aggregateRevision,
-          changedAt: occurredAt,
-        })}`
+        yield* feed(event, occurredAt)
         yield* signal
         return yield* Schema.decodeUnknownEffect(RecordedEvent)({ sequence: row?.sequence, id, occurredAt })
       }, sql.withTransaction)
 
       const notify = Effect.fn('Ledger.notify')(function* (input: ChangeInput) {
         const change = yield* Schema.decodeUnknownEffect(ChangeInput)(input)
-        yield* sql`INSERT INTO change_log ${sql.insert({
-          projectId: change.projectId ?? null,
-          aggregateType: change.aggregateType,
-          aggregateId: change.aggregateId,
-          aggregateRevision: change.aggregateRevision,
-          changedAt: yield* now,
-        })}`
+        yield* feed(change, yield* now)
         yield* signal
       })
 
