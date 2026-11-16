@@ -410,6 +410,32 @@ describe('a GraphQL call', () => {
     return { http: makeHttp({ product: 'linear', fetch, authorization: Effect.succeed('k') }), sent }
   }
 
+  it.effect('keeps a partial mutation response uncertain even when it contains a rate-limit error', () =>
+    Effect.gen(function* () {
+      const { http } = graphql({
+        json: { data: { issueCreate: { success: true } }, errors: [{ message: 'Slow down', extensions: { code: 'RATELIMITED' } }] },
+      })
+      const failed = failure(
+        yield* Effect.exit(http.graphql(Schema.Unknown, 'https://api.test/graphql', 'mutation { issueCreate { success } }')),
+      )
+      assert.strictEqual(failed?.reason, 'invalid_response')
+    }),
+  )
+
+  it.effect('preserves the reset supplied with a GraphQL rate-limit refusal', () =>
+    Effect.gen(function* () {
+      const { http } = graphql({
+        status: 429,
+        headers: { 'x-ratelimit-requests-reset': '1800000000000' },
+        json: { errors: [{ message: 'Slow down', extensions: { code: 'RATELIMITED' } }] },
+      })
+      const failed = failure(
+        yield* Effect.exit(http.graphql(Schema.Unknown, 'https://api.test/graphql', 'mutation { issueCreate { success } }')),
+      )
+      assert.strictEqual(failed?.retryAt, new Date(1800000000000).toISOString())
+    }),
+  )
+
   it.effect('sends its query and variables, and reads its data', () =>
     Effect.gen(function* () {
       const { http, sent } = graphql({ json: { data: { viewer: { name: 'a' } } } })

@@ -575,7 +575,25 @@ export const makeHttp = (options: HttpOptions): Http => {
           answer.body,
         ).pipe(Effect.catch(() => Effect.flatMap(success(answer), () => Effect.fail(invalid('The answer was not GraphQL')))))
         const first = envelope.errors?.[0]
-        if (first !== undefined) return yield* Effect.fail(graphqlFailure(product, first, answer.status))
+        if (first !== undefined) {
+          // A partial mutation may already have performed its write. Never describe it as a refusal.
+          if (envelope.data != null && /\bmutation\b/.test(query))
+            return yield* Effect.fail(invalid('The mutation returned partial data with errors'))
+          const failed = graphqlFailure(product, first, answer.status)
+          if (failed.reason === 'rate_limited') {
+            const retryAt = retryAtOf(answer.headers, yield* Clock.currentTimeMillis)
+            return yield* Effect.fail(
+              new ConnectorFailed({
+                product,
+                reason: failed.reason,
+                message: failed.message,
+                status: answer.status,
+                ...(retryAt === undefined ? {} : { retryAt }),
+              }),
+            )
+          }
+          return yield* Effect.fail(failed)
+        }
         yield* success(answer)
         return yield* Schema.decodeUnknownEffect(schema)(envelope.data ?? null).pipe(Effect.mapError((error) => invalid(error.message)))
       }),
