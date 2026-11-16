@@ -113,7 +113,7 @@ import s from './Task.module.css'
 import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
 import { canHold, ChangeTeam, useTeamed } from '../team/Team'
-import type { TaskModel } from './useTask'
+import { presses, type TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { pages } from '../browser/pages'
@@ -897,27 +897,36 @@ export function TaskView({
     // Only the last pick's end takes it away: one made after is still on its way.
     void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
-  // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
-  const edit = async (id: string) => {
+  // A queued message goes back in the composer to be changed, and out of the queue, at once. One the lead had already read
+  // comes back where it was, the line saying why, and the composer goes back to what it held, unless written in since.
+  const edit = (id: string) => {
     const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
     // One whose images or files wouldn't fit beside those waiting stays in the queue, and the composer says why.
     if (said === undefined || !images.fits(said)) return
-    if (await model.takeBack(id)) {
+    let was: string | null = null
+    let put: string | null = null
+    const refused = () => setDraft((current) => (current === put && was !== null ? was : current))
+    if (!model.takeBack(id, refused)) return
+    setDraft((current) => {
+      was = current
+      put = withQueued(current, said.text)
+      return put
+    })
+    if (said.dictated === true) setDraftDictated(kept, true)
+    images.restore(said)
+  }
+
+  // A queued message goes to the lead now, interrupting it, rather than when the lead is done: out of the queue, and said
+  // again, at once. One the lead has already read stays as it was; one Althar didn't take goes back in the composer, as one
+  // taken back to edit does.
+  const sendQueuedNow = (id: string) => {
+    const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
+    if (said === undefined) return
+    model.sendQueuedNow(id, said.text, outgoingOf(said), () => {
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said)
-    }
-  }
-
-  // A queued message goes to the lead now, interrupting it, rather than when the lead is done: out of the queue, and said again. One the lead has already read stays as it was.
-  const sendQueuedNow = async (id: string) => {
-    const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
-    if (said === undefined || !(await model.takeBack(id))) return
-    if (await model.sendNow(said.text, outgoingOf(said))) return
-    // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
-    setDraft((current) => withQueued(current, said.text))
-    if (said.dictated === true) setDraftDictated(kept, true)
-    images.restore(said)
+    })
   }
 
   const issue = snapshot.task.issue
@@ -1252,8 +1261,8 @@ export function TaskView({
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         queued={queuedOf(snapshot.items, queue)}
-        onEditQueued={(id) => void edit(id)}
-        onSendQueuedNow={(id) => void sendQueuedNow(id)}
+        onEditQueued={edit}
+        onSendQueuedNow={sendQueuedNow}
         onUnqueue={(id) => void model.takeBack(id)}
         // An aside's is the coordinator's, in a word: its lead is named in the picker.
         placeholder={
@@ -1366,12 +1375,8 @@ export function TaskView({
           <Button
             variant="signal"
             size="small"
-            busy={model.pending}
-            onClick={() =>
-              void (async () => {
-                for (const draftId of waitingIssues) await model.fileIssueDraft(draftId)
-              })()
-            }
+            busy={model.busy.has(presses.fileIssues)}
+            onClick={() => void model.fileIssueDrafts(waitingIssues)}
           >
             {text.fileAll(waitingIssues.length)}
           </Button>
@@ -1533,7 +1538,7 @@ export function TaskView({
               <ThreadShellProvider value={host.shell}>
                 <Outputs
                   snapshot={snapshot}
-                  pending={model.pending}
+                  pending={model.doing !== null}
                   doing={model.doing}
                   error={model.error}
                   errorMore={model.errorMore}
@@ -1645,7 +1650,7 @@ export function TaskView({
                             session={session}
                             retryable={snapshot.retryable}
                             undoable={snapshot.undoable}
-                            onUndoFrom={busy || model.pending ? undefined : turnUndo.ask}
+                            onUndoFrom={busy || model.pending || model.busy.has(presses.undo) ? undefined : turnUndo.ask}
                             project={snapshot.project.name}
                             // A failed turn is tried again here, unless its step waits on the person, whose call has its ways on.
                             {...(busy || stuckOpen
@@ -1713,7 +1718,7 @@ export function TaskView({
                                 named={named}
                                 projectId={snapshot.project.id}
                                 agents={model.agents}
-                                busy={model.pending}
+                                busy={model.busy.has(doing.accept)}
                                 onMerge={(change) => void model.accept([change])}
                                 {...(card.taskId === snapshot.task.id
                                   ? { changes: snapshot.task.changes, mergeStanding: model.mergeStanding }
@@ -1730,7 +1735,7 @@ export function TaskView({
                                 request={request}
                                 at={at}
                                 {...(lead.name === '' ? {} : { by: lead.name })}
-                                pushing={model.pending}
+                                pushing={model.busy.has(doing.push(request.url))}
                                 onPush={(head, url) => void model.push(head, url)}
                               />
                             )}
@@ -1779,7 +1784,7 @@ export function TaskView({
                       commits: snapshot.task.unshipped?.commits ?? 0,
                     },
                   })}
-              busy={model.pending}
+              busy={model.busy.has(presses.abandon)}
               {...(model.error === null ? {} : { error: model.error })}
               // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers (closing pull requests): it stays open, busy, so a refusal lands in it.
               onAbandon={(choices) =>
@@ -1816,7 +1821,7 @@ export function TaskView({
                       setAttaching({ value: attaching.value })
                     },
                   })}
-              busy={model.pending}
+              busy={model.busy.has(presses.attach)}
               {...(model.error === null ? {} : { error: model.error })}
               // oxlint-disable-next-line althar/press-at-once -- A dialog the host answers: it stays open, busy, so a refusal lands in it.
               onAttach={(pullRequest, start) =>

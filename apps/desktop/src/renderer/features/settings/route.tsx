@@ -1,6 +1,6 @@
 import { createRoute, lazyRouteComponent, redirect } from '@tanstack/react-router'
 
-import { readFirst, reads } from '../../data/reads'
+import { held, readFirst, reads } from '../../data/reads'
 import { rootRoute } from '../../root'
 import { PagePending } from '../../shared/Pending'
 import { sectionOf } from './sections'
@@ -35,13 +35,14 @@ export const settingsRoute = createRoute({
     const moved = sectionOf(section)
     if (moved !== undefined && moved !== section) throw redirect({ to: '/settings/$section', params: { section: moved }, replace: true })
   },
-  // What every section shows, and the skills too on their own section, read before it shows (ADR-014).
+  // What every section shows, and the skills too on their own section, read before it shows (ADR-014); held, at once, and read
+  // again behind it where the feed said it changed, so coming back never waits on the runtime.
   loader: ({ params: { section }, context: { client, cache } }) => {
     const read = reads(client)
     return readFirst(
-      cache.fetchQuery(read.settings()),
-      cache.fetchQuery(read.connections()),
-      ...(section === 'skills' ? [cache.fetchQuery(read.skills())] : []),
+      held(cache, read.settings()),
+      held(cache, read.connections()),
+      ...(section === 'skills' ? [held(cache, read.skills())] : []),
     )
   },
   validateSearch: settingsSearchOf,

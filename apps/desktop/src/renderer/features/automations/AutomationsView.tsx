@@ -9,7 +9,7 @@ import { PartPending } from '../../shared/Pending'
 import { usePreferences } from '../../shared/usePreferences'
 import { useNow } from '../../shared/time'
 import { AutomationCardOf } from './AutomationCardOf'
-import { type AutomationModel, useAutomation, useAutomations, useNewAutomation } from './useAutomations'
+import { type AutomationModel, type AutomationsModel, useAutomation, useAutomations, useNewAutomation } from './useAutomations'
 import {
   activeRun,
   endsInPullRequest,
@@ -113,8 +113,7 @@ const limitsOf = (
 ]
 
 /** The tab: its automations as cards, the one that paused itself first; pausing them all; where they run. */
-function Tab({ projectId, onOpen, onNew }: { projectId: string; onOpen: (id: string) => void; onNew: (starter?: string) => void }) {
-  const model = useAutomations(projectId)
+function Tab({ model, onOpen, onNew }: { model: AutomationsModel; onOpen: (id: string) => void; onNew: (starter?: string) => void }) {
   const { preferences, read, set } = usePreferences()
   // What it says of when each runs next moves on with the clock, a minute at a time.
   const now = new Date(useNow(true, 60_000))
@@ -149,12 +148,15 @@ function Page({
   project,
   agents,
   onBack,
+  onDelete,
   onTask,
 }: {
   model: AutomationModel
   project: string
   agents: ReadonlyArray<AgentStatus>
   onBack: () => void
+  /** Deletes it, and goes back to the tab, at once: where it couldn't be, the tab says why. */
+  onDelete: () => void
   onTask: (threadId: string) => void
 }) {
   const view = model.view
@@ -190,8 +192,7 @@ function Page({
       onTryOnce={model.runNow}
       onTurnOn={model.turnOn}
       onRename={(name) => model.change({ ...definition, name })}
-      // oxlint-disable-next-line althar/press-at-once -- Not instant yet: a failed delete has nowhere to say so once its view is gone (foundations.md, The UI is instant).
-      onDelete={() => void model.remove().then((removed) => removed && onBack())}
+      onDelete={onDelete}
       onBack={onBack}
       {...(view.state === 'paused' && view.pausedBy === 'itself' ? { pausedItself: view.pauseReason ?? text.why } : {})}
       card={
@@ -274,7 +275,9 @@ function New({
       paused={false}
       proposed
       on={false}
+      // oxlint-disable-next-line althar/press-at-once -- Opening what only the answer names: its page, by the id it is made under. The form stays, busy, so a refusal lands in it.
       onSave={() => make(draft.save)}
+      // oxlint-disable-next-line althar/press-at-once -- Opening what only the answer names: its page, by the id it is made under. The form stays, busy, so a refusal lands in it.
       onTurnOn={() => make(draft.turnOn)}
       check={check}
       onBack={onBack}
@@ -321,6 +324,8 @@ export function AutomationsView({
   onTask: (threadId: string) => void
 }) {
   const back = () => onOpen(null)
+  // Kept by the room, not its tab: one deleted from its page is gone from the tab it goes back to, and a failure is said there.
+  const automations = useAutomations(projectId)
   // The starter a new one opened from on the tab: the window's, not the address's.
   const [starter, setStarter] = useState<Starter | undefined>(undefined)
   const fresh = (id?: string) => {
@@ -330,7 +335,7 @@ export function AutomationsView({
   return (
     <div className={s.room}>
       {open === null ? (
-        <Tab projectId={projectId} onOpen={onOpen} onNew={fresh} />
+        <Tab model={automations} onOpen={onOpen} onNew={fresh} />
       ) : open === 'new' ? (
         <New
           key={starter?.id ?? 'blank'}
@@ -343,7 +348,18 @@ export function AutomationsView({
           onMade={onOpen}
         />
       ) : (
-        <Existing key={open} automationId={open} project={project} agents={agents} onBack={back} onTask={onTask} />
+        <Existing
+          key={open}
+          automationId={open}
+          project={project}
+          agents={agents}
+          onBack={back}
+          onDelete={() => {
+            automations.remove(open)
+            back()
+          }}
+          onTask={onTask}
+        />
       )}
     </div>
   )

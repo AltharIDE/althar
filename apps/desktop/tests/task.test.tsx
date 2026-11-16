@@ -1845,7 +1845,11 @@ describe('a task', () => {
 
   it('sends nothing, and leaves the queue as it was, where the lead has the queued message already', async () => {
     const queued = items.you('Use the helper', { state: 'queued', interrupting: false })
-    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })),
+      // Read again, it is as the runtime holds it.
+      getThreadItem: vi.fn(async (_threadId: string, itemId: string) => (itemId === queued.id ? queued : null)),
+    })
     vi.mocked(client.takeBack).mockRejectedValueOnce(new Error('The lead has read it already.'))
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Send now' }))

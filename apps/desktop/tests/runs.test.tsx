@@ -183,6 +183,8 @@ describe('what the project runs, from its front', () => {
     expect(client.orderRunnables).toHaveBeenLastCalledWith('p1', ['rnbl_storybook', 'rnbl_dev'])
     await userEvent.click(list.getByRole('button', { name: 'Remove Storybook' }))
     expect(client.dropRunnable).toHaveBeenCalledWith('p1', 'rnbl_storybook')
+    // Gone from the list at once, before the runtime's word of it.
+    expect(list.queryByRole('button', { name: 'Remove Storybook' })).toBeNull()
     // Its repository's own way: named, it stays its own.
     await userEvent.click(list.getByRole('button', { name: 'Edit bun run dev' }))
     const edit = within(await screen.findByRole('dialog', { name: 'Edit bun run dev' }))
@@ -197,9 +199,9 @@ describe('what the project runs, from its front', () => {
     })
     // Back to the list once kept; from there, adding opens too.
     const again = within(await screen.findByRole('dialog', { name: 'What meridian runs' }))
-    await userEvent.click(again.getByRole('button', { name: 'Edit Storybook' }))
-    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Edit Storybook' })).getByRole('button', { name: 'Remove' }))
-    expect(client.dropRunnable).toHaveBeenLastCalledWith('p1', 'rnbl_storybook')
+    await userEvent.click(again.getByRole('button', { name: 'Edit bun run dev' }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Edit bun run dev' })).getByRole('button', { name: 'Remove' }))
+    expect(client.dropRunnable).toHaveBeenLastCalledWith('p1', 'rnbl_dev')
     await userEvent.click(
       within(await screen.findByRole('dialog', { name: 'What meridian runs' })).getByRole('button', { name: 'Add something to run' }),
     )

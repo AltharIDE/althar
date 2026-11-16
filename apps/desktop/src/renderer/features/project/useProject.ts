@@ -46,6 +46,23 @@ import type { Streamed } from '../../shared/thread'
 /** How long changes are gathered before they are read. */
 const GATHER = 25
 
+/** What the person says, or hands over with: the one press `pending` is of. */
+const SEND = 'send'
+
+/**
+ * What a cleared view, or a forgotten conversation, keeps: the cards that may still be open, as the runtime's rule for
+ * what is carried in has it (`chatView.ts`). Whether each still is, the read after it says; the conversation goes at once.
+ */
+const MAY_STAY: ReadonlySet<ThreadItem['kind']> = new Set([
+  'task',
+  'issue_draft',
+  'issue_changes',
+  'question',
+  'task_ask',
+  'setting',
+  'automation',
+])
+
 export interface ProjectModel {
   readonly project: ProjectSummary | null
   /** Its repositories as this Mac has them, each with its remote: what its header says it is made of. */
@@ -63,7 +80,7 @@ export interface ProjectModel {
   /** The agents have been read: none above then means none can work, not that none are known yet. */
   readonly agentsKnown: boolean
   readonly error: string | null
-  /** An action is on its way to the runtime. */
+  /** What the person said is on its way, or the coordinator it starts: until the thread's head is read again after it. */
   readonly pending: boolean
   readonly loadingEarlier: boolean
   /** Rejects on failure; quiet keeps automatic reads from opening the global error notice. */
@@ -72,8 +89,17 @@ export interface ProjectModel {
   /** Tells the coordinator something, with any images; a coordinator not running starts as the person chose, when they did. */
   readonly say: (body: string, choice: Choice | null, images?: Outgoing) => Promise<boolean>
   readonly sayNow: (body: string, images?: Outgoing) => Promise<boolean>
-  /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
-  readonly takeBack: (itemId: string) => Promise<boolean>
+  /**
+   * Takes back a message still waiting its turn: out of the queue at once, false for one still on its way. Where the
+   * coordinator already had it, it comes back as it was, the line says why, and `refused` is called, to put back what it
+   * was taken for.
+   */
+  readonly takeBack: (itemId: string, refused?: () => void) => boolean
+  /**
+   * Says a message waiting its turn now, interrupting the coordinator: out of the queue, and said again, at once. Where the
+   * coordinator already had it, it stays as it was, said why; where Althar didn't take it, `unsent` puts it back.
+   */
+  readonly sayQueuedNow: (itemId: string, body: string, images?: Outgoing, unsent?: () => void) => void
   readonly interrupt: () => Promise<void>
   /** Tries the coordinator's last turn again, where it failed: what the person said in it goes again. */
   readonly tryAgain: () => Promise<void>
@@ -149,13 +175,38 @@ export const useProject = (projectId: string): ProjectModel => {
   const project = listed.data ?? null
   const repositories = useQuery(read.repositories(projectId)).data ?? null
   const thread = useQuery(read.coordinator(projectId))
-  const coordinator = thread.data ?? null
+  const readNow = thread.data ?? null
+  // What a clear or a forgotten conversation takes from the thread, gone from the press until the thread is read rewritten:
+  // the view's version as it was pressed on, and what goes, by id.
+  const [rewriting, setRewriting] = useState<{ readonly version: number; readonly gone: ReadonlySet<string> } | null>(null)
+  if (rewriting !== null && readNow !== null && readNow.view.version !== rewriting.version) setRewriting(null)
+  // The messages taken back from the queue, out of it at once, until a read of each says so.
+  const [withdrawn, setWithdrawn] = useState<ReadonlySet<string>>(new Set())
+  if (readNow !== null && withdrawn.size > 0) {
+    const still = [...withdrawn].filter((id) =>
+      readNow.items.some((item) => item.id === id && item.kind === 'user_message' && item.input?.state === 'queued'),
+    )
+    if (still.length !== withdrawn.size) setWithdrawn(new Set(still))
+  }
+  const coordinator = useMemo(
+    () =>
+      readNow === null || (rewriting === null && withdrawn.size === 0)
+        ? readNow
+        : {
+            ...readNow,
+            items: readNow.items.flatMap((item) =>
+              rewriting?.gone.has(item.id) === true ? [] : withdrawn.has(item.id) ? takenBack([item], item.id) : [item],
+            ),
+          },
+    [readNow, rewriting, withdrawn],
+  )
   const status = useQuery(read.status()).data
   const agents = useMemo(() => status?.agents.filter(canPick) ?? [], [status])
   const [failed, setError] = useState<string | null>(null)
   const readFailure = thread.error ?? listed.error
   const error = failed ?? (readFailure === null ? null : messageOf(readFailure))
-  const [pending, setPending] = useState(false)
+  // What is on its way to the runtime, by each press's key: how many of each.
+  const [under, setUnder] = useState<ReadonlyMap<string, number>>(new Map())
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [newest] = useState(() => newestReads('head'))
@@ -377,11 +428,24 @@ export const useProject = (projectId: string): ProjectModel => {
     [client, projectId, coordinator, setCoordinator, fail],
   )
 
-  /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
+  /** Marks a press under way, or no longer, by its key. */
+  const mark = useCallback(
+    (which: string, by: 1 | -1) =>
+      setUnder((now) => {
+        const next = new Map(now)
+        const count = (next.get(which) ?? 0) + by
+        if (count > 0) next.set(which, count)
+        else next.delete(which)
+        return next
+      }),
+    [],
+  )
+
+  /** Runs an action, says what went wrong if it did, and reads the thread's head again: under way by its own key meanwhile. */
   const act = useCallback(
-    async (action: () => Promise<unknown>) => {
+    async (action: () => Promise<unknown>, which = 'act') => {
       setError(null)
-      setPending(true)
+      mark(which, 1)
       try {
         await action()
       } catch (failure) {
@@ -389,19 +453,33 @@ export const useProject = (projectId: string): ProjectModel => {
       } finally {
         // Done once the head is read again: what it started, such as the agent the person's message starts, shows as it goes on.
         await readHead()
-        setPending(false)
+        mark(which, -1)
       }
     },
-    [readHead, fail],
+    [readHead, fail, mark],
   )
 
-  /** An action that rewrites the thread: done, the thread is read whole again. */
-  const rewrite = (action: (threadId: string) => Promise<void>) =>
-    act(async () => {
+  /**
+   * An action that rewrites the thread: done, the thread is read whole again. One that takes the conversation from the
+   * thread (`clears`) takes it at once, keeping what may still be open, until the thread is read rewritten; one that
+   * fails puts it back.
+   */
+  const rewrite = (action: (threadId: string) => Promise<void>, clears = false) => {
+    if (clears && readNow !== null) {
+      const gone = readNow.items.flatMap((item) => (MAY_STAY.has(item.kind) ? [] : [item.id]))
+      setRewriting((now) => ({ version: now?.version ?? readNow.view.version, gone: new Set([...(now?.gone ?? []), ...gone]) }))
+    }
+    return act(async () => {
       if (threadId === null) return
-      await action(threadId)
+      try {
+        await action(threadId)
+      } catch (failure) {
+        if (clears) setRewriting(null)
+        throw failure
+      }
       await readWhole()
     })
+  }
 
   const send = (body: string, disposition: 'after_current' | 'interrupt_and_continue', images?: Outgoing) =>
     threadId === null ? Promise.resolve() : client.send({ threadId, body, disposition, ...sentWith(images) })
@@ -435,8 +513,17 @@ export const useProject = (projectId: string): ProjectModel => {
         setCoordinator((current) => ({ ...current, items: unsent(current.items, id, text) }))
         throw failure
       }
-    }).then(() => accepted)
+    }, SEND).then(() => accepted)
   }
+
+  /** Out of the queue at once, held so until a read of it says so; back as it was where the coordinator already had it. */
+  const withdraw = (itemId: string) => setWithdrawn((now) => new Set([...now, itemId]))
+  const restore = (itemId: string) =>
+    setWithdrawn((now) => {
+      const next = new Set(now)
+      next.delete(itemId)
+      return next
+    })
 
   return {
     project,
@@ -448,7 +535,7 @@ export const useProject = (projectId: string): ProjectModel => {
     agents,
     agentsKnown: status !== undefined,
     error,
-    pending,
+    pending: under.has(SEND),
     loadingEarlier,
     loadEarlier,
     say: (body, choice, images) =>
@@ -468,27 +555,50 @@ export const useProject = (projectId: string): ProjectModel => {
         images,
       ),
     sayNow: (body, images) => shown(body, 'interrupt_and_continue', () => send(body, 'interrupt_and_continue', images), images),
-    takeBack: async (itemId) => {
+    takeBack: (itemId, refused) => {
       // What is still on its way has nothing to take back yet.
       if (isSending(itemId)) return false
       setError(null)
-      try {
-        await client.takeBack(itemId)
-        // Gone from the queue at once, rather than when the runtime's word of it arrives.
-        arrived(takenBack(coordinator?.items ?? [], itemId))
-        return true
-      } catch (failure) {
+      // Out of the queue from the press until a read of it says so, whatever lands before: the runtime's word of it reads it.
+      withdraw(itemId)
+      client.takeBack(itemId).catch((failure: unknown) => {
+        restore(itemId)
         fail(failure)
-        return false
-      }
+        refused?.()
+      })
+      return true
+    },
+    sayQueuedNow: (itemId, body, images, unsent) => {
+      if (isSending(itemId) || threadId === null) return
+      setError(null)
+      withdraw(itemId)
+      // Taken back first, so one the coordinator already read is never said twice: the copy shown goes, and it stays where it was.
+      let taken = false
+      void shown(
+        body,
+        'interrupt_and_continue',
+        async () => {
+          try {
+            await client.takeBack(itemId)
+          } catch (failure) {
+            restore(itemId)
+            throw failure
+          }
+          taken = true
+          await send(body, 'interrupt_and_continue', images)
+        },
+        images,
+      ).then((said) => {
+        if (!said && taken) unsent?.()
+      })
     },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
     tryAgain: () => act(async () => (threadId === null ? undefined : client.tryAgain(threadId))),
     compact: () => act(async () => (threadId === null ? undefined : client.compact(threadId))),
-    clearView: () => rewrite((id) => client.clearView(id)),
+    clearView: () => rewrite((id) => client.clearView(id), true),
     showEarlier: (open) => rewrite((id) => client.showEarlier(id, open)),
     undoClearView: () => rewrite((id) => client.undoClearView(id)),
-    forgetConversation: () => rewrite((id) => client.forgetConversation(id)),
+    forgetConversation: () => rewrite((id) => client.forgetConversation(id), true),
     runProject: (taskId = null, runnableId = null, ref) =>
       act(() =>
         ref === undefined
