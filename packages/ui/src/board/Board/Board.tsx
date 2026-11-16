@@ -273,7 +273,12 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
         value={{ rail: (lane) => rails.has(lane), fold: (lane, collapse) => setChosen(chose(chosen, lane, collapse)) }}
       >
         {/* A lane folding or opening moves what is beside it, whatever drew the board again. */}
-        <ListMotion within={ref} {...(version === undefined ? {} : { version: [version, railsKey(rails)] })}>
+        {/* One flat run of entries, its own and the rails': ListMotion compares a version entry by entry, so an array kept
+            whole inside another would be new on every draw, and the page read each time. */}
+        <ListMotion
+          within={ref}
+          {...(version === undefined ? {} : { version: [...(Array.isArray(version) ? version : [version]), railsKey(rails)] })}
+        >
           {children}
         </ListMotion>
       </FoldingContext.Provider>

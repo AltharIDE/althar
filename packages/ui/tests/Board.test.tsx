@@ -235,8 +235,9 @@ describe('a board given what its cards stand on', () => {
     })
     const found = vi.spyOn(Element.prototype, 'querySelectorAll')
     const measured = () => found.mock.calls.filter(([selector]) => selector === '[data-move]').length
+    // A fresh array of its entries each time, as the app gives it: the same entries are the same version.
     const board = (cards: ReadonlyArray<string>) => (
-      <Board label="Meridian’s work" version={cards.join(' ')}>
+      <Board label="Meridian’s work" version={[...cards, cards.length]}>
         <BoardColumn lane={BoardLane.Running} count={cards.length}>
           {cards.map((card) => (
             <div key={card} data-move={card}>
