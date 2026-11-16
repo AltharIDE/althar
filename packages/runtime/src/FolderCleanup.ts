@@ -242,25 +242,21 @@ export const diskOf = (path: string) =>
     ),
   )
 
-/** The device a path is on: that of its nearest parent that exists; null where none can be read. */
-export const deviceOf = (path: string): Effect.Effect<number | null> =>
-  Effect.promise(async () => {
-    for (let at = path; ; at = dirname(at)) {
-      const found = await stat(at).then(
-        (stats) => stats.dev,
-        () => null,
-      )
-      if (found !== null) return found
-      if (dirname(at) === at) return null
-    }
-  })
-
 /** The nearest of a path and its parents that is there: where its disk is still read once a folder on it went. */
 const nearest = (path: string) => {
   let at = path
   while (!existsSync(at) && dirname(at) !== at) at = dirname(at)
   return at
 }
+
+/** The device a path is on: that of its nearest parent that exists; null where it can't be read. */
+export const deviceOf = (path: string): Effect.Effect<number | null> =>
+  Effect.promise(() =>
+    stat(nearest(path)).then(
+      (stats) => stats.dev,
+      () => null,
+    ),
+  )
 
 /** The folder a task's worktree was made in (root/project/task/repository): where task folders were, when it was made. */
 const rootOf = (worktree: string) => dirname(dirname(dirname(worktree)))
@@ -548,14 +544,10 @@ export class FolderCleanup extends Context.Service<
           const rootKey = keyOf(yield* deviceAt(root), root)
           const disks = new Map<string, Disk>([[rootKey, { id: rootKey, at: root, folder: root, candidates: [] }]])
           for (const candidate of all) {
-            const first = candidate.workspaces[0]
-            const key = first === undefined ? rootKey : keyOf(yield* deviceAt(first.path), first.path)
-            const disk = disks.get(key) ?? {
-              id: key,
-              at: first?.path ?? root,
-              folder: first === undefined ? root : rootOf(first.path),
-              candidates: [],
-            }
+            // One with no folder here counts on the root's disk, as the root is read there.
+            const at = candidate.workspaces[0]?.path ?? root
+            const key = keyOf(yield* deviceAt(at), at)
+            const disk = disks.get(key) ?? { id: key, at, folder: rootOf(at), candidates: [] }
             disks.set(key, disk)
             disk.candidates.push(candidate)
           }
@@ -568,12 +560,13 @@ export class FolderCleanup extends Context.Service<
       const list = Effect.gen(function* () {
         const all = yield* candidates
         yield* measureLater(all)
-        const disks = yield* disksOf(all)
+        const listed = all.filter((candidate) => facts.get(candidate.taskId)?.unshipped !== true)
+        // The root's disk, and each other one a folder listed is on.
+        const disks = yield* disksOf(listed)
         const onDisk = new Map(disks.flatMap((disk) => disk.candidates.map((candidate) => [candidate.taskId, disk.id] as const)))
         const folders = []
-        for (const candidate of all) {
+        for (const candidate of listed) {
           const known = facts.get(candidate.taskId)
-          if (known?.unshipped === true) continue
           folders.push({
             taskId: candidate.taskId,
             threadId: candidate.threadId ?? '',
@@ -583,13 +576,12 @@ export class FolderCleanup extends Context.Service<
             settledAt: candidate.settledAt,
             bytes: known?.bytes ?? null,
             held: holdOf(yield* runningFrom(candidate), known?.lost ?? null, yield* openedLately(candidate)),
-            disk: onDisk.get(candidate.taskId) ?? null,
+            // Every folder listed is on one of the disks.
+            disk: onDisk.get(candidate.taskId)!,
           })
         }
-        // The root's disk, and each other one a folder listed is on: one read each.
         const shown = []
-        for (const [index, disk] of disks.entries()) {
-          if (index > 0 && !folders.some((folder) => folder.disk === disk.id)) continue
+        for (const disk of disks) {
           const read = yield* readDisk(disk)
           if (read !== null) shown.push({ id: disk.id, folder: disk.folder, total: read.total, used: read.used })
         }

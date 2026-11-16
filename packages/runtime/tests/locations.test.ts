@@ -63,6 +63,8 @@ describe('the folder chosen for task folders, which the app and the command line
     assert.isNull(chosenWorktrees('/p', kept('{"worktrees":null}')))
     assert.isNull(chosenWorktrees('/p', kept('{"worktrees":"relative/Althar"}')))
     assert.isNull(chosenWorktrees('/p', kept('[]')))
+    assert.isNull(chosenWorktrees('/p', kept('null')))
+    assert.isNull(chosenWorktrees('/p', kept('"/Volumes/Ext/Althar"')))
     assert.isNull(chosenWorktrees('/p', kept('{not json')))
     assert.isNull(
       chosenWorktrees('/p', () => {

@@ -104,14 +104,15 @@ const folderLines = (threadId: string) =>
  * Moves a task's worktree to where it would be had it been made under `earlier`, as one made before the person moved the root in
  * Settings is: the store keeps its path there.
  */
-const madeUnder = <T extends { readonly taskId: string; readonly worktree: string }>(task: T, earlier: string) =>
+const madeUnder = <T extends { readonly taskId: string; readonly worktree: string; readonly root: string }>(task: T, earlier: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const { worktreeRoot } = yield* RuntimeConfig
     const moved = join(earlier, relative(worktreeRoot, task.worktree))
     mkdirSync(dirname(moved), { recursive: true })
-    git(task.worktree, 'worktree', 'move', task.worktree, moved)
-    rmSync(dirname(task.worktree), { recursive: true, force: true })
+    // From the repository: Windows won't move the folder git runs in.
+    git(task.root, 'worktree', 'move', task.worktree, moved)
+    removeTreeSync(dirname(task.worktree))
     yield* sql`UPDATE workspaces SET path = ${moved} WHERE task_id = ${task.taskId}`
     return { ...task, worktree: moved }
   })
@@ -243,6 +244,23 @@ describe('finished tasks’ folders', () => {
         assert.strictEqual(listed.folders.length, 1)
         assert.isNull(listed.folders[0]?.bytes)
       }).pipe(Effect.provide(withCleanup())),
+  )
+
+  // As above: neither Windows nor root can lock a folder.
+  it.live.skipIf(windows || process.getuid?.() === 0)('says what a folder of a size not known freed by what its disk gained', () =>
+    Effect.gen(function* () {
+      const task = yield* finished('done', 1)
+      // Empty, so it goes, though what it holds can't be read.
+      const locked = join(task.worktree, 'locked')
+      mkdirSync(locked)
+      chmodSync(locked, 0o000)
+      const listed = yield* measured.pipe(Effect.onError(() => Effect.sync(() => chmodSync(locked, 0o755))))
+      assert.isNull(listed.folders[0]?.bytes)
+      const freed = yield* (yield* FolderCleanup).remove(task.taskId, listed.folders[0]?.held ?? null, yield* person)
+      assert.isFalse(existsSync(task.worktree))
+      assert.deepInclude(freed, { failed: 0 })
+      assert.isAtLeast(freed.freed, 0)
+    }).pipe(Effect.provide(withCleanup())),
   )
 
   it.live('holds back a folder with changes not committed, which goes by hand', () =>
@@ -397,6 +415,32 @@ describe('finished tasks’ folders', () => {
       assert.isTrue(existsSync(older.worktree), 'a folder on another disk went early')
       assert.isFalse(existsSync(newer.worktree), 'the folder on the disk that ran low stayed')
       assert.deepStrictEqual(yield* folderLines(older.threadId), [])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk, device })))))
+  })
+
+  it.live('keeps a folder whose disk can’t be read out of a low sweep and the bars, and its wait still removes it', () => {
+    const { earlier } = twoDisks()
+    // The root's disk is low; neither the device nor the disk under the earlier root can be read.
+    const disk = (path: string) => Effect.succeed(path.startsWith(earlier) ? null : { total: 1000, free: 50, used: 950 })
+    const device = (path: string) => Effect.succeed(path.startsWith(earlier) ? null : 1)
+    return Effect.gen(function* () {
+      const unread = yield* madeUnder(yield* finished('done', 1, 'Unread'), earlier)
+      const here = yield* finished('done', 1, 'Here')
+      const cleanup = yield* FolderCleanup
+      yield* cleanup.sweep
+      assert.isFalse(existsSync(here.worktree), 'the folder on the disk that ran low stayed')
+      assert.isTrue(existsSync(unread.worktree), 'a folder on a disk not read went early')
+      const { worktreeRoot } = yield* RuntimeConfig
+      const listed = yield* measured
+      assert.deepStrictEqual(
+        listed.disks.map((one) => one.folder),
+        [worktreeRoot],
+      )
+      assert.notStrictEqual(listed.folders.find((one) => one.taskId === unread.taskId)?.disk, listed.disks[0]?.id)
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE tasks SET settled_at = ${new Date(Date.now() - 5 * DAY).toISOString()} WHERE id = ${unread.taskId}`
+      yield* cleanup.sweep
+      assert.isFalse(existsSync(unread.worktree), 'its wait didn’t remove it')
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { disk, device })))))
   })
 
