@@ -5,6 +5,7 @@ import { Model, SmallChange, type SmallChangeChecks, type SmallChangeReview, typ
 
 import { messageOf } from '../../data/client'
 import { type MergeStanding, mergeStandingOf } from '../../data/merges'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { useServices } from '../../data/services'
 import { type NameModel, useEffortNames } from '../../shared/modelNames'
 import type { SmallChangeContent } from '../../shared/thread'
@@ -119,6 +120,7 @@ export function SmallChangeOf({
   mergeStanding?: (url: string) => MergeStanding | null
 }) {
   const { client } = useServices()
+  const title = useTaskTitle(card.taskId, card.title)
   const [error, setError] = useState<string | null>(null)
   // Its team: what the person just saved, laid over what is read until a read of its own says it, or says something else.
   const effortOf = useEffortNames()
@@ -256,7 +258,7 @@ export function SmallChangeOf({
   return (
     <>
       <SmallChange
-        title={card.title}
+        title={title}
         started={stepOf(card, 'started')?.at ?? ''}
         changed={{
           at: reported ? (changed?.at ?? null) : null,

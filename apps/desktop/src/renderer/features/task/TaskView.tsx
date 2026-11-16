@@ -124,6 +124,7 @@ import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
 import { useSearchReveal } from '../finder/revealSearch'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
 import { pictureOf } from '../../shared/code/FilePicture'
@@ -650,6 +651,8 @@ export function TaskView({
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
+  // An agent's rename types itself into the title; the person's own shows at once.
+  const typedTitle = useTaskTitle(snapshot?.task.id, snapshot?.task.title ?? '')
   if (snapshot === null) {
     return (
       <div className={embedded ? s.aside : s.window}>
@@ -1298,6 +1301,7 @@ export function TaskView({
                 to={snapshot.project.name}
                 kbd="esc"
                 title={snapshot.task.title}
+                shown={typedTitle}
                 titleLevel={1}
                 maxLength={TITLE_LENGTH}
                 editing={renaming}
