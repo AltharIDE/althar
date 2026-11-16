@@ -1,3 +1,6 @@
+import { Schema } from 'effect'
+import type { DeviceKey, HttpsHomeTarget } from '@althar/transport-node'
+import { ClientDeviceId, HomeId, PairingTokenHash } from '@althar/contracts'
 import { Effect, Option } from 'effect'
 
 import type { RemoteHome, SshHomeTarget } from '../../homes'
@@ -17,6 +20,7 @@ export const connectHomeProcess = (
   home: RemoteHome,
   port: unknown,
   events: { connected: (identity: unknown) => void; disconnected: (problem: string) => void },
+  key?: DeviceKey,
 ) => {
   const child = fork()
   let stopping = false
@@ -59,7 +63,7 @@ export const connectHomeProcess = (
         'problem' in message && typeof message.problem === 'string' && message.problem.length <= 1024 ? message.problem : closedProblem,
       )
   })
-  child.postMessage({ type: 'connect', home }, [port])
+  child.postMessage({ type: 'connect', home, ...(key === undefined ? {} : { key }) }, [port])
   return {
     stop: Effect.gen(function* () {
       if (ended) return
@@ -78,7 +82,12 @@ export const connectHomeProcess = (
 }
 
 /** Discovery uses the same isolated utility entry, with no RPC port or database. Abort tears down its SSH scope. */
-export const inspectHomeProcess = (fork: ForkHomeProcess, target: SshHomeTarget, signal: AbortSignal): Promise<HostStatus> =>
+const requestHomeProcess = <A>(
+  fork: ForkHomeProcess,
+  request: unknown,
+  read: (message: Record<string, unknown>) => A | undefined,
+  signal: AbortSignal,
+): Promise<A> =>
   new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(new Error('The home check was cancelled.'))
@@ -88,7 +97,7 @@ export const inspectHomeProcess = (fork: ForkHomeProcess, target: SshHomeTarget,
     let finished = false
     let force: ReturnType<typeof setTimeout> | undefined
     const deadline = setTimeout(() => cancel('The host did not answer its check. Check its SSH configuration and service.'), 45_000)
-    const finish = (status?: HostStatus, problem = 'The host did not answer its check. Check its SSH configuration and service.') => {
+    const finish = (status?: A, problem = 'The host did not answer its check. Check its SSH configuration and service.') => {
       if (finished) return
       finished = true
       clearTimeout(deadline)
@@ -114,7 +123,12 @@ export const inspectHomeProcess = (fork: ForkHomeProcess, target: SshHomeTarget,
     })
     child.on('message', (message) => {
       if (typeof message !== 'object' || message === null || !('type' in message)) return
-      if (message.type === 'inspected' && 'status' in message) finish(message.status as HostStatus)
+      try {
+        const value = read({ ...message })
+        if (value !== undefined) finish(value)
+      } catch {
+        cancel('The home returned invalid connection information.')
+      }
       if (message.type === 'disconnected')
         finish(
           undefined,
@@ -122,8 +136,31 @@ export const inspectHomeProcess = (fork: ForkHomeProcess, target: SshHomeTarget,
         )
     })
     try {
-      child.postMessage({ type: 'inspect', target })
+      child.postMessage(request)
     } catch {
       cancel('The host check could not start.')
     }
   })
+
+export const inspectHomeProcess = (fork: ForkHomeProcess, target: SshHomeTarget, signal: AbortSignal): Promise<HostStatus> =>
+  requestHomeProcess(
+    fork,
+    { type: 'inspect', target },
+    (message) => (message.type === 'inspected' ? (message.status as HostStatus) : undefined),
+    signal,
+  )
+
+const SecureTarget = Schema.Struct({ origin: Schema.String, homeId: HomeId, deviceId: ClientDeviceId, tlsKeyPin: PairingTokenHash })
+export const pairHomeProcess = (
+  fork: ForkHomeProcess,
+  code: string,
+  key: DeviceKey,
+  name: string,
+  signal: AbortSignal,
+): Promise<HttpsHomeTarget> =>
+  requestHomeProcess(
+    fork,
+    { type: 'pair', code, key, name },
+    (message) => (message.type === 'paired' ? Schema.decodeUnknownSync(SecureTarget)(message.target) : undefined),
+    signal,
+  )

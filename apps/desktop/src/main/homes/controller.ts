@@ -31,6 +31,7 @@ interface WindowState {
 }
 export interface HomeControllerOptions {
   readonly store: ReturnType<typeof homeStore>
+  readonly pair?: (code: string, name: string, signal: AbortSignal) => Promise<RemoteHome>
   readonly inspect: (target: SshHomeTarget, signal: AbortSignal) => Promise<HostStatus>
   readonly open: (home: WindowHome) => void
   readonly changed: (owner: number, state: HomeState) => void
@@ -39,7 +40,7 @@ export interface HomeControllerOptions {
 const notAvailable = () => new Error('This home check expired or belongs to another window. Check the host again.')
 
 /** Window-scoped, one-use confirmation. A renderer never chooses a home identity or claims paired authority. */
-export const homeController = ({ store, inspect, open, changed, now = Date.now }: HomeControllerOptions) => {
+export const homeController = ({ store, inspect, pair, open, changed, now = Date.now }: HomeControllerOptions) => {
   let accepting = true
   const available = () => {
     if (!accepting) throw new Error('Althar is closing its home connections.')
@@ -71,6 +72,26 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
       available()
       if (windows.has(owner)) throw new Error('This window already belongs to a home.')
       windows.set(owner, { state: { current: home, connection: home.kind === 'local' ? 'local' : 'connecting' }, generation: 0, page: 0 })
+    },
+    pair: async (owner: number, code: unknown, name: unknown) => {
+      available()
+      const label = homeName(name)
+      if (pair === undefined || typeof code !== 'string' || code.length > 8192 || !windows.has(owner))
+        throw new Error('Use a pairing code from the host in an open Althar window.')
+      if (activeInspections.size >= 8) throw new Error('Several homes are being connected. Try again shortly.')
+      cancelCheck(owner)
+      const page = windows.get(owner)?.page
+      const stop = new AbortController()
+      inspecting.set(owner, stop)
+      activeInspections.add(stop)
+      try {
+        const home = await pair(code, label, stop.signal)
+        await store.save(home)
+        if (accepting && !stop.signal.aborted && windows.get(owner)?.page === page) open({ kind: 'https', home })
+      } finally {
+        activeInspections.delete(stop)
+        if (inspecting.get(owner) === stop) inspecting.delete(owner)
+      }
     },
     inspect: async (owner: number, value: unknown): Promise<CheckedHome> => {
       available()
@@ -109,7 +130,7 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
         ssh: pending.target,
       })
       // Saving settings may outlive its window, but cannot open a replacement window after the caller closed.
-      if (accepting && windows.get(owner)?.page === page) open({ kind: 'ssh', home })
+      if (accepting && windows.get(owner)?.page === page) open({ kind: home.https === undefined ? 'ssh' : 'https', home })
     },
     open: async (owner: number, id: unknown) => {
       available()
@@ -121,7 +142,7 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
       }
       const home = (await store.list()).find((one) => one.id === id)
       if (home === undefined) throw new Error('This saved home was forgotten. Check its host to connect again.')
-      if (accepting && windows.get(owner)?.page === page) open({ kind: 'ssh', home })
+      if (accepting && windows.get(owner)?.page === page) open({ kind: home.https === undefined ? 'ssh' : 'https', home })
     },
     forget: async (owner: number, id: unknown) => {
       available()
@@ -132,23 +153,28 @@ export const homeController = ({ store, inspect, open, changed, now = Date.now }
     begin: (owner: number): { readonly home: RemoteHome; readonly generation: number } => {
       available()
       const previous = windows.get(owner)
-      if (previous?.state.current.kind !== 'ssh') throw new Error('This window uses its local runtime.')
+      if (previous === undefined || previous.state.current.kind === 'local') throw new Error('This window uses its local runtime.')
       const generation = previous.generation + 1
       update(owner, { current: previous.state.current, connection: 'connecting' }, generation)
       return { home: previous.state.current.home, generation }
     },
     connected: (owner: number, generation: number, value: unknown): boolean => {
       const previous = windows.get(owner)
-      if (!accepting || previous === undefined || previous.generation !== generation || previous.state.current.kind !== 'ssh') return false
+      if (!accepting || previous === undefined || previous.generation !== generation || previous.state.current.kind === 'local')
+        return false
       const identity = Schema.decodeUnknownSync(ClientIdentity)(value)
-      if (identity.homeId !== previous.state.current.home.homeId || identity.role !== 'socket')
+      if (
+        identity.homeId !== previous.state.current.home.homeId ||
+        identity.role !== 'socket' ||
+        (previous.state.current.home.https !== undefined && identity.deviceId !== previous.state.current.home.https.deviceId)
+      )
         throw new Error('The home returned an unexpected identity or authority.')
       update(owner, { current: previous.state.current, connection: 'connected', identity }, generation)
       return true
     },
-    disconnected: (owner: number, generation: number, problem = 'The home disconnected. Its work continues; reconnect to carry on.') => {
+    disconnected: (owner: number, generation: number, problem = 'The home disconnected. Reconnect to see its latest state.') => {
       const previous = windows.get(owner)
-      if (previous === undefined || previous.generation !== generation || previous.state.current.kind !== 'ssh') return
+      if (previous === undefined || previous.generation !== generation || previous.state.current.kind === 'local') return
       update(owner, { current: previous.state.current, connection: 'disconnected', problem }, generation)
     },
     isCurrent: (owner: number, generation: number) => accepting && windows.get(owner)?.generation === generation,

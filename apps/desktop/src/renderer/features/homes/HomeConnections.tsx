@@ -12,8 +12,13 @@ export function HomeButton() {
   const state = useHomeState(host.homes)
   if (host.homes === undefined) return null
   return (
-    <Button className={s.trigger} onClick={showHomes} aria-label="Homes">
-      {state?.current.kind === 'ssh' ? state.current.home.name : 'Homes'}
+    <Button
+      className={s.trigger}
+      onClick={showHomes}
+      aria-label="Homes"
+      title={state !== null && state.current.kind !== 'local' ? state.current.home.name : 'Homes'}
+    >
+      {state !== null && state.current.kind !== 'local' ? state.current.home.name : 'Homes'}
       {state?.current.kind === 'ssh' && <span className={s.note}> SSH</span>}
     </Button>
   )
@@ -36,11 +41,11 @@ export function HomeConnections({ host, ready }: { host: Host; ready: boolean })
   }, [host.homes])
   if (host.homes === undefined) return null
   if (open) return <HomesDialog homes={host.homes} onClose={() => setOpen(false)} />
-  if (!ready || state?.current.kind !== 'ssh' || state.connection !== 'disconnected') return null
+  if (!ready || state === null || state.current.kind === 'local' || state.connection !== 'disconnected') return null
   return (
     <Dialog
       title={`Disconnected from ${state.current.home.name}`}
-      description="Work continues on the home. Reconnect to carry on."
+      description="Reconnect to see the home’s latest state."
       onClose={showHomes}
       holding
       actions={

@@ -1,3 +1,4 @@
+import { PairingInvitation, PairingTokenHash } from './pairing'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { AcpCatalog, AcpConnection } from './agentCatalog'
 import { AttentionEvent } from './attention'
@@ -4648,6 +4649,9 @@ export const AttentionApi = RpcGroup.make(
 ).middleware(ClientAuthority)
 
 const socketCalls = new Set<string>([
+  'IssueDevicePairing',
+  'ListClientDevices',
+  'RevokeConnectionDevice',
   'GetConnectionInfo',
   'Status',
   'ListProjects',
@@ -4713,6 +4717,8 @@ const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, ma
 
 const ConnectionApi = RpcGroup.make(
   call('GetConnectionInfo', {}, ConnectionInfo),
+  command('IssueDevicePairing', { tokenHash: PairingTokenHash }, PairingInvitation),
+  command('RevokeConnectionDevice', { deviceId: ClientDeviceId }, Schema.Void),
   call('ListClientDevices', ClientListOptions.fields, ClientPage),
   command(
     'RegisterClientDevice',

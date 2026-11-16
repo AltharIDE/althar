@@ -6,11 +6,13 @@ The desktop shell of [docs/architecture/02](../../docs/architecture/02-desktop-r
 - **Consumers:** people using Althar.
 - **Dependency direction:** the window depends on `@althar/ui` and `@althar/contracts`; the runtime's process on `@althar/runtime`. The window never imports the runtime, and the kit never imports Effect.
 
-## Personal homes over SSH
+## Personal home connections
 
-SSH is an optional connection adapter. It is not required by the home identity or API model; direct and relay connections can use those contracts too. This slice connects to an already-installed host with an ordinary user’s SSH key/agent, without a root password or an exposed API port.
+The Homes menu (Ctrl/Cmd+Shift+H), above the project picker, opens saved homes or connects an already-running host. Pairing is the default route: the operator creates a short-lived code on the host, and desktop main validates its home, HTTPS origin and out-of-band TLS public-key pin before exchanging a new device's proof of possession. The connection utility verifies authenticated RPC before a separate home window opens. That window's project picker lists the remote home's projects; the local window and its projects remain separate.
 
-The Homes menu (Ctrl/Cmd+Shift+H) opens saved homes or checks an existing SSH host. Discovery is read-only. Main binds the checked identity to the initiating window and a short-lived, one-use confirmation; the renderer cannot supply a replacement home ID. Saved settings contain names and targets, never provider credentials or person-authority signing keys. OpenSSH owns authentication and strict host-key checking, including aliases and jump hosts from the person's SSH configuration. Unknown or changed host keys must be resolved outside this flow.
+Pairing stores a pending device key through the OS keyring before exchange so a lost reply can retry with the same key. Main keeps sealed keys in a private atomic file, separate from public home settings; neither the renderer nor ordinary settings receive private keys. An unavailable or insecure keyring fails closed. Saved settings contain only names, targets and public device identity. Reconnecting uses a fresh signed one-use challenge and checks the pinned TLS key, home, device and API version. Forgetting removes local credentials; revoking on the host also closes active connections and rejects future challenges.
+
+SSH remains an optional adapter using an ordinary user's SSH key/agent, without a root password or an exposed API port. Its discovery is read-only. Main binds the checked identity to the initiating window and a short-lived, one-use confirmation; the renderer cannot supply a replacement home ID. OpenSSH owns authentication and strict host-key checking, including aliases and jump hosts from the person's SSH configuration. Unknown or changed host keys must be resolved outside this flow. Neither route requires a relay.
 
 ```mermaid
 flowchart LR
@@ -18,15 +20,16 @@ flowchart LR
     Remote["Home window<br/>separate storage partition"] <-->|"MessagePort"| Transport["Connection utility<br/>no runtime or database"]
     Transport <-->|"SSH / framed stdio"| Host["Host launcher<br/>connect-stdio"]
     Host <-->|"private API socket"| Home["Existing home runtime<br/>owns projects and work"]
-    Main["Desktop main<br/>saved targets and lifecycle"] --> Transport
+    Transport <-->|"pinned HTTPS/WSS<br/>device challenge"| Home
+    Main["Desktop main<br/>saved targets, OS-sealed keys and lifecycle"] --> Transport
     Main --> Remote
 ```
 
-A remote window never starts or migrates the home's store. Its connection utility receives a minimal SSH environment, and disconnecting it does not stop the home or its work. Each window owns its tunnel; navigation and close dispose it. A local runtime failure does not reconnect remote windows. Shutdown cancels discovery and bounds utility cleanup.
+A remote window never starts or migrates the home's store. Its connection utility receives a minimal environment, and disconnecting it does not stop the home or its work. Each window owns its connection; navigation and close dispose it. A local runtime failure does not reconnect remote windows. Shutdown cancels discovery and pairing and bounds utility cleanup.
 
 The renderer verifies the API version, home, actor, device and socket authority before loading data. Remote feeds use home-scoped positions with history checkpoints, never numeric cursor fallback. A restored history requires a fresh snapshot and cache reset; a broken connection requires explicit reconnect and never automatically replays commands. Each home has its own persistent browser storage partition, query cache and drafts.
 
-SSH grants restricted socket capabilities: existing projects and task conversations. It does not prove human presence or enroll a trusted device. Permission approvals and other person-only operations remain denied by the runtime and are refused by the client before transmission. Protected signing keys and trusted approvals are a separate feature; ordinary encrypted desktop storage is not assumed to resist an agent running as the same OS user. An unrestricted shell account remains outside this application-level boundary.
+Both routes grant restricted socket capabilities: existing projects and task conversations. Neither proves human presence or enrolls a trusted approval device. Permission approvals, pairing-code issuance and connection-device administration remain denied by the runtime for paired clients. Protected signing keys and trusted approvals are a separate feature; ordinary encrypted desktop storage is not assumed to resist an agent running as the same OS user. An unrestricted shell account remains outside this application-level boundary.
 
 Desktop-local folder grants, attachments, clipboard credential helpers, embedded pages, canvases and local previews are unavailable to remote windows. Main enforces these boundaries independently of renderer controls. Remote links must use public HTTPS addresses. Host updates remain the host launcher's responsibility; the desktop connects through its active release and refuses incompatible API versions rather than starting or upgrading a remote runtime.
 

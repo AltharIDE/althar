@@ -2,8 +2,8 @@ import { constants, promises as fs } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
-import { HomeId } from '@althar/contracts'
-import { sshArguments } from '@althar/transport-node'
+import { ClientDeviceId, PairingTokenHash, HomeId } from '@althar/contracts'
+import { httpsOrigin, sshArguments } from '@althar/transport-node'
 import { Schema } from 'effect'
 
 import type { RemoteHome, SshHomeTarget } from '../../homes'
@@ -17,13 +17,25 @@ const target = Schema.Struct({
   configFile: Schema.optional(Schema.String),
   port: Schema.optional(Schema.Int),
 })
-const home = Schema.Struct({
+const base = {
   id: Schema.String.check(Schema.isPattern(/^remote_[0-9a-f]{32}$/)),
   name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(120)),
   homeId: HomeId,
-  ssh: target,
-})
-const file = Schema.Struct({ version: Schema.Literal(1), homes: Schema.Array(home).check(Schema.isMaxLength(MAX_HOMES)) })
+}
+const home = Schema.Union([
+  Schema.Struct({ ...base, ssh: target }),
+  Schema.Struct({
+    ...base,
+    https: Schema.Struct({ origin: Schema.String, homeId: HomeId, deviceId: ClientDeviceId, tlsKeyPin: PairingTokenHash }),
+  }),
+])
+const file = Schema.Union([
+  Schema.Struct({
+    version: Schema.Literal(1),
+    homes: Schema.Array(Schema.Struct({ ...base, ssh: target })).check(Schema.isMaxLength(MAX_HOMES)),
+  }),
+  Schema.Struct({ version: Schema.Literal(2), homes: Schema.Array(home).check(Schema.isMaxLength(MAX_HOMES)) }),
+])
 const unsafe = () => new Error('Saved home connections could not be read safely. Check this app profile’s permissions.')
 const controls = (value: string) => Array.from(value).some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)
 
@@ -48,9 +60,11 @@ export const homeTarget = (value: unknown): SshHomeTarget => {
   }
 }
 export const savedHome = (value: unknown): RemoteHome => {
+  if (typeof value !== 'object' || value === null || 'ssh' in value === 'https' in value) throw unsafe()
   const parsed = Schema.decodeUnknownSync(home)(value)
   homeName(parsed.name)
-  homeTarget(parsed.ssh)
+  if ('ssh' in parsed) homeTarget(parsed.ssh)
+  else if (httpsOrigin(parsed.https.origin) !== parsed.https.origin || parsed.https.homeId !== parsed.homeId) throw unsafe()
   return parsed
 }
 
@@ -114,7 +128,7 @@ export const homeStore = (profile: string) => {
     const next = tail
       .then(async () => {
         const updated = update(await list())
-        const contents = Buffer.from(JSON.stringify({ version: 1, homes: updated.homes }))
+        const contents = Buffer.from(JSON.stringify({ version: 2, homes: updated.homes }))
         if (updated.homes.length > MAX_HOMES || contents.length > MAX_BYTES)
           throw new Error('Forget an unused home before saving another connection.')
         const temporary = join(profile, `homes-${randomUUID()}.tmp`)
@@ -143,9 +157,18 @@ export const homeStore = (profile: string) => {
     save: (given: RemoteHome) =>
       change((homes) => {
         const parsed = savedHome(given)
-        const existing = homes.find((one) => one.homeId === parsed.homeId && JSON.stringify(one.ssh) === JSON.stringify(parsed.ssh))
+        const existing = homes.find(
+          (one) =>
+            one.homeId === parsed.homeId &&
+            JSON.stringify({ ssh: one.ssh, https: one.https }) === JSON.stringify({ ssh: parsed.ssh, https: parsed.https }),
+        )
         if (existing !== undefined) return { homes, result: existing }
-        return { homes: [...homes, parsed], result: parsed }
+        const previous = homes.find((one) => one.id === parsed.id)
+        if (previous !== undefined && previous.homeId !== parsed.homeId) throw unsafe()
+        return {
+          homes: previous === undefined ? [...homes, parsed] : homes.map((one) => (one.id === parsed.id ? parsed : one)),
+          result: parsed,
+        }
       }),
     forget: (id: string) => change((homes) => ({ homes: homes.filter((one) => one.id !== id), result: undefined })),
   }

@@ -52,6 +52,45 @@ const fixture = () => {
     },
   }
 }
+
+it('previews a pairing destination, keeps the code private and pairs without SSH discovery', async () => {
+  const at = fixture()
+  const pair = vi.fn(async () => {})
+  const homes = {
+    ...at.homes,
+    pair,
+    pairingInfo: vi.fn(async () => ({ origin: 'https://my-vps.test:6769', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER })),
+  }
+  const close = vi.fn()
+  render(<HomesDialog homes={homes} onClose={close} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Connect a host…' }))
+  expect(screen.queryByLabelText('SSH host')).toBeNull()
+  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
+  await userEvent.type(screen.getByLabelText('Pairing code'), 'opaque-code')
+  expect(screen.getByLabelText('Pairing code').getAttribute('type')).toBe('password')
+  expect(await screen.findByText('https://my-vps.test:6769')).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Pair and open' }))
+  await waitFor(() => expect(close).toHaveBeenCalledOnce())
+  expect(pair).toHaveBeenCalledExactlyOnceWith('opaque-code', 'My VPS')
+  expect(at.homes.inspect).not.toHaveBeenCalled()
+})
+
+it('discards an obsolete pairing preview and cancels pairing when its form is left', async () => {
+  const at = fixture()
+  const old = later<{ origin: string; homeId: string; expiresAt: number }>()
+  const homes = { ...at.homes, pair: vi.fn(async () => {}), pairingInfo: vi.fn(() => old.promise) }
+  render(<HomesDialog homes={homes} onClose={() => {}} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Connect a host…' }))
+  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
+  await userEvent.type(screen.getByLabelText('Pairing code'), 'old-code')
+  await userEvent.clear(screen.getByLabelText('Pairing code'))
+  await act(async () => old.resolve({ origin: 'https://old.test', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER }))
+  expect(screen.queryByText('https://old.test')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Pair and open' }).getAttribute('disabled')).not.toBeNull()
+  await userEvent.click(screen.getByRole('radio', { name: 'SSH' }))
+  expect(screen.getByLabelText('SSH host')).not.toBeNull()
+  expect(at.homes.cancelCheck).toHaveBeenCalled()
+})
 const later = <A,>() => {
   let resolve!: (value: A) => void
   return {

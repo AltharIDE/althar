@@ -13,7 +13,12 @@ import type { RemoteHome, WindowHome } from '../src/homes'
 const homeId = `home_${'1'.repeat(32)}`
 const status = { homeId, hostDeviceId: `dev_${'2'.repeat(32)}`, apiVersion: 1, version: 'fixture' }
 const identity = { homeId, actorId: `act_${'3'.repeat(32)}`, deviceId: status.hostDeviceId, role: 'socket' as const }
-const remote = (digit = '4'): RemoteHome => ({ id: `remote_${digit.repeat(32)}`, name: 'VPS', homeId, ssh: { target: 'fixture' } })
+const remote = (digit = '4'): Extract<RemoteHome, { ssh: unknown }> => ({
+  id: `remote_${digit.repeat(32)}`,
+  name: 'VPS',
+  homeId,
+  ssh: { target: 'fixture' },
+})
 const roots: string[] = []
 const temporary = () => {
   const root = mkdtempSync(join(tmpdir(), 'althar-homes-'))

@@ -20,3 +20,5 @@ export * from './identities'
 export * from './wire'
 export * from './attention'
 export * from './agentCatalog'
+
+export * from './pairing'

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { Button, Dialog, Field, Problem } from '@althar/ui'
+import { Button, Dialog, Field, Problem, Segmented } from '@althar/ui'
 
 import type { CheckedHome, HomesHost, RemoteHome, SshHomeTarget } from '../../../homes'
 import { homeProblem } from './useHomes'
@@ -50,7 +50,11 @@ export function HomesDialog({ homes, onClose }: { homes: HomesHost; onClose: () 
     <Dialog
       title={adding ? 'Connect a home' : 'Homes'}
       description={
-        adding ? 'Use a host already set up for SSH. Verify its home identity before connecting.' : 'Each home opens in its own window.'
+        adding
+          ? homes.pair === undefined
+            ? 'Use a host already set up for SSH. Verify its home identity before connecting.'
+            : 'Connect using a pairing code or SSH.'
+          : 'Each home opens in its own window.'
       }
       width={520}
       onClose={onClose}
@@ -76,15 +80,15 @@ export function HomesDialog({ homes, onClose }: { homes: HomesHost; onClose: () 
             </Button>
           </div>
           {saved === null ? (
-            <p role="status" className={s.note}>
-              Reading saved homes…
-            </p>
+            <output className={s.note}>Reading saved homes…</output>
           ) : (
             saved.map((home) => (
               <div className={s.row} key={home.id}>
                 <div className={s.identity}>
                   <strong>{home.name}</strong>
-                  <span className={s.mono}>{home.ssh.target}</span>
+                  <span className={s.mono} title={home.ssh?.target ?? home.https?.origin}>
+                    {home.ssh?.target ?? home.https?.origin}
+                  </span>
                 </div>
                 <div className={s.actions}>
                   <Button disabled={pending !== null} onClick={() => open(home.id)}>
@@ -119,8 +123,8 @@ export function HomesDialog({ homes, onClose }: { homes: HomesHost; onClose: () 
             ))
           )}
           <p className={s.note}>
-            SSH access supports existing projects and task conversations. Approvals need a trusted device. Project setup, file transfers and
-            local previews are not available through this connection.
+            Remote access supports existing projects and task conversations. Approvals need a trusted device. Project setup, file transfers
+            and local previews are not available through this connection.
           </p>
         </div>
       )}
@@ -128,7 +132,7 @@ export function HomesDialog({ homes, onClose }: { homes: HomesHost; onClose: () 
   )
 }
 
-function ConnectHome({ homes, onDone }: { homes: HomesHost; onDone: () => void }) {
+function SshConnectHome({ homes, onDone }: { homes: HomesHost; onDone: () => void }) {
   const id = useId()
   const [name, setName] = useState('')
   const [target, setTarget] = useState('')
@@ -248,6 +252,126 @@ function ConnectHome({ homes, onDone }: { homes: HomesHost; onDone: () => void }
         </Button>
         <Button variant="ink" disabled={pending || checked === null || name.trim() === ''} onClick={connect}>
           {pending && checked !== null ? 'Connecting…' : 'Connect to this home'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function ConnectHome({ homes, onDone }: { homes: HomesHost; onDone: () => void }) {
+  const [method, setMethod] = useState<'pair' | 'ssh'>(homes.pair === undefined ? 'ssh' : 'pair')
+  return (
+    <div className={s.form}>
+      {homes.pair !== undefined && (
+        <Segmented
+          label="Connection method"
+          value={method}
+          onChange={setMethod}
+          options={[
+            { value: 'pair', label: 'Pairing code' },
+            { value: 'ssh', label: 'SSH' },
+          ]}
+        />
+      )}
+      {method === 'ssh' ? <SshConnectHome homes={homes} onDone={onDone} /> : <PairHome homes={homes} onDone={onDone} />}
+    </div>
+  )
+}
+
+function PairHome({ homes, onDone }: { homes: HomesHost; onDone: () => void }) {
+  const id = useId()
+  const [name, setName] = useState('')
+  const [code, setCode] = useState('')
+  const [info, setInfo] = useState<{ origin: string; homeId: string; expiresAt: number } | null>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const live = useRef(true)
+  useEffect(() => {
+    live.current = true
+    return () => {
+      live.current = false
+      void homes.cancelCheck().catch(() => undefined)
+    }
+  }, [homes])
+  useEffect(() => {
+    let current = true
+    if (code.trim() !== '' && homes.pairingInfo !== undefined) {
+      void homes
+        .pairingInfo(code.trim())
+        .then((info) => {
+          if (current) setInfo(info)
+        })
+        .catch((error: unknown) => {
+          if (current) setProblem(homeProblem(error))
+        })
+    }
+    return () => {
+      current = false
+    }
+  }, [code, homes])
+  const pair = () => {
+    if (homes.pair === undefined || info === null) return
+    setPending(true)
+    setProblem(null)
+    void homes
+      .pair(code.trim(), name.trim())
+      .then(() => {
+        if (live.current) {
+          setCode('')
+          onDone()
+        }
+      })
+      .catch((error: unknown) => {
+        if (live.current) {
+          setPending(false)
+          setProblem(homeProblem(error))
+        }
+      })
+  }
+  return (
+    <div className={s.form}>
+      <label className={s.field} htmlFor={`${id}-name`}>
+        <span>Name</span>
+        <Field
+          id={`${id}-name`}
+          value={name}
+          maxLength={120}
+          disabled={pending}
+          autoComplete="off"
+          placeholder="My server"
+          onChange={(event) => setName(event.currentTarget.value)}
+        />
+      </label>
+      <label className={s.field} htmlFor={`${id}-code`}>
+        <span>Pairing code</span>
+        <Field
+          id={`${id}-code`}
+          type="password"
+          value={code}
+          maxLength={8192}
+          disabled={pending}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(event) => {
+            setCode(event.currentTarget.value)
+            setInfo(null)
+            setProblem(null)
+          }}
+        />
+      </label>
+      <p className={s.note}>
+        On the host, run <code>althar-host pair</code> to create a code.
+      </p>
+      {problem !== null && <Problem>{problem}</Problem>}
+      {info !== null && (
+        <output className={s.check}>
+          <strong>{info.origin}</strong>
+          <span className={s.note}>This device can work with tasks. Approvals need a trusted device.</span>
+        </output>
+      )}
+      <div className={s.actions}>
+        <Button variant="ink" disabled={pending || info === null || name.trim() === ''} onClick={pair}>
+          {pending ? 'Pairing…' : 'Pair and open'}
         </Button>
       </div>
     </div>

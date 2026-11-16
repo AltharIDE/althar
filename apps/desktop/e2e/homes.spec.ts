@@ -89,6 +89,7 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     await still(page)
     await page.screenshot({ path: 'test-results/homes-flow-02-picker.png', scale: 'css' })
     await page.getByRole('button', { name: 'Connect a host…' }).click()
+    await page.getByRole('radio', { name: 'SSH', exact: true }).click()
     await page.getByLabel('Name', { exact: true }).fill('My VPS')
     await page.getByLabel('SSH host', { exact: true }).fill('fixture')
     await still(page)

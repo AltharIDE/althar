@@ -17,12 +17,14 @@
   },
   "dependencies": {
     "@althar/contracts": "workspace:*",
-    "effect": "4.0.7"
+    "effect": "4.0.7",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@althar/testing": "workspace:*",
     "@effect/vitest": "4.0.7",
     "@types/node": "^24.0.0",
+    "@types/ws": "8.18.2",
     "@vitest/coverage-v8": "5.1.0",
     "typescript": "^7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",

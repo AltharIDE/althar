@@ -78,7 +78,7 @@ everything, Windows' tests, coverage and the packages too, after merge.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the target every app and package moves toward. In short:
 
-- Strict TypeScript for the existing app and home; Rust for the planned worker supervisor and sandbox execution agent, with a Protobuf worker contract ([Foundations](docs/decisions/foundations.md#remote-connections-and-native-workers-decided-not-built)). Validate anything untrusted at runtime in either language.
+- Strict TypeScript for the existing app and home; Rust for the planned worker supervisor and sandbox execution agent, with a Protobuf worker contract ([Foundations](docs/decisions/foundations.md#remote-connections-and-native-workers)). Validate anything untrusted at runtime in either language.
 - Tests first for new behaviour, and at least 90% line and branch coverage in each app and package.
 - Accessibility to WCAG 2.2 AA from the first implementation.
 - A consequential decision amends its area document in [`docs/decisions`](docs/decisions), with a dated Changes entry; undecided proposals stay in `proposed/`. Do not add numbered ADRs. An exception gets an owner and an expiry.

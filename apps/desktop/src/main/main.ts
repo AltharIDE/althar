@@ -87,6 +87,7 @@ import {
 import { appMenu, PAGE, windowOptions } from './windowOptions'
 import {
   keyringIsSafe,
+  protectConnectionCredential,
   keyringUnavailable,
   passwordStore,
   sealFailure,
@@ -482,6 +483,7 @@ let bridge: Bridge | undefined
 const mine = (contents: WebContents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents)
 
 const homes = startHomeConnections({
+  protect: (sealing, value) => protectConnectionCredential(sealing, value, safeStorage, process.platform, portal),
   profile: locations().profile,
   entry: join(here, '../connection/connection.js'),
   mine,
@@ -489,7 +491,7 @@ const homes = startHomeConnections({
     const existing = [...windows].find((window) => {
       if (window.isDestroyed()) return false
       const current = homes.state(window.webContents.id).current
-      return home.kind === 'local' ? current.kind === 'local' : current.kind === 'ssh' && current.home.homeId === home.home.homeId
+      return home.kind === 'local' ? current.kind === 'local' : current.kind !== 'local' && current.home.id === home.home.id
     })
     if (existing !== undefined) {
       existing.show()
@@ -503,7 +505,7 @@ const localWindows = () =>
   new Set([...windows].filter((window) => !window.isDestroyed() && homes.state(window.webContents.id).current.kind === 'local'))
 const handleLocal: typeof ipcMain.handle = (channel, listener) =>
   ipcMain.handle(channel, (event, ...args) => {
-    if (homes.state(event.sender.id).current.kind === 'ssh') throw new Error(localServicesUnavailable)
+    if (homes.state(event.sender.id).current.kind !== 'local') throw new Error(localServicesUnavailable)
     return listener(event, ...args)
   })
 const showHomes = () => {
@@ -921,14 +923,14 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const remote = homes.state(window.webContents.id).current.kind === 'ssh'
+    const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
     if (allowed !== null) openOutside(allowed)
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {
     event.preventDefault()
-    const remote = homes.state(window.webContents.id).current.kind === 'ssh'
+    const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
     if (allowed !== null) openOutside(allowed)
   })

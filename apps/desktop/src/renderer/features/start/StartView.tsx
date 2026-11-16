@@ -211,7 +211,7 @@ export function StartView({
           <BareBar />
           <main className={s.remoteEmpty}>
             <h1>No projects on this home yet</h1>
-            <p>Set up a project on the host, then reconnect. SSH access supports existing projects and task conversations.</p>
+            <p>Set up a project on the host, then reconnect. Remote access supports existing projects and task conversations.</p>
             <p>Approvals require a trusted device. File transfers and local previews are unavailable on this connection.</p>
             <Button onClick={showHomes}>Homes</Button>
           </main>
