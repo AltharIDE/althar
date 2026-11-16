@@ -88,7 +88,7 @@ export function AgentSignIn({
       agent={agent.name}
       text={{
         folder: `A folder on ${device.this}`,
-        ...(agent.id === 'copilot-direct' ? { checking: () => 'Preparing GitHub Copilot…' } : {}),
+        ...(agent.id === 'copilot-direct' ? { checking: () => 'Connecting to GitHub…' } : {}),
       }}
       position={position}
       {...(account === undefined ? {} : { account })}
@@ -99,7 +99,7 @@ export function AgentSignIn({
         ...(agent.ways.includes('device') ? { code: true } : {}),
         // An agent that signs in only inside Althar has no command for a terminal.
         terminal: agent.login !== '',
-        ...(agent.id === 'copilot-direct' ? { enterprise: true } : {}),
+        ...(agent.id === 'copilot-direct' || agent.id === 'copilot' ? { enterprise: true } : {}),
         found: signIn.found.map((place) => ({ id: place.grant, name: place.name, folder: shortFolder(place.path), from: place.tool })),
         choose: agent.id !== 'copilot-direct',
       }}
@@ -134,7 +134,11 @@ export function AgentAccounts({ agent, start, signIn }: { agent: AgentStatus; st
     <Accounts
       agent={agent.name}
       accounts={accounts.map((account) =>
-        accountEntry(agent.id === 'copilot-direct' && !agent.installed ? { ...account, signIn: 'signed_out' } : account),
+        accountEntry(
+          agent.id === 'copilot-direct' && (!agent.installed || account.signIn === 'unknown')
+            ? { ...account, signIn: 'signed_out' }
+            : account,
+        ),
       )}
       // An agent whose sign-in every folder shares has its one account (the registry's `home.accounts`).
       {...(agent.addsAccounts ? { onAdd: () => signIn.add(agent.id) } : {})}

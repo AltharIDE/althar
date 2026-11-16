@@ -1,4 +1,5 @@
-import type { AttachedFile, ConversationView, Picture, ThreadItem } from '@althar/contracts'
+import type { AttachedFile, ConversationView, LineComment, Picture, ThreadItem } from '@althar/contracts'
+import { notifyManager } from '@tanstack/react-query'
 
 import { text as imagesText } from './images'
 import type { Streamed } from './thread'
@@ -16,6 +17,14 @@ let sent = 0
 /** One of the window's own copies of what the person sent. */
 export const isSending = (id: string) => id.startsWith(SENDING)
 
+/**
+ * A message keeps its motion identity when the store replaces the optimistic
+ * copy. Only a replaced copy needs an entry: every other item's identity is
+ * its own id, made the same way each time.
+ */
+const moves = new Map<string, string>()
+export const messageMove = (item: ThreadItem): string => moves.get(item.id) ?? `message:${item.id}`
+
 /** A message the window shows the moment it is sent, after what it holds, until the store's copy arrives. */
 export const sending = (
   items: ReadonlyArray<ThreadItem>,
@@ -29,6 +38,8 @@ export const sending = (
     readonly pictures?: ReadonlyArray<Picture>
     /** The files and folders sent with it. */
     readonly files?: ReadonlyArray<AttachedFile>
+    /** Its comments on lines of the diff (decisions: desktop-app § Comments on the diff). */
+    readonly comments?: ReadonlyArray<LineComment>
   },
 ): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
   sent += 1
@@ -39,7 +50,15 @@ export const sending = (
     sequence: (items.at(-1)?.sequence ?? 0) + 0.5,
     agentId: null,
     createdAt: new Date().toISOString(),
-    content: { text: message.text, links: [], pictures: message.pictures ?? [], files: message.files ?? [] },
+    content: {
+      text: message.text,
+      links: [],
+      pictures: message.pictures ?? [],
+      files: message.files ?? [],
+      ...(message.comments === undefined || message.comments.length === 0
+        ? {}
+        : { comments: message.comments.map((comment, index) => ({ id: `${id}:${index}`, ...comment })) }),
+    },
     input: {
       state: message.queued ? 'queued' : 'delivered',
       interrupting: message.interrupting,
@@ -75,6 +94,8 @@ export const inView = (view: ConversationView, held: ReadonlyArray<ThreadItem>, 
 export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: ReadonlyArray<ThreadItem>): ReadonlyArray<ThreadItem> => {
   const byId = new Map(current.map((item) => [item.id, item]))
   for (const item of incoming) {
+    const previous = byId.get(item.id)
+    if (previous !== undefined && item.kind === 'user_message') moves.set(item.id, messageMove(previous))
     // A message new to the window, said since the copy was made (not an older page read), takes the copy's place.
     if (item.kind === 'user_message' && !byId.has(item.id)) {
       const copy = [...byId.values()].find(
@@ -84,7 +105,10 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
           held.content.text === item.content.text &&
           item.sequence > held.sequence - 1,
       )
-      if (copy !== undefined) byId.delete(copy.id)
+      if (copy !== undefined) {
+        moves.set(item.id, messageMove(copy))
+        byId.delete(copy.id)
+      }
     }
     byId.set(item.id, item)
   }
@@ -168,13 +192,13 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
 /**
  * Whether what waits its turn shows in the composer's queue: behind a turn
  * running, or with no agent on the thread to take it, where it could wait
- * for long. With an agent idle there is nothing to wait behind, and while the
- * person's own send is on its way (which may start the agent), what they just
- * sent is about to be read: it goes straight to the thread, rather than
- * flashing in the queue.
+ * for long. The person's own send shows there from its first frame when the
+ * runtime says it will wait (`accepting`), so a mid-turn message never shows
+ * in the thread first. A message the runtime has claimed but not begun
+ * reading yet is not shown as waiting: the agent is reading it now.
  */
-export const queueShown = (session: { readonly turnRunning: boolean } | null, sending: boolean): boolean =>
-  !sending && (session === null || session.turnRunning)
+export const queueShown = (session: { readonly turnRunning: boolean } | null, sending: boolean, accepting?: 'now' | 'queued'): boolean =>
+  (sending && accepting === 'queued') || session?.turnRunning === true || (!sending && session === null)
 
 /**
  * Whether what waits after the agent's last reply is being read now, with
@@ -201,19 +225,23 @@ export const queuedOf = (
   shown: boolean,
 ): ReadonlyArray<{
   readonly id: string
+  readonly move?: string
   readonly text: string
   readonly attached?: string
   readonly pictures: ReadonlyArray<Picture>
   readonly files: ReadonlyArray<AttachedFile>
   readonly dictated?: boolean
+  /** Its comments on lines of the diff, as they went (decisions: desktop-app § Comments on the diff). */
+  readonly comments?: ReadonlyArray<LineComment>
 }> =>
   !shown
     ? []
     : items.flatMap((item) =>
-        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting && !isSending(item.id)
+        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
           ? [
               {
                 id: item.id,
+                move: messageMove(item),
                 text: item.content.text,
                 ...(item.content.pictures.length + item.content.files.length === 0
                   ? {}
@@ -221,6 +249,9 @@ export const queuedOf = (
                 pictures: item.content.pictures,
                 files: item.content.files,
                 ...(item.input.dictated === true ? { dictated: true } : {}),
+                ...(item.content.comments === undefined || item.content.comments.length === 0
+                  ? {}
+                  : { comments: item.content.comments.map(({ id: _id, ...comment }) => comment) }),
               },
             ]
           : [],
@@ -243,14 +274,31 @@ export const withQueued = (draft: string, text: string): string => (draft.trim()
  * so an earlier answer never puts back what a later one replaced. `landed`
  * waits for the newest read of a thing, whichever began last: the one kept.
  */
-export const newestReads = () => {
+export const newestReads = (head?: string) => {
   const begun = new Map<string, { readonly read: number; readonly landed: Promise<void> }>()
+  // A head waits for its associated item reads. Publish them in one notification batch, so new work never
+  // appears with the previous session's idle state, nor a running session with its input still queued.
+  let held: Array<() => void> | null = null
   let reads = 0
   const newest = <A>(key: string, read: Promise<A>, keep: (value: A) => void, fail: (failure: unknown) => void): Promise<void> => {
     reads += 1
     const mine = reads
+    if (key === head) held ??= []
     const landed = read.then((value) => {
-      if (begun.get(key)?.read === mine) keep(value)
+      const commit = () => {
+        if (begun.get(key)?.read === mine) keep(value)
+      }
+      if (key !== head && held !== null) held.push(commit)
+      else if (key === head && begun.get(key)?.read === mine)
+        notifyManager.batch(() => {
+          commit()
+          // A rewritten conversation can start a whole new head read from keep; wait for that one instead.
+          if (begun.get(key)?.read !== mine) return
+          const ready = held
+          held = null
+          for (const item of ready ?? []) item()
+        })
+      else commit()
     }, fail)
     begun.set(key, { read: mine, landed })
     return landed

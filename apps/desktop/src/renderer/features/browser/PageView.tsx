@@ -10,6 +10,7 @@ import type { PageLine as Line, Pointed } from '../../../main/browser/page'
 import { useServices } from '../../data/services'
 import { cropOf, gather, type GatheredComment, rewrite, drop, useComments } from '../../shared/comments'
 import { usePreferences } from '../../shared/usePreferences'
+import { pressDictationShortcut } from '../../shared/dictation/useDictation'
 import { useCovered } from './cover'
 import { pages, usePage, type Where } from './pages'
 
@@ -249,6 +250,7 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
         if (from !== owner) return
         if (key === 'comment') void point()
         if (key === 'address') address.current?.focus()
+        if (key === 'dictate') pressDictationShortcut()
       }),
     [browser, owner, point],
   )

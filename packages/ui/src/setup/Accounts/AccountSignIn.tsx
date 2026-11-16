@@ -362,7 +362,10 @@ function Under({
   const another = onBack && <LinkButton onClick={onBack}>{t.another}</LinkButton>
   switch (step.kind) {
     case 'choose': {
-      if (ways.enterprise) return <GitHubChoice step={step} onWay={onWay} onEnterprise={onEnterprise} />
+      if (ways.enterprise)
+        return (
+          <GitHubChoice step={step} way={ways.browser ? SignInWay.Browser : SignInWay.Terminal} onWay={onWay} onEnterprise={onEnterprise} />
+        )
       const others = [
         ways.code && { way: SignInWay.Code, label: t.code },
         ways.terminal && ways.browser && { way: SignInWay.Terminal, label: t.terminal },
@@ -502,10 +505,12 @@ function Under({
 /** Most work accounts use github.com. An enterprise hostname is a quiet, optional second path. */
 function GitHubChoice({
   step,
+  way,
   onWay,
   onEnterprise,
 }: {
   step: Extract<AccountSignInStep, { kind: 'choose' }>
+  way: SignInWay.Browser | SignInWay.Terminal
   onWay: (way: SignInWay) => void
   onEnterprise?: (host: string) => void
 }) {
@@ -521,12 +526,15 @@ function GitHubChoice({
     return (
       <div className={s.under}>
         <div className={s.row}>
-          <Button size="small" icon="external" onClick={() => onWay(SignInWay.Browser)}>
+          <Button size="small" icon={way === SignInWay.Terminal ? 'terminal' : 'external'} onClick={() => onWay(way)}>
             Continue with GitHub
           </Button>
           <LinkButton onClick={() => setEnterprise(true)}>Use a GitHub Enterprise address…</LinkButton>
         </div>
-        <p className={s.hint}>GitHub will ask you to authorize OpenCode. Usage is on your Copilot subscription.</p>
+        <p className={s.hint}>
+          {way === SignInWay.Terminal ? 'Your terminal opens to sign in with GitHub.' : 'GitHub will ask you to authorize Althar.'} Usage is
+          on your Copilot subscription.
+        </p>
       </div>
     )
   return (

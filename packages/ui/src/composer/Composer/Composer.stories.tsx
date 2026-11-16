@@ -371,6 +371,11 @@ export const SendingNow: Story = {
     await expect(args.onSendNow).toHaveBeenLastCalledWith('And keep the test.')
   },
 }
+/** Set to steer: Enter sends now, and Queue, beside it, waits for the turn to end. */
+export const Steering: Story = {
+  args: { onSendNow: fn() },
+  render: (args) => <Example busy steer onSendNow={args.onSendNow} initial="Stop, the limiter belongs in charges." />,
+}
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
 /** Stopping dictation puts the words in the field, and it is the size the same text typed would be: one row for a short transcript. */

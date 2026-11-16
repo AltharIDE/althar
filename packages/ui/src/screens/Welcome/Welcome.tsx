@@ -212,6 +212,14 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   /** Folders dropped on the window, on the project's step. Without it, a drop does nothing. */
   onDrop?: (files: readonly File[]) => void
   repositoryText?: Partial<RepositoryPickText>
+  /**
+   * In place of the repositories found: the consumer's own way of choosing
+   * where the first project's code comes from, such as a clone. Make still
+   * waits on something picked, and the name shows once it is.
+   */
+  project?: ReactNode
+  /** The name shows before anything is picked: for a way the project is named first, such as a new repository named after it. */
+  naming?: boolean
   /** The project's name as it stands. */
   name: string
   onNameChange: (name: string) => void
@@ -225,7 +233,8 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   /** Asks the agents again, after their list couldn't be read: beside the agents' error. */
   onRecheck?: () => void
   /** The code hosts, to connect one: the consumer's list, and its walk in. */
-  hosts: ReactNode
+  /** Where its code is. Without it, as for a clone that came from its host, the step is left out. */
+  hosts?: ReactNode
   /** A code host is connected: the code's step goes on with Continue, not Not now. */
   hostConnected?: boolean
   /** The trackers, to connect one, the same way. Without them, where none can be connected, there is no step for issues. */
@@ -252,10 +261,12 @@ export function Welcome({
   awayText,
   repositories,
   picked,
+  naming = false,
   onPick,
   onAdd,
   onDrop,
   repositoryText,
+  project,
   name,
   onNameChange,
   onCreate,
@@ -274,7 +285,7 @@ export function Welcome({
   ...rows
 }: WelcomeProps) {
   const t = { ...welcomeText, ...text }
-  const setup = trackers === undefined ? SETUP.filter((one) => one !== 'issues') : SETUP
+  const setup = SETUP.filter((one) => (one !== 'issues' || trackers !== undefined) && (one !== 'code' || hosts !== undefined))
   const steps: readonly WelcomeStep[] = toured ? setup : [...TOUR, ...setup]
   const [chosen, setStep] = useControlled<WelcomeStep>(stepProp, defaultStep ?? steps[0] ?? 'agents', onStepChange)
   const step: WelcomeStep = steps.includes(chosen) ? chosen : (steps[0] ?? 'agents')
@@ -303,10 +314,11 @@ export function Welcome({
   // Once the project is made, the steps up to it are done with.
   const canGoBack = previous !== undefined && !(made && (previous === 'project' || steps.indexOf(previous) < steps.indexOf('project')))
 
-  // Made, the welcome goes on to where its code is.
+  // Made, the welcome goes on to where its code is, or to its issues where it came from its host.
+  const after = steps[at + 1]
   useEffect(() => {
-    if (made && step === 'project') setStep('code')
-  }, [made, step, setStep])
+    if (made && step === 'project' && after !== undefined) setStep(after)
+  }, [made, step, after, setStep])
 
   // Each step's main button takes the focus as the step arrives, so Return goes on; the project's step is about finding a
   // repository, so its field takes it, where there are any to find.
@@ -362,7 +374,7 @@ export function Welcome({
     setNothing(false)
     onCreate()
   }
-  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating, last: at === steps.length - 1 })
+  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating, last: at === steps.length - 1, made })
   const title = isTour(step) ? t.tour[step].title : step === 'project' && over ? t.project.over : t[step].title
 
   return (
@@ -437,18 +449,20 @@ export function Welcome({
             ))}
           {step === 'project' && (
             <>
-              <RepositoryPick
-                repositories={repositories}
-                picked={picked}
-                onPick={(id) => {
-                  setNothing(false)
-                  onPick(id)
-                }}
-                onAdd={onAdd}
-                {...(repositoryText === undefined ? {} : { text: repositoryText })}
-              />
+              {project ?? (
+                <RepositoryPick
+                  repositories={repositories}
+                  picked={picked}
+                  onPick={(id) => {
+                    setNothing(false)
+                    onPick(id)
+                  }}
+                  onAdd={onAdd}
+                  {...(repositoryText === undefined ? {} : { text: repositoryText })}
+                />
+              )}
               {nothing && <Problem>{t.project.nothing}</Problem>}
-              {picked.length > 0 && (
+              {(picked.length > 0 || naming) && (
                 <div className={s.named}>
                   <label htmlFor={nameId} className={s.namedLabel}>
                     {t.project.name}
@@ -510,6 +524,7 @@ function mainOf(
     readonly creating: boolean
     /** The last step: it opens the project. */
     readonly last: boolean
+    readonly made: boolean
   },
 ): Main {
   const open = { label: w.t.issues.open(w.name.trim() === '' ? w.t.issues.theProject : w.name.trim()), act: w.onOpen }
@@ -523,6 +538,8 @@ function mainOf(
     case 'agents':
       return w.ready > 0 ? { label: w.t.agents.go, act: w.next } : { label: w.t.agents.without, act: w.next, quiet: true }
     case 'project':
+      // Made, with no step after it, as a clone with no tracker to connect: it opens.
+      if (w.made && w.last) return open
       return { label: w.t.project.make, act: w.make, busy: w.creating, kbd: w.t.project.makeKbd }
     case 'code':
       if (w.last) return open

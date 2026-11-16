@@ -1,10 +1,12 @@
+import { MessageMotion } from '../../shared/MessageMotion'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { ThreadWaysContext } from '../../shared/ThreadBlocks'
 import { useTurnUndo } from './useTurnUndo'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import type { AttentionRequest, TaskAction, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import type { AttentionRequest, Service, TaskAction, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import { useQuery } from '@tanstack/react-query'
 import {
   CheckoutAsk,
   AbandonTask,
@@ -83,6 +85,7 @@ import { DraftCard } from '../../shared/DraftCard'
 import { PermissionCalls } from './PermissionCall'
 import { reachOf, reachText, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
+import { useSendMidTurn } from '../settings/useSendMidTurn'
 import { HeldLimit } from './LimitCall'
 import { StuckCall } from './StuckCall'
 import { coordinatorSigned } from '../../shared/signed'
@@ -94,6 +97,8 @@ import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
+import { reads } from '../../data/reads'
+import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
 import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
 import { BackgroundOutput } from './BackgroundOutput'
@@ -102,6 +107,7 @@ import { conflictsOf, hasOutputs, hasOutputsToShow, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { OpenFinding } from './Reports'
 import { useChanges } from './useChanges'
+import { useLineComments } from './useLineComments'
 import { canHold, ChangeTeam, useTeamed } from '../team/Team'
 import type { TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
@@ -122,8 +128,10 @@ import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
 import { useSearchReveal } from '../finder/revealSearch'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
+import { pictureOf } from '../../shared/code/FilePicture'
 
 /*
  * A task, with its faces under its header, as in the prototype: the
@@ -154,6 +162,7 @@ export const text = {
   noLead: 'No lead yet',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
+  placeholderBusySteer: 'Steer the lead, or add to the queue',
   /** Whose usage the composer's ring says, under the context. */
   usageHeading: 'This task',
   placeholder: (lead: string) => (lead === '' ? 'Tell the lead something' : `Tell ${lead} something`),
@@ -434,6 +443,7 @@ export function TaskView({
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true
+  const steers = useSendMidTurn()?.to === 'steer'
   const [pick, setPick] = useState<Choice | null>(null)
   // A model or effort of the lead's own agent, picked and not yet taken by the runtime.
   const [moving, setMoving] = useState<Choice | null>(null)
@@ -441,6 +451,10 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
+  // Its one repository only on this computer: the connection it is being put on from its card, or a host to connect first.
+  const [putting, setPutting] = useState<string | null>(null)
+  const [connectService, setConnectService] = useState<Service | null>(null)
+  const connectionList = useQuery(reads(client).connections()).data ?? null
   // The command its lead left running whose output is shown.
   const [outputOf, setOutputOf] = useState<string | null>(null)
   // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
@@ -503,10 +517,6 @@ export function TaskView({
   // The page belongs to the conversation: Outputs and Graph leave it out, and coming back brings it as it was (ADR-100).
   const conversation = face === null || face === 'talk' || (face === 'graph' && (model.snapshot?.task.graph?.length ?? 0) === 0)
   // What the thread's parts open: a picture in the lightbox, a document or a file the lead names, or a page, beside the thread.
-  const ways = useMemo(
-    () => ({ ...(onRules === undefined ? {} : { onRules }), ...(onSignIn === undefined ? {} : { onSignIn }) }),
-    [onRules, onSignIn],
-  )
   const host = useThreadHost(
     true,
     { threadId: model.snapshot?.threadId ?? null, taskId: model.snapshot?.task.id ?? null },
@@ -547,6 +557,35 @@ export function TaskView({
   )
   // ⌘D opens what the task changed, when it changed something. With its modifier, never set off by typing or by voice.
   const { show } = changes
+  // The person's comments on its lines (DEV-175): gathered there, sent to the lead in one message, and read back where they are now.
+  const lineComments = useLineComments(
+    model.snapshot?.task.id ?? null,
+    changes.open,
+    // A commit moves no line against the base, but its files are no longer uncommitted: a comment it addressed is read again.
+    [
+      ...files.map((file) => `${file.path}:${file.add}:${file.del}:${file.uncommitted}`),
+      ...(model.snapshot?.reports ?? []).map((report) => report.id),
+    ].join('\n'),
+  )
+  const [commentShown, setCommentShown] = useState<string | null>(null)
+  const [sendingComments, setSendingComments] = useState(false)
+  // A comment's excerpt in the thread opens the diff on it, where the task changed something.
+  const canOpenComment = files.length > 0
+  const ways = useMemo(
+    () => ({
+      ...(onRules === undefined ? {} : { onRules }),
+      ...(onSignIn === undefined ? {} : { onSignIn }),
+      ...(canOpenComment
+        ? {
+            onOpenComment: (id: string, path: string) => {
+              setCommentShown(id)
+              show(path)
+            },
+          }
+        : {}),
+    }),
+    [onRules, onSignIn, canOpenComment, show],
+  )
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== 'd' || !commandDown(event) || event.shiftKey || event.altKey) return
@@ -645,6 +684,8 @@ export function TaskView({
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
+  // An agent's rename types itself into the title; the person's own shows at once.
+  const typedTitle = useTaskTitle(snapshot?.task.id, snapshot?.task.title ?? '')
   if (snapshot === null) {
     return (
       <div className={embedded ? s.aside : s.window}>
@@ -692,7 +733,7 @@ export function TaskView({
   const busy = session?.turnRunning ?? false
   // A step that waits on the person: its call, not the thread, has the ways on.
   const stuckOpen = snapshot.attention.some((request) => request.kind === 'stuck')
-  const queue = queueShown(session, model.pending)
+  const queue = queueShown(session, model.pending, snapshot?.accepting)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
   // What its lead left running, and what Althar runs of it itself (ADR-096); a run's output is in its card.
@@ -831,6 +872,18 @@ export function TaskView({
     // Only the last pick's end takes it away: one made after is still on its way.
     void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
+  // The comments gathered on the diff go to the lead in one message of their own, the composer left as it is; given back where Althar doesn't take them.
+  const sendComments = () => {
+    const comments = lineComments.take()
+    if (comments.length === 0) return
+    const outgoing: Outgoing = { sent: [], pictures: [], files: [], attached: [], comments }
+    setSendingComments(true)
+    void model.send('', session === null || !session.held ? (chosen ?? undefined) : undefined, outgoing).then((accepted) => {
+      setSendingComments(false)
+      if (accepted) lineComments.reread()
+      else lineComments.giveBack(comments)
+    })
+  }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
     const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
@@ -840,6 +893,8 @@ export function TaskView({
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said)
+      // Its comments on the diff wait there again, to be sent with the next.
+      if (said.comments !== undefined) lineComments.giveBack(said.comments)
     }
   }
 
@@ -965,6 +1020,8 @@ export function TaskView({
       change.head === null
         ? undefined
         : void model.accept([{ head: change.head, url: change.url, ...(bypassQueue ? { bypassQueue: true } : {}) }]),
+    mergeStanding: model.mergeStanding,
+    mergeAwaits: model.mergeAwaits,
     postReview: (draftId) => void model.postReview(draftId),
     stopLaunch: (id) => void model.stopLaunch(id),
     openUrl: (url) => void window.open(url, '_blank'),
@@ -1009,7 +1066,6 @@ export function TaskView({
               },
             }
           : {})}
-        {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         // A prototype, a chat or a quick task made a change in one move: a reviewer on, and its pull request ending.
         {...(snapshot.task.toChange === true ? { onMakeChange: () => void model.makeChange() } : {})}
         // Its parts kept as a preset, named for it; and a chat moved between Scratch and the board, either way.
@@ -1165,6 +1221,7 @@ export function TaskView({
         }
         onSubmit={(body) => submit(body, false)}
         onSendNow={(body) => submit(body, true)}
+        steer={steers}
         {...images.props(receiver)}
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
@@ -1182,7 +1239,9 @@ export function TaskView({
         onSendQueuedNow={(id) => void sendQueuedNow(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         // An aside's is the coordinator's, in a word: its lead is named in the picker.
-        placeholder={busy ? text.placeholderBusy : embedded ? text.reply : text.placeholder(receiver.name)}
+        placeholder={
+          busy ? (steers ? text.placeholderBusySteer : text.placeholderBusy) : embedded ? text.reply : text.placeholder(receiver.name)
+        }
         meter={contextMeter(session, named, model.compact, { usage: snapshot.usage, heading: text.usageHeading })}
         // Another agent's model hands the task to that agent.
         picker={
@@ -1256,7 +1315,7 @@ export function TaskView({
   return (
     <PageOpenerProvider value={opener}>
       <OpenFinding.Provider value={changes.showFindings}>
-        <div className={embedded ? s.aside : s.window}>
+        <MessageMotion className={embedded ? s.aside : s.window}>
           {/* The bar is the header: the way back and which task, then where it stands, its faces and what it opens. */}
           {!embedded && (
             <TitleBar
@@ -1289,6 +1348,7 @@ export function TaskView({
                 to={snapshot.project.name}
                 kbd="esc"
                 title={snapshot.task.title}
+                shown={typedTitle}
                 titleLevel={1}
                 maxLength={TITLE_LENGTH}
                 editing={renaming}
@@ -1345,7 +1405,7 @@ export function TaskView({
             <NoOutputsView snapshot={snapshot} lead={lead.name} />
           ) : !embedded && shown === 'out' ? (
             <div
-              className={connecting || host.code !== null ? s.withPanel : s.outputsFace}
+              className={connecting || connectService !== null || host.code !== null ? s.withPanel : s.outputsFace}
               style={host.code !== null && !connecting ? ({ '--panel-width': `${host.bench.width}px` } as CSSProperties) : undefined}
             >
               {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
@@ -1375,12 +1435,19 @@ export function TaskView({
                   onMarkAllReady={(urls) => void model.markAllReady(urls)}
                   merging={model.merging}
                   mergeRefused={model.mergeRefused}
+                  mergeStanding={model.mergeStanding}
+                  mergeAwaits={model.mergeAwaits}
                   onPostScreenshots={model.postScreenshots}
                   onOpenFile={changes.show}
                   conflict={model.conflict}
                   onPushHere={() => void model.pushHere()}
                   onPushBranch={() => void model.pushBranch()}
                   onConnect={() => setConnecting(true)}
+                  putOnHost={putOnHostOf(snapshot, connectionList, {
+                    putting,
+                    onPut: (id, connected) => (connected ? setPutting(id) : setConnectService(id as Service)),
+                    onEnd: () => setPutting(null),
+                  })}
                   // So is a conflict to settle, in words the lead acts on.
                   onResolve={() => {
                     model.dismissConflict()
@@ -1388,7 +1455,9 @@ export function TaskView({
                   }}
                 />
               </ThreadShellProvider>
-              {connecting && snapshot.host !== null ? (
+              {connectService !== null ? (
+                <ConnectPanel service={connectService} onClose={() => setConnectService(null)} />
+              ) : connecting && snapshot.host !== null ? (
                 <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
               ) : (
                 // A file a lead's report names, beside it, as beside the thread.
@@ -1409,6 +1478,8 @@ export function TaskView({
                         <DocumentPanel
                           key={host.doc.source ?? host.doc.path ?? host.doc.title}
                           threadId={snapshot.threadId}
+                          taskId={snapshot.task.id}
+                          worktree={snapshot.task.worktree}
                           doc={host.doc}
                           version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
                           onClose={host.closeDoc}
@@ -1539,8 +1610,13 @@ export function TaskView({
                         <SmallChangeOf
                           card={card}
                           named={named}
+                          projectId={snapshot.project.id}
+                          agents={model.agents}
                           busy={model.pending}
                           onMerge={(change) => void model.accept([change])}
+                          {...(card.taskId === snapshot.task.id
+                            ? { changes: snapshot.task.changes, mergeStanding: model.mergeStanding }
+                            : {})}
                           {...(onOpenTask === undefined ? {} : { onOpen: onOpenTask })}
                           onShow={showInThread}
                         />
@@ -1721,9 +1797,26 @@ export function TaskView({
               findings={changes.findings}
               finding={changes.finding}
               onFinding={changes.goToFinding}
+              comments={lineComments.comments}
+              comment={commentShown}
+              // Comments are on the task's own change: one settled takes none.
+              {...(snapshot.task.phase === 'settled'
+                ? {}
+                : {
+                    onComment: lineComments.add,
+                    onEditComment: lineComments.edit,
+                    onRemoveComment: lineComments.remove,
+                    onSendComments: sendComments,
+                    sendingComments,
+                  })}
               view={changes.view}
               onRetry={changes.retry}
-              onClose={changes.close}
+              onClose={() => {
+                setCommentShown(null)
+                changes.close()
+              }}
+              // A markdown file's pictures are read where the task works; a file it links to that isn't in the change opens in the editor.
+              markdown={{ image: pictureOf(snapshot.threadId), ...(openFile === undefined ? {} : { open: openFile }) }}
               // An editor opens the task's folder there, at the file and its first change.
               actions={
                 <OpenIn
@@ -1734,8 +1827,44 @@ export function TaskView({
               }
             />
           )}
-        </div>
+        </MessageMotion>
       </OpenFinding.Provider>
     </PageOpenerProvider>
   )
+}
+
+/**
+ * For a task whose one repository is only on this computer: the hosts it can
+ * be put on from its card, those connected by their connection and the rest
+ * to connect first, and the form that puts it on the one chosen.
+ */
+const putOnHostOf = (
+  snapshot: ThreadSnapshot,
+  list: import('@althar/contracts').ConnectionList | null,
+  put: { readonly putting: string | null; readonly onPut: (id: string, connected: boolean) => void; readonly onEnd: () => void },
+) => {
+  const [only] = snapshot.task.here
+  if (snapshot.task.here.length !== 1 || only === undefined || only.remote != null) return undefined
+  const { ready, hosts } = hostChoices(list)
+  const chosen = ready.find((connection) => connection.id === put.putting)
+  return {
+    hosts,
+    onPut: (id: string) =>
+      put.onPut(
+        id,
+        ready.some((connection) => connection.id === id),
+      ),
+    putting:
+      chosen === undefined ? null : (
+        <PutOnHost
+          projectId={snapshot.project.id}
+          repository={only.repository}
+          name={only.name}
+          branch={only.branch}
+          connection={{ id: chosen.id, name: chosen.name, product: chosen.product, thing: thingOn(serviceOfProduct(chosen.product)) }}
+          onDone={put.onEnd}
+          onBack={put.onEnd}
+        />
+      ),
+  }
 }

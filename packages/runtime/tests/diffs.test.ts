@@ -5,9 +5,11 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
+import { vi } from 'vitest'
 
 import { baseOf, changedBetween, changedFiles, changedStretch, fileDiff, parseDiff, unchangedFileDiff } from '../src/diffs'
 import { NotFound } from '../src/errors'
+import * as spawner from '../src/spawner'
 
 /** Windows, where what some tests stand on isn't (each says what). */
 const windows = process.platform === 'win32'
@@ -51,6 +53,51 @@ const changed = () => {
 }
 
 describe('what a task changed', () => {
+  it.effect('keeps filenames and their sizes together while an agent changes the worktree during a read', () =>
+    Effect.gen(function* () {
+      const root = mkdtempSync(join(tmpdir(), 'althar-diff-changing-'))
+      const git = (...args: Array<string>) => execFileSync('git', args, { cwd: root }).toString()
+      git('init', '-q')
+      writeFileSync(join(root, 'file.txt'), 'before\n')
+      git('add', '.')
+      git('-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Before')
+      const base = git('rev-parse', 'HEAD').trim()
+      writeFileSync(join(root, 'file.txt'), 'after\n')
+      const named = git('diff', '--name-status', '-z', base)
+      const spawn = spawner.startApart
+      const changed = () => writeFileSync(join(root, 'file.txt'), 'before\n')
+      const mocked = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
+        const [command] = args
+        if (command.command === 'git' && command.args.includes('diff')) {
+          // A writer restores the file between separate name and size reads. A single combined read
+          // has both from the same snapshot, even when the file changes before the caller gets it.
+          if (command.args.includes('--name-status'))
+            return {
+              result: Promise.resolve({ code: 0, signal: null, error: null, over: false, stdout: named, stderr: '' }),
+              stop: () => undefined,
+            }
+          if (command.args.includes('--numstat')) {
+            if (!command.args.includes('--raw')) changed()
+            const running = spawn(...args)
+            return {
+              ...running,
+              result: running.result.then((result) => {
+                changed()
+                return result
+              }),
+            }
+          }
+        }
+        return spawn(...args)
+      })
+      const files = yield* changedFiles(root, base).pipe(Effect.ensuring(Effect.sync(() => mocked.mockRestore())))
+      assert.deepStrictEqual(
+        files.map(({ path, add, del, binary }) => ({ path, add, del, binary })),
+        [{ path: 'file.txt', add: 1, del: 1, binary: false }],
+      )
+    }),
+  )
+
   it.effect('lists each file with how it changed, how much, and whether all of it is committed', () =>
     Effect.gen(function* () {
       const { root, base } = changed()
@@ -77,6 +124,7 @@ describe('what a task changed', () => {
       const { root, base } = changed()
       const diff = yield* fileDiff(root, base, 'retry.ts')
       assert.isFalse(diff.truncated)
+      assert.isTrue(diff.whole)
       assert.deepStrictEqual(diff.lines, [
         { kind: 'hunk', text: '@@ -1,6 +1,6 @@' },
         { kind: 'removed', old: 1, text: 'const tries = 3', changed: ['3'] },
@@ -118,6 +166,13 @@ describe('what a task changed', () => {
       assert.isFalse(cut.truncated)
       assert.deepStrictEqual(cut.lines[0], { kind: 'hunk', text: '@@ -23998,7 +23998,7 @@ row 23997' })
       assert.isTrue(cut.lines.some((line) => line.kind === 'added' && line.text === 'row changed'))
+      assert.isFalse(cut.whole)
+      assert.isTrue(diff.whole)
+      // A change near the top of a file too long to read whole: its first hunk starts at the first line, yet it is not the file.
+      writeFileSync(join(root, 'huge.txt'), `${huge.map((line, i) => (i === 1 ? 'row changed' : line)).join('\n')}\n`)
+      const top = yield* fileDiff(root, before, 'huge.txt')
+      assert.deepStrictEqual(top.lines[0], { kind: 'hunk', text: '@@ -1,5 +1,5 @@' })
+      assert.isFalse(top.whole)
     }),
   )
 
@@ -147,7 +202,12 @@ describe('what a task changed', () => {
       // Moved without a change: no lines, and it says where it was.
       const moved = yield* fileDiff(root, base, 'notes.md')
       assert.strictEqual(moved.file.from, 'old.md')
-      assert.lengthOf(moved.lines, 0)
+      // A markdown file is read as it is, every line unchanged, so it can open as a page; any other file has no lines.
+      assert.lengthOf(moved.lines, 5)
+      assert.isTrue(moved.lines.every((line) => line.kind === 'context'))
+      assert.isTrue(moved.whole)
+      assert.isTrue(scratch.whole)
+      assert.isFalse(picture.whole)
       // A file the task didn't change, or one outside the worktree, isn't read.
       for (const path of ['README.md', '../../etc/hosts']) {
         const refused = yield* Effect.flip(fileDiff(root, base, path))
@@ -172,6 +232,43 @@ const started = () => {
 }
 
 describe('what a task changed, carefully', () => {
+  it.effect('refuses an incomplete tracked-file diff instead of returning files with missing sizes', () =>
+    Effect.gen(function* () {
+      const { root, base } = started()
+      const spawn = spawner.startApart
+      const mocked = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
+        const [command] = args
+        if (command.command === 'git' && command.args.includes('--raw'))
+          return {
+            result: Promise.resolve({
+              code: 0,
+              signal: null,
+              error: null,
+              over: false,
+              stderr: '',
+              stdout: ':100644 100644 1234567 0000000 M\0README.md\0',
+            }),
+            stop: () => undefined,
+          }
+        return spawn(...args)
+      })
+      const error = yield* Effect.flip(changedFiles(root, base)).pipe(Effect.ensuring(Effect.sync(() => mocked.mockRestore())))
+      assert.instanceOf(error, Error)
+      assert.include((error as Error).message, 'Git reported no size for README.md.')
+    }),
+  )
+
+  it.effect('lists a staged permission change with zero added or deleted lines', () =>
+    Effect.gen(function* () {
+      const { root, git, base } = started()
+      git('config', 'core.filemode', 'false')
+      git('update-index', '--chmod=+x', 'README.md')
+      assert.deepStrictEqual(yield* changedFiles(root, base), [
+        { path: 'README.md', from: null, status: 'modified', add: 0, del: 0, binary: false, uncommitted: true },
+      ])
+    }),
+  )
+
   // Not on Windows: it makes a named pipe (mkfifo) and a symbolic link, which Windows has neither of as git sees them.
   it.effect.skipIf(windows)(
     'shows a new link as git would add it, its target, never what it points at; and reads nothing that isn’t a file',

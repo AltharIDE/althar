@@ -55,6 +55,8 @@ import {
   type TurnTime,
   type ScreenshotsOnChange,
   type TaskFindings,
+  type TaskLineComments,
+  type LineComment,
   waitingIn,
   plainTitle,
   toolPhrase,
@@ -85,6 +87,7 @@ import { evidenceGallery, galleryUpdateIn } from './evidenceGallery'
 import { builtIn, descriptionsIn, evidenceOf, evidencePaths, keptViewsIn, shownOf, unverifiedIn } from './evidence'
 import { graphOf, type RunRows, type StepRow } from './graph'
 import { taskFindingsOf } from './taskFindings'
+import { type KeptLineComment, keepLineComments, keptIn, lineCommentsOf, sentOf } from './lineComments'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { handedOf, issueCardsWaiting, issueChangesWaiting, issueDraftsWaiting, kindOf } from './kinds'
 import { reviewOfferOf } from './reviewOffer'
@@ -92,7 +95,7 @@ import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
 import { documentKept, documentText, outputText } from './reading'
-import { type CodeRoot, type CodeRoots, findCode, readCode } from './code'
+import { type CodeRoot, type CodeRoots, findCode, readCode, readCodeImage } from './code'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { folderOf, KEPT } from './bringBack'
@@ -629,7 +632,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
     ...(row.deliveryId == null ? {} : { turn: row.deliveryId }),
   }
   switch (row.kind) {
-    case 'user_message':
+    case 'user_message': {
+      const comments = keptIn(field(content, 'comments'))
       return {
         ...base,
         kind: 'user_message',
@@ -638,6 +642,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []),
           pictures: picturesOf(field(content, 'pictures')),
           files: Option.getOrElse(decodeAttached(field(content, 'files') ?? []), () => []),
+          ...(comments.length === 0 ? {} : { comments: sentOf(row.id, comments) }),
         },
         input:
           row.inputState === null
@@ -648,6 +653,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
                 ...(row.dictated === 1 ? { dictated: true } : {}),
               },
       }
+    }
     case 'agent_message':
     case 'agent_thought': {
       const answer = field(content, 'answer')
@@ -991,10 +997,14 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
 /** A change from the store's feed, with the thread it belongs to, when it belongs to one. */
 export interface ThreadChange {
   readonly cursor: number
+  readonly checkpoint: string
   readonly aggregateType: string
   readonly aggregateId: string
   readonly projectId: string | null
   readonly threadId: string | null
+  /** A task's rename this change is, by its recorded event: the title, and whether an agent gave it (1) or the person (0). */
+  readonly renamedTo: string | null
+  readonly renamedByAgent: number | null
 }
 
 type Store =
@@ -1059,6 +1069,10 @@ export class Queries extends Context.Service<
     fileDiff(taskId: string, path: string, untouched?: boolean): Effect.Effect<FileDiff, unknown>
     /** What the reviews of a task's latest run found, each where it is in the change now and what became of it. */
     findings(taskId: string, review?: string): Effect.Effect<TaskFindings, unknown>
+    /** The comments the person sent on a task's diff, each where its lines are now and whether a commit since changed them (decisions: desktop-app § Comments on the diff). */
+    lineComments(taskId: string): Effect.Effect<TaskLineComments, unknown>
+    /** Comments on a task's diff about to be sent in a thread, each with the tree of its worktree's files as they are now; none for a thread with no task. */
+    keepLineComments(threadId: string, comments: ReadonlyArray<LineComment>): Effect.Effect<ReadonlyArray<KeptLineComment>, unknown>
     /** Where a thread's agent works, for the code it names: its task's worktrees here, or the project's repositories at their default branches. */
     codeRoots(threadId: string): Effect.Effect<CodeRoots, SqlError.SqlError | NotFound>
     /** What the names in a thread's messages name there, each message as it was when said where it is an item of the thread. */
@@ -1071,6 +1085,7 @@ export class Queries extends Context.Service<
     >
     /** A file there, as findCode named it: as it is now, or at a commit its default branch was at when a message was said. */
     readCode(threadId: string, path: string, commit?: string, line?: number): Effect.Effect<CodeText, SqlError.SqlError | NotFound>
+    readCodeImage(threadId: string, path: string): Effect.Effect<CodeText, SqlError.SqlError | NotFound>
     /** A task's card, as its board shows it: where it stands and what it makes. */
     card(taskId: string): Effect.Effect<TaskCard, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
@@ -1078,7 +1093,7 @@ export class Queries extends Context.Service<
     /** The next page of a project's settled tasks, as cards: the ones settled before `before` (`taskId` breaking a tie), most recent first. */
     olderSettled(projectId: string, before: string, taskId: string): Effect.Effect<ReadonlyArray<BoardSnapshot['tasks'][number]>, unknown>
     /** The home: every project, and across them what waits on the person, what runs, and what the loop did since `since` or they last left it. */
-    home(since?: string): Effect.Effect<HomeSnapshot, unknown>
+    home(since?: string, deviceId?: string): Effect.Effect<HomeSnapshot, unknown>
     /**
      * What waits on the person, across every project not archived: each task the home shows, as the card watcher last worked
      * its card out, and the calls that wait. What the Dock's badge and the notifications go by; it works no card out.
@@ -1769,6 +1784,20 @@ export class Queries extends Context.Service<
             { concurrency: 'unbounded' },
           )
           return yield* taskFindingsOf(taskId, placed, review)
+        })
+
+      /** A task's worktrees here, by their slugs, as its comments name their files. */
+      const commentedWorktrees = (taskId: string) =>
+        Effect.map(worktreesOf(taskId), (worktrees) =>
+          worktrees.filter((worktree) => existsSync(worktree.path)).map((worktree) => ({ slug: worktree.slug, path: worktree.path })),
+        )
+
+      const keptComments = (threadId: string, comments: ReadonlyArray<LineComment>) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
+          const worktrees = thread?.taskId == null ? [] : yield* commentedWorktrees(thread.taskId)
+          return yield* keepLineComments(worktrees, comments)
         })
 
       /** Where a folder really is, as an agent may write it: its links followed. */
@@ -2711,6 +2740,7 @@ export class Queries extends Context.Service<
                       : {}),
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
+                    ...(field(parameters, 'reviewAfterMerge') === true ? { reviewAfterMerge: true } : {}),
                     // The preset its parts are, which the card's kicker names first (a task is a conversation plus parts).
                     preset:
                       field(parameters, 'smallChange') === true
@@ -3145,13 +3175,13 @@ export class Queries extends Context.Service<
        * what runs, and what the loop did since `since`, or since they last left
        * the home here, or, before they ever did, over the last day.
        */
-      const home = (since?: string) =>
+      const home = (since?: string, deviceId: string = instance.deviceId) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const at = yield* cursor
           const [device] = yield* sql<{
             looked: string | null
-          }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${instance.deviceId}`
+          }>`SELECT home_looked_at AS looked FROM devices WHERE id = ${deviceId}`
           const looked = device?.looked ?? null
           const from = since ?? looked ?? new Date((yield* Clock.currentTimeMillis) - FIRST_LOOK).toISOString()
           const { open, tasks } = yield* homeTasks
@@ -3778,8 +3808,12 @@ export class Queries extends Context.Service<
           // Where it stands, from its card, which shows its links too: the header reads those with git, below.
           // Its links are read first and given to it: its kind, and where it opens, depend on its pull requests.
           const links = yield* linksOf(head.taskId)
-          const card: TaskCard | undefined = yield* cardFor(head.taskId, links)
-          const session = yield* sessionOf(threadId)
+          const sessions = yield* Sessions
+          const [found, session, accepting] = yield* Effect.all(
+            [cardFor(head.taskId, links), sessionOf(threadId), sessions.placement(threadId)],
+            { concurrency: 'unbounded' },
+          )
+          const card: TaskCard | undefined = found
           // The last lead that actually started, for its account or a thread that has no plan. A failed replacement isn't its lead.
           const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
             SELECT s.agent_id, s.model, a.name AS account FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
@@ -3849,6 +3883,7 @@ export class Queries extends Context.Service<
             WHERE w.task_id = ${head.taskId} AND w.moving_to IS NOT NULL LIMIT 1`
           return {
             threadId,
+            accepting,
             cursor: at,
             usage,
             project: { id: head.projectId, name: head.projectName },
@@ -3998,7 +4033,7 @@ export class Queries extends Context.Service<
               allowEverything: { task: head.allowEverything === 1, project: head.projectAllows === 1 },
               review: yield* reviewBriefOf(head.taskId),
             },
-            session,
+            session: session === null ? null : { ...session, accepting },
             retryable: yield* (yield* Sessions).retryable(threadId),
             conversationVersion:
               (yield* sql<{ version: number }>`SELECT conversation_version AS version FROM threads WHERE id = ${threadId}`)[0]?.version ??
@@ -4050,13 +4085,15 @@ export class Queries extends Context.Service<
           const mark = yield* markOf(threadId)
           const within = mark === null ? {} : mark.earlierShown ? { until: mark.from } : { from: mark.from }
           // Its cards, the agent on it, the one it would start on and the project's host, read at the same time.
-          const [read, session, suggested, host, view] = yield* Effect.all(
+          const sessions = yield* Sessions
+          const [read, session, suggested, host, view, accepting] = yield* Effect.all(
             [
               pageOf(threadId, { ...page, ...within }),
               sessionOf(threadId),
               coordinators.suggested(projectId),
               hostOf(projectId),
               viewOf(threadId),
+              sessions.placement(threadId),
             ],
             { concurrency: 'unbounded' },
           )
@@ -4074,10 +4111,11 @@ export class Queries extends Context.Service<
           const usage = yield* spendingOf({ threadId, since: midnight.toISOString() }).pipe(Effect.orElseSucceed(() => []))
           return {
             threadId,
+            accepting,
             cursor: at,
             usage,
             project: { id: projectId, name: project.name },
-            session,
+            session: session === null ? null : { ...session, accepting },
             retryable: yield* (yield* Sessions).retryable(threadId),
             suggested,
             items,
@@ -4113,7 +4151,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<ThreadChange>`
-            SELECT c.cursor, c.aggregate_type, c.aggregate_id, c.project_id,
+            SELECT c.cursor, c.checkpoint, c.aggregate_type, c.aggregate_id, c.project_id,
               CASE c.aggregate_type
                 WHEN 'thread' THEN c.aggregate_id
                 WHEN 'thread_item' THEN (SELECT thread_id FROM thread_items WHERE id = c.aggregate_id)
@@ -4140,7 +4178,13 @@ export class Queries extends Context.Service<
                 WHEN 'node_attempt' THEN (SELECT t.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
                   JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
                   JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task' WHERE a.id = c.aggregate_id)
-              END AS thread_id
+              END AS thread_id,
+              -- A rename is told with who made it: the task's event of that revision, by the person, an agent, or Althar itself.
+              (SELECT json_extract(e.payload, '$.title') FROM record_events e WHERE c.aggregate_type = 'task' AND e.aggregate_type = 'task'
+                AND e.aggregate_id = c.aggregate_id AND e.aggregate_revision = c.aggregate_revision AND e.type = 'task.renamed' LIMIT 1) AS renamed_to,
+              (SELECT e.actor_id NOT IN (${instance.personId}, ${instance.systemId}) FROM record_events e WHERE c.aggregate_type = 'task'
+                AND e.aggregate_type = 'task' AND e.aggregate_id = c.aggregate_id AND e.aggregate_revision = c.aggregate_revision
+                AND e.type = 'task.renamed' LIMIT 1) AS renamed_by_agent
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
 
@@ -4312,10 +4356,13 @@ export class Queries extends Context.Service<
         thread: (threadId, page) => run(thread(threadId, page)),
         fileDiff: (taskId, path, untouched) => run(diffOf(taskId, path, untouched)),
         findings: (taskId, review) => run(findingsOf(taskId, review)),
+        lineComments: (taskId) => run(Effect.flatMap(commentedWorktrees(taskId), (worktrees) => lineCommentsOf(taskId, worktrees))),
+        keepLineComments: (threadId, comments) => run(keptComments(threadId, comments)),
         codeRoots: (threadId) => run(codeRoots(threadId)),
         findCode: (threadId, messages) => run(codeFound(threadId, messages)),
         readCode: (threadId, path, commit, line) =>
           run(Effect.flatMap(codeRoots(threadId), (place) => readCode(place, path, commit, line))),
+        readCodeImage: (threadId, path) => run(Effect.flatMap(codeRoots(threadId), (place) => readCodeImage(place, path))),
         card: (taskId) =>
           run(
             Effect.flatMap(cardFor(taskId), (found) =>
@@ -4324,7 +4371,7 @@ export class Queries extends Context.Service<
           ),
         board: (projectId) => run(board(projectId)),
         olderSettled: (projectId, before, taskId) => run(olderSettled(projectId, before, taskId)),
-        home: (since) => run(home(since)),
+        home: (since, deviceId) => run(home(since, deviceId)),
         waiting: run(waiting),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         shown: (threadId, itemId) => run(shown(threadId, itemId)),

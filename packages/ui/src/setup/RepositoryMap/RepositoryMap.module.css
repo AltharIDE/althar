@@ -144,12 +144,12 @@
   flex: none;
 }
 .where {
+  display: flex;
   min-width: 0;
   overflow: hidden;
   padding-left: 23px;
   font: 450 11.5px/1.4 var(--mono);
   color: var(--t-3);
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .elsewhere {
@@ -320,4 +320,12 @@
 }
 .off .what {
   flex: 1 1 220px;
+}
+
+/* A repository only here, put on a host: the way to, beside it, and the form in its place once a host is chosen. */
+.putOn {
+  margin-left: auto;
+}
+.putting {
+  margin-top: 6px;
 }

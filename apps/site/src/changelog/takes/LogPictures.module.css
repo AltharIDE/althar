@@ -636,3 +636,74 @@
   .cvPayout { display: none; }
   .cvPin { left: auto; right: 0.6em; top: 9.6em; }
 }
+
+/* ---- 0.9.0: undo from a message ---- */
+
+/* A task: its conversation, and the files it changed beside it. Everything that goes or comes back does it in room that is there. */
+.unWin { margin: 0 1.6em; }
+.unBody { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr); height: 27em; }
+/* The window dims under the question, as the app's dialogs dim it. */
+.unBody::after { content: ''; position: absolute; inset: 0; z-index: 1; background: rgba(10, 9, 8, 0.62); opacity: 0; transition: opacity 0.4s; }
+.unBody[data-asking='true']::after { opacity: 1; }
+.unTalk { display: flex; flex-direction: column; gap: 1em; min-width: 0; padding: 1.3em 1.4em 1.2em; border-right: 1px solid var(--line); font-size: 0.9em; }
+.unYou { display: grid; justify-items: end; gap: 0.35em; margin-left: 2.4em; }
+.unYou p { margin: 0; padding: 0.55em 0.85em; border-radius: 0.7em 0.7em 0.2em 0.7em; background: var(--paper); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--t1); transition: box-shadow 0.35s; }
+.unYou p[data-at='true'] { box-shadow: inset 0 0 0 1px rgba(150, 160, 255, 0.5); }
+/* The message's own link, shown on hover, its room kept. */
+.unUndo { font-size: 0.82em; font-weight: 550; color: var(--live); opacity: 0; transition: opacity 0.35s; }
+.unUndo[data-shown='true'] { opacity: 1; }
+.unTurn { display: grid; gap: 1em; transition: opacity 0.6s, transform 0.7s var(--ease-out); }
+.unTurn[data-gone='true'] { opacity: 0; transform: translateY(-0.4em); }
+/* The draft, the prompt back in it. */
+.unDraft { display: flex; align-items: center; min-height: 2.9em; margin-top: auto; padding: 0.6em 0.85em; border-radius: 0.6em; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--t4); transition: box-shadow 0.5s, color 0.5s; }
+.unDraft[data-back='true'] { color: var(--t1); box-shadow: inset 0 0 0 1px var(--line-2), 0 0 0 0.2em rgba(138, 149, 255, 0.18); }
+.unDraftWords { animation: rvIn 0.45s var(--ease-out) both; }
+
+.unChanges { display: flex; flex-direction: column; min-width: 0; background: var(--bar); }
+.unTabs { display: flex; align-items: stretch; gap: 1.2em; height: 2.6em; padding: 0 1em; border-bottom: 1px solid var(--line); font-size: 0.82em; color: var(--t3); white-space: nowrap; }
+.unTabs > * { display: flex; align-items: center; }
+.unTabs b { color: var(--t1); font-weight: 550; box-shadow: inset 0 -1px 0 var(--t2); }
+.unSum { margin-left: auto; gap: 0.35em; font-family: var(--mono); font-size: 0.92em; animation: rvIn 0.45s var(--ease-out) both; }
+.unFiles { margin: 0; padding: 0.4em 0; list-style: none; font-size: 0.84em; }
+.unFiles li { display: flex; align-items: baseline; justify-content: space-between; gap: 1em; padding: 0.55em 1em; border-bottom: 1px solid var(--line); transition: opacity 0.6s, transform 0.7s var(--ease-out); }
+.unFiles li[data-gone='true'] { opacity: 0; transform: translateX(0.6em); }
+.unFiles code { overflow: hidden; min-width: 0; color: var(--t1); text-overflow: ellipsis; white-space: nowrap; }
+.unFiles code span { color: var(--t4); }
+.unFiles .diff { display: inline-flex; flex: none; gap: 0.4em; font-family: var(--mono); font-size: 0.86em; }
+
+/* The question, over the window: the app's own words, its prompt quoted. */
+.unAsk {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  gap: 0.55em;
+  width: 27em;
+  padding: 1.4em 1.5em 1.1em;
+  border-radius: 0.9em;
+  background: var(--raised);
+  box-shadow: 0 0 0 1px rgba(255, 240, 215, 0.14), inset 0 1px 0 rgba(255, 240, 215, 0.08), 0 3em 5em -1.5em rgba(0, 0, 0, 0.9), 0 0 7em -2em rgba(60, 76, 255, 0.45);
+  opacity: 0;
+  transform: translate(-50%, -46%);
+  transition: opacity 0.4s, transform 0.5s var(--ease-out);
+}
+.unAsk[data-shown='true'] { opacity: 1; transform: translate(-50%, -50%); }
+.unSay { font-size: 0.86em; color: var(--t2); }
+.unQuote { margin: 0.15em 0; padding: 0.6em 0.85em; border-radius: 0.55em; background: rgba(0, 0, 0, 0.24); box-shadow: inset 0 0 0 1px var(--line); font-size: 0.88em; color: var(--t1); }
+.unWords { display: flex; justify-content: flex-end; gap: 1.5em; margin-top: 0.45em; padding-top: 0.8em; border-top: 1px solid var(--line); font-size: 0.86em; color: var(--t3); }
+.unWords b { color: #f2816f; font-weight: 600; text-decoration: underline 1px transparent; text-underline-offset: 0.3em; transition: text-decoration-color 0.3s; }
+.unWords b[data-pressed='true'] { text-decoration-color: currentColor; }
+
+@container (max-width: 560px) {
+  .unWin { margin: 0; }
+  .unBody { grid-template-columns: minmax(0, 1fr); grid-template-rows: 22em 10.5em; height: auto; }
+  .unTalk { border-right: 0; border-bottom: 1px solid var(--line); }
+  .unTalk .brTask { display: none; }
+  .unAsk { width: 25em; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .unTurn, .unFiles li { transform: none; }
+  .unAsk { transform: translate(-50%, -50%); }
+  .unDraftWords, .unSum { animation: none; }
+}

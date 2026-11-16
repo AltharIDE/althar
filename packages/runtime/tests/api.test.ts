@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -46,6 +46,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
+import { ClientIdentities } from '../src/ClientIdentities'
 import { listProcesses, marksOf, WORK } from '../src/machine'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
@@ -59,6 +60,20 @@ import { until } from '@althar/testing/effect'
 import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY, ROOMY_DISK } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
+const externalConnection = {
+  id: 'acp-rpc',
+  name: 'RPC agent',
+  command: 'althar-no-such-acp-agent',
+  args: [],
+  mode: 'ask',
+  readerMode: 'read',
+  modeOption: 'mode',
+  modelOption: 'model',
+  effortOption: null,
+  held: {},
+  registryId: null,
+  registryVersion: null,
+}
 
 /** Lines the runtime would have opened in Terminal. */
 const opened: Array<string> = []
@@ -111,12 +126,19 @@ const connected = (
         checksAppear: Duration.zero,
       }),
     )
+    let boundSender: MessageSender = options.sender ?? { kind: 'window' }
+    if (boundSender.kind === 'paired_device') {
+      const publicKey = generateKeyPairSync('ed25519').publicKey.export({ format: 'jwk' }).x
+      if (publicKey === undefined) throw new Error('Missing Ed25519 public key')
+      const registered = yield* Context.get(context, ClientIdentities).register({ name: 'Test phone', publicKey, role: 'paired_device' })
+      boundSender = { kind: 'paired_device', deviceId: registered.deviceId }
+    }
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
     yield* Effect.forkScoped(
       Layer.launch(
         connection(
           emitterPort(channel.port1, (data) => data),
-          options.sender ?? { kind: 'window' },
+          boundSender,
         ),
       ).pipe(Effect.provideContext(context)),
     )
@@ -126,7 +148,7 @@ const connected = (
     const grant = (path: string) => Context.get(context, Folders).allow(path)
     /** Reads or writes the runtime's store directly, for what no client does. */
     const store = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) => effect.pipe(Effect.provideContext(context))
-    return { client, grant, store, context }
+    return { client, grant, store, context, boundSender }
   })
 
 /** The fake agents, with one of them changed: to make what Althar asks of it fail. */
@@ -157,6 +179,56 @@ const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.sess
 const texts = (thread: ThreadSnapshot) => thread.items.map((item) => ('text' in item.content ? item.content.text : item.kind))
 
 describe('the API', () => {
+  it.live('keeps external ACP command retries idempotent through the window RPC, including after removal', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const mutable = Layer.effect(
+          Agents,
+          Effect.map(Agents, (all) => Agents.from(all.list)),
+        ).pipe(Layer.provide(fakeAgents()))
+        const { client } = yield* connected({ agents: mutable })
+        const saveId = commandId()
+        const revision = yield* client.SaveAcpConnection({ commandId: saveId, connection: externalConnection })
+        assert.strictEqual(yield* client.SaveAcpConnection({ commandId: saveId, connection: externalConnection }), revision)
+        assert.strictEqual((yield* client.GetAgentCatalog({})).connections.length, 1)
+        const checkId = commandId()
+        const checking = yield* client.CheckAcpConnection({ commandId: checkId, agentId: externalConnection.id })
+        assert.strictEqual(yield* client.CheckAcpConnection({ commandId: checkId, agentId: externalConnection.id }), checking)
+        const failed = yield* until(client.GetAgentCatalog({}), (read) => read.connections[0]?.state === 'failed')
+        assert.isNotNull(failed.connections[0]?.reason)
+        const removeId = commandId()
+        const removed = yield* client.RemoveAcpConnection({ commandId: removeId, agentId: externalConnection.id })
+        assert.strictEqual(yield* client.RemoveAcpConnection({ commandId: removeId, agentId: externalConnection.id }), removed)
+        assert.strictEqual(yield* client.SaveAcpConnection({ commandId: saveId, connection: externalConnection }), revision)
+        assert.isEmpty((yield* client.GetAgentCatalog({})).connections)
+        const missingId = commandId()
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const error = yield* Effect.flip(client.CheckAcpConnection({ commandId: missingId, agentId: externalConnection.id }))
+          assert.instanceOf(error, ApiError)
+          if (error instanceof ApiError) assert.include(error.message, 'Save the connection')
+        }
+      }),
+    ),
+  )
+
+  it.live('keeps external ACP executable configuration and checks inside the person’s window', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({ sender: { kind: 'socket' } })
+        const calls: ReadonlyArray<Effect.Effect<unknown, unknown>> = [
+          client.GetAgentCatalog({}),
+          client.SaveAcpConnection({ commandId: commandId(), connection: externalConnection }),
+          client.CheckAcpConnection({ commandId: commandId(), agentId: externalConnection.id }),
+          client.RemoveAcpConnection({ commandId: commandId(), agentId: externalConnection.id }),
+        ]
+        for (const call of calls) {
+          const error = yield* Effect.flip(call)
+          assert.instanceOf(error, ApiError)
+          if (error instanceof ApiError) assert.strictEqual(error.reason, 'PersonRequired')
+        }
+      }),
+    ),
+  )
   it.live('Try again refuses visibly when there is no failed turn or ended session', () =>
     Effect.gen(function* () {
       const { client, grant } = yield* connected()
@@ -965,6 +1037,42 @@ describe('accounts, through the API', () => {
   )
 })
 
+it.live('opens Copilot CLI on the selected enterprise host and reports that host through the API', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const cliAgents = Layer.effect(
+        Agents,
+        Effect.gen(function* () {
+          const agents = yield* Agents
+          const cli = yield* agents.get('copilot').pipe(Effect.orDie)
+          return Agents.from([
+            ...agents.list,
+            { ...cli, definition: { ...cli.definition, signIn: { ...cli.definition.signIn, login: 'copilot login' } } },
+          ])
+        }),
+      ).pipe(Layer.provide(fakeAgents()))
+      const { client } = yield* connected({ agents: cliAgents })
+      const [account] = (yield* client.Status({})).agents.find((agent) => agent.id === 'copilot')?.accounts ?? []
+      assert.isDefined(account)
+      const result = yield* client.SignInAccount({ commandId: commandId(), accountId: account!.id, host: 'https://Company.GHE.com/' })
+      assert.deepStrictEqual(result, { line: "copilot login --host 'https://company.ghe.com'", opened: true })
+      assert.include(opened, result.line)
+      const [saved] = (yield* client.Status({})).agents.find((agent) => agent.id === 'copilot')?.accounts ?? []
+      assert.strictEqual(saved?.signInHost, 'company.ghe.com')
+      const count = opened.length
+      const rejected = yield* Effect.flip(
+        client.SignInAccount({
+          commandId: commandId(),
+          accountId: account!.id,
+          host: 'https://user:password@company.ghe.com',
+        }),
+      )
+      assert.strictEqual(rejected.reason, 'AccountRefused')
+      assert.lengthOf(opened, count)
+    }),
+  ),
+)
+
 describe('a project’s vocabulary, through the API', () => {
   it.live('says the names its code uses that have parts, its files’ among them, and not plain words', () =>
     Effect.scoped(
@@ -1027,6 +1135,19 @@ describe('settings, through the API', () => {
         assert.deepStrictEqual((yield* client.GetSettings({})).coAuthor, { on: false, line })
         yield* client.SetCoAuthor({ commandId: commandId(), on: true })
         assert.isTrue((yield* client.GetSettings({})).coAuthor.on)
+      }),
+    ),
+  )
+
+  it.live('queues what is sent mid-turn unless the person sets it to steer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'queue')
+        yield* client.SetSendMidTurn({ commandId: commandId(), to: 'steer' })
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'steer')
+        yield* client.SetSendMidTurn({ commandId: commandId(), to: 'queue' })
+        assert.strictEqual((yield* client.GetSettings({})).sendMidTurn, 'queue')
       }),
     ),
   )
@@ -1504,6 +1625,20 @@ describe('editors, through the API', () => {
           ],
         )
         assert.deepInclude(yield* client.ReadCode({ threadId: task.threadId, path: 'src/retry.ts' }), { from: 1, total: 3, cut: false })
+        // A picture a markdown file names beside it: the task's own, by its name, and never one out of its folder.
+        mkdirSync(join(worktree, 'docs'))
+        writeFileSync(join(worktree, 'docs', 'flow.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+        writeFileSync(join(worktree, 'docs', 'notes.txt'), 'not a picture')
+        symlinkSync(join(tmpdir(), 'elsewhere.png'), join(worktree, 'docs', 'link.png'))
+        assert.deepStrictEqual((yield* client.ReadCode({ threadId: task.threadId, path: 'docs/flow.png', image: true })).image, {
+          type: 'image/png',
+          data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'),
+        })
+        for (const path of ['docs/notes.txt', 'docs/link.png', 'docs/none.png', '../flow.png'])
+          assert.strictEqual(
+            (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path, image: true }))).message,
+            "That file isn't there any more.",
+          )
         assert.strictEqual(
           (yield* Effect.flip(client.ReadCode({ threadId: task.threadId, path: '../outside.ts' }))).message,
           "That file isn't there any more.",
@@ -3290,7 +3425,7 @@ describe('connection authority', () => {
     it.live(`keeps ${sender.kind} as the source when the person tells a stuck lead what to do`, () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const { client, grant, context, store } = yield* connected({ sender })
+          const { client, grant, context, store, boundSender } = yield* connected({ sender })
           const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
           const task = yield* client.StartTask({
             commandId: commandId(),
@@ -3322,7 +3457,7 @@ describe('connection authority', () => {
             (rows) => rows.length === 1,
           )
           assert.strictEqual(rows[0]?.senderKind, sender.kind)
-          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          assert.strictEqual(rows[0]?.senderDeviceId, boundSender.kind === 'paired_device' ? boundSender.deviceId : null)
           assert.strictEqual(rows[0]?.origin, 'person')
           const turn = JSON.parse(
             yield* Effect.provideContext(
@@ -3343,7 +3478,7 @@ describe('connection authority', () => {
     it.live(`records ${sender.kind} from its connection and delivers its explicit turn origin`, () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const { client, context, store } = yield* connected({ sender })
+          const { client, context, store, boundSender } = yield* connected({ sender })
           // Seed the project internally, since a socket is not allowed to open folders on the person's behalf.
           const project = yield* Effect.provideContext(
             Effect.gen(function* () {
@@ -3382,7 +3517,7 @@ describe('connection authority', () => {
           assert.isTrue(
             rows.every((row) => row.senderKind === sender.kind && row.origin === (sender.kind === 'socket' ? 'system' : 'person')),
           )
-          assert.strictEqual(rows[0]?.senderDeviceId, sender.kind === 'paired_device' ? sender.deviceId : null)
+          assert.strictEqual(rows[0]?.senderDeviceId, boundSender.kind === 'paired_device' ? boundSender.deviceId : null)
           // The message travelled over RPC and Sessions opened this live delivery; no turn rows are seeded.
           let acts = 0
           const first = rows[0]!
@@ -3436,4 +3571,165 @@ describe('connection authority', () => {
       ),
     )
   }
+})
+
+describe('a project set up where it starts, through the API', () => {
+  /** A repository's origin as its config has it, before any `insteadOf`. */
+  const originOf = (path: string) => execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: path, encoding: 'utf8' }).trim()
+
+  /**
+   * GitHub connected, with a repository of the person's on it and their own
+   * account to make one in; git goes to bare repositories of the test's for
+   * each, by its address on the host, as the person's git would to GitHub.
+   */
+  const setUp = () =>
+    Effect.gen(function* () {
+      const remotes = realpathSync(mkdtempSync(join(tmpdir(), 'althar-host-')))
+      const bareOf = (path: string) => join(remotes, `${path.replace('/', '__')}.git`)
+      const seed = folderWith({ tidepool: [] })
+      execFileSync('git', ['clone', '-q', '--bare', '--', join(seed, 'tidepool'), bareOf('you/tidepool')])
+      execFileSync('git', ['init', '-q', '--bare', bareOf('you/fresh')])
+      const config = join(remotes, 'gitconfig')
+      writeFileSync(
+        config,
+        [
+          '[user]\n\tname = Dana\n\temail = dana@example.test',
+          // With forward slashes: a config's quoted name reads a backslash, as Windows' paths have, as an escape.
+          ...['you/tidepool', 'you/fresh'].map(
+            (path) => `[url "${bareOf(path).replaceAll('\\', '/')}"]\n\tinsteadOf = ${HOST}/${path}.git`,
+          ),
+          '',
+        ].join('\n'),
+      )
+      const was = { global: process.env.GIT_CONFIG_GLOBAL, system: process.env.GIT_CONFIG_NOSYSTEM }
+      process.env.GIT_CONFIG_GLOBAL = config
+      process.env.GIT_CONFIG_NOSYSTEM = '1'
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (was.global === undefined) delete process.env.GIT_CONFIG_GLOBAL
+          else process.env.GIT_CONFIG_GLOBAL = was.global
+          if (was.system === undefined) delete process.env.GIT_CONFIG_NOSYSTEM
+          else process.env.GIT_CONFIG_NOSYSTEM = was.system
+        }),
+      )
+      const github = makeFakeService({ pushUrl: (path) => `${HOST}/${path.join('/')}.git` })
+      github.addRepository(['you', 'tidepool'], 'main', { description: 'Tide tables', private: true })
+      const { client, grant } = yield* connected({ connectors: fakeConnectors({ github }) })
+      const connection = yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+      return { client, grant, github, connectionId: connection.id, bareOf }
+    })
+
+  it.live('lists the host’s repositories and owners, and clones one into the folder chosen, to open as a project', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, connectionId } = yield* setUp()
+        const listed = yield* client.ListHostRepositories({ connectionId })
+        assert.deepInclude(listed[0], { path: ['you', 'tidepool'], description: 'Tide tables', private: true })
+        assert.deepStrictEqual(yield* client.ListRepositoryOwners({ connectionId }), [{ id: 'you', name: 'You', kind: 'user' }])
+        const parent = realpathSync(mkdtempSync(join(tmpdir(), 'althar-code-')))
+        const cloned = yield* client.CloneRepository({
+          commandId: commandId(),
+          grant: yield* grant(parent),
+          from: { connectionId, path: ['you', 'tidepool'] },
+        })
+        assert.strictEqual(cloned.path, join(parent, 'tidepool'))
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: cloned.grant, name: 'Tidepool' })
+        // Its origin is the repository's address on the host, as git has it before the test's rewriting.
+        assert.strictEqual(originOf(cloned.path), `${HOST}/you/tidepool.git`)
+        assert.lengthOf(yield* client.GetRepositories({ projectId: project.id }), 1)
+        // Once there, the folder of its name is taken: a second clone is refused, in words.
+        const again = yield* Effect.flip(
+          client.CloneRepository({ commandId: commandId(), grant: yield* grant(parent), from: { url: `${HOST}/you/tidepool.git` } }),
+        )
+        assert.deepInclude(again, { reason: 'FolderRefused', why: 'taken' })
+      }),
+    ),
+  )
+
+  it.live('makes a folder of files a repository, opens it, and puts it on the host, where its tasks then go', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, github, connectionId, bareOf } = yield* setUp()
+        const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-fresh-')))
+        writeFileSync(join(folder, 'index.html'), '<p>Tides</p>')
+        const read = yield* client.ReadFolder({ grant: yield* grant(folder) })
+        assert.deepInclude(read, { kind: 'folder', empty: false, repositories: [] })
+        // Not a repository yet: opening it as it is is refused.
+        assert.deepInclude(yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })), {
+          reason: 'NotARepository',
+        })
+        assert.deepStrictEqual(yield* client.PrepareFolder({ commandId: commandId(), grant: yield* grant(folder) }), {
+          did: 'started',
+          path: folder,
+          branch: 'main',
+          files: 2,
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder), name: 'Fresh' })
+        const [only] = yield* client.GetRepositories({ projectId: project.id })
+        assert.isNull(only?.host)
+        const published = yield* client.PublishRepository({
+          commandId: commandId(),
+          at: { projectId: project.id, repositoryId: only?.id ?? '' },
+          connectionId,
+          owner: { id: 'you', name: 'You', kind: 'user' },
+          name: 'fresh',
+          private: true,
+        })
+        assert.deepInclude(published, { remote: 'you/fresh', branch: 'main' })
+        assert.lengthOf(github.repositoriesMade, 1)
+        assert.strictEqual(
+          execFileSync('git', ['rev-parse', 'main'], { cwd: bareOf('you/fresh'), encoding: 'utf8' }).trim(),
+          execFileSync('git', ['rev-parse', 'HEAD'], { cwd: folder, encoding: 'utf8' }).trim(),
+        )
+        assert.strictEqual(originOf(folder), `${HOST}/you/fresh.git`)
+        // On the host now: putting it there again is refused, and says where it is.
+        const again = yield* Effect.flip(
+          client.PublishRepository({
+            commandId: commandId(),
+            at: { projectId: project.id, repositoryId: only?.id ?? '' },
+            connectionId,
+            owner: { id: 'you', name: 'You', kind: 'user' },
+            name: 'fresh',
+            private: true,
+          }),
+        )
+        assert.deepInclude(again, { reason: 'PublishRefused', why: 'has_remote' })
+      }),
+    ),
+  )
+
+  it.live('puts a folder’s repository on the host before its project is made, so the project opens on the host', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, connectionId, bareOf } = yield* setUp()
+        const parent = realpathSync(mkdtempSync(join(tmpdir(), 'althar-parent-')))
+        const folder = join(parent, 'fresh')
+        mkdirSync(folder)
+        writeFileSync(join(folder, 'notes.md'), '# Notes')
+        const chosen = yield* grant(parent)
+        // A repository inside the folder chosen, by its path there: git starts in it, not in the folder around it.
+        yield* client.PrepareFolder({ commandId: commandId(), grant: chosen, path: folder })
+        assert.isFalse(existsSync(join(parent, '.git')))
+        yield* client.PublishRepository({
+          commandId: commandId(),
+          at: { grant: chosen, path: folder },
+          connectionId,
+          owner: { id: 'you', name: 'You', kind: 'user' },
+          name: 'fresh',
+          private: false,
+        })
+        assert.strictEqual(originOf(folder), `${HOST}/you/fresh.git`)
+        assert.strictEqual(
+          execFileSync('git', ['rev-parse', 'main'], { cwd: bareOf('you/fresh'), encoding: 'utf8' }).trim(),
+          execFileSync('git', ['rev-parse', 'HEAD'], { cwd: folder, encoding: 'utf8' }).trim(),
+        )
+        // A path outside the folder chosen is refused, for both.
+        const outside = realpathSync(mkdtempSync(join(tmpdir(), 'althar-outside-')))
+        assert.deepInclude(yield* Effect.flip(client.PrepareFolder({ commandId: commandId(), grant: chosen, path: outside })), {
+          reason: 'NotFound',
+        })
+        assert.isFalse(existsSync(join(outside, '.git')))
+      }),
+    ),
+  )
 })

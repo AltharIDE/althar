@@ -2,7 +2,7 @@ import type { ThreadItem } from '@althar/contracts'
 import { describe, expect, it } from 'vitest'
 
 import { isFinished } from '../src/renderer/shared/calls'
-import { queuedOf, sending, settled, unsent } from '../src/renderer/shared/items'
+import { mergeItems, messageMove, queuedOf, sending, settled, unsent } from '../src/renderer/shared/items'
 import { type Block, blocksOf } from '../src/renderer/shared/thread'
 import { card, items } from './fixtures'
 
@@ -62,14 +62,28 @@ describe('what can’t change any more', () => {
 })
 
 describe('what the person sent', () => {
+  it('keeps one motion identity when a stale prediction is corrected into the queue, then delivered', () => {
+    const sent = sending([], { text: 'Next', queued: false, interrupting: false })
+    const copy = sent.items[0]
+    if (copy === undefined) throw new Error('No optimistic message')
+    const stored = items.you('Next', { state: 'queued', interrupting: false })
+    const queued = mergeItems(sent.items, [stored])
+    expect(queued).toHaveLength(1)
+    expect(queuedOf(queued, true)[0]?.move).toBe(messageMove(copy))
+    const delivered = { ...stored, input: { state: 'delivered' as const, interrupting: false } }
+    const final = mergeItems(queued, [delivered])
+    expect(final).toHaveLength(1)
+    expect(messageMove(delivered)).toBe(messageMove(copy))
+  })
+
   it('keeps that some of a message’s words were dictated, on its copy and in the queue', () => {
     const sent = sending([items.says('Ready.')], { text: 'Use the helper', queued: true, interrupting: false, dictated: true })
     const copy = sent.items.at(-1)
     expect(copy?.kind === 'user_message' && copy.input).toEqual({ state: 'queued', interrupting: false, dictated: true })
-    // On its way it goes straight to the thread; waiting its turn after, the queue says its words were dictated.
+    // The optimistic copy and the stored item both keep that the words were dictated.
     const waited = items.you('Use the helper', { state: 'queued', interrupting: false, dictated: true })
-    expect(queuedOf([...sent.items, waited], true)).toEqual([
-      { id: waited.id, text: 'Use the helper', pictures: [], files: [], dictated: true },
+    expect(queuedOf([waited], true)).toEqual([
+      { id: waited.id, move: `message:${waited.id}`, text: 'Use the helper', pictures: [], files: [], dictated: true },
     ])
     // Typed, it says nothing of it.
     const typed = items.you('Typed', { state: 'queued', interrupting: false })

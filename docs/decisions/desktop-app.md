@@ -229,6 +229,44 @@ peeks at the lines; pressing it opens the whole file beside the conversation;
   (Settings picks which).
 - **Files are coloured by Shiki,** its grammars loaded as a language first
   shows, in the kit's syntax inks, which code blocks in messages share.
+- **A markdown file opens rendered.** A `.md` or `.markdown` file is a page
+  wherever Althar opens a file: the Changes view, and the panel beside the
+  conversation. One switch has three ways, M going through them, kept per file:
+  Changes, the page with what the task changed marked; Rendered, the page as it
+  is now with nothing marked, to read it; and Source, the diff where the task
+  changed it (the file's lines where it didn't, or where lines named in it were
+  asked for, and as they were said where they were rewritten since). Changes is the default
+  where the task changed it; a file it wrote new has nothing to mark, so it is
+  Rendered and Source only, and one it deleted Changes and Source only. The page is the kit's
+  `Markdown`, as in the thread, with code, tables, task lists and diagrams as
+  they are there. A file's HTML is drawn as GitHub draws it, since a README is
+  often mostly HTML (a banner's `<picture>`, centred lines, tables of pictures):
+  read inertly and drawn from an allow-list of tags and of the attributes that
+  set a page out (align, width, spans), never a script, a style, a handler or a
+  frame, its links and pictures going the markdown's own way. In what is said in
+  a thread, HTML stays words. GitHub's alerts (`> [!NOTE]`) are callouts, and a
+  file's headings step down in size, `#` to `###`. Where the task changed it, the page says what: blocks with an
+  added line are tinted and carry a `+`, what was taken out is drawn where it
+  stood, tinted and carrying a `−`, never a stripe at the edge. This is read from
+  the file's whole-file diff, which holds every line of it, so nothing more is
+  asked for. The runtime says it is whole (`FileDiff.whole`), since a diff in
+  hunks starts at line one too and ends before the file does; a file too long to
+  be read whole stays a diff, and going to a finding's note, which sits under a
+  line, opens its file as Source. A change to a link's definition (`[guide]: …`)
+  marks the blocks that link through it and shows the old line where it stood;
+  a markdown file moved with nothing else changed is read as it is and opens as
+  a page. A document an agent handed back opens in the side panel the same way:
+  Changes, Rendered or Source (what the task changed, as a diff), a link to a
+  file opening on top of it; the file is found by its whole
+  path where the task works, so a task of several repositories names it, its
+  change and what it links to by their repository. A relative image or link is the file's
+  neighbour: its path is resolved from the file's folder, an image is read
+  from where the thread's agent works (`ReadCode` with `image`, only an image,
+  not past 8 MB: a task's from inside its folders as they are, the
+  coordinator's from the default branch at the commit its documents are read at) and drawn in place of its words, and
+  a link to a file opens it (a file of the change is picked in Changes; another
+  opens in the editor; in the panel it opens there). A picture off the machine is
+  never fetched: its words stand in.
 
 ### The workbench
 
@@ -457,6 +495,42 @@ files and folders, each at most 50 MB (a folder's files together, at most
 A message with files can't go to a task whose folder isn't on this computer
 right now; the composer says so.
 
+## Comments on the diff
+
+In a task's diff (Outputs → Review the diff, ⌘D) the person picks a line or a
+range, writes about it, gathers several, and Send delivers them to the lead in
+one message. Posting them to the code host as a review is not built; the
+shape is close enough to a review comment to be mapped later.
+
+- **A comment is a value of its own (`LineComment`):** a file as the Changes
+  view names it (the repository's slug first in a task of several), a side
+  (`new` for the file as the task has it, `old` for lines the change only took
+  out, with `under` the new line they were taken out after), a first and last
+  line, the code as it showed (each line unchanged, added or removed) and what
+  the person said. `LINE_COMMENTS` limits a message to 30 and a comment to 80
+  quoted lines.
+- **It rides on a message.** `Send` and `SwitchAgent` take `comments`; no call
+  sends them on their own, so a message and its comments are one input and
+  one turn. The command's envelope says how many there are, not what they say.
+- **The lead reads text.** After the person's words come "N comments on the
+  diff:", then each comment's file and lines ("as the file was before the
+  change" for a removed line), its code fenced in the file's language, or as a
+  diff where a line was taken out, in a fence longer than any run of backticks
+  in it, and what the person said. No agent needs to know a new shape, and
+  older clients need nothing: the field is optional.
+- **The thread shows them on the person's message.** `UserMessageItem`'s
+  content has an optional `comments` (`SentLineComment`, the comment with an
+  id); the bubble shows each one's excerpt after the words, and an excerpt
+  opens the diff at its line.
+- **Addressed is worked out, never stored.** The runtime keeps each comment
+  with its worktree's tree and HEAD as they were when it was sent.
+  `GetLineComments` reads them back with where each one's lines are now,
+  carried past what changed since. A comment is `addressed` once a commit
+  since it was sent changed its lines, and they are still changed as the
+  files are now; what isn't committed doesn't count. One whose lines no longer
+  show in the change is listed above its file; one whose worktree is gone has
+  no place and is never addressed.
+
 ## Dictation
 
 Dictation is local, always. Speech is turned into text on this machine and
@@ -489,6 +563,19 @@ code. The only thing dictation fetches is its model.
   held down, letting go stops it. Leaving the composer while it listens keeps
   it listening in a pill that says whose it is. Once written, it goes to the
   thread it was said in, or into the composer on screen.
+- **Unless the cursor is in a composer's field, the shortcut is the window's.**
+  With it there, the words land in that composer; anywhere else, a composer on
+  screen or none (the home, a board, the settings, a page, a task's outputs),
+  it listens in a thread of its own, carried from the first word, whose pill
+  says "Not placed yet". Written, the person places it (the search box in a
+  choosing mode: a project, for its coordinator, or a task, an aside among
+  them), and it waits in that composer, not sent, marked as dictated; or
+  moves it into the composer they are on, or throws it away. What was said and
+  not placed is kept, and carried again if the window is closed first. It is also in
+  the search's actions with its key, and a page in a tab passes the key on.
+  The key is the one the composers already had: it clashes with nothing
+  macOS, Windows or Linux set, nor with ⌘D (a task's diff) or ⌘⇧C (a
+  comment on a page). Shortcuts are fixed in Althar, so this one is too.
 
 Hosted transcription would be better on accents and noise, but speech would
 leave the machine. Windows on Arm has no build yet.
@@ -655,8 +742,10 @@ A delivered task message with a complete checkpoint offers **Undo from here**. T
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: what stands open after a turn folds carries everything the person needs, never "see above" (#699).
+- 8 Nov 2026: comments on lines of the diff go to the lead with their file, lines and code, and show addressed once a commit changes their lines (DEV-175).
 - 10 Nov 2026: a thread marks a new change as a stamped row of its own; the board keeps chats on Scratch behind one chip; the plan card's kicker names its preset; the header's parts move a task, point it elsewhere, run a review's code and stop a helper ([tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#asides)).
 - 11 Nov 2026: asides over the coordinator's conversation replace Scratch's chip beside it; the chip stays with the board alone ([tasks](tasks.md#asides)).
 - 13 Nov 2026: the cache is patched by what the person does, at once, and held until a read confirms it ([foundations § The UI is instant](foundations.md#the-ui-is-instant)); it used to say the cache was never patched.
+- 14 Nov 2026: markdown files open rendered, with what the task changed marked, and Source a key away ([Code beside the conversation](#code-beside-the-conversation)).
 - 14 Nov 2026: one bar on every Linux desktop but a tiling one, KDE and the other frame-drawing desktops included, with the buttons where each desktop puts them; the system's frame only where an X11 window manager can't move a frameless window ([The window on each desktop](#the-window-on-each-desktop)).

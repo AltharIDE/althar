@@ -1,7 +1,7 @@
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Logger } from 'effect'
 
-import { iso, makeBitbucketCloud, mergesOf, statusState, strategyOf } from '../src/bitbucketCloud'
+import { iso, makeBitbucketCloud, mergesOf, slugOf, statusState, strategyOf } from '../src/bitbucketCloud'
 import * as dc from '../src/bitbucketDataCenter'
 import type { Repository } from '../src/model'
 import { type Route, stubFetch } from './stub'
@@ -1160,6 +1160,15 @@ const whoami = (name: string | null, id?: string): Route => [
 ]
 
 describe('Bitbucket Data Center as a code host', () => {
+  it.effect('reads the landed commit from the merged PR, separately from its source head', () =>
+    Effect.gen(function* () {
+      const { host } = center([['GET', PULL, { json: pr({ state: 'MERGED', properties: { mergeCommit: { id: 'landed' } } }) }]])
+      const seen = yield* host.change(prj, 101)
+      assert.strictEqual(seen.mergeCommit, 'landed')
+      assert.strictEqual(seen.headSha, 'babecafebabecafebabecafebabecafebabecafe')
+    }),
+  )
+
   it.effect('says who it is signed in as, from the header it answers with', () =>
     Effect.gen(function* () {
       const { host, sent } = center([whoami('jcitizen', '101'), ['GET', `${DC}/users?filter=jcitizen&limit=100`, { json: page([jane]) }]])
@@ -2318,6 +2327,371 @@ describe('Bitbucket bringing a pull request’s branch up to date', () => {
       assert.deepInclude(yield* Effect.flip(merged.host.updateBranch(prj, yield* merged.host.change(prj, 101), { expectedHead: THEIRS })), {
         reason: 'rejected',
       })
+    }),
+  )
+})
+
+describe('Bitbucket Cloud’s repositories, for cloning one or making one', () => {
+  const WORKSPACES = `${CLOUD}/user/workspaces?pagelen=100`
+  const access = (slug: string, name: string) => ({
+    type: 'workspace_access',
+    administrator: false,
+    workspace: { type: 'workspace_base', uuid: `{${slug}}`, slug, name },
+  })
+  const listed = (workspace: string) => `${CLOUD}/repositories/${workspace}?role=member&sort=-updated_on&pagelen=100`
+  const reached = (full: string, overrides: Record<string, unknown> = {}) => ({
+    type: 'repository',
+    full_name: full,
+    description: '',
+    is_private: true,
+    updated_on: '2026-10-07T06:22:22.583123+00:00',
+    links: { html: { href: `https://bitbucket.org/${full}` } },
+    ...overrides,
+  })
+  const made = (full: string) => ({
+    type: 'repository',
+    uuid: '{5c8b7a3e-0000-4000-8000-000000000001}',
+    full_name: full,
+    name: 'Atlas Maps',
+    mainbranch: null,
+    links: { html: { href: `https://bitbucket.org/${full}` } },
+  })
+
+  it.effect('slugs a name as Bitbucket does', () =>
+    Effect.sync(() => {
+      assert.strictEqual(slugOf('Atlas Maps'), 'atlas-maps')
+      assert.strictEqual(slugOf('  --My  Repo!! v2.0_final-- '), 'my-repo-v2.0_final')
+      assert.strictEqual(slugOf('Café — déjà'), 'caf-d-j')
+      assert.strictEqual(slugOf('!!!'), '')
+    }),
+  )
+
+  it.effect('lists each workspace’s repositories, every page by its link, last updated first across them', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([
+        ['GET', WORKSPACES, { json: { values: [access('meridian', 'Meridian')], next: `${WORKSPACES}&page=2` } }],
+        ['GET', `${WORKSPACES}&page=2`, { json: { values: [access('you', 'You')] } }],
+        [
+          'GET',
+          listed('meridian'),
+          { json: { values: [reached('meridian/api', { description: 'The API' })], next: `${listed('meridian')}&page=2` } },
+        ],
+        [
+          'GET',
+          `${listed('meridian')}&page=2`,
+          // A next page off Bitbucket's API isn't followed: the credential goes with it.
+          {
+            json: {
+              values: [reached('meridian/old', { updated_on: '2025-01-01T00:00:00+00:00' })],
+              next: 'https://elsewhere.example/2.0/x',
+            },
+          },
+        ],
+        [
+          'GET',
+          listed('you'),
+          { json: { values: [reached('you/dotfiles', { is_private: false, updated_on: '2026-10-09T00:00:00+00:00' })] } },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.repositories(), [
+        {
+          path: ['you', 'dotfiles'],
+          description: null,
+          private: false,
+          pushedAt: '2026-10-09T00:00:00+00:00',
+          webUrl: 'https://bitbucket.org/you/dotfiles',
+          archived: false,
+        },
+        {
+          path: ['meridian', 'api'],
+          description: 'The API',
+          private: true,
+          pushedAt: '2026-10-07T06:22:22.583123+00:00',
+          webUrl: 'https://bitbucket.org/meridian/api',
+          archived: false,
+        },
+        {
+          path: ['meridian', 'old'],
+          description: null,
+          private: true,
+          pushedAt: '2025-01-01T00:00:00+00:00',
+          webUrl: 'https://bitbucket.org/meridian/old',
+          archived: false,
+        },
+      ])
+      assert.isFalse(sent.some((request) => new URL(request.url).host === 'elsewhere.example'))
+    }),
+  )
+
+  it.effect('says each workspace the account is a member of, as a place to make a repository', () =>
+    Effect.gen(function* () {
+      const { host } = cloud([['GET', WORKSPACES, { json: { values: [access('you', 'You'), access('meridian', 'Meridian')] } }]])
+      assert.deepStrictEqual(yield* host.owners(), [
+        { id: 'you', name: 'You', kind: 'workspace' },
+        { id: 'meridian', name: 'Meridian', kind: 'workspace' },
+      ])
+    }),
+  )
+
+  it.effect('makes an empty repository at the slug of its name, read back as Bitbucket made it', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([['POST', `${CLOUD}/repositories/meridian/atlas-maps`, { json: made('meridian/atlas-maps') }]])
+      assert.deepStrictEqual(
+        yield* host.createRepository({
+          owner: { id: 'meridian', name: 'Meridian', kind: 'workspace' },
+          name: 'Atlas Maps',
+          private: true,
+          description: 'Maps',
+        }),
+        {
+          id: '{5c8b7a3e-0000-4000-8000-000000000001}',
+          path: ['meridian', 'atlas-maps'],
+          defaultBranch: 'main',
+          webUrl: 'https://bitbucket.org/meridian/atlas-maps',
+          canPush: true,
+          merges: [],
+        },
+      )
+      assert.deepStrictEqual(sent[0]?.body, { scm: 'git', name: 'Atlas Maps', is_private: true, description: 'Maps' })
+      // A name with nothing to make a slug of is refused before Bitbucket is asked.
+      const nothing = yield* Effect.flip(
+        host.createRepository({ owner: { id: 'meridian', name: 'Meridian', kind: 'workspace' }, name: '!!!', private: true }),
+      )
+      assert.strictEqual(nothing.reason, 'rejected')
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('refuses a slug taken, in Bitbucket’s words, and a workspace the account may not make one in', () =>
+    Effect.gen(function* () {
+      const meridian = { id: 'meridian', name: 'Meridian', kind: 'workspace' } as const
+      const { host } = cloud([
+        [
+          'POST',
+          `${CLOUD}/repositories/meridian/api`,
+          { status: 400, json: { type: 'error', error: { message: 'Repository with this Slug and Owner already exists.' } } },
+        ],
+        [
+          'POST',
+          `${CLOUD}/repositories/meridian/atlas`,
+          {
+            status: 403,
+            json: { type: 'error', error: { message: 'You do not have permission to create a repository in this workspace.' } },
+          },
+        ],
+        ['POST', `${CLOUD}/repositories/nowhere/atlas`, { status: 404, json: { type: 'error', error: { message: 'Not found' } } }],
+      ])
+      assert.deepInclude(yield* Effect.flip(host.createRepository({ owner: meridian, name: 'api', private: true })), {
+        reason: 'rejected',
+        message: 'Repository with this Slug and Owner already exists.',
+      })
+      assert.deepInclude(yield* Effect.flip(host.createRepository({ owner: meridian, name: 'Atlas', private: true })), {
+        reason: 'forbidden',
+        message: 'You do not have permission to create a repository in this workspace.',
+      })
+      assert.deepInclude(
+        yield* Effect.flip(
+          host.createRepository({ owner: { id: 'nowhere', name: 'Nowhere', kind: 'workspace' }, name: 'atlas', private: true }),
+        ),
+        { reason: 'forbidden', status: 404 },
+      )
+    }),
+  )
+})
+
+describe('Bitbucket Data Center’s repositories, for cloning one or making one', () => {
+  const listed = (start: number) => `${DC}/repos?permission=REPO_READ&limit=100&start=${start}`
+  const reached = (key: string, slug: string, overrides: Record<string, unknown> = {}) => ({
+    slug,
+    id: 1,
+    name: slug,
+    scmId: 'git',
+    state: 'AVAILABLE',
+    forkable: true,
+    project: { key, id: 1, name: key },
+    public: false,
+    archived: false,
+    links: { self: [{ href: `${SERVER}/projects/${key}/repos/${slug}/browse` }] },
+    ...overrides,
+  })
+
+  it.effect('lists every repository the account can read, page after page, as each says it is', () =>
+    Effect.gen(function* () {
+      const { host, sent } = center([
+        ['GET', listed(0), { json: page([reached('PRJ', 'my-repo', { description: 'My repo' })], 25) }],
+        [
+          'GET',
+          listed(25),
+          {
+            json: page([
+              // A server older than 8.0 says nothing of archiving, nor of a description where there is none.
+              reached('~DANA', 'scratch', {
+                public: true,
+                archived: undefined,
+                links: { self: [{ href: `${SERVER}/users/dana/repos/scratch/browse` }] },
+              }),
+              reached('PRJ', 'old', { archived: true, description: '' }),
+            ]),
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.repositories(), [
+        {
+          path: ['PRJ', 'my-repo'],
+          description: 'My repo',
+          private: true,
+          pushedAt: null,
+          webUrl: `${SERVER}/projects/PRJ/repos/my-repo`,
+          archived: false,
+        },
+        {
+          path: ['~DANA', 'scratch'],
+          description: null,
+          private: false,
+          pushedAt: null,
+          webUrl: `${SERVER}/users/dana/repos/scratch`,
+          archived: false,
+        },
+        {
+          path: ['PRJ', 'old'],
+          description: null,
+          private: true,
+          pushedAt: null,
+          webUrl: `${SERVER}/projects/PRJ/repos/old`,
+          archived: true,
+        },
+      ])
+      assert.lengthOf(sent, 2)
+    }),
+  )
+
+  it.effect('says the account’s own project first, then each project it administers', () =>
+    Effect.gen(function* () {
+      const projects = (start: number) => `${DC}/projects?permission=PROJECT_ADMIN&limit=100&start=${start}`
+      const { host } = center([
+        whoami('jcitizen', '101'),
+        ['GET', `${DC}/users?filter=jcitizen&limit=100`, { json: page([jane]) }],
+        ['GET', projects(0), { json: page([{ key: 'PRJ', id: 1, name: 'My Cool Project', type: 'NORMAL' }], 1) }],
+        ['GET', projects(1), { json: page([{ key: 'OPS', id: 2, name: 'Operations', type: 'NORMAL' }]) }],
+      ])
+      assert.deepStrictEqual(yield* host.owners(), [
+        { id: '~JCITIZEN', name: 'Jane Citizen', kind: 'user' },
+        { id: 'PRJ', name: 'My Cool Project', kind: 'project' },
+        { id: 'OPS', name: 'Operations', kind: 'project' },
+      ])
+      // A service account, unlisted, has its name for its slug.
+      const unlisted = center([
+        whoami('bot-prj-1'),
+        ['GET', /\/users\?filter=/, { json: page([]) }],
+        ['GET', projects(0), { json: page([]) }],
+      ])
+      assert.deepStrictEqual(yield* unlisted.host.owners(), [{ id: '~BOT-PRJ-1', name: 'bot-prj-1', kind: 'user' }])
+    }),
+  )
+
+  it.effect('makes an empty repository in a project, or the account’s own, read back as Data Center has it', () =>
+    Effect.gen(function* () {
+      const answer = {
+        id: 9,
+        slug: 'atlas-maps',
+        name: 'Atlas Maps',
+        project: { key: 'PRJ' },
+        links: { self: [{ href: `${SERVER}/projects/PRJ/repos/atlas-maps/browse` }] },
+      }
+      const { host, sent } = center([
+        ['POST', `${DC}/projects/PRJ/repos`, { status: 201, json: answer }],
+        ['GET', `${DC}/projects/PRJ/repos/atlas-maps/default-branch`, { json: { id: 'refs/heads/main', displayId: 'main' } }],
+        [
+          'GET',
+          `${DC}/projects/PRJ/repos/atlas-maps/settings/pull-requests`,
+          {
+            json: {
+              mergeConfig: {
+                defaultStrategy: { id: 'squash' },
+                strategies: [
+                  { id: 'no-ff', enabled: true },
+                  { id: 'squash', enabled: true },
+                ],
+              },
+            },
+          },
+        ],
+        [
+          'POST',
+          `${DC}/projects/~JCITIZEN/repos`,
+          { status: 201, json: { id: 10, slug: 'scratch', name: 'scratch', project: { key: '~JCITIZEN' } } },
+        ],
+      ])
+      assert.deepStrictEqual(
+        yield* host.createRepository({
+          owner: { id: 'PRJ', name: 'My Cool Project', kind: 'project' },
+          name: 'Atlas Maps',
+          private: true,
+          description: 'Maps',
+        }),
+        {
+          id: '9',
+          path: ['PRJ', 'atlas-maps'],
+          defaultBranch: 'main',
+          webUrl: `${SERVER}/projects/PRJ/repos/atlas-maps`,
+          canPush: true,
+          merges: ['squash', 'merge'],
+        },
+      )
+      assert.deepStrictEqual(sent[0]?.body, { name: 'Atlas Maps', scmId: 'git', public: false, description: 'Maps' })
+      // Made, it stays made: what the server won't say after is taken as a new one is.
+      assert.deepStrictEqual(
+        yield* host.createRepository({ owner: { id: '~JCITIZEN', name: 'Jane Citizen', kind: 'user' }, name: 'scratch', private: false }),
+        {
+          id: '10',
+          path: ['~JCITIZEN', 'scratch'],
+          defaultBranch: 'main',
+          webUrl: `${SERVER}/projects/~JCITIZEN/repos/scratch`,
+          canPush: true,
+          merges: [],
+        },
+      )
+      assert.deepStrictEqual(sent.find((request) => request.url === `${DC}/projects/~JCITIZEN/repos`)?.body, {
+        name: 'scratch',
+        scmId: 'git',
+        public: true,
+      })
+    }),
+  )
+
+  it.effect('refuses a name taken, in Data Center’s words, and a project the account may not make one in', () =>
+    Effect.gen(function* () {
+      const project = { id: 'PRJ', name: 'My Cool Project', kind: 'project' } as const
+      const { host } = center([
+        whoami('jcitizen', '101'),
+        [
+          'POST',
+          `${DC}/projects/PRJ/repos`,
+          { status: 409, json: { errors: [{ context: 'name', message: 'This repository name is already taken.', exceptionName: null }] } },
+        ],
+        [
+          'POST',
+          `${DC}/projects/OPS/repos`,
+          { status: 401, json: { errors: [{ message: 'You are not permitted to access this resource' }] } },
+        ],
+        ['POST', `${DC}/projects/GONE/repos`, { status: 404, json: { errors: [{ message: 'Project GONE does not exist.' }] } }],
+      ])
+      assert.deepInclude(yield* Effect.flip(host.createRepository({ owner: project, name: 'my-repo', private: true })), {
+        reason: 'rejected',
+        status: 409,
+        message: 'This repository name is already taken.',
+      })
+      // 401 is Data Center's word for an account that may not, while its token still signs it in.
+      assert.deepInclude(
+        yield* Effect.flip(
+          host.createRepository({ owner: { id: 'OPS', name: 'Operations', kind: 'project' }, name: 'atlas', private: true }),
+        ),
+        { reason: 'forbidden', status: 401 },
+      )
+      assert.deepInclude(
+        yield* Effect.flip(host.createRepository({ owner: { id: 'GONE', name: 'Gone', kind: 'project' }, name: 'atlas', private: true })),
+        { reason: 'forbidden', status: 404 },
+      )
     }),
   )
 })

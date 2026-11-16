@@ -1,6 +1,6 @@
 import { chord, type CoAuthorCommit, keys, modKey, type ReviewSealSample } from '@althar/ui'
 
-import { device } from '../../shared/device'
+import { device, platform } from '../../shared/device'
 
 const capital = (words: string) => `${words.slice(0, 1).toUpperCase()}${words.slice(1)}`
 
@@ -22,6 +22,17 @@ export const text = {
   version: (version: string) => `Althar ${version}`,
   /** Report a problem (DEV-61), in the quick settings' foot and About Althar. */
   report: 'Report a problem',
+  /* About › Storage (DEV-147). */
+  storage: {
+    note: 'Where Althar keeps its data on this computer. The window’s own state and caches are kept elsewhere and aren’t counted here.',
+    profile: { title: 'Profile', note: 'Projects, tasks and settings. Best not edited by hand.' },
+    logs: { title: 'Logs', note: 'What Althar writes as it runs.' },
+    worktrees: {
+      title: 'Task folders',
+      note: 'A copy of each project for every task. To free space, remove task folders under Task folders, in Settings.',
+    },
+    show: platform === 'darwin' ? 'Show in Finder' : platform === 'win32' ? 'Show in Explorer' : 'Show in Files',
+  },
   on: 'On',
   off: 'Off',
   everyTask: 'Every task',
@@ -55,6 +66,11 @@ export const text = {
   atLoginNote: 'Off, automations run only while Althar is open.',
   pauseAllTitle: 'Pause all automations',
   pauseAllNote: 'Runs under way finish.',
+  /* Tasks. */
+  sendMidTurnTitle: 'When I send while an agent is working',
+  sendMidTurnNote: 'Enter does this one; the other is a click or ⌘Enter away.',
+  sendMidTurnQueue: 'Queue it',
+  sendMidTurnSteer: 'Steer the agent',
   /* Reviews and pull requests. */
   postTeamTitle: 'Post reviews of my team’s pull requests without asking',
   postTeamNote: 'Pull requests from outside the team still wait for you.',

@@ -29,9 +29,11 @@ export interface Plan {
 
 /** The packages desktop.yml tests on Windows. */
 const ON_WINDOWS = new Set([
+  'apps/cli',
   'apps/desktop',
   'packages/connectors',
   'packages/contracts',
+  'packages/transport-node',
   'packages/domain',
   'packages/persistence-sqlite',
   'packages/provider-adapters',

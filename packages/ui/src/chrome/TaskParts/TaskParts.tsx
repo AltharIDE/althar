@@ -3,8 +3,9 @@ import { type ReactNode, useState } from 'react'
 import { Brand } from '../../foundations/brands/brands'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
-import { MergeButton } from '../../primitives/MergeButton/MergeButton'
+import { MergeButton, type MergeStanding } from '../../primitives/MergeButton/MergeButton'
 import { KeyValues } from '../../primitives/KeyValues/KeyValues'
 import { Popover } from '../../primitives/Popover/Popover'
 import s from './TaskParts.module.css'
@@ -27,6 +28,8 @@ export interface PartAction {
   label: string
   onClick: () => void
   onBypassQueue?: () => void
+  /** It is Merge: where its merge stands from the press on, said in its place, Merge answering the press. */
+  standing?: MergeStanding | null
   variant?: 'signal' | 'quiet' | 'danger' | 'default'
   icon?: IconName
   /** It loses something: it says what first, with a way to keep it. */
@@ -46,8 +49,12 @@ export interface TaskPartModel {
   detail: string
   /** Something about it waits on the person, or failed, or it runs. */
   tone?: PartTone | undefined
-  /** What the person does from its row, where something waits: Merge, Post it. Without `onClick`, it opens the part. */
-  act?: { label: string; onClick?: () => void } | undefined
+  /**
+   * What the person does from its row, where something waits: Merge, Post it. Without `onClick`, it opens the part. Given
+   * `standing`, it is Merge, and where its merge stands from the press on: pressed, the row stays where it was while it
+   * merges, Merge answering the press in its place.
+   */
+  act?: { label: string; onClick?: () => void; standing?: MergeStanding | null } | undefined
   /** Where it stands, as the part says it when open. */
   facts?: ReadonlyArray<readonly [string, ReactNode]>
   /** What else it shows when open: the files it changed, the failing check's last lines, the findings. */
@@ -76,15 +83,23 @@ export function PartShots({ shots }: { shots: ReadonlyArray<{ id: string; src: s
   )
 }
 
-/** A part's lines of text, as a changed file or a failing check's last lines show. */
-export function PartLines({ lines, log = false }: { lines: ReadonlyArray<readonly [string, string]>; log?: boolean }) {
+/**
+ * A part's lines, as a changed file or a failing check's last lines show: the
+ * text, what it says beside it, and what it is: a 'path' (shortened by whole
+ * folders where narrow) or 'text' (as it comes). Without one, a line with
+ * something beside it is a path, as a file with its lines is; a binary file,
+ * with nothing beside it, says 'path'.
+ */
+export type PartLine = readonly [text: string, beside: string, kind?: 'path' | 'text']
+
+export function PartLines({ lines, log = false }: { lines: ReadonlyArray<PartLine>; log?: boolean }) {
   if (log) return <pre className={s.log}>{lines.map(([line]) => line).join('\n')}</pre>
   return (
     <ul className={s.files}>
-      {lines.map(([path, delta]) => (
-        <li key={path}>
-          <span className={delta === '' ? s.plain : s.path}>{path}</span>
-          <span className={s.delta}>{delta}</span>
+      {lines.map(([text, beside, kind = beside === '' ? 'text' : 'path']) => (
+        <li key={text}>
+          {kind === 'path' ? <Path path={text} className={s.path} /> : <span className={s.plain}>{text}</span>}
+          <span className={s.delta}>{beside}</span>
         </li>
       ))}
     </ul>
@@ -107,13 +122,14 @@ const waits = (part: TaskPartModel) => part.tone === 'you' || part.tone === 'bad
 /** One action of an open part; one that loses something asks first, in place. */
 function Act({ action, sure, onSure }: { action: PartAction; sure: boolean; onSure: (on: boolean) => void }) {
   const variant = action.variant ?? 'default'
-  if (action.onBypassQueue !== undefined)
+  if (action.onBypassQueue !== undefined || action.standing !== undefined)
     return (
       <MergeButton
         size="small"
         variant={variant === 'danger' ? 'default' : variant}
+        standing={action.standing ?? null}
         onMerge={action.onClick}
-        onBypassQueue={action.onBypassQueue}
+        {...(action.onBypassQueue === undefined ? {} : { onBypassQueue: action.onBypassQueue })}
       >
         {action.label}
       </MergeButton>
@@ -238,9 +254,11 @@ export function PartsDrill({ parts, kinds }: { parts: ReadonlyArray<TaskPartMode
     )
   }
 
-  const now = parts.filter(waits)
-  const live = parts.filter((one) => one.tone === 'live')
-  const rest = parts.filter((one) => !waits(one) && one.tone !== 'live')
+  // Merged from its row, a part stays there while it merges, its Merge answering the press, though it no longer waits.
+  const stays = (one: TaskPartModel) => waits(one) || one.act?.standing === 'merging'
+  const now = parts.filter(stays)
+  const live = parts.filter((one) => one.tone === 'live' && !stays(one))
+  const rest = parts.filter((one) => !stays(one) && one.tone !== 'live')
   return (
     <div className={s.list}>
       <div className={s.listHead}>
@@ -261,15 +279,20 @@ export function PartsDrill({ parts, kinds }: { parts: ReadonlyArray<TaskPartMode
                 <span className={s.itemName}>{one.name}</span>
                 <span className={s.itemDetail}>{one.detail}</span>
               </button>
-              {one.act !== undefined && (
-                <Button
-                  size="small"
-                  {...(one.tone === 'you' ? { variant: 'signal' as const } : {})}
-                  onClick={() => (one.act?.onClick ?? (() => open(one)))()}
-                >
-                  {one.act.label}
-                </Button>
-              )}
+              {one.act !== undefined &&
+                (one.act.standing !== undefined ? (
+                  <MergeButton size="small" standing={one.act.standing} onMerge={one.act.onClick ?? (() => open(one))}>
+                    {one.act.label}
+                  </MergeButton>
+                ) : (
+                  <Button
+                    size="small"
+                    {...(one.tone === 'you' ? { variant: 'signal' as const } : {})}
+                    onClick={() => (one.act?.onClick ?? (() => open(one)))()}
+                  >
+                    {one.act.label}
+                  </Button>
+                ))}
             </div>
           ))}
         </section>

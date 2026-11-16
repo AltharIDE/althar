@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import { expect, test } from '@playwright/test'
 
@@ -77,5 +78,67 @@ test('a conflict its lead couldn’t resolve says why on its card and in its tas
     await expect.poll(() => said.count()).toBeGreaterThan(before)
   } finally {
     await electronApp.close()
+  }
+})
+
+test('quitting while the lead merges a conflict keeps its merge and completes recovery after reopening', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const repo = repository(home)
+  const first = await launch(home)
+  let worktree = ''
+  let mergedHead = ''
+  try {
+    await openFirstProject(first.electronApp, first.page, repo)
+    await startTask(first.page, 'Add a retry', '[lead:finish] [lead:edit] [lead:resolve-hold]')
+    await expect(first.page.getByText('Ready', { exact: true })).toBeVisible()
+    const task = git(repo, 'worktree', 'list', '--porcelain')
+      .split('\n\n')
+      .find((one) => one.includes('branch refs/heads/') && !one.includes('branch refs/heads/main'))
+    worktree = task?.split('\n')[0]?.slice('worktree '.length) ?? ''
+    expect(worktree).not.toBe('')
+    writeFileSync(join(repo, 'change.txt'), 'main’s own change\n')
+    git(repo, 'add', '-A')
+    git(repo, 'commit', '-q', '-m', 'Main moves on')
+    await projectSettings(first.page, 'Tasks')
+    await first.page.getByRole('button', { name: 'Look for conflicts now' }).click()
+    // The fake lead commits the conflict merge and holds its turn before reporting it done.
+    await expect
+      .poll(() => {
+        try {
+          git(worktree, 'merge-base', '--is-ancestor', 'main', 'HEAD')
+          return true
+        } catch {
+          return false
+        }
+      })
+      .toBe(true)
+    mergedHead = git(worktree, 'rev-parse', 'HEAD')
+  } finally {
+    await first.electronApp.close()
+  }
+  const before = new DatabaseSync(join(home, 'profile', 'althar.sqlite'), { readOnly: true })
+  try {
+    expect(before.prepare('SELECT state FROM conflict_resolutions').all()).toEqual([{ state: 'resolving' }])
+  } finally {
+    before.close()
+  }
+  const again = await launch(home)
+  try {
+    await again.page.getByRole('navigation', { name: 'Projects' }).getByText('meridian').click()
+    await showPanes(again.page, { conversation: false, board: true })
+    const work = again.page.getByRole('region', { name: 'The project’s work' })
+    const card = work.getByRole('region', { name: 'Needs you' }).getByRole('article').filter({ hasText: 'Add a retry' })
+    await expect(card.getByText('Ready to accept', { exact: true })).toBeVisible()
+    expect(git(worktree, 'rev-parse', 'HEAD')).toBe(mergedHead)
+    await card.screenshot({ path: 'test-results/restarts-merge-recovered.png', scale: 'css' })
+  } finally {
+    await again.electronApp.close()
+  }
+  const after = new DatabaseSync(join(home, 'profile', 'althar.sqlite'), { readOnly: true })
+  try {
+    expect(after.prepare('SELECT state FROM conflict_resolutions').all()).toEqual([{ state: 'resolved' }])
+    expect(after.prepare("SELECT count(*) AS n FROM attention_requests WHERE state = 'open'").get()?.n).toBe(0)
+  } finally {
+    after.close()
   }
 })

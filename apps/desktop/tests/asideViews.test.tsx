@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useRef } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type BoardTask } from '@althar/contracts'
+import { ApiError, type BoardTask, type SearchDocument } from '@althar/contracts'
 
 import {
   AskInAside,
@@ -11,6 +11,7 @@ import {
   AsideMoveFailed,
   AsideQuote,
   AsidesBar,
+  passagesOf,
   useAsideMoves,
 } from '../src/renderer/features/project/Asides'
 import { card, fakeClient, items, snapshot } from './fixtures'
@@ -52,13 +53,82 @@ describe('the conversations above a project', () => {
     expect(onPick).toHaveBeenLastCalledWith('recent')
     await userEvent.click(screen.getByRole('tab', { name: 'Coordinator' }))
     expect(onPick).toHaveBeenLastCalledWith(null)
-    await userEvent.click(screen.getByRole('button', { name: 'Clear Retry' }))
-    expect(onClear).toHaveBeenLastCalledWith(['recent'])
-    await userEvent.click(screen.getByRole('button', { name: '1 older' }))
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Clear it' }))
+    // The open one's × clears it.
+    await userEvent.click(screen.getByRole('button', { name: 'Clear Webhook' }))
+    expect(onClear).toHaveBeenLastCalledWith(['older'])
+    // ⌘J opens the search over every conversation, where those left a week clear together.
+    await userEvent.keyboard('{Meta>}j{/Meta}')
+    expect(document.activeElement).toBe(await screen.findByRole('combobox', { name: 'Search conversations' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clear it' }))
     expect(onClear).toHaveBeenLastCalledWith(['forgotten'])
+    await userEvent.keyboard('{Escape}')
     await userEvent.click(screen.getByRole('button', { name: 'New aside' }))
     expect(onNew).toHaveBeenCalledOnce()
+  })
+
+  it('finds a conversation by anything said in it, the coordinator’s too, as the window read what was said', async () => {
+    const now = Date.parse('2026-11-12T12:00:00Z')
+    const one: BoardTask = {
+      ...card(),
+      taskId: 'stripe',
+      title: 'Stripe API version',
+      scratch: true,
+      createdAt: '2026-11-12T11:00:00Z',
+      state: 'active',
+      settledAt: null,
+      changed: null,
+      here: [],
+      latest: { at: '2026-11-12T11:30:00Z', by: 'lead', said: 'Done.' },
+    }
+    const said = (id: string, taskId: string | null, text: string, changedAt: string, projectId = 'p1'): SearchDocument => ({
+      id: `said:${id}`,
+      kind: 'said',
+      projectId,
+      threadId: 't',
+      taskId,
+      itemId: id,
+      title: text,
+      body: '',
+      ref: 'Conversation',
+      url: null,
+      changedAt,
+      state: '',
+    })
+    const documents = [
+      said('1', 'stripe', 'Which Stripe version do the webhook handlers expect?', '2026-11-12T11:10:00Z'),
+      said('2', 'stripe', 'Done.', '2026-11-12T11:30:00Z'),
+      said('3', null, 'Should the nightly reconcile run first?', '2026-11-12T10:00:00Z'),
+      said('4', null, 'A reconcile in another project', '2026-11-12T10:00:00Z', 'p2'),
+    ]
+    // The latest first, each conversation's own, this project's only.
+    const passages = passagesOf(documents, 'p1')
+    expect(passages.get('stripe')).toEqual(['Done.', 'Which Stripe version do the webhook handlers expect?'])
+    expect(passages.get(null)).toEqual(['Should the nightly reconcile run first?'])
+    const onPick = vi.fn()
+    const props = {
+      scratch: [one],
+      board: [one],
+      open: { kind: 'coordinator' as const },
+      first: null,
+      onPick,
+      onClear: vi.fn(),
+      onNew: vi.fn(),
+      now,
+    }
+    const view = render(<AsidesBar {...props} />)
+    await userEvent.keyboard('{Meta>}j{/Meta}')
+    const field = await screen.findByRole('combobox', { name: 'Search conversations' })
+    // Before what was said is read, the titles are found, and nothing else.
+    await userEvent.type(field, 'webhook')
+    expect(screen.queryByRole('option', { name: /Stripe API version/ })).toBeNull()
+    view.rerender(<AsidesBar {...props} passages={passages} />)
+    const found = await screen.findByRole('option', { name: /Stripe API version/ })
+    expect(found.textContent).toContain('webhook handlers expect?')
+    await userEvent.clear(field)
+    await userEvent.type(field, 'reconcile')
+    expect(screen.getByRole('option', { name: /Coordinator/ }).textContent).toContain('nightly reconcile')
+    await userEvent.keyboard('{Enter}')
+    expect(onPick).toHaveBeenLastCalledWith(null)
   })
 })
 

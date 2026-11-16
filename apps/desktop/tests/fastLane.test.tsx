@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -7,12 +7,14 @@ import { ApiError, type ThreadItem } from '@althar/contracts'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { SmallChangeOf } from '../src/renderer/features/task/SmallChangeOf'
+import { Card, type CardActions } from '../src/renderer/features/project/Card'
 import type { SmallChangeContent } from '../src/renderer/shared/thread'
 import { act } from 'react'
 
-import { change, changed, fakeClient, items, snapshot } from './fixtures'
+import { agents, card, change, changed, fakeClient, items, snapshot } from './fixtures'
 import { servicesFor, withServices } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
+import { useMerge } from '../src/renderer/data/merges'
 import { ModelMoveOf } from '../src/renderer/features/task/ModelMoveOf'
 
 /*
@@ -72,6 +74,208 @@ const Task = ({ onOpenTask }: { onOpenTask?: (threadId: string) => void }) => (
   <TaskView model={useTask('th1')} onBack={vi.fn()} {...(onOpenTask === undefined ? {} : { onOpenTask })} />
 )
 
+describe("a small change's team", () => {
+  const board = (plan: NonNullable<ReturnType<typeof card>['plan']>, phase: 'planned' | 'running' = 'running') => ({
+    cursor: 1,
+    tasks: [{ ...card({ phase, plan }), state: 'open' as const, createdAt: when, settledAt: null, changed: null, here: [] }],
+    calls: [],
+    settledTotal: 0,
+  })
+  const small = {
+    ...card().plan!,
+    startsAt: null,
+    preset: 'Small change',
+    steps: [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, effort: 'low', skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ],
+  }
+  const content = () => {
+    const item = smallChange({ reviewAfterMerge: false })
+    if (item.kind !== 'small_change') throw new Error('Expected a small change')
+    return item.content
+  }
+  const show = (phase: 'planned' | 'running') => {
+    const fake = fakeClient({ getBoard: vi.fn(async () => board(small, phase)) })
+    withServices(
+      <SmallChangeOf
+        card={content()}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    return fake
+  }
+
+  it('offers Change the team… while it is running, and never holds it', async () => {
+    const { client } = show('running')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect(client.holdPlan).not.toHaveBeenCalled()
+    expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
+  })
+
+  it('holds it while its team is changed before it has started, as a planned task is, and starts it from the dialog', async () => {
+    const { client } = show('planned')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await waitFor(() => expect(client.holdPlan).toHaveBeenCalledWith(small.id))
+    await userEvent.click(dialog.getByRole('button', { name: 'Start' }))
+    await waitFor(() => expect(client.startPlan).toHaveBeenCalledWith(small.id))
+  })
+
+  it('shows the team the person saved at once, a new reviewer or none', async () => {
+    const { client } = show('running')
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeTeam).toHaveBeenCalledWith('t1', [{ key: 'review', agentId: 'codex', model: null, skipped: true }]),
+    )
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    // Before the thread reads again, its route agrees: no review stop is left beside "no review".
+    expect(screen.getByText(/no review/)).toBeTruthy()
+    expect(screen.queryByText('Review before Ship')).toBeNull()
+  })
+
+  /** A board that reads its lead's effort as the test says, and tells the window it changed. */
+  const live = (over: Parameters<typeof fakeClient>[0] = {}) => {
+    let effort: string | null = 'low'
+    const make = () =>
+      board({
+        ...small,
+        steps: [{ key: 'implement' as const, agentId: 'claude-code', model: null, effort, skipped: false }, small.steps[1]!],
+      })
+    const fake = fakeClient({ getBoard: vi.fn(async () => make()), ...over })
+    withServices(
+      <SmallChangeOf
+        card={content()}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    return {
+      ...fake,
+      set: (next: string) => {
+        effort = next
+        act(() => fake.emit(changed('card', 't1', 'th1')))
+      },
+    }
+  }
+  const line = () => screen.getByText(/claude-code ·/).textContent
+
+  it('lets a saved lead go once the board reads it, even before the command answers, so a later change shows', async () => {
+    let answer: () => void = () => {}
+    const fake = live({ changeTeam: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))) })
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: /^Implement:/ }))
+    await userEvent.click(await screen.findByRole('radio', { name: /^High$/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(fake.client.changeTeam).toHaveBeenCalled())
+    // The read that says it comes first; then the command answers; then the lead changes again, by the composer or Auto.
+    fake.set('high')
+    await waitFor(() => expect(line()).toMatch(/High/))
+    act(() => answer())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    fake.set('medium')
+    await waitFor(() => expect(line()).toMatch(/Medium/))
+  })
+
+  it('keeps a saved reviewer removal through a read that changes only the lead', async () => {
+    const fake = live()
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    await userEvent.click(dialog.getByRole('button', { name: /^Review:/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove from this step' }))
+    await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    fake.set('high')
+    await waitFor(() => expect(line()).toMatch(/High/))
+    expect(screen.getByText(/no review/)).toBeTruthy()
+    expect(screen.queryByText('Review before Ship')).toBeNull()
+  })
+
+  it('names who leads from the next turn, as the board reads it, not only the plan its card was made from', async () => {
+    const lead = { key: 'implement' as const, agentId: 'codex', model: null, effort: 'high', skipped: false }
+    const fake = fakeClient({ getBoard: vi.fn(async () => board({ ...small, steps: [lead, small.steps[1]!] })) })
+    withServices(
+      <SmallChangeOf
+        card={content()}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    expect(await screen.findByText(/^codex/)).toBeTruthy()
+    expect(screen.queryByText(/^claude-code/)).toBeNull()
+  })
+
+  it('leaves a review that reads after the merge to its Review stop: the dialog changes only its lead', async () => {
+    const afterMerge = smallChange({ reviewAfterMerge: true })
+    if (afterMerge.kind !== 'small_change') throw new Error('Expected a small change')
+    const fake = fakeClient({ getBoard: vi.fn(async () => board(small, 'running')) })
+    withServices(
+      <SmallChangeOf
+        card={afterMerge.content}
+        named={(id) => ({ id: id ?? '', name: id ?? '', short: id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
+        busy={false}
+        onMerge={vi.fn()}
+      />,
+      fake.client,
+    )
+    await userEvent.click(await screen.findByRole('button', { name: 'Change the team…' }))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Team' }))
+    expect(dialog.getByRole('button', { name: /^Implement:/ })).toBeTruthy()
+    expect(dialog.queryByRole('button', { name: /^Review:/ })).toBeNull()
+    expect(dialog.queryByRole('button', { name: 'Add a review' })).toBeNull()
+  })
+})
+
+describe("a small change's card in the coordinator's thread", () => {
+  const actions = (onChangeTeam: (taskId: string) => void): CardActions => ({
+    project: 'meridian',
+    agents,
+    agentName: (id) => id ?? '',
+    onStart: vi.fn(),
+    onHold: vi.fn(),
+    onChange: vi.fn(),
+    onCreateBranch: vi.fn(),
+    onOpen: vi.fn(),
+    onChangeTeam,
+    onStopBackground: vi.fn(),
+  })
+  const running = (preset: string) => card({ phase: 'running', plan: { ...card().plan!, startsAt: null, preset } })
+
+  it('offers Change the team… from the card, with no need to open the task', async () => {
+    const onChangeTeam = vi.fn()
+    withServices(<Card card={running('Small change')} actions={actions(onChangeTeam)} />, fakeClient().client)
+    await userEvent.click(screen.getByRole('button', { name: 'Change the team…' }))
+    expect(onChangeTeam).toHaveBeenCalledWith('t1')
+  })
+
+  it('offers nothing of the kind on another task, which has its row and its menu', () => {
+    withServices(<Card card={running('Change')} actions={actions(vi.fn())} />, fakeClient().client)
+    expect(screen.queryByRole('button', { name: 'Change the team…' })).toBeNull()
+  })
+})
+
 describe('a small change before the runtime knows its final route', () => {
   const show = (over: Partial<SmallChangeContent>) => {
     const item = smallChange(over)
@@ -82,6 +286,8 @@ describe('a small change before the runtime knows its final route', () => {
       <SmallChangeOf
         card={item.content}
         named={(id, model) => ({ id: id ?? '', name: model ?? id ?? '', short: model ?? id ?? '', runtime: id ?? '', efforts: [] })}
+        projectId="p1"
+        agents={agents}
         busy={false}
         onMerge={onMerge}
       />,
@@ -190,6 +396,103 @@ describe('the fast lane on a task’s screen', () => {
     await userEvent.click(await screen.findByRole('menuitemradio', { name: /Before it merges/ }))
     await waitFor(() => expect(client.makeItAFullTask).toHaveBeenCalledWith('t1'))
     expect(screen.getByText('Before merge')).toBeTruthy()
+  })
+
+  it('says In the queue as the task reads it, though its card was made before the merge, and offers no Merge again', async () => {
+    const open = change({ state: 'open', head: 'abc123', checks: PASSED })
+    const base = snapshot()
+    const { client } = fakeClient({
+      // The card as it was made, its pull request open; the task's head, read after the merge, has it in its merge queue.
+      getThread: vi.fn(async () =>
+        snapshot({ task: { ...base.task, changes: [{ ...open, queued: true }] }, items: [smallChange({ change: open })] }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('In the queue')).toBeTruthy()
+    expect(screen.queryByText('Ready')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+  })
+
+  it('shows Merging at once on Merge, then In the queue once the runtime says so: never Merge again', async () => {
+    const open = change({ state: 'open', head: 'abc123', checks: PASSED })
+    const base = snapshot()
+    let queued = false
+    let answer: () => void = () => {}
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: { ...base.task, changes: [queued ? { ...open, queued: true } : open] },
+          items: [smallChange({ change: open })],
+        }),
+      ),
+      merge: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            answer = () => {
+              queued = true
+              resolve()
+            }
+          }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge' }))
+    // Before the runtime answers: Merging, in Merge's place.
+    expect(screen.getAllByText('Merging').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    act(() => answer())
+    expect(await screen.findByText('In the queue')).toBeTruthy()
+    await waitFor(() => expect(screen.queryByText('Merging')).toBeNull())
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(client.merge).toHaveBeenCalledOnce()
+  })
+
+  it('says Merging, not In the queue with its bypass again, while a bypass pressed elsewhere is under way', async () => {
+    const queued = change({ state: 'open', head: 'abc123', checks: PASSED, queued: true, canBypassQueue: true })
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ task: { ...base.task, changes: [queued] }, items: [smallChange({ change: queued })] })),
+      merge: vi.fn(() => new Promise<void>(() => {})),
+    })
+    // The Dock's Merge without queue, in the same window, the task not open yet.
+    function Dock() {
+      const merge = useMerge()
+      return (
+        <button onClick={() => void merge({ taskId: base.task.id, head: 'abc123', url: queued.url, bypassQueue: true })}>
+          Merge without queue
+        </button>
+      )
+    }
+    const services = servicesFor(client)
+    const view = (task: boolean) => (
+      <ServicesProvider value={services}>
+        <Dock />
+        {task ? <Task /> : null}
+      </ServicesProvider>
+    )
+    const { rerender } = render(view(false))
+    await userEvent.click(screen.getByRole('button', { name: 'Merge without queue' }))
+    rerender(view(true))
+    expect((await screen.findAllByText('Merging')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('In the queue')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Other ways to merge' })).toBeNull()
+    expect(client.merge).toHaveBeenCalledOnce()
+  })
+
+  it('goes back to Merge, with a line, where the merge fails', async () => {
+    const open = change({ state: 'open', head: 'abc123', checks: PASSED })
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => snapshot({ task: { ...base.task, changes: [open] }, items: [smallChange({ change: open })] })),
+      merge: vi.fn(async () => {
+        throw new ApiError({ reason: 'ConnectorFailed', message: 'GitHub refused the merge.' })
+      }),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Merge' }))
+    expect(await screen.findByText(/GitHub refused the merge/)).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Merge' })).toBeTruthy()
+    expect(screen.queryByText('Merging')).toBeNull()
   })
 
   it('goes back, with a line, where moving its review fails', async () => {

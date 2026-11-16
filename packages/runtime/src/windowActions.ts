@@ -29,6 +29,8 @@ export const WINDOW_ACTIONS = {
   dismissConflict: { window: 'hides the note about a merge that conflicted' },
   loadEarlier: { window: 'reads further back in the thread (read_thread does with before)' },
   readFiles: { window: 'reads the changed files for the person to look at (read_task_diff)' },
+  mergeStanding: { window: 'reads where a pressed merge stands, to show it in Merge’s place (read_task)' },
+  mergeAwaits: { window: 'reads whether a pull request merges later in a press under way (read_task)' },
   send: { tool: 'message_lead' },
   sendNow: { tool: 'message_lead' },
   takeBack: { person: 'takes back their own message before the lead reads it' },

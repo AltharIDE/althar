@@ -39,9 +39,13 @@ test('comes back to what runs and what waits across projects, with the projects 
     // Another project, made in a tab of its own from the home, with a task that is soon ready.
     await page.getByRole('complementary', { name: 'Projects' }).getByRole('button', { name: 'New project' }).click()
     await page.getByRole('textbox', { name: 'Name' }).fill('halyard')
+    await page
+      .getByRole('radiogroup', { name: 'Where its code comes from' })
+      .getByRole('radio', { name: /^A folder/ })
+      .click()
     await chooseFolder(electronApp, halyard)
     await page.getByRole('button', { name: 'Choose a folder…' }).click()
-    await expect(page.getByRole('list', { name: 'Its folders' }).getByText('halyard', { exact: true })).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Its folders' }).getByText('halyard', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /^Create halyard/ }).click()
     await expect(page.getByRole('heading', { name: 'halyard', level: 1 })).toBeVisible()
     await startTask(page, 'Name the limits better', '[lead:finish] [lead:edit]')

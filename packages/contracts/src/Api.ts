@@ -1,10 +1,23 @@
-import { Context, Schema } from 'effect'
+import { Context, Effect, Layer, Schema } from 'effect'
+import { AcpCatalog, AcpConnection } from './agentCatalog'
+import { AttentionEvent } from './attention'
 import { Rpc, RpcGroup, RpcMiddleware } from 'effect/rpc'
+import {
+  ConnectionInfo,
+  ClientName,
+  ClientPublicKey,
+  ClientDeviceId,
+  RegisteredClient,
+  FeedPosition,
+  ClientListOptions,
+  ClientPage,
+} from './identities'
 
 import { CanvasDetail, CanvasKind, CanvasSummary, CanvasText, SentCanvasComment } from './canvases'
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
+import { LineComments, SentLineComment, TaskLineComments } from './lineComments'
 import { SettingChangeCard, SettingChanged } from './settings'
 
 /*
@@ -191,6 +204,8 @@ export const AccountStatus = Schema.Struct({
   outUntil: Schema.NullOr(Schema.String),
   /** What made its folder, when Althar didn't. */
   adoptedFrom: Schema.NullOr(Schema.String),
+  /** The selected GitHub sign-in host for the Copilot CLI account. */
+  signInHost: Schema.optional(Schema.String),
   /** When its sign-in ends, where its agent's status says (Claude Code's claude.ai sign-in); not given where it doesn't. */
   endsAt: Schema.optional(Schema.String),
   /** Its sign-in ends within the days the runtime warns in, or has ended: given with `endsAt`, so the row and the warning agree. */
@@ -739,6 +754,8 @@ export const AppSettings = Schema.Struct({
   postTeamReviews: Schema.Boolean,
   /** What "Run it" on code from outside the team does without asking: `ask` each time, its default, run `safe`ly, or trust it `full`y. */
   runOutside: Schema.optional(Schema.Literals(['ask', 'safe', 'full'])),
+  /** What sending does while an agent is mid-turn: `queue` it for the turn's end, its default, or `steer` it to the agent at once. */
+  sendMidTurn: Schema.optional(Schema.Literals(['queue', 'steer'])),
   /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
   automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
@@ -794,6 +811,19 @@ export const TaskFolders = Schema.Struct({
   measuring: Schema.Boolean,
 })
 export type TaskFolders = typeof TaskFolders.Type
+
+/** A place Althar keeps data, by the id the window asks for it with (About › Storage). */
+export const PLACES = ['profile', 'logs', 'worktrees'] as const
+export const PlaceId = Schema.Literals(PLACES)
+export type PlaceId = typeof PlaceId.Type
+
+/** What measuring a place came to: bytes (approximate where the time was up, a lower bound too where entries couldn't be read), or that it isn't there, or couldn't be read. */
+export const StorageSize = Schema.Union([
+  Schema.Struct({ state: Schema.Literal('done'), bytes: Schema.Number, approximate: Schema.Boolean, unreadable: Schema.Int }),
+  Schema.Struct({ state: Schema.Literal('missing') }),
+  Schema.Struct({ state: Schema.Literal('failed') }),
+])
+export type StorageSize = typeof StorageSize.Type
 
 /** What removing finished tasks' folders freed, in bytes, as they were measured just before they went; and how many it couldn't remove. */
 export const FoldersFreed = Schema.Struct({ freed: Schema.Number, failed: Schema.Int })
@@ -853,7 +883,11 @@ export const ProjectSummary = Schema.Struct({
 })
 export type ProjectSummary = typeof ProjectSummary.Type
 
-export const ProjectList = Schema.Struct({ cursor: Cursor, projects: Schema.Array(ProjectSummary) })
+export const ProjectList = Schema.Struct({
+  cursor: Cursor,
+  position: Schema.optional(FeedPosition),
+  projects: Schema.Array(ProjectSummary),
+})
 
 /** Where issues are filed on a tracker, by its own id and its name: a Linear team, a Jira project, a Trello list, a repository. */
 export const TrackerContainer = Schema.Struct({
@@ -976,6 +1010,8 @@ export const FoundRepository = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   /** Its first remote, without any password in it; null when it has none. */
   remote: Schema.NullOr(Schema.String),
+  /** Whether it has a commit yet: false for one just made with `git init`, which a task can't branch from. */
+  commits: Schema.optional(Schema.Boolean),
 })
 export type FoundRepository = typeof FoundRepository.Type
 
@@ -994,6 +1030,53 @@ export const MadeRepository = Schema.Struct({
 })
 export type MadeRepository = typeof MadeRepository.Type
 
+/** What making a folder ready to be a project's repository did: started git in it, made its first commit, or nothing; on which branch. */
+export const PreparedFolder = Schema.Struct({
+  did: Schema.Literals(['started', 'committed', 'nothing']),
+  /** The repository's root: the folder, or the repository it is in. */
+  path: Schema.String,
+  branch: Schema.String,
+  /** The files its first commit has, where one was made. */
+  files: Schema.Number,
+})
+export type PreparedFolder = typeof PreparedFolder.Type
+
+/** A repository on a connected code host, for choosing one to clone. */
+export const HostRepository = Schema.Struct({
+  /** As its host names it, by its parts: northwind, app. */
+  path: Schema.Array(Schema.String),
+  description: Schema.NullOr(Schema.String),
+  private: Schema.Boolean,
+  /** When it was last pushed to, as an ISO time; null where the host doesn't say. */
+  pushedAt: Schema.NullOr(Schema.String),
+  webUrl: Schema.String,
+  archived: Schema.Boolean,
+})
+export type HostRepository = typeof HostRepository.Type
+
+/** Where a connection's account can make a repository: itself, an organization, a group, a workspace or a project. */
+export const RepositoryOwner = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  kind: Schema.Literals(['user', 'organization', 'group', 'workspace', 'project']),
+})
+export type RepositoryOwner = typeof RepositoryOwner.Type
+
+/** A repository cloned onto this computer: the grant of its folder, for OpenProject, and where it is. */
+export const ClonedRepository = Schema.Struct({
+  grant: Schema.String,
+  path: Schema.String,
+})
+export type ClonedRepository = typeof ClonedRepository.Type
+
+/** A project's repository put on a host: as the host names it, its page, and the branch pushed. */
+export const PublishedRepository = Schema.Struct({
+  remote: Schema.String,
+  webUrl: Schema.String,
+  branch: Schema.String,
+})
+export type PublishedRepository = typeof PublishedRepository.Type
+
 /**
  * What opening a folder would make, read before anything is: a repository, a
  * folder inside one, or a folder holding several, one level down. Reading it
@@ -1006,6 +1089,10 @@ export const FolderReading = Schema.Struct({
   repositories: Schema.Array(FoundRepository),
   /** The project it already is, when it was opened before. */
   project: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** A folder that isn't a repository: whether it has nothing in it but what is hidden, as .DS_Store is. */
+  empty: Schema.optional(Schema.Boolean),
+  /** A folder that isn't a repository: where it is, as git would be started in it. */
+  path: Schema.optional(Schema.String),
 })
 export type FolderReading = typeof FolderReading.Type
 
@@ -1206,7 +1293,7 @@ export const TaskSummary = Schema.Struct({
 })
 export type TaskSummary = typeof TaskSummary.Type
 
-export const TaskList = Schema.Struct({ cursor: Cursor, tasks: Schema.Array(TaskSummary) })
+export const TaskList = Schema.Struct({ cursor: Cursor, position: Schema.optional(FeedPosition), tasks: Schema.Array(TaskSummary) })
 export type TaskList = typeof TaskList.Type
 
 /* ---- Code hosts and trackers (docs/architecture/06) ---- */
@@ -1278,6 +1365,7 @@ export type ConnectPlace = typeof ConnectPlace.Type
 
 export const ConnectionList = Schema.Struct({
   cursor: Cursor,
+  position: Schema.optional(FeedPosition),
   connections: Schema.Array(ConnectionSummary),
   products: Schema.Array(ProductOption),
   /** Where the projects' code is, on the hosted services and on servers already connected. */
@@ -1763,6 +1851,8 @@ export const UserMessageItem = Schema.Struct({
     links: Schema.Array(Unfurl),
     pictures: Schema.Array(Picture),
     files: Schema.Array(AttachedFile),
+    /** What they said of lines of the task's diff, each with the code it is on (decisions: desktop-app § Comments on the diff). */
+    comments: Schema.optional(Schema.Array(SentLineComment)),
   }),
   input: Schema.NullOr(
     Schema.Struct({
@@ -2510,6 +2600,8 @@ export const TaskCard = Schema.Struct({
       worksIn: Schema.optional(WorksIn),
       /** The preset its parts are, as the card's kicker names it first (a task is a conversation plus parts): Change, Chat. */
       preset: Schema.optional(Schema.String),
+      /** Its review reads only once it merges (a small change's, by an explicit request): its review step is then skipped before that, and still has its reviewer. */
+      reviewAfterMerge: Schema.optional(Schema.Boolean),
       /** Why it works where it does, in the coordinator's words, where that isn't the project's default; null otherwise. */
       worksInWhy: Schema.optional(Schema.NullOr(Schema.String)),
       /** The task working Local now, which it would wait for there; null where Local is free. */
@@ -3441,6 +3533,8 @@ export const SessionSummary = Schema.Struct({
   effort: Schema.NullOr(Schema.String),
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
+  /** Whether a new message waits behind work already claimed, including a turn still preparing its prompt. */
+  accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   turnRunning: Schema.Boolean,
   /** When the turn running started, by the runtime's clock; null between turns. What the wait for its first word is counted from. */
   turnStartedAt: Schema.NullOr(Schema.String),
@@ -3708,6 +3802,8 @@ export const FileDiff = Schema.Struct({
   file: ChangedFile,
   lines: Schema.Array(DiffLine),
   truncated: Schema.Boolean,
+  /** The lines are the whole file, every one of it from its first, unchanged ones too; not one read in hunks. Where it is absent, they are not known to be. */
+  whole: Schema.optional(Schema.Boolean),
 })
 export type FileDiff = typeof FileDiff.Type
 
@@ -3819,6 +3915,8 @@ export type GraphRound = typeof GraphRound.Type
 /** A task's thread: its task and project, the agent working on it, the calls waiting on the person, and a page of its items. */
 export const ThreadSnapshot = Schema.Struct({
   threadId: Schema.String,
+  /** The runtime's placement for a new message, including work between sessions. */
+  accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   /** The complete visual collection, read independently of the thread's report limit. */
   gallery: Schema.optional(EvidenceGallery),
 
@@ -3827,6 +3925,7 @@ export const ThreadSnapshot = Schema.Struct({
   /** Delivered messages with a complete file checkpoint, eligible for Undo from here. */
   undoable: Schema.optional(Schema.Array(Schema.String)),
   cursor: Cursor,
+  position: Schema.optional(FeedPosition),
   /** What the task used of each account its agents ran on, in every thread of it, its reviews' too (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
@@ -4099,6 +4198,7 @@ export type HomeEvent = typeof HomeEvent.Type
  */
 export const HomeSnapshot = Schema.Struct({
   cursor: Cursor,
+  position: Schema.optional(FeedPosition),
   /** When the person last left the home on this Mac; null before they ever did. */
   looked: Schema.NullOr(Schema.String),
   /** What the loop did is read from: when they last left the home, unless the window says. */
@@ -4117,6 +4217,7 @@ export type HomeSnapshot = typeof HomeSnapshot.Type
  */
 export const BoardSnapshot = Schema.Struct({
   cursor: Cursor,
+  position: Schema.optional(FeedPosition),
   tasks: Schema.Array(BoardTask),
   calls: Schema.Array(BoardCall),
   /** How many tasks the project has settled (done or abandoned), in all: `tasks` holds only the most recent of them. */
@@ -4152,7 +4253,10 @@ export type ConversationView = typeof ConversationView.Type
  */
 export const CoordinatorSnapshot = Schema.Struct({
   threadId: Schema.String,
+  /** The runtime's placement for a new message, including work between sessions. */
+  accepting: Schema.optional(Schema.Literals(['now', 'queued'])),
   cursor: Cursor,
+  position: Schema.optional(FeedPosition),
   /** What the coordinator used today, since this computer's midnight, of each account it ran on (ADR-084). */
   usage: Schema.optional(Schema.Array(AccountUse)),
   project: Schema.Struct({ id: Schema.String, name: Schema.String }),
@@ -4231,10 +4335,15 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({
     _tag: Schema.Literal('Changed'),
     cursor: Cursor,
+    /** Present on WatchFrom. Carry this into the next saved FeedPosition. */
+    checkpoint: Schema.optional(Schema.String),
     aggregateType: Schema.String,
     aggregateId: Schema.String,
     projectId: Schema.NullOr(Schema.String),
     threadId: Schema.NullOr(Schema.String),
+    /** On a task's change that was a rename: the title it was given, and whether an agent (a lead or the coordinator) gave it, not the person. */
+    renamedTo: Schema.optional(Schema.String),
+    renamedByAgent: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     _tag: Schema.Literal('Streaming'),
@@ -4357,6 +4466,8 @@ export const CodeText = Schema.Struct({
   from: CodeLine,
   total: Schema.Number,
   cut: Schema.Boolean,
+  /** Asked for as a picture: its bytes in base64 and their kind, with no text. */
+  image: Schema.optional(Schema.Struct({ type: Schema.String, data: Schema.String })),
 })
 export type CodeText = typeof CodeText.Type
 
@@ -4582,7 +4693,13 @@ export type SkillUpdate = typeof SkillUpdate.Type
 /** Enforced by the runtime for each connection, including streaming calls. */
 export class ClientAuthority extends RpcMiddleware.Service<ClientAuthority>()('@althar/contracts/ClientAuthority', { error: ApiError }) {}
 
+/** A native host can subscribe without constructing the desktop's complete client. Uses the same authenticated API. */
+export const AttentionApi = RpcGroup.make(
+  Rpc.make('WatchAttention', { payload: {}, success: AttentionEvent, error: ApiError, stream: true }).annotate(SocketAllowed, true),
+).middleware(ClientAuthority)
+
 const socketCalls = new Set<string>([
+  'GetConnectionInfo',
   'Status',
   'ListProjects',
   'GetProject',
@@ -4598,6 +4715,7 @@ const socketCalls = new Set<string>([
   'ReadCode',
   'GetFileDiff',
   'GetTaskFindings',
+  'GetLineComments',
   'GetBoard',
   'GetOlderSettled',
   'GetHome',
@@ -4643,7 +4761,22 @@ const command = <const Tag extends string, P extends Schema.Struct.Fields, S ext
 
 const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 500 })))
 
-export const Api = RpcGroup.make(
+const ConnectionApi = RpcGroup.make(
+  call('GetConnectionInfo', {}, ConnectionInfo),
+  call('ListClientDevices', ClientListOptions.fields, ClientPage),
+  command(
+    'RegisterClientDevice',
+    { name: ClientName, publicKey: ClientPublicKey, role: Schema.Literals(['paired_device', 'socket']) },
+    RegisteredClient,
+  ),
+  command('RevokeClientDevice', { deviceId: ClientDeviceId }, Schema.Void),
+  Rpc.make('WatchFrom', { payload: { position: FeedPosition }, success: WatchEvent, error: ApiError, stream: true }).annotate(
+    SocketAllowed,
+    true,
+  ),
+).middleware(ClientAuthority)
+
+const ProjectApi = RpcGroup.make(
   /** The runtime's version and the agents on this machine. Sign-in is checked at most once a minute, unless `recheck`. */
   call('Status', { recheck: Schema.optional(Schema.Boolean) }, Status),
   Rpc.make('ListProjects', { success: ProjectList, error: ApiError }).annotate(SocketAllowed, true),
@@ -4661,6 +4794,61 @@ export const Api = RpcGroup.make(
    * grant comes back, for OpenProject.
    */
   call('MakeRepository', { grant: Schema.String, name: Schema.String }, MadeRepository),
+  /**
+   * Makes the folder the person chose ready to be a project's repository, as
+   * the project is made: git on main, with what is in it as its first
+   * commit, where it has no git; its first commit, where it has git and no
+   * commit. Refused where it can't be read, is too wide to be one project
+   * (the home folder), has too many files, or has repositories inside it.
+   * What this made is taken away where it fails. `path` is a repository's
+   * root inside the folder chosen, where it is one of several found there.
+   */
+  command('PrepareFolder', { grant: Schema.String, path: Schema.optional(Schema.String) }, PreparedFolder),
+  /** Every repository a code host's connection reaches, last pushed to first. */
+  call('ListHostRepositories', { connectionId: Schema.String }, Schema.Array(HostRepository)),
+  /** Where a code host's connection can make a repository: its account first, then its organizations, groups or workspaces. */
+  call('ListRepositoryOwners', { connectionId: Schema.String }, Schema.Array(RepositoryOwner)),
+  /**
+   * Clones a repository into a folder of its name in the folder the person
+   * chose (`grant`): one on a connection's host, by its path there; or one by
+   * its URL, signed in through the connection whose host it is on, else with
+   * the person's own git sign-in. Refused where that folder has something in
+   * it already; what a failed clone made is taken away.
+   */
+  command(
+    'CloneRepository',
+    {
+      grant: Schema.String,
+      from: Schema.Union([
+        Schema.Struct({ connectionId: Schema.String, path: Schema.Array(Schema.String) }),
+        Schema.Struct({ url: Schema.String }),
+      ]),
+    },
+    ClonedRepository,
+  ),
+  /**
+   * Puts a repository only on this computer on a code host: a project's, or
+   * one in a folder the person chose, before its project is made. Makes an
+   * empty repository there, under `owner`, sets it as `origin`, and pushes
+   * the branch checked out, which follows it from then on. Refused where the
+   * repository has a remote already, or the host has one of that name. Made
+   * and not pushed, trying again pushes to the one made.
+   */
+  command(
+    'PublishRepository',
+    {
+      at: Schema.Union([
+        /** A project's repository, by its id, or its slug, as a task's names it. */
+        Schema.Struct({ projectId: Schema.String, repositoryId: Schema.String }),
+        Schema.Struct({ grant: Schema.String, path: Schema.optional(Schema.String) }),
+      ]),
+      connectionId: Schema.String,
+      owner: RepositoryOwner,
+      name: Schema.String,
+      private: Schema.Boolean,
+    },
+    PublishedRepository,
+  ),
   /**
    * Opens the folder the person chose, by the grant the app gave for it: the
    * window never names a path. A folder holding several repositories opens
@@ -4794,6 +4982,12 @@ export const Api = RpcGroup.make(
    * `review`, a thread item; without it, the latest run that found anything.
    */
   call('GetTaskFindings', { taskId: Schema.String, review: Schema.optional(Schema.String) }, TaskFindings),
+  /**
+   * The comments the person sent on lines of a task's diff (decisions: desktop-app § Comments on the diff), each
+   * where its lines are in the change now, and addressed once a commit since
+   * it was made changed them.
+   */
+  call('GetLineComments', { taskId: Schema.String }, TaskLineComments),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
   /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
@@ -4861,11 +5055,19 @@ export const Api = RpcGroup.make(
   /**
    * A file where a thread's agent works, by its path as FindCode named it:
    * as it is now, or at the commit it was when a message was said. Whole,
-   * or past a size, the lines around `line`.
+   * or past a size, the lines around `line`. With `image`, a picture a task's
+   * markdown file names beside it, as it is now: only an image, only from
+   * inside the task's folders, and not past a size.
    */
   call(
     'ReadCode',
-    { threadId: Schema.String, path: Schema.String, commit: Schema.optional(Schema.String), line: Schema.optional(CodeLine) },
+    {
+      threadId: Schema.String,
+      path: Schema.String,
+      commit: Schema.optional(Schema.String),
+      line: Schema.optional(CodeLine),
+      image: Schema.optional(Schema.Boolean),
+    },
     CodeText,
   ),
   /** The project's coordinator thread, made the first time it is asked for. */
@@ -4897,8 +5099,8 @@ export const Api = RpcGroup.make(
   ),
   /** Starts a planned task now, rather than when its time runs out. */
   command('StartPlan', { planId: Schema.String }, Schema.Void),
-  /** Holds a planned task: it waits until you start it. */
-  command('HoldPlan', { planId: Schema.String }, Schema.Void),
+  /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
+  command('HoldPlan', { planId: Schema.String }, Schema.Boolean),
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
   command('HoldDraft', { threadId: Schema.String, key: Schema.String }, Schema.Void),
   /** Changes who does a planned task's steps, or skips one, before it starts. */
@@ -4993,6 +5195,8 @@ export const Api = RpcGroup.make(
       files: Schema.optional(SentFiles),
       /** Any of what the person said came from dictation. */
       dictated: Schema.optional(Schema.Boolean),
+      /** Comments on lines of the task's diff sent with what the person said (decisions: desktop-app § Comments on the diff). */
+      comments: Schema.optional(LineComments),
     },
     Schema.String,
   ),
@@ -5065,6 +5269,8 @@ export const Api = RpcGroup.make(
   command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
   /** What "Run it" on code from outside the team does without asking: ask each time, run safely, or trust it fully. */
   command('SetRunOutside', { to: Schema.Literals(['ask', 'safe', 'full']) }, Schema.Void),
+  /** What sending a message does while an agent is mid-turn: queue it, or steer the agent with it at once. */
+  command('SetSendMidTurn', { to: Schema.Literals(['queue', 'steer']) }, Schema.Void),
   /**
    * Saves a preset: a task's parts, team and first lines of its brief (Save as preset), or the parts the coordinator offered;
    * kept to the task's project with `projectOnly`. Its name, as kept.
@@ -5198,8 +5404,15 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+).middleware(ClientAuthority)
+
+const WorkApi = RpcGroup.make(
   /** Finished tasks' folders on this computer, with the disk they are on: sizes not yet measured start being measured. */
   call('GetTaskFolders', {}, TaskFolders),
+  /**
+   * What a place Althar keeps data in takes on disk, as the same walk counts what removing task folders frees. Kept for the session; `refresh` measures again, for longer. Giving up on the call (About closed) stops the walk when no one else waits on it.
+   */
+  call('GetStorageSize', { place: PlaceId, refresh: Schema.Boolean }, StorageSize),
   /** Removes every finished task's folder nothing holds, whatever its wait; their branches stay, and each comes back when its task needs it. */
   command('CleanUpFolders', {}, FoldersFreed),
   /**
@@ -5322,6 +5535,8 @@ export const Api = RpcGroup.make(
       files: Schema.optional(SentFiles),
       /** Any of its words came from dictation, even if the person edited them after: the agent is told, so it reads past what was misheard. */
       dictated: Schema.optional(Schema.Boolean),
+      /** Comments on lines of a task's diff (decisions: desktop-app § Comments on the diff): the agent reads each with its file, its lines and the code quoted, after the words. */
+      comments: Schema.optional(LineComments),
       /** The person's comments on canvases (ADR-104), kept with the message and in the same command: until it is sent, each is only the person's draft. */
       canvasComments: Schema.optional(Schema.Array(SentCanvasComment).check(Schema.isMaxLength(50))),
     },
@@ -5480,8 +5695,13 @@ export const Api = RpcGroup.make(
   /**
    * Opens the agent's own sign-in for the account, in Terminal, where the
    * person signs in: the line it runs, and whether it could open it.
+   * Copilot CLI accepts a GitHub host, remembered for the account.
    */
-  command('SignInAccount', { accountId: Schema.String }, Schema.Struct({ line: Schema.String, opened: Schema.Boolean })),
+  command(
+    'SignInAccount',
+    { accountId: Schema.String, host: Schema.optional(Schema.String) },
+    Schema.Struct({ line: Schema.String, opened: Schema.Boolean }),
+  ),
   /** Signs an account in inside Althar, this way: its id, to ask how it stands. */
   command(
     'StartAccountSignIn',
@@ -5812,4 +6032,30 @@ export const Api = RpcGroup.make(
     true,
   ),
 ).middleware(ClientAuthority)
+
+/** External ACP connections share the API's authority boundary, with a small handler group of their own. */
+export const AcpApi = RpcGroup.make(
+  call('GetAgentCatalog', { refresh: Schema.optional(Schema.Boolean) }, AcpCatalog),
+  command('SaveAcpConnection', { connection: AcpConnection }, Schema.Number),
+  command('CheckAcpConnection', { agentId: Schema.String }, Schema.Number),
+  command('RemoveAcpConnection', { agentId: Schema.String }, Schema.Number),
+).middleware(ClientAuthority)
+
+export const Api = ProjectApi.merge(WorkApi, ConnectionApi, AttentionApi, AcpApi)
 export type Api = typeof Api
+/** Closed handlers capture their services when built; callers cannot accidentally require another client's context. */
+export type ApiHandlers = { readonly [R in RpcGroup.Rpcs<Api> as R['_tag']]: Rpc.ToHandlerFn<R, never> }
+
+/** Build once per connection, then install bounded groups to keep handler service inference tractable as the API grows. */
+export const apiLayer = <E = never, R = never>(build: ApiHandlers | Effect.Effect<ApiHandlers, E, R>) =>
+  Layer.unwrap(
+    Effect.map(Effect.isEffect(build) ? build : Effect.succeed(build), (handlers) =>
+      Layer.mergeAll(
+        ProjectApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof ProjectApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+        WorkApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof WorkApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+        ConnectionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof ConnectionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+        AttentionApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AttentionApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+        AcpApi.toLayer<{ readonly [P in RpcGroup.Rpcs<typeof AcpApi> as P['_tag']]: Rpc.ToHandlerFn<P, never> }>(handlers),
+      ),
+    ),
+  )

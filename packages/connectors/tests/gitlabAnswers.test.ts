@@ -72,6 +72,21 @@ const change: ChangeRequest = {
 const job = (id: string): Check => ({ id, name: 'unit', state: 'failed', url: null, summary: null })
 
 describe('GitLab answers that leave things out', () => {
+  it.effect('identifies the landed merge, squash or fast-forward commit', () =>
+    Effect.gen(function* () {
+      for (const [fields, expected] of [
+        [{ merge_commit_sha: 'merge', squash_commit_sha: 'squash' }, 'merge'],
+        [{ squash_commit_sha: 'squash' }, 'squash'],
+        [{}, 'a4f0330b'],
+      ] as const) {
+        const { host } = gitlab([['GET', `${PROJECT}/merge_requests/12`, { json: request({ state: 'merged', ...fields }) }]])
+        const seen = yield* host.change(repository, 12)
+        assert.strictEqual(seen.mergeCommit, expected)
+        assert.strictEqual(seen.headSha, 'a4f0330b')
+      }
+    }),
+  )
+
   it.effect('says who it is signed in as when the account has no name', () =>
     Effect.gen(function* () {
       const { host } = gitlab([['GET', `${API}/user`, { json: { id: 5, username: 'you' } }]])

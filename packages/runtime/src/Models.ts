@@ -15,6 +15,7 @@ import { Instance } from './Instance'
 import { blockedModelsOf, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
 import { change, timestamp } from './records'
 import { SignIns } from './SignIns'
+import { Accounts } from './Accounts'
 
 /*
  * The models each agent offers, and how hard each can be asked to think, in
@@ -51,7 +52,7 @@ export interface AgentModels {
   readonly images: boolean | null
 }
 
-type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns | Installs | RuntimeConfig
+type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | SignIns | Installs | RuntimeConfig | Accounts
 
 export interface OfferedModel {
   readonly id: string
@@ -210,6 +211,7 @@ export class Models extends Context.Service<
       const sql = yield* SqlClient.SqlClient
       const agents = yield* Agents
       const signIns = yield* SignIns
+      const accounts = yield* Accounts
       const installs = yield* Installs
       const instance = yield* Instance
       const context = yield* Effect.context<Store>()
@@ -217,6 +219,7 @@ export class Models extends Context.Service<
       const scope = yield* Effect.scope
       /* What asking each agent found this launch; an agent being asked has no entry yet. */
       const probed = new Map<string, Offered | null>()
+      const lastEntries = new Map<string, AgentEntry>()
       /* When each agent that couldn't say was asked, so it is asked again a while on. */
       const failedAt = new Map<string, number>()
       const askAgain = Duration.toMillis(config.modelsAgain ?? ASK_AGAIN)
@@ -253,7 +256,9 @@ export class Models extends Context.Service<
           (folder) =>
             Effect.gen(function* () {
               const { definition } = entry
-              const transport = entry.transport(folder)
+              // Copilot CLI's probe must use the same account host as its login and sessions.
+              const account = entry.definition.id === 'copilot' ? (yield* accounts.of('copilot'))[0] : undefined
+              const transport = account === undefined ? entry.transport(folder) : entry.transport(folder, accounts.env(account))
               const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
               if (transport._tag === 'Process' && processId !== undefined)
                 yield* sql`INSERT INTO processes ${sql.insert({
@@ -321,6 +326,13 @@ export class Models extends Context.Service<
       const of = (entry: AgentEntry) =>
         Effect.gen(function* () {
           const { definition } = entry
+          const previous = lastEntries.get(definition.id)
+          if (previous !== undefined && previous !== entry) {
+            probed.delete(definition.id)
+            failedAt.delete(definition.id)
+            probing.delete(definition.id)
+          }
+          lastEntries.set(definition.id, entry)
           const defaults = yield* defaultEffortsOf(definition.id)
           const blocked = yield* blockedModelsOf(definition.id)
           // Its settings as the session started; what it is on now, as the person last set it.
@@ -356,7 +368,10 @@ export class Models extends Context.Service<
         })
 
       return Models.of({
-        catalog: Effect.provide(Effect.forEach(agents.list, of), context),
+        catalog: Effect.provide(
+          Effect.suspend(() => Effect.forEach(agents.list, of)),
+          context,
+        ),
         setDefaultEffort: (input) =>
           Effect.gen(function* () {
             const entry = yield* agents.get(input.agentId)

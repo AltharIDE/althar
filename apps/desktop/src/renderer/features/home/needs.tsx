@@ -7,7 +7,6 @@ import { commandOf, titleOf } from '../../shared/callCommand'
 import { askOf, callKindOf, isUnshipped, kindWords, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
-import { stepText } from '../../shared/steps'
 import {
   doingWords,
   doneHere,
@@ -197,7 +196,6 @@ export const needsOf = ({
   calls,
   answered = [],
   issues = [],
-  stopped = [],
   ready,
   refs,
   agentName,
@@ -209,8 +207,6 @@ export const needsOf = ({
   answered?: ReadonlyArray<AnsweredCall>
   /** Tasks that wait on issues their lead drafted, or changes to their issue, for the person to file or apply. */
   issues?: ReadonlyArray<HomeTask>
-  /** Tasks whose lead stopped with no agent on them, which wait for the person to carry on or abandon, as on the board. */
-  stopped?: ReadonlyArray<HomeTask>
   ready: ReadonlyArray<HomeTask>
   refs: ReadonlyMap<string, ProjectRef>
   agentName: (id: string | null) => string
@@ -280,22 +276,6 @@ export const needsOf = ({
     return project === undefined
       ? []
       : [{ id: task.taskId, threadId: task.threadId, kind: issuesWordOf(task.issues), project, title: task.title }]
-  }),
-  // Stopped, as its card in the board's Needs you says it: the word, and what stopped its lead, where something says.
-  ...stopped.flatMap((task): ReadonlyArray<Need> => {
-    const project = refs.get(task.projectId)
-    if (project === undefined) return []
-    const by = task.stopped?.by
-    return [
-      {
-        id: task.taskId,
-        threadId: task.threadId,
-        kind: kindWords.stopped,
-        project,
-        title: task.title,
-        ...(by == null ? {} : { brief: stepText.stoppedBy[by] }),
-      },
-    ]
   }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
@@ -423,11 +403,12 @@ export function needLineOf(
                   ? undefined
                   : labelWords(here, `${ready.task.change.prefix}${ready.task.change.number}`, why !== null)
               }
-              busy={doing?.(ready.task.taskId) === true}
+              // Pressed, it stays its line while it merges (`mergedHere`): Merge answers the press in its place.
+              standing={doing?.(ready.task.taskId) === true ? 'merging' : null}
               onMerge={() => onNext(ready.task, here)}
               {...(ready.task.change?.canBypassQueue === true ? { onBypassQueue: () => onNext(ready.task, here, true) } : {})}
             >
-              {doing?.(ready.task.taskId) === true ? doingWords(here) : why === null ? nextWords(here) : standingText.nextFailed.again}
+              {why === null ? nextWords(here) : standingText.nextFailed.again}
             </MergeButton>
           ) : (
             <Button

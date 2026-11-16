@@ -60,6 +60,20 @@ describe('the device outside a Flatpak', () => {
     expect(missing).toEqual([])
   })
 
+  it('carries the replay server’s base URLs out to the device when set, even as the sandbox has them, and not when unset', () => {
+    const facts = {
+      env: { HOME: '/home/me', PATH: '/usr/bin' },
+      uid: 1000,
+      ambient: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:8787', OPENAI_BASE_URL: 'http://127.0.0.1:8787/v1' },
+    } satisfies Parameters<typeof relayOut>[2]
+    const spec = { command: 'codex', args: [] }
+    const set = relayOut(spec, { env: { ...facts.ambient, OPENAI_API_KEY: 'test-key' } }, facts).args
+    expect(set).toContain('--env=ANTHROPIC_BASE_URL=http://127.0.0.1:8787')
+    expect(set).toContain('--env=OPENAI_BASE_URL=http://127.0.0.1:8787/v1')
+    expect(set.some((arg) => arg.includes('API_KEY'))).toBe(false)
+    expect(relayOut(spec, { env: {} }, { ...facts, ambient: {} }).args.some((arg) => arg.includes('BASE_URL'))).toBe(false)
+  })
+
   it('takes a launch out to the device with the names it needs and what the agent was given, and nothing else', () => {
     const facts = {
       env: { HOME: '/home/me', PATH: '/usr/bin:/bin', XDG_RUNTIME_DIR: '/run/user/1000' },

@@ -323,6 +323,28 @@ export const setRunOutside = (to: RunOutside) =>
       ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
   })
 
+/** The settings key for what sending does while an agent is mid-turn; no row is its default, queue. */
+const SEND_MID_TURN = 'send_mid_turn'
+
+/** What sending a message does while an agent is mid-turn: wait in the queue, its default, or steer the agent at once. */
+export type SendMidTurn = 'queue' | 'steer'
+
+export const sendMidTurn = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const [row] = yield* sql<{ value: string }>`SELECT value FROM settings WHERE key = ${SEND_MID_TURN}`
+  return (row?.value === 'steer' ? 'steer' : 'queue') as SendMidTurn
+})
+
+export const setSendMidTurn = (to: SendMidTurn) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    if (to === 'queue') return yield* sql`DELETE FROM settings WHERE key = ${SEND_MID_TURN}`.pipe(Effect.asVoid)
+    const at = yield* timestamp
+    yield* sql`
+      INSERT INTO settings ${sql.insert({ key: SEND_MID_TURN, value: to, updatedAt: at })}
+      ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  })
+
 /** Each package manager's lockfile, and its install from it with no install scripts, as Run safely installs. */
 const SAFE_INSTALLS: ReadonlyArray<readonly [string, string]> = [
   ['bun.lock', 'bun install --frozen-lockfile --ignore-scripts'],
@@ -1245,16 +1267,27 @@ export class Reviews extends Context.Service<
             const row = marked.row
             const verdict = row.verdict ?? row.suggested
             const kept = Schema.decodeUnknownSync(Comments)(row.comments).filter((comment) => comment.kept)
+            let postedVerdict: ReviewVerdict = verdict
+            let postedSummary = row.summary
             const made = yield* connections.adapters(row.connectionId).pipe(
               Effect.flatMap((adapters): Effect.Effect<PostedReview, unknown> => {
                 const host = adapters.host
                 // Wanting its sign-in again, or gone, the host isn't asked: it would refuse.
                 if (host === undefined || adapters.info.state !== 'ready')
                   return Effect.fail(new ConnectorFailed({ product: row.product, reason: 'unauthorized', message: '' }))
+                // GitHub refuses approvals and change requests from the pull request's author. Preserve the chosen
+                // verdict in the review text, while posting the inline findings as a comment review.
+                const own = row.product === 'github' && row.author.toLowerCase() === adapters.info.account.login.toLowerCase()
+                const comment = own && verdict !== 'comment'
+                const summary = comment
+                  ? `**${verdict === 'approve' ? 'Approved' : 'Changes requested'}** (posted as a comment because GitHub does not allow authors to approve or request changes on their own pull requests).\n\n${row.summary}`
+                  : row.summary
+                postedVerdict = comment ? 'comment' : verdict
+                postedSummary = summary
                 return Effect.flatMap(host.repository(row.repository.split('/')), (repository) =>
                   host.postReview(repository, row.number, {
-                    event: EVENTS[verdict],
-                    body: signed(row.summary, row.drafter, row.automationName),
+                    event: comment ? 'comment' : EVENTS[verdict],
+                    body: signed(summary, row.drafter, row.automationName),
                     commit: row.headCommit,
                     comments: kept.map((comment) => ({ path: comment.path, line: comment.line, body: comment.body })),
                   }),
@@ -1267,11 +1300,19 @@ export class Reviews extends Context.Service<
               (now) => now.state === 'posting',
               (_, at) =>
                 made._tag === 'Success'
-                  ? { state: 'posted', reviewRef: made.success.id, reviewUrl: made.success.url ?? row.url, decidedAt: at }
+                  ? {
+                      state: 'posted',
+                      verdict: postedVerdict,
+                      summary: postedSummary,
+                      reviewRef: made.success.id,
+                      reviewUrl: made.success.url ?? row.url,
+                      decidedAt: at,
+                    }
                   : { state: uncertain(made.failure) ? 'uncertain' : 'failed', error: failureWords(made.failure, row.product) },
               made._tag === 'Success' ? 'review_draft.posted' : uncertain(made.failure) ? 'review_draft.uncertain' : 'review_draft.failed',
               actorId,
-              (now) => (now.state === 'posted' ? { url: now.reviewUrl, verdict, comments: kept.length } : { error: now.error }),
+              (now) =>
+                now.state === 'posted' ? { url: now.reviewUrl, verdict: now.verdict, comments: kept.length } : { error: now.error },
               // Posted, the review task is done, in the same transaction: a crash between them can't leave a posted review open.
               (now) => (now.state === 'posted' ? settle(now, actorId) : Effect.void),
             )
