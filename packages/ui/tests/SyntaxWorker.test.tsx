@@ -194,6 +194,22 @@ describe('a file’s colours, from a worker', () => {
     expect(Colours.made).toHaveLength(1)
   })
 
+  it('colours the whole file in place where the worker breaks after a slice, each line its own once', async () => {
+    const Lines = await fresh()
+    const text = fileOf(SLICE * 2 + 3)
+    render(<Lines text={text} />)
+    const worker = Colours.made[0] as Colours
+    await turn(worker)
+    await waitFor(() => expect(screen.getByTestId('line-0')).toHaveStyle({ color: keyword }))
+    // It breaks with a slice told: the rest is coloured in place, from the first line, in place of what it told.
+    worker.onerror?.(new Event('error'))
+    const last = SLICE * 2 + 2
+    await waitFor(() => expect(screen.getByTestId(`line-${last}`)).toHaveStyle({ color: keyword }))
+    for (const at of [0, SLICE - 1, SLICE, last])
+      expect(screen.getByTestId(`line-${at}`).textContent).toBe(`const line${at} = ${at} // number ${at}`)
+    expect(screen.queryByTestId(`line-${last + 1}`)).toBeNull()
+  })
+
   it('colours in place where the page may not start a worker', async () => {
     Colours.refused = true
     const Lines = await fresh()

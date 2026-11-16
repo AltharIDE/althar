@@ -100,6 +100,8 @@ const keep = (key: string, lines: TokenLines) => {
 /** What a text being coloured hears: its lines as they come, and whether those are the last; or that it can't be. */
 interface Hears {
   readonly lines: (lines: TokenLines, done: boolean) => void
+  /** All of its lines at once, in place of any heard before: colouring started again in place, after a worker that broke. */
+  readonly whole: (lines: TokenLines) => void
   readonly failed: () => void
 }
 
@@ -172,7 +174,8 @@ const start = (text: string, lang: string, hears: Hears): (() => void) => {
   let stopped = false
   const inPlace = () => {
     colourInPlace(text, lang, () => stopped).then((lines) => {
-      if (lines !== null) hears.lines(lines, true)
+      // The whole text, from its first line: what a worker that broke sent of it before is replaced, never added to.
+      if (lines !== null) hears.whole(lines)
     }, hears.failed)
   }
   const to = theWorker()
@@ -226,6 +229,12 @@ const colour = (text: string, lang: string, show: Show): (() => void) => {
           keep(key, made.lines)
           over()
         }
+        for (const one of made.shows) one(made.lines)
+      },
+      whole: (all) => {
+        made.lines = all
+        keep(key, made.lines)
+        over()
         for (const one of made.shows) one(made.lines)
       },
       // A grammar that wouldn't load leaves it plain.
