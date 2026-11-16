@@ -12,7 +12,7 @@ import { RpcClient } from 'effect/rpc'
 
 import { Behind, BEHIND_AT_ONCE, connection, services } from '../src/Api'
 import { Folders } from '../src/Folders'
-import { deltasFor, Live, newestOf, SENT_KEPT, watchedKey } from '../src/Live'
+import { deltasFor, Live, newestOf, SENT_KEPT, type Watched, watchedKey, watchedOf } from '../src/Live'
 import { Secrets } from '../src/Secrets'
 import { addItem } from '../src/threads'
 
@@ -171,7 +171,7 @@ describe('what a watch that fell behind is sent', () => {
   it.effect('is the newest of each thing, in the order each last changed, and nothing of the rest', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const streamed = (itemId: string, text: string): WatchEvent => ({
+        const streamed = (itemId: string, text: string): Watched => ({
           _tag: 'Streaming',
           threadId: 'thread_1',
           itemId,
@@ -180,7 +180,7 @@ describe('what a watch that fell behind is sent', () => {
           agentId: 'codex',
           text,
         })
-        const events: ReadonlyArray<WatchEvent> = [
+        const events: ReadonlyArray<Watched> = [
           ...['a', 'ab', 'abc'].map((text) => streamed('item_1', text)),
           { _tag: 'Context', threadId: 'thread_1', used: 1, size: 10 },
           { _tag: 'Output', threadId: 'thread_1', itemId: 'item_2', text: 'one', dropped: 0 },
@@ -205,6 +205,26 @@ describe('what a watch that fell behind is sent', () => {
       }),
     ),
   )
+
+  it('is what a client shows of what happens now, and nothing that is the runtime’s own', () => {
+    const shown = [
+      watchedOf({ _tag: 'Streaming', threadId: 't', itemId: 'i', sequence: 2, kind: 'agent_message', agentId: 'codex', text: 'Hi' }),
+      watchedOf({ _tag: 'Output', threadId: 't', itemId: 'i', text: 'ok', dropped: 1 }),
+      watchedOf({ _tag: 'Agent', threadId: 't', event: { _tag: 'ContextUsage', used: 3, size: 9 } }),
+      watchedOf({ _tag: 'Background', threadId: 't', background: [] }),
+      watchedOf({ _tag: 'Launches', projectId: 'p', launches: [] }),
+      watchedOf({ _tag: 'Drafting', threadId: 't', drafts: [] }),
+    ]
+    assert.deepStrictEqual(
+      shown.map((event) => (event === undefined ? undefined : watchedKey(event))),
+      ['Streaming:i', 'Output:i', 'Context:t', 'Background:t', 'Launches:p', 'Drafting:t'],
+    )
+    assert.deepStrictEqual(shown[2], { _tag: 'Context', threadId: 't', used: 3, size: 9 })
+    // An agent's other events, and the runtime's turns and sessions, are not a client's to be sent this way.
+    assert.isUndefined(watchedOf({ _tag: 'Agent', threadId: 't', event: { _tag: 'AgentMessage', text: 'Hi' } }))
+    assert.isUndefined(watchedOf({ _tag: 'TurnStarted', threadId: 't', turnId: 'turn' }))
+    assert.isUndefined(watchedOf({ _tag: 'PersonSaid', threadId: 't' }))
+  })
 
   it('sends a message whole the first time, then what was added, and whole again once it is forgotten', () => {
     const sent = deltasFor()

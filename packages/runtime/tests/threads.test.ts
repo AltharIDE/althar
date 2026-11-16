@@ -183,6 +183,28 @@ describe('a running tool call, as the store keeps it', () => {
       assert.strictEqual(yield* writesOf(where.threadId, 'serve'), 2)
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('lets go of what it held of a call gone from the thread, and starts it again as it is heard of again', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder({ ...where, gather: HELD })
+      const sql = yield* SqlClient.SqlClient
+      const gone = sql`DELETE FROM thread_items WHERE thread_id = ${where.threadId} AND tool_call_id = 'lint'`
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'lint', title: 'Lint', kind: 'execute', status: 'in_progress' })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'lint', title: 'Lint the app' })
+      // Gone while what its agent said was held: there is nothing to write it on, and nothing goes wrong.
+      yield* gone
+      yield* record.flush
+      assert.isUndefined(yield* callIn(where.threadId, 'lint'))
+      // Heard of again, it is placed again.
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'lint', title: 'Lint it all' })
+      assert.strictEqual((yield* callIn(where.threadId, 'lint'))?.title, 'Lint it all')
+      // And gone between its events, it is placed again too.
+      yield* gone
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'lint', status: 'completed' })
+      assert.strictEqual((yield* callIn(where.threadId, 'lint'))?.status, 'completed')
+    }).pipe(Effect.provide(runtime())),
+  )
 })
 
 describe('the thread recorder', () => {

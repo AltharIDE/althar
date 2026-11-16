@@ -81,13 +81,16 @@ export type LiveEvent =
       readonly setAside?: { readonly title: string; readonly decision: 'allow' | 'reject' }
     }
 
+/** What a watch is sent of what happens now, beside the store's changes, which come by their cursor. */
+export type Watched = Exclude<WatchEvent, { readonly _tag: 'Changed' }>
+
 /**
  * What a client watching is sent of an event: an agent's message or thought
  * as far as it has streamed, a command's output, how full an agent's context
  * is, and what the runtime sends whole as it changes. Nothing of the rest,
  * which is the runtime's own.
  */
-export const watchedOf = (event: LiveEvent): WatchEvent | undefined => {
+export const watchedOf = (event: LiveEvent): Watched | undefined => {
   switch (event._tag) {
     case 'Streaming':
       return {
@@ -119,7 +122,7 @@ export const watchedOf = (event: LiveEvent): WatchEvent | undefined => {
 }
 
 /** What a watched event is of: a newer one of the same thing says all it said, whole. */
-export const watchedKey = (event: WatchEvent): string => {
+export const watchedKey = (event: Watched): string => {
   switch (event._tag) {
     case 'Streaming':
     case 'Output':
@@ -128,9 +131,6 @@ export const watchedKey = (event: WatchEvent): string => {
       return `${event._tag}:${event.projectId}`
     case 'PlanUsage':
       return event._tag
-    // A change from the store is its own: never one in place of another.
-    case 'Changed':
-      return `${event._tag}:${event.cursor}`
     default:
       return `${event._tag}:${event.threadId}`
   }
