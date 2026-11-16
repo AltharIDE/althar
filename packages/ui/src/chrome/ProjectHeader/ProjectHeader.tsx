@@ -157,8 +157,8 @@ export function ProjectHeader({
         />
       }
     >
-      <Heading level={headingLevel} className={s.crumb}>
-        <button type="button" className={s.home} title={name} onClick={() => onRoom(Room.Board)}>
+      <Heading level={headingLevel} className={s.crumb} title={name}>
+        <button type="button" className={s.home} onClick={() => onRoom(Room.Board)}>
           <ProjectMark seed={seed} ink={ink} size={18} className={s.mark} data-ink={ink} />
           <span className={s.name}>{name}</span>
         </button>
