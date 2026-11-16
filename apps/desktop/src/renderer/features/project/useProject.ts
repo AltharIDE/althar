@@ -8,6 +8,7 @@ import {
   type Draft,
   PAGE,
   type PlanStep,
+  type ProjectList,
   type ProjectRepository,
   type ProjectSummary,
   type TaskEnd,
@@ -139,8 +140,12 @@ const NO_ITEMS: ReadonlyArray<ThreadItem> = []
 export const useProject = (projectId: string): ProjectModel => {
   const { client, cache } = useServices()
   const read = reads(client)
-  const listed = useQuery(read.projects())
-  const project = listed.data?.projects.find((candidate) => candidate.id === projectId) ?? null
+  // Only this project of the list: another's change draws nothing here.
+  const listed = useQuery({
+    ...read.projects(),
+    select: useCallback((list: ProjectList) => list.projects.find((candidate) => candidate.id === projectId) ?? null, [projectId]),
+  })
+  const project = listed.data ?? null
   const repositories = useQuery(read.repositories(projectId)).data ?? null
   const thread = useQuery(read.coordinator(projectId))
   const coordinator = thread.data ?? null
