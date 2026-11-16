@@ -222,7 +222,24 @@ export const CONVERSATIONS: ReadonlyArray<Conversation> = [
       0.2,
     ),
   },
-  { id: 'cc-sleep', agent: 'claude-code', title: 'Why does the meter jump to 100% after sleep?', at: daysAgo(4), messages: 16, in: 'lima' },
+  {
+    id: 'cc-sleep',
+    agent: 'claude-code',
+    title: 'Why does the meter jump to 100% after sleep?',
+    at: daysAgo(4),
+    messages: 16,
+    in: 'lima',
+    said: said(
+      [
+        ['you', 'Why does the meter jump to 100% after the Mac sleeps?'],
+        [
+          'agent',
+          'It reads usage once on launch and adds what it sees after; a wake replays the whole window as new. It needs to read the total again on wake.',
+        ],
+      ],
+      4,
+    ),
+  },
   {
     id: 'cx-wal',
     agent: 'codex',

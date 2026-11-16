@@ -187,7 +187,8 @@ function Source({ who }: { who: Tool | Agent }) {
     ? CONVERSATIONS.filter((one) => one.agent === who && (era === 'later' || one.later !== true))
     : worktreesOf(era).filter((one) => one.tool === who)
   const inNow = theirs.filter((one) => ('agent' in one ? b.conversations.has(one.id) : b.worktrees.has(one.id)))
-  const out = theirs.length - inNow.length
+  // What was passed over on the way in; what's new since is offered above.
+  const out = theirs.filter((one) => one.later !== true).length - inNow.filter((one) => one.later !== true).length
   const setup = !isAgent(who) && b.setup === who
   if (theirs.length === 0) return null
   const noun = isAgent(who) ? 'conversation' : 'worktree'

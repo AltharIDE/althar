@@ -1,4 +1,4 @@
-import { type ComponentProps, useState } from 'react'
+import { type ComponentProps, useEffect, useState, useSyncExternalStore } from 'react'
 
 import { Button, Icon, LinkButton } from '@althar/ui'
 
@@ -19,21 +19,40 @@ export * from '../../src/renderer/shared/ThreadBlocks'
  * was); else it starts a new session from a brief of this one (Codex here).
  */
 
+/** The thread brought in that's on show, for its composer to say how it goes on (TaskFace, in Seams.tsx). */
+let shown: string | null = null
+const listeners = new Set<() => void>()
+const showing = (threadId: string | null) => {
+  shown = threadId
+  for (const listener of listeners) listener()
+}
+export const useShownBrought = () =>
+  useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    () => shown,
+  )
+
 export function ThreadBlocks(props: ComponentProps<typeof AppThreadBlocks>) {
   const brought = broughtOf(props.threadId)
-  if (brought === null || brought.conversations.length === 0) return <AppThreadBlocks {...props} />
-  // A thread may be drawn in parts (its earlier turns, then its latest): where it came from heads the part with its first
-  // words, and how it goes on ends the part with its last.
+  const any = brought !== null && brought.conversations.length > 0
+  useEffect(() => {
+    if (!any) return
+    showing(props.threadId)
+    return () => {
+      if (shown === props.threadId) showing(null)
+    }
+  }, [any, props.threadId])
+  if (brought === null || !any) return <AppThreadBlocks {...props} />
+  // A thread may be drawn in parts (its earlier turns, then its latest): where it came from heads the part with its first words.
   const oldest = brought.conversations.at(-1)
-  const newest = brought.conversations[0]
-  const drawn = JSON.stringify(props.blocks)
-  const first = oldest !== undefined && drawn.includes(`"${oldest.id}-0"`)
-  const last = newest !== undefined && drawn.includes(`"${newest.id}-${(newest.said?.length ?? 2) - 1}"`)
+  const first = oldest !== undefined && JSON.stringify(props.blocks).includes(`"${oldest.id}-0"`)
   return (
     <>
       {first && <Origin brought={brought} />}
       <AppThreadBlocks {...props} />
-      {last && <GoOn brought={brought} />}
     </>
   )
 }
@@ -70,7 +89,13 @@ function Origin({ brought }: { brought: Brought }) {
   )
 }
 
-function GoOn({ brought }: { brought: Brought }) {
+/** How a conversation brought in goes on: over its composer. */
+export function GoOn({ threadId }: { threadId: string }) {
+  const brought = broughtOf(threadId)
+  return brought === null ? null : <GoingOn key={threadId} brought={brought} />
+}
+
+function GoingOn({ brought }: { brought: Brought }) {
   const [going, setGoing] = useState<'session' | 'brief' | null>(null)
   const last = brought.conversations[0]
   if (last === undefined) return null

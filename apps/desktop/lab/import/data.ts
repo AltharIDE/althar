@@ -218,12 +218,8 @@ const boardOf = (projectId: string): BoardSnapshot => {
 
 /** What was said, at its own time; one the lab has no words for shows its first and last. */
 const saidOf = (one: Conversation): ThreadItem[] => {
-  const lines =
-    one.said ??
-    ([
-      { who: 'you', text: one.title, ago: 0 },
-      { who: 'agent', text: `…`, ago: 0 },
-    ] as const)
+  // One the lab has no words for shows how it began.
+  const lines = one.said ?? ([{ who: 'you', text: one.title, ago: 0 }] as const)
   const at = Date.parse(one.at)
   return lines.map(
     (line, i) =>

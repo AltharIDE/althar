@@ -17,9 +17,12 @@ import { defineConfig, type Plugin } from 'vite-plus'
 const here = import.meta.dirname
 const renderer = join(here, '../../src/renderer')
 const seamed = new Set(
-  ['features/board/BoardView.tsx', 'features/projectSettings/ProjectSettingsPage.tsx', 'features/settings/SettingsPage.tsx'].map((one) =>
-    join(renderer, one),
-  ),
+  [
+    'features/board/BoardView.tsx',
+    'features/projectSettings/ProjectSettingsPage.tsx',
+    'features/settings/SettingsPage.tsx',
+    'features/task/TaskView.tsx',
+  ].map((one) => join(renderer, one)),
 )
 const swaps = new Map(
   [

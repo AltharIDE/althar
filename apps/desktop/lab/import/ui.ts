@@ -5,4 +5,4 @@
  * tools where that's the section open.
  */
 export * from '@althar/ui'
-export { BoardCard, BoardColumn, SettingsLayout } from './Seams'
+export { BoardCard, BoardColumn, SettingsLayout, TaskFace } from './Seams'
