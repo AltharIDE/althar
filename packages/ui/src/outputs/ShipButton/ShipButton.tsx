@@ -70,6 +70,8 @@ export interface ShipButtonText {
   introEdit: string
   /** What a stop does on this route, in the dialog. */
   guide: (stop: ShipStop, route: ShipRoute, about: ShipAbout, readyAlready: boolean) => string
+  /** The review's stop, in the dialog, where the task has no reviewer. */
+  guideNoReviewer: (about: ShipAbout) => string
   skip: (stop: string) => string
   bringBack: (stop: string) => string
   pushAlways: string
@@ -165,6 +167,7 @@ export const shipButtonText: ShipButtonText = {
         return unreachable(stop)
     }
   },
+  guideNoReviewer: (about) => `This task has no reviewer, so the ${about.commits} go up as they are.`,
   skip: (stop) => `Skip ${stop} this time`,
   bringBack: (stop) => `Bring ${stop} back`,
   pushAlways: 'Push always goes: it’s what Ship is for',
@@ -262,6 +265,8 @@ export interface ShipGuideProps {
   route: ShipRoute
   about: ShipAbout
   readyAlready?: boolean
+  /** Whether a review can come first: without a reviewer, its stop can't be turned on, and says why. */
+  reviewable?: boolean
   /** Turns a stop on or off for this Ship; without it, the stops are only read. */
   onRoute?: (route: ShipRoute) => void
   /** Ships on the route as it stands: offered once the route has changed here. */
@@ -271,7 +276,7 @@ export interface ShipGuideProps {
 }
 
 /** How Ship works: the stops as a path, in plain words for this route; a click on a stop's icon turns it on or off. */
-export function ShipGuide({ route, about, readyAlready = false, onRoute, onShip, onClose, text }: ShipGuideProps) {
+export function ShipGuide({ route, about, readyAlready = false, reviewable = true, onRoute, onShip, onClose, text }: ShipGuideProps) {
   const t = { ...shipButtonText, ...text }
   // The route it opened on: once it changes here, the dialog ends on the Ship it makes.
   const [opened] = useState(route)
@@ -307,12 +312,14 @@ export function ShipGuide({ route, about, readyAlready = false, onRoute, onShip,
       <ol className={s.path}>
         {ORDER.map((stop) => {
           const on = takes(route, stop, readyAlready)
-          const fixed = stop === ShipStop.Push || (stop === ShipStop.Ready && readyAlready) || onRoute === undefined
+          const noReviewer = stop === ShipStop.Review && !reviewable
+          const fixed = stop === ShipStop.Push || (stop === ShipStop.Ready && readyAlready) || noReviewer || onRoute === undefined
+          const why = onRoute === undefined ? undefined : stop === ShipStop.Push ? t.pushAlways : noReviewer ? t.noReviewer : undefined
           const name = t.stop[stop]
           return (
             <li key={stop} className={s.step} data-skipped={!on || undefined}>
               {fixed ? (
-                <span className={s.mark} {...(stop === ShipStop.Push && onRoute !== undefined ? { title: t.pushAlways } : {})}>
+                <span className={s.mark} {...(why === undefined ? {} : { title: why })}>
                   <Icon name={ICON[stop]} size={14} />
                 </span>
               ) : (
@@ -332,7 +339,7 @@ export function ShipGuide({ route, about, readyAlready = false, onRoute, onShip,
                   {name}
                   {!on && <span className={s.off}>{t.off}</span>}
                 </b>
-                <span>{t.guide(stop, route, about, readyAlready)}</span>
+                <span>{noReviewer && !on ? t.guideNoReviewer(about) : t.guide(stop, route, about, readyAlready)}</span>
               </span>
             </li>
           )
@@ -488,6 +495,7 @@ export function ShipButton({
           route={route}
           about={about}
           readyAlready={readyAlready}
+          reviewable={reviewable}
           {...(going ? {} : { onRoute, ...(onShip === undefined ? {} : { onShip }) })}
           onClose={() => setGuide(false)}
           text={t}

@@ -134,6 +134,22 @@ export const GuideEdits: Story = {
   },
 }
 
+/** No reviewer: How Ship works keeps its Review stop off, saying why, so the dialog can't promise one. */
+export const GuideNoReviewer: Story = {
+  args: NoReviewer.args,
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'How far it goes' }))
+    await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'How Ship works' }))
+    const dialog = within(await within(document.body).findByRole('dialog'))
+    await expect(dialog.queryByRole('button', { name: 'Bring Review back' })).toBeNull()
+    await expect(dialog.getByTitle('This task has no reviewer')).toBeVisible()
+    await expect(dialog.getByText('This task has no reviewer, so the 2 commits go up as they are.')).toBeVisible()
+    // The other stops still change.
+    await userEvent.click(dialog.getByRole('button', { name: 'Bring Merge back' }))
+    await expect(args.onRoute).toHaveBeenLastCalledWith({ review: false, far: ShipFar.Merge })
+  },
+}
+
 export const Guide: StoryObj<typeof ShipGuide> = {
   render: () => <ShipGuide route={READY} about={{ ...ABOUT, theirs: true }} onRoute={fn()} onShip={fn()} onClose={fn()} />,
 }
