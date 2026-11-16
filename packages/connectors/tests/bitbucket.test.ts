@@ -2419,7 +2419,7 @@ describe('Bitbucket Cloud’s repositories, for cloning one or making one', () =
           archived: false,
         },
       ])
-      assert.isFalse(sent.some((request) => request.url.startsWith('https://elsewhere.example')))
+      assert.isFalse(sent.some((request) => new URL(request.url).host === 'elsewhere.example'))
     }),
   )
 

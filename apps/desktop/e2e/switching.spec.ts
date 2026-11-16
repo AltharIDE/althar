@@ -62,8 +62,13 @@ test('going back to an open project shows the screen it kept, where the person l
     // Another project, in a tab of its own, with a conversation of its own.
     await page.keyboard.press('ControlOrMeta+n')
     await page.getByRole('textbox', { name: 'Name' }).fill('halyard')
+    await page
+      .getByRole('radiogroup', { name: 'Where its code comes from' })
+      .getByRole('radio', { name: /^A folder/ })
+      .click()
     await chooseFolder(electronApp, halyard)
     await page.getByRole('button', { name: 'Choose a folder…' }).click()
+    await expect(page.getByRole('region', { name: 'Its folders' }).getByText('halyard', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /^Create halyard/ }).click()
     await expect(page.getByRole('heading', { name: 'halyard', level: 1 })).toBeVisible()
     await say(page, 'Halyard first words')
