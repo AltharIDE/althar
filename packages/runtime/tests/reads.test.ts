@@ -176,6 +176,24 @@ describe('what screens read from git', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('reads it again as an older call ends after many newer ones have', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId, worktree } = yield* ready
+      quiet(worktree)
+      const place = { projectId: projectId as ProjectId, threadId }
+      const edit = { title: 'Edit the router', kind: 'edit' }
+      const id = yield* addItem(place, 'tool_call', { ...edit, status: 'in_progress' }, { toolCallId: 'long-edit' })
+      // Many calls start and end while it goes on, more than any count of the latest would see.
+      for (let at = 0; at < 25; at += 1)
+        yield* addItem(place, 'tool_call', { title: `Read ${at}`, kind: 'read', status: 'completed' }, { toolCallId: `read-${at}` })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+      writeFileSync(join(worktree, 'router.ts'), 'export {}\n')
+      // The old call ends: what it wrote shows, though no newer call moved.
+      yield* updateItem(place.projectId, id, { ...edit, status: 'completed' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'router.ts'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('says a task is merged here once its default branch has its head, however it got there', () =>
     Effect.gen(function* () {
       const queries = yield* Queries

@@ -111,6 +111,7 @@ import { teamLeadsOf } from './teamLead'
 import { spendingOf } from './Spending'
 import { timingsFrom } from './turnTimes'
 import { actionsOf, standingOf } from './Tasks'
+import { toolCallMoves } from './toolMoves'
 
 /*
  * What screens show, read from the store (docs/architecture/02: queries
@@ -150,9 +151,6 @@ const REPORTS = 200
 
 /** How many of a task's rounds of work its graph reads, newest: far more than a task has. */
 const GRAPH_ROUNDS = 100
-
-/** How many of its lead's latest tool calls a task's files are read again on as each ends: calls run together end in any order. */
-const LATEST_CALLS = 20
 
 /** What a revision of a run's graph keeps of its steps, by key. */
 const GraphSteps = Schema.fromJsonString(
@@ -1582,17 +1580,15 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const worktrees = yield* worktreesOf(taskId)
-          // The lead's tool calls, how many and how its latest stand: how its edits that nobody staged show, once a call starts
-          // or ends. Not as a call goes on, which moves its item with every word of its progress and would read git again each
-          // time; nor by reading every call the thread ever had, thousands in a long one.
-          const [lead] = wants.changed
-            ? yield* sql<{ calls: string }>`
-                SELECT (SELECT count(*) FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'tool_call') || ':' ||
-                  coalesce((SELECT group_concat(status, ',') FROM (SELECT coalesce(json_extract(i.content, '$.status'), '') AS status
-                    FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'tool_call' ORDER BY i.sequence DESC LIMIT ${LATEST_CALLS})), '')
-                  AS calls
+          // The lead's tool calls, how many and how often one started or changed status (toolMoves.ts): how its edits that
+          // nobody staged show, once any call starts or ends, however old. Not as a call goes on, which moves its item with every
+          // word of its progress and would read git again each time; nor by reading every call's status, thousands in a long one.
+          const [counted] = wants.changed
+            ? yield* sql<{ threadId: string; count: number }>`
+                SELECT t.id AS thread_id, (SELECT count(*) FROM thread_items i WHERE i.thread_id = t.id AND i.kind = 'tool_call') AS count
                 FROM threads t WHERE t.task_id = ${taskId} AND t.kind = 'task'`
             : []
+          const lead = counted === undefined ? undefined : { calls: `${counted.count}:${toolCallMoves(counted.threadId)}` }
           // A screenshot the lead handed as evidence, left uncommitted, isn't part of what it changed.
           const pictures = wants.changed ? yield* evidencePaths(taskId) : () => false
           const shown = (worktree: string) => (file: ChangedFile) =>

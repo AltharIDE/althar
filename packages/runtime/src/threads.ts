@@ -36,6 +36,7 @@ import { change, timestamp } from './records'
 import { commandIn, essentials } from './rules'
 import { indexThread } from './Search'
 import { mcpActOf } from './mcpActs'
+import { toolCallMoved } from './toolMoves'
 
 /** How long the words an MCP call posted are kept on its item: what it said, at a glance. */
 const WORDS_KEPT = 600
@@ -127,6 +128,8 @@ export const addItem = (
         if (kind === 'user_message' || kind === 'step_result') yield* indexThread(place.threadId)
       }),
     )
+    // A tool call started: what the lead's edits left is read again (toolMoves.ts).
+    if (kind === 'tool_call') toolCallMoved(place.threadId)
     return id
   })
 
@@ -158,12 +161,21 @@ export const updateItem = (projectId: ProjectId, id: string, content: unknown) =
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
-    yield* sql.withTransaction(
+    const status = typeof content === 'object' && content !== null && 'status' in content ? content.status : undefined
+    const moved = yield* sql.withTransaction(
       Effect.gen(function* () {
+        // A tool call's status, as it stood: one that changes moves what the lead's edits left (toolMoves.ts).
+        const [was] =
+          status === undefined
+            ? []
+            : yield* sql<{ threadId: string; kind: string; status: unknown }>`
+                SELECT thread_id, kind, json_extract(content, '$.status') AS status FROM thread_items WHERE id = ${id}`
         const revision = yield* change('thread_items', id, { content: JSON.stringify(content) })
         yield* ledger.notify({ projectId, aggregateType: 'thread_item', aggregateId: id, aggregateRevision: revision })
+        return was !== undefined && was.kind === 'tool_call' && was.status !== status ? was.threadId : null
       }),
     )
+    if (moved !== null) toolCallMoved(moved)
   })
 
 /** A session's tool call, as the thread keeps it, and the revision it is at. */
@@ -591,6 +603,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string; readon
         }),
       )
       if (wrote === undefined) return void calls.delete(toolCallId)
+      // Its status changed: what the lead's edits left is read again (toolMoves.ts).
+      if (wrote.content.status !== call.stood) toolCallMoved(place.threadId)
       call.content = wrote.content
       call.written = wrote.json
       call.stood = wrote.content.status
