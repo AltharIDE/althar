@@ -41,7 +41,7 @@ const open = async () => {
   // Watched from where the first read was: nothing after it is missed.
   const first = await cache.fetchQuery(edgeRead(client)).catch(() => null)
   const feed = follow(client, cache, first?.cursor)
-  followEdge(feed, cache)
+  followEdge(feed, cache, client.behind)
   // The menu bar's sheet is kept hidden between clicks: shown, it reads again, whatever it heard meanwhile.
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') void cache.invalidateQueries({ queryKey: edgeKey })
