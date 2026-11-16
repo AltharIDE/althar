@@ -382,7 +382,13 @@ describe('a page canvas', () => {
 
   const page = () => detail([version(1, { kind: 'html', title: 'Sign-in page', entry: 'index.html' })])
 
-  const views = (): CanvasesHost => ({ show: vi.fn(), close: vi.fn(), reload: vi.fn() })
+  const views = (): CanvasesHost => ({
+    show: vi.fn(),
+    close: vi.fn(),
+    reload: vi.fn(),
+    still: vi.fn(async () => 'data:image/jpeg;base64,BBBB'),
+    cover: vi.fn(async () => {}),
+  })
 
   it('is laid over the panel’s place at its version, moved as the place does, and loaded again when asked', async () => {
     let place = box(640, 120, 640, 700)
@@ -411,6 +417,44 @@ describe('a page canvas', () => {
 
     unmount()
     expect(canvases.close).toHaveBeenCalledWith(THREAD)
+    measured.mockRestore()
+  })
+
+  it('steps aside for what opens over its place, with a picture of it there, and comes back as it closes', async () => {
+    const place = box(640, 120, 640, 700)
+    const measured = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => place)
+    const canvases = views()
+    const { client } = canvasClient(page())
+    const { unmount } = show(client, { canvases })
+    await waitFor(() => expect(canvases.show).toHaveBeenCalled())
+    expect(canvases.cover).not.toHaveBeenCalledWith(THREAD, true)
+
+    // A lightbox, as a Radix dialog at the end of the body, over the place.
+    const lightbox = document.createElement('div')
+    lightbox.setAttribute('role', 'dialog')
+    act(() => document.body.append(lightbox))
+    await waitFor(() => expect(canvases.still).toHaveBeenCalledWith(THREAD))
+    const picture = await waitFor(() => {
+      const found = document.querySelector<HTMLImageElement>('img[src="data:image/jpeg;base64,BBBB"]')
+      if (found === null) throw new Error('No picture yet.')
+      return found
+    })
+    // The view steps aside once the picture is drawn, not before.
+    expect(canvases.cover).not.toHaveBeenCalledWith(THREAD, true)
+    fireEvent.load(picture)
+    expect(canvases.cover).toHaveBeenCalledWith(THREAD, true)
+
+    act(() => lightbox.remove())
+    await waitFor(() => expect(canvases.cover).toHaveBeenLastCalledWith(THREAD, false))
+    await waitFor(() => expect(document.querySelector('img[src="data:image/jpeg;base64,BBBB"]')).toBeNull())
+
+    // With no picture to give, the view steps aside all the same.
+    vi.mocked(canvases.still).mockResolvedValueOnce(null)
+    act(() => document.body.append(lightbox))
+    await waitFor(() => expect(canvases.cover).toHaveBeenLastCalledWith(THREAD, true))
+
+    unmount()
+    expect(canvases.cover).toHaveBeenLastCalledWith(THREAD, false)
     measured.mockRestore()
   })
 

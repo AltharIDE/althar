@@ -306,6 +306,10 @@ export interface CanvasesHost {
   readonly close: (threadId: string) => void
   /** Loads the version shown again, as it was published. */
   readonly reload: (threadId: string) => void
+  /** A picture of the canvas as it shows, for the window to draw in its place while something of its own is over it; null where there is none. */
+  readonly still: (threadId: string) => Promise<string | null>
+  /** Hides the view while something of the window's is over it (ADR-100), and shows it again after. */
+  readonly cover: (threadId: string, covered: boolean) => Promise<void>
 }
 
 /**
