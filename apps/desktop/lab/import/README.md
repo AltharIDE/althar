@@ -25,7 +25,7 @@ Ticked at first: work not finished (not merged, not someone else's PR), Conducto
 - **B · By place.** The same step, with every worktree shown as the task it becomes. The conversations that ran in a worktree sit under it as its history, and come with it. Conversations from althar's own folder are a list of their own and become chats on Scratch. Setup comes first, as what runs before each task. *For:* says what each thing becomes, and nothing comes in detached from its work. *Against:* longer still, and a conversation can't come in without its worktree.
 - **C · On the board.** No step, and nothing in the New project tab but a line in its foot. The project opens with a "Found in other tools" card at the top of Up next: each worktree with its most urgent fact, a press to bring it in or leave it, the conversations in one row with Choose…, and Bring in all as its last row. *For:* nothing in the way on day one, and each thing is decided where it will live. *Against:* the first board starts busy, and things nobody decides on wait there.
 
-Afterwards, in every direction: an adopted worktree is a task in place. Its folder stays where the other tool made it, and its branch and pull request are its own. Its card says "From Conductor" where a stopped one says "Stopped", with Resume. One whose PR is green waits in Needs you. The coordinator's first word says what came in, and the one thing that needs a look. Conversations from althar's own folder are asides, which is today's conversation list, at their own dates. A thread brought in says where it came from over it (the tool's folder, each conversation's agent, length and date). Under it is how it goes on: Claude Code continues from a copy of its own session, so the one in `~/.claude` stays as it was. Codex starts a new session from a brief, the DEV-37 fallback for an agent that can't load one here.
+Afterwards, in every direction: an adopted worktree is a task in place. Its folder stays where the other tool made it, and its branch and pull request are its own. Its card says "From Conductor" where a stopped one says "Stopped", with Resume. One whose PR is green waits in Needs you. The coordinator's first word says what came in, and the one thing that needs a look. Conversations from althar's own folder are asides, which is today's conversation list, at their own dates. A thread brought in says where it came from at its top (the tool's folder, each conversation's agent, length and date). Over its composer is how it goes on: Claude Code continues from a copy of its own session, so the one in `~/.claude` stays as it was. Codex starts a new session from a brief, the DEV-37 fallback for an agent that can't load one here.
 
 ## Later, from Settings
 
@@ -37,7 +37,7 @@ The board offers what's new in every Later direction (but 3, for the tools it ke
 
 ## How it's built
 
-`world.ts` holds what's found and what was brought in. `data.ts` is the fake runtime that turns it into the board, threads and the coordinator. `Found.tsx` has the lists to pick from (A by kind, B by place), `Arrival.tsx` the kit's `Welcome` and `NewProject` screens with them, and `Later.tsx` the found card and the Settings sections. The seams in `vite.config.ts` work like this: the board's and both Settings pages' kit imports come through `ui.ts` (`Seams.tsx`: Up next's found card, the adopted card's word, the Other tools section); both pages' section lists are the lab's (`projectSections.ts`, `settingsSections.ts`); and so is a thread's blocks (`ThreadBlocks.tsx`: where it came from, how it continues).
+`world.ts` holds what's found and what was brought in. `data.ts` is the fake runtime that turns it into the board, threads and the coordinator. `Found.tsx` has the lists to pick from (A by kind, B by place), `Arrival.tsx` the kit's `Welcome` and `NewProject` screens with them, and `Later.tsx` the found card and the Settings sections. The seams in `vite.config.ts` work like this: the kit imports of the board, both Settings pages and the task view come through `ui.ts` (`Seams.tsx`: Up next's found card, the adopted card's word, the Other tools section, Continue over the composer); both pages' section lists are the lab's (`projectSections.ts`, `settingsSections.ts`); and so is a thread's blocks (`ThreadBlocks.tsx`: where it came from).
 
 One change outside the lab: the kit's `Welcome` takes an optional `bring` step after the project's, left out without it (`packages/ui/src/screens/Welcome/Welcome.tsx`).
 
@@ -45,6 +45,7 @@ One change outside the lab: the kit's `Welcome` takes an optional `bring` step a
 
 - The welcome's Code and Issues steps are left out here: the lab gives the welcome no hosts or trackers.
 - No separate "bring in" from the conversation bar. Conversations brought in are asides, and the found card offers more.
+- The task header of an adopted worktree still says Stopped (its board card says where it came from).
 - What happens when a worktree brought in is cleaned up. Althar must never remove a folder it didn't make (ADR-056); here the card only says where the folder is.
 
 Delete the lab once a direction is picked to build, before building it.
