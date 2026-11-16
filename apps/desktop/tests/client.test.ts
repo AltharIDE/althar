@@ -271,6 +271,7 @@ describe('the client', () => {
           CreateTask: () => Effect.die('unused'),
           GetThread: () => Effect.die('unused'),
           GetThreadItem: () => Effect.die('unused'),
+          GetThreadItems: () => Effect.die('unused'),
           ReadOutput: () => Effect.die('unused'),
           ReadBackgroundOutput: () => Effect.die('unused'),
           ReadDocument: () => Effect.die('unused'),
