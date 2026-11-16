@@ -2209,6 +2209,7 @@ describe('GitLab’s projects, for cloning one or making one', () => {
           webUrl: 'https://gitlab.com/you/atlas',
           canPush: true,
           merges: ['merge', 'squash'],
+          parent: null,
         },
       )
       assert.deepStrictEqual(sent[0]?.body, { name: 'Atlas', visibility: 'private', description: 'Maps', initialize_with_readme: false })
