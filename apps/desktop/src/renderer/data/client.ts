@@ -70,6 +70,11 @@ import {
   type FolderHeld,
   type FolderReading,
   type MadeRepository,
+  type PreparedFolder,
+  type HostRepository,
+  type RepositoryOwner,
+  type ClonedRepository,
+  type PublishedRepository,
   type PlacedRepository,
   type FoldersFreed,
   type FolderWait,
@@ -151,6 +156,25 @@ export interface Client {
   readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
   /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
   readonly makeRepository: (grant: string, name: string) => Promise<MadeRepository>
+  /** Makes a folder chosen ready to be a project's repository: git, and a first commit, where it hasn't them; `path`, a repository inside it. */
+  readonly prepareFolder: (grant: string, path?: string) => Promise<PreparedFolder>
+  /** Every repository a code host's connection reaches, last pushed to first. */
+  readonly listHostRepositories: (connectionId: string) => Promise<ReadonlyArray<HostRepository>>
+  /** Where a code host's connection can make a repository. */
+  readonly listRepositoryOwners: (connectionId: string) => Promise<ReadonlyArray<RepositoryOwner>>
+  /** Clones a repository into a folder of its name in the folder a grant names: from a connection's host, or by its URL. */
+  readonly cloneRepository: (
+    grant: string,
+    from: { readonly connectionId: string; readonly path: ReadonlyArray<string> } | { readonly url: string },
+  ) => Promise<ClonedRepository>
+  /** Puts a repository only on this computer on a code host: a project's, or one in a folder chosen, before its project is made. */
+  readonly publishRepository: (input: {
+    readonly at: { readonly projectId: string; readonly repositoryId: string } | { readonly grant: string; readonly path?: string }
+    readonly connectionId: string
+    readonly owner: RepositoryOwner
+    readonly name: string
+    readonly private: boolean
+  }) => Promise<PublishedRepository>
   /**
    * Opens the folder a grant names: one the person chose in the picker or
    * dropped on the window. A folder of several repositories opens with the
@@ -899,6 +923,12 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
     makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
+    prepareFolder: (grant, path) =>
+      command((commandId) => api.PrepareFolder({ commandId, grant, ...(path === undefined ? {} : { path }) })),
+    listHostRepositories: (connectionId) => settle(api.ListHostRepositories({ connectionId })),
+    listRepositoryOwners: (connectionId) => settle(api.ListRepositoryOwners({ connectionId })),
+    cloneRepository: (grant, from) => command((commandId) => api.CloneRepository({ commandId, grant, from })),
+    publishRepository: (input) => command((commandId) => api.PublishRepository({ commandId, ...input })),
     openProject: (grant, options = {}) =>
       command((commandId) =>
         api.OpenProject({

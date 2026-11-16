@@ -26,6 +26,7 @@ import {
   type SentFile,
   type SentImage,
 } from '@althar/contracts'
+import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Stream } from 'effect'
@@ -52,7 +53,10 @@ import {
   uninstall,
 } from '@althar/skills'
 import { codeRootOf } from './code'
-import { ChangeRefused, FileRefused, NotFound, ProjectRefused, RetryRefused } from './errors'
+import { ChangeRefused, CloneRefused, FileRefused, NotFound, ProjectRefused, RetryRefused } from './errors'
+import { cloneFolderOf, cloneRepository, prepareFolder } from './folderSetup'
+import { publishRepository } from './publish'
+import { refreshRemotes } from './recordedRemotes'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { modelNamer } from './coordinatorNews'
@@ -305,6 +309,47 @@ export const handlers = apiLayer(
     const folderStore = yield* Effect.context<SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto>()
     const cleanup = yield* FolderCleanup
     const setups = yield* Setups
+    /** A folder the person chose, by its grant, or a path inside it, as the runtime read one there: never a path elsewhere. */
+    const within = (grant: string, path?: string) =>
+      Effect.gen(function* () {
+        const chosen = realpathOf(yield* folders.path(grant))
+        if (path === undefined) return chosen
+        const inside = realpathOf(path)
+        if (inside !== chosen && !inside.startsWith(`${chosen}${sep}`)) return yield* new NotFound({ kind: 'folder', id: path })
+        return inside
+      })
+    /** A connection's code host, signed in through it; refused where it is a tracker's, or gone. */
+    const codeHostOf = (connectionId: string) =>
+      Effect.flatMap(connections.adapters(connectionId), ({ host }) =>
+        host === undefined ? Effect.fail(new NotFound({ kind: 'connection', id: connectionId })) : Effect.succeed(host),
+      )
+    /**
+     * Where a clone comes from, and how git signs in to it: a connection's
+     * host, by the repository's path there; or a URL, through the connection
+     * whose host it is on where one is, else with the person's own sign-in.
+     */
+    const cloneSource = (from: { readonly connectionId: string; readonly path: ReadonlyArray<string> } | { readonly url: string }) =>
+      Effect.gen(function* () {
+        if ('connectionId' in from) {
+          const { host, info } = yield* connections.adapters(from.connectionId)
+          if (host === undefined) return yield* new NotFound({ kind: 'connection', id: from.connectionId })
+          const remote = from.path.join('/')
+          const repository = yield* host
+            .repository(from.path)
+            .pipe(Effect.mapError(() => new CloneRefused({ reason: 'not_found', remote, host: info.name })))
+          return { remote, host: info.name, folder: cloneFolderOf(from.path), target: yield* host.pushTarget(repository) }
+        }
+        const url = from.url.trim()
+        const ref = parseRemote(url)
+        if (ref === null) return yield* new CloneRefused({ reason: 'not_found', remote: url, host: '' })
+        const remote = ref.path.join('/')
+        const found = yield* connections.hostOf([url]).pipe(Effect.orElseSucceed(() => null))
+        if (found === null) return { remote, host: ref.host, folder: cloneFolderOf(ref.path), target: { url, header: null } }
+        const repository = yield* found.host
+          .repository(found.path)
+          .pipe(Effect.mapError(() => new CloneRefused({ reason: 'not_found', remote, host: ref.host })))
+        return { remote, host: ref.host, folder: cloneFolderOf(ref.path), target: yield* found.host.pushTarget(repository) }
+      })
     /**
      * A task's folder about to open, or to take files sent to its lead:
      * brought back first, where it was removed to free the disk or deleted by
@@ -730,9 +775,10 @@ export const handlers = apiLayer(
                 Effect.gen(function* () {
                   const batch = yield* queries.changesSince(cursor, 500)
                   if (batch.length === 0) yield* Effect.raceFirst(grown, Effect.sleep(FEED_FALLBACK))
-                  const events: ReadonlyArray<WatchEvent> = batch.map(({ checkpoint, ...change }) => ({
+                  const events: ReadonlyArray<WatchEvent> = batch.map(({ checkpoint, renamedTo, renamedByAgent, ...change }) => ({
                     _tag: 'Changed',
                     ...change,
+                    ...(renamedTo === null ? {} : { renamedTo, renamedByAgent: renamedByAgent === 1 }),
                     ...(checked ? { checkpoint } : {}),
                   }))
                   return [events, Option.some(batch.at(-1)?.cursor ?? cursor)] as const
@@ -855,6 +901,68 @@ export const handlers = apiLayer(
             const made = yield* makeRepository(yield* folders.path(grant), name)
             return { grant: yield* folders.allow(made.path), path: made.path }
           }),
+        ),
+      PrepareFolder: ({ commandId, grant, path }) =>
+        once(commandId, api(Effect.flatMap(within(grant, path), (root) => prepareFolder(root)))),
+      ListHostRepositories: ({ connectionId }) =>
+        api(
+          Effect.gen(function* () {
+            const host = yield* codeHostOf(connectionId)
+            return (yield* host.repositories()).map((repository) => ({ ...repository, path: [...repository.path] }))
+          }),
+        ),
+      ListRepositoryOwners: ({ connectionId }) => api(Effect.flatMap(codeHostOf(connectionId), (host) => host.owners())),
+      CloneRepository: ({ commandId, grant, from }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const parent = yield* folders.path(grant)
+              const source = yield* cloneSource(from)
+              const path = yield* cloneRepository({ parent, ...source })
+              return { grant: yield* folders.allow(path), path }
+            }),
+          ),
+        ),
+      PublishRepository: ({ commandId, at, connectionId, owner, name, private: hidden }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              // A project's repository, by its id, or by its slug, as a task's names it.
+              const bySlug =
+                'grant' in at
+                  ? []
+                  : yield* sql<{
+                      id: string
+                    }>`SELECT id FROM repository_bindings WHERE project_id = ${at.projectId} AND slug = ${at.repositoryId} AND detached_at IS NULL`
+              const root =
+                'grant' in at
+                  ? yield* within(at.grant, at.path)
+                  : (yield* projects.repositories(at.projectId)).find((one) => one.id === at.repositoryId || one.id === bySlug[0]?.id)?.path
+              if (root === undefined || root === null)
+                return yield* new NotFound({ kind: 'repository', id: 'repositoryId' in at ? at.repositoryId : '' })
+              const { host, info } = yield* connections.adapters(connectionId)
+              if (host === undefined) return yield* new NotFound({ kind: 'connection', id: connectionId })
+              const published = yield* publishRepository({
+                root,
+                host,
+                hostName: info.name,
+                owner,
+                name,
+                private: hidden,
+                originOf: (url) =>
+                  connections.hostOf([url]).pipe(
+                    Effect.map((found) => (found !== null && found.connectionId === connectionId ? found.path : null)),
+                    Effect.orElseSucceed(() => null),
+                  ),
+              })
+              // A project's: its host is found by its remote from now on, as any repository's is.
+              if ('projectId' in at)
+                yield* refreshRemotes(instance.deviceId, { projectId: at.projectId }).pipe(Effect.provideService(SqlClient.SqlClient, sql))
+              return published
+            }),
+          ),
         ),
       OpenProject: ({ commandId, grant, name, repositories, projectId, ink }) =>
         api(

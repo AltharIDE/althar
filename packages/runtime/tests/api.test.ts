@@ -3572,3 +3572,164 @@ describe('connection authority', () => {
     )
   }
 })
+
+describe('a project set up where it starts, through the API', () => {
+  /** A repository's origin as its config has it, before any `insteadOf`. */
+  const originOf = (path: string) => execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: path, encoding: 'utf8' }).trim()
+
+  /**
+   * GitHub connected, with a repository of the person's on it and their own
+   * account to make one in; git goes to bare repositories of the test's for
+   * each, by its address on the host, as the person's git would to GitHub.
+   */
+  const setUp = () =>
+    Effect.gen(function* () {
+      const remotes = realpathSync(mkdtempSync(join(tmpdir(), 'althar-host-')))
+      const bareOf = (path: string) => join(remotes, `${path.replace('/', '__')}.git`)
+      const seed = folderWith({ tidepool: [] })
+      execFileSync('git', ['clone', '-q', '--bare', '--', join(seed, 'tidepool'), bareOf('you/tidepool')])
+      execFileSync('git', ['init', '-q', '--bare', bareOf('you/fresh')])
+      const config = join(remotes, 'gitconfig')
+      writeFileSync(
+        config,
+        [
+          '[user]\n\tname = Dana\n\temail = dana@example.test',
+          // With forward slashes: a config's quoted name reads a backslash, as Windows' paths have, as an escape.
+          ...['you/tidepool', 'you/fresh'].map(
+            (path) => `[url "${bareOf(path).replaceAll('\\', '/')}"]\n\tinsteadOf = ${HOST}/${path}.git`,
+          ),
+          '',
+        ].join('\n'),
+      )
+      const was = { global: process.env.GIT_CONFIG_GLOBAL, system: process.env.GIT_CONFIG_NOSYSTEM }
+      process.env.GIT_CONFIG_GLOBAL = config
+      process.env.GIT_CONFIG_NOSYSTEM = '1'
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (was.global === undefined) delete process.env.GIT_CONFIG_GLOBAL
+          else process.env.GIT_CONFIG_GLOBAL = was.global
+          if (was.system === undefined) delete process.env.GIT_CONFIG_NOSYSTEM
+          else process.env.GIT_CONFIG_NOSYSTEM = was.system
+        }),
+      )
+      const github = makeFakeService({ pushUrl: (path) => `${HOST}/${path.join('/')}.git` })
+      github.addRepository(['you', 'tidepool'], 'main', { description: 'Tide tables', private: true })
+      const { client, grant } = yield* connected({ connectors: fakeConnectors({ github }) })
+      const connection = yield* client.ConnectToken({ commandId: commandId(), product: 'github', webUrl: HOST, token: 'ghp_x' })
+      return { client, grant, github, connectionId: connection.id, bareOf }
+    })
+
+  it.live('lists the host’s repositories and owners, and clones one into the folder chosen, to open as a project', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, connectionId } = yield* setUp()
+        const listed = yield* client.ListHostRepositories({ connectionId })
+        assert.deepInclude(listed[0], { path: ['you', 'tidepool'], description: 'Tide tables', private: true })
+        assert.deepStrictEqual(yield* client.ListRepositoryOwners({ connectionId }), [{ id: 'you', name: 'You', kind: 'user' }])
+        const parent = realpathSync(mkdtempSync(join(tmpdir(), 'althar-code-')))
+        const cloned = yield* client.CloneRepository({
+          commandId: commandId(),
+          grant: yield* grant(parent),
+          from: { connectionId, path: ['you', 'tidepool'] },
+        })
+        assert.strictEqual(cloned.path, join(parent, 'tidepool'))
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: cloned.grant, name: 'Tidepool' })
+        // Its origin is the repository's address on the host, as git has it before the test's rewriting.
+        assert.strictEqual(originOf(cloned.path), `${HOST}/you/tidepool.git`)
+        assert.lengthOf(yield* client.GetRepositories({ projectId: project.id }), 1)
+        // Once there, the folder of its name is taken: a second clone is refused, in words.
+        const again = yield* Effect.flip(
+          client.CloneRepository({ commandId: commandId(), grant: yield* grant(parent), from: { url: `${HOST}/you/tidepool.git` } }),
+        )
+        assert.deepInclude(again, { reason: 'FolderRefused', why: 'taken' })
+      }),
+    ),
+  )
+
+  it.live('makes a folder of files a repository, opens it, and puts it on the host, where its tasks then go', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, github, connectionId, bareOf } = yield* setUp()
+        const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-fresh-')))
+        writeFileSync(join(folder, 'index.html'), '<p>Tides</p>')
+        const read = yield* client.ReadFolder({ grant: yield* grant(folder) })
+        assert.deepInclude(read, { kind: 'folder', empty: false, repositories: [] })
+        // Not a repository yet: opening it as it is is refused.
+        assert.deepInclude(yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: yield* grant(folder) })), {
+          reason: 'NotARepository',
+        })
+        assert.deepStrictEqual(yield* client.PrepareFolder({ commandId: commandId(), grant: yield* grant(folder) }), {
+          did: 'started',
+          path: folder,
+          branch: 'main',
+          files: 2,
+        })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(folder), name: 'Fresh' })
+        const [only] = yield* client.GetRepositories({ projectId: project.id })
+        assert.isNull(only?.host)
+        const published = yield* client.PublishRepository({
+          commandId: commandId(),
+          at: { projectId: project.id, repositoryId: only?.id ?? '' },
+          connectionId,
+          owner: { id: 'you', name: 'You', kind: 'user' },
+          name: 'fresh',
+          private: true,
+        })
+        assert.deepInclude(published, { remote: 'you/fresh', branch: 'main' })
+        assert.lengthOf(github.repositoriesMade, 1)
+        assert.strictEqual(
+          execFileSync('git', ['rev-parse', 'main'], { cwd: bareOf('you/fresh'), encoding: 'utf8' }).trim(),
+          execFileSync('git', ['rev-parse', 'HEAD'], { cwd: folder, encoding: 'utf8' }).trim(),
+        )
+        assert.strictEqual(originOf(folder), `${HOST}/you/fresh.git`)
+        // On the host now: putting it there again is refused, and says where it is.
+        const again = yield* Effect.flip(
+          client.PublishRepository({
+            commandId: commandId(),
+            at: { projectId: project.id, repositoryId: only?.id ?? '' },
+            connectionId,
+            owner: { id: 'you', name: 'You', kind: 'user' },
+            name: 'fresh',
+            private: true,
+          }),
+        )
+        assert.deepInclude(again, { reason: 'PublishRefused', why: 'has_remote' })
+      }),
+    ),
+  )
+
+  it.live('puts a folder’s repository on the host before its project is made, so the project opens on the host', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, connectionId, bareOf } = yield* setUp()
+        const parent = realpathSync(mkdtempSync(join(tmpdir(), 'althar-parent-')))
+        const folder = join(parent, 'fresh')
+        mkdirSync(folder)
+        writeFileSync(join(folder, 'notes.md'), '# Notes')
+        const chosen = yield* grant(parent)
+        // A repository inside the folder chosen, by its path there: git starts in it, not in the folder around it.
+        yield* client.PrepareFolder({ commandId: commandId(), grant: chosen, path: folder })
+        assert.isFalse(existsSync(join(parent, '.git')))
+        yield* client.PublishRepository({
+          commandId: commandId(),
+          at: { grant: chosen, path: folder },
+          connectionId,
+          owner: { id: 'you', name: 'You', kind: 'user' },
+          name: 'fresh',
+          private: false,
+        })
+        assert.strictEqual(originOf(folder), `${HOST}/you/fresh.git`)
+        assert.strictEqual(
+          execFileSync('git', ['rev-parse', 'main'], { cwd: bareOf('you/fresh'), encoding: 'utf8' }).trim(),
+          execFileSync('git', ['rev-parse', 'HEAD'], { cwd: folder, encoding: 'utf8' }).trim(),
+        )
+        // A path outside the folder chosen is refused, for both.
+        const outside = realpathSync(mkdtempSync(join(tmpdir(), 'althar-outside-')))
+        assert.deepInclude(yield* Effect.flip(client.PrepareFolder({ commandId: commandId(), grant: chosen, path: outside })), {
+          reason: 'NotFound',
+        })
+        assert.isFalse(existsSync(join(outside, '.git')))
+      }),
+    ),
+  )
+})

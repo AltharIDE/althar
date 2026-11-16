@@ -21,7 +21,7 @@ How the processes fit together is in [architecture 02](../architecture/02-deskto
 The desktop runs one runtime per profile. Work outlives the window, but not the app:
 
 - **Closing the last window** leaves Althar working on a Mac, and anywhere the person chose to keep it working in the background.
-- **Quit with work under way asks first.** The runtime counts the leads and reviews in a turn, the runs going, and what agents left running. The window then offers to quit, to keep everything working in the background, or to carry on. With nothing at work, Quit just quits.
+- **Quit with work under way asks first.** The runtime counts the leads, reviews and helpers in a turn, the runs going, and busy background commands of unfinished tasks. Finished or stopped tasks keep no agent place through their previews; a live turn on them still counts. The window then offers to quit, to keep everything working in the background, or to carry on. With nothing at work, Quit just quits.
 - **Open at login** is the person's switch, on a Mac and on Windows. Opened so, Althar starts with no window: the runtime and its automations run, and a window opens when the person asks for one. Linux has no such switch, so none is offered.
 - **The store holds its SQLite file locked**, so only one runtime writes to a profile. The CLI runs a smaller runtime of its own in-process, and can't run while the app has the profile open.
 

@@ -6,6 +6,7 @@ import type { BoardSnapshot, BoardTask, PlanStep, SearchDocument, ThreadItem, Th
 import { type Aside, AsideMoves, AsideTabs, Button, Icon, IconButton, LinkButton, Problem } from '@althar/ui'
 
 import { type Client, messageOf, newTaskId } from '../../data/client'
+import { useAgentRenames } from '../../data/agentRenames'
 import { keys, reads } from '../../data/reads'
 import { mergeItems, sending, unsent } from '../../shared/items'
 import { coordinatorSigned } from '../../shared/signed'
@@ -363,7 +364,8 @@ export function useAsides({
       cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
         current === undefined ? current : { ...current, items: mergeItems(current.items, optimistic.items) },
       )
-      await Promise.all([client.renameTask(taskId, asideTitle(words)).catch(() => undefined), sendOn(threadId, said, was, lead)])
+      const titled = asideTitle(words)
+      await Promise.all([client.renameTask(taskId, titled).catch(() => undefined), sendOn(threadId, said, was, lead)])
       // Keep the person's message on screen until its stored copy arrives. A failed refresh never sends it twice.
       await cache.fetchQuery({ ...reads(client).thread(threadId), staleTime: 0 }).catch(() => undefined)
       leads.current.set(taskId, lead)
@@ -472,6 +474,7 @@ export function AsidesBar({
   /** The search opens or shuts: the window reads what was said as it opens. */
   onSearching?: ((open: boolean) => void) | undefined
 }) {
+  const byAgent = useAgentRenames()
   const { recent, older } = asidesOf(scratch, now, {
     open: open.kind === 'coordinator' ? null : open.taskId,
     first,
@@ -505,7 +508,7 @@ export function AsidesBar({
       ref={strip}
       className={s.bar}
       mark={coordinatorSigned.mark}
-      asides={recent.map(dated)}
+      asides={recent.map((one) => ({ ...dated(one), byAgent: byAgent.get(one.id) ?? null }))}
       older={older.map(dated)}
       searching={searching}
       onSearchingChange={setSearching}

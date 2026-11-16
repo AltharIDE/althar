@@ -931,6 +931,29 @@ describe('renaming a task', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('tells the feed who renamed a task: an agent or the person', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const queries = yield* Queries
+      const instance = yield* Instance
+      const { task } = yield* planned('Retry checkout')
+      const since = yield* queries.cursor
+      yield* tasks.rename({ envelope: yield* command('task.rename'), taskId: task.taskId, title: 'By the person' })
+      yield* tasks.rename({
+        envelope: yield* Runtime.envelope('task.rename', {}, undefined, instance.coordinatorId),
+        taskId: task.taskId,
+        title: 'By an agent',
+      })
+      const renames = (yield* queries.changesSince(since, 100))
+        .filter((change) => change.aggregateType === 'task' && change.renamedTo !== null)
+        .map((change) => [change.renamedTo, change.renamedByAgent])
+      assert.deepStrictEqual(renames, [
+        ['By the person', 0],
+        ['By an agent', 1],
+      ])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('refuses an empty title, and one past the limit draft_task keeps, and a task that is not there', () =>
     Effect.gen(function* () {
       const tasks = yield* Tasks

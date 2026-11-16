@@ -1,6 +1,7 @@
 import { Fragment, type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { cx } from '../../lib/cx'
+import { useTypedTitle } from '../../lib/typedTitle'
 import type { RootProps } from '../../lib/props'
 import { Icon } from '../../foundations/Icon/Icon'
 import { Button } from '../../primitives/Button/Button'
@@ -21,10 +22,17 @@ import s from './Asides.module.css'
  * the board sits over its composer (AsideMoves).
  */
 
+/** A title as drawn, typed in where an agent renamed it. */
+function Titled({ title, byAgent }: { title: string; byAgent: string | null | undefined }) {
+  return <>{useTypedTitle(title, byAgent ?? null)}</>
+}
+
 export interface Aside {
   id: string
   /** Its title; empty for one just started, whose heading says it is new until its first words name it. */
   title: string
+  /** The title an agent last gave it: while that is its title, a rename types itself in (useTypedTitle). */
+  byAgent?: string | null
   /** What was said last, its first line: found by the search, and shown under its name there. */
   said?: string
   /**
@@ -164,7 +172,7 @@ export function AsideTabs({
               {...(open === null ? {} : { onKeyDown: clearKey(open.id) })}
             >
               {open === null ? mark : open.running === true ? <LiveDot pulse /> : null}
-              <span className={s.name}>{name}</span>
+              <span className={s.name}>{open === null || open.title === '' ? name : <Titled title={name} byAgent={open.byAgent} />}</span>
               <Icon name="chevronD" size={12} className={s.chev} />
               {elsewhere && <LiveDot pulse />}
             </button>
@@ -200,7 +208,9 @@ export function AsideTabs({
               {...(one.id === null ? {} : { onKeyDown: clearKey(one.id) })}
             >
               {one.id === null ? mark : one.running === true ? <LiveDot pulse /> : null}
-              <span className={s.title}>{one.title}</span>
+              <span className={s.title}>
+                <Titled title={one.title} byAgent={'byAgent' in one ? one.byAgent : null} />
+              </span>
             </button>
           ))}
         </div>

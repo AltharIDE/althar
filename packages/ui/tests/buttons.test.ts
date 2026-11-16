@@ -71,6 +71,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
   'outputs/ChangeView/ChangeView.tsx': 'a file in the list of what changed',
   'setup/ConnectCard/ConnectCard.tsx': 'the ways in to a service, as large options',
+  'setup/ProjectSetup/ProjectSetup.tsx':
+    'a new project’s ways in, and where its code lives, as large options; a repository’s row, the whole of which chooses it',
   'setup/SettingsNav/SettingsNav.tsx': 'a section in the list down the side of Settings',
   /* a shape of its own */
   'composer/ContextRing/ContextRing.tsx': 'the ring',

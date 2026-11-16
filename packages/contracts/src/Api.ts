@@ -996,6 +996,8 @@ export const FoundRepository = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   /** Its first remote, without any password in it; null when it has none. */
   remote: Schema.NullOr(Schema.String),
+  /** Whether it has a commit yet: false for one just made with `git init`, which a task can't branch from. */
+  commits: Schema.optional(Schema.Boolean),
 })
 export type FoundRepository = typeof FoundRepository.Type
 
@@ -1014,6 +1016,53 @@ export const MadeRepository = Schema.Struct({
 })
 export type MadeRepository = typeof MadeRepository.Type
 
+/** What making a folder ready to be a project's repository did: started git in it, made its first commit, or nothing; on which branch. */
+export const PreparedFolder = Schema.Struct({
+  did: Schema.Literals(['started', 'committed', 'nothing']),
+  /** The repository's root: the folder, or the repository it is in. */
+  path: Schema.String,
+  branch: Schema.String,
+  /** The files its first commit has, where one was made. */
+  files: Schema.Number,
+})
+export type PreparedFolder = typeof PreparedFolder.Type
+
+/** A repository on a connected code host, for choosing one to clone. */
+export const HostRepository = Schema.Struct({
+  /** As its host names it, by its parts: northwind, app. */
+  path: Schema.Array(Schema.String),
+  description: Schema.NullOr(Schema.String),
+  private: Schema.Boolean,
+  /** When it was last pushed to, as an ISO time; null where the host doesn't say. */
+  pushedAt: Schema.NullOr(Schema.String),
+  webUrl: Schema.String,
+  archived: Schema.Boolean,
+})
+export type HostRepository = typeof HostRepository.Type
+
+/** Where a connection's account can make a repository: itself, an organization, a group, a workspace or a project. */
+export const RepositoryOwner = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  kind: Schema.Literals(['user', 'organization', 'group', 'workspace', 'project']),
+})
+export type RepositoryOwner = typeof RepositoryOwner.Type
+
+/** A repository cloned onto this computer: the grant of its folder, for OpenProject, and where it is. */
+export const ClonedRepository = Schema.Struct({
+  grant: Schema.String,
+  path: Schema.String,
+})
+export type ClonedRepository = typeof ClonedRepository.Type
+
+/** A project's repository put on a host: as the host names it, its page, and the branch pushed. */
+export const PublishedRepository = Schema.Struct({
+  remote: Schema.String,
+  webUrl: Schema.String,
+  branch: Schema.String,
+})
+export type PublishedRepository = typeof PublishedRepository.Type
+
 /**
  * What opening a folder would make, read before anything is: a repository, a
  * folder inside one, or a folder holding several, one level down. Reading it
@@ -1026,6 +1075,10 @@ export const FolderReading = Schema.Struct({
   repositories: Schema.Array(FoundRepository),
   /** The project it already is, when it was opened before. */
   project: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** A folder that isn't a repository: whether it has nothing in it but what is hidden, as .DS_Store is. */
+  empty: Schema.optional(Schema.Boolean),
+  /** A folder that isn't a repository: where it is, as git would be started in it. */
+  path: Schema.optional(Schema.String),
 })
 export type FolderReading = typeof FolderReading.Type
 
@@ -4237,6 +4290,9 @@ export const WatchEvent = Schema.Union([
     aggregateId: Schema.String,
     projectId: Schema.NullOr(Schema.String),
     threadId: Schema.NullOr(Schema.String),
+    /** On a task's change that was a rename: the title it was given, and whether an agent (a lead or the coordinator) gave it, not the person. */
+    renamedTo: Schema.optional(Schema.String),
+    renamedByAgent: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     _tag: Schema.Literal('Streaming'),
@@ -4688,6 +4744,61 @@ const ProjectApi = RpcGroup.make(
    * grant comes back, for OpenProject.
    */
   call('MakeRepository', { grant: Schema.String, name: Schema.String }, MadeRepository),
+  /**
+   * Makes the folder the person chose ready to be a project's repository, as
+   * the project is made: git on main, with what is in it as its first
+   * commit, where it has no git; its first commit, where it has git and no
+   * commit. Refused where it can't be read, is too wide to be one project
+   * (the home folder), has too many files, or has repositories inside it.
+   * What this made is taken away where it fails. `path` is a repository's
+   * root inside the folder chosen, where it is one of several found there.
+   */
+  command('PrepareFolder', { grant: Schema.String, path: Schema.optional(Schema.String) }, PreparedFolder),
+  /** Every repository a code host's connection reaches, last pushed to first. */
+  call('ListHostRepositories', { connectionId: Schema.String }, Schema.Array(HostRepository)),
+  /** Where a code host's connection can make a repository: its account first, then its organizations, groups or workspaces. */
+  call('ListRepositoryOwners', { connectionId: Schema.String }, Schema.Array(RepositoryOwner)),
+  /**
+   * Clones a repository into a folder of its name in the folder the person
+   * chose (`grant`): one on a connection's host, by its path there; or one by
+   * its URL, signed in through the connection whose host it is on, else with
+   * the person's own git sign-in. Refused where that folder has something in
+   * it already; what a failed clone made is taken away.
+   */
+  command(
+    'CloneRepository',
+    {
+      grant: Schema.String,
+      from: Schema.Union([
+        Schema.Struct({ connectionId: Schema.String, path: Schema.Array(Schema.String) }),
+        Schema.Struct({ url: Schema.String }),
+      ]),
+    },
+    ClonedRepository,
+  ),
+  /**
+   * Puts a repository only on this computer on a code host: a project's, or
+   * one in a folder the person chose, before its project is made. Makes an
+   * empty repository there, under `owner`, sets it as `origin`, and pushes
+   * the branch checked out, which follows it from then on. Refused where the
+   * repository has a remote already, or the host has one of that name. Made
+   * and not pushed, trying again pushes to the one made.
+   */
+  command(
+    'PublishRepository',
+    {
+      at: Schema.Union([
+        /** A project's repository, by its id, or its slug, as a task's names it. */
+        Schema.Struct({ projectId: Schema.String, repositoryId: Schema.String }),
+        Schema.Struct({ grant: Schema.String, path: Schema.optional(Schema.String) }),
+      ]),
+      connectionId: Schema.String,
+      owner: RepositoryOwner,
+      name: Schema.String,
+      private: Schema.Boolean,
+    },
+    PublishedRepository,
+  ),
   /**
    * Opens the folder the person chose, by the grant the app gave for it: the
    * window never names a path. A folder holding several repositories opens

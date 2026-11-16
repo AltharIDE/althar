@@ -5,7 +5,8 @@ import { useTurnUndo } from './useTurnUndo'
 import { useNavigate } from '@tanstack/react-router'
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import type { AttentionRequest, TaskAction, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import type { AttentionRequest, Service, TaskAction, ThreadItem, ThreadSnapshot } from '@althar/contracts'
+import { useQuery } from '@tanstack/react-query'
 import {
   CheckoutAsk,
   AbandonTask,
@@ -96,6 +97,8 @@ import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
+import { reads } from '../../data/reads'
+import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
 import { useServices } from '../../data/services'
 import { text as reportText } from '../report/reportWords'
 import { BackgroundOutput } from './BackgroundOutput'
@@ -124,6 +127,7 @@ import { REQUEST, taskGraphOf } from './graph'
 import { GraphFace } from './GraphFace'
 import { reveal } from './reveal'
 import { useSearchReveal } from '../finder/revealSearch'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { turnsById } from '../../shared/turnTime'
 import { ReadFailed } from '../../shared/ReadFailed'
 import { pictureOf } from '../../shared/code/FilePicture'
@@ -446,6 +450,10 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
+  // Its one repository only on this computer: the connection it is being put on from its card, or a host to connect first.
+  const [putting, setPutting] = useState<string | null>(null)
+  const [connectService, setConnectService] = useState<Service | null>(null)
+  const connectionList = useQuery(reads(client).connections()).data ?? null
   // The command its lead left running whose output is shown.
   const [outputOf, setOutputOf] = useState<string | null>(null)
   // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
@@ -650,6 +658,8 @@ export function TaskView({
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
+  // An agent's rename types itself into the title; the person's own shows at once.
+  const typedTitle = useTaskTitle(snapshot?.task.id, snapshot?.task.title ?? '')
   if (snapshot === null) {
     return (
       <div className={embedded ? s.aside : s.window}>
@@ -1298,6 +1308,7 @@ export function TaskView({
                 to={snapshot.project.name}
                 kbd="esc"
                 title={snapshot.task.title}
+                shown={typedTitle}
                 titleLevel={1}
                 maxLength={TITLE_LENGTH}
                 editing={renaming}
@@ -1354,7 +1365,7 @@ export function TaskView({
             <NoOutputsView snapshot={snapshot} lead={lead.name} />
           ) : !embedded && shown === 'out' ? (
             <div
-              className={connecting || host.code !== null ? s.withPanel : s.outputsFace}
+              className={connecting || connectService !== null || host.code !== null ? s.withPanel : s.outputsFace}
               style={host.code !== null && !connecting ? ({ '--panel-width': `${host.bench.width}px` } as CSSProperties) : undefined}
             >
               {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
@@ -1392,6 +1403,11 @@ export function TaskView({
                   onPushHere={() => void model.pushHere()}
                   onPushBranch={() => void model.pushBranch()}
                   onConnect={() => setConnecting(true)}
+                  putOnHost={putOnHostOf(snapshot, connectionList, {
+                    putting,
+                    onPut: (id, connected) => (connected ? setPutting(id) : setConnectService(id as Service)),
+                    onEnd: () => setPutting(null),
+                  })}
                   // So is a conflict to settle, in words the lead acts on.
                   onResolve={() => {
                     model.dismissConflict()
@@ -1399,7 +1415,9 @@ export function TaskView({
                   }}
                 />
               </ThreadShellProvider>
-              {connecting && snapshot.host !== null ? (
+              {connectService !== null ? (
+                <ConnectPanel service={connectService} onClose={() => setConnectService(null)} />
+              ) : connecting && snapshot.host !== null ? (
                 <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
               ) : (
                 // A file a lead's report names, beside it, as beside the thread.
@@ -1758,4 +1776,40 @@ export function TaskView({
       </OpenFinding.Provider>
     </PageOpenerProvider>
   )
+}
+
+/**
+ * For a task whose one repository is only on this computer: the hosts it can
+ * be put on from its card, those connected by their connection and the rest
+ * to connect first, and the form that puts it on the one chosen.
+ */
+const putOnHostOf = (
+  snapshot: ThreadSnapshot,
+  list: import('@althar/contracts').ConnectionList | null,
+  put: { readonly putting: string | null; readonly onPut: (id: string, connected: boolean) => void; readonly onEnd: () => void },
+) => {
+  const [only] = snapshot.task.here
+  if (snapshot.task.here.length !== 1 || only === undefined || only.remote != null) return undefined
+  const { ready, hosts } = hostChoices(list)
+  const chosen = ready.find((connection) => connection.id === put.putting)
+  return {
+    hosts,
+    onPut: (id: string) =>
+      put.onPut(
+        id,
+        ready.some((connection) => connection.id === id),
+      ),
+    putting:
+      chosen === undefined ? null : (
+        <PutOnHost
+          projectId={snapshot.project.id}
+          repository={only.repository}
+          name={only.name}
+          branch={only.branch}
+          connection={{ id: chosen.id, name: chosen.name, product: chosen.product, thing: thingOn(serviceOfProduct(chosen.product)) }}
+          onDone={put.onEnd}
+          onBack={put.onEnd}
+        />
+      ),
+  }
 }

@@ -948,6 +948,9 @@ export interface ThreadChange {
   readonly aggregateId: string
   readonly projectId: string | null
   readonly threadId: string | null
+  /** A task's rename this change is, by its recorded event: the title, and whether an agent gave it (1) or the person (0). */
+  readonly renamedTo: string | null
+  readonly renamedByAgent: number | null
 }
 
 type Store =
@@ -4103,7 +4106,13 @@ export class Queries extends Context.Service<
                 WHEN 'node_attempt' THEN (SELECT t.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
                   JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
                   JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task' WHERE a.id = c.aggregate_id)
-              END AS thread_id
+              END AS thread_id,
+              -- A rename is told with who made it: the task's event of that revision, by the person, an agent, or Althar itself.
+              (SELECT json_extract(e.payload, '$.title') FROM record_events e WHERE c.aggregate_type = 'task' AND e.aggregate_type = 'task'
+                AND e.aggregate_id = c.aggregate_id AND e.aggregate_revision = c.aggregate_revision AND e.type = 'task.renamed' LIMIT 1) AS renamed_to,
+              (SELECT e.actor_id NOT IN (${instance.personId}, ${instance.systemId}) FROM record_events e WHERE c.aggregate_type = 'task'
+                AND e.aggregate_type = 'task' AND e.aggregate_id = c.aggregate_id AND e.aggregate_revision = c.aggregate_revision
+                AND e.type = 'task.renamed' LIMIT 1) AS renamed_by_agent
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
 

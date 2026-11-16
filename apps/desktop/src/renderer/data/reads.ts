@@ -35,6 +35,10 @@ export const keys = {
   projectTracker: (projectId: string) => ['projectTracker', projectId] as const,
   /** Where issues can be filed on a tracker connected: its teams. */
   containers: (connectionId: string) => ['containers', connectionId] as const,
+  /** A code host connection's repositories, to clone one. */
+  hostRepositories: (connectionId: string) => ['host-repositories', connectionId] as const,
+  /** Where a code host connection can make a repository. */
+  repositoryOwners: (connectionId: string) => ['repository-owners', connectionId] as const,
   settings: ['settings'] as const,
   agentCatalog: ['agentCatalog'] as const,
   /** The settings an agent changed last, with who and when: a project's, or (null) Althar's own (ADR-097). */
@@ -154,6 +158,20 @@ export const reads = (client: Client) => ({
   // Asked of the tracker itself, so kept a while: its teams change slowly.
   containers: (connectionId: string) =>
     queryOptions({ queryKey: keys.containers(connectionId), queryFn: () => client.listContainers(connectionId), staleTime: 60_000 }),
+  hostRepositories: (connectionId: string) =>
+    queryOptions({
+      queryKey: keys.hostRepositories(connectionId),
+      queryFn: () => client.listHostRepositories(connectionId),
+      staleTime: 60_000,
+      retry: false,
+    }),
+  repositoryOwners: (connectionId: string) =>
+    queryOptions({
+      queryKey: keys.repositoryOwners(connectionId),
+      queryFn: () => client.listRepositoryOwners(connectionId),
+      staleTime: 5 * 60_000,
+      retry: false,
+    }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
   settingChanges: (projectId: string | null) =>
     queryOptions({ queryKey: keys.settingChanges(projectId), queryFn: () => client.getSettingChanges(projectId) }),

@@ -204,6 +204,16 @@ export interface Host {
   readonly findRepositories: () => Promise<FoundRepositories>
   /** A grant for a repository it found, by its id; null for one it didn't. */
   readonly grantFound: (id: string) => Promise<string | null>
+  /**
+   * Where a repository cloned for a new project goes, unless the person
+   * chooses: the folder most of their repositories are in, as they know the
+   * place, and a grant for it; null where there's nowhere usual.
+   */
+  readonly clonePlace: () => Promise<{ readonly grant: string; readonly where: string } | null>
+  /** Opens where the system lets Althar into folders it keeps closed; false where there's no such place, off a Mac. */
+  readonly openFolderAccess: () => Promise<boolean>
+  /** Asks the person where to clone it; as above, or null when they cancel. */
+  readonly pickClonePlace: () => Promise<{ readonly grant: string; readonly where: string } | null>
   /** The icon the person gave the app, by name (see `shared/appIcons`), or null where there is no Dock to show one. */
   readonly appIcon: () => Promise<string | null>
   /** Gives the app another icon, kept and shown on the Dock at once. */
