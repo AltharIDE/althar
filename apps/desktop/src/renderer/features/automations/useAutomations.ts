@@ -55,7 +55,8 @@ export const useAutomations = (projectId: string): AutomationsModel => {
   const [error, setError] = useState<string | null>(null)
   // Those deleted here, gone from the press until a read without them lands.
   const gone = useGoneAtOnce(read.data?.automations, (one) => one.id)
-  const snapshot = read.data === undefined ? null : gone.shown === read.data.automations ? read.data : { ...read.data, automations: gone.shown ?? [] }
+  const snapshot =
+    read.data === undefined ? null : gone.shown === read.data.automations ? read.data : { ...read.data, automations: gone.shown ?? [] }
   const { hide, back } = gone
   const remove = useCallback(
     (automationId: string) => {

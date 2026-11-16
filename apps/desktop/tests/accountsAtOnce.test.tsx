@@ -25,7 +25,9 @@ const later = () => {
 const withTwo: Status = {
   ...status,
   agents: status.agents.map((agent) =>
-    agent.id === 'claude-code' ? { ...agent, accounts: [usual('acc_claude', 'signed_in'), { ...usual('acc_work', 'signed_in'), name: 'Work' }] } : agent,
+    agent.id === 'claude-code'
+      ? { ...agent, accounts: [usual('acc_claude', 'signed_in'), { ...usual('acc_work', 'signed_in'), name: 'Work' }] }
+      : agent,
   ),
 }
 
@@ -40,9 +42,30 @@ const render = <T,>(use: () => T, client: Parameters<typeof servicesFor>[0]) => 
 
 describe('an account changed', () => {
   it.each([
-    ['renamed', (model: ReturnType<typeof useStart>) => model.renameAccount('acc_work', 'Personal'), 'renameAccount', [['acc_claude', usual('acc_claude', 'signed_in').name], ['acc_work', 'Personal']]],
-    ['moved up', (model: ReturnType<typeof useStart>) => model.moveAccount('claude-code', 'acc_work', 'up'), 'orderAccounts', [['acc_work', 'Work'], ['acc_claude', usual('acc_claude', 'signed_in').name]]],
-    ['removed', (model: ReturnType<typeof useStart>) => model.removeAccount('acc_work'), 'removeAccount', [['acc_claude', usual('acc_claude', 'signed_in').name]]],
+    [
+      'renamed',
+      (model: ReturnType<typeof useStart>) => model.renameAccount('acc_work', 'Personal'),
+      'renameAccount',
+      [
+        ['acc_claude', usual('acc_claude', 'signed_in').name],
+        ['acc_work', 'Personal'],
+      ],
+    ],
+    [
+      'moved up',
+      (model: ReturnType<typeof useStart>) => model.moveAccount('claude-code', 'acc_work', 'up'),
+      'orderAccounts',
+      [
+        ['acc_work', 'Work'],
+        ['acc_claude', usual('acc_claude', 'signed_in').name],
+      ],
+    ],
+    [
+      'removed',
+      (model: ReturnType<typeof useStart>) => model.removeAccount('acc_work'),
+      'removeAccount',
+      [['acc_claude', usual('acc_claude', 'signed_in').name]],
+    ],
   ] as const)('shows so from the press when %s, before the runtime answers', async (_name, press, call, shown) => {
     const { client } = fakeClient({ status: vi.fn(async () => withTwo) })
     const answer = later()

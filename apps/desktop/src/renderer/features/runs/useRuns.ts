@@ -121,7 +121,11 @@ export function useRuns({
       let id = ''
       cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) => {
         if (current === undefined) return current
-        const next = sending(current.items, { text: askText, queued: queueShown(current.session, true, current.accepting), interrupting: false })
+        const next = sending(current.items, {
+          text: askText,
+          queued: queueShown(current.session, true, current.accepting),
+          interrupting: false,
+        })
         id = next.id
         return { ...current, items: next.items }
       })

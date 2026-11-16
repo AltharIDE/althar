@@ -82,7 +82,11 @@ export function AutomationInThread({
       },
     )
   }
-  const turnOn = () => act(() => actions.turnOn(id, itemId), (was) => ({ ...was, ...shownAs.on }))
+  const turnOn = () =>
+    act(
+      () => actions.turnOn(id, itemId),
+      (was) => ({ ...was, ...shownAs.on }),
+    )
   const said = error === null ? null : <Problem className={s.cardFailure}>{text.failed(error)}</Problem>
   const next = now.nextAt === null ? undefined : nextWords(now.nextAt)
 
@@ -121,7 +125,12 @@ export function AutomationInThread({
           stage="changed"
           {...(now.state === 'proposed' ? { onTurnOn: turnOn } : { holds: true })}
           // Undone, it is what it was before the coordinator changed it.
-          onUndo={() => act(() => actions.undo(itemId), (was) => (was.was === null ? was : { ...was, definition: was.was, was: null }))}
+          onUndo={() =>
+            act(
+              () => actions.undo(itemId),
+              (was) => (was.was === null ? was : { ...was, definition: was.was, was: null }),
+            )
+          }
           onOpen={() => onOpen(id)}
           busy={pressed}
         />
@@ -138,7 +147,12 @@ export function AutomationInThread({
           fromSchedule
           agents={agents}
           stage="proposed"
-          onChange={(changed) => act(() => actions.change(id, changed), (was) => ({ ...was, definition: changed }))}
+          onChange={(changed) =>
+            act(
+              () => actions.change(id, changed),
+              (was) => ({ ...was, definition: changed }),
+            )
+          }
           onTryOnce={() => act(() => actions.runNow(id, itemId))}
           onTurnOn={turnOn}
           busy={pressed}
@@ -153,7 +167,12 @@ export function AutomationInThread({
         state={now.state}
         {...(next === undefined ? {} : { next })}
         onOpen={() => onOpen(id)}
-        onTurnOff={() => act(() => actions.pause(id), (was) => ({ ...was, ...shownAs.paused }))}
+        onTurnOff={() =>
+          act(
+            () => actions.pause(id),
+            (was) => ({ ...was, ...shownAs.paused }),
+          )
+        }
         onTurnOn={turnOn}
       />
       {said}
