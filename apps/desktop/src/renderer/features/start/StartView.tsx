@@ -447,6 +447,7 @@ function First({
           if (folderWay || draft === null) project.rename(next)
           else store.change(draft.id, (now) => ({ ...now, name: next }))
         }}
+        // oxlint-disable-next-line althar/press-at-once -- A form the runtime and a code host check (a clone, a repository made there): it stays, making, until made, so a refusal lands in it.
         onCreate={make}
         creating={project.making || draft?.creating === true}
         made={made !== null}

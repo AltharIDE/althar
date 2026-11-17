@@ -24,6 +24,8 @@ import {
   signed,
   standing,
   unsigned,
+  withDescribed,
+  withIssues,
 } from '../src/pullRequestWords'
 import { listenDue } from '../src/Changes'
 import { changeOf, itemOf, stuckOf } from '../src/Queries'
@@ -134,6 +136,47 @@ describe('what Althar writes about a pull request', () => {
       bodyOf({ lead: '', issue: { key: 'MER-231', url: 'https://linear.app/m/issue/MER-231', sameHost: false, partOf: true } }),
       `Part of [MER-231](https://linear.app/m/issue/MER-231)\n\n${credit}`,
     )
+    // A task from several issues names each, on whichever tracker: those it does whole, then those it does part of.
+    assert.strictEqual(
+      bodyOf({
+        lead: '',
+        issue: [
+          { key: 'DEV-211', url: 'https://linear.app/m/issue/DEV-211', sameHost: false },
+          { key: '#12', url: 'u', sameHost: true },
+          { key: 'DEV-37', url: 'https://linear.app/m/issue/DEV-37', sameHost: false, partOf: true },
+        ],
+      }),
+      `Issues: [DEV-211](https://linear.app/m/issue/DEV-211), #12\nPart of [DEV-37](https://linear.app/m/issue/DEV-37)\n\n${credit}`,
+    )
+    // An issue added after it opened: its lines are given anew, the lead's words and someone's on the host as they were.
+    const opened = bodyOf({
+      lead: '',
+      written: 'Limits refunds.',
+      issue: [{ key: 'DEV-211', url: 'https://linear.app/m/issue/DEV-211', sameHost: false }],
+    })
+    const two = withIssues(`${opened}\n\nThanks, from Dana.`, [
+      { key: 'DEV-211', url: 'https://linear.app/m/issue/DEV-211', sameHost: false },
+      { key: 'DEV-37', url: 'https://linear.app/m/issue/DEV-37', sameHost: false, partOf: true },
+    ])
+    assert.strictEqual(
+      two,
+      `Limits refunds.\n\nIssue: [DEV-211](https://linear.app/m/issue/DEV-211)\nPart of [DEV-37](https://linear.app/m/issue/DEV-37)\n\n${credit}\n\nThanks, from Dana.`,
+    )
+    // Given again, the same; and a new description after leaves both lines where they are.
+    assert.strictEqual(
+      withIssues(two, [
+        { key: 'DEV-211', url: 'https://linear.app/m/issue/DEV-211', sameHost: false },
+        { key: 'DEV-37', url: 'https://linear.app/m/issue/DEV-37', sameHost: false, partOf: true },
+      ]),
+      two,
+    )
+    assert.strictEqual(withDescribed(two, 'Limits them.'), two.replace('Limits refunds.', 'Limits them.'))
+    // One Althar named no issue in gets its lines before its credit; one it didn't write, at its end.
+    assert.strictEqual(
+      withIssues(bodyOf({ lead: '', written: 'Limits refunds.', issue: null }), [{ key: '#12', url: 'u', sameHost: true }]),
+      `Limits refunds.\n\nIssue: #12\n\n${credit}`,
+    )
+    assert.strictEqual(withIssues('Mine.', [{ key: '#12', url: 'u', sameHost: true }]), 'Mine.\n\nIssue: #12')
     // The lead's description is the body, above the issue's link: not what the task built, which is the person's.
     assert.strictEqual(
       bodyOf({

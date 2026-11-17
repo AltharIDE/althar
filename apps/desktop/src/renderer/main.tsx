@@ -22,6 +22,7 @@ import { ReportDialog } from './features/report/ReportDialog'
 import { ApiVersionMismatchView } from './features/update/ApiVersionMismatchView'
 import { ProfileInUseView } from './features/update/ProfileInUseView'
 import { UpdateStoppedView } from './features/update/UpdateStoppedView'
+import { watchFrames } from './shared/frames'
 import { followScheme } from './shared/scheme'
 import { SystemAccent } from './shared/SystemAccent'
 import { useHostChrome } from './shared/useWindowChrome'
@@ -41,8 +42,9 @@ import { keepWindowErrors } from './shared/windowErrors'
 // Light or dark, before anything draws.
 followScheme()
 
-// What the page doesn't handle goes to the app's log.
+// What the page doesn't handle goes to the app's log, and so does what made it slow.
 keepWindowErrors(window.althar)
+watchFrames(window.althar)
 
 // Listen before anything else: the port arrives once the page has loaded.
 window.althar.startup?.('renderer-entry')

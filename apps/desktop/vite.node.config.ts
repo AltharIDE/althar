@@ -41,9 +41,10 @@ export default defineConfig(({ mode }) => ({
     target: 'node24',
     sourcemap: true,
     rollupOptions: {
+      // The main process and the runtime start from a file that keeps V8's compiled code first, then loads the rest (compileCache.ts).
       input: {
-        'main/main': 'src/main/main.ts',
-        'runtime/runtime': 'src/runtime/runtime.ts',
+        'main/main': 'src/main/boot.ts',
+        'runtime/runtime': 'src/runtime/boot.ts',
         'speech/speech': 'src/speech/speech.ts',
         'connection/connection': 'src/connection/connection.ts',
       },

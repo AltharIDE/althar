@@ -138,7 +138,18 @@ describe('reading the desktop', () => {
     expect(followed.current().facts.gnomeVersion).toBe(47)
     expect(ran.map((one) => one.command)).toEqual(['gdbus'])
     expect(ran.every((one) => one.timeout > 0 && one.timeout <= 2000)).toBe(true)
-    expect(written).toEqual([{ desktop: 'linux|wayland|gnome|GNOME|', facts: { gnomeVersion: 47 } }])
+    // Kept for the next start: what the slow reads found, and what the window opened on.
+    expect(written).toEqual([
+      {
+        desktop: 'linux|wayland|gnome|GNOME|',
+        facts: { gnomeVersion: 47 },
+        look: {
+          layouts: { gnome: { start: ['close', 'minimize'], end: ['maximize'] } },
+          accent: { r: 51, g: 128, b: 230 },
+          gtkTheme: 'Yaru',
+        },
+      },
+    ])
     followed.stop()
   })
 
@@ -324,7 +335,13 @@ describe('reading the desktop', () => {
     await followed.first(1000)
     await settled()
     expect(decideChrome(followed.current().facts)).toEqual({ kind: 'frame' })
-    expect(written).toEqual([{ desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'oldwm', wmMoves: false } }])
+    expect(written).toEqual([
+      {
+        desktop: 'linux|x11|xfce|XFCE|',
+        facts: { wm: 'oldwm', wmMoves: false },
+        look: { layouts: {}, accent: null },
+      },
+    ])
     const next = followDesktopChrome(
       sourcesOf({ env: { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11' }, cached: written[0] }).sources,
     )
@@ -355,6 +372,87 @@ describe('reading the desktop', () => {
     expect(decideChrome((await broken.first(1000)).facts).kind).toBe('drawn')
     const notMoves = followDesktopChrome(sourcesOf({ env, cached: { desktop: 'linux|x11|xfce|XFCE|', facts: { wmMoves: 'no' } } }).sources)
     expect(decideChrome((await notMoves.first(1000)).facts).kind).toBe('drawn')
+  })
+
+  it('opens on what it opened on last time, where the portal is slow to say, and follows what it says then', async () => {
+    const kept = {
+      desktop: 'linux|wayland|gnome|GNOME|',
+      facts: { gnomeVersion: 47 },
+      look: { layouts: { gnome: { start: ['close'], end: [] } }, accent: { r: 1, g: 2, b: 3 }, gtkTheme: 'Yaru' },
+    }
+    // A portal that answers only after the test has looked.
+    let answer: (() => void) | undefined
+    const { sources } = sourcesOf({ env: GNOME_WAYLAND, cached: kept })
+    const followed = followDesktopChrome({
+      ...sources,
+      watchPortal: (namespace, key, parse, changed) => {
+        const said = answer
+        answer = () => {
+          said?.()
+          changed(namespace === 'org.freedesktop.appearance' ? parse('(<<(0.2, 0.5, 0.9)>>,)') : undefined)
+        }
+        return () => undefined
+      },
+    })
+    // Given all the time there is: it opens with the portal still silent.
+    const first = await followed.first(60_000)
+    expect(chromeOf(first, false)).toMatchObject({ tone: 'yaru', layout: { start: ['close'], end: [] }, accent: { r: 1, g: 2, b: 3 } })
+    // The portal says now: its accent follows, and what it didn't say stays as kept.
+    const followedLooks: Array<unknown> = []
+    followed.follow((look) => followedLooks.push(chromeOf(look, false).accent))
+    answer?.()
+    expect(followed.current().accent).toEqual({ r: 51, g: 128, b: 230 })
+    expect(followedLooks.at(-1)).toEqual({ r: 51, g: 128, b: 230 })
+    followed.stop()
+  })
+
+  it('never takes back with what it kept what the portal has said already, and keeps no look that isn’t one', async () => {
+    const kept = {
+      desktop: 'linux|wayland|gnome|GNOME|',
+      facts: {},
+      look: { layouts: { gnome: { start: ['close'], end: [] } }, accent: { r: 1, g: 2, b: 3 }, gtkTheme: 'Yaru' },
+    }
+    const { sources } = sourcesOf({
+      env: GNOME_WAYLAND,
+      cached: kept,
+      portal: {
+        'org.gnome.desktop.wm.preferences button-layout': "(<<':minimize,close'>>,)",
+        'org.gnome.desktop.interface gtk-theme': "(<<'Adwaita'>>,)",
+        'org.freedesktop.appearance accent-color': '(<<(0.2, 0.5, 0.9)>>,)',
+      },
+    })
+    // The portal answers before the cache is read.
+    const followed = followDesktopChrome({ ...sources, cache: { read: () => settled().then(() => kept), write: () => Promise.resolve() } })
+    await followed.first(1000)
+    expect(chromeOf(followed.current(), false)).toMatchObject({
+      tone: 'adwaita',
+      layout: { start: [], end: ['minimize', 'close'] },
+      accent: { r: 51, g: 128, b: 230 },
+    })
+    followed.stop()
+    for (const look of [
+      { layouts: { nowhere: { start: [], end: [] } }, accent: null },
+      { layouts: { gnome: { start: ['shade'], end: [] } }, accent: null },
+      { layouts: {}, accent: { r: 300, g: 0, b: 0 } },
+      { layouts: null, accent: null },
+      { layouts: {}, accent: null, gtkTheme: 'a/b' },
+      'look',
+    ]) {
+      const broken = followDesktopChrome(
+        sourcesOf({ env: GNOME_WAYLAND, cached: { desktop: 'linux|wayland|gnome|GNOME|', facts: {}, look } }).sources,
+      )
+      expect(chromeOf(await broken.first(1000), false).accent, JSON.stringify(look)).toBeNull()
+      broken.stop()
+    }
+  })
+
+  it('on X11, opens on what it kept only once xprop has said what the window manager is', async () => {
+    const env = { XDG_CURRENT_DESKTOP: 'XFCE', XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' }
+    const kept = { desktop: 'linux|x11|xfce|XFCE|', facts: { wm: 'xfwm4', wmMoves: true }, look: { layouts: {}, accent: null } }
+    const stale = followDesktopChrome(sourcesOf({ env, prints: OLD_WM, cached: kept, slow: 150 }).sources)
+    // Its frame hangs on it: framed, as xprop says now, not frameless as the cache kept.
+    expect(decideChrome((await stale.first(100)).facts)).toEqual({ kind: 'frame' })
+    stale.stop()
   })
 
   it('on Windows and a Mac: the accent from Electron, and its changes', async () => {

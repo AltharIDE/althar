@@ -1,8 +1,9 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { removeFully } from '@althar/provider-adapters'
-import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
 
 /*
  * Where Althar keeps a secret, such as a code host's token
@@ -44,6 +45,9 @@ const AGAIN = {
   schedule: Schedule.exponential(Duration.millis(200)),
   while: (error: SecretsUnavailable) => error.keyring !== true && error.unreadable !== true,
 }
+
+/** How long a secret opened is kept open in memory before the keychain is asked again. */
+export const KEPT_OPEN = Duration.minutes(5)
 
 /** What seals a secret so that only Althar can open it, and opens it again: in the app, its main process. */
 export interface Sealer {
@@ -87,49 +91,92 @@ export class Secrets extends Context.Service<
    * Secrets sealed by `sealer`, each in a file of its own in `folder`, which
    * only this user can read; a file is replaced whole, so a secret is never
    * half written.
+   *
+   * A secret opened is kept open in this process's memory for `keptOpen`, a
+   * few minutes: a code host's or tracker's every call reads its token, and
+   * each read was a file read and a round trip to the main process, which
+   * asks the keychain. One kept, changed or removed is forgotten at once, and
+   * an open that began before the change never keeps what it read.
    */
-  static readonly sealed = (folder: string, sealer: Sealer): Layer.Layer<Secrets> =>
+  static readonly sealed = (
+    folder: string,
+    sealer: Sealer,
+    { keptOpen = KEPT_OPEN }: { readonly keptOpen?: Duration.Duration } = {},
+  ): Layer.Layer<Secrets> =>
     Layer.sync(Secrets, () => {
       const pathOf = (name: string) =>
         /^[\w.-]+$/.test(name) && !name.startsWith('.')
           ? Effect.succeed(join(folder, name))
           : Effect.fail(new SecretsUnavailable({ reason: `Not a secret's name: ${name}` }))
-      const attempt = <A>(what: string, run: () => A) =>
-        Effect.try({ try: run, catch: (error) => new SecretsUnavailable({ reason: `Couldn't ${what}: ${String(error)}` }) })
+      const failed = (what: string) => (error: unknown) => new SecretsUnavailable({ reason: `Couldn't ${what}: ${String(error)}` })
+      const attempt = <A>(what: string, run: () => A) => Effect.try({ try: run, catch: failed(what) })
+      /** Secrets opened, by name, until when each is kept. */
+      const open = new Map<string, { readonly value: string; readonly until: number }>()
+      /** How many times each has changed, so an open that began before a change never keeps what it read. */
+      const changes = new Map<string, number>()
+      const changed = (name: string) => {
+        changes.set(name, (changes.get(name) ?? 0) + 1)
+        open.delete(name)
+      }
+      const keep = (name: string, value: string, at: number) =>
+        Effect.map(Clock.currentTimeMillis, (now) => {
+          if ((changes.get(name) ?? 0) === at && Duration.toMillis(keptOpen) > 0)
+            open.set(name, { value, until: now + Duration.toMillis(keptOpen) })
+        })
+      /** The sealed secret on disk, read off the thread; null where none is kept. */
+      const sealedAt = (path: string) =>
+        Effect.tryPromise({
+          try: async () => {
+            try {
+              return await readFile(path, 'utf8')
+            } catch (error) {
+              // None kept, unless its folder is a file: Windows says a name under one isn't there, POSIX that it isn't a folder.
+              const blocked = (await stat(folder).catch(() => null))?.isDirectory() === false
+              if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !blocked) return null
+              throw error
+            }
+          },
+          catch: failed('read the secret'),
+        })
       return Secrets.of({
         set: (name, value) =>
           Effect.flatMap(pathOf(name), (path) =>
             Effect.gen(function* () {
+              changed(name)
               const sealed = yield* sealer.seal(value)
-              yield* attempt('keep the secret', () => {
+              const at = yield* attempt('keep the secret', () => {
                 mkdirSync(folder, { recursive: true, mode: 0o700 })
                 chmodSync(folder, 0o700)
                 const next = `${path}.next`
                 writeFileSync(next, sealed, { mode: 0o600 })
                 renameSync(next, path)
+                // As it lands, in the same breath: what is kept open is what is on disk.
+                changed(name)
+                return changes.get(name) ?? 0
               })
+              yield* keep(name, value, at)
             }).pipe(Effect.retry(AGAIN)),
           ),
         get: (name) =>
           Effect.flatMap(pathOf(name), (path) =>
             Effect.gen(function* () {
-              const sealed = yield* attempt('read the secret', () => {
-                try {
-                  return readFileSync(path, 'utf8')
-                } catch (error) {
-                  // None kept, unless its folder is a file: Windows says a name under one isn't there, POSIX that it isn't a folder.
-                  const blocked = statSync(folder, { throwIfNoEntry: false })?.isDirectory() === false
-                  if ((error as NodeJS.ErrnoException).code === 'ENOENT' && !blocked) return null
-                  throw error
-                }
-              })
-              return sealed === null ? null : yield* sealer.open(sealed)
+              const kept = open.get(name)
+              if (kept !== undefined && kept.until > (yield* Clock.currentTimeMillis)) return kept.value
+              const at = changes.get(name) ?? 0
+              const sealed = yield* sealedAt(path)
+              if (sealed === null) return null
+              const value = yield* sealer.open(sealed)
+              yield* keep(name, value, at)
+              return value
             }).pipe(Effect.retry(AGAIN)),
           ),
         remove: (name) =>
           Effect.flatMap(pathOf(name), (path) =>
-            removeFully(path).pipe(
-              Effect.mapError((failed) => new SecretsUnavailable({ reason: `Couldn't remove the secret: ${failed.reason}` })),
+            Effect.sync(() => changed(name)).pipe(
+              Effect.andThen(removeFully(path)),
+              // Once it is gone too: an open that read it meanwhile keeps nothing.
+              Effect.ensuring(Effect.sync(() => changed(name))),
+              Effect.mapError((error) => new SecretsUnavailable({ reason: `Couldn't remove the secret: ${error.reason}` })),
             ),
           ),
       })

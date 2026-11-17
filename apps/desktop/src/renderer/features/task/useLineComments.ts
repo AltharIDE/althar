@@ -29,7 +29,8 @@ export interface LineCommentsModel {
   readonly remove: (id: string) => void
   /** Takes those waiting, as many as a message takes, as they go: given back with `giveBack` where Althar doesn't take them. */
   readonly take: () => ReadonlyArray<LineComment>
-  readonly giveBack: (comments: ReadonlyArray<LineComment>) => void
+  /** Returns how to take exactly those off again, leaving any written or removed since, as where the lead had them already. */
+  readonly giveBack: (comments: ReadonlyArray<LineComment>) => () => void
   /** Reads the sent ones again: once a message with some is accepted. */
   readonly reread: () => void
 }
@@ -133,14 +134,15 @@ export const useLineComments = (taskId: string | null, open: boolean, moved = ''
       setDrafts((now) => now.slice(LINE_COMMENTS.count))
       return drafts.slice(0, LINE_COMMENTS.count).map(sentOf)
     },
-    giveBack: (comments) =>
-      setDrafts((now) => [
-        ...comments.map((comment) => {
-          made += 1
-          return { ...comment, id: `draft-${made}` }
-        }),
-        ...now,
-      ]),
+    giveBack: (comments) => {
+      const back = comments.map((comment) => {
+        made += 1
+        return { ...comment, id: `draft-${made}` }
+      })
+      setDrafts((now) => [...back, ...now])
+      const put = new Set(back.map((one) => one.id))
+      return () => setDrafts((now) => now.filter((one) => !put.has(one.id)))
+    },
     reread: useCallback(() => setAttempt((count) => count + 1), []),
   }
 }

@@ -5,9 +5,11 @@ import { assert, describe, it } from '@effect/vitest'
 import type { LiveEvent } from '../src/Live'
 import { spawn } from 'node:child_process'
 
-import { cpuTimeOf, treeCpuOf, treeCpus, treeMembers, treeMembersOf, workedBetween } from '../src/processTree'
+import { cpuTimeOf, processListing, treeCpuOf, treeCpus, treeMembers, treeMembersOf, workedBetween } from '../src/processTree'
+import type { Command, Ended, Started } from '../src/spawner'
 import { type Finished, makeStallWatch, repeated, spanOf, type StallAction, type StallLimits } from '../src/stallWatch'
-import { Effect } from 'effect'
+import { Duration, Effect, Fiber } from 'effect'
+import { TestClock } from 'effect/testing'
 
 /** Windows, where what some tests stand on isn't (each says what). */
 const windows = process.platform === 'win32'
@@ -523,6 +525,70 @@ describe('the CPU an agent uses', () => {
       assert.isNotNull(used.get(process.pid))
       assert.isNull(used.get(2 ** 22 + 12_345))
       assert.strictEqual((yield* treeCpus([])).size, 0)
+    }),
+  )
+})
+
+describe('the listing a tree is read from', () => {
+  const ended = (more: Partial<Ended> = {}): Ended => ({ code: 0, signal: null, error: null, stdout: '', stderr: '', over: false, ...more })
+  /** A runner the test stands in for: what it was asked to start, and how often it was asked to stop. */
+  const runner = (result: Promise<Ended>) => {
+    const asked: Array<Command> = []
+    let stops = 0
+    return {
+      start: (command: Command): Started => {
+        asked.push(command)
+        return { result, stop: () => void (stops += 1) }
+      },
+      asked,
+      stops: () => stops,
+    }
+  }
+
+  it.effect('starts ps on the runner’s thread, as background work, and reads the trees from what it printed', () =>
+    Effect.gen(function* () {
+      const ps = runner(Promise.resolve(ended({ stdout: ' 10     1  0:01.00\n 12    10  0:00.50\n' })))
+      assert.strictEqual(yield* processListing(ps.start), ' 10     1  0:01.00\n 12    10  0:00.50\n')
+      assert.deepInclude(ps.asked[0], { command: 'ps', args: ['-A', '-o', 'pid=,ppid=,time='], detached: false })
+      assert.isUndefined(ps.asked[0]?.first)
+      assert.deepStrictEqual(
+        [...(yield* treeCpus([10, 11], processListing(ps.start)))],
+        [
+          [10, 1_500],
+          [11, null],
+        ],
+      )
+      assert.deepStrictEqual([...((yield* treeMembers([12], processListing(ps.start))).get(12) ?? [])], [[12, 500]])
+    }),
+  )
+
+  it.effect('says nothing where ps failed, couldn’t start or printed more than Althar reads, and nothing of any tree then', () =>
+    Effect.gen(function* () {
+      for (const end of [ended({ code: 1 }), ended({ error: { message: 'spawn ps ENOENT', code: 'ENOENT' } }), ended({ over: true })])
+        assert.isNull(yield* processListing(runner(Promise.resolve(end)).start))
+      const failing = processListing(runner(Promise.resolve(ended({ code: 1 }))).start)
+      assert.deepStrictEqual([...(yield* treeCpus([10], failing))], [[10, null]])
+      assert.deepStrictEqual([...(yield* treeMembers([10], failing))], [[10, null]])
+    }),
+  )
+
+  it.effect('stops waiting for ps after ten seconds, and stops it', () =>
+    Effect.gen(function* () {
+      const ps = runner(new Promise<Ended>(() => undefined))
+      const reading = yield* Effect.forkChild(processListing(ps.start))
+      yield* TestClock.adjust(Duration.seconds(10))
+      assert.isNull(yield* Fiber.join(reading))
+      assert.strictEqual(ps.stops(), 1)
+    }),
+  )
+
+  it.effect('stops ps when what waits for it no longer does', () =>
+    Effect.gen(function* () {
+      const ps = runner(new Promise<Ended>(() => undefined))
+      const reading = yield* Effect.forkChild(processListing(ps.start))
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(reading)
+      assert.strictEqual(ps.stops(), 1)
     }),
   )
 })

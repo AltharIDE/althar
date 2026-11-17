@@ -26,6 +26,29 @@ describe('Ledger', () => {
     }).pipe(Effect.provide(Env)),
   )
 
+  it.effect('makes each change’s checkpoint as it writes the change, leaving the trigger nothing to do', () =>
+    Effect.gen(function* () {
+      const ledger = yield* Ledger
+      const sql = yield* SqlClient.SqlClient
+      const { actorId, projectId } = yield* seed
+      // Without the trigger, a change that came with none would keep none.
+      yield* sql`DROP TRIGGER change_log_checkpoint`
+      yield* ledger.notify({ projectId, aggregateType: 'thread_item', aggregateId: 'item_1', aggregateRevision: 1 })
+      yield* ledger.record({
+        aggregateType: 'project',
+        aggregateId: projectId,
+        aggregateRevision: 1,
+        type: 'project.renamed',
+        payload: {},
+        actorId,
+      })
+      const checkpoints = yield* sql<{ checkpoint: string | null }>`SELECT checkpoint FROM change_log ORDER BY cursor`
+      assert.lengthOf(checkpoints, 2)
+      for (const { checkpoint } of checkpoints) assert.match(checkpoint ?? '', /^[0-9a-f]{32}$/)
+      assert.notStrictEqual(checkpoints[0]?.checkpoint, checkpoints[1]?.checkpoint)
+    }).pipe(Effect.provide(Env)),
+  )
+
   it.live('wakes a listener when the feed grows, and only then', () =>
     Effect.scoped(
       Effect.gen(function* () {

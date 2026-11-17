@@ -1,4 +1,6 @@
 import { isStartupStage, type StartupStage } from '../startup'
+import { keepCompiledNow } from '../compileCache'
+import { compiledIn, windowFolderOf } from './windowFolder'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
@@ -12,7 +14,7 @@ import { homePartition, localServicesUnavailable, remoteExternalUrl } from './ho
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
-import { FIRST_SCHEME_WAIT, firstScheme, followDesktopScheme, type Scheme, themeSourceFor } from './colorScheme'
+import { FIRST_SCHEME_WAIT, followDesktopScheme, keptSchemeIn, openingScheme, type Scheme, themeSourceFor } from './colorScheme'
 import { CHROME_ARG, decideChrome, type DesktopChrome, parseHexAccent } from './desktop'
 import { chromeOf, FIRST_CHROME_WAIT, type FollowedChrome, followDesktopChrome, systemSources } from './desktopChrome'
 import { keepingAwake } from './awake'
@@ -25,6 +27,7 @@ import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
 import { loginItemOf, openedAtLogin, opensAtLogin } from './loginItem'
+import { watchLag } from './lag'
 import { startLogs } from './logs'
 import { isPlace, showPlace } from './storage'
 import { setAppMenu } from './menu'
@@ -195,17 +198,11 @@ if (store !== null) app.commandLine.appendSwitch('password-store', store)
 const portal = sealsWithPortal(process.env.FLATPAK_ID !== undefined, process.platform)
 if (portal) app.commandLine.appendSwitch('enable-features', withPortalFeature(app.commandLine.getSwitchValue('enable-features')))
 
-/*
- * Where the window keeps what it remembers, its tabs and pinned models. A
- * profile of its own, as the end-to-end tests give, keeps it apart from the
- * person's. Otherwise it stays in the folder it had before the app took its
- * name, Althar (productName, which also names the keychain entry sign-ins
- * are sealed with): Application Support/Althar is where a profile lives.
- */
+/* Where the window keeps what it remembers, its tabs and pinned models (windowFolder.ts). */
 const ownProfile = process.env.ALTHAR_PROFILE
 app.setPath(
   'userData',
-  ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'window') : join(app.getPath('appData'), '@althar', 'desktop'),
+  windowFolderOf(ownProfile, () => app.getPath('appData')),
 )
 
 /*
@@ -240,8 +237,13 @@ const startupMark = (stage: string, duration_ms?: number, window_id?: number) =>
   logs.info('Startup', { stage, elapsed_ms: Math.round(process.uptime() * 1000), duration_ms, pid: process.pid, window_id })
 logs.info('Startup', { stage: 'process-start', elapsed_ms: 0, pid: process.pid })
 startupMark('main-entry')
+// Each few seconds in which this thread ran late, as the runtime's log says of its own (lag.ts).
+watchLag((lag) => logs.warn('Event loop ran late', { max_ms: lag.maxMs, p99_ms: lag.p99Ms, mean_ms: lag.meanMs }))
 let startupStage: StartupStage = 'data'
 let firstScreenDrawn = false
+/** How long after the first screen what was compiled is written, so it doesn't compete with the screen's first reads. */
+const KEEP_COMPILED_AFTER = 5_000
+let compiledKept = false
 let releaseBackground: () => void = () => {}
 const backgroundReady = new Promise<void>((resolve) => {
   releaseBackground = resolve
@@ -253,6 +255,9 @@ ipcMain.on('althar:startup', (event, stage: unknown, duration: unknown) => {
     firstScreenDrawn = true
     releaseBackground()
     runtime?.postMessage({ type: 'first-screen' })
+    // What this launch compiled is kept for the next, once the first screen is up (compileCache.ts): after an update, once.
+    if (!compiledKept) setTimeout(keepCompiledNow, KEEP_COMPILED_AFTER).unref()
+    compiledKept = true
   }
 })
 
@@ -650,11 +655,15 @@ const startRuntime = () => {
       ALTHAR_WORKTREES: worktrees,
       ALTHAR_APP_VERSION: app.getVersion(),
       ALTHAR_LOGS: logs.dir,
+      // Where it keeps V8's compiled code between launches, as this process does (compileCache.ts).
+      ALTHAR_COMPILE_CACHE: compiledIn(app.getPath('userData')),
+      // The runtime says in its log when its thread ran late, and which calls took long (lag.ts): packaged or not, so a
+      // slowness a person reports has its evidence in the logs on their computer.
+      ALTHAR_LAG_LOG: '1',
       // The Node the agent adapters run on (ADR-033): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
       ...(app.isPackaged
         ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', process.platform === 'win32' ? 'node.exe' : 'node') }
-        : // A development build's runtime says in its log when its thread ran late, and which calls took long (lag.ts).
-          { ALTHAR_LAG_LOG: '1' }),
+        : {}),
     },
   })
   logs.keepOutput(child)
@@ -922,7 +931,8 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
     // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open, unless the person chose to keep working in the background.
     if (windows.size === 0 && process.platform !== 'darwin' && !keepingOn) quitWhenNoneLeft()
   })
-  window.webContents.on('did-finish-load', () => connect(window))
+  // As its document is parsed, its scripts run and listening for the port (main.tsx), not once its fonts and pictures are in too.
+  window.webContents.on('dom-ready', () => connect(window))
   // A document of the window's gone, as it reloads when the runtime restarts, takes with it what said where its pages show: they hide until the new one says.
   window.webContents.on('did-navigate', () => pages?.hideIn(window))
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
@@ -1299,15 +1309,21 @@ void ready.then(() => {
     runtime?.postMessage({ type: 'first-screen' })
   }
   // Once the preferences are read, so the first window opens in the scheme the person chose, never the other one first;
-  // on Linux, matching the desktop, once it has said its scheme too (a moment at most), since Electron can't tell it.
-  // And once the desktop has said where its window buttons go, so they don't move as the window opens (a moment at most too).
+  // on Linux, matching the desktop, in the scheme it said last time, or once it has said it (a moment at most) on a first
+  // launch, since Electron can't tell it. And where the desktop said its window buttons go, last time or now, so they don't
+  // move as the window opens. What the desktop says after that, the windows follow.
   const look = startDesktopLook()
   void preferencesRead
     .catch(() => undefined)
     .then(() =>
       Promise.all([
         process.platform === 'linux' && preferences.appearance === 'system'
-          ? firstScheme(followDesktopScheme, FIRST_SCHEME_WAIT)
+          ? openingScheme(followDesktopScheme, FIRST_SCHEME_WAIT, keptSchemeIn(locations().profile)).then((scheme) => {
+              // What was kept, until the desktop says now.
+              if (linuxScheme !== undefined || scheme === undefined) return
+              linuxScheme = scheme
+              applyAppearance()
+            })
           : undefined,
         look.first(FIRST_CHROME_WAIT),
       ]),

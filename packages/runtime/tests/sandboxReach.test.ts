@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
@@ -28,7 +28,7 @@ import {
 import { SECRET_PLACES } from '@althar/provider-adapters'
 import { cachesOf, TOOL_PLACES } from '../src/toolPlaces'
 import { Sessions, upFrontSaid } from '../src/Sessions'
-import { repository, runtime, sessionMetas, turns, until } from './support'
+import { fakeSandbox, repository, runtime, sessionMetas, turns, until } from './support'
 
 /*
  * What a lead's sandbox lets through from the start: commands it runs
@@ -290,6 +290,37 @@ const leading = (rules: Parameters<Policies['Service']['set']>[1]) =>
   })
 
 describe('a lead’s session', () => {
+  it.live('waits for its agent’s sandbox probe before it works out what the sandbox holds and what the session starts with', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const sessions = yield* Sessions
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: desktopApp() })
+      const made = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Retry checkout' }),
+        projectId: project.projectId,
+        title: 'Retry checkout',
+      })
+      // The probe is still out, as on Linux while bubblewrap starts.
+      let asked = 0
+      let probed: () => void = () => undefined
+      fakeSandbox.ready = () => {
+        asked += 1
+        return new Promise<void>((resolve) => (probed = resolve))
+      }
+      sessionMetas.length = 0
+      const starting = yield* Effect.forkChild(sessions.start({ threadId: made.threadId, agentId: 'claude-code' }))
+      yield* until(
+        Effect.sync(() => asked),
+        (times) => times === 1,
+      )
+      assert.deepStrictEqual(sessionMetas, [])
+      probed()
+      yield* Fiber.join(starting)
+      yield* until(turns(made.threadId), (rows) => rows.length >= 1)
+      assert.isDefined(sessionMetas.find((meta) => meta.role === 'lead'))
+    }).pipe(Effect.ensuring(Effect.sync(() => (fakeSandbox.ready = () => Promise.resolve()))), Effect.provide(runtime())),
+  )
+
   it.live('starts a new lead with native web tools off when the project switch is off', () =>
     leading({ permissions: 'rules', allowEverything: false, leadsReachWeb: false }).pipe(Effect.provide(runtime())),
   )

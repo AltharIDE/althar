@@ -31,6 +31,13 @@ import { MOTION, reducedMotion, SCALE } from './motion'
  * update. While `still`, a list's items are someone else's to move (a drag):
  * nothing of ours does. When a list goes, or hides, what it set moving is
  * put away at once: nothing of one screen travels over the next.
+ *
+ * Taking where everything stands reads the whole of what it wraps, and lays
+ * the page out again once the update is in, so a list given its `version`
+ * does it only where that changed: a screen drawn again for each word typed
+ * or streamed, or each second its clock ticks, reads nothing of the page
+ * while what can move stays as it was. Within another, it hands that one
+ * only the updates in which its own changed.
  */
 
 /** More than this many items coming, or going, at once is a list drawn afresh: they show, or go, at once. */
@@ -45,8 +52,22 @@ export interface ListMotionProps {
   readonly enter?: ListEnter
   /** While true, its items are a drag's to move, not ours: what moves them stops, and the update that ends it moves nothing. */
   readonly still?: boolean
+  /**
+   * What its items' places stand on: their keys, list by list, or what they are drawn from (the board's lanes). An update
+   * that leaves it as it was moves nothing and reads nothing of the page; an array is compared entry by entry, anything
+   * else as itself. Left out, any update may move something.
+   */
+  readonly version?: unknown
   readonly children?: ReactNode
 }
+
+/** Whether two versions are the same: arrays entry by entry, anything else as itself. */
+const sameVersion = (one: unknown, other: unknown) =>
+  Object.is(one, other) ||
+  (Array.isArray(one) &&
+    Array.isArray(other) &&
+    one.length === other.length &&
+    one.every((entry: unknown, index) => Object.is(entry, other[index])))
 
 interface Stood {
   readonly el: HTMLElement
@@ -86,6 +107,8 @@ export class ListMotion extends Component<ListMotionProps> {
 
   override getSnapshotBeforeUpdate(was: ListMotionProps): true | null {
     if (was.still === true || this.props.still === true) return null
+    // Nothing that can move changed: the page isn't read, and the list around it isn't told.
+    if (this.props.version !== undefined && sameVersion(was.version, this.props.version)) return null
     return this.outer.take() ? true : null
   }
 

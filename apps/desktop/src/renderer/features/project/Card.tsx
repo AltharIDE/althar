@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
+import type { AgentStatus, ChangeSummary, PlanStep, Product, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
   type IssueRefProps,
   type LaunchStep,
@@ -111,9 +111,17 @@ export const endOf = (end: TaskEnd): End => (end === TaskEnd.DraftPr ? 'draft' :
 const placeOf = (where: Where): WorksIn => (where === 'checkout' ? WorksIn.Local : WorksIn.Worktree)
 const whereOf = (place: WorksIn): Where => (place === WorksIn.Local ? 'checkout' : 'worktree')
 
-/** The issue a task came from, as the kit marks it. */
-const fromOf = (card: TaskCardContent): IssueRefProps | undefined =>
-  card.issue === null ? undefined : { mark: productBrand(card.issue.product), id: card.issue.key, linear: card.issue.product === 'linear' }
+/** The issues a task came from, as the kit marks them: its first, and any others after it. */
+const fromOf = (card: TaskCardContent): IssueRefProps | undefined => {
+  if (card.issue === null) return undefined
+  const refOf = (issue: { readonly product: Product; readonly key: string }) => ({
+    mark: productBrand(issue.product),
+    id: issue.key,
+    linear: issue.product === 'linear',
+  })
+  const also = (card.fromIssues ?? []).slice(1).map(refOf)
+  return { ...refOf(card.issue), ...(also.length === 0 ? {} : { also }) }
+}
 
 /**
  * The plan's steps as the kit shows them, by model; the agent's id rides on
