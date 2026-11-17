@@ -560,7 +560,8 @@ export interface Client {
   /** Says to the coordinator, as the person, that issues are filed and changed at once from now on, or wait on a card first: from an issue card in a thread. */
   readonly preferIssueCards: (threadId: string, atOnce: boolean) => Promise<void>
   /** Whether a task does only part of its issue, so its merge comments on it and leaves it open. */
-  readonly setTaskIssuePart: (taskId: string, partOf: boolean) => Promise<void>
+  /** Whether a task does only part of an issue it came from: the one named by its ref, or its first. */
+  readonly setTaskIssuePart: (taskId: string, partOf: boolean, issue?: string) => Promise<void>
   /** Changes a review the lead drafted, before it is posted: its verdict, its summary, which comments are kept and what they say. */
   readonly changeReviewDraft: (
     draftId: string,
@@ -1143,7 +1144,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     applyIssueChanges: (changesId) => command((commandId) => api.ApplyIssueChanges({ commandId, changesId })),
     discardIssueChanges: (changesId) => command((commandId) => api.DiscardIssueChanges({ commandId, changesId })),
     preferIssueCards: (threadId, atOnce) => command((commandId) => api.PreferIssueCards({ commandId, threadId, atOnce })),
-    setTaskIssuePart: (taskId, partOf) => command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf })),
+    setTaskIssuePart: (taskId, partOf, issue) =>
+      command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf, ...(issue === undefined ? {} : { issue }) })),
     changeReviewDraft: (draftId, edit) => command((commandId) => api.ChangeReviewDraft({ commandId, draftId, ...edit })),
     postReviewDraft: (draftId) => command((commandId) => api.PostReviewDraft({ commandId, draftId })),
     discardReviewDraft: (draftId) => command((commandId) => api.DiscardReviewDraft({ commandId, draftId })),

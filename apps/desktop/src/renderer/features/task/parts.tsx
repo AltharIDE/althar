@@ -115,7 +115,7 @@ export const partsText = {
   reviewField: 'The pull request: its link, or its number',
   reviewAsk: (pr: string) => `Review ${pr} and draft what you find; don't post it.`,
   issueField: 'Its key or link',
-  issueAsk: (issue: string) => `Read ${issue}: it is part of this task.`,
+  issueAsk: (issue: string) => `Add ${issue} to the issues this task comes from, with add_issue, and read it: it is part of this task.`,
   pageField: 'Its address',
   pageAsk: (url: string) => `Open ${url} in the browser and keep it open while you work.`,
   accessNote: 'With everything allowed, only what can’t be undone asks. Ask for one in the conversation when you want it to go ahead.',
@@ -382,10 +382,11 @@ export const partsOf = (snapshot: ThreadSnapshot, act: PartsActions): ReadonlyAr
       ],
     })
   }
-  if (task.issue !== null) {
-    const issue = task.issue
+  // Each issue it came from, on any trackers: from a runtime before, its one issue.
+  for (const [at, issue] of (task.fromIssues ?? (task.issue === null ? [] : [task.issue])).entries()) {
     parts.push({
-      id: 'issue',
+      // Its first keeps the id one issue always had.
+      id: at === 0 ? 'issue' : `issue:${issue.product}:${issue.ref}`,
       icon: productBrand(issue.product),
       name: issue.key,
       detail: issue.title,

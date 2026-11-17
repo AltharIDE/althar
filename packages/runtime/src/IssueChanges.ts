@@ -938,7 +938,7 @@ export class IssueChanges extends Context.Service<
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            const [own] = yield* sql<{
+            const links = yield* sql<{
               projectId: ProjectId
               connectionId: string | null
               ref: string
@@ -947,62 +947,82 @@ export class IssueChanges extends Context.Service<
             }>`
               SELECT x.project_id, x.connection_id, x.ref, x.part_of,
                 (SELECT id FROM threads WHERE task_id = x.task_id AND kind = 'task') AS thread_id
-              FROM external_links x WHERE x.task_id = ${taskId} AND x.kind = 'issue' ORDER BY x.created_at LIMIT 1`
-            if (own === undefined || own.connectionId === null || own.threadId === null) return
-            const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
-            // A merged task settles as done, so what it says goes where the person reads about the project: the coordinator's thread.
-            const [coordinator] =
-              event === 'merged'
-                ? yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${own.projectId} AND kind = 'coordinator' LIMIT 1`
-                : []
-            // A task that did only part of its issue leaves it open: its merge says on the issue what landed, whether or not issues move.
-            if (event === 'merged' && own.partOf === 1) {
-              const words = yield* landed(own.threadId, task?.title ?? '')
-              const card = yield* comment({
-                projectId: own.projectId,
-                threadId: coordinator?.id ?? own.threadId,
-                target: { connectionId: own.connectionId, ref: own.ref },
-                body: `Part of this landed in [${pullRequest.key}](${pullRequest.url}), merged:\n\n${words}`,
-                by: 'althar',
-                actorId: instance.systemId,
-              })
-              yield* Effect.logDebug('Said on a task’s issue what part of it landed', card.changesId)
-              return
-            }
-            if (!movesIssues((yield* policies.current(own.projectId)).rules)) return
-            const at = yield* found(own.projectId, { connectionId: own.connectionId, ref: own.ref })
-            const { issue, tracker } = at
-            // Done or cancelled already, it is left as it is.
-            if (issue.status.category === 'done' || issue.status.category === 'cancelled') return
-            const wanted: Wanted | undefined =
-              event === 'merged'
-                ? tracker.capabilities.changes.includes('close')
-                  ? { close: true }
-                  : undefined
-                : yield* Effect.gen(function* () {
-                    if (!tracker.capabilities.changes.includes('status')) return undefined
-                    // Its tracker's own review status, where it has one; one in review already is left as it is.
-                    const review = (yield* tracker.choices(issue, 'status')).find((choice) => /\breview\b/i.test(choice.name))
-                    if (review === undefined || review.name.trim().toLowerCase() === issue.status.name.trim().toLowerCase())
-                      return undefined
-                    // Not back from further along, as a status after In Review would be; only from where work is under way, or hasn't started.
-                    return unstarted(issue.status.category) || issue.status.category === 'started' ? { status: review.name } : undefined
-                  })
-            if (wanted === undefined) return
-            const proposed = yield* propose({
+              FROM external_links x WHERE x.task_id = ${taskId} AND x.kind = 'issue' ORDER BY x.created_at, x.rowid`
+            const [task] = links.length === 0 ? [] : yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
+            // Each issue it came from on its own, on whichever tracker: one that can't be moved leaves the others to move.
+            for (const own of links)
+              yield* followOne(own, task?.title ?? '', event, pullRequest).pipe(
+                Effect.catchCause((cause) => Effect.logWarning('Could not move a task’s issue with its pull request', cause)),
+              )
+          }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not move a task’s issues with its pull request', cause))),
+        )
+
+      const followOne = (
+        own: {
+          readonly projectId: ProjectId
+          readonly connectionId: string | null
+          readonly ref: string
+          readonly threadId: string | null
+          readonly partOf: number
+        },
+        title: string,
+        event: Parameters<IssueChanges['Service']['followPullRequest']>[1],
+        pullRequest: Parameters<IssueChanges['Service']['followPullRequest']>[2],
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          if (own.connectionId === null || own.threadId === null) return
+          // A merged task settles as done, so what it says goes where the person reads about the project: the coordinator's thread.
+          const [coordinator] =
+            event === 'merged'
+              ? yield* sql<{ id: string }>`SELECT id FROM threads WHERE project_id = ${own.projectId} AND kind = 'coordinator' LIMIT 1`
+              : []
+          // A task that did only part of its issue leaves it open: its merge says on the issue what landed, whether or not issues move.
+          if (event === 'merged' && own.partOf === 1) {
+            const words = yield* landed(own.threadId, title)
+            const card = yield* comment({
               projectId: own.projectId,
               threadId: coordinator?.id ?? own.threadId,
-              issues: [{ target: { connectionId: own.connectionId, ref: own.ref }, change: wanted }],
-              note: `${pullRequest.key} ${event}`,
-              why: { url: pullRequest.url, task: task?.title ?? '' },
-              // The project moves issues along with its tasks: it doesn't wait on the person. A move the tracker refuses stays a card to try again.
-              direct: true,
+              target: { connectionId: own.connectionId, ref: own.ref },
+              body: `Part of this landed in [${pullRequest.key}](${pullRequest.url}), merged:\n\n${words}`,
               by: 'althar',
               actorId: instance.systemId,
             })
-            yield* Effect.logDebug('Moved a task’s issue with its pull request', proposed.card?.changesId ?? proposed.left.join(' '))
-          }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not move a task’s issue with its pull request', cause))),
-        )
+            yield* Effect.logDebug('Said on a task’s issue what part of it landed', card.changesId)
+            return
+          }
+          if (!movesIssues((yield* policies.current(own.projectId)).rules)) return
+          const at = yield* found(own.projectId, { connectionId: own.connectionId, ref: own.ref })
+          const { issue, tracker } = at
+          // Done or cancelled already, it is left as it is.
+          if (issue.status.category === 'done' || issue.status.category === 'cancelled') return
+          const wanted: Wanted | undefined =
+            event === 'merged'
+              ? tracker.capabilities.changes.includes('close')
+                ? { close: true }
+                : undefined
+              : yield* Effect.gen(function* () {
+                  if (!tracker.capabilities.changes.includes('status')) return undefined
+                  // Its tracker's own review status, where it has one; one in review already is left as it is.
+                  const review = (yield* tracker.choices(issue, 'status')).find((choice) => /\breview\b/i.test(choice.name))
+                  if (review === undefined || review.name.trim().toLowerCase() === issue.status.name.trim().toLowerCase()) return undefined
+                  // Not back from further along, as a status after In Review would be; only from where work is under way, or hasn't started.
+                  return unstarted(issue.status.category) || issue.status.category === 'started' ? { status: review.name } : undefined
+                })
+          if (wanted === undefined) return
+          const proposed = yield* propose({
+            projectId: own.projectId,
+            threadId: coordinator?.id ?? own.threadId,
+            issues: [{ target: { connectionId: own.connectionId, ref: own.ref }, change: wanted }],
+            note: `${pullRequest.key} ${event}`,
+            why: { url: pullRequest.url, task: title },
+            // The project moves issues along with its tasks: it doesn't wait on the person. A move the tracker refuses stays a card to try again.
+            direct: true,
+            by: 'althar',
+            actorId: instance.systemId,
+          })
+          yield* Effect.logDebug('Moved a task’s issue with its pull request', proposed.card?.changesId ?? proposed.left.join(' '))
+        })
 
       // A card Althar closed while applying may have applied in part: said so, and applying it again is safe.
       yield* provide(
@@ -1046,21 +1066,34 @@ export class IssueChanges extends Context.Service<
           ),
       })
 
-      /** The issue a lead's task came from, or why it has none. */
-      const ownIssue = (access: ToolAccess) =>
+      /** The issues a lead's task came from, in the order they were tied to it, or why it has none. */
+      const ownIssues = (access: ToolAccess) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [own] = yield* sql<{ id: string; connectionId: string | null; ref: string; key: string }>`
+          const all = yield* sql<{ id: string; connectionId: string | null; ref: string; key: string }>`
             SELECT id, connection_id, ref, key FROM external_links WHERE task_id = ${access.taskId ?? ''} AND kind = 'issue'
-            ORDER BY created_at LIMIT 1`
-          if (own === undefined)
+            ORDER BY created_at, rowid`
+          if (all.length === 0)
             return yield* new ToolRefused({
               message:
                 'This task didn’t come from an issue, so it has none of its own to change. Name the one you mean, by its key or link, as issue.',
             })
-          if (own.connectionId === null)
-            return yield* new ToolRefused({ message: `The tracker ${own.key} is on isn’t connected to Althar any more.` })
-          return { linkId: own.id, key: own.key, target: { connectionId: own.connectionId, ref: own.ref } }
+          const gone = all.find((one) => one.connectionId === null)
+          if (gone !== undefined)
+            return yield* new ToolRefused({ message: `The tracker ${gone.key} is on isn’t connected to Althar any more.` })
+          return all.map((one) => ({ linkId: one.id, key: one.key, target: { connectionId: one.connectionId ?? '', ref: one.ref } }))
+        })
+
+      /** The issue a lead's task came from, or why it has none: one of several it came from is named, as each has its own. */
+      const ownIssue = (access: ToolAccess) =>
+        Effect.gen(function* () {
+          const all = yield* ownIssues(access)
+          const [own] = all
+          if (own === undefined || all.length > 1)
+            return yield* new ToolRefused({
+              message: `This task came from ${all.map((one) => one.key).join(', ')}. Name the one you mean, by its key or link, as issue; or several as issues.`,
+            })
+          return own
         })
 
       /**
@@ -1243,35 +1276,37 @@ export class IssueChanges extends Context.Service<
           )
         })
 
-      /** Links the task's pull requests to its issue: each at once, with the receipt Althar's own link of it as it opened has. */
+      /** Links the task's pull requests to each issue it came from: each at once, with the receipt Althar's own link of it as it opened has. */
       const linkTool = (access: ToolAccess) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const own = yield* ownIssue(access)
+          const own = yield* ownIssues(access)
+          const keys = own.map((one) => one.key).join(', ')
           const pulls = yield* sql<{ url: string; key: string; snapshot: string }>`
             SELECT url, key, snapshot FROM external_links WHERE task_id = ${access.taskId ?? ''} AND kind = 'change' ORDER BY created_at`
           if (pulls.length === 0)
             return yield* new ToolRefused({
-              message: `This task has no pull request yet. Althar links it to ${own.key} itself as it opens it.`,
+              message: `This task has no pull request yet. Althar links it to ${keys} itself as it opens it.`,
             })
           const said: Array<string> = []
-          for (const pull of pulls) {
-            const title = (JSON.parse(pull.snapshot) as { readonly title?: string }).title ?? pull.key
-            const card = yield* link({
-              projectId: access.projectId as ProjectId,
-              threadId: access.threadId,
-              target: own.target,
-              link: { url: pull.url, title: `${pull.key}: ${title}` },
-              receipt: `link_issue:${own.linkId}:${pull.url}`,
-              by: 'lead',
-              actorId: instance.systemId,
-            })
-            said.push(
-              card.state === 'applied'
-                ? `Linked ${pull.key} to ${own.key}.`
-                : `Couldn't link ${pull.key} to ${own.key}: ${card.issues[0]?.error ?? card.error ?? ''}`,
-            )
-          }
+          for (const issue of own)
+            for (const pull of pulls) {
+              const title = (JSON.parse(pull.snapshot) as { readonly title?: string }).title ?? pull.key
+              const card = yield* link({
+                projectId: access.projectId as ProjectId,
+                threadId: access.threadId,
+                target: issue.target,
+                link: { url: pull.url, title: `${pull.key}: ${title}` },
+                receipt: `link_issue:${issue.linkId}:${pull.url}`,
+                by: 'lead',
+                actorId: instance.systemId,
+              })
+              said.push(
+                card.state === 'applied'
+                  ? `Linked ${pull.key} to ${issue.key}.`
+                  : `Couldn't link ${pull.key} to ${issue.key}: ${card.issues[0]?.error ?? card.error ?? ''}`,
+              )
+            }
           return said.join(' ')
         })
 
