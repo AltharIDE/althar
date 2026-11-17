@@ -1289,6 +1289,29 @@ describe('Agents at once, across a restart', () => {
     }),
   )
 
+  it.live('let a wait for a place an earlier Althar left on an idle lead go after a restart, with places free', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const before = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const { projectId } = yield* opened
+        const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+        yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+        yield* idle(first.threadId)
+        // As an earlier Althar left it, holding a turn for a usage limit as a wait for a place, the words it held taken back since.
+        yield* sql`UPDATE threads SET waits_for_place = ${new Date().toISOString()} WHERE id = ${first.threadId}`
+        return { projectId, first }
+      }).pipe(Effect.provide(machine(2, file)))
+
+      yield* Effect.gen(function* () {
+        const { projectId, first } = before
+        // Places free: its lead starts again and takes one, and its card stops saying it waits for an agent.
+        yield* until(waitsOn(first.threadId), (since) => since === null)
+        yield* until(cardOf(projectId, first.taskId), (card) => card?.queued === null)
+      }).pipe(Effect.provide(machine(2, file)))
+    }),
+  )
+
   it.live('let the person stop a task whose idle lead waits for a place after a restart: it never starts', () =>
     Effect.gen(function* () {
       const file = store()

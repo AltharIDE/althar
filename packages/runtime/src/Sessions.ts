@@ -429,6 +429,11 @@ interface Running {
   turnRunning: boolean
   /** A failed delivery waits for an explicit retry, new words, or its account's reset; queued input alone is not work. */
   deliveryHeld: 'transient' | 'usage_limit' | 'recovery' | null
+  /**
+   * Held for `usage_limit`: its account out until when, as last read. Kept here only, never as the thread's wait for a place
+   * (`waits_for_place`): its task's card says it waits for the reset, not for an agent.
+   */
+  usageOut?: { readonly agentId: string; readonly accountId: string; readonly until: string } | undefined
   /** Queued recovery may deliver fresh input, but cannot retry input that an earlier session already dispatched. */
   blockedInputs: ReadonlySet<string> | undefined
   /** The failed turn whose input waits, so a later person message can resume even when it arrived as that turn ended. */
@@ -1005,6 +1010,8 @@ export class Sessions extends Context.Service<
         readonly background: ReadonlyArray<ShownLeftRunning>
         /** Who leads from its next turn, where `changeLead` changed that. */
         readonly nextLead?: { readonly agentId: string; readonly model?: string; readonly effort?: string }
+        /** Its queued turn waits for its account's usage limit to reset: which agent and account, and until when. */
+        readonly usageOut?: { readonly agentId: string; readonly accountId: string; readonly until: string }
       }>
     >
     /**
@@ -2816,6 +2823,17 @@ export class Sessions extends Context.Service<
           }),
         ).pipe(Effect.orElseSucceed(() => true))
 
+      /** Its queued turn waits for its account's reset, until `out.until`: its card says so once it begins to, and then each time the reset moves. */
+      const heldForUsage = (running: Running, out: { readonly agentId: string; readonly accountId: string; readonly until: string }) =>
+        Effect.suspend(() => {
+          const said = running.usageOut
+          running.usageOut = { agentId: out.agentId, accountId: out.accountId, until: out.until }
+          return running.thread.role === 'coordinator' ||
+            (said?.until === out.until && said.accountId === out.accountId && said.agentId === out.agentId)
+            ? Effect.void
+            : Effect.ignore(run(touchTask(running.thread.taskId)))
+        })
+
       /** Delivers queued input, one turn at a time, until the session stops. */
       const deliveries = (running: Running) =>
         Effect.forever(
@@ -2857,6 +2875,7 @@ export class Sessions extends Context.Service<
             if (running.deliveryHeld === 'usage_limit') {
               const out = yield* run(limits.outAccount(running.account.id))
               if (Option.isSome(out)) {
+                yield* heldForUsage(running, out.value)
                 yield* Effect.sleep(
                   Duration.millis(Math.min(1000, Math.max(1, Date.parse(out.value.until) - (yield* Clock.currentTimeMillis)))),
                 )
@@ -2864,6 +2883,11 @@ export class Sessions extends Context.Service<
                 return
               }
               running.deliveryHeld = null
+              // Back in usage: its card no longer says it waits for the reset.
+              if (running.usageOut !== undefined) {
+                running.usageOut = undefined
+                if (thread.role !== 'coordinator') yield* Effect.ignore(run(touchTask(thread.taskId)))
+              }
             }
             // A turn that couldn't be delivered is kept to that turn: the next message wakes the loop again.
             if (thread.role === 'coordinator')
@@ -2886,8 +2910,11 @@ export class Sessions extends Context.Service<
               )
             if (yield* compactsNext(running)) return yield* delivered(running.delivering.withPermits(1)(deliver(running)))
             // News can start a stopped session outside a workflow step. Keep its input queued until
-            // this account has usage again, before asking Busy for a place. The thread marker also
-            // lets Busy restore this wait after a restart.
+            // this account has usage again, before asking Busy for a place. That wait is the account's,
+            // not a place's: it stays off the thread's `waits_for_place`, which says an agent is
+            // waited for (its card would say "Waiting", the agents busy, with places free), and
+            // which only Busy keeps and lets go. After a restart its queued input starts its agent
+            // again (`recoverQueued`), and the wait is found again here.
             const inWorkflow = yield* run(
               Effect.gen(function* () {
                 const sql = yield* SqlClient.SqlClient
@@ -2900,15 +2927,7 @@ export class Sessions extends Context.Service<
             const out = inWorkflow ? Option.none() : yield* run(limits.outAccount(running.account.id))
             if (Option.isSome(out)) {
               running.deliveryHeld = 'usage_limit'
-              yield* run(
-                Effect.gen(function* () {
-                  const sql = yield* SqlClient.SqlClient
-                  const changed = yield* sql<{
-                    id: string
-                  }>`UPDATE threads SET waits_for_place = ${yield* timestamp} WHERE id = ${thread.threadId} AND waits_for_place IS NULL RETURNING id`
-                  if (changed.length > 0) yield* touchTask(thread.taskId)
-                }),
-              )
+              yield* heldForUsage(running, out.value)
               yield* Effect.sleep(
                 Duration.millis(Math.min(1000, Math.max(1, Date.parse(out.value.until) - (yield* Clock.currentTimeMillis)))),
               )
@@ -5288,6 +5307,7 @@ export class Sessions extends Context.Service<
                   stopping: running.stopping,
                   background: [...running.background.values()].map(shownOf),
                   ...(running.nextLead === undefined ? {} : { nextLead: running.nextLead }),
+                  ...(running.deliveryHeld === 'usage_limit' && running.usageOut !== undefined ? { usageOut: running.usageOut } : {}),
                 })
           }),
         askPermission: (threadId, request) =>
