@@ -21,6 +21,8 @@ export interface SplitButtonProps extends Omit<ButtonProps, 'variant'> {
   moreLabel: string
   /** Renders the menu of alternatives around the given trigger, usually a Menu. */
   menu: (trigger: ReactElement) => ReactNode
+  /** Renders the main button inside something of the consumer's, such as a HoverCard that says what it does. */
+  around?: (main: ReactElement) => ReactNode
 }
 
 export function SplitButton({
@@ -32,11 +34,13 @@ export function SplitButton({
   style,
   mainClassName,
   moreClassName,
+  around,
   ...main
 }: SplitButtonProps) {
+  const button = <Button {...main} variant={variant} size={size} className={cx(s.main, mainClassName)} />
   return (
     <span role="group" style={style} className={cx(s.split, size === 'small' && s.small, variant === 'signal' && s.signal, className)}>
-      <Button {...main} variant={variant} size={size} className={cx(s.main, mainClassName)} />
+      {around === undefined ? button : around(button)}
       {menu(
         /* while the main action works, its alternatives wait too */
         <Button

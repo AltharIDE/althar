@@ -68,6 +68,13 @@ export const savedHome = (value: unknown): RemoteHome => {
   return parsed
 }
 
+export const forgottenHome = () => new Error('This saved home was forgotten. Check its host to connect again.')
+const savedOf = (homes: ReadonlyArray<RemoteHome>, id: string): RemoteHome => {
+  const found = homes.find((one) => one.id === id)
+  if (found === undefined) throw forgottenHome()
+  return found
+}
+
 /** Serialized atomic writes; no database, tokens or private device keys belong in this file. */
 export const homeStore = (profile: string) => {
   const path = join(profile, 'homes.json')
@@ -171,5 +178,29 @@ export const homeStore = (profile: string) => {
         }
       }),
     forget: (id: string) => change((homes) => ({ homes: homes.filter((one) => one.id !== id), result: undefined })),
+    rename: (id: string, name: string) =>
+      change((homes) => {
+        const label = homeName(name)
+        const found = savedOf(homes, id)
+        const renamed = { ...found, name: label }
+        return { homes: homes.map((one) => (one.id === id ? renamed : one)), result: renamed }
+      }),
+    /** A saved home reached another way: its identity stays, only how SSH reaches it changes. */
+    change: (id: string, ssh: SshHomeTarget) =>
+      change((homes) => {
+        const target = homeTarget(ssh)
+        const found = savedOf(homes, id)
+        if (found.ssh === undefined) throw new Error('Use a new pairing code to change a secure connection.')
+        const changed = { ...found, ssh: target }
+        return { homes: homes.map((one) => (one.id === id ? changed : one)), result: changed }
+      }),
+    /** A home forgotten a moment ago, back where it was, unless it is saved again already. */
+    restore: (given: RemoteHome, index: number) =>
+      change((homes) => {
+        const parsed = savedHome(given)
+        if (homes.some((one) => one.id === parsed.id)) return { homes, result: undefined }
+        const at = Math.max(0, Math.min(homes.length, Math.trunc(index)))
+        return { homes: [...homes.slice(0, at), parsed, ...homes.slice(at)], result: undefined }
+      }),
   }
 }

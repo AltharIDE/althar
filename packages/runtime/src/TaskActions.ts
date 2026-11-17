@@ -19,13 +19,14 @@ import { TITLES_FOLLOW_WORK } from './presetBrief'
 import { Agents } from './Config'
 import { envelope } from './envelope'
 import { Errands } from './Errands'
-import { CantMerge, PushRefused } from './errors'
+import { CantMerge, PushRefused, ShipRefused } from './errors'
 import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { answeredIn, quickIn } from './kinds'
 import { MergeReviews } from './MergeReviews'
 import { Reviews } from './Reviews'
 import { shelve } from './scratch'
+import { taskShipRoute } from './shipRoute'
 import { branchOnFirstWrite } from './firstWrite'
 import { Projects } from './Projects'
 import { Plans } from './Plans'
@@ -39,6 +40,7 @@ import { addItem, updateItem } from './threads'
 import { touchTask } from './cards'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
+import { blockersOf, stopWaiting, waitFor } from './waits'
 import { expected, words } from './words'
 
 /*
@@ -568,6 +570,12 @@ export class TaskActions extends Context.Service<
         updateItem(projectId, itemId, { ...card, state, said } satisfies TaskAskContent)
 
       const Asked = Schema.Struct({ task: Schema.String, why: Schema.optional(Schema.String) })
+      const Waiting = Schema.Struct({
+        task: Schema.String,
+        on: Schema.optional(Schema.Array(Schema.String)),
+        stop: Schema.optional(Schema.Array(Schema.String)),
+        why: Schema.optional(Schema.String),
+      })
       const Settling = Schema.Struct({
         task: Schema.optional(Schema.String),
         how: Schema.Literals(['done', 'keep', 'discard']),
@@ -909,7 +917,13 @@ export class TaskActions extends Context.Service<
         pull_request: Schema.optional(Schema.String),
       })
       const Named = Schema.Struct({ task: Schema.optional(Schema.String) })
-      const ShipAsked = Schema.Struct({ task: Schema.optional(Schema.String), change: Schema.optional(Schema.String) })
+      // Its route, where the person said one: as far as a push, or ready for review; merging stays the person's own Ship.
+      const ShipAsked = Schema.Struct({
+        task: Schema.optional(Schema.String),
+        change: Schema.optional(Schema.String),
+        review: Schema.optional(Schema.Boolean),
+        far: Schema.optional(Schema.Literals(['push', 'ready'])),
+      })
       const AfterMerge = Schema.Struct({ task: Schema.optional(Schema.String), answer: Schema.Literals(['fix', 'leave']) })
       const NewChange = Schema.Struct({
         task: Schema.optional(Schema.String),
@@ -1047,19 +1061,70 @@ export class TaskActions extends Context.Service<
           return `${task.slug}: ${holds}. ${threadsSaying(access, task)}.`
         })
 
+      /**
+       * The route of a Ship an agent asks for, on the person's word: what they said of its review and how far, the rest the
+       * task's own, as its card offers it. Never as far as a merge, which is the person's own Ship, or the coordinator's
+       * merge on their word: one their default would merge goes as far as ready for review.
+       */
+      const agentRoute = (taskId: string, asked: { readonly review?: boolean | undefined; readonly far?: 'push' | 'ready' | undefined }) =>
+        Effect.map(taskShipRoute(changes, taskId), (own) => ({
+          // With no reviewer yet, its review is on: a reviewer the turn adds before it ships still reads it.
+          review: asked.review ?? (own.route.review || !own.reviewable),
+          far: asked.far ?? (own.route.far === 'merge' ? ('ready' as const) : own.route.far),
+        }))
+
+      /** How far a Ship goes, as an agent is told. */
+      const FAR_SAID = {
+        push: 'a push (a draft pull request stays a draft, a new one opens as one)',
+        ready: 'ready for review (an open draft is marked ready, a new pull request opens ready)',
+        merge: 'a merge, once the checks its target requires pass',
+      } as const satisfies Record<'push' | 'ready' | 'merge', string>
+
       const shipTask = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(ShipAsked, input)
           const task = yield* named(access, asked.task)
+          // A Ship under way, with a route said: that Ship takes it, as the person's RouteShip does, from where it stands.
+          if (asked.review !== undefined || asked.far !== undefined) {
+            const said = yield* envelope(
+              'task.route_ship',
+              { taskId: task.id, review: asked.review ?? null, far: asked.far ?? null },
+              undefined,
+              actorOf(access),
+            )
+            const rerouted = yield* runs
+              .routeShip({
+                envelope: said,
+                taskId: task.id,
+                route: {
+                  ...(asked.review === undefined ? {} : { review: asked.review }),
+                  ...(asked.far === undefined ? {} : { far: asked.far }),
+                },
+              })
+              .pipe(
+                Effect.catchIf(
+                  (error) => error instanceof ShipRefused && error.why === 'not_shipping',
+                  () => Effect.succeed(undefined),
+                ),
+                (rerouting) => plainly(rerouting, task.slug),
+              )
+            if (rerouted !== undefined) {
+              yield* did(access, input, task, `Changed “${task.title}”’s Ship`, 'changed the route of its Ship')
+              const review = asked.review === false && !rerouted.review ? ', without its review (one under way stops)' : ''
+              return `Changed ${task.slug}’s Ship: it now goes as far as ${FAR_SAID[rerouted.far]}${review}. read_task shows where it stands. ${threadsSaying(access, task)}.`
+            }
+          }
           // Its own lead asks in its turn: it ships once that turn ends, with all the turn committed.
           const own = access.role === 'lead' && task.id === access.taskId
-          const said = yield* envelope('task.ship', { taskId: task.id, change: asked.change ?? null }, undefined, actorOf(access))
+          const route = yield* agentRoute(task.id, asked)
+          const said = yield* envelope('task.ship', { taskId: task.id, change: asked.change ?? null, route }, undefined, actorOf(access))
           yield* plainly(
             runs.ship({
               envelope: said,
               taskId: task.id,
               ...(own ? { afterTurn: true } : {}),
               ...(asked.change === undefined ? {} : { change: asked.change }),
+              route,
             }),
             task.slug,
           )
@@ -1709,8 +1774,10 @@ export class TaskActions extends Context.Service<
           }
           const sent = yield* plainly(mergeReviews.fix(task.id), task.slug)
           const said = yield* envelope('task.ship', { taskId: task.id, afterMerge: true }, undefined, actorOf(access))
+          // Its route read once the fix is in, when what waits for Ship is the fix.
+          const fixShipped = Effect.flatMap(agentRoute(task.id, {}), (route) => runs.ship({ envelope: said, taskId: task.id, route }))
           yield* Effect.forkDetach(
-            Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), runs.ship({ envelope: said, taskId: task.id })).pipe(
+            Effect.andThen(mergeReviews.afterTurnOf(sent.threadId, sent.inputId), fixShipped).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not ship a fix after a merge', cause)),
             ),
           )
@@ -1850,6 +1917,65 @@ export class TaskActions extends Context.Service<
           (access, input) => Effect.flatMap(read(Asked, input), (asked) => act(access, asked.task, 'hold', { why: asked.why })),
         ),
         tool(
+          'wait_for_tasks',
+          'Makes a task wait for other tasks, its blockers, or stop waiting for some: its plan starts by itself once every task it waits for has merged, after its countdown, as the board says ("Starts when Pairing merges"). Only a blocker that is abandoned comes to the person, who starts it anyway, reopens the blocker or stops it waiting. Use it when the person says one task should come after another; propose_plan takes waits_for for a task planned to wait. A task can’t wait for itself, nor for one that waits for it, however far along; one merged already is nothing to wait for. The person’s Start now (restart_task) still starts it at once, and a held plan stays held. It acts at once, with a line in the task’s thread.',
+          {
+            type: 'object',
+            properties: {
+              task,
+              on: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Tasks it waits for from now, by slug, as list_tasks shows them.',
+              },
+              stop: { type: 'array', items: { type: 'string' }, description: 'Tasks it stops waiting for, by slug.' },
+              why,
+            },
+            required: ['task'],
+          },
+          (access, input) =>
+            Effect.gen(function* () {
+              const asked = yield* read(Waiting, input)
+              const target = yield* taskOf(access.projectId, asked.task)
+              const on = yield* Effect.forEach(asked.on ?? [], (one) => taskOf(access.projectId, one))
+              const stop = yield* Effect.forEach(asked.stop ?? [], (one) => taskOf(access.projectId, one))
+              if (on.length === 0 && stop.length === 0)
+                return yield* new ToolRefused({ message: 'Name the tasks it waits for (on), or stops waiting for (stop).' })
+              const actorId = actorOf(access)
+              const outcomes = yield* waitFor({ taskId: target.id, on: on.map((one) => one.id), actorId })
+              const stopped: Array<Task> = []
+              for (const one of stop) if (yield* stopWaiting({ taskId: target.id, on: one.id, actorId })) stopped.push(one)
+              const added = on.filter((one) => outcomes.some((outcome) => outcome.on === one.slug && 'added' in outcome && outcome.added))
+              const as = becauseOf(asked.why)
+              const who = access.role === 'lead' && access.taskId === target.id ? 'Its lead' : yield* whoOf(access)
+              const titles = (tasks: ReadonlyArray<Task>) => tasks.map((one) => `“${one.title}”`).join(' and ')
+              if (added.length > 0) yield* line(target.projectId, target.threadId, `${who} made it wait for ${titles(added)}${as}`)
+              if (stopped.length > 0)
+                yield* line(target.projectId, target.threadId, `${who} stopped it waiting for ${titles(stopped)}${as}`)
+              const sql = yield* SqlClient.SqlClient
+              const now = yield* blockersOf(target.id)
+              const named = yield* Effect.forEach(now, (id) =>
+                Effect.map(sql<{ slug: string; state: string }>`SELECT slug, state FROM tasks WHERE id = ${id}`, (rows) => rows[0]),
+              )
+              const [started] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${target.id} LIMIT 1`
+              const said = [
+                ...outcomes.flatMap((outcome) =>
+                  'refused' in outcome
+                    ? [`Not ${outcome.on}: ${outcome.refused}`]
+                    : !outcome.added && outcome.why === 'merged'
+                      ? [`${outcome.on} has merged already: nothing to wait for.`]
+                      : [],
+                ),
+                ...stop.filter((one) => !stopped.includes(one)).map((one) => `It didn’t wait for ${one.slug}.`),
+                named.length === 0
+                  ? `${target.slug} waits for no task now.`
+                  : `${target.slug} waits for ${named.map((one) => (one === undefined ? '' : one.state === 'done' ? `${one.slug} (merged)` : one.state === 'abandoned' ? `${one.slug} (abandoned: the person decides)` : one.slug)).join(', ')}.`,
+                ...(started !== undefined ? ['It has started already: waiting only holds a plan that hasn’t.'] : []),
+              ]
+              return said.join(' ')
+            }),
+        ),
+        tool(
           'restart_task',
           'Restarts a task, as its Start now, Resume and Reopen do: a held one starts, a stopped one carries on from its step with its last lead, and a discarded one opens again on its worktree and branch. It acts at once, with a line in your thread and the task’s.',
           { type: 'object', properties: { task, why }, required: ['task'] },
@@ -1916,7 +2042,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'ship_task',
-          'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A task of several changes ships each waiting in a Ship of its own, the bottom of a stack first, each after its own review; with change, only that one, and what waits beneath it in its stack. A lead shipping its own task ships it once its turn ends. It acts at once, with a line in your thread and the task’s.',
+          'Ships what waits on a task’s branch, as its Ship button does, on the person’s word ("ship it", "push it"): what the person’s turns with its lead committed after its plan stays on the branch until then. Where its plan has a reviewer before the work ships, one review runs first, over everything since the last review, and its lead settles what it finds; then the commits go up, to its open pull request, or a new one after the last merged or closed. A task of several changes ships each waiting in a Ship of its own, the bottom of a stack first, each after its own review; with change, only that one, and what waits beneath it in its stack. A lead shipping its own task ships it once its turn ends. Where the task has a Ship under way, review and far change that Ship instead, from where it stands, as the person’s own change of its route does: review false stops a review under way, and far applies where it hasn’t gone past it (once ready for review, it can’t be a draft again); with neither, a Ship under way is refused as it is. It acts at once, with a line in your thread and the task’s.',
           {
             type: 'object',
             properties: {
@@ -1925,6 +2051,17 @@ export class TaskActions extends Context.Service<
               change: {
                 type: 'string',
                 description: 'One change to ship, by its name or branch, with what waits beneath it; else every change waiting.',
+              },
+              review: {
+                type: 'boolean',
+                description:
+                  'Only where the person said: false ships without its review, which then never runs for it, and stops one under way. Left out, as the task goes, or as its Ship under way goes now.',
+              },
+              far: {
+                type: 'string',
+                enum: ['push', 'ready'],
+                description:
+                  'Only where the person said how far: push leaves a draft pull request a draft and opens a new one as a draft; ready marks an open draft ready for review and opens a new one ready. Left out, as the task goes, or as its Ship under way goes now. Merging is the person’s own Ship.',
               },
             },
           },

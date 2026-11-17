@@ -7,9 +7,11 @@ import {
   type SearchDocuments,
 } from '@althar/contracts'
 import { checkedPosition, checkedWatch } from './checkedWatch'
-import type { AcpCatalog, AcpConnection } from '@althar/contracts'
+import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
 
 import {
+  type PlaceId,
+  type StorageSize,
   type CanvasDetail,
   type CanvasSummary,
   type CanvasText,
@@ -49,9 +51,12 @@ import {
   type SealStyle,
   Api,
   ApiError,
+  BACKGROUND,
   type BoardSnapshot,
   type HomeSnapshot,
   clientProtocol,
+  LANE_HEADER,
+  THREAD_ITEMS_AT_ONCE,
   type ConnectGuide,
   type ConnectionCheck,
   type ConnectionList,
@@ -65,8 +70,11 @@ import {
   type DocumentText,
   type DomMessagePort,
   domPort,
+  untraced,
   type FileDiff,
   type TaskFindings,
+  type TaskLineComments,
+  type LineComment,
   type FolderHeld,
   type FolderReading,
   type MadeRepository,
@@ -210,6 +218,17 @@ export interface Client {
   ) => Promise<ThreadSnapshot>
   /** One item of a thread; null for one it keeps for Althar and never shows. */
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem | null>
+  /**
+   * Several items of a thread in one call, as `getThreadItem` reads each: by id, null for one it keeps for Althar and
+   * never shows, or that has gone. Asked of more than one call takes, it reads in as many.
+   */
+  readonly getThreadItems: (threadId: string, itemIds: Iterable<string>) => Promise<ReadonlyMap<string, ThreadItem | null>>
+  /**
+   * Runs `start`, and every read it starts goes behind (`BACKGROUND`): a read nobody waits on, as the change feed starts
+   * them to keep what a screen holds current, which the runtime answers a few at a time, after a press. What `start`
+   * returns, as it returned it.
+   */
+  readonly behind: <A>(start: () => A) => A
   /** What a command in a thread printed, as kept once it ended. */
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
   /** What a command a thread's session left running has printed so far. */
@@ -228,6 +247,8 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string, untouched?: boolean) => Promise<FileDiff>
   /** What the reviews of a task's run found, each where it is in the change now: the run of the review reported in `review`, else the latest. */
   readonly getTaskFindings: (taskId: string, review?: string) => Promise<TaskFindings>
+  /** The comments the person sent on lines of a task's diff, each where it is now and whether a commit since addressed it (decisions: desktop-app § Comments on the diff). */
+  readonly getLineComments: (taskId: string) => Promise<TaskLineComments>
   /** What the names in a thread's messages name where its agent works, each message by its item where it has one. */
   readonly findCode: (
     threadId: string,
@@ -259,6 +280,7 @@ export interface Client {
       readonly images?: ReadonlyArray<SentImage>
       readonly files?: ReadonlyArray<SentFile>
       readonly dictated?: boolean
+      readonly comments?: ReadonlyArray<LineComment>
     },
   ) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
@@ -307,6 +329,8 @@ export interface Client {
   readonly setPlansAndReviews: (change: PlansAndReviewsChange) => Promise<void>
   /** What the rules of projects made from now on start with; what isn't given stays. */
   readonly setNewProjectDefaults: (change: NewProjectDefaultsChange) => Promise<void>
+  /** What a place Althar keeps data in takes on disk (About › Storage), kept for the session by the runtime, or measured again on a refresh; `signal` gives up on it, which stops the walk when no one else waits. */
+  readonly getStorageSize: (place: PlaceId, refresh: boolean, signal?: AbortSignal) => Promise<StorageSize>
   /** Finished tasks' folders on this computer, with the disk they are on. */
   readonly getTaskFolders: () => Promise<TaskFolders>
   /** Removes every finished task's folder nothing holds; what it freed, measured after. */
@@ -322,6 +346,8 @@ export interface Client {
   /** What "Run it" on code from outside the team does without asking. */
   readonly setRunOutside: (to: 'ask' | 'safe' | 'full') => Promise<void>
   readonly setSendMidTurn: (to: 'queue' | 'steer') => Promise<void>
+  /** Makes a route the person's default for every Ship; null goes back to each task's own. */
+  readonly setShipRoute: (route: ShipRoute | null) => Promise<void>
   /** Puts a task on Scratch, or on the board with null. */
   readonly shelveTask: (taskId: string, shelf: 'scratch' | null) => Promise<void>
   /** Stops a helper the task's lead started. */
@@ -468,6 +494,8 @@ export interface Client {
     readonly files?: ReadonlyArray<SentFile>
     /** Any of its words came from dictation, even if edited after. */
     readonly dictated?: boolean
+    /** Comments on lines of the task's diff, each with its file, lines and code (decisions: desktop-app § Comments on the diff). */
+    readonly comments?: ReadonlyArray<LineComment>
     /** The person's comments on canvases, kept with it (ADR-104). */
     readonly canvasComments?: ReadonlyArray<SentCanvasComment>
   }) => Promise<void>
@@ -508,6 +536,8 @@ export interface Client {
     readonly taskId?: string
   }) => Promise<TaskSummary>
   readonly startPlan: (planId: string) => Promise<void>
+  /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
+  readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Whether it was held: false where the task had begun already. */
   readonly holdPlan: (planId: string) => Promise<boolean>
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held. */
@@ -539,7 +569,8 @@ export interface Client {
   /** Says to the coordinator, as the person, that issues are filed and changed at once from now on, or wait on a card first: from an issue card in a thread. */
   readonly preferIssueCards: (threadId: string, atOnce: boolean) => Promise<void>
   /** Whether a task does only part of its issue, so its merge comments on it and leaves it open. */
-  readonly setTaskIssuePart: (taskId: string, partOf: boolean) => Promise<void>
+  /** Whether a task does only part of an issue it came from: the one named by its ref, or its first. */
+  readonly setTaskIssuePart: (taskId: string, partOf: boolean, issue?: string) => Promise<void>
   /** Changes a review the lead drafted, before it is posted: its verdict, its summary, which comments are kept and what they say. */
   readonly changeReviewDraft: (
     draftId: string,
@@ -701,7 +732,10 @@ export interface Client {
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Ships what waits on the task's branch for Ship: its review first, where its plan has one before the work ships, then the commits go up. */
   /** Ships what waits; with a change named, only it, and what waits beneath it in its stack. */
-  readonly ship: (taskId: string, change?: string) => Promise<void>
+  /** Ships what waits, on `route` where the person chose one for this Ship, else the task's own. */
+  readonly ship: (taskId: string, change?: string, route?: ShipRoute) => Promise<void>
+  /** Changes the route of the task's Ship under way. */
+  readonly routeShip: (taskId: string, route: ShipRoute) => Promise<void>
   /** Fix it, on what the task's review after a merge found: the lead takes the findings, and its fix ships after the merged pull request. */
   readonly fixAfterMerge: (taskId: string, url?: string) => Promise<void>
   /** Leave it, on what the task's review after a merge found: the findings close, and stay in the thread. */
@@ -840,12 +874,51 @@ const uuidV7 = (now: number) => {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
-const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
-  Effect.runPromiseExit(effect).then((exit) => {
+/**
+ * How deep the window is in `behind`: a read started meanwhile goes behind. It is said as the call is made, which is
+ * synchronous, so only what `behind`'s `start` starts is behind, never a call made after it returns.
+ */
+let behindNow = 0
+
+/** The header a read nobody waits on carries. */
+const laneHeaders = { [LANE_HEADER]: BACKGROUND }
+
+/**
+ * Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it, or stops it with
+ * `signal`. One made while `behind` runs says so; the runtime puts a read so marked behind, and answers a command as it
+ * comes either way.
+ */
+const settle = <A>(effect: Effect.Effect<A, unknown>, signal?: AbortSignal): Promise<A> =>
+  Effect.runPromiseExit(
+    behindNow > 0 ? RpcClient.withHeaders(effect, laneHeaders) : effect,
+    signal === undefined ? undefined : { signal },
+  ).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
+
+/**
+ * A message as it streams, whole again, from what a watch that asked for deltas sends: each item's text as far as it
+ * came, by id, for this run of the watch, the latest few more than the runtime keeps for it (`SENT_KEPT`), so any it
+ * sends what was added to is here.
+ */
+const STREAMED_KEPT = 256
+const wholeAgain = () => {
+  const texts = new Map<string, string>()
+  return (event: WatchEvent): WatchEvent | undefined => {
+    if (event._tag !== 'Streaming' || event.offset === undefined) return event
+    const { offset, ...rest } = event
+    const before = offset === 0 ? '' : texts.get(event.itemId)
+    // What came before it never came on this watch: nothing to add it to. The runtime sends each item whole first.
+    if (before === undefined || before.length !== offset) return undefined
+    const text = before + event.text
+    texts.delete(event.itemId)
+    texts.set(event.itemId, text)
+    const oldest = texts.keys().next()
+    if (texts.size > STREAMED_KEPT && oldest.done !== true) texts.delete(oldest.value)
+    return { ...rest, text }
+  }
+}
 
 /** How long before a command with no answer is tried again, once. */
 const RETRY_AFTER = Duration.millis(300)
@@ -870,7 +943,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
   const rawApi = await Effect.runPromise(
     Effect.gen(function* () {
       const protocol = yield* Layer.build(clientProtocol(domPort(port)))
-      return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+      return yield* RpcClient.make(Api, untraced).pipe(Effect.provideContext(protocol))
     }).pipe(
       Scope.provide(scope),
       Effect.onError(() => Scope.close(scope, Exit.void)),
@@ -947,6 +1020,25 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
+    getThreadItems: (threadId, itemIds) => {
+      const asked = [...new Set(itemIds)]
+      const calls = Array.from({ length: Math.ceil(asked.length / THREAD_ITEMS_AT_ONCE) }, (_, at) =>
+        settle(api.GetThreadItems({ threadId, itemIds: asked.slice(at * THREAD_ITEMS_AT_ONCE, (at + 1) * THREAD_ITEMS_AT_ONCE) })),
+      )
+      return Promise.all(calls).then((read) => {
+        const found = new Map<string, ThreadItem | null>(asked.map((id) => [id, null]))
+        for (const item of read.flat()) found.set(item.id, item)
+        return found
+      })
+    },
+    behind: (start) => {
+      behindNow += 1
+      try {
+        return start()
+      } finally {
+        behindNow -= 1
+      }
+    },
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
@@ -956,6 +1048,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     readCanvasText: (canvasId, version) => settle(api.ReadCanvasText({ canvasId, version })),
     getFileDiff: (taskId, path, untouched) => settle(api.GetFileDiff({ taskId, path, ...(untouched === true ? { untouched } : {}) })),
     getTaskFindings: (taskId, review) => settle(api.GetTaskFindings({ taskId, ...(review === undefined ? {} : { review }) })),
+    getLineComments: (taskId) => settle(api.GetLineComments({ taskId })),
     findCode: (threadId, messages) => settle(api.FindCode({ threadId, messages })),
     readCode: (threadId, path, at = {}) =>
       settle(
@@ -1000,6 +1093,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setRunOutside: (to) => command((commandId) => api.SetRunOutside({ commandId, to })),
     setSendMidTurn: (to) => command((commandId) => api.SetSendMidTurn({ commandId, to })),
+    setShipRoute: (route) => command((commandId) => api.SetShipRoute({ commandId, route })),
     shelveTask: (taskId, shelf) => command((commandId) => api.ShelveTask({ commandId, taskId, shelf })),
     stopHelper: (taskId, helper) => command((commandId) => api.StopHelper({ commandId, taskId, helper })),
     joinChanges: (taskId, change, into) =>
@@ -1053,6 +1147,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     setFolderWait: (wait) => command((commandId) => api.SetFolderWait({ commandId, wait })),
     setPlansAndReviews: (change) => command((commandId) => api.SetPlansAndReviews({ commandId, ...change })),
     setNewProjectDefaults: (change) => command((commandId) => api.SetNewProjectDefaults({ commandId, ...change })),
+    getStorageSize: (place, refresh, signal) => settle(api.GetStorageSize({ place, refresh }), signal),
     getTaskFolders: () => settle(api.GetTaskFolders({})),
     cleanUpFolders: () => command((commandId) => api.CleanUpFolders({ commandId })),
     removeTaskFolder: (taskId, seen) => command((commandId) => api.RemoveTaskFolder({ commandId, taskId, seen })),
@@ -1085,6 +1180,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),
+    stopWaiting: (taskId, on) => command((commandId) => api.StopWaiting({ commandId, taskId, on })),
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     holdDraft: (threadId, key) => command((commandId) => api.HoldDraft({ commandId, threadId, key })),
     changePlan: (planId, steps, end, worksIn, toward) =>
@@ -1106,7 +1202,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     applyIssueChanges: (changesId) => command((commandId) => api.ApplyIssueChanges({ commandId, changesId })),
     discardIssueChanges: (changesId) => command((commandId) => api.DiscardIssueChanges({ commandId, changesId })),
     preferIssueCards: (threadId, atOnce) => command((commandId) => api.PreferIssueCards({ commandId, threadId, atOnce })),
-    setTaskIssuePart: (taskId, partOf) => command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf })),
+    setTaskIssuePart: (taskId, partOf, issue) =>
+      command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf, ...(issue === undefined ? {} : { issue }) })),
     changeReviewDraft: (draftId, edit) => command((commandId) => api.ChangeReviewDraft({ commandId, draftId, ...edit })),
     postReviewDraft: (draftId) => command((commandId) => api.PostReviewDraft({ commandId, draftId })),
     discardReviewDraft: (draftId) => command((commandId) => api.DiscardReviewDraft({ commandId, draftId })),
@@ -1195,7 +1292,11 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     startAcpCheck: (agentId) => command((commandId) => api.CheckAcpConnection({ commandId, agentId })),
     removeAcpConnection: (agentId) => command((commandId) => api.RemoveAcpConnection({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
-    ship: (taskId, change) => command((commandId) => api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }) })),
+    ship: (taskId, change, route) =>
+      command((commandId) =>
+        api.Ship({ commandId, taskId, ...(change === undefined ? {} : { change }), ...(route === undefined ? {} : { route }) }),
+      ),
+    routeShip: (taskId, route) => command((commandId) => api.RouteShip({ commandId, taskId, route })),
     fixAfterMerge: (taskId, url) => command((commandId) => api.FixAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
     leaveAfterMerge: (taskId, url) =>
       command((commandId) => api.LeaveAfterMerge({ commandId, taskId, ...(url === undefined ? {} : { url }) })),
@@ -1245,14 +1346,19 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.
       // Said once the watch's request has gone, a moment after it starts, so a read made then comes after it on the port.
       const started = Effect.sync(() => void setTimeout(() => onWatching?.(), 0))
-      const heard = Effect.suspend(() =>
-        Stream.runForEach(Stream.onStart(api.Watch(cursor === undefined ? {} : { since: cursor }), started), (event) =>
-          Effect.sync(() => {
-            if (event._tag === 'Changed') cursor = event.cursor
-            listener(event)
-          }),
-        ),
-      )
+      // An agent's message comes as what was added since this run of the watch last sent it, and goes to listeners whole.
+      const heard = Effect.suspend(() => {
+        const whole = wholeAgain()
+        return Stream.runForEach(
+          Stream.onStart(api.Watch(cursor === undefined ? { deltas: true } : { since: cursor, deltas: true }), started),
+          (event) =>
+            Effect.sync(() => {
+              if (event._tag === 'Changed') cursor = event.cursor
+              const shown = whole(event)
+              if (shown !== undefined) listener(shown)
+            }),
+        )
+      })
       const fiber = Effect.runFork(Effect.forever(Effect.andThen(Effect.ignore(heard), Effect.sleep(REWATCH_AFTER))))
       return () => void Effect.runFork(Fiber.interrupt(fiber))
     },

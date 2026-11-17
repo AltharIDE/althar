@@ -58,6 +58,7 @@ jobs:
       any: ${{ steps.plan.outputs.any }}
       e2e: ${{ steps.plan.outputs.e2e }}
       windows-e2e: ${{ steps.plan.outputs.windows-e2e }}
+      native-homes: ${{ steps.native.outputs.homes }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -78,6 +79,23 @@ jobs:
         env:
           DRAFT: ${{ github.event.pull_request.draft }}
         run: bun packages/testing/src/select.ts plan desktop "$RUNNER_TEMP/changed"
+      # Connection credentials must survive a real desktop relaunch using each OS's own keyring.
+      - id: native
+        env:
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          bun -e '
+            const paths = (await Bun.file(`${process.env.RUNNER_TEMP}/changed`).text()).split("\n").filter(Boolean)
+            const globs = [
+              "apps/desktop/src/main/homes/**", "apps/desktop/src/main/{main,homeBridge}.ts",
+              "apps/desktop/src/connection/**", "apps/desktop/src/homes.ts", "apps/desktop/src/preload/**",
+              "apps/desktop/src/renderer/features/homes/**", "apps/desktop/e2e/{pairing.spec,support,networkHost,networkHost.config}.ts",
+              "apps/desktop/{package.json,vite.node.config.ts}", "packages/transport-node/**", "packages/contracts/**",
+              "packages/runtime/src/{networkApi,DevicePairings,ClientIdentities}.ts",
+              ".github/{actions/electron/**,workflows/desktop.yml}", "{bun.lock,.bun-version,.node-version}"
+            ].map((path) => new Bun.Glob(path))
+            console.log(`homes=${process.env.DRAFT !== "true" && paths.some((path) => path === "*" || globs.some((glob) => glob.match(path)))}`)
+          ' >> "$GITHUB_OUTPUT"
 
   verify:
     needs: plan
@@ -139,6 +157,37 @@ jobs:
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
         uses: ./.github/actions/flaky
+
+  native-homes:
+    name: native pairing (${{ matrix.os }})
+    needs: plan
+    if: needs.plan.outputs.native-homes == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/electron
+      - run: bun run test:e2e e2e/pairing.spec.ts
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: native-pairing-${{ matrix.os }}
+          path: apps/desktop/test-results
+          retention-days: 7
 
   # The app's whole end-to-end run, in four parts, when the change reaches the app: on the pull request, so a change
   # that breaks a spec it didn't touch fails where it was made, and again in the merge queue, on main as it will be.

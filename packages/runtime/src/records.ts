@@ -1,21 +1,35 @@
 import { type ActorId, type AggregateType, type CommandId, now, type ProjectId } from '@althar/domain'
-import { bumpRevision, Ledger, type RevisionedTable, RowNotFound } from '@althar/persistence-sqlite'
+import { Ledger, type RevisionConflict, type RevisionedTable, RowNotFound } from '@althar/persistence-sqlite'
 import { Effect } from 'effect'
-import { SqlClient } from 'effect/sql'
+import { SqlClient, type SqlError } from 'effect/sql'
 
 /*
  * The small write helpers every module shares. A changed row gets its next
  * revision; a fact goes to the record with that revision.
  */
 
-/** Changes a row and moves its revision on. Returns the new revision. */
-export const change = Effect.fn('change')(function* (table: RevisionedTable, id: string, set: Readonly<Record<string, unknown>>) {
+/**
+ * Changes a row and moves its revision on, in one statement: what changed
+ * and its next revision are written together, so nothing can come between
+ * them, and an agent's every edit costs the store one write, not three.
+ * Returns the new revision. Its failures still name a revision conflict, as
+ * its callers were written against the read and move it replaces; one
+ * statement never meets one.
+ */
+export const change: (
+  table: RevisionedTable,
+  id: string,
+  set: Readonly<Record<string, unknown>>,
+) => Effect.Effect<number, SqlError.SqlError | RowNotFound | RevisionConflict, SqlClient.SqlClient> = Effect.fn('change')(function* (
+  table: RevisionedTable,
+  id: string,
+  set: Readonly<Record<string, unknown>>,
+) {
   const sql = yield* SqlClient.SqlClient
-  const [row] = yield* sql<{ revision: number }>`SELECT revision FROM ${sql(table)} WHERE id = ${id}`
+  const moved = Object.keys(set).length === 0 ? sql`revision = revision + 1` : sql`${sql.update(set)}, revision = revision + 1`
+  const [row] = yield* sql<{ revision: number }>`UPDATE ${sql(table)} SET ${moved} WHERE id = ${id} RETURNING revision`
   if (row === undefined) return yield* new RowNotFound({ table, id })
-  const revision = yield* bumpRevision(table, id, row.revision)
-  yield* sql`UPDATE ${sql(table)} SET ${sql.update(set)} WHERE id = ${id}`
-  return revision
+  return row.revision
 })
 
 export interface Fact {

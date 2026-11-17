@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useEffectEvent, useState, useSyncExternalStore } from 'react'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 
 import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
@@ -195,6 +195,10 @@ function BareTitleBar({ className }: { className?: string }) {
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
+  // A project Manage homes asked for, in this window or another's: its tab, and the window on it.
+  const showProject = useEffectEvent((projectId: string) => tabs.open(projectId))
+  const { host: frameHost } = useServices()
+  useEffect(() => frameHost.homes?.onProject(showProject), [frameHost.homes])
   useWarmSearch()
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)

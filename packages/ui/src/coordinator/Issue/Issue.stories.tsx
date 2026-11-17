@@ -96,9 +96,61 @@ export const AllStates: Story = {
         },
         { state: 'from, linear', node: <IssueRef mark={Brand.Linear} id="MER-231" linear /> },
         { state: 'from, plain', node: <IssueRef mark={Brand.Jira} id="PAY-212" /> },
+        {
+          state: 'from, several',
+          node: (
+            <IssueRef
+              mark={Brand.Linear}
+              id="DEV-211"
+              linear
+              also={[
+                { mark: Brand.Linear, id: 'DEV-37', linear: true },
+                { mark: Brand.GitHub, id: '#412' },
+              ]}
+            />
+          ),
+        },
       ]}
     />
   ),
+}
+
+/**
+ * A task from several issues, on any trackers, heading its thread as the
+ * task's screen lays them out: each with its own switch, set on its own.
+ */
+export const SeveralIssues: Story = {
+  render: function Render(args) {
+    const [parts, setParts] = useState<Readonly<Record<string, boolean>>>({ 'PAY-212': true })
+    const issues = [
+      args,
+      { ...args, mark: Brand.Jira, source: 'Jira', id: 'PAY-212', title: 'Partners can retry refunds', tone: 'plain' as const },
+    ]
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {issues.map((issue) => (
+          <div key={issue.id}>
+            <Issue {...issue} />
+            <IssuePart
+              id={issue.id}
+              partOf={parts[issue.id] === true}
+              onChange={(partOf) => setParts((all) => ({ ...all, [issue.id]: partOf }))}
+            />
+          </div>
+        ))}
+      </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const first = c.getByRole('switch', { name: 'Only part of MER-231' })
+    const second = c.getByRole('switch', { name: 'Only part of PAY-212' })
+    await expect(first).toHaveAttribute('aria-checked', 'false')
+    await expect(second).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(first)
+    await expect(first).toHaveAttribute('aria-checked', 'true')
+    await expect(second).toHaveAttribute('aria-checked', 'true')
+  },
 }
 
 /** Under a task's issue: the task does all of it, so its merge closes it; or, switched on, only part, and its merge leaves it open. */

@@ -19,7 +19,7 @@ import {
 } from '@althar/ui'
 import { Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
-import { showHomes } from '../homes/useHomes'
+import { useHomeState } from '../homes/useHomes'
 import { brandOf, pinnedOf } from '../../shared/agents'
 import { reads } from '../../data/reads'
 import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
@@ -197,7 +197,8 @@ export function StartView({
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
-  const { client } = useServices()
+  const { client, host } = useServices()
+  const here = useHomeState(host.homes)
   const welcoming = useWelcoming()
   // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong; and the
   // welcome while it is on show, over the project made on its way.
@@ -210,10 +211,9 @@ export function StartView({
         <div className={s.window}>
           <BareBar />
           <main className={s.remoteEmpty}>
-            <h1>No projects on this home yet</h1>
-            <p>Set up a project on the host, then reconnect. Remote access supports existing projects and task conversations.</p>
-            <p>Approvals require a trusted device. File transfers and local previews are unavailable on this connection.</p>
-            <Button onClick={showHomes}>Homes</Button>
+            <Icon name="home" size={28} className={s.remoteGlyph} />
+            <h1>No projects on {here !== null && here.current.kind !== 'local' ? here.current.home.name : 'this home'} yet</h1>
+            <p>Add a project on the host and it shows here.</p>
           </main>
         </div>
       )
@@ -447,6 +447,7 @@ function First({
           if (folderWay || draft === null) project.rename(next)
           else store.change(draft.id, (now) => ({ ...now, name: next }))
         }}
+        // oxlint-disable-next-line althar/press-at-once -- A form the runtime and a code host check (a clone, a repository made there): it stays, making, until made, so a refusal lands in it.
         onCreate={make}
         creating={project.making || draft?.creating === true}
         made={made !== null}

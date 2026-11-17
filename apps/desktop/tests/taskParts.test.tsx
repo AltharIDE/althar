@@ -324,12 +324,6 @@ describe('a task’s parts', () => {
       const merge = vi.fn(() => new Promise<void>((resolve, reject) => answers.push({ resolve, reject })))
       return { merge, answers }
     }
-    /** Another screen of the same window, pressing through the task's own model. */
-    function Elsewhere({ press }: { press: (model: ReturnType<typeof useTask>) => void }) {
-      const model = useTask('th1')
-      return <button onClick={() => press(model)}>Press elsewhere</button>
-    }
-
     it('keeps the second pull request Merging, not the first, across leaving the task and coming back, and after the call', async () => {
       const { merge, answers } = held()
       const getThread = reading()
@@ -352,30 +346,6 @@ describe('a task’s parts', () => {
       expect(popover.getByText('Merging', said)).toBeTruthy()
       expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1)
       expect(merge).toHaveBeenCalledOnce()
-    })
-
-    it('shows Merge now from Outputs as Merging on every surface, and Merge again where it fails', async () => {
-      const { merge, answers } = held()
-      const { client } = fakeClient({ getThread: reading(), merge })
-      withServices(
-        <>
-          <Task />
-          <Elsewhere press={(model) => void model.mergeWaiting('now')} />
-        </>,
-        client,
-      )
-      await screen.findByRole('button', { name: /^Parts, \d+/ })
-      await userEvent.click(screen.getByRole('button', { name: 'Press elsewhere' }))
-      await waitFor(() => expect(merge).toHaveBeenCalledWith(base.task.id, 'aaa111', first.url, 'now'))
-      // Pressed again meanwhile, nothing merges it twice.
-      await userEvent.click(screen.getByRole('button', { name: 'Press elsewhere' }))
-      const popover = await parts()
-      expect(await popover.findByText('Merging', said)).toBeTruthy()
-      expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1)
-      expect(merge).toHaveBeenCalledOnce()
-      act(() => answers[0]!.reject(new Error('GitHub refused the merge.')))
-      await waitFor(() => expect(popover.queryByText('Merging', said)).toBeNull())
-      expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(2)
     })
 
     /** Outputs of the same task, pressing through the model its header reads. */
@@ -540,21 +510,28 @@ describe('a task’s parts', () => {
       expect(client.merge).toHaveBeenCalledOnce()
     })
 
-    it('replaces Review and merge with Merging at once, pressed there or elsewhere', async () => {
+    it('shows Ship under way at once, pressed on its card, before the runtime answers', async () => {
       const waiting = change({ draft: false, head: 'aaa111', checks: PASSED, localHead: 'def456', unpushed: 2 })
-      const merge = vi.fn(() => new Promise<void>(() => {}))
+      const ship = vi.fn(() => new Promise<void>(() => {}))
       const { client } = fakeClient({
         getThread: vi.fn(async () =>
-          snapshot({ task: { ...base.task, phase: 'ready', changes: [waiting], held: { since: '2026-11-10T09:00:00.000Z', commits: 2 } } }),
+          snapshot({
+            task: {
+              ...base.task,
+              phase: 'ready',
+              changes: [waiting],
+              held: { since: '2026-11-10T09:00:00.000Z', commits: 2 },
+              shipRoute: { route: { review: true, far: 'merge' }, reviewable: true, bent: null },
+            },
+          }),
         ),
-        merge,
+        ship,
       })
       withServices(<Task />, client)
-      await userEvent.click(await screen.findByRole('button', { name: 'Review and merge' }))
-      expect(screen.queryByRole('button', { name: 'Review and merge' })).toBeNull()
-      expect(screen.getAllByRole('status').some((status) => status.textContent?.includes('Merging'))).toBe(true)
-      await userEvent.click(screen.getByRole('button', { name: /^Parts, \d+/ }))
-      expect(merge).toHaveBeenCalledOnce()
+      await userEvent.click(await screen.findByRole('button', { name: 'Ship review, then push, then ready, then merge' }))
+      expect(screen.getByRole('button', { name: /^Reviewing/ }).getAttribute('aria-disabled')).toBe('true')
+      expect(screen.queryByRole('button', { name: 'Ship review, then push, then ready, then merge' })).toBeNull()
+      expect(ship).toHaveBeenCalledWith(base.task.id, undefined, undefined)
     })
   })
 })

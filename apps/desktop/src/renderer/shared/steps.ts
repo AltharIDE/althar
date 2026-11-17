@@ -29,6 +29,8 @@ export const stepText = {
     // Its pull request in its branch's merge queue, until its host merges it or the queue takes it out (data/merges).
     merge_queue: 'In the merge queue',
   } as Readonly<Record<string, string>>,
+  /** Its Ship past its push, its step still the opening of its pull request: the stop it is at, as Ship's button says it. */
+  shipAt: { ready: 'Marking ready', merge: 'Merges once checks pass' } satisfies Record<'ready' | 'merge', string>,
   /** Stopped, no agent on it, as its card and its header say it: by what stopped its lead, where something says. */
   stopped: 'Stopped',
   /** Stopped with its pull request ready to merge as it is: the word, and that it can be accepted all the same. */
@@ -39,6 +41,10 @@ export const stepText = {
     althar: 'Stopped by Althar',
   } satisfies Record<'declined' | 'interrupted' | 'althar', string>,
 }
+
+/** What it does while on a step, in a word; on `publish` with its Ship past its push, the stop it is at. */
+export const stepNow = (step: string | null, shipAt?: 'ready' | 'merge' | null): string | undefined =>
+  step === null ? undefined : step === 'publish' && shipAt != null ? stepText.shipAt[shipAt] : stepText.now[step]
 
 /** Whether a step comes after the plan's steps: a conflict round's, the checks of a change, its commits going up, or its merge. */
 export const afterSteps = (step: string | null) =>

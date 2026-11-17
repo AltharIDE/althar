@@ -11,7 +11,7 @@ import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Thread } from '../../thread/Thread/Thread'
 import { Turn } from '../../thread/Turn/Turn'
 import { You } from '../../thread/You/You'
-import { TaskEnd, WorksIn } from '../../foundations/vocabulary'
+import { BlockerStands, TaskEnd, WorksIn } from '../../foundations/vocabulary'
 import { TaskLaunch, type LaunchPick, type LaunchStep } from './TaskLaunch'
 
 /** The consumer's picker for one agent of a step: the composer's own, bordered. */
@@ -294,6 +294,50 @@ export const HeldWhileWaitingForAFreeAgent: Story = {
     await expect(c.getByText('Held')).toBeInTheDocument()
     await expect(c.getByRole('button', { name: 'Start' })).toBeInTheDocument()
     await expect(c.queryByRole('status')).toBeNull()
+  },
+}
+
+const stopWaitingForHosts = fn()
+const startedWithout = fn()
+
+/**
+ * It waits for other tasks (tasks wait for their blockers): each is a stop on
+ * its line before its lead, "Pairing merges", turning while it runs, and how
+ * it stands at the row's end. The foot says when it starts, where the clock
+ * was; no clock runs. A row's menu lets go of that task, or starts it anyway.
+ */
+export const WaitsForOtherTasks: Story = {
+  render: () => (
+    <Launch
+      onStart={startedWithout}
+      waitsFor={[
+        { id: 'pairing', name: 'Pair a device', stands: BlockerStands.Review, onOpen: fn() },
+        { id: 'hosts', name: 'Hosts screen', stands: BlockerStands.Working, onOpen: fn(), onStopWaiting: stopWaitingForHosts },
+      ]}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('Pair a device merges')).toBeInTheDocument()
+    await expect(c.getByText('In review')).toBeInTheDocument()
+    await expect(c.getByRole('status')).toHaveTextContent('Starts when both merge')
+    await expect(c.queryByRole('button', { name: 'Start now' })).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'After Hosts screen: Working' }))
+    await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Stop waiting for Hosts screen' }))
+    await expect(stopWaitingForHosts).toHaveBeenCalled()
+    await expect(startedWithout).not.toHaveBeenCalled()
+  },
+}
+
+/** One it waits for was abandoned: struck through, in red, and the plan waits for the person's answer. */
+export const WaitsForAnAbandonedTask: Story = {
+  render: () => <Launch waitsFor={[{ id: 'seal', name: 'Seal secrets', stands: BlockerStands.Abandoned, onReopen: fn() }]} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('status')).toHaveTextContent('Waits for your answer')
+    await userEvent.click(c.getByRole('button', { name: 'After Seal secrets: Abandoned' }))
+    await expect(await within(document.body).findByRole('menuitem', { name: 'Reopen Seal secrets' })).toBeInTheDocument()
+    await expect(within(document.body).getByRole('menuitem', { name: 'Start now, without it' })).toBeInTheDocument()
   },
 }
 

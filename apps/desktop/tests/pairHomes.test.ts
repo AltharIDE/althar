@@ -46,6 +46,31 @@ const protection = () => {
 }
 
 describe('connection credentials', () => {
+  it('removes a forgotten key from disk and restores only its original sealed record through Undo', async () => {
+    const profile = temporary()
+    const protect = protection()
+    const store = connectionCredentials(profile, protect, () => 0)
+    const first = await store.pending('5'.repeat(64), 100, new Set())
+    const restore = await store.forget(first.id)
+    expect(readFileSync(join(profile, 'connection-keys/devices.json'), 'utf8')).not.toContain(first.id)
+    await expect(connectionCredentials(profile, protect).load(first.id)).rejects.toThrow('safely')
+    expect(restore).toBeDefined()
+    await restore?.()
+    await restore?.()
+    expect(await store.load(first.id)).toEqual(first.key)
+    expect(readFileSync(join(profile, 'connection-keys/devices.json'), 'utf8')).not.toContain(first.key.privateKey)
+    expect(await store.forget(`remote_${'0'.repeat(32)}`)).toBeUndefined()
+  })
+
+  it('does not overwrite a newer pending key when an old connection is restored', async () => {
+    const store = connectionCredentials(temporary(), protection(), () => 0)
+    const first = await store.pending('5'.repeat(64), 100, new Set())
+    const restore = await store.forget(first.id)
+    const newer = await store.pending('5'.repeat(64), 100, new Set())
+    await expect(restore?.()).rejects.toThrow('safely')
+    expect(await store.load(newer.id)).toEqual(newer.key)
+  })
+
   it('saves only sealed keys and reuses a pending key across concurrent retries and restarts', async () => {
     const profile = temporary()
     const protect = protection()

@@ -15,7 +15,7 @@ import {
   homeHttpsAgent,
 } from '@althar/transport-node'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Exit, Scope } from 'effect'
 
 import { services } from '../src/Api'
 import { DevicePairings } from '../src/DevicePairings'
@@ -23,7 +23,9 @@ import { Instance } from '../src/Instance'
 import { ClientIdentities } from '../src/ClientIdentities'
 import { listenNetworkApi } from '../src/networkApi'
 import { Secrets } from '../src/Secrets'
-import { fakeAgents, fakeConnectors, ROOMY } from './support'
+import { Projects } from '../src/Projects'
+import { envelope } from '../src/envelope'
+import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
 
 const certificate = readFileSync(new URL('../../transport-node/tests/fixtures/tls/certificate.pem', import.meta.url))
 const key = readFileSync(new URL('../../transport-node/tests/fixtures/tls/key.pem', import.meta.url))
@@ -157,6 +159,28 @@ describe('direct HTTPS and WSS home connections', () => {
         yield* Effect.flip(completeDevicePairing({ ...code, tlsKeyPin: '0'.repeat(64) }, key, 'Desktop'))
         // The failed TLS connection did not consume the invitation.
         yield* completeDevicePairing(code, key, 'Desktop')
+      }).pipe(Effect.provide(environment)),
+    ),
+  )
+
+  it.live('records a remote task exactly once and reads it after reconnecting with the saved device key', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { code } = yield* home
+        const project = yield* (yield* Projects).open({ envelope: yield* envelope('project.open', {}), path: repository() })
+        const key = yield* createDeviceKey
+        const target = yield* completeDevicePairing(code, key, 'Desktop')
+        const scope = yield* Scope.make()
+        const { api } = yield* Effect.gen(function* () {
+          return yield* apiClient(yield* openHttpsConnection(target, (message) => signDeviceMessage(key.privateKey, message)))
+        }).pipe(Scope.provide(scope))
+        const command = { commandId: commandId(), projectId: project.projectId, title: 'Created over WSS' }
+        const task = yield* api.CreateTask(command)
+        assert.strictEqual((yield* api.CreateTask(command)).id, task.id)
+        yield* Scope.close(scope, Exit.void)
+        const again = yield* apiClient(yield* openHttpsConnection(target, (message) => signDeviceMessage(key.privateKey, message)))
+        assert.strictEqual(again.info.identity.deviceId, target.deviceId)
+        assert.strictEqual((yield* again.api.GetThread({ threadId: task.threadId })).task.title, command.title)
       }).pipe(Effect.provide(environment)),
     ),
   )

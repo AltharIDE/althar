@@ -971,5 +971,5 @@ it('shows an empty remote home without offering desktop folders or agent install
   expect(await screen.findByRole('heading', { name: 'No projects on this home yet' })).not.toBeNull()
   expect(screen.queryByRole('button', { name: /Choose a folder/ })).toBeNull()
   expect(host.pickFolder).not.toHaveBeenCalled()
-  expect(screen.getByRole('button', { name: 'Homes' })).not.toBeNull()
+  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
 })

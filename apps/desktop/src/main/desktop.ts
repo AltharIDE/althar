@@ -671,6 +671,21 @@ const isChannel = (value: unknown) => typeof value === 'number' && Number.isInte
 
 const isOneOf = (value: unknown, of: readonly string[]) => typeof value === 'string' && of.includes(value)
 
+/** Whether `value` is a layout of the window's buttons. */
+export const isButtonLayout = (value: unknown): value is ButtonLayout => {
+  if (typeof value !== 'object' || value === null) return false
+  const { start, end } = value as Record<string, unknown>
+  return isButtons(start) && isButtons(end)
+}
+
+/** Whether `value` is an accent: a colour, or none. */
+export const isAccent = (value: unknown): value is Rgb | null => {
+  if (value === null) return true
+  if (typeof value !== 'object' || value === undefined) return false
+  const { r, g, b } = value as Record<string, unknown>
+  return isChannel(r) && isChannel(g) && isChannel(b)
+}
+
 /** Whether `value` is a DesktopChrome, as it crosses from main to the window. */
 export const isDesktopChrome = (value: unknown): value is DesktopChrome => {
   if (typeof value !== 'object' || value === null) return false
@@ -678,11 +693,5 @@ export const isDesktopChrome = (value: unknown): value is DesktopChrome => {
   if (!isOneOf(family, FAMILIES) || !isOneOf(kind, KINDS)) return false
   if (look !== undefined && !isOneOf(look, LOOKS)) return false
   if (tone !== undefined && !isOneOf(tone, TONES)) return false
-  if (typeof layout !== 'object' || layout === null) return false
-  const { start, end } = layout as Record<string, unknown>
-  if (!isButtons(start) || !isButtons(end)) return false
-  if (accent === null) return true
-  if (typeof accent !== 'object' || accent === undefined) return false
-  const { r, g, b } = accent as Record<string, unknown>
-  return isChannel(r) && isChannel(g) && isChannel(b)
+  return isButtonLayout(layout) && isAccent(accent)
 }

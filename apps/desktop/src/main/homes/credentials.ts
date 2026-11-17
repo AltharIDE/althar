@@ -143,6 +143,24 @@ export const connectionCredentials = (profile: string, protect: ProtectCredentia
         if (record === undefined) throw unavailable()
         return unlock(record)
       }),
-    forget: (id: string) => serialized(async () => write((await read()).filter((key) => key.id !== id))),
+    /** The undo capability retains only the OS-sealed record, and never leaves main. */
+    forget: (id: string) =>
+      serialized(async () => {
+        const records = await read()
+        const forgotten = records.find((key) => key.id === id)
+        await write(records.filter((key) => key.id !== id))
+        if (forgotten === undefined) return undefined
+        return () =>
+          serialized(async () => {
+            const current = await read()
+            const present = current.find((key) => key.id === id)
+            if (present !== undefined) {
+              if (present.sealed !== forgotten.sealed) throw unavailable()
+              return
+            }
+            if (current.length >= 64 || current.some((key) => key.pairingHash === forgotten.pairingHash)) throw unavailable()
+            await write([...current, forgotten])
+          })
+      }),
   }
 }

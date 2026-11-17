@@ -4,6 +4,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { STAGES, T432 } from '../../fixtures/coordinator'
 import { CODEX, OPUS, SONNET } from '../../fixtures/models'
+import { Brand } from '../../foundations/brands/brands'
 import { TaskStatus } from '../../foundations/vocabulary'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { States, statesOn } from '../../storybook/States'
@@ -31,6 +32,18 @@ export const Running: Story = {
   play: async ({ args, canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Open task/ }))
     await expect(args.onOpen).toHaveBeenCalledWith('432')
+  },
+}
+
+/** From several issues, on any trackers: each one's mark and key in its foot. */
+export const FromSeveralIssues: Story = {
+  args: {
+    from: { mark: Brand.Linear, id: 'DEV-211', linear: true, also: [{ mark: Brand.Linear, id: 'DEV-37', linear: true }] },
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('DEV-211')).toBeVisible()
+    await expect(c.getByText('DEV-37')).toBeVisible()
   },
 }
 

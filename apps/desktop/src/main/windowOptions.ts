@@ -43,7 +43,7 @@ export const appMenu = (platform: NodeJS.Platform, dev: boolean, homes?: () => v
           submenu: [
             ...(homes === undefined
               ? []
-              : [{ label: 'Homes…', accelerator: 'CommandOrControl+Shift+H', click: homes }, { type: 'separator' as const }]),
+              : [{ id: 'homes', label: 'Homes…', accelerator: 'CommandOrControl+Shift+H', click: homes }, { type: 'separator' as const }]),
             { role: 'quit' },
           ],
         },

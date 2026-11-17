@@ -1,4 +1,4 @@
-import type { AttachedFile, ConversationView, Picture, ThreadItem } from '@althar/contracts'
+import type { AttachedFile, ConversationView, LineComment, Picture, ThreadItem } from '@althar/contracts'
 import { notifyManager } from '@tanstack/react-query'
 
 import { text as imagesText } from './images'
@@ -38,6 +38,8 @@ export const sending = (
     readonly pictures?: ReadonlyArray<Picture>
     /** The files and folders sent with it. */
     readonly files?: ReadonlyArray<AttachedFile>
+    /** Its comments on lines of the diff (decisions: desktop-app § Comments on the diff). */
+    readonly comments?: ReadonlyArray<LineComment>
   },
 ): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
   sent += 1
@@ -48,7 +50,15 @@ export const sending = (
     sequence: (items.at(-1)?.sequence ?? 0) + 0.5,
     agentId: null,
     createdAt: new Date().toISOString(),
-    content: { text: message.text, links: [], pictures: message.pictures ?? [], files: message.files ?? [] },
+    content: {
+      text: message.text,
+      links: [],
+      pictures: message.pictures ?? [],
+      files: message.files ?? [],
+      ...(message.comments === undefined || message.comments.length === 0
+        ? {}
+        : { comments: message.comments.map((comment, index) => ({ id: `${id}:${index}`, ...comment })) }),
+    },
     input: {
       state: message.queued ? 'queued' : 'delivered',
       interrupting: message.interrupting,
@@ -221,6 +231,8 @@ export const queuedOf = (
   readonly pictures: ReadonlyArray<Picture>
   readonly files: ReadonlyArray<AttachedFile>
   readonly dictated?: boolean
+  /** Its comments on lines of the diff, as they went (decisions: desktop-app § Comments on the diff). */
+  readonly comments?: ReadonlyArray<LineComment>
 }> =>
   !shown
     ? []
@@ -237,6 +249,9 @@ export const queuedOf = (
                 pictures: item.content.pictures,
                 files: item.content.files,
                 ...(item.input.dictated === true ? { dictated: true } : {}),
+                ...(item.content.comments === undefined || item.content.comments.length === 0
+                  ? {}
+                  : { comments: item.content.comments.map(({ id: _id, ...comment }) => comment) }),
               },
             ]
           : [],
@@ -288,11 +303,34 @@ export const newestReads = (head?: string) => {
     begun.set(key, { read: mine, landed })
     return landed
   }
+  /**
+   * One read of several things, as `newest` reads each: `keep` is given, at once, those of them no read began after,
+   * so a burst read together is shown in one write.
+   */
+  const many = <A>(
+    keys: ReadonlyArray<string>,
+    read: Promise<ReadonlyMap<string, A>>,
+    keep: (values: ReadonlyMap<string, A>) => void,
+    fail: (failure: unknown) => void,
+  ): Promise<void> => {
+    reads += 1
+    const mine = reads
+    const landed = read.then((values) => {
+      const commit = () => {
+        const kept = new Map([...values].filter(([key]) => begun.get(key)?.read === mine))
+        if (kept.size > 0) keep(kept)
+      }
+      if (held !== null) held.push(commit)
+      else commit()
+    }, fail)
+    for (const key of keys) begun.set(key, { read: mine, landed })
+    return landed
+  }
   const landed = async (key: string) => {
     for (let now = begun.get(key); now !== undefined; now = begun.get(key)) {
       await now.landed
       if (begun.get(key) === now) return
     }
   }
-  return Object.assign(newest, { landed })
+  return Object.assign(newest, { many, landed })
 }

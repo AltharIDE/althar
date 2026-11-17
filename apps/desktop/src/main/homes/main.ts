@@ -8,6 +8,7 @@ import { sshEnvironment } from '@althar/transport-node'
 
 import type { WindowHome } from '../../homes'
 import { homeController } from './controller'
+import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
 import { homeStore, savedHome } from './store'
@@ -24,7 +25,7 @@ export const startHomeConnections = ({
   readonly profile: string
   readonly entry: string
   readonly mine: (contents: WebContents) => boolean
-  readonly open: (home: WindowHome) => void
+  readonly open: (home: WindowHome, projectId?: string) => void
   readonly log: (message: string) => void
 }) => {
   const connections = new Map<number, ReturnType<typeof connectHomeProcess>>()
@@ -59,12 +60,40 @@ export const startHomeConnections = ({
   }
   const store = homeStore(profile)
   const credentials = connectionCredentials(profile, protect)
+  const forgottenKeys = new Map<string, { restore: () => Promise<void>; timer: ReturnType<typeof setTimeout> }>()
+  let keyChanges: Promise<unknown> = Promise.resolve()
+  let queuedKeyChanges = 0
+  const changingKey = <A>(change: () => Promise<A>): Promise<A> => {
+    if (queuedKeyChanges >= 16) return Promise.reject(new Error('Home connections are busy. Try again shortly.'))
+    queuedKeyChanges++
+    const next = keyChanges.then(change).finally(() => {
+      queuedKeyChanges--
+    })
+    keyChanges = next.catch(() => undefined)
+    return next
+  }
+  // What the chip's menu and Manage homes show, sent to every window at most once a frame however much changed at once.
+  let telling: ReturnType<typeof setTimeout> | undefined
+  const overviewChanged = () => {
+    if (telling !== undefined) return
+    telling = setTimeout(() => {
+      telling = undefined
+      void controller
+        .overview()
+        .then((overview) => {
+          for (const window of BrowserWindow.getAllWindows())
+            if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:homes-overview', overview)
+        })
+        .catch(() => undefined)
+    }, 16)
+  }
+  const glances = homeGlances({ profile, wanted: () => controller.wanted(), changed: overviewChanged })
   const controller = homeController({
     store,
     pair: async (value, name, signal) => {
       const code = decodePairingCode(value.trim())
       if (code.expiresAt <= Date.now()) throw new Error('This pairing code expired. Create a new one on the host.')
-      const used = new Set((await store.list()).map((home) => home.id))
+      const used = (await controller.wanted()).ids
       if (signal.aborted) throw new Error('Pairing was cancelled.')
       const pending = await credentials.pending(
         createHash('sha256')
@@ -79,6 +108,8 @@ export const startHomeConnections = ({
     inspect: (target, signal) => inspectHomeProcess(fork, target, signal),
     open,
     changed: tell,
+    overviewChanged,
+    glances,
   })
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
@@ -100,14 +131,63 @@ export const startHomeConnections = ({
   ipcMain.handle('althar:homes-pair', (event, code: unknown, name: unknown) => controller.pair(owner(event), code, name))
   ipcMain.handle('althar:homes-inspect', (event, target: unknown) => controller.inspect(owner(event), target))
   ipcMain.handle('althar:homes-connect', (event, check: unknown, name: unknown) => controller.connect(owner(event), check, name))
-  ipcMain.handle('althar:homes-open', (event, id: unknown) => controller.open(owner(event), id))
-  ipcMain.handle('althar:homes-forget', async (event, id: unknown) => {
+  ipcMain.handle('althar:homes-overview', (event) => {
+    owner(event)
+    return controller.overview()
+  })
+  ipcMain.handle('althar:homes-save', (event, check: unknown, name: unknown) => controller.save(owner(event), check, name))
+  ipcMain.handle('althar:homes-open', (event, id: unknown, projectId: unknown) => controller.open(owner(event), id, projectId))
+  ipcMain.handle('althar:homes-rename', (event, id: unknown, name: unknown) => controller.rename(owner(event), id, name))
+  ipcMain.handle('althar:homes-change', (event, id: unknown, check: unknown) => controller.change(owner(event), id, check))
+  ipcMain.handle('althar:homes-forget', (event, id: unknown) => {
     const caller = owner(event)
     if (typeof id !== 'string' || !/^remote_[0-9a-f]{32}$/.test(id)) throw new Error('Choose a saved home to forget.')
-    await credentials.forget(id)
-    await controller.forget(caller, id)
+    return changingKey(async () => {
+      const home = (await store.list()).find((one) => one.id === id)
+      await controller.forget(caller, id)
+      if (home?.https === undefined) return
+      let restore: (() => Promise<void>) | undefined
+      try {
+        restore = await credentials.forget(id)
+      } catch (error) {
+        await controller.restore(caller, id)
+        throw error
+      }
+      const previous = forgottenKeys.get(id)
+      if (previous !== undefined) clearTimeout(previous.timer)
+      if (restore !== undefined)
+        forgottenKeys.set(id, {
+          restore,
+          timer: setTimeout(() => forgottenKeys.delete(id), 30_000),
+        })
+    })
   })
-  ipcMain.handle('althar:homes-cancel', (event) => controller.navigating(owner(event)))
+  ipcMain.handle('althar:homes-restore', (event, id: unknown) => {
+    const caller = owner(event)
+    if (typeof id !== 'string' || !/^remote_[0-9a-f]{32}$/.test(id)) throw new Error('Choose a saved home to restore.')
+    return changingKey(async () => {
+      const held = forgottenKeys.get(id)
+      if (held !== undefined) await held.restore()
+      try {
+        await controller.restore(caller, id)
+      } catch (error) {
+        if (held !== undefined && !(await store.list()).some((home) => home.id === id)) await credentials.forget(id)
+        throw error
+      }
+      if (held !== undefined) clearTimeout(held.timer)
+      forgottenKeys.delete(id)
+    })
+  })
+  // A window's projects, as it reads them: a report main can't read, or from anything but Althar's own window, is dropped.
+  ipcMain.on('althar:homes-report', (event, projects: unknown) => {
+    try {
+      if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame) return
+      controller.report(event.sender.id, projects)
+    } catch {
+      // Nothing to answer: the window reports again as its projects change.
+    }
+  })
+  ipcMain.handle('althar:homes-cancel', (event) => controller.cancel(owner(event)))
   const stop = (id: number) => {
     const connection = connections.get(id)
     connections.delete(id)
@@ -196,6 +276,11 @@ export const startHomeConnections = ({
     connect,
     stopAll: async () => {
       controller.stopping()
+      await keyChanges
+      for (const held of forgottenKeys.values()) clearTimeout(held.timer)
+      forgottenKeys.clear()
+      clearTimeout(telling)
+      const kept = glances.flush().catch(() => undefined)
       const stopped = Promise.all([...connections.keys()].map(stop))
       for (const child of children.keys()) {
         try {
@@ -206,7 +291,7 @@ export const startHomeConnections = ({
       }
       await Effect.runPromise(Effect.promise(() => Promise.all(children.values())).pipe(Effect.timeoutOption('12 seconds')))
       for (const child of children.keys()) child.kill()
-      await stopped
+      await Promise.all([stopped, kept])
     },
   }
 }

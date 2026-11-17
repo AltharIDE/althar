@@ -13,6 +13,11 @@ import { type Dispatch, type SetStateAction, useCallback, useSyncExternalStore }
  * A draft also remembers whether any of its words were dictated, even if
  * the person edited them after: the message is sent marked, so the agent
  * knows to read past what was misheard. Emptying the words forgets it.
+ *
+ * The window holds the words; storage is written behind them, not on each
+ * key: a moment after the person stops typing, or a little later while they
+ * go on, and at once as the window goes. Only the threads whose words
+ * changed are written, over what another window kept for the rest.
  */
 
 /** Where the words are kept across launches, by thread. */
@@ -49,21 +54,53 @@ const readStored = (): Record<string, string> => {
   return stored
 }
 
-/** Keeps a thread's words in storage, over what another window kept for other threads. */
-const keep = (key: string, text: string) => {
-  const kept = readStored()
-  if (text === '') delete kept[key]
-  else kept[key] = text
+/** How long after the last change storage is written, and how long the person typing on puts it off at most. */
+const WRITE = { after: 300, within: 2000 } as const
+
+/** Threads whose words changed since storage was last written, with their words now. */
+const unwritten = new Map<string, string>()
+let writing: ReturnType<typeof setTimeout> | undefined
+/** When the oldest of what isn't written yet changed. */
+let since: number | null = null
+let listening = false
+
+/** Writes the threads whose words changed, over what another window kept for other threads. */
+const write = () => {
+  clearTimeout(writing)
+  writing = undefined
+  since = null
+  if (unwritten.size === 0) return
+  const changed = [...unwritten]
+  unwritten.clear()
   try {
     const now: unknown = JSON.parse(window.localStorage.getItem(STORED) ?? '{}')
     const all = typeof now === 'object' && now !== null ? { ...(now as Record<string, unknown>) } : {}
-    if (text === '') delete all[key]
-    else all[key] = text
+    for (const [key, text] of changed)
+      if (text === '') delete all[key]
+      else all[key] = text
     if (Object.keys(all).length === 0) window.localStorage.removeItem(STORED)
     else window.localStorage.setItem(STORED, JSON.stringify(all))
   } catch {
     // Kept for this window only.
   }
+}
+
+/** Keeps a thread's words: in the window at once, and in storage behind them. */
+const keep = (key: string, text: string) => {
+  const kept = readStored()
+  if (text === '') delete kept[key]
+  else kept[key] = text
+  unwritten.set(key, text)
+  // As the window goes, what is still unwritten is written then.
+  if (!listening) {
+    listening = true
+    window.addEventListener('pagehide', write)
+    window.addEventListener('beforeunload', write)
+  }
+  const at = Date.now()
+  since ??= at
+  clearTimeout(writing)
+  writing = setTimeout(write, Math.max(0, Math.min(WRITE.after, since + WRITE.within - at)))
 }
 
 /** A thread's draft as it stands. */
@@ -155,8 +192,30 @@ export const useDraftOf = <Image, File = unknown>(key: string): Draft<Image, Fil
 /** A thread's words, and the way to change them: as useState, but kept by the thread. */
 export const useDraft = (key: string): readonly [string, Dispatch<SetStateAction<string>>] => {
   const { text } = useDraftOf(key)
-  const set = useCallback((change: SetStateAction<string>) => setDraftText(key, change), [key])
-  return [text, set]
+  return [text, useSetDraft(key)]
+}
+
+/**
+ * The way to change a thread's words, for a screen that doesn't show them itself: its composer does
+ * (`DraftComposer`), so the screen isn't drawn again for each word typed.
+ */
+export const useSetDraft = (key: string): Dispatch<SetStateAction<string>> =>
+  useCallback((change: SetStateAction<string>) => setDraftText(key, change), [key])
+
+/** What a screen reads of a thread's words, as it changes: drawn again only where that does, not for each word typed. */
+export const useDraftWords = <T>(key: string, read: (text: string) => T): T =>
+  useSyncExternalStore(
+    useCallback((listener: () => void) => subscribeDraft(key, listener), [key]),
+    () => read(draftOf(key).text),
+  )
+
+/** A thread's images and files, and whether its words were dictated, as they change: each the same until it does, whatever is typed. */
+export const useDraftAttached = <Image, File = unknown>(key: string): Pick<Draft<Image, File>, 'images' | 'files' | 'dictated'> => {
+  const subscribe = useCallback((listener: () => void) => subscribeDraft(key, listener), [key])
+  const images = useSyncExternalStore(subscribe, () => draftOf<Image, File>(key).images)
+  const files = useSyncExternalStore(subscribe, () => draftOf<Image, File>(key).files)
+  const dictated = useSyncExternalStore(subscribe, () => draftOf(key).dictated)
+  return { images, files, dictated }
 }
 
 /* Each image's id, unique in the window, so ones kept in a draft from before never share one with ones added since. */
@@ -166,11 +225,15 @@ export const nextImageId = () => {
   return `image-${images}`
 }
 
-/** Forgets every draft this window holds, as each test starts. */
+/** Forgets every draft this window holds, as each test starts: what wasn't written to storage yet isn't. */
 export const forgetDrafts = () => {
   drafts.clear()
   stored = null
   images = 0
+  clearTimeout(writing)
+  writing = undefined
+  since = null
+  unwritten.clear()
 }
 
 /** The key of the coordinator's draft in a project, and of a task's. */

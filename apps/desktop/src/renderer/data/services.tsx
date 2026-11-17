@@ -13,6 +13,7 @@ import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '
 import type { UpdateGlance } from '../../main/updates'
 
 import type { Attached } from '../shared/files'
+import type { SlowFrames } from '../shared/frames'
 import type { Client } from './client'
 import type { Feed } from './feed'
 
@@ -170,6 +171,16 @@ export interface WindowError {
   readonly source?: string
 }
 
+/** A place Althar keeps data, by id. */
+export type StoragePlace = 'profile' | 'logs' | 'worktrees'
+
+export interface StorageHost {
+  /** The path of each place. */
+  readonly places: () => Promise<Record<StoragePlace, string>>
+  /** Opens it in the system's file manager. */
+  readonly show: (place: StoragePlace) => Promise<void>
+}
+
 export interface Host {
   readonly homes?: HomesHost
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
@@ -232,6 +243,8 @@ export interface Host {
   readonly onStoreFailed: (listener: (failure: StoreFailure) => void) => () => void
   /** Shows the copy from before that update in the system's file manager. */
   readonly showBackup: () => Promise<void>
+  /** Where Althar keeps its data and where each is and a way to open it (About › Storage); the sizes are the runtime's (`getStorageSize`). */
+  readonly storage: StorageHost
   /** Starts the runtime again on a profile that was open elsewhere, once the person has closed that; the window reloads. */
   readonly tryAgain: () => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
@@ -274,6 +287,8 @@ export interface Host {
   readonly quit?: QuitHost
   /** Keeps an error the page didn't handle in main's log. */
   readonly logError?: (error: WindowError) => void
+  /** Keeps the page's long frames and slow presses in main's log (`shared/frames.ts`). */
+  readonly logFrames?: (frames: SlowFrames) => void
   /** The pages beside the conversations (ADR-100); absent where a page can't have them, as the edge's. */
   readonly pages?: PagesHost
   /** The HTML canvases beside the conversations (ADR-104); absent where a page can't have them, as the edge's. */

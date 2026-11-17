@@ -10,6 +10,8 @@ import {
   API_VERSION,
   NEW_PROJECT_DEFAULTS,
   apiVersionRefusal,
+  BACKGROUND,
+  LANE_HEADER,
   ClientAuthority,
   SocketAllowed,
   type MessageSender,
@@ -19,6 +21,7 @@ import {
   apiLayer,
   ApiError,
   type AgentStatus,
+  type StorageSize,
   type Attachment,
   type PortLike,
   serverProtocol,
@@ -26,11 +29,12 @@ import {
   type ProjectRulesView,
   type SentFile,
   type SentImage,
+  type LineComment,
 } from '@althar/contracts'
 import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Stream } from 'effect'
+import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { RpcServer, type RpcMiddleware } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
@@ -60,6 +64,7 @@ import { publishRepository } from './publish'
 import { refreshRemotes } from './recordedRemotes'
 import { contained, Failures, failuresLayer } from './Failures'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
+import { storageSizes } from './StorageSizes'
 import { modelNamer } from './coordinatorNews'
 import { teamChanges, teamLine } from './teamWords'
 import { addItem } from './threads'
@@ -82,7 +87,7 @@ import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
-import { Live } from './Live'
+import { deltasFor, Live, newestOf, watchedKey, watchedOf } from './Live'
 import { missedReports } from './missedReports'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
@@ -133,6 +138,7 @@ import { TaskActions } from './TaskActions'
 import { IssueChanges } from './IssueChanges'
 import { IssueDrafts } from './IssueDrafts'
 import { postTeamReviews, Reviews, runOutside, sendMidTurn, setPostTeamReviews, setRunOutside, setSendMidTurn } from './Reviews'
+import { setShipRoute, shipRouteSetting } from './shipRoute'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
 import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
@@ -162,6 +168,7 @@ import { Canvases } from './Canvases'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
+import { stopWaiting } from './waits'
 
 /** Runs one of sync's steps against the person's agents' settings, where this runtime reads them; refused where it doesn't. */
 const withSync = (step: (io: mcpSync.SyncIo & skillSync.SkillIo) => Promise<unknown>) =>
@@ -236,6 +243,11 @@ const realOf = (path: string): string => {
   }
 }
 /** What the person asked for, as a task they made says it: what they wrote, or, from an issue, which the thread shows, what they added to it. */
+/** The issues a task is made from, each once, in the order given: issue first, then issues. */
+const issuesOf = (issue: string | undefined, issues: ReadonlyArray<string> | undefined): ReadonlyArray<string> => {
+  const all = [...(issue === undefined ? [] : [issue]), ...(issues ?? [])].map((one) => one.trim()).filter((one) => one !== '')
+  return all.filter((one, index) => all.findIndex((other) => other.toLowerCase() === one.toLowerCase()) === index)
+}
 const requestOf = (title: string, description: string | undefined, issue: string | undefined): { readonly request?: string } => {
   const words = issue === undefined ? [title, description ?? ''].filter((part) => part.trim() !== '').join('\n\n') : (description ?? '')
   return words.trim() === '' ? {} : { request: words }
@@ -380,6 +392,11 @@ export const handlers = apiLayer(
     const openingFolder = (taskId: string) => holdingFolder(taskId, Effect.void)
     const agents = yield* Agents
     const config = yield* RuntimeConfig
+    // What About › Storage measures: kept for the session, and stopped when the window gives up.
+    const sizes =
+      config.storage === undefined
+        ? undefined
+        : storageSizes({ profile: config.storage.profile, logs: config.storage.logs, worktrees: config.worktreeRoot })
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
@@ -432,6 +449,10 @@ export const handlers = apiLayer(
           })
     /** What a message's command says of its files: how many, never their names or paths; nothing where it has none. */
     const filesSaid = (kept: ReadonlyArray<InputFile>) => (kept.length === 0 ? {} : { files: kept.length })
+    /** A message's comments on the diff, kept with the files as they are now (decisions: desktop-app § Comments on the diff); none where it has none. */
+    const commentsFor = (threadId: string, comments: ReadonlyArray<LineComment> | undefined) =>
+      comments === undefined || comments.length === 0 ? Effect.succeed([]) : queries.keepLineComments(threadId, comments)
+    const commentsSaid = (kept: ReadonlyArray<unknown>) => (kept.length === 0 ? {} : { comments: kept.length })
 
     const failures = yield* Failures
     /** The call being answered, by the name the RPC server gives its span: `Status`, `ListProjects`. */
@@ -797,38 +818,31 @@ export const handlers = apiLayer(
         ),
       )
 
-    /* An agent's message or thought as far as it has streamed, before the store has all of it; and how full its context is, as it says. */
-    const streaming = Stream.unwrap(
-      Effect.map(live.subscribe, (events) =>
-        events.pipe(
-          Stream.flatMap((event): Stream.Stream<WatchEvent> =>
-            event._tag === 'Streaming'
-              ? Stream.make({
-                  _tag: 'Streaming',
-                  threadId: event.threadId,
-                  itemId: event.itemId,
-                  sequence: event.sequence,
-                  kind: event.kind,
-                  agentId: event.agentId,
-                  text: event.text,
-                })
-              : event._tag === 'Output'
-                ? Stream.make({ _tag: 'Output', threadId: event.threadId, itemId: event.itemId, text: event.text, dropped: event.dropped })
-                : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
-                  ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
-                  : event._tag === 'Background'
-                    ? Stream.make({ _tag: 'Background', threadId: event.threadId, background: event.background })
-                    : event._tag === 'Launches'
-                      ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
-                      : event._tag === 'PlanUsage'
-                        ? Stream.make({ _tag: 'PlanUsage', usage: event.usage })
-                        : event._tag === 'Drafting'
-                          ? Stream.make({ _tag: 'Drafting', threadId: event.threadId, drafts: event.drafts })
-                          : Stream.empty,
-          ),
-        ),
-      ),
-    )
+    /*
+     * What is happening now, for one watch: an agent's message or thought as
+     * far as it has streamed, before the store has all of it; how full its
+     * context is, as it says; a command's output; and what the runtime sends
+     * whole as it changes. Each is whole, so a watch that falls behind is sent
+     * the newest of each (`newestOf`), and nothing piles up for a window that
+     * stopped reading. With `deltas`, a message comes as what was added since
+     * this watch last sent it, not whole every time to every window.
+     */
+    const streaming = (deltas: boolean): Stream.Stream<WatchEvent> =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const events = Stream.flatMap(yield* live.subscribe, (event) => {
+            const shown = watchedOf(event)
+            return shown === undefined ? Stream.empty : Stream.make(shown)
+          })
+          const newest = yield* newestOf(events, watchedKey)
+          if (!deltas) return newest
+          const sent = deltasFor()
+          return Stream.flatMap(newest, (event) => {
+            const delta = sent(event)
+            return delta === undefined ? Stream.empty : Stream.make(delta)
+          })
+        }),
+      )
 
     const implemented: ApiHandlers = {
       ...(yield* agentCatalogHandlers),
@@ -875,7 +889,7 @@ export const handlers = apiLayer(
                 reason: 'SnapshotRequired',
                 message: 'This saved position is older than the available change history. Read a fresh snapshot before watching again.',
               })
-            return Stream.merge(changes(position.cursor, true), streaming)
+            return Stream.merge(changes(position.cursor, true), streaming(false))
           }),
         ),
       Status: ({ recheck }) =>
@@ -1178,10 +1192,14 @@ export const handlers = apiLayer(
             return { tasks: yield* findTasks(input, working) }
           }),
         ),
-      CreateTask: ({ commandId, projectId, title, description, issue, repositories }) =>
+      CreateTask: ({ commandId, projectId, title, description, issue: named, issues: others, repositories }) =>
         api(
           Effect.gen(function* () {
+            const all = issuesOf(named, others)
+            const issue = all[0]
             const from = yield* issueFor(projectId, issue)
+            // Each is read before the task is made, so one no tracker has makes no task.
+            yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
             const created = yield* projects.createTask({
               envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
               projectId,
@@ -1191,7 +1209,7 @@ export const handlers = apiLayer(
               ...(repositories === undefined ? {} : { repositories }),
               ...requestOf(title, description, issue),
             })
-            if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
+            for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })
             return yield* queries.task(created.taskId)
           }),
         ),
@@ -1204,6 +1222,17 @@ export const handlers = apiLayer(
           }),
         ),
       GetThreadItem: ({ threadId, itemId }) => api(queries.shown(threadId, itemId)),
+      // What a burst of changes touched, in one call: each as GetThreadItem reads it, the ones the thread shows. One gone
+      // since is left out on its own, as one it keeps for Althar is, rather than failing the rest.
+      GetThreadItems: ({ threadId, itemIds }) =>
+        api(
+          Effect.map(
+            Effect.forEach(new Set(itemIds), (itemId) =>
+              queries.shown(threadId, itemId).pipe(Effect.catchTag('NotFound', () => Effect.succeed(null))),
+            ),
+            (found) => found.filter((item) => item !== null),
+          ),
+        ),
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
@@ -1214,6 +1243,7 @@ export const handlers = apiLayer(
         api(image === true ? queries.readCodeImage(threadId, path) : queries.readCode(threadId, path, commit, line)),
       GetFileDiff: ({ taskId, path, untouched }) => api(queries.fileDiff(taskId, path, untouched === true)),
       GetTaskFindings: ({ taskId, review }) => api(queries.findings(taskId, review)),
+      GetLineComments: ({ taskId }) => api(queries.lineComments(taskId)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
       GetOlderSettled: ({ projectId, before, taskId }) =>
         api(Effect.map(queries.olderSettled(projectId, before, taskId), (tasks) => ({ tasks }))),
@@ -1235,7 +1265,7 @@ export const handlers = apiLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images, files, dictated, comments }) =>
         once(
           commandId,
           api(
@@ -1243,6 +1273,7 @@ export const handlers = apiLayer(
               // Its images and files are read and kept first, outside any transaction; one that can't be sent refuses the switch.
               const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = body === undefined ? [] : yield* filesFor(threadId, files)
+              const commented = body === undefined ? [] : yield* commentsFor(threadId, comments)
               // What the person said with it is said to the thread, under a command of its own.
               const message =
                 body === undefined
@@ -1257,6 +1288,7 @@ export const handlers = apiLayer(
                           disposition: 'after_current',
                           ...imagesSaid(kept),
                           ...filesSaid(copied),
+                          ...commentsSaid(commented),
                           ...(dictated === true ? { dictated } : {}),
                         },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
@@ -1265,6 +1297,7 @@ export const handlers = apiLayer(
                       sender,
                       ...(kept.length === 0 ? {} : { images: kept }),
                       ...(copied.length === 0 ? {} : { files: copied }),
+                      ...(commented.length === 0 ? {} : { comments: commented }),
                       ...(dictated === true ? { dictated: true } : {}),
                     }
               // Written to again with the switch, a task kept for later is back, as when it is sent on its own.
@@ -1299,6 +1332,7 @@ export const handlers = apiLayer(
           Effect.gen(function* () {
             const on = yield* coAuthorOn
             const atOnce = yield* busy.atOnce
+            const shipRoute = yield* shipRouteSetting
             return {
               plansAndReviews: yield* plansAndReviewsOf,
               newProjects: yield* newProjectDefaultsOf,
@@ -1307,6 +1341,7 @@ export const handlers = apiLayer(
               postTeamReviews: yield* postTeamReviews,
               runOutside: yield* runOutside,
               sendMidTurn: yield* sendMidTurn,
+              ...(shipRoute === undefined ? {} : { shipRoute }),
               automationsPaused: yield* automations.allPaused,
               folderWait: yield* cleanup.wait,
               agentsAtOnce: {
@@ -1414,6 +1449,12 @@ export const handlers = apiLayer(
       SetNewProjectDefaults: ({ commandId, ...change }) =>
         once(commandId, api(setNewProjectDefaults(change)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       GetTaskFolders: () => api(cleanup.list),
+      GetStorageSize: ({ place, refresh }) =>
+        api(
+          sizes === undefined
+            ? Effect.succeed<StorageSize>({ state: 'failed' })
+            : Effect.promise((signal) => sizes.size(place, refresh, signal).catch(() => ({ state: 'failed' }) as const)),
+        ),
       CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId))),
       RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, actorId))),
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
@@ -1422,6 +1463,8 @@ export const handlers = apiLayer(
       SetPostTeamReviews: ({ commandId, on }) =>
         once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetSendMidTurn: ({ commandId, to }) => once(commandId, api(setSendMidTurn(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetShipRoute: ({ commandId, route }) =>
+        once(commandId, api(setShipRoute(route)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetRunOutside: ({ commandId, to }) => once(commandId, api(setRunOutside(to)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       RunIt: ({ commandId, taskId, how }) => once(commandId, api(reviews.runIt({ taskId, ...(how === undefined ? {} : { how }) }))),
       StopRunning: ({ commandId, taskId }) => once(commandId, api(reviews.stopRunning({ taskId, actorId: actorId }))),
@@ -1625,7 +1668,7 @@ export const handlers = apiLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition, images, files, dictated, canvasComments }) =>
+      Send: ({ commandId, threadId, body, disposition, images, files, dictated, comments, canvasComments }) =>
         api(
           sessions.accepting(
             threadId,
@@ -1633,8 +1676,10 @@ export const handlers = apiLayer(
               // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
               const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = yield* filesFor(threadId, files)
+              // Its comments on the diff, each with the files as they are now, so a commit since can be told to change their lines.
+              const commented = yield* commentsFor(threadId, comments)
               const message = {
-                // The command says its images by their digests, never their bytes, and how many files, never their paths.
+                // The command says its images by their digests, never their bytes, and how many files and comments, never their paths.
                 envelope: yield* envelope(
                   'thread.send',
                   {
@@ -1643,6 +1688,7 @@ export const handlers = apiLayer(
                     disposition,
                     ...imagesSaid(kept),
                     ...filesSaid(copied),
+                    ...commentsSaid(commented),
                     ...(dictated === true ? { dictated } : {}),
                     ...(canvasComments === undefined || canvasComments.length === 0 ? {} : { canvasComments }),
                   },
@@ -1654,6 +1700,7 @@ export const handlers = apiLayer(
                 disposition,
                 ...(kept.length === 0 ? {} : { images: kept }),
                 ...(copied.length === 0 ? {} : { files: copied }),
+                ...(commented.length === 0 ? {} : { comments: commented }),
                 ...(dictated === true ? { dictated } : {}),
                 ...(canvasComments === undefined || canvasComments.length === 0 ? {} : { canvasComments }),
               }
@@ -1680,12 +1727,15 @@ export const handlers = apiLayer(
         api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat, taskId }) =>
+      StartTask: ({ commandId, projectId, title, description, steps, issue: named, issues: others, end, repositories, chat, taskId }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
+              const all = issuesOf(named, others)
+              const issue = all[0]
               const from = yield* issueFor(projectId, issue)
+              yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
               const created = yield* projects.createTask({
                 envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
@@ -1702,7 +1752,7 @@ export const handlers = apiLayer(
                   ? { plain: true, shelf: 'scratch' as const, ...(description?.trim() ? { request: description } : {}) }
                   : requestOf(title, description, issue)),
               })
-              if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
+              for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
               const projectEnd = aside ? null : yield* pullRequests.endFor(projectId, created.taskId)
               const planId = yield* plans.propose({
@@ -1729,6 +1779,9 @@ export const handlers = apiLayer(
         ),
       StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
+      // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
+      StopWaiting: ({ commandId, taskId, on }) =>
+        once(commandId, api(Effect.asVoid(Effect.provideContext(stopWaiting({ taskId, on, actorId }), folderStore)))),
       HoldDraft: ({ commandId, threadId, key }) => once(commandId, api(coordinator.holdDraft(threadId, key, actorId))),
       ChangePlan: ({ commandId, planId, steps, end, worksIn, toward }) =>
         once(commandId, api(plans.change(planId, steps, actorId, end, worksIn, toward))),
@@ -1822,7 +1875,19 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      SetTaskIssuePart: ({ commandId, taskId, partOf }) => once(commandId, api(issues.setPart(taskId, partOf))),
+      // Without an issue named, its first, as the one switch of a runtime before set.
+      SetTaskIssuePart: ({ commandId, taskId, partOf, issue }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const named = issue ?? (yield* issues.allOfTask(taskId))[0]?.link
+              yield* issues.setPart(taskId, partOf, named ?? '')
+              // Its open pull request says it in the words trackers read: in the background, as the switch shows it at once.
+              yield* pullRequests.issuesChanged(taskId)
+            }),
+          ),
+        ),
       ChangeReviewDraft: ({ commandId, draftId, verdict, summary, comments }) =>
         once(
           commandId,
@@ -2233,12 +2298,26 @@ export const handlers = apiLayer(
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
       DeclineReview: ({ commandId, taskId }) => once(commandId, api(runs.declineReview(taskId, actorId))),
-      Ship: ({ commandId, taskId, change }) =>
+      Ship: ({ commandId, taskId, change, route }) =>
         once(
           commandId,
           api(
-            Effect.flatMap(envelope('task.ship', { taskId, change: change ?? null }, commandId), (said) =>
-              runs.ship({ envelope: said, taskId, ...(change === undefined ? {} : { change }) }),
+            Effect.flatMap(envelope('task.ship', { taskId, change: change ?? null, route: route ?? null }, commandId), (said) =>
+              runs.ship({
+                envelope: said,
+                taskId,
+                ...(change === undefined ? {} : { change }),
+                ...(route === undefined ? {} : { route }),
+              }),
+            ),
+          ),
+        ),
+      RouteShip: ({ commandId, taskId, route }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.route_ship', { taskId, route }, commandId), (said) =>
+              Effect.asVoid(runs.routeShip({ envelope: said, taskId, route })),
             ),
           ),
         ),
@@ -2488,7 +2567,7 @@ export const handlers = apiLayer(
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
-      Watch: ({ since }) => Stream.merge(changes(since), streaming),
+      Watch: ({ since, deltas }) => Stream.merge(changes(since), streaming(deltas === true)),
     }
     return implemented
   }),
@@ -2504,9 +2583,39 @@ export const isInside = (
   return within !== '' && within !== '..' && !within.startsWith(`..${paths.sep}`) && !paths.isAbsolute(within)
 }
 
+/** How many reads nobody waits on run at once (`BACKGROUND`): a few, so a press always finds the thread all but free. */
+export const BEHIND_AT_ONCE = 2
+
+/**
+ * The reads that go behind when nobody waits on them: the store's large ones,
+ * which the window's feed reads again on almost every change and which hold
+ * the runtime's thread while they run. A read that waits on a process or the
+ * network holds nothing meanwhile, so it would only keep a place in the lane
+ * from the reads that need it: it is answered as it comes, marked or not.
+ */
+export const BEHIND_CALLS: ReadonlySet<string> = new Set([
+  'ListProjects',
+  'GetHome',
+  'GetBoard',
+  'GetCoordinator',
+  'GetThread',
+  'GetThreadItem',
+  'GetThreadItems',
+])
+
+/**
+ * The lane every connection's background reads share: the reads the window's
+ * change feed starts to keep what a screen holds current. They run a few at a
+ * time, in turn; a command, a read a screen waits on and a watch never queue
+ * here, so however many changes an agent makes, a press is answered next.
+ */
+export class Behind extends Context.Service<Behind, Semaphore.Semaphore>()('@althar/runtime/Behind') {
+  static readonly layer: Layer.Layer<Behind> = Layer.effect(Behind, Semaphore.make(BEHIND_AT_ONCE))
+}
+
 /** The runtime's services: the store, this launch, and everything the API calls. Built once per launch. */
 export const services = (options: Runtime.RuntimeLayerOptions) =>
-  Layer.mergeAll(Nudges.layer, UsageData.layer, Folders.layer).pipe(
+  Layer.mergeAll(Nudges.layer, UsageData.layer, Folders.layer, Behind.layer).pipe(
     Layer.provideMerge(Queries.layer),
     Layer.provideMerge(Runtime.layer(options)),
     // Below everything, so a failure kept anywhere is said through the one listener.
@@ -2521,6 +2630,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
       const identities = yield* ClientIdentities
       const commands = yield* ApiCommands
       const sql = yield* SqlClient.SqlClient
+      const behind = yield* Behind
       const identity: ClientIdentity = Object.freeze({
         ...(authenticated ?? {
           homeId: instance.homeId,
@@ -2599,7 +2709,10 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
                 })
               })
               if (typeof payload !== 'object' || payload === null || !('commandId' in payload) || typeof payload.commandId !== 'string')
-                return yield* positioned
+                // A large read nobody waits on goes behind, a few at a time. Never a watch, which would keep its place for good.
+                return yield* headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
+                  ? behind.withPermits(1)(positioned)
+                  : positioned
               // Effect RPC erases the handler's success type in middleware. The schema and effect come from the same validated RPC definition.
               const result = rpc.successSchema as Schema.Codec<RpcMiddleware.SuccessValue, unknown>
               const handle = Effect.andThen(identities.check(identity), positioned).pipe(

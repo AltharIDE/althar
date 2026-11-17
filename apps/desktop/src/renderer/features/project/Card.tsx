@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
+import type { AgentStatus, ChangeSummary, PlanStep, Product, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
   type IssueRefProps,
   type LaunchStep,
@@ -15,13 +15,14 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 
 import { useServices } from '../../data/services'
+import { openBlockers, standsOf } from '../../shared/blockers'
 import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
-import { stepIndex, stepNames, stepText } from '../../shared/steps'
+import { stepIndex, stepNames, stepNow, stepText } from '../../shared/steps'
 import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
@@ -73,6 +74,10 @@ export interface CardActions {
   readonly agentName: (id: string | null) => string
   readonly onStart: (planId: string) => void
   readonly onHold: (planId: string) => void
+  /** Stops a task waiting for another (tasks wait for their blockers); done once it has gone through or failed. */
+  readonly onStopWaiting?: (taskId: string, on: string) => Promise<void>
+  /** Reopens a task a plan waits for, once abandoned. */
+  readonly onReopen?: (taskId: string) => void
   readonly onChange: (
     planId: string,
     steps: ReadonlyArray<PlanStep>,
@@ -106,9 +111,17 @@ export const endOf = (end: TaskEnd): End => (end === TaskEnd.DraftPr ? 'draft' :
 const placeOf = (where: Where): WorksIn => (where === 'checkout' ? WorksIn.Local : WorksIn.Worktree)
 const whereOf = (place: WorksIn): Where => (place === WorksIn.Local ? 'checkout' : 'worktree')
 
-/** The issue a task came from, as the kit marks it. */
-const fromOf = (card: TaskCardContent): IssueRefProps | undefined =>
-  card.issue === null ? undefined : { mark: productBrand(card.issue.product), id: card.issue.key, linear: card.issue.product === 'linear' }
+/** The issues a task came from, as the kit marks them: its first, and any others after it. */
+const fromOf = (card: TaskCardContent): IssueRefProps | undefined => {
+  if (card.issue === null) return undefined
+  const refOf = (issue: { readonly product: Product; readonly key: string }) => ({
+    mark: productBrand(issue.product),
+    id: issue.key,
+    linear: issue.product === 'linear',
+  })
+  const also = (card.fromIssues ?? []).slice(1).map(refOf)
+  return { ...refOf(card.issue), ...(also.length === 0 ? {} : { also }) }
+}
 
 /**
  * The plan's steps as the kit shows them, by model; the agent's id rides on
@@ -168,6 +181,28 @@ function PlanCard({
   const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
   const effortOf = useEffortNames()
+  // What it waits for (tasks wait for their blockers), a row each before its lead: one the person stops waiting for goes at once.
+  const [letGo, setLetGo] = useState<ReadonlySet<string>>(new Set())
+  const waitsFor = openBlockers(card)
+    .filter((one) => !letGo.has(one.taskId))
+    .map((one) => ({
+      id: one.taskId,
+      name: one.title,
+      stands: standsOf(one.stands),
+      onOpen: () => actions.onOpen(one.threadId),
+      ...(actions.onReopen === undefined ? {} : { onReopen: () => actions.onReopen?.(one.taskId) }),
+      ...(actions.onStopWaiting === undefined
+        ? {}
+        : {
+            onStopWaiting: () => {
+              setLetGo((was) => new Set([...was, one.taskId]))
+              // Read again by then: gone where it went through, back with a line where it didn't.
+              void actions
+                .onStopWaiting?.(card.taskId, one.taskId)
+                .finally(() => setLetGo((was) => new Set([...was].filter((id) => id !== one.taskId))))
+            },
+          }),
+    }))
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
   const [shown, setShown] = useState<{
     readonly from: Plan
@@ -236,6 +271,7 @@ function PlanCard({
       }}
       wait={Math.max(1, plan.startsAfter ?? COUNTDOWN)}
       {...(queued === undefined ? {} : { queued })}
+      {...(waitsFor.length === 0 ? {} : { waitsFor })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
       onHeldChange={(held) => {
@@ -335,9 +371,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
               ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
               : card.reconnects != null
                 ? reconnectsWords(card.reconnects, clock)
-                : card.step === null
-                  ? undefined
-                  : text.now[card.step]
+                : stepNow(card.step, card.shipAt)
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   // A small change's card names who leads from its next turn, which its plan's lead is as the runtime reads it, so a team just changed shows.

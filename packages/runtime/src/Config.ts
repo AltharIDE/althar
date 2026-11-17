@@ -51,6 +51,8 @@ export interface Screenshot {
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
   readonly worktreeRoot: string
+  /** The profile and the logs, which About › Storage measures beside the worktrees; without them it says it can't. */
+  readonly storage?: { readonly profile: string; readonly logs: string }
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
   /**
@@ -166,6 +168,11 @@ export interface RuntimeOptions {
    * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
    */
   readonly betweenAgents?: Duration.Duration
+  /**
+   * How long a board's card is kept between reads at most, until its task moves (Queries.ts): ten seconds unless a test
+   * says otherwise. Zero keeps none, as for a test that writes the store by hand, which no change says.
+   */
+  readonly keptFor?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's public OAuth app ID for native Copilot; falls back to its own GitHub app ID. */
