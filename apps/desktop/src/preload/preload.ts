@@ -358,6 +358,8 @@ contextBridge.exposeInMainWorld('althar', {
     ): void => ipcRenderer.send('althar:canvas-show', threadId, target, panel),
     close: (threadId: string): void => ipcRenderer.send('althar:canvas-close', threadId),
     reload: (threadId: string): void => ipcRenderer.send('althar:canvas-reload', threadId),
+    still: (threadId: string): Promise<string | null> => ipcRenderer.invoke('althar:canvas-still', threadId),
+    cover: (threadId: string, covered: boolean): Promise<void> => ipcRenderer.invoke('althar:canvas-cover', threadId, covered),
   },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>
