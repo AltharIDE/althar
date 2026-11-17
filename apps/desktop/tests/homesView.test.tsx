@@ -15,6 +15,10 @@ import { fakeClient, fakeHost, home as snapshot, project } from './fixtures'
 import { servicesFor } from './render'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { reads } from '../src/renderer/data/reads'
+import { StartView } from '../src/renderer/features/start/StartView'
+import { useStart } from '../src/renderer/features/start/useStart'
+import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
+import { welcome } from '../src/renderer/features/start/welcome'
 
 const home = { id: `remote_${'1'.repeat(32)}`, name: 'My server', homeId: `home_${'2'.repeat(32)}`, ssh: { target: 'fixture' } }
 const checked: CheckedHome = {
@@ -882,3 +886,84 @@ it('keeps the original home when saving another checked home fails', async () =>
   expect(screen.getByText('My server')).not.toBeNull()
   expect(at.homes.change).not.toHaveBeenCalled()
 })
+
+it('closes an early port when the final home state is not authenticated', async () => {
+  const at = fixture()
+  at.homes.state.mockResolvedValueOnce({ ...remote, connection: 'connecting' }).mockResolvedValueOnce({ ...remote, identity: undefined })
+  const postMessage = vi.fn()
+  const port = { postMessage } as unknown as MessagePort
+  const target = new EventTarget()
+  const opening = receiveHomeConnection({ ...fakeHost(), homes: at.homes }, target as unknown as Window)
+  target.dispatchEvent(new MessageEvent('message', { data: 'althar:port', ports: [port] }))
+  await expect(opening).rejects.toThrow('verified connection')
+  expect(postMessage).toHaveBeenCalledWith([1])
+  expect(at.listeners.size).toBe(0)
+})
+
+it('receives a local runtime without a native homes bridge', async () => {
+  const port = {} as MessagePort
+  const target = new EventTarget()
+  const opening = receiveHomeConnection(fakeHost(), target as unknown as Window)
+  target.dispatchEvent(new MessageEvent('message', { data: 'althar:port', ports: [port] }))
+  expect(await opening).toEqual({ port, home: local })
+})
+
+it.each([false, true])('bounds startup when a runtime never sends its port (remote: %s)', async (away) => {
+  vi.useFakeTimers()
+  try {
+    const at = fixture()
+    at.homes.state.mockResolvedValue(away ? remote : local)
+    const opening = receiveHomeConnection({ ...fakeHost(), homes: at.homes }, new EventTarget() as unknown as Window)
+    const failure = expect(opening).rejects.toThrow(away ? 'service and network' : 'runtime didn’t start')
+    await vi.advanceTimersByTimeAsync(away ? 60_000 : 15_000)
+    await failure
+    expect(at.listeners.size).toBe(0)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+function RemoteStart() {
+  const model = useStart()
+  return <StartView model={model} accounts={useAccountSignIn(model)} onProject={() => {}} home={() => <p>Projects on the remote home</p>} />
+}
+
+it.each([remote, { current: { kind: 'https' as const, home: paired }, connection: 'connected' as const }])(
+  'names an empty remote home, then opens its projects without running local onboarding (%s)',
+  async (here) => {
+    const at = fixture()
+    at.homes.state.mockResolvedValue(here)
+    const listed = later<{ cursor: number; projects: (typeof project)[] }>()
+    const { client } = fakeClient({
+      connection: {
+        identity: remote.identity!,
+        hostDeviceId: checked.hostDeviceId,
+        apiVersion: 1,
+        appVersion: 'test',
+        position: { homeId: home.homeId, cursor: 0, checkpoint: null },
+      },
+      listProjects: vi.fn(() => listed.promise),
+    })
+    const host = fakeHost({ homes: at.homes })
+    const services = servicesFor(client, host)
+    // A local welcome left on show must not replace the remote host’s first screen.
+    welcome.begin()
+    render(
+      <ServicesProvider value={services}>
+        <RemoteStart />
+      </ServicesProvider>,
+    )
+    expect(screen.queryByText('Projects on the remote home')).toBeNull()
+    expect(screen.queryByRole('heading', { name: /No projects/ })).toBeNull()
+    await act(async () => listed.resolve({ cursor: 0, projects: [] }))
+    const name = here.current.kind === 'local' ? '' : here.current.home.name
+    expect(await screen.findByRole('heading', { name: `No projects on ${name} yet` })).not.toBeNull()
+    expect(host.findRepositories).not.toHaveBeenCalled()
+    expect(host.pickFolders).not.toHaveBeenCalled()
+    act(() => {
+      services.cache.setQueryData(reads(client).projects().queryKey, { cursor: 1, projects: [project] })
+    })
+    expect(await screen.findByText('Projects on the remote home')).not.toBeNull()
+    expect(screen.queryByRole('heading', { name: /No projects/ })).toBeNull()
+  },
+)

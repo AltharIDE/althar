@@ -232,6 +232,26 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: ./.github/actions/flaky/quarantine
       - run: bun run test:coverage
+      - name: Show remaining branch coverage gaps
+        if: failure()
+        run: |
+          bun -e '
+            const file = Bun.file("coverage/coverage-final.json")
+            if (!(await file.exists())) process.exit(0)
+            const report = await file.json()
+            const rows = Object.entries(report).map(([file, value]) => {
+              const branches = Object.entries(value.b).flatMap(([id, hits]) =>
+                hits.map((hit, index) => ({ hit, line: value.branchMap[id].locations[index]?.start.line ?? value.branchMap[id].line })))
+              return { file: file.split("src/renderer/").at(-1), total: branches.length,
+                covered: branches.filter((branch) => branch.hit > 0).length,
+                missing: branches.filter((branch) => branch.hit === 0).map((branch) => branch.line) }
+            })
+            const total = rows.reduce((sum, row) => sum + row.total, 0)
+            const covered = rows.reduce((sum, row) => sum + row.covered, 0)
+            console.log(JSON.stringify({ total, covered, needed: Math.ceil(total * .9) - covered }))
+            for (const row of rows.sort((a, b) => b.missing.length - a.missing.length).slice(0, 25))
+              console.log(JSON.stringify(row))
+          '
       - uses: actions/upload-artifact@v6
         if: always()
         with:
