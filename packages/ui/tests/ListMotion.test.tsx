@@ -65,7 +65,8 @@ function stubAnimations() {
 
 /**
  * Where layout puts an item: its list across, its place down (the first narrower, where `narrowFirst`), from where the
- * lists' room stands; the room itself (`data-room`) where `room` has it; a copy where it is laid; anything else, nowhere.
+ * lists' room stands where it is in one (`data-room`), from the page's start elsewhere; the room itself where `room` has
+ * it; a copy where it is laid; anything else, nowhere.
  */
 const placed = (el: Element) => {
   if (el.hasAttribute('data-room')) return new DOMRect(room.left, 0, room.width, room.height)
@@ -77,7 +78,8 @@ const placed = (el: Element) => {
   if (list === null || !el.hasAttribute('data-move')) return new DOMRect(0, 0, 0, 0)
   const lists = [...(list.parentElement?.querySelectorAll('ol') ?? [])]
   const place = [...list.querySelectorAll('[data-move]')].indexOf(el)
-  return new DOMRect(room.left + lists.indexOf(list) * 300, place * 50, narrowFirst && place === 0 ? 200 : 280, 40)
+  const left = list.closest('[data-room]') === null ? 0 : room.left
+  return new DOMRect(left + lists.indexOf(list) * 300, place * 50, narrowFirst && place === 0 ? 200 : 280, 40)
 }
 
 /** Where the lists' room stands across the page, and how wide and high it is. */
@@ -144,6 +146,25 @@ function Lists({
             ))}
           </ol>
         ))}
+      </ListMotion>
+    </div>
+  )
+}
+
+/** Steady lists within a window's own ListMotion, beside a list of the window's: a board beside the conversation. */
+function Window({ lists, outside, at }: { lists: ReadonlyArray<ReadonlyArray<string>>; outside: ReadonlyArray<string>; at?: typeof room }) {
+  const ref = useRef<HTMLDivElement>(null)
+  return (
+    <div ref={ref}>
+      <ListMotion within={ref}>
+        <ol>
+          {outside.map((key) => (
+            <li key={key} data-move={key}>
+              {key}
+            </li>
+          ))}
+        </ol>
+        <Lists lists={lists} steady {...(at === undefined ? {} : { at })} />
       </ListMotion>
     </div>
   )
@@ -239,6 +260,19 @@ describe('ListMotion', () => {
     expect(trip.cancel).toHaveBeenCalled()
     expect(item('b').style.visibility).toBe('')
     expect(layer()!.childElementCount).toBe(0)
+  })
+
+  it('keeps a room of its own within a list that moves the whole window', () => {
+    // As the board is within the project's window, whose ListMotion lets a message travel to the composer (DEV-222).
+    const { rerender } = render(<Window lists={[['a', 'b'], ['c']]} outside={['m', 'n']} />)
+    // The board moves, and in that same commit the window's own list changes order.
+    rerender(<Window lists={[['a', 'b'], ['c']]} outside={['n', 'm']} at={{ left: 120, width: 780, height: 600 }} />)
+    // None of the board's cards moves: they went with it. The window's own items move as ever.
+    for (const key of ['a', 'b', 'c']) expect(of(item(key))).toEqual([])
+    expect(of(item('m'))[0]!.keyframes[0]).toEqual({ translate: '0px -50px' })
+    // The board where it was, its cards' own moves move them.
+    rerender(<Window lists={[['b', 'a'], ['c']]} outside={['n', 'm']} at={{ left: 120, width: 780, height: 600 }} />)
+    expect(of(item('a'))[0]!.keyframes[0]).toEqual({ translate: '0px -50px' })
   })
 
   it('where its room is its items’, slides them by as far as it moved', () => {

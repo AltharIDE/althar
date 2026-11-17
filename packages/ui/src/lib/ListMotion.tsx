@@ -41,7 +41,10 @@ import { MOTION, reducedMotion, SCALE } from './motion'
  * A list that changes by state of its own, such as the line up next, is
  * wrapped in a ListMotion of its own; within another, that one hands its
  * updates to the outer one, which takes and moves what is in both, once an
- * update. While `still`, a list's items are someone else's to move (a drag):
+ * update. A list within another keeps its own room all the same: where the
+ * board is in the window's (which lets a message travel from the
+ * conversation to the composer), the board moving still moves none of its
+ * cards, while what is elsewhere in the window moves as it would. While `still`, a list's items are someone else's to move (a drag):
  * nothing of ours does. When a list goes, or hides, what it set moving is
  * put away at once: nothing of one screen travels over the next.
  */
@@ -72,14 +75,22 @@ interface Stood {
   readonly rect: DOMRect
   /** The list it is in, past a list item wrapping it alone: a gone item fades only while this still shows. */
   readonly list: Element | null
+  /** The rooms the page sets (`steady`) it was in. */
+  readonly rooms: ReadonlyArray<HTMLElement>
+}
+
+/** Where a list whose room is the page's (`steady`) stood. */
+interface Room {
+  readonly root: HTMLElement
+  readonly rect: DOMRect
 }
 
 interface Snapshot {
   readonly stood: ReadonlyMap<string, Stood>
   /** The lists within that were still: their items are left as they are. */
   readonly held: ReadonlyArray<HTMLElement>
-  /** Where `within` stood, where its room is the page's (`steady`). */
-  readonly room: DOMRect | null
+  /** Where each list whose room is the page's (`steady`) stood, this one or one within. */
+  readonly rooms: ReadonlyArray<Room>
 }
 
 /** The outermost ListMotion around, which moves what is in those within it. */
@@ -134,10 +145,20 @@ export class ListMotion extends Component<ListMotionProps> {
     const held = [...this.inner].flatMap((one) =>
       one.props.still === true && one.props.within.current !== null ? [one.props.within.current] : [],
     )
+    // This one's room, and those of the lists within: each keeps its own, whichever list moves what is in it.
+    const rooms = [this, ...this.inner].flatMap((one): Room[] => {
+      const room = one.props.within.current
+      return one.props.steady === true && room !== null ? [{ root: room, rect: room.getBoundingClientRect() }] : []
+    })
     const stood = new Map<string, Stood>()
     for (const el of itemsIn(root, held))
-      stood.set(el.dataset.move!, { el, rect: running.get(el)?.shown() ?? el.getBoundingClientRect(), list: listOf(el) })
-    this.taken = { stood, held, room: this.props.steady === true ? root.getBoundingClientRect() : null }
+      stood.set(el.dataset.move!, {
+        el,
+        rect: running.get(el)?.shown() ?? el.getBoundingClientRect(),
+        list: listOf(el),
+        rooms: rooms.filter((one) => one.root.contains(el)).map((one) => one.root),
+      })
+    this.taken = { stood, held, rooms }
     return true
   }
 
@@ -147,23 +168,29 @@ export class ListMotion extends Component<ListMotionProps> {
     this.taken = null
     const root = this.props.within.current
     if (before === null || root === null || !moves(root)) return
-    // The list itself moved, or its room changed size: its items went with it, by none of their own, and what of ours
-    // moved them stops where they are laid out.
-    if (before.room !== null && changed(before.room, root.getBoundingClientRect())) {
+    // A list whose room is the page's moved, or its room changed size: its items went with it, by none of their own, what
+    // of ours moved them stops where they are laid out, and what came or went in it shows, or goes, at once.
+    const shifted = before.rooms
+      .filter((one) => one.root.isConnected && changed(one.rect, one.root.getBoundingClientRect()))
+      .map((one) => one.root)
+    const inShifted = (was: Stood) => was.rooms.some((one) => shifted.includes(one))
+    if (shifted.length > 0) {
       // Those taken before as well as those there now: one drawn again elsewhere is another element, its copy the old one's.
-      for (const el of new Set([...[...before.stood.values()].map((was) => was.el), ...itemsIn(root)])) running.get(el)?.stop()
-      return
+      const stop = [...[...before.stood.values()].filter(inShifted).map((was) => was.el), ...shifted.flatMap((one) => itemsIn(one))]
+      for (const el of new Set(stop)) running.get(el)?.stop()
     }
-    const items = itemsIn(root, before.held)
+    const items = itemsIn(root, [...before.held, ...shifted])
     // Read everything, then write: where each is laid out now, whatever of ours moves it.
     const to = items.map((el) => running.get(el)?.place() ?? el.getBoundingClientRect())
     const came = items.filter((el) => !before.stood.has(el.dataset.move!))
-    const keys = new Set(items.map((el) => el.dataset.move!))
-    const went = [...before.stood].filter(([key]) => !keys.has(key)).map(([, was]) => was)
+    // What is still here, in a room that moved too: only what is nowhere now went.
+    const keys = new Set(itemsIn(root, before.held).map((el) => el.dataset.move!))
+    const went = [...before.stood].filter(([key, was]) => !keys.has(key) && !inShifted(was)).map(([, was]) => was)
     const reduced = reducedMotion()
     const goes = items.map((el, i) => {
       const was = before.stood.get(el.dataset.move!)
-      if (was === undefined) return null
+      // Out of a room that moved: it went with it.
+      if (was === undefined || inShifted(was)) return null
       // Drawn again elsewhere mid-journey: the old one's journey ends, and this one sets out from where it showed.
       if (was.el !== el) running.get(was.el)?.stop()
       const now = running.get(el)
