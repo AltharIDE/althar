@@ -9,7 +9,10 @@ import { Chip, HomeConnections } from '../src/renderer/features/homes/HomeConnec
 import { ManageHomes } from '../src/renderer/features/homes/ManageHomes'
 import { homesUi, useHomeState } from '../src/renderer/features/homes/useHomes'
 import { hostForHome, receiveHomeConnection } from '../src/renderer/data/homeConnection'
-import { fakeHost } from './fixtures'
+import { fakeHost, fakeClient, project, home as snapshot } from './fixtures'
+import { withServices } from './render'
+import { HomeOpening } from '../src/renderer/features/homes/HomeOpening'
+import { HomeReport } from '../src/renderer/features/homes/HomeReport'
 
 const home = { id: `remote_${'1'.repeat(32)}`, name: 'My server', homeId: `home_${'2'.repeat(32)}`, ssh: { target: 'fixture' } }
 const checked: CheckedHome = {
@@ -341,4 +344,237 @@ it('fails startup on disconnect even if the initial metadata read never answers'
   at.emit({ ...remote, connection: 'disconnected', problem: 'Host went away' })
   await expect(opening).rejects.toThrow('Host went away')
   expect(at.listeners.size).toBe(0)
+})
+
+it('rolls back a refused Forget and a refused Undo, keeping the error visible', async () => {
+  const at = fixture()
+  at.homes.forget.mockRejectedValueOnce(new Error('Cannot forget'))
+  const { view } = manage(at)
+  await userEvent.click(await screen.findByRole('button', { name: 'My server, more' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Forget' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('Cannot forget')
+  expect(screen.getByText('My server')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
+  view.unmount()
+  at.homes.restore.mockRejectedValueOnce(new Error('Undo expired'))
+  const next = manage(at)
+  await userEvent.click(await screen.findByRole('button', { name: 'My server, more' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Forget' }))
+  next.view.rerender(
+    <ManageHomes homes={at.homes} overview={{ ...overview, homes: [] }} here={local} onClose={() => {}} onConnect={() => {}} />,
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('Undo expired')
+  expect(screen.queryByText('My server')).toBeNull()
+})
+
+it('keeps renames on blur, cancels with Escape, ignores blank names and settles an acknowledged rename', async () => {
+  const at = fixture()
+  const { view } = manage(at)
+  const rename = async () => {
+    await userEvent.click(screen.getByRole('button', { name: /, more/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Rename' }))
+    return screen.findByLabelText('Name')
+  }
+  const field = await rename()
+  await userEvent.type(field, 'New name{Escape}')
+  expect(screen.getByText(home.name)).not.toBeNull()
+  expect(at.homes.rename).not.toHaveBeenCalled()
+  await userEvent.clear(await rename())
+  await userEvent.keyboard('{Enter}')
+  expect(at.homes.rename).not.toHaveBeenCalled()
+  const production = await rename()
+  await userEvent.clear(production)
+  await userEvent.type(production, 'Production')
+  await userEvent.tab()
+  expect(at.homes.rename).toHaveBeenCalledExactlyOnceWith(home.id, 'Production')
+  expect(screen.getByText('Production')).not.toBeNull()
+  view.rerender(
+    <ManageHomes
+      homes={at.homes}
+      overview={{ ...overview, homes: [{ ...home, name: 'Production' }] }}
+      here={local}
+      onClose={() => {}}
+      onConnect={() => {}}
+    />,
+  )
+  expect(screen.getByText('Production')).not.toBeNull()
+})
+
+it.each(['connecting', 'disconnected', 'connected'] as const)(
+  'shows %s homes and opens them without a project from their menu',
+  async (connection) => {
+    const at = fixture()
+    const { close } = manage(at, { ...overview, windows: { [home.homeId]: connection } })
+    expect(
+      await screen.findByText(connection === 'connecting' ? 'Connecting…' : connection === 'disconnected' ? 'Disconnected' : 'Open'),
+    ).not.toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'My server, more' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Open' }))
+    await waitFor(() => expect(at.homes.open).toHaveBeenCalledExactlyOnceWith(home.id, undefined))
+    expect(close).toHaveBeenCalledOnce()
+  },
+)
+
+it('identifies its own remote window and offers Connect even when projects are not known yet', async () => {
+  const at = fixture()
+  const connect = vi.fn()
+  render(<ManageHomes homes={at.homes} overview={{ ...overview, projects: {} }} here={remote} onClose={() => {}} onConnect={connect} />)
+  expect(screen.getByText('This window')).not.toBeNull()
+  expect(screen.getByText('Its projects show here once a window on it opens.')).not.toBeNull()
+  expect(screen.getByText('Open it to see its projects here.')).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'My server, more' }))
+  expect(screen.queryByRole('menuitem', { name: 'Open' })).toBeNull()
+  await userEvent.keyboard('{Escape}')
+  await userEvent.click(screen.getByRole('button', { name: 'Connect a home' }))
+  expect(connect).toHaveBeenCalledOnce()
+})
+
+it('distinguishes empty homes and live projects that are idle, running, or waiting on the person', async () => {
+  const at = fixture()
+  const { view } = manage(at, { ...overview, projects: { local: { live: true, list: [] }, [home.homeId]: { live: true, list: [] } } })
+  expect(screen.getByText('Add a project and it shows here.')).not.toBeNull()
+  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
+  view.rerender(
+    <ManageHomes
+      homes={at.homes}
+      overview={{
+        ...overview,
+        projects: {
+          local: {
+            live: true,
+            list: [
+              { id: 'idle', name: 'Idle', ink: 'clay', working: 0, yours: 0 },
+              { id: 'running', name: 'Running', ink: 'clay', working: 2, yours: 0 },
+              { id: 'waiting', name: 'Waiting', ink: 'clay', working: 0, yours: 1 },
+            ],
+          },
+        },
+      }}
+      here={local}
+      onClose={() => {}}
+      onConnect={() => {}}
+    />,
+  )
+  expect(screen.getByText('Nothing running')).not.toBeNull()
+  expect(screen.getByText('2 running')).not.toBeNull()
+  expect(screen.getByText('Needs you')).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: /Idle/ }))
+  await waitFor(() => expect(at.homes.open).toHaveBeenCalledWith('local', 'idle'))
+})
+
+it('restores connection edits on Escape, and rolls back a refused change or saving another home', async () => {
+  const at = fixture()
+  at.homes.change.mockRejectedValueOnce(new Error('Change refused'))
+  manage(at)
+  await userEvent.click(screen.getByRole('button', { name: 'My server, more' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Edit connection' }))
+  const field = await screen.findByLabelText('SSH host')
+  await userEvent.type(field, '-edited{Escape}')
+  expect((field as HTMLInputElement).value).toBe('fixture')
+  await userEvent.type(field, '-new{Enter}')
+  expect((await screen.findByRole('alert')).textContent).toContain('Change refused')
+  expect(screen.getByRole('button', { name: 'Check and save' })).not.toBeNull()
+  at.homes.inspect.mockResolvedValueOnce({ ...checked, homeId: 'other-home' })
+  await userEvent.click(screen.getByRole('button', { name: 'Check and save' }))
+  await screen.findByRole('button', { name: 'Save as a new home' })
+  at.homes.save.mockRejectedValueOnce(new Error('Save refused'))
+  await userEvent.click(screen.getByRole('button', { name: 'Save as a new home' }))
+  expect((await screen.findByRole('alert')).textContent).toContain('Save refused')
+  await userEvent.click(screen.getByRole('button', { name: 'Close' }))
+  expect(screen.queryByLabelText('SSH host')).toBeNull()
+})
+
+it('shows connection progress, then the failure with explicit retry and close actions', async () => {
+  const at = fixture()
+  const host = { ...fakeHost(), homes: at.homes }
+  const view = render(<HomeOpening host={host} homes={at.homes} home={home} problem={null} />)
+  expect(screen.getByText('Connecting over SSH…')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+  view.rerender(<HomeOpening host={host} homes={at.homes} home={home} problem="SSH refused" />)
+  expect(screen.getByText('SSH refused')).not.toBeNull()
+  at.homes.reconnect.mockRejectedValueOnce(new Error('Still down'))
+  await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(at.homes.reconnect).toHaveBeenCalledOnce()
+  await userEvent.click(screen.getByRole('button', { name: 'Close window' }))
+  expect(host.window).toHaveBeenCalledWith('close')
+})
+
+it('reports known project activity to the other home windows, after its project read answers', async () => {
+  const at = fixture()
+  const projects = later<Awaited<ReturnType<ReturnType<typeof fakeClient>['client']['listProjects']>>>()
+  const { client } = fakeClient({ listProjects: vi.fn(() => projects.promise), getHome: vi.fn(async () => snapshot()) })
+  const host = { ...fakeHost(), homes: at.homes }
+  withServices(<HomeReport />, client, host)
+  expect(at.homes.report).not.toHaveBeenCalled()
+  await act(async () => projects.resolve({ cursor: 3, projects: [{ ...project, working: 2 }] }))
+  await waitFor(() =>
+    expect(at.homes.report).toHaveBeenCalledWith([{ id: project.id, name: project.name, ink: project.ink, working: 2, yours: 0 }]),
+  )
+  expect(client.getHome).toHaveBeenCalled()
+})
+
+it('reports an empty home without reading its task activity', async () => {
+  const at = fixture()
+  const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects: [] })) })
+  withServices(<HomeReport />, client, { ...fakeHost(), homes: at.homes })
+  await waitFor(() => expect(at.homes.report).toHaveBeenCalledWith([]))
+  expect(client.getHome).not.toHaveBeenCalled()
+})
+
+it('opens local and saved homes from the menu, and reaches Manage and Connect from File › Homes', async () => {
+  const at = fixture()
+  render(
+    <>
+      <Chip homes={at.homes} />
+      <HomeConnections host={{ ...fakeHost(), homes: at.homes }} />
+    </>,
+  )
+  const show = async () => {
+    act(() => {
+      window.dispatchEvent(new Event('althar:show-homes'))
+    })
+    await screen.findByRole('menuitem', { name: /This computer/ })
+  }
+  await screen.findByRole('button', { name: 'Homes' })
+  await show()
+  await userEvent.click(screen.getByRole('menuitem', { name: /This computer/ }))
+  expect(at.homes.open).toHaveBeenCalledWith('local')
+  await show()
+  await userEvent.click(screen.getByRole('menuitem', { name: /My server/ }))
+  expect(at.homes.open).toHaveBeenCalledWith(home.id)
+  await show()
+  await userEvent.click(screen.getByRole('menuitem', { name: 'Manage homes…' }))
+  await screen.findByRole('dialog', { name: 'Homes' })
+  await userEvent.click(screen.getByRole('button', { name: 'Connect a home' }))
+  await screen.findByRole('dialog', { name: 'Connect a home' })
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+it('keeps a forgotten home in its own window’s menu while reconnecting and disconnected', async () => {
+  const at = fixture()
+  at.homes.state.mockResolvedValue({ ...remote, connection: 'connecting' })
+  at.homes.overview.mockResolvedValue({ ...overview, homes: [], windows: {} })
+  render(<Chip homes={at.homes} />)
+  await userEvent.click(await screen.findByRole('button', { name: 'My server, reconnecting. Homes' }))
+  expect(await screen.findByRole('menuitem', { name: /My server/ })).not.toBeNull()
+  expect(screen.getByText('This window')).not.toBeNull()
+  await userEvent.keyboard('{Escape}')
+  act(() => at.emit({ ...remote, connection: 'disconnected', problem: 'SSH lost' }))
+  await userEvent.click(screen.getByRole('button', { name: 'My server, disconnected. Homes' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: /Reconnect/ }))
+  expect(at.homes.reconnect).toHaveBeenCalledOnce()
+})
+
+it('opens Manage from File › Homes when saved homes exist but no chip is drawn', async () => {
+  const at = fixture()
+  render(<HomeConnections host={{ ...fakeHost(), homes: at.homes }} />)
+  await act(async () => {})
+  act(() => {
+    window.dispatchEvent(new Event('althar:show-homes'))
+  })
+  await screen.findByRole('dialog', { name: 'Homes' })
+  await userEvent.click(screen.getByRole('button', { name: 'Done' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
 })
