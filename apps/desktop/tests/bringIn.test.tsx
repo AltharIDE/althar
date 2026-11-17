@@ -2,10 +2,12 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { BroughtIn, Elsewhere, FolderReading } from '@althar/contracts'
+import { ApiError, type BroughtIn, type Elsewhere, type FolderReading } from '@althar/contracts'
 
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
 import { NotBroughtInOf } from '../src/renderer/features/elsewhere/NotBroughtInOf'
+import { unsent, unsentFrom } from '../src/renderer/features/elsewhere/unsent'
+import { UnsentBringIn } from '../src/renderer/features/elsewhere/UnsentBringIn'
 import { picked, picksOf, tilesOf, words } from '../src/renderer/features/elsewhere/tiles'
 import { merged } from '../src/renderer/features/elsewhere/useElsewhere'
 import { StartView } from '../src/renderer/features/start/StartView'
@@ -241,14 +243,14 @@ describe('the welcome’s step for what other tools left', () => {
     const unhandled: Array<unknown> = []
     const note = (reason: unknown) => unhandled.push(reason)
     process.on('unhandledRejection', note)
-    let asked = 0
+    const asked: Array<string> = []
     const { client } = fakeClient({
       listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
       readFolder: vi.fn(async () => reading),
       lookElsewhere: vi.fn(async () => FOUND),
       // Not a mock, which would handle what it returns itself: refused, as the runtime gone would.
-      bringIn: () => {
-        asked++
+      bringIn: (input: { readonly projectId: string }) => {
+        asked.push(input.projectId)
         return Promise.reject(new Error('The runtime went away.'))
       },
     })
@@ -262,10 +264,13 @@ describe('the welcome’s step for what other tools left', () => {
     await userEvent.click(screen.getByRole('button', { name: /^Conductor/ }))
     await userEvent.click(screen.getByRole('button', { name: 'Bring in 1 worktree and 1 setup' }))
     // Refused, and caught: nothing is left unhandled, and the welcome has gone on.
-    await waitFor(() => expect(asked).toBe(1))
+    await waitFor(() => expect(asked).toHaveLength(1))
     await new Promise((settled) => setTimeout(settled, 50))
     process.off('unhandledRejection', note)
     expect(unhandled).toEqual([])
+    // The runtime never got it, so the window keeps what was picked, for the project's conversation to say with Try again.
+    expect(unsent.of(asked[0] ?? '')).toMatchObject({ names: expect.arrayContaining(['lima']), worktrees: [expect.any(String)] })
+    unsent.reset()
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Already under way' })).toBeNull())
   })
 
@@ -332,5 +337,58 @@ describe('what didn’t come in, in the project’s conversation', () => {
     const { client } = fakeClient()
     withServices(<NotBroughtInOf offer={{ ...offer, worktrees: [] }} title={title} />, client, fakeHost())
     expect(screen.queryByRole('button')).toBeNull()
+  })
+})
+
+describe('a bringing in the runtime never got, in the project’s conversation', () => {
+  const kept = {
+    projectId: 'p1',
+    names: ['lima', 'Conductor’s setup for meridian'],
+    worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+    setups: ['setup:conductor:meridian'],
+    conversations: [],
+    why: "Althar's runtime didn't answer. If it keeps happening, restart Althar.",
+  }
+
+  it('says what was picked and why it didn’t go, and goes once Try again goes through', async () => {
+    unsent.keep(kept)
+    let answer: (value: BroughtIn) => void = () => {}
+    const { client } = fakeClient({ bringIn: vi.fn(() => new Promise<BroughtIn>((resolve) => (answer = resolve))) })
+    withServices(<UnsentBringIn projectId="p1" />, client, fakeHost())
+    expect(screen.getByText('Nothing picked from other tools came in')).toBeTruthy()
+    expect(screen.getByText('lima')).toBeTruthy()
+    expect(screen.getByText(/runtime didn't answer/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(screen.getByText('Trying again…')).toBeTruthy()
+    expect(client.bringIn).toHaveBeenCalledWith({
+      projectId: 'p1',
+      worktrees: kept.worktrees,
+      setups: kept.setups,
+      conversations: [],
+      steps: [],
+    })
+    answer({ tasks: ['t1'], asides: [], setups: 1, histories: 0, failed: [] })
+    await waitFor(() => expect(screen.queryByText('Nothing picked from other tools came in')).toBeNull())
+    expect(unsent.of('p1')).toBeUndefined()
+  })
+
+  it('stands, with why, where another try doesn’t go either, and is kept past the screen', async () => {
+    unsent.keep(kept)
+    const { client } = fakeClient({ bringIn: vi.fn(async () => Promise.reject(new ApiError({ reason: 'conflict', message: 'Not now.' }))) })
+    withServices(<UnsentBringIn projectId="p1" />, client, fakeHost())
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('Not now.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(unsentFrom(JSON.stringify({ p1: unsent.of('p1') }))).toEqual({ p1: { ...kept, why: 'Not now.' } })
+    unsent.reset()
+  })
+
+  it('says nothing for another project, or where nothing was kept', () => {
+    unsent.keep(kept)
+    const { client } = fakeClient()
+    withServices(<UnsentBringIn projectId="p2" />, client, fakeHost())
+    expect(screen.queryByText('Nothing picked from other tools came in')).toBeNull()
+    unsent.reset()
+    expect(unsentFrom('not json')).toEqual({})
   })
 })

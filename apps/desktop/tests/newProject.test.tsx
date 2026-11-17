@@ -16,6 +16,7 @@ import { newProjectId } from '../src/renderer/data/client'
 import { makeQueryClient } from '../src/renderer/data/reads'
 import type { FoundRepositories } from '../src/renderer/data/services'
 import { draftActions, draftsOf } from '../src/renderer/features/newProject/draft'
+import { unsent } from '../src/renderer/features/elsewhere/unsent'
 import { NewProjectView } from '../src/renderer/features/newProject/NewProjectView'
 import { useNewProject } from '../src/renderer/features/newProject/useNewProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -273,13 +274,13 @@ describe('a new project from a folder', () => {
     const unhandled: Array<unknown> = []
     const note = (reason: unknown) => unhandled.push(reason)
     process.on('unhandledRejection', note)
-    let asked = 0
+    const asked: Array<string> = []
     const { onCreated } = opened(
       {
         lookElsewhere: vi.fn(async () => ({ worktrees: [LIMA], setups: [], conversations: [] })),
         // Not a mock, which would handle what it returns itself: refused, as the runtime gone would.
-        bringIn: () => {
-          asked++
+        bringIn: (input: { readonly projectId: string }) => {
+          asked.push(input.projectId)
           return Promise.reject(new Error('The runtime went away.'))
         },
       },
@@ -293,10 +294,13 @@ describe('a new project from a folder', () => {
     await create('Tidepool')
     await waitFor(() => expect(onCreated).toHaveBeenCalled())
     // Refused, and caught: nothing is left unhandled, and the tab has gone on to the project.
-    await waitFor(() => expect(asked).toBe(1))
+    await waitFor(() => expect(asked).toHaveLength(1))
     await new Promise((settled) => setTimeout(settled, 50))
     process.off('unhandledRejection', note)
     expect(unhandled).toEqual([])
+    // The runtime never got it, so the window keeps what was picked, for the project's conversation to say with Try again.
+    expect(unsent.of(asked[0] ?? '')).toMatchObject({ names: expect.arrayContaining(['lima']), worktrees: [expect.any(String)] })
+    unsent.reset()
   })
 
   it('says a folder that is a project already, opens that project from there, and makes no second one', async () => {

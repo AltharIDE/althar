@@ -24,7 +24,7 @@ export const notBroughtInText: NotBroughtInText = {
 export interface NotBroughtInProps {
   /** What it says: Not everything picked from other tools came in. */
   title: string
-  /** What didn't come in, by name, and why. */
+  /** What didn't come in, by name, and why; where all of it is down to one why, `error` says it and each has none. */
   missed: ReadonlyArray<{ readonly name: string; readonly why: string }>
   /** Try again, where another try could bring something in; left out where none could. */
   onTryAgain?: () => void
@@ -53,7 +53,11 @@ export function NotBroughtIn({ title, missed, onTryAgain, tried, error, text }: 
           {missed.map((one, index) => (
             // oxlint-disable-next-line react/no-array-index-key -- Two picked can share a name; the list never reorders.
             <li key={index}>
-              <span className={s.name}>{one.name}:</span> {one.why}
+              <span className={s.name}>
+                {one.name}
+                {one.why === '' ? '' : ':'}
+              </span>
+              {one.why === '' ? '' : ` ${one.why}`}
             </li>
           ))}
         </ul>

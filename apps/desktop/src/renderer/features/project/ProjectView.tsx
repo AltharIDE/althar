@@ -47,6 +47,7 @@ import { Runs } from '../runs/Runs'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
+import { UnsentBringIn } from '../elsewhere/UnsentBringIn'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
@@ -1065,6 +1066,8 @@ export function ProjectView({
                                 signed={coordinatorSigned}
                                 virtual={coordinator.threadId}
                               />
+                              {/* A bringing in from other tools the runtime never got: the window says it, with Try again. */}
+                              <UnsentBringIn projectId={projectId} className={s.unsent} />
                               {drafting.shown.map((draft) => (
                                 <DraftingCard
                                   key={draft.key}

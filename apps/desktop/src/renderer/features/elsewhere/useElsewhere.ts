@@ -1,8 +1,9 @@
 import type { BroughtIn, Elsewhere, PlanStep } from '@althar/contracts'
 import { useEffect, useMemo, useState } from 'react'
 
-import type { Client } from '../../data/client'
+import { type Client, messageOf } from '../../data/client'
 import { picked, picksOf, tilesOf, words } from './tiles'
+import { unsent } from './unsent'
 
 /*
  * What other tools left, for a project's welcome step or a new project's tab: read once as it opens (by the project, or
@@ -22,7 +23,8 @@ export interface ElsewhereModel {
   /**
    * Brings in what was picked, into the project; nothing where nothing was. It never fails: the window has moved on by
    * then, so what didn't come in, or a bringing in that failed as a whole, is said in the project's conversation, with
-   * Try again (Elsewhere.ts); null then, as where nothing was picked.
+   * Try again: by the runtime where it got it (Elsewhere.ts), by the window where it never did (unsent.ts); null then,
+   * as where nothing was picked.
    */
   readonly bring: (projectId: string, steps?: ReadonlyArray<PlanStep>) => Promise<BroughtIn | null>
   /** Reads a project now, as it is made, for a step that must know before it shows whether anything was found. */
@@ -30,6 +32,15 @@ export interface ElsewhereModel {
 }
 
 const NONE: Elsewhere = { worktrees: [], setups: [], conversations: [] }
+
+/** What was picked, by name, as the tiles showed it. */
+const namesOf = (found: Elsewhere, chosen: ReturnType<typeof picksOf>): ReadonlyArray<string> => [
+  ...found.worktrees.filter((one) => chosen.worktrees.includes(one.key)).map((one) => one.name),
+  ...found.setups
+    .filter((one) => chosen.setups.includes(one.key))
+    .map((one) => `${words.setupOf(words.names[one.tool])} for ${one.repository}`),
+  ...found.conversations.filter((one) => chosen.conversations.includes(one.key)).map((one) => `“${one.title}”`),
+]
 
 /** Several reads (a new project's folders), as one: what two of them found is found once. */
 export const merged = (all: ReadonlyArray<Elsewhere>): Elsewhere => {
@@ -90,7 +101,9 @@ export const useElsewhere = (
       chosen === null || chosen.worktrees.length + chosen.setups.length + chosen.conversations.length === 0
         ? Promise.resolve(null)
         : client.bringIn({ projectId, ...chosen, steps }).catch((failure: unknown) => {
-            console.warn('Bringing in from other tools failed', failure)
+            // Refused before the runtime answered, so it can't say so: the window keeps it, for the project's
+            // conversation to say with Try again (unsent.ts). What the runtime got and couldn't bring in, it says itself.
+            unsent.keep({ projectId, ...chosen, names: found === null ? [] : namesOf(found, chosen), why: messageOf(failure) })
             return null
           }),
   }

@@ -46,6 +46,18 @@ export const NothingToTry: Story = {
     await expect(within(canvasElement).queryByRole('button')).toBeNull()
   },
 }
+/** The runtime never got it: what was picked, by name, and why it didn't go, once. */
+export const NeverSent: Story = {
+  args: {
+    title: 'Nothing picked from other tools came in',
+    missed: [
+      { name: 'lima', why: '' },
+      { name: 'Conductor’s setup for meridian', why: '' },
+    ],
+    error: "Althar's runtime didn't answer. If it keeps happening, restart Althar.",
+  },
+}
+export const NeverSentDark: Story = { ...NeverSent, globals: { theme: 'dark' } }
 /** Under way, at once as it is pressed. */
 export const Trying: Story = { args: { tried: 'trying' } }
 /** Tried, and it didn't go through. */

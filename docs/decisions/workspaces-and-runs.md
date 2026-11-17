@@ -511,7 +511,10 @@ Each thing comes in in a transaction of its own (an aside together with its
 history): one that can't come in says why, and the rest come in. The window
 has moved on by then, so what didn't come in, or a bringing in that failed as
 a whole, is said in the project's conversation, where it stays: each by name
-and why, with Try again for what another try could bring in.
+and why, with Try again for what another try could bring in. One the runtime
+never got (refused before it answered) it can't say, so the window keeps what
+was picked, by project and past a reload, and says it there the same way
+until another try goes through.
 
 Not built yet: offering what's new since from a project's settings, for a
 project made before this, or one still worked on in another tool; the board
