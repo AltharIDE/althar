@@ -359,7 +359,8 @@ export function useAsides({
       // On the lead the composer has picked now: where it changed since +, the words go to that one, as a task's composer hands over.
       const was =
         leads.current.get(taskId) ?? scratch.find((one) => one.taskId === taskId)?.plan?.steps.find((step) => step.key === 'implement')
-      await cache.ensureQueryData(reads(client).thread(threadId))
+      // The words go at once, not after its thread is read: the aside shows them meanwhile (`said`), and its thread, where the
+      // window holds it, has them too; one it doesn't hold yet is read with them below.
       sentTo = threadId
       cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
         current === undefined ? current : { ...current, items: mergeItems(current.items, optimistic.items) },

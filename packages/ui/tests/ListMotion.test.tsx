@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { Activity, useRef, useState } from 'react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest'
 
 import { ListMotion } from '../src/lib/ListMotion'
 import { MOTION } from '../src/lib/motion'
@@ -79,6 +79,8 @@ const placed = (el: Element) => {
 let narrowFirst = false
 let reduced = false
 let visible = true
+/** Where each element stands: jsdom lays nothing out, so each is placed by its list (`placed`). */
+let rects: MockInstance<() => DOMRect>
 
 beforeEach(() => {
   played = []
@@ -87,7 +89,7 @@ beforeEach(() => {
   reduced = false
   visible = true
   stubAnimations()
-  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function rect(this: Element) {
+  rects = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function rect(this: Element) {
     return placed(this)
   })
   Object.defineProperty(Element.prototype, 'checkVisibility', { value: () => visible, configurable: true })
@@ -108,17 +110,19 @@ function Lists({
   enter,
   still = false,
   seen = [],
+  version,
 }: {
   lists: ReadonlyArray<ReadonlyArray<string>>
   enter?: 'rise' | 'grow'
   still?: boolean
   /** Keys marked as having come to where they are drawn before. */
   seen?: ReadonlyArray<string>
+  version?: unknown
 }) {
   const ref = useRef<HTMLDivElement>(null)
   return (
     <div ref={ref}>
-      <ListMotion within={ref} still={still} {...(enter === undefined ? {} : { enter })}>
+      <ListMotion within={ref} still={still} {...(enter === undefined ? {} : { enter })} {...(version === undefined ? {} : { version })}>
         {lists.map((keys, i) => (
           <ol key={i}>
             {keys.map((key) => (
@@ -133,13 +137,13 @@ function Lists({
   )
 }
 
-/* A line with an order of its own, as up next has, the first of the lists, beside one of the board's. */
-function Line({ keys, still }: { keys: ReadonlyArray<string>; still: boolean }) {
+/* A line with an order of its own, as up next has, the first of the lists, beside one of the board's; where `versioned`, its order is its version. */
+function Line({ keys, still, versioned }: { keys: ReadonlyArray<string>; still: boolean; versioned: boolean }) {
   const ref = useRef<HTMLOListElement>(null)
   const [order, setOrder] = useState<ReadonlyArray<string> | null>(null)
   const shown = order ?? keys
   return (
-    <ListMotion within={ref} still={still}>
+    <ListMotion within={ref} still={still} {...(versioned ? { version: shown.join(' ') } : {})}>
       <ol ref={ref}>
         {shown.map((key) => (
           <li key={key} data-move={key}>
@@ -153,12 +157,23 @@ function Line({ keys, still }: { keys: ReadonlyArray<string>; still: boolean }) 
   )
 }
 
-function Nested({ line, rest, still = false }: { line: ReadonlyArray<string>; rest: ReadonlyArray<string>; still?: boolean }) {
+function Nested({
+  line,
+  rest,
+  still = false,
+  versioned = false,
+}: {
+  line: ReadonlyArray<string>
+  rest: ReadonlyArray<string>
+  still?: boolean
+  /** Each list given its keys as its version. */
+  versioned?: boolean
+}) {
   const ref = useRef<HTMLDivElement>(null)
   return (
     <div ref={ref}>
-      <ListMotion within={ref}>
-        <Line keys={line} still={still} />
+      <ListMotion within={ref} {...(versioned ? { version: rest } : {})}>
+        <Line keys={line} still={still} versioned={versioned} />
         <ol>
           {rest.map((key) => (
             <li key={key} data-move={key}>
@@ -414,6 +429,41 @@ describe('ListMotion', () => {
     expect(of(item('a'))).toEqual([])
     expect(of(item('d'))[0]!.keyframes).toEqual([{ opacity: 0 }, { opacity: 1 }])
     expect(of(c)[0]!.keyframes).toEqual([{ opacity: 1 }, { opacity: 0 }])
+  })
+
+  it('reads nothing of the page where its version stays: drawn again for a word typed or a second ticking, nothing can move', () => {
+    const { rerender } = render(<Lists lists={[['a', 'b', 'c']]} version="a b c" />)
+    const found = vi.spyOn(Element.prototype, 'querySelectorAll')
+    rects.mockClear()
+    rerender(<Lists lists={[['a', 'b', 'c']]} version="a b c" />)
+    expect(rects).not.toHaveBeenCalled()
+    expect(found).not.toHaveBeenCalled()
+    // Its version moves with its order: what changed places slides.
+    rerender(<Lists lists={[['c', 'a', 'b']]} version="c a b" />)
+    expect(rects).toHaveBeenCalled()
+    expect(of(item('c'))[0]!.keyframes).toEqual([{ translate: '0px 100px' }, { translate: '0px 0px' }])
+  })
+
+  it('compares a version made of entries one at a time: a new array of the same keys is the same version', () => {
+    const { rerender } = render(<Lists lists={[['a'], ['b']]} version={['a', 'b']} />)
+    rects.mockClear()
+    rerender(<Lists lists={[['a'], ['b']]} version={['a', 'b']} />)
+    expect(rects).not.toHaveBeenCalled()
+    rerender(<Lists lists={[['a', 'b'], []]} version={['a b', '']} />)
+    expect(layer()!.childElementCount).toBe(1)
+  })
+
+  it('hands the list around it an update only where its own version changed, and moves what is in both then', () => {
+    const { rerender } = render(<Nested line={['a', 'b', 'c']} rest={['x']} versioned />)
+    rects.mockClear()
+    // Both drawn again, neither's keys changed: nothing reads the page.
+    rerender(<Nested line={['a', 'b', 'c']} rest={['x']} versioned />)
+    expect(rects).not.toHaveBeenCalled()
+    // The line's own order changes, the outer one's doesn't: the outer one moves what is in the line, once.
+    fireEvent.click(screen.getByRole('button', { name: 'c' }))
+    expect(of(item('c'))).toHaveLength(1)
+    expect(of(item('c'))[0]!.keyframes[0]).toEqual({ translate: '0px 100px' })
+    expect(of(item('x'))).toEqual([])
   })
 
   it('moves nothing while the list does not show, nor where the browser does not animate', () => {

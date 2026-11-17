@@ -175,13 +175,13 @@ describe('what the client sends', () => {
     })
   })
 
-  it('watches from the start when it has heard nothing yet', async () => {
+  it('watches from the start when it has heard nothing yet, its streamed words as they grow', async () => {
     const { client, heard } = await standIn()
     const events: Array<WatchEvent> = []
     const unwatch = client.watch((event) => events.push(event))
     await waitFor(() => events.length)
     unwatch()
-    expect(heard.find((one) => one.tag === 'Watch')?.payload).toEqual({})
+    expect(heard.find((one) => one.tag === 'Watch')?.payload).toEqual({ deltas: true })
     expect(events[0]).toMatchObject({ _tag: 'Changed', cursor: 7 })
   })
 })

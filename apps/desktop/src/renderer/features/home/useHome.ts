@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 
 import type { BoardSnapshot, HomeSnapshot } from '@althar/contracts'
 
@@ -30,8 +30,16 @@ export interface HomeModel extends WorkActions {
 export const useHome = (): HomeModel => {
   const { client, cache } = useServices()
   const read = useQuery(reads(client).home())
-  const actions = useWorkActions(read.data?.tasks ?? null)
-  const home = read.data ?? null
+  // A press's card stays busy until the home is read again after its answer: begun then, whatever was under way.
+  const readAgain = useCallback(
+    () => cache.refetchQueries({ queryKey: keys.home, exact: true }).then(() => cache.getQueryData<HomeSnapshot>(keys.home)?.tasks),
+    [cache],
+  )
+  const actions = useWorkActions(read.data?.tasks ?? null, readAgain)
+  const { over } = actions
+  const readHome = read.data ?? null
+  // The home as the person's presses left it: a card Done or kept for later moved at once.
+  const home = useMemo(() => (readHome === null ? null : { ...readHome, tasks: over(readHome.tasks) }), [readHome, over])
 
   // What the loop did is read from where the read the home opened on started, as long as it is open. Shown again while
   // the home is read anew from when the person left, from where that read starts.

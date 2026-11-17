@@ -43,9 +43,12 @@ import {
   type SealStyle,
   Api,
   ApiError,
+  BACKGROUND,
   type BoardSnapshot,
   type HomeSnapshot,
   clientProtocol,
+  LANE_HEADER,
+  THREAD_ITEMS_AT_ONCE,
   type ConnectGuide,
   type ConnectionCheck,
   type ConnectionList,
@@ -59,6 +62,7 @@ import {
   type DocumentText,
   type DomMessagePort,
   domPort,
+  untraced,
   type FileDiff,
   type TaskFindings,
   type TaskLineComments,
@@ -205,6 +209,17 @@ export interface Client {
   ) => Promise<ThreadSnapshot>
   /** One item of a thread; null for one it keeps for Althar and never shows. */
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem | null>
+  /**
+   * Several items of a thread in one call, as `getThreadItem` reads each: by id, null for one it keeps for Althar and
+   * never shows, or that has gone. Asked of more than one call takes, it reads in as many.
+   */
+  readonly getThreadItems: (threadId: string, itemIds: Iterable<string>) => Promise<ReadonlyMap<string, ThreadItem | null>>
+  /**
+   * Runs `start`, and every read it starts goes behind (`BACKGROUND`): a read nobody waits on, as the change feed starts
+   * them to keep what a screen holds current, which the runtime answers a few at a time, after a press. What `start`
+   * returns, as it returned it.
+   */
+  readonly behind: <A>(start: () => A) => A
   /** What a command in a thread printed, as kept once it ended. */
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
   /** What a command a thread's session left running has printed so far. */
@@ -844,12 +859,51 @@ const uuidV7 = (now: number) => {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
+/**
+ * How deep the window is in `behind`: a read started meanwhile goes behind. It is said as the call is made, which is
+ * synchronous, so only what `behind`'s `start` starts is behind, never a call made after it returns.
+ */
+let behindNow = 0
+
+/** The header a read nobody waits on carries. */
+const laneHeaders = { [LANE_HEADER]: BACKGROUND }
+
+/**
+ * Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it, or stops it with
+ * `signal`. One made while `behind` runs says so; the runtime puts a read so marked behind, and answers a command as it
+ * comes either way.
+ */
 const settle = <A>(effect: Effect.Effect<A, unknown>, signal?: AbortSignal): Promise<A> =>
-  Effect.runPromiseExit(effect, signal === undefined ? undefined : { signal }).then((exit) => {
+  Effect.runPromiseExit(
+    behindNow > 0 ? RpcClient.withHeaders(effect, laneHeaders) : effect,
+    signal === undefined ? undefined : { signal },
+  ).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
+
+/**
+ * A message as it streams, whole again, from what a watch that asked for deltas sends: each item's text as far as it
+ * came, by id, for this run of the watch, the latest few more than the runtime keeps for it (`SENT_KEPT`), so any it
+ * sends what was added to is here.
+ */
+const STREAMED_KEPT = 256
+const wholeAgain = () => {
+  const texts = new Map<string, string>()
+  return (event: WatchEvent): WatchEvent | undefined => {
+    if (event._tag !== 'Streaming' || event.offset === undefined) return event
+    const { offset, ...rest } = event
+    const before = offset === 0 ? '' : texts.get(event.itemId)
+    // What came before it never came on this watch: nothing to add it to. The runtime sends each item whole first.
+    if (before === undefined || before.length !== offset) return undefined
+    const text = before + event.text
+    texts.delete(event.itemId)
+    texts.set(event.itemId, text)
+    const oldest = texts.keys().next()
+    if (texts.size > STREAMED_KEPT && oldest.done !== true) texts.delete(oldest.value)
+    return { ...rest, text }
+  }
+}
 
 /** How long before a command with no answer is tried again, once. */
 const RETRY_AFTER = Duration.millis(300)
@@ -874,7 +928,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
   const api = await Effect.runPromise(
     Effect.gen(function* () {
       const protocol = yield* Layer.build(clientProtocol(domPort(port)))
-      return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+      return yield* RpcClient.make(Api, untraced).pipe(Effect.provideContext(protocol))
     }).pipe(Scope.provide(scope)),
   )
   return {
@@ -907,6 +961,25 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
+    getThreadItems: (threadId, itemIds) => {
+      const asked = [...new Set(itemIds)]
+      const calls = Array.from({ length: Math.ceil(asked.length / THREAD_ITEMS_AT_ONCE) }, (_, at) =>
+        settle(api.GetThreadItems({ threadId, itemIds: asked.slice(at * THREAD_ITEMS_AT_ONCE, (at + 1) * THREAD_ITEMS_AT_ONCE) })),
+      )
+      return Promise.all(calls).then((read) => {
+        const found = new Map<string, ThreadItem | null>(asked.map((id) => [id, null]))
+        for (const item of read.flat()) found.set(item.id, item)
+        return found
+      })
+    },
+    behind: (start) => {
+      behindNow += 1
+      try {
+        return start()
+      } finally {
+        behindNow -= 1
+      }
+    },
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
@@ -1200,14 +1273,19 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.
       // Said once the watch's request has gone, a moment after it starts, so a read made then comes after it on the port.
       const started = Effect.sync(() => void setTimeout(() => onWatching?.(), 0))
-      const heard = Effect.suspend(() =>
-        Stream.runForEach(Stream.onStart(api.Watch(cursor === undefined ? {} : { since: cursor }), started), (event) =>
-          Effect.sync(() => {
-            if (event._tag === 'Changed') cursor = event.cursor
-            listener(event)
-          }),
-        ),
-      )
+      // An agent's message comes as what was added since this run of the watch last sent it, and goes to listeners whole.
+      const heard = Effect.suspend(() => {
+        const whole = wholeAgain()
+        return Stream.runForEach(
+          Stream.onStart(api.Watch(cursor === undefined ? { deltas: true } : { since: cursor, deltas: true }), started),
+          (event) =>
+            Effect.sync(() => {
+              if (event._tag === 'Changed') cursor = event.cursor
+              const shown = whole(event)
+              if (shown !== undefined) listener(shown)
+            }),
+        )
+      })
       const fiber = Effect.runFork(Effect.forever(Effect.andThen(Effect.ignore(heard), Effect.sleep(REWATCH_AFTER))))
       return () => void Effect.runFork(Fiber.interrupt(fiber))
     },

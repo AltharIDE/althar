@@ -37,6 +37,7 @@ import { headsOf } from '../../shared/mergeHere'
 import { commitsToShip } from '../../shared/shipping'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
+import type { Heard } from '../../shared/heard'
 import { type Outgoing, sentWith } from '../../shared/useAttachments'
 import { useOutputs } from '../../shared/useOutputs'
 import { useStreamed } from '../../shared/useStreamed'
@@ -60,6 +61,45 @@ const NO_ITEMS: ReadonlyArray<ThreadItem> = []
 /** How long changes are gathered before they are read. */
 const GATHER = 25
 
+/** The task's own presses that show as busy, each by its key, beside its outputs' (`doing`); any other is `act`'s. */
+export const presses = {
+  /** What the person sends, or hands over with. */
+  send: 'send',
+  undo: 'undo',
+  abandon: 'abandon',
+  attach: 'attach',
+  /** Its lead's drafted issues, filed in turn. */
+  fileIssues: 'file-issues',
+  /** Any other: what it changes is read again, and nothing shows it as working. */
+  act: 'act',
+} as const
+
+/** What the window says where the runtime answered a press but did nothing. */
+export const settleText = {
+  stillOpen: 'Something of it opened meanwhile, so it stays as it was.',
+}
+
+/** A task as its head says it. */
+type Task = ThreadSnapshot['task']
+
+/**
+ * What a press shows of the task before the runtime says so, over the thread as read: held, by its press, until a head
+ * read after its answer is shown, so a read from before it never takes it back.
+ */
+type Shown = (task: Task) => Task
+
+/**
+ * A press's change of the task, and the setting it changes: once a press is confirmed, an earlier one of the same setting
+ * still waiting for its answer shows no more, as the later is what the person wants. Without a setting, it stands alone.
+ */
+interface Showing {
+  readonly setting?: string
+  readonly show: Shown
+}
+
+/** The presses that are the task's own, not its outputs'. */
+const OWN: ReadonlySet<string> = new Set(Object.values(presses))
+
 /** A pull request to close as the task is abandoned: its address, its name in the host's words, and whether its branch goes too. */
 export interface ToClose {
   readonly url: string
@@ -82,10 +122,10 @@ export interface ErrorMore {
 export interface TaskModel {
   /** The thread's head and the items read so far, oldest first. */
   readonly snapshot: ThreadSnapshot | null
-  /** Text still streaming, by thread item. */
-  readonly streaming: ReadonlyMap<string, Streamed>
-  /** Commands' output as far as it has come, by their tool call's item, while they run. */
-  readonly outputs: ReadonlyMap<string, OutputSoFar>
+  /** Text still streaming, by thread item: held apart, for what shows it to read (`useStreaming`). */
+  readonly streaming: Heard<Streamed>
+  /** Commands' output as far as it has come, by their tool call's item, while they run: held apart, for what shows it to read (`usePrinted`). */
+  readonly outputs: Heard<OutputSoFar>
   /** Agents that could lead: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
   /** The agents have been read: none above then means none can lead, not that none are known yet. */
@@ -111,10 +151,12 @@ export interface TaskModel {
   readonly mergeStanding: (url: string) => MergeStanding | null
   /** Whether the pull request at this address merges later in a press under way, after one before it lands: no Merge of its own meanwhile. */
   readonly mergeAwaits: (url: string) => boolean
-  /** An action is on its way to the runtime. */
+  /** What the person sent is on its way, or the lead it starts: until the thread's head is read again after it. */
   readonly pending: boolean
-  /** Which of them, where it is one of the outputs' (see `doing`): the others wait, but aren't working. */
+  /** Which action on its outputs is on its way, where one is (see `doing`): the others wait, but aren't working. */
   readonly doing: Doing | null
+  /** The presses under way, by key: the outputs' (`doing`), and the task's own (`presses`). */
+  readonly busy: ReadonlySet<string>
   /** Earlier items are on their way. */
   readonly loadingEarlier: boolean
   /** Rejects on failure; quiet keeps automatic reads from opening the global error notice. */
@@ -130,8 +172,16 @@ export interface TaskModel {
    */
   readonly send: (body: string, start?: Choice, images?: Outgoing) => Promise<boolean>
   readonly sendNow: (body: string, images?: Outgoing) => Promise<boolean>
-  /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
-  readonly takeBack: (itemId: string) => Promise<boolean>
+  /**
+   * Takes back a message still waiting its turn: out of the queue at once, false for one still on its way. Where the lead
+   * already had it, it comes back as it was, the line says why, and `refused` is called, to put back what it was taken for.
+   */
+  readonly takeBack: (itemId: string, refused?: () => void) => boolean
+  /**
+   * Sends a message waiting its turn now, interrupting the lead: out of the queue, and said again, at once. Where the lead
+   * already had it, it stays as it was, said why; where Althar didn't take it, `unsent` puts it back to send again.
+   */
+  readonly sendQueuedNow: (itemId: string, body: string, images?: Outgoing, unsent?: () => void) => void
   readonly undoTurn: (itemId: string) => Promise<UndoTurnResult>
   readonly interrupt: () => Promise<void>
   /** Has the agent on the task compact its context, after what it was told before. */
@@ -291,6 +341,8 @@ export interface TaskModel {
   readonly discardReview: (draftId: string) => Promise<void>
   /** Files an issue the lead drafted, as the person says; changes it before; or throws it away. */
   readonly fileIssueDraft: (draftId: string) => Promise<void>
+  /** Files each of these drafts in turn, as one press: File all. */
+  readonly fileIssueDrafts: (draftIds: ReadonlyArray<string>) => Promise<void>
   readonly changeIssueDraft: (
     draftId: string,
     edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
@@ -325,7 +377,31 @@ export const useTask = (threadId: string): TaskModel => {
   const merge = useMerge()
   const read = reads(client)
   const thread = useQuery(read.thread(threadId))
-  const snapshot = thread.data ?? null
+  // What the presses under way show of it, each held over the thread as read until a read after its answer is shown.
+  const [shows, setShows] = useState<ReadonlyMap<number, Showing>>(new Map())
+  // The messages taken back from the queue, out of it at once, until a read of each says so.
+  const [withdrawn, setWithdrawn] = useState<ReadonlySet<string>>(new Set())
+  const readNow = thread.data ?? null
+  if (readNow !== null && withdrawn.size > 0) {
+    const still = [...withdrawn].filter((id) =>
+      readNow.items.some((item) => item.id === id && item.kind === 'user_message' && item.input?.state === 'queued'),
+    )
+    if (still.length !== withdrawn.size) setWithdrawn(new Set(still))
+  }
+  const snapshot = useMemo(
+    () =>
+      readNow === null || (shows.size === 0 && withdrawn.size === 0)
+        ? readNow
+        : {
+            ...readNow,
+            task: [...shows.values()].reduce((task, change) => change.show(task), readNow.task),
+            items:
+              withdrawn.size === 0
+                ? readNow.items
+                : readNow.items.flatMap((item) => (withdrawn.has(item.id) ? takenBack([item], item.id) : [item])),
+          },
+    [readNow, shows, withdrawn],
+  )
   const status = useQuery(read.status()).data
   // Its merges as the window keeps them: pressed and not answered, or answered and not yet read back merged, wherever pressed.
   const shownChange = snapshot === null ? null : shownChangeOf(snapshot.task.changes)
@@ -353,8 +429,10 @@ export const useTask = (threadId: string): TaskModel => {
   const outputs = useOutputs(threadId, snapshot?.items ?? NO_ITEMS, snapshot?.session?.turnRunning ?? false)
   const [failed, setError] = useState<string | null>(null)
   const error = failed ?? (thread.error === null ? null : messageOf(thread.error))
-  const [pending, setPending] = useState(false)
-  const [acting, setActing] = useState<Doing | null>(null)
+  // What is on its way to the runtime, by each press's key, so a press marks only its own control busy: how many of each.
+  const [under, setUnder] = useState<ReadonlyMap<string, number>>(new Map())
+  const busyNow = useMemo<ReadonlySet<string>>(() => new Set(under.keys()), [under])
+  const pressedCount = useRef(0)
   // Ship's route as the person chose it for the next Ship, and as pressed or changed under way, held until a read has it.
   // The choice is kept with the task it was made on, so another task's never shows on this one.
   const [choice, setChoice] = useState<{ readonly taskId: string; readonly route: ShipRoute | null } | null>(null)
@@ -429,26 +507,31 @@ export const useTask = (threadId: string): TaskModel => {
   /** What the window holds of the thread now, for a read that lands later. */
   const held = useCallback(() => cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.items ?? [], [cache, threadId])
 
+  // What a burst of changes touched is read in one call, and shows in one write.
   const readItems = useCallback(
-    (ids: Iterable<string>) =>
-      Promise.all(
-        [...ids].map((itemId) => {
-          const version = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion
-          return newest(
-            itemId,
-            client.getThreadItem(threadId, itemId),
-            // One the thread keeps for Althar alone, such as what its lead could see, is nothing to draw, and nothing wrong.
-            (item) => {
-              if (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion !== version) return
-              return item === null
-                ? setSnapshot((current) => ({ ...current, items: current.items.filter((one) => one.id !== itemId) }))
-                : arrived([item])
-            },
-            fail,
-          )
-        }),
-      ),
-    [client, cache, threadId, newest, arrived, fail, setSnapshot],
+    (ids: Iterable<string>) => {
+      const asked = [...ids]
+      if (asked.length === 0) return Promise.resolve()
+      const version = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion
+      return newest.many(
+        asked,
+        client.getThreadItems(threadId, asked),
+        // One the thread keeps for Althar alone, such as what its lead could see, is nothing to draw, and nothing wrong.
+        (read) => {
+          if (cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.conversationVersion !== version) return
+          const found = [...read.values()].filter((item) => item !== null)
+          setSnapshot((current) => ({
+            ...current,
+            items: mergeItems(
+              current.items.filter((one) => read.get(one.id) !== null),
+              found,
+            ),
+          }))
+        },
+        fail,
+      )
+    },
+    [client, cache, threadId, newest, fail, setSnapshot],
   )
 
   // What the lead was last picked to, until the thread says it: a pick made before the last one was taken goes from there.
@@ -591,30 +674,84 @@ export const useTask = (threadId: string): TaskModel => {
     [client, threadId, snapshot, setSnapshot, fail],
   )
 
+  /** Marks a press under way, or no longer, by its key. */
+  const mark = useCallback(
+    (which: string, by: 1 | -1) =>
+      setUnder((now) => {
+        const next = new Map(now)
+        const count = (next.get(which) ?? 0) + by
+        if (count > 0) next.set(which, count)
+        else next.delete(which)
+        return next
+      }),
+    [],
+  )
+
+  /**
+   * Once the thread's head, as the window holds it, is no longer `was`: a
+   * head read begun since is shown, the one asked for or one the runtime's
+   * word of the change began after it. Or once no read of the head is under
+   * way, where none could be shown, as one that failed.
+   */
+  const shownSince = useCallback(
+    (was: Task | undefined) =>
+      new Promise<void>((resolve) => {
+        const now = () => cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.task
+        if (now() !== was) return resolve()
+        const stop = cache.getQueryCache().subscribe(() => {
+          if (now() === was) return
+          stop()
+          resolve()
+        })
+        void newest.landed('head').then(() => {
+          stop()
+          resolve()
+        })
+      }),
+    [cache, threadId, newest],
+  )
+
   /**
    * Runs an action, says what went wrong if it did, and reads the thread's
-   * head again. It stays under way until that read, or one begun after it,
-   * is shown, so what it changed shows as it ends: a Push never shows its
-   * count from before it went.
+   * head again. It is under way by its own key (`which`), so nothing else
+   * shows as busy for it, until a head read begun after its answer is shown,
+   * so what it changed shows as it ends: a Push never shows its count from
+   * before it went. A read begun since, as the runtime's word of it arrives,
+   * is newer, and shows in its place; one landing out of turn never ends it.
+   * What it `shows` of the task is there from the press, over whatever is
+   * read, until that read is shown; what fails takes it back, and the line
+   * says why.
    */
   const act = useCallback(
-    async (action: () => Promise<unknown>, which: Doing | null = null) => {
+    async (action: () => Promise<unknown>, which: string = presses.act, shows?: Shown | Showing) => {
       setError(null)
-      setPending(true)
-      setActing(which)
+      mark(which, 1)
+      const press = ++pressedCount.current
+      const showing = typeof shows === 'function' ? { show: shows } : shows
+      const unshow = () => setShows((now) => (now.has(press) ? new Map([...now].filter(([one]) => one !== press)) : now))
+      if (showing !== undefined) setShows((now) => new Map([...now, [press, showing]]))
+      let failed = false
       try {
         await action()
       } catch (failure) {
+        failed = true
+        unshow()
         fail(failure)
       } finally {
-        await readHead()
-        // A read begun since, as the runtime's word of the push arrives, replaces it: shown once that lands.
-        await newest.landed('head')
-        setPending(false)
-        setActing(null)
+        // What it shows holds until the task is read again from here: the runtime's word from then on.
+        const was = cache.getQueryData<ThreadSnapshot>(keys.thread(threadId))?.task
+        void readHead()
+        await shownSince(was)
+        // Confirmed, it supersedes every earlier press of its setting still waiting: those show no more, whenever they answer.
+        const setting = failed ? undefined : showing?.setting
+        setShows((now) => {
+          const left = [...now].filter(([one, it]) => one !== press && (setting === undefined || one > press || it.setting !== setting))
+          return left.length === now.size ? now : new Map(left)
+        })
+        mark(which, -1)
       }
     },
-    [readHead, newest, fail],
+    [readHead, shownSince, fail, mark, cache, threadId, setShows],
   )
 
   /** A press here is over: the window's record of each merge, by its address, says where it stands from here. */
@@ -624,9 +761,9 @@ export const useTask = (threadId: string): TaskModel => {
     setAwaitingMerges((now) => new Set([...now].filter((url) => !urls.includes(url))))
   }
 
-  /** Runs an action on the task, once it has been read. */
-  const onTask = (action: (taskId: string) => Promise<unknown>) =>
-    act(async () => (snapshot === null ? undefined : action(snapshot.task.id)))
+  /** Runs an action on the task, once it has been read, as `act` does: by its key, showing what it changes. */
+  const onTask = (action: (taskId: string) => Promise<unknown>, which: string = presses.act, shows?: Shown | Showing) =>
+    act(async () => (snapshot === null ? undefined : action(snapshot.task.id)), which, shows)
 
   /**
    * What the person sends shows at once, as the window's copy until the
@@ -669,8 +806,32 @@ export const useTask = (threadId: string): TaskModel => {
         if (!accepted) setSnapshot((current) => ({ ...current, items: unsent(current.items, id, text) }))
         throw failure
       }
-    }).then(() => accepted)
+    }, presses.send).then(() => accepted)
   }
+
+  /** Out of the queue at once, held so until a read of it says so; back as it was where the lead already had it. */
+  const withdraw = (itemId: string) => setWithdrawn((now) => new Set([...now, itemId]))
+  const restore = (itemId: string) =>
+    setWithdrawn((now) => {
+      const next = new Set(now)
+      next.delete(itemId)
+      return next
+    })
+
+  /** Settles it, or keeps it for later, shown at once as its card will be; one the runtime answered without moving says so. */
+  const settle = (how: 'done' | 'kept', which: Doing) =>
+    act(
+      async () => {
+        if (snapshot === null) return
+        await (how === 'done' ? client.markTaskDone(snapshot.task.id) : client.keepTaskForLater(snapshot.task.id))
+        // Something of it opened meanwhile, as an aside's Clear finds: read afresh after the answer, never what the cache holds.
+        const after = await client.getThread(threadId, { limit: 0 })
+        if (after.task.phase !== (how === 'done' ? 'settled' : 'kept'))
+          throw new ApiError({ reason: 'Unchanged', message: settleText.stillOpen })
+      },
+      which,
+      { setting: 'phase', show: (task) => ({ ...task, phase: how === 'done' ? 'settled' : 'kept' }) },
+    )
 
   return {
     snapshot,
@@ -699,8 +860,9 @@ export const useTask = (threadId: string): TaskModel => {
     },
     mergeAwaits: (url) =>
       (awaitingMerges.has(url) || heldMerges.has(url)) && merging !== url && !pressedMerges.has(url) && !pressedByUrl.has(url),
-    pending,
-    doing: acting,
+    pending: under.has(presses.send),
+    doing: [...under.keys()].find((key) => !OWN.has(key)) ?? null,
+    busy: busyNow,
     loadingEarlier,
     loadEarlier,
     readFiles,
@@ -734,28 +896,54 @@ export const useTask = (threadId: string): TaskModel => {
         images,
       ),
     undoTurn: async (itemId) => {
-      setPending(true)
+      mark(presses.undo, 1)
       try {
         const result = await client.undoTurn(itemId)
-        cache.setQueryData(keys.thread(threadId), await client.getThread(threadId))
+        // Undone: the turn and what came after go from the thread at once, and its newest page is read again behind it.
+        const from = snapshot?.items.find((item) => item.id === itemId)?.sequence
+        if (from !== undefined) setSnapshot((current) => ({ ...current, items: current.items.filter((item) => item.sequence < from) }))
+        void newest('head', client.getThread(threadId, { limit: PAGE }), (fresh) => cache.setQueryData(keys.thread(threadId), fresh), fail)
         return result
       } finally {
-        setPending(false)
+        mark(presses.undo, -1)
       }
     },
-    takeBack: async (itemId) => {
+    takeBack: (itemId, refused) => {
       // What is still on its way has nothing to take back yet.
       if (isSending(itemId)) return false
       setError(null)
-      try {
-        await client.takeBack(itemId)
-        // Gone from the queue at once, rather than when the runtime's word of it arrives.
-        arrived(takenBack(snapshot?.items ?? [], itemId))
-        return true
-      } catch (failure) {
+      // Out of the queue from the press until a read of it says so, whatever lands before: the runtime's word of it reads it.
+      withdraw(itemId)
+      client.takeBack(itemId).catch((failure: unknown) => {
+        restore(itemId)
         fail(failure)
-        return false
-      }
+        refused?.()
+      })
+      return true
+    },
+    sendQueuedNow: (itemId, body, images, unsent) => {
+      if (isSending(itemId)) return
+      setError(null)
+      withdraw(itemId)
+      // Taken back first, so one the lead already read is never said twice: the copy shown goes, and it stays where it was.
+      let taken = false
+      void shown(
+        body,
+        'interrupt_and_continue',
+        async () => {
+          try {
+            await client.takeBack(itemId)
+          } catch (failure) {
+            restore(itemId)
+            throw failure
+          }
+          taken = true
+          await client.send({ threadId, body, disposition: 'interrupt_and_continue', ...sentWith(images) })
+        },
+        images,
+      ).then((sent) => {
+        if (!sent && taken) unsent?.()
+      })
     },
     interrupt: () => act(() => client.interrupt(threadId)),
     compact: () => act(() => client.compact(threadId)),
@@ -795,9 +983,17 @@ export const useTask = (threadId: string): TaskModel => {
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
     makeChange: () => onTask((taskId) => client.shapeTask(taskId, 'Change')),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
-    setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
+    setResolveConflicts: (on) =>
+      onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on }), presses.act, {
+        setting: 'resolveConflicts',
+        show: (task) => ({ ...task, resolveConflicts: { ...task.resolveConflicts, task: on } }),
+      }),
     resolveConflictsNow: () => onTask((taskId) => client.resolveConflictsNow(taskId)),
-    setAllowEverything: (on) => onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on })),
+    setAllowEverything: (on) =>
+      onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on }), presses.act, {
+        setting: 'allowEverything',
+        show: (task) => ({ ...task, allowEverything: { ...task.allowEverything, task: on } }),
+      }),
     abandon: async (close = []) => {
       let abandoned = false
       const open: Array<string> = []
@@ -817,7 +1013,7 @@ export const useTask = (threadId: string): TaskModel => {
             said.push(closeText.stillOpen(one.name, messageOf(failure)))
           }
         }
-      })
+      }, presses.abandon)
       if (said.length > 0) setError(said.join(' '))
       return { abandoned, open }
     },
@@ -827,7 +1023,7 @@ export const useTask = (threadId: string): TaskModel => {
       let done = null as Attachment | null
       await onTask(async (taskId) => {
         done = await client.attachPullRequest(taskId, pullRequest, start)
-      })
+      }, presses.attach)
       return done
     },
     startPlan: (planId) => act(() => client.startPlan(planId)),
@@ -868,7 +1064,11 @@ export const useTask = (threadId: string): TaskModel => {
     workToward: (toward) => onTask((taskId) => client.workToward(taskId, toward)),
     runIt: (how) => onTask((taskId) => client.runIt(taskId, how)),
     stopRunning: () => onTask((taskId) => client.stopRunning(taskId)),
-    shelve: (shelf) => onTask((taskId) => client.shelveTask(taskId, shelf)),
+    shelve: (shelf) =>
+      onTask((taskId) => client.shelveTask(taskId, shelf), presses.act, {
+        setting: 'shelf',
+        show: (task) => ({ ...task, scratch: shelf === 'scratch' }),
+      }),
     savePreset: (name) => onTask((taskId) => client.savePreset({ name, taskId })),
     stopHelper: (helper) => onTask((taskId) => client.stopHelper(taskId, helper)),
     joinChanges: (change) => onTask((taskId) => client.joinChanges(taskId, change)),
@@ -936,8 +1136,8 @@ export const useTask = (threadId: string): TaskModel => {
         async () => (snapshot === null ? undefined : client.leaveAfterMerge(snapshot.task.id, snapshot.task.afterMerge?.url)),
         doing.leaveAfterMerge,
       ),
-    markDone: () => act(async () => (snapshot === null ? undefined : client.markTaskDone(snapshot.task.id)), doing.markDone),
-    keep: () => act(async () => (snapshot === null ? undefined : client.keepTaskForLater(snapshot.task.id)), doing.keep),
+    markDone: () => settle('done', doing.markDone),
+    keep: () => settle('kept', doing.keep),
     mergeHere: () =>
       act(async () => {
         setConflict(null)
@@ -1056,12 +1256,20 @@ export const useTask = (threadId: string): TaskModel => {
       }),
     discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
+    fileIssueDrafts: (draftIds) =>
+      act(async () => {
+        for (const draftId of draftIds) await client.fileIssueDraft(draftId)
+      }, presses.fileIssues),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
     discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     applyIssueChanges: (changesId) => act(() => client.applyIssueChanges(changesId)),
     discardIssueChanges: (changesId) => act(() => client.discardIssueChanges(changesId)),
     preferIssueCards: (atOnce) => act(() => client.preferIssueCards(threadId, atOnce)),
-    setIssuePart: (partOf) => onTask((taskId) => client.setTaskIssuePart(taskId, partOf)),
+    setIssuePart: (partOf) =>
+      onTask((taskId) => client.setTaskIssuePart(taskId, partOf), presses.act, {
+        setting: 'issuePartOf',
+        show: (task) => ({ ...task, issuePartOf: partOf }),
+      }),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),

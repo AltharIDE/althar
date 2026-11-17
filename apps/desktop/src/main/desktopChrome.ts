@@ -11,6 +11,8 @@ import {
   type DesktopChrome,
   type DesktopFacts,
   factsFromEnv,
+  isAccent,
+  isButtonLayout,
   kdeFacts,
   kwinDoubleClickMaximizes,
   kwinLayout,
@@ -53,10 +55,13 @@ import {
  * plasmashell, kreadconfig6 and their kind are GUI programs that abort
  * without a display, and kreadconfig6 opens a dialog where it can't write
  * its own config. What can't be read is unknown, and the desktop's default
- * stands. The layout's reads are local and quick, and the first window waits
- * for them (within FIRST_CHROME_WAIT). The slow reads (the version, the
- * window manager's name, KDE's decoration) don't hold it: what they found
- * last time is cached in the profile, and what they find now follows.
+ * stands. The layout's reads are local and quick, and the first window of a
+ * first launch waits for them (within FIRST_CHROME_WAIT). After that it opens
+ * on what they said last time, kept in the profile with what the slow reads
+ * found (the version, the window manager's name, KDE's decoration), and what
+ * they say now follows: a portal that is slow to start, or not there, never
+ * holds the window. On X11 it waits for xprop's word on the window manager
+ * all the same, as the window's frame hangs on it and can't change once open.
  */
 
 /**
@@ -77,10 +82,12 @@ export const FIRST_CHROME_WAIT = 1500
  */
 export const FIRST_X11_WAIT = 2 * PROBE_TIMEOUT + 500
 
-/** What the slow reads found, kept for the next start, for the same desktop only. */
+/** What the slow reads found, and what the window last opened on, kept for the next start, for the same desktop only. */
 export interface CachedFacts {
   readonly desktop: string
   readonly facts: Partial<Pick<DesktopFacts, 'wm' | 'gnomeVersion' | 'kdeDecoration' | 'kdeColorScheme' | 'wmMoves'>>
+  /** The layouts, accent and theme the quick reads said, which the next start's first window opens on. */
+  readonly look?: { readonly layouts: DesktopLook['layouts']; readonly accent: DesktopLook['accent']; readonly gtkTheme?: string }
 }
 
 /** What the desktop is read through: the system's, or a test's. */
@@ -136,18 +143,41 @@ export const chromeOf = (look: DesktopLook, framed: boolean): DesktopChrome => {
 export const desktopKey = (facts: DesktopFacts, env: Readonly<Record<string, string | undefined>>): string =>
   [facts.platform, facts.session, facts.family, env.XDG_CURRENT_DESKTOP ?? '', env.DESKTOP_SESSION ?? ''].join('|')
 
+/** Each place a desktop keeps its button layout. */
+const LAYOUT_SOURCES: readonly string[] = [
+  'gnome',
+  'kwin',
+  'cinnamon',
+  'marco',
+  'xfwm4',
+  'openbox',
+  'labwc',
+  'wayfire',
+  'cosmic',
+] satisfies ReadonlyArray<LayoutSource>
+
+const text = (one: unknown) => one === undefined || (typeof one === 'string' && /^[\w .+@-]{1,80}$/.test(one))
+
+/** Whether a kept look is one: each layout by a place layouts are kept, an accent, and a theme's name. */
+const isLook = (value: unknown): value is NonNullable<CachedFacts['look']> => {
+  if (typeof value !== 'object' || value === null) return false
+  const { layouts, accent, gtkTheme } = value as Record<string, unknown>
+  if (typeof layouts !== 'object' || layouts === null || !isAccent(accent) || !text(gtkTheme)) return false
+  return Object.entries(layouts).every(([source, layout]) => LAYOUT_SOURCES.includes(source) && isButtonLayout(layout))
+}
+
 const isCached = (value: unknown, desktop: string): value is CachedFacts => {
   if (typeof value !== 'object' || value === null) return false
-  const { desktop: kept, facts } = value as Record<string, unknown>
+  const { desktop: kept, facts, look } = value as Record<string, unknown>
   if (kept !== desktop || typeof facts !== 'object' || facts === null) return false
   const { wm, gnomeVersion, kdeDecoration, kdeColorScheme, wmMoves } = facts as Record<string, unknown>
-  const text = (one: unknown) => one === undefined || (typeof one === 'string' && /^[\w .+@-]{1,80}$/.test(one))
   return (
     text(wm) &&
     text(kdeDecoration) &&
     text(kdeColorScheme) &&
     (gnomeVersion === undefined || Number.isInteger(gnomeVersion)) &&
-    (wmMoves === undefined || typeof wmMoves === 'boolean')
+    (wmMoves === undefined || typeof wmMoves === 'boolean') &&
+    (look === undefined || isLook(look))
   )
 }
 
@@ -175,6 +205,10 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
 
   // What the first window waits for: the cache, and the portal's first word on each setting it is asked.
   const waiting = new Set<string>(['cache'])
+  // What has been said of now, by the portal or a file, which what was kept never takes back: `layout:<source>`, accent, theme.
+  const said = new Set<string>()
+  // Whether the cache held what the window last opened on: the first window opens on it, and what is said now follows.
+  let opensOnKept = false
   const settledOnes = new Set<() => void>()
   const settle = (what: string) => {
     waiting.delete(what)
@@ -201,6 +235,7 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
     let first = true
     stops.push(
       sources.watchPortal(namespace, key, parse, (value) => {
+        said.add(name)
         use(value)
         if (first) settle(name)
         first = false
@@ -286,6 +321,7 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
     void readers[source]()
       .catch(() => undefined)
       .then((layout) => {
+        said.add(what)
         if (layout !== undefined) set({ layouts: { ...look.layouts, [source]: layout } })
         settle(what)
       })
@@ -310,6 +346,7 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
     let firstLayout = true
     stops.push(
       sources.watchPortal('org.gnome.desktop.wm.preferences', 'button-layout', parseGnomeLayout, (layout) => {
+        said.add('layout:gnome')
         if (layout !== undefined) set({ layouts: { ...look.layouts, gnome: layout } })
         if (!firstLayout) return
         firstLayout = false
@@ -343,7 +380,16 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
   const cacheRead = sources.cache === undefined ? Promise.resolve(undefined) : sources.cache.read().catch(() => undefined)
   if (linux) readLayout(base)
   void cacheRead.then((kept) => {
-    if (isCached(kept, desktop)) set({ facts: withClick(withFacts(look.facts, kept.facts)) })
+    if (isCached(kept, desktop)) {
+      set({ facts: withClick(withFacts(look.facts, kept.facts)) })
+      if (kept.look !== undefined) {
+        // What was kept, where nothing has been said of it yet this time.
+        const layouts = Object.entries(kept.look.layouts).filter(([source]) => !said.has(`layout:${source}`))
+        set({ layouts: { ...Object.fromEntries(layouts), ...look.layouts }, ...(said.has('accent') ? {} : { accent: kept.look.accent }) })
+        if (kept.look.gtkTheme !== undefined && !said.has('theme')) learn({ gtkTheme: kept.look.gtkTheme })
+        opensOnKept = true
+      }
+    }
     if (linux) readLayout(look.facts)
     settle('cache')
   })
@@ -397,11 +443,24 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
       }),
     )
   }
+  // Once everything has had its first word, what the quick reads said: kept for the next start to open on.
+  const allSaid = new Promise<void>((resolve) => {
+    const check = () => {
+      if (waiting.size > 0) return
+      settledOnes.delete(check)
+      resolve()
+    }
+    settledOnes.add(check)
+  })
   // Once the cache is read, so a slower read never loses to what it held; then kept for the next start.
-  void Promise.all([cacheRead, ...reads]).then(() => {
+  void Promise.all([cacheRead, ...reads]).then(async () => {
     if (stopped) return
     learn(found)
-    if (sources.cache !== undefined && reads.length > 0) void sources.cache.write({ desktop, facts: found }).catch(() => undefined)
+    if (!linux) return
+    await allSaid
+    const { layouts, accent, facts } = look
+    const kept = { layouts, accent, ...(facts.gtkTheme === undefined ? {} : { gtkTheme: facts.gtkTheme }) }
+    if (sources.cache !== undefined && !stopped) void sources.cache.write({ desktop, facts: found, look: kept }).catch(() => undefined)
   })
 
   return {
@@ -412,7 +471,9 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
     },
     first: (within) =>
       new Promise((resolve) => {
-        if (waiting.size === 0) return resolve(look)
+        // What the window last opened on, once the cache is read: what is said now follows. On X11, never before xprop's word.
+        const kept = () => opensOnKept && !waiting.has('cache') && !waiting.has('x11')
+        if (waiting.size === 0 || kept()) return resolve(look)
         let late = false
         const done = () => {
           clearTimeout(timer)
@@ -422,7 +483,7 @@ export const followDesktopChrome = (sources: ChromeSources): FollowedChrome => {
         }
         // Past `within`, only xprop's word is waited for.
         const check = () => {
-          if (waiting.size === 0 || (late && !waiting.has('x11'))) done()
+          if (waiting.size === 0 || kept() || (late && !waiting.has('x11'))) done()
         }
         const timer = setTimeout(() => {
           late = true

@@ -13,7 +13,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SearchDocument } from '@althar/contracts'
 import type { Client } from '../src/renderer/data/client'
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
-import { search, type Ask, type Context, type Entry } from '../src/renderer/features/finder/model'
+import { entriesOf, type EntryChanges, nothingHeld, withChanges } from '../src/renderer/features/finder/held'
+import { search, type Ask, type Context } from '../src/renderer/features/finder/model'
 import { draftKey, draftOf } from '../src/renderer/shared/drafts'
 import { fakeClient, project } from './fixtures'
 import { withServices } from './render'
@@ -21,12 +22,12 @@ import { withServices } from './render'
 class RankWorker {
   static hold = false
   static pending: Array<() => void> = []
-  entries: ReadonlyArray<Entry> = []
+  held = nothingHeld
   onmessage: ((event: MessageEvent) => void) | null = null
-  postMessage(message: { type: string; entries: ReadonlyArray<Entry>; id: number; query: string; context: Context; ask: Ask }) {
-    if (message.type === 'entries') this.entries = message.entries
+  postMessage(message: { type: string; changes: EntryChanges; id: number; query: string; context: Context; ask: Ask }) {
+    if (message.type === 'entries') this.held = withChanges(this.held, message.changes)
     else {
-      const results = search(this.entries, message.query, message.context, message.ask)
+      const results = search(entriesOf(this.held), message.query, message.context, message.ask)
       const answer = () => this.onmessage?.({ data: { id: message.id, results } } as MessageEvent)
       if (RankWorker.hold) RankWorker.pending.push(answer)
       else queueMicrotask(answer)

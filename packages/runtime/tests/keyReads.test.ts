@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer, Option, Tracer } from 'effect'
+import { Duration, Effect, Layer, Option, Tracer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
@@ -160,7 +160,12 @@ describe('the reads the person waits on', () => {
       const scans = (yield* Effect.forEach([...new Set(read)], scansIn)).flat()
       assert.deepStrictEqual(scans, [])
     }).pipe(
-      Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })))),
+      // Cards kept between reads, as Althar keeps them: what the watcher reads to work them out is read here too.
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github }), keptFor: Duration.hours(1) })),
+        ),
+      ),
       Effect.provide(traced.layer),
     )
   })

@@ -144,6 +144,8 @@ export function WorkNow({ icon, children }: WorkNowProps) {
       {/* each step comes in by a fade, not a flip */}
       <span key={children} className={s.doing}>
         {children}
+        {/* the light passing over them: their copy, drawn by its style, never read, found or copied twice */}
+        <span className={s.sheen} data-words={children} aria-hidden="true" />
       </span>
     </p>
   )
