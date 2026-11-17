@@ -65,7 +65,8 @@ test('stops, resumes, abandons and reopens a task from its menu', async () => {
     await expect(shown(page, 'Stopped', { exact: true }).first()).toBeVisible()
     items = await menu(page)
     await expect(items.getByRole('menuitem', { name: /Resume/ })).toBeVisible()
-    await page.keyboard.press('Escape')
+    // Visibility can precede Radix's focus handoff. Send Escape from the open menu's item.
+    await items.getByRole('menuitem', { name: /Resume/ }).press('Escape')
     await expect(page.getByRole('menu')).toHaveCount(0)
   } finally {
     await electronApp.close()

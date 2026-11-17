@@ -9,6 +9,8 @@
  * stands for that round's report too, and opens as it is brought into view.
  */
 
+import { bringItemIntoView } from '@althar/ui'
+
 /** How many earlier pages it reads, at most, looking for an item: a hundred items each. */
 const PAGES = 10
 /** How many frames it waits for the conversation to show what it read. */
@@ -35,6 +37,8 @@ const found = async (root: ParentNode, itemId: string): Promise<HTMLElement | nu
  */
 export async function reveal(itemId: string, earlier: () => Promise<boolean>, root: ParentNode = document): Promise<boolean> {
   for (let page = 0; page <= PAGES; page++) {
+    // A long thread draws only what is near the view: the item's block is drawn first, wherever it is.
+    bringItemIntoView(itemId)
     const block = await found(root, itemId)
     if (block !== null) {
       const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches

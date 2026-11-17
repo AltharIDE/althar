@@ -239,6 +239,7 @@ const ALTHAR: Readonly<Record<string, string>> = {
   update_branch: 'Update the branch',
   wait_for_person: 'Wait for the person',
   wait_for: 'Wait for an external change',
+  wait_for_tasks: 'Set what the task waits for',
   work_toward: 'Work toward a branch',
 }
 

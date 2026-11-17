@@ -128,7 +128,10 @@ test('makes the first project of a repository it found, starts a task, and talks
     const before = await folds.count()
     await say(page, 'updates')
     await expect(folds).toHaveCount(before + 1)
+    // Its last live line folds as the turn ends; only then does this click open the completed work.
+    await expect(folds.last()).toHaveAttribute('aria-expanded', 'false')
     await folds.last().click()
+    await expect(folds.last()).toHaveAttribute('aria-expanded', 'true')
     await expect(page.getByText('Write the test')).toBeVisible()
     await page.screenshot({ path: 'test-results/thread.png' })
 

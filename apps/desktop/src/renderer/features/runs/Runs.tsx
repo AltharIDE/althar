@@ -236,8 +236,8 @@ export interface RunDialogsModel {
 }
 
 /** The dialogs for what a project runs, wherever they open from: Run's list, or the project's settings. */
-export const useRunDialogs = (projectId: string): RunDialogsModel => {
-  const runs = useRuns({ projectId })
+export const useRunDialogs = (projectId: string, runnables: ReadonlyArray<Runnable> | null = null): RunDialogsModel => {
+  const runs = useRuns({ projectId, runnables })
   const [showing, setShowing] = useState<RunDialog>(null)
   return {
     runs,
@@ -275,10 +275,12 @@ export function RunDialogs({
   const { runs: model, showing, show } = dialogs
   const close = () => show(null)
   const error = model.error === null ? {} : { error: model.error }
-  const ids = runnables.map((one) => one.id)
-  const kept = new Set(runnables.map((one) => runsAs(one.repository, one.command)))
+  // As the person left them: one removed gone at once.
+  const listed = model.shown ?? runnables
+  const ids = listed.map((one) => one.id)
+  const kept = new Set(listed.map((one) => runsAs(one.repository, one.command)))
   const fresh = model.scripts?.filter((script) => !kept.has(runsAs(script.repository, script.command))) ?? null
-  const editing = showing?.kind === 'edit' ? runnables.find((one) => one.id === showing.id) : undefined
+  const editing = showing?.kind === 'edit' ? listed.find((one) => one.id === showing.id) : undefined
 
   return (
     <>
@@ -303,9 +305,10 @@ export function RunDialogs({
           onAddScripts={async (picked) => {
             if (await model.keepScripts((fresh ?? []).filter((script) => picked.includes(scriptId(script))))) close()
           }}
-          // oxlint-disable-next-line althar/press-at-once -- Not instant yet: the form keeps its error until the coordinator has the ask (foundations.md, The UI is instant).
-          onAsk={async () => {
-            if (await model.ask()) close()
+          // Said in the coordinator's thread at once; where it couldn't be, asked again here, saying why.
+          onAsk={() => {
+            model.ask(() => show({ kind: 'add', way: 'ask' }))
+            close()
           }}
           onClose={close}
           busy={model.busy}
@@ -315,11 +318,11 @@ export function RunDialogs({
       {showing?.kind === 'list' && (
         <Runnables
           project={project}
-          runnables={runnables.map(listedOf)}
+          runnables={listed.map(listedOf)}
           onOrder={(next) => void model.order(next)}
           onDefault={(id) => void model.order([id, ...ids.filter((one) => one !== id)])}
           onEdit={(id) => show({ kind: 'edit', id })}
-          onRemove={(id) => void model.drop(id)}
+          onRemove={(id) => model.drop(id)}
           onAdd={() => show({ kind: 'add', way: 'type' })}
           onClose={close}
           {...error}
@@ -337,9 +340,10 @@ export function RunDialogs({
           onSave={async ({ name, command, repository }) => {
             if (await model.keep({ id: editing.id, name, command, repository })) show(afterEdit)
           }}
-          // oxlint-disable-next-line althar/press-at-once -- Not instant yet: the list shows a removed run until it is read again (foundations.md, The UI is instant).
-          onRemove={async () => {
-            if (await model.drop(editing.id)) show(afterEdit)
+          // Gone at once, and back to where it was opened from; where it couldn't be removed, that list says why.
+          onRemove={() => {
+            model.drop(editing.id)
+            show(afterEdit)
           }}
           onClose={() => show(afterEdit)}
           busy={model.busy}
@@ -544,7 +548,7 @@ export function Runs({
   /** Opens where a code host is connected, from the picker's band for one that isn't. */
   readonly onConnect?: () => void
 }) {
-  const dialogs = useRunDialogs(projectId)
+  const dialogs = useRunDialogs(projectId, runnables)
   const { client } = useServices()
   const toward = useWorkToward(projectId)
   const repositories = useQuery(reads(client).repositories(projectId)).data

@@ -440,6 +440,11 @@ export const startPages = (options: PagesOptions) => {
       event.preventDefault()
       return options.pressed(page.owner.id, 'comment')
     }
+    // The window's shortcut to dictate, from anywhere: a page that has the keys hears it first.
+    if (mod(input) && input.shift && !input.alt && key.toLowerCase() === 'd') {
+      event.preventDefault()
+      return options.pressed(page.owner.id, 'dictate')
+    }
     if (mod(input) && !input.shift && key.toLowerCase() === 'l') {
       event.preventDefault()
       // The keys go to the window's address field from here on, not the page.

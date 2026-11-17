@@ -22,11 +22,13 @@ import {
   WorkSaid,
   WorkShots,
   Verdict,
+  VirtualBlocks,
   type ModelInfo,
 } from '@althar/ui'
 
 import { piecesOf, shotsOf } from '../../shared/evidence'
 import { handedBy } from '../../shared/handed'
+import { linkedWords } from '../../shared/noteLinks'
 import { HandedBack } from '../../shared/HandedBack'
 import { useModelNames } from '../../shared/modelNames'
 import { type Round as RoundModel, type RoundBlock, type Said, type Shown, type WorkStep, withoutShotList } from '../../shared/rounds'
@@ -35,6 +37,7 @@ import { RuleReceipt } from '../../shared/RuleReceipt'
 import { SaidIn } from '../../shared/code/CodeHost'
 import { CanvasLines, McpActs, PartView, ThreadBlocks } from '../../shared/ThreadBlocks'
 import { FailedTurn } from '../../shared/WayOut'
+import { holdsItem, stopOf } from '../../shared/virtual'
 import { PublishedReport, reportText, ReviewReport } from './Reports'
 import { HelperWork } from './HelperWork'
 import s from './TaskThread.module.css'
@@ -453,13 +456,25 @@ export function TaskThread({
           compact: onCompact !== undefined,
           signIn: onSignIn === undefined ? null : (block.agentId ?? session?.agentId ?? null),
         }
-  // The pictures already shown, by their names: a later report's retakes of a view aren't shown again.
+  // The pictures already shown, by their names: a later report's retakes of a view aren't shown again. Read through
+  // every round in order, drawn or not, as only those near the view are drawn.
   const seen = new Set<string>()
+  const retakesOf = new Map<string, ReadonlyArray<string>>()
+  const note = (block: RoundModel) => {
+    const names = shotNames(block.report)
+    retakesOf.set(
+      block.id,
+      names.filter((name) => seen.has(name)),
+    )
+    for (const name of names) seen.add(name)
+  }
+  for (const block of rounds) {
+    if (block.kind === 'round') note(block)
+    else if (block.kind === 'verdict' && block.settle !== null) note(block.settle)
+  }
 
   const round = (block: RoundModel) => {
-    const names = shotNames(block.report)
-    const retakes = names.filter((name) => seen.has(name))
-    for (const name of names) seen.add(name)
+    const retakes = retakesOf.get(block.id) ?? []
     return (
       <RoundView
         key={block.id}
@@ -481,7 +496,7 @@ export function TaskThread({
     )
   }
 
-  const drawn = rounds.map((block) => {
+  const draw = (block: RoundBlock) => {
     switch (block.kind) {
       case 'round':
         return round(block)
@@ -500,13 +515,13 @@ export function TaskThread({
       case 'althar':
         if (block.task !== undefined && started !== undefined) return <Fragment key={block.id}>{started(block.task)}</Fragment>
         return (
-          <AltharLine key={block.id} tone={block.tone}>
+          <AltharLine key={block.id} tone={block.tone} {...(block.details === undefined ? {} : { details: block.details })}>
             {block.task !== undefined && onOpenTask !== undefined ? (
               <>
                 {STARTED} <LinkButton onClick={() => onOpenTask(block.task?.threadId ?? '')}>{block.task.title}</LinkButton>
               </>
             ) : (
-              block.text
+              linkedWords(block.text, block.links)
             )}
           </AltharLine>
         )
@@ -594,6 +609,24 @@ export function TaskThread({
       default:
         return <ThreadBlocks key={block.id} {...shared} blocks={[block as Block]} />
     }
-  })
-  return reviewing === null ? drawn : [...drawn, <ReviewLine key="reviewing" model={reviewing.model} live took={reviewing.took} />]
+  }
+  // Only the blocks near the view are drawn, however long the thread (VirtualBlocks).
+  const drawn = (
+    <VirtualBlocks
+      count={rounds.length}
+      keyOf={(i) => rounds[i]!.id}
+      render={(i) => draw(rounds[i]!)}
+      holds={(i, itemId) => holdsItem(rounds[i], itemId)}
+      stopOf={(i) => stopOf(rounds, i)}
+      memory={threadId}
+    />
+  )
+  return reviewing === null ? (
+    drawn
+  ) : (
+    <>
+      {drawn}
+      <ReviewLine model={reviewing.model} live took={reviewing.took} />
+    </>
+  )
 }

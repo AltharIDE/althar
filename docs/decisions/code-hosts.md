@@ -226,14 +226,36 @@ each turn of its lead begins, before the lead reads anything, and before it
 pushes on its own; crediting keeps when a commit was written, so a commit
 made again for its credit is still the lead's.
 
-**Merge, with commits not shipped, offers two.** Review and merge is a Ship
-that merges once what waited is up, unless the lead set a finding of its
-review aside, which a line says, leaving the merge to the person. Merge now
-sends them up past the hold and merges at once, and they are reviewed after
-the merge, in the same task, where it has a reviewer
-([reviews](reviews.md#an-explicit-review-after-merge)). A plain
-Accept, from the Dock or anywhere, is refused while they wait: it would
-merge the pull request without them, unreviewed. The Dock offers Ship.
+**Ship takes a route: whether it reviews first, and how far it goes.** As
+far as a push (a draft stays one, a new pull request opens as one), ready
+for review (an open draft is marked ready, a new one opens ready), or
+merged, once the checks main requires pass: a required check still running
+holds the merge, an optional one never does, and a failed one ends the Ship
+at ready with a line saying why. The route is the one the person chose for
+this Ship from Ship's chevron, else the task's own: the person's default
+(Make this my default), else its plan's review and its ending; no review
+where it has no reviewer, and no further than ready where main needs
+someone else's approval, which the menu says. Ship's button names every
+stop, the ones it skips faded; hovering it says what it will do, and How
+Ship works explains each stop, where a click on a stop's icon turns it on
+or off. Under way, the same button greys at the stop it is at, its route
+still changeable (`RouteShip`, and `ship_task` for the coordinator and the
+leads, who go no further than ready) and its review skippable, with no Push
+or Mark ready beside it; the task's card and header say that stop too
+(Merges once checks pass), not the opening of a pull request. A change of
+route away from merged and the merge itself can't both win: the merge reads
+its route again in the transaction that records its intent, after its reads
+of the host, so a change made before then sends no merge, and one made
+after it is refused, the merge having gone to the host (`merging`). How Ship
+works keeps the review's stop off, saying why, where the task has no
+reviewer. So Merge, with commits not shipped, is Ship to
+merged: the card offers no Review and merge or Merge now beside it, and
+Review and merge stays a Ship to merged for the runtime. Merge now remains
+the runtime's, sending them up past the hold and merging at once, reviewed
+after the merge where the task has a reviewer
+([reviews](reviews.md#an-explicit-review-after-merge)). A plain Accept,
+from the Dock or anywhere, is refused while they wait: it would merge the
+pull request without them, unreviewed. The Dock offers Ship.
 
 `push_to_pull_request` pushes at once wherever the rule or a checks fix
 would, and says what it did; otherwise it shows the person the commits with
@@ -505,6 +527,15 @@ the task settles as done.
 repository allows. A head that moved since is refused, as merging what
 nobody saw; an errand's merge takes the head that went green.
 
+The window's Merge also follows the host's queue by default, including for an
+admin who can bypass it. Where GitHub explicitly permits this viewer to bypass
+branch protections, its secondary menu offers **Merge without queue**. That
+choice checks the permission again and merges only the head shown; a refusal
+stays a refusal. A queued pull request offers the same explicit choice without
+another normal merge. Permission unknown or denied, another host, work waiting
+for Ship, and a settled change offer no bypass. The override belongs to the
+named pull request, never every repository in a stack.
+
 - **Where the branch has the host's own queue** (GitHub's and Bitbucket
   Cloud's merge queues, GitLab's merge trains), the merge goes there, at its head, and the host
   merges once the queue's checks pass. A build the queue sent back is not cleared by
@@ -740,5 +771,6 @@ The decisions above are current. These parts of them aren't built on main:
 - 8 Nov 2026: the limits sweep (#696) built: agents carry the person's own sign-in, and `gh` and `glab` are read as git is.
 - 9 Nov 2026: what a turn the person's words began after the plan commits holds the branch for Ship (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: commits made by hand hold the branch too; Merge with commits not shipped offers Review and merge or Merge now (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 16 Nov 2026: Ship takes a route, review or not and as far as push, ready or merged, named on its button and explained on hover; it replaces Review and merge and Merge now on the card, and a merge waits for the checks main requires.
 - 10 Nov 2026: a task follows several pull requests at once, one for each change; stacks hold, ship, merge and retarget from the bottom up, and a pull request opened outside Althar from a change's own branch is that change's (a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)).
 - 12 Nov 2026: review and triage bots (DEV-205) built: the person trusts each in the project's settings, off by default; a trusted bot's words reach the lead as findings quoted as data, never obeyed.

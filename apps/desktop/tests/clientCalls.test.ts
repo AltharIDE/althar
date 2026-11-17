@@ -1,5 +1,6 @@
 // @vitest-environment node
 import {
+  apiLayer,
   ClientAuthority,
   Api,
   ApiError,
@@ -62,7 +63,7 @@ const standIn = async (): Promise<{ client: Client; heard: Array<Heard> }> => {
   // Every handler the stand-in has needs nothing, whatever the contract allows them.
   const server = RpcServer.layer(Api).pipe(
     Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
-    Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as never)))),
+    Layer.provide(apiLayer(Effect.succeed(Api.of(handlers as never)))),
     Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
   ) as Layer.Layer<never>
   await Effect.runPromise(Effect.forkIn(Layer.launch(server), scope))
@@ -138,6 +139,12 @@ describe('what the client sends', () => {
     const url = 'https://github.com/meridian/web/pull/4'
     expect((await sent(heard, client.markReady('t1'))).payload).toEqual({ taskId: 't1' })
     expect((await sent(heard, client.merge('t1', 'abc'))).payload).toEqual({ taskId: 't1', head: 'abc' })
+    expect((await sent(heard, client.merge('t1', 'abc', 'https://github.com/meridian/api/pull/12', undefined, true))).payload).toEqual({
+      taskId: 't1',
+      head: 'abc',
+      url: 'https://github.com/meridian/api/pull/12',
+      bypassQueue: true,
+    })
     expect((await sent(heard, client.push('t1', 'abc'))).payload).toEqual({ taskId: 't1', head: 'abc' })
     expect((await sent(heard, client.push('t1', 'abc', url))).payload).toEqual({ taskId: 't1', head: 'abc', url })
     expect(await sent(heard, client.replacePullRequest('t1', 'abc', 'def'))).toEqual({
@@ -168,13 +175,13 @@ describe('what the client sends', () => {
     })
   })
 
-  it('watches from the start when it has heard nothing yet', async () => {
+  it('watches from the start when it has heard nothing yet, its streamed words as they grow', async () => {
     const { client, heard } = await standIn()
     const events: Array<WatchEvent> = []
     const unwatch = client.watch((event) => events.push(event))
     await waitFor(() => events.length)
     unwatch()
-    expect(heard.find((one) => one.tag === 'Watch')?.payload).toEqual({})
+    expect(heard.find((one) => one.tag === 'Watch')?.payload).toEqual({ deltas: true })
     expect(events[0]).toMatchObject({ _tag: 'Changed', cursor: 7 })
   })
 })

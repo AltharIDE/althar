@@ -10,7 +10,7 @@ import type { WatchEvent } from '@althar/contracts'
 
 import type { Feed } from '../src/renderer/data/feed'
 import { EdgeView, type EdgePlaceShown } from '../src/renderer/features/edge/EdgeView'
-import { edgeKey, followEdge, useEdge } from '../src/renderer/features/edge/useEdge'
+import { EDGE_GATHER, edgeKey, followEdge, useEdge } from '../src/renderer/features/edge/useEdge'
 import { card, change, changed, fakeClient, fakeHost, home, project } from './fixtures'
 import { render } from '@testing-library/react'
 
@@ -152,7 +152,7 @@ describe('the edge', () => {
     await userEvent.click(within(stalled).getByRole('button', { name: 'Open' }))
     expect(host.openInWindow).toHaveBeenCalledWith('th4')
     // Stopped, it waits on the person, as on its board: not work in progress.
-    expect(within(screen.getByRole('article', { name: 'Left alone' })).getByText('Stopped')).toBeTruthy()
+    expect(screen.queryByRole('article', { name: 'Left alone' })).toBeNull()
     expect(screen.getByText('2 in progress · 1 held')).toBeTruthy()
   })
 
@@ -291,9 +291,9 @@ describe('the edge', () => {
     await screen.findByRole('button', { name: 'Nothing needs you' })
     tasks = [{ ...running, phase: 'stopped', stopped: { by: 'interrupted', at: '2026-10-07T09:30:00.000Z' } }]
     act(() => emit(changed('card', running.taskId, running.threadId, running.projectId)))
-    expect(await screen.findByRole('button', { name: '1 needs you' })).toBeTruthy()
-    // On its line in the sheet, but nothing beside the notch.
-    expect(within(screen.getByRole('region', { name: 'Althar' })).getAllByText('Stopped')).toHaveLength(1)
+    await waitFor(() => expect(screen.queryByText('Implement')).toBeNull())
+    expect(screen.getByRole('button', { name: 'Nothing needs you' })).toBeTruthy()
+    expect(within(screen.getByRole('region', { name: 'Althar' })).queryByText('Stopped')).toBeNull()
   })
 
   it('opens as the pointer comes onto it, as the main process watches it, and says where it draws', async () => {
@@ -331,16 +331,47 @@ describe('the edge’s reads', () => {
       }
       const cache = new QueryClient()
       const invalidate = vi.spyOn(cache, 'invalidateQueries')
-      followEdge(feed, cache)
+      let behind = 0
+      followEdge(feed, cache, (start) => {
+        behind += 1
+        return start()
+      })
       listeners.forEach((listener) => listener(changed('decision', 'd1')))
-      vi.advanceTimersByTime(500)
+      vi.advanceTimersByTime(EDGE_GATHER)
       expect(invalidate).not.toHaveBeenCalled()
       listeners.forEach((listener) => listener(changed('card', 't1')))
       listeners.forEach((listener) => listener(changed('project', 'p1')))
-      vi.advanceTimersByTime(500)
+      // A burst is gathered for a second, and read once, behind.
+      vi.advanceTimersByTime(EDGE_GATHER - 1)
+      expect(invalidate).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
       expect(invalidate).toHaveBeenCalledTimes(1)
       expect(invalidate).toHaveBeenCalledWith({ queryKey: edgeKey })
+      expect(behind).toBe(1)
     } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('are only marked while the edge is hidden, to be read as it shows', () => {
+    vi.useFakeTimers()
+    const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
+    try {
+      const listeners: Array<(event: WatchEvent) => void> = []
+      const feed: Feed = {
+        listen: (listener) => (listeners.push(listener), () => {}),
+        rewatched: () => () => {},
+        remembered: () => 0,
+        stop: () => {},
+      }
+      const cache = new QueryClient()
+      const invalidate = vi.spyOn(cache, 'invalidateQueries')
+      followEdge(feed, cache)
+      listeners.forEach((listener) => listener(changed('card', 't1')))
+      vi.advanceTimersByTime(EDGE_GATHER)
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: edgeKey, refetchType: 'none' })
+    } finally {
+      hidden.mockRestore()
       vi.useRealTimers()
     }
   })

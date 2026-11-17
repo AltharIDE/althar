@@ -66,6 +66,45 @@ export const Repository = Schema.Struct({
 })
 export type Repository = typeof Repository.Type
 
+/**
+ * A repository the account can reach on a host, as a list of them says it:
+ * for choosing one to clone. `path` is as `repository` takes it.
+ */
+export const ListedRepository = Schema.Struct({
+  path: Schema.Array(Schema.String),
+  /** Its description on the host; null where it has none. */
+  description: Schema.NullOr(Schema.String),
+  private: Schema.Boolean,
+  /** When it was last pushed to, as an ISO time; null where the host doesn't say. */
+  pushedAt: Schema.NullOr(Schema.String),
+  webUrl: Schema.String,
+  /** Archived, or read-only otherwise: listed, to clone, never to push to. */
+  archived: Schema.Boolean,
+})
+export type ListedRepository = typeof ListedRepository.Type
+
+/**
+ * Where the account can make a repository: itself, an organization, a group
+ * (GitLab's, nested ones by their full path), a workspace (Bitbucket Cloud's)
+ * or a project (Bitbucket Data Center's, by its key). `id` is what
+ * `createRepository` takes; `name` is how the host names it to people.
+ */
+export const RepositoryOwner = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  kind: Schema.Literals(['user', 'organization', 'group', 'workspace', 'project']),
+})
+export type RepositoryOwner = typeof RepositoryOwner.Type
+
+/** A new repository, made empty: no README, no licence, no first commit, so the project's own can be pushed. */
+export interface NewHostRepository {
+  readonly owner: RepositoryOwner
+  /** Its name; the host makes its path from it as it does (GitLab and Bitbucket slug it). */
+  readonly name: string
+  readonly private: boolean
+  readonly description?: string
+}
+
 /** Where a change stands. A declined Bitbucket pull request is closed. */
 export const ChangeState = Schema.Literals(['open', 'merged', 'closed'])
 export type ChangeState = typeof ChangeState.Type
@@ -82,6 +121,8 @@ export const ChangeRequest = Schema.Struct({
   source: Schema.String,
   target: Schema.String,
   headSha: Schema.NullOr(Schema.String),
+  /** The commit that landed this change, absent until the host can identify it. */
+  mergeCommit: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.NullOr(Person),
   additions: Schema.NullOr(Schema.Number),
   deletions: Schema.NullOr(Schema.Number),
@@ -248,6 +289,8 @@ export type HostNeed = typeof HostNeed.Type
 export const MergeRules = Schema.Struct({
   requiredChecks: Schema.Union([Schema.Literal('all'), Schema.Array(Schema.String), Schema.Null]),
   needs: Schema.Array(HostNeed),
+  /** GitHub explicitly allows this viewer to bypass the queue; absent where unknown or there is no queue. */
+  canBypassQueue: Schema.optional(Schema.Boolean),
 })
 export type MergeRules = typeof MergeRules.Type
 
@@ -386,6 +429,8 @@ export interface HostCapabilities {
    * not on Enterprise Server, which takes no such upload.
    */
   readonly pictures: boolean
+  /** Conservative upload ceiling in bytes, before any smaller limit the server reports. */
+  readonly pictureLimit?: number
   /**
    * A closed change can be opened again. Not on Bitbucket Cloud, where a
    * declined pull request is final: `reopenChange` is refused there.
@@ -518,6 +563,8 @@ export interface CodeHost extends HostReleases {
    * comes back open and `queued` too.
    */
   merge(repository: Repository, change: ChangeRequest, how?: MergeHow): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /** The person's explicit choice to merge without the queue. Rechecks the host's bypass permission and pins the head. */
+  mergeWithoutQueue?(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   /** How changes into a branch merge on the host: its queue or train, auto-merge, or plainly. Read when asked; kept a while. */
   mergeWays(repository: Repository, target: string): Effect.Effect<MergeWays, ConnectorFailed>
   /**
@@ -632,6 +679,19 @@ export interface CodeHost extends HostReleases {
     reply: { readonly body: string; readonly threadId: string | null },
   ): Effect.Effect<Comment, ConnectorFailed>
   pushTarget(repository: Repository): Effect.Effect<PushTarget, ConnectorFailed>
+  /**
+   * Every repository the account can reach, last pushed to first, as far as
+   * `paged` follows: its own, its organizations', groups' or workspaces'.
+   */
+  repositories(): Effect.Effect<ReadonlyArray<ListedRepository>, ConnectorFailed>
+  /** Where the account can make a repository: itself first, where it can, then each it may make one in. */
+  owners(): Effect.Effect<ReadonlyArray<RepositoryOwner>, ConnectorFailed>
+  /**
+   * Makes an empty repository. One of that name there already is refused as
+   * `rejected`, with the host's words; one the account may not make there as
+   * `forbidden`.
+   */
+  createRepository(repository: NewHostRepository): Effect.Effect<Repository, ConnectorFailed>
   /**
    * A change to review, whoever opened it: what it is, whether its author is
    * one of the repository's people, and the fork it comes from. Where the

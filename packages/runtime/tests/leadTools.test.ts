@@ -1,4 +1,4 @@
-import { removeTreeSync } from '@althar/testing'
+import { removeTree } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -182,7 +182,8 @@ describe('a lead’s pull request tools, at their edges', () => {
     return Effect.gen(function* () {
       const { lead, worktree } = yield* withPullRequest(working)
       // On Windows a folder can't go while a process still has it open, as git looking at it for a conflict may for a moment.
-      removeTreeSync(worktree)
+      yield* Effect.ignore((yield* Sessions).stop(lead.threadId))
+      yield* Effect.promise(() => removeTree(worktree))
       assert.strictEqual(
         yield* callTool(lead, 'push_to_pull_request', {}),
         `The task's worktree isn't on ${thisDevice()}, so Althar can't see what is on its branch. Tell the person.`,
@@ -211,7 +212,8 @@ describe('a task’s pull request, as the person acts on it', () => {
       const kept = execFileSync('git', ['rev-parse', 'althar/add-a-retry'], { cwd: bare }).toString().trim()
       execFileSync('git', ['update-ref', '-d', 'refs/heads/althar/add-a-retry'], { cwd: bare })
       const unfetched = yield* Effect.flip(changes.mergeNote(taskId))
-      assert.strictEqual((unfetched as { stderr?: string }).stderr, "Couldn't fetch althar/add-a-retry from the host.")
+      // What git said of it, not a sentence of Althar's in its place.
+      assert.strictEqual((unfetched as { stderr?: string }).stderr, "fatal: couldn't find remote ref refs/heads/althar/add-a-retry")
       execFileSync('git', ['update-ref', 'refs/heads/althar/add-a-retry', kept], { cwd: bare })
       // Someone merged it on the host before the person pressed Merge: nothing is merged twice, and the task settles.
       github.mergeByHand(1)

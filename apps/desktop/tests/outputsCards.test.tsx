@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { ChangedFile, ChangeSummary, ThreadSnapshot } from '@althar/contracts'
 
 import { Outputs } from '../src/renderer/features/task/Outputs'
+import type { ShipModel } from '../src/renderer/features/task/ShipControl'
 import { change, fakeClient, items, snapshot } from './fixtures'
 import { withServices } from './render'
 
@@ -41,7 +42,14 @@ const pr = (repository: string, number: number, overrides: Partial<ChangeSummary
 
 const show = (
   snap: ThreadSnapshot,
-  props: { error?: string | null; merging?: string | null; mergeRefused?: string | null; doing?: string | null; pending?: boolean } = {},
+  props: {
+    error?: string | null
+    merging?: string | null
+    mergeRefused?: string | null
+    doing?: string | null
+    pending?: boolean
+    ship?: Partial<ShipModel>
+  } = {},
 ) => {
   const handlers = {
     onAccept: vi.fn(),
@@ -55,12 +63,21 @@ const show = (
     onConnect: vi.fn(),
     onReplace: vi.fn(),
     onBringIn: vi.fn(),
-    onShip: vi.fn(),
-    onMergeWaiting: vi.fn(),
+  }
+  const ship = {
+    ship: vi.fn(async () => {}),
+    shipChoice: null,
+    chooseShipRoute: vi.fn(),
+    shipPressed: null,
+    routeShip: vi.fn(async () => {}),
+    shipRerouted: null,
+    skipReview: vi.fn(async () => {}),
+    ...props.ship,
   }
   withServices(
     <Outputs
       snapshot={snap}
+      ship={ship}
       pending={props.pending ?? false}
       doing={props.doing ?? null}
       error={props.error ?? null}
@@ -70,10 +87,81 @@ const show = (
     />,
     fakeClient().client,
   )
-  return handlers
+  return { ...handlers, onShip: ship.ship, ship }
 }
 
 describe('what a task changed, card by card', () => {
+  it('keeps the queue default and sends bypass only from the secondary action at the viewed head', async () => {
+    const one = pr('api', 12, { canBypassQueue: true })
+    const { onAccept } = show(task({ changes: [one] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Accept and merge' }))
+    expect(onAccept).toHaveBeenLastCalledWith([{ head: one.head, url: one.url }])
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    expect(onAccept).toHaveBeenLastCalledWith([{ head: one.head, url: one.url, bypassQueue: true }])
+  })
+
+  it.each([false, undefined])('has no override when bypass permission is %s', (canBypassQueue) => {
+    show(task({ changes: [pr('api', 12, canBypassQueue === undefined ? {} : { canBypassQueue })] }))
+    expect(screen.queryByRole('button', { name: 'Other ways to merge' })).toBeNull()
+  })
+
+  it('keeps a queued PR in place and offers an authorized bypass instead of another normal merge', async () => {
+    const one = pr('api', 12, { queued: true, canBypassQueue: true })
+    const { onAccept } = show(task({ changes: [one], phase: 'running' }))
+    expect(screen.getByText('In the merge queue')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Accept and merge' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    expect(onAccept).toHaveBeenCalledWith([{ head: one.head, url: one.url, bypassQueue: true }])
+  })
+
+  it('bypasses only the named next repository in a stack, preserving the default for the rest', async () => {
+    const first = pr('api', 12, { canBypassQueue: true })
+    const second = pr('web', 18, { canBypassQueue: true })
+    const { onAccept } = show(task({ changes: [first, second] }))
+    await userEvent.click(screen.getByRole('button', { name: 'Each on its own' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge api without queue' }))
+    expect(onAccept).toHaveBeenCalledWith([{ head: first.head, url: first.url, bypassQueue: true }])
+  })
+
+  it.each(['draft', 'working', 'merged', 'closed'] as const)('has no bypass action for work that is %s', (state) => {
+    const one = pr('api', 12, {
+      canBypassQueue: true,
+      draft: state === 'draft',
+      ...(state === 'merged' || state === 'closed' ? { state } : {}),
+    })
+    show(task({ changes: [one], phase: state === 'working' ? 'running' : state === 'merged' || state === 'closed' ? 'settled' : 'ready' }))
+    expect(screen.queryByRole('button', { name: 'Other ways to merge' })).toBeNull()
+  })
+
+  it('keeps queue bypass unavailable while commits wait for Ship', async () => {
+    const one = pr('api', 12, { canBypassQueue: true })
+    show(task({ changes: [one], held: { commits: 2, since: '2026-10-01T10:00:00Z' } }))
+    const more = screen.queryByRole('button', { name: 'Other ways to merge' })
+    if (more !== null) await userEvent.click(more)
+    expect(screen.queryByRole('menuitem', { name: 'Merge without queue' })).toBeNull()
+  })
+
+  it.each([false, true])('keeps a sibling’s published PR available while another repository needs Ship (queued: %s)', async (queued) => {
+    const published = pr('web', 18, { canBypassQueue: true, queued })
+    const { onAccept } = show(
+      task({
+        end: 'draft',
+        changes: [pr('api', 12, { state: 'merged' }), published],
+        unshipped: { commits: 1, add: 4, del: 0 },
+      }),
+    )
+    expect(screen.getByRole('button', { name: /^Ship/ })).toBeTruthy()
+    if (!queued) {
+      await userEvent.click(screen.getByRole('button', { name: 'Accept and merge web' }))
+      expect(onAccept).toHaveBeenLastCalledWith([{ head: published.head, url: published.url }])
+    }
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    await userEvent.click(screen.getByRole('menuitem', { name: queued ? 'Merge web without queue' : 'Merge without queue' }))
+    expect(onAccept).toHaveBeenLastCalledWith([{ head: published.head, url: published.url, bypassQueue: true }])
+  })
+
   it.each(['draft', 'ready'] as const)('offers Ship for committed work ending in a %s pull request before any hold exists', async (end) => {
     const here = [
       {
@@ -87,7 +175,7 @@ describe('what a task changed, card by card', () => {
     const { onShip, onOpenChange, onPushBranch, onMergeHere } = show(
       task({ end, commits: 9, files: [FILE], here, steps: [{ key: 'review', agentId: 'codex', model: null, skipped: false }] }),
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Ship 9 commits' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Ship/ }))
     expect(onShip).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: /Open a .*pull request/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Push to origin' })).toBeNull()
@@ -100,19 +188,19 @@ describe('what a task changed, card by card', () => {
   it('ships committed work on an explicitly stopped task without offering a raw publication bypass', async () => {
     const stopped = task({ end: 'draft', phase: 'stopped', stopped: { by: 'interrupted', at: null }, commits: 2, files: [FILE] })
     const { onShip } = show(stopped)
-    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Ship/ }))
     expect(onShip).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: 'Open a draft pull request' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Push to origin' })).toBeNull()
     cleanup()
     show({ ...stopped, session: { ...snapshot().session!, turnRunning: true } })
-    expect(screen.queryByRole('button', { name: 'Ship 2 commits' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Ship/ })).toBeNull()
   })
 
   it('ships a next pull request through its ending, and offers no Ship when no committed work remains', async () => {
     const changes = [pr('api', 1, { state: 'merged' })]
     const { onShip } = show(task({ end: 'draft', changes, commits: 12, unshipped: { commits: 2, add: 5, del: 0 } }))
-    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Ship/ }))
     expect(onShip).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: 'Open a new draft pull request' })).toBeNull()
     cleanup()
@@ -125,7 +213,7 @@ describe('what a task changed, card by card', () => {
 
   it('ships a new repository’s pull request even while a sibling pull request is open', async () => {
     const { onShip } = show(task({ end: 'draft', changes: [pr('api', 1)], unshipped: { commits: 2, add: 5, del: 0 } }))
-    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Ship/ }))
     expect(onShip).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: 'Open a new draft pull request' })).toBeNull()
   })
@@ -175,16 +263,54 @@ describe('what a task changed, card by card', () => {
     expect(screen.queryByRole('button', { name: /^Ship|Merge into|Push to/ })).toBeNull()
   })
 
-  it('offers Review and merge, or Merge now, beside Ship where commits wait for it', async () => {
+  it('names Ship’s route, and goes as far as merged from its chevron, with no Merge or Push beside it', async () => {
     const changes = [pr('api', 1, { localHead: 'def456', unpushed: 2 })]
-    const { onMergeWaiting, onShip } = show(task({ changes, held: { since: '2026-11-10T09:00:00.000Z', commits: 2 } }))
-    await userEvent.click(screen.getByRole('button', { name: 'Ship 2 commits' }))
-    expect(onShip).toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: 'Review and merge' }))
-    expect(onMergeWaiting).toHaveBeenLastCalledWith('review')
-    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Merge now' }))
-    expect(onMergeWaiting).toHaveBeenLastCalledWith('now')
+    const { onShip, ship } = show(
+      task({
+        changes,
+        held: { since: '2026-11-10T09:00:00.000Z', commits: 2 },
+        shipRoute: { route: { review: true, far: 'ready' }, reviewable: true, bent: null },
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'Ship review, then push, then ready' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Review and merge|Merge now|Push 2 commits|Accept and merge/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'How far it goes' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: /Merged/ }))
+    expect(ship.chooseShipRoute).toHaveBeenLastCalledWith({ review: true, far: 'merge' })
+    await userEvent.click(screen.getByRole('button', { name: /^Ship/ }))
+    expect(onShip).toHaveBeenCalledOnce()
+  })
+
+  it('keeps Ship in place, greyed at its stop, while it runs: nothing to press beside it, its review skippable', async () => {
+    const changes = [pr('api', 1, { draft: true, localHead: 'def456', unpushed: 2 })]
+    const { onShip, onPush, onMarkReady, ship } = show(
+      task({
+        phase: 'running',
+        changes,
+        held: { since: '2026-11-10T09:00:00.000Z', commits: 2 },
+        shipping: { route: { review: true, far: 'merge' }, at: 'review' },
+        skipReview: true,
+      }),
+    )
+    const going = screen.getByRole('button', { name: /^Reviewing/ })
+    expect(going.getAttribute('aria-disabled')).toBe('true')
+    await userEvent.click(going)
+    expect(onShip).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /Push 2 commits|Mark ready for review/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'How far it goes' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Skip the review/ }))
+    expect(ship.skipReview).toHaveBeenCalledOnce()
+    expect(onPush).not.toHaveBeenCalled()
+    expect(onMarkReady).not.toHaveBeenCalled()
+  })
+
+  it('shows Ship under way from the press, before the runtime says so', () => {
+    const changes = [pr('api', 1, { localHead: 'def456', unpushed: 2 })]
+    show(task({ changes, held: { since: '2026-11-10T09:00:00.000Z', commits: 2 } }), {
+      ship: { shipPressed: { route: { review: false, far: 'push' }, at: 'push' } },
+    })
+    expect(screen.getByRole('button', { name: /^Pushing 2 commits/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Ship/ })).toBeNull()
   })
 
   it('accepts every pull request still open in a task of several, at the head each showed, and not one merged already', async () => {
@@ -370,7 +496,7 @@ describe('what a task changed, card by card', () => {
     expect(screen.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
   })
 
-  it('says a merge here with no remote has nowhere to push to, with its review and what went wrong', async () => {
+  it('says a merge here with no remote is merged here, and no more, with its review and what went wrong', async () => {
     const merged = [{ repository: 'meridian', name: 'meridian', branch: 'main', remote: null, ahead: 0 }]
     show(
       task(
@@ -379,7 +505,8 @@ describe('what a task changed, card by card', () => {
       ),
       { error: 'The worktree is gone.' },
     )
-    expect(await screen.findByText('Into main on this Mac. It has no remote to push to.')).toBeTruthy()
+    // Only on this computer, as its project is: nothing it lacks is said.
+    expect(await screen.findByText('Into main on this Mac.')).toBeTruthy()
     expect(screen.getByText(/Reviewed by/)).toBeTruthy()
     expect(screen.getByText('The worktree is gone.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Push/ })).toBeNull()

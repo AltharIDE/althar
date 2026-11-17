@@ -34,11 +34,16 @@ saw came from screens starting empty, not from slow reads.
 
 - **Reads go out of date by change, never by age.** The window watches the
   runtime's change feed once, for every screen. A change reads again every
-  whole read it touches, on screen or not, so the next place the person goes
-  is already right. A change to a thread only marks it out of date; the
-  screen showing it reads what changed, item by item, and a thread not on
-  screen is read when it next opens. A read under way is let finish and
-  read once more, never cut short to begin again.
+  whole read it touches that shows; one off screen (a board, the home, the
+  projects) is marked, and read as the person goes back, behind what was
+  read before, which shows at once. A change to a thread only marks it out
+  of date; the screen showing it reads what changed, in one call for a
+  burst, and a thread not on screen is read when it next opens. A read under
+  way is let finish and read once more, never cut short to begin again.
+  What the feed reads for a screen that shows goes at once; what it reads
+  only for what doesn't show goes behind, where the runtime answers it a
+  few at a time, after a press. A screen's own read in that lane waited
+  behind every other the window had, and showed seconds late.
 - **A board follows its cards, as the runtime says they changed.** The
   runtime works a task's card out again as anything of the task changes,
   whatever kind of record it is, and says `card` on the feed only where it
@@ -229,6 +234,44 @@ peeks at the lines; pressing it opens the whole file beside the conversation;
   (Settings picks which).
 - **Files are coloured by Shiki,** its grammars loaded as a language first
   shows, in the kit's syntax inks, which code blocks in messages share.
+- **A markdown file opens rendered.** A `.md` or `.markdown` file is a page
+  wherever Althar opens a file: the Changes view, and the panel beside the
+  conversation. One switch has three ways, M going through them, kept per file:
+  Changes, the page with what the task changed marked; Rendered, the page as it
+  is now with nothing marked, to read it; and Source, the diff where the task
+  changed it (the file's lines where it didn't, or where lines named in it were
+  asked for, and as they were said where they were rewritten since). Changes is the default
+  where the task changed it; a file it wrote new has nothing to mark, so it is
+  Rendered and Source only, and one it deleted Changes and Source only. The page is the kit's
+  `Markdown`, as in the thread, with code, tables, task lists and diagrams as
+  they are there. A file's HTML is drawn as GitHub draws it, since a README is
+  often mostly HTML (a banner's `<picture>`, centred lines, tables of pictures):
+  read inertly and drawn from an allow-list of tags and of the attributes that
+  set a page out (align, width, spans), never a script, a style, a handler or a
+  frame, its links and pictures going the markdown's own way. In what is said in
+  a thread, HTML stays words. GitHub's alerts (`> [!NOTE]`) are callouts, and a
+  file's headings step down in size, `#` to `###`. Where the task changed it, the page says what: blocks with an
+  added line are tinted and carry a `+`, what was taken out is drawn where it
+  stood, tinted and carrying a `−`, never a stripe at the edge. This is read from
+  the file's whole-file diff, which holds every line of it, so nothing more is
+  asked for. The runtime says it is whole (`FileDiff.whole`), since a diff in
+  hunks starts at line one too and ends before the file does; a file too long to
+  be read whole stays a diff, and going to a finding's note, which sits under a
+  line, opens its file as Source. A change to a link's definition (`[guide]: …`)
+  marks the blocks that link through it and shows the old line where it stood;
+  a markdown file moved with nothing else changed is read as it is and opens as
+  a page. A document an agent handed back opens in the side panel the same way:
+  Changes, Rendered or Source (what the task changed, as a diff), a link to a
+  file opening on top of it; the file is found by its whole
+  path where the task works, so a task of several repositories names it, its
+  change and what it links to by their repository. A relative image or link is the file's
+  neighbour: its path is resolved from the file's folder, an image is read
+  from where the thread's agent works (`ReadCode` with `image`, only an image,
+  not past 8 MB: a task's from inside its folders as they are, the
+  coordinator's from the default branch at the commit its documents are read at) and drawn in place of its words, and
+  a link to a file opens it (a file of the change is picked in Changes; another
+  opens in the editor; in the panel it opens there). A picture off the machine is
+  never fetched: its words stand in.
 
 ### The workbench
 
@@ -457,6 +500,42 @@ files and folders, each at most 50 MB (a folder's files together, at most
 A message with files can't go to a task whose folder isn't on this computer
 right now; the composer says so.
 
+## Comments on the diff
+
+In a task's diff (Outputs → Review the diff, ⌘D) the person picks a line or a
+range, writes about it, gathers several, and Send delivers them to the lead in
+one message. Posting them to the code host as a review is not built; the
+shape is close enough to a review comment to be mapped later.
+
+- **A comment is a value of its own (`LineComment`):** a file as the Changes
+  view names it (the repository's slug first in a task of several), a side
+  (`new` for the file as the task has it, `old` for lines the change only took
+  out, with `under` the new line they were taken out after), a first and last
+  line, the code as it showed (each line unchanged, added or removed) and what
+  the person said. `LINE_COMMENTS` limits a message to 30 and a comment to 80
+  quoted lines.
+- **It rides on a message.** `Send` and `SwitchAgent` take `comments`; no call
+  sends them on their own, so a message and its comments are one input and
+  one turn. The command's envelope says how many there are, not what they say.
+- **The lead reads text.** After the person's words come "N comments on the
+  diff:", then each comment's file and lines ("as the file was before the
+  change" for a removed line), its code fenced in the file's language, or as a
+  diff where a line was taken out, in a fence longer than any run of backticks
+  in it, and what the person said. No agent needs to know a new shape, and
+  older clients need nothing: the field is optional.
+- **The thread shows them on the person's message.** `UserMessageItem`'s
+  content has an optional `comments` (`SentLineComment`, the comment with an
+  id); the bubble shows each one's excerpt after the words, and an excerpt
+  opens the diff at its line.
+- **Addressed is worked out, never stored.** The runtime keeps each comment
+  with its worktree's tree and HEAD as they were when it was sent.
+  `GetLineComments` reads them back with where each one's lines are now,
+  carried past what changed since. A comment is `addressed` once a commit
+  since it was sent changed its lines, and they are still changed as the
+  files are now; what isn't committed doesn't count. One whose lines no longer
+  show in the change is listed above its file; one whose worktree is gone has
+  no place and is never addressed.
+
 ## Dictation
 
 Dictation is local, always. Speech is turned into text on this machine and
@@ -489,6 +568,19 @@ code. The only thing dictation fetches is its model.
   held down, letting go stops it. Leaving the composer while it listens keeps
   it listening in a pill that says whose it is. Once written, it goes to the
   thread it was said in, or into the composer on screen.
+- **Unless the cursor is in a composer's field, the shortcut is the window's.**
+  With it there, the words land in that composer; anywhere else, a composer on
+  screen or none (the home, a board, the settings, a page, a task's outputs),
+  it listens in a thread of its own, carried from the first word, whose pill
+  says "Not placed yet". Written, the person places it (the search box in a
+  choosing mode: a project, for its coordinator, or a task, an aside among
+  them), and it waits in that composer, not sent, marked as dictated; or
+  moves it into the composer they are on, or throws it away. What was said and
+  not placed is kept, and carried again if the window is closed first. It is also in
+  the search's actions with its key, and a page in a tab passes the key on.
+  The key is the one the composers already had: it clashes with nothing
+  macOS, Windows or Linux set, nor with ⌘D (a task's diff) or ⌘⇧C (a
+  comment on a page). Shortcuts are fixed in Althar, so this one is too.
 
 Hosted transcription would be better on accents and noise, but speech would
 leave the machine. Windows on Arm has no build yet.
@@ -518,29 +610,86 @@ written Match the system follows the system. There is one dark, a warm one.
 ## The window on each desktop
 
 The window is dressed for the desktop it sits on, decided by Althar, not by a
-setting: the person asked that it belong without having to pick. The main
-process reads the desktop (`main/desktop.ts`, `main/desktopChrome.ts`) from
-the environment, the Settings portal, D-Bus, KDE's config files and, on X11,
-the window manager's name. The only programs it ever runs are `gdbus`,
-`xprop` and `gsettings`, with a timeout and no shell. Desktop programs
+setting: the person asked that it belong without having to pick. On Linux it
+has one bar wherever it can: Althar's own strip, with the window's buttons
+drawn at its end (or start) in the desktop's manner, as GNOME's own apps
+have it, on KDE and every other stacking desktop too. The person asked for
+this over the window manager's title bar above Althar's strip, for a more
+unified look. The main process reads the desktop (`main/desktop.ts`,
+`main/desktopChrome.ts`) from the environment, the Settings portal, D-Bus,
+gsettings, the desktop's config files and, on X11, the window manager's name
+and what it supports. The only programs it ever runs are `gdbus`, `xprop`
+and `gsettings`, with a timeout and no shell. Desktop programs
 (`plasmashell`, `kreadconfig6`) crash without a display or open dialogs, so a
 test holds the list.
 
-| Desktop | Frame | Althar's buttons |
-| --- | --- | --- |
-| macOS | inset title bar | none: the system's traffic lights |
-| Windows | frameless | Windows' manner, the bar's full height |
-| A tiling window manager | frameless | none |
-| GNOME and its family (Ubuntu, Pop, Budgie, Pantheon…) | frameless | GNOME's, in its `button-layout` order and side |
-| KDE Plasma | the window manager's | none |
-| Other stacking window managers on X11, and Wayland compositors that frame windows | the window manager's | none |
-| Anything else | frameless | GNOME's, plain, on the right |
+| Desktop | Frame | Althar's buttons | Side and order out of the box | Its own setting, read from |
+| --- | --- | --- | --- | --- |
+| macOS | inset title bar | none: the system's traffic lights | left | |
+| Windows | frameless | Windows' manner, the bar's full height | right: minimize, maximize, close | |
+| A tiling window manager | frameless | none | | |
+| GNOME and its remixes (Ubuntu, Pop, Zorin) | frameless | GNOME's | right: close | `org.gnome.desktop.wm.preferences button-layout`, through the portal, else gsettings |
+| Budgie | frameless | GNOME's, plain | right: minimize, maximize, close | the same key |
+| Pantheon | frameless | GNOME's, plain | close left, maximize right | the same key |
+| Unity | frameless | GNOME's, plain | left: close, minimize, maximize | the same key |
+| KDE Plasma | frameless | KDE's | right: minimize, maximize, close | kwinrc `ButtonsOnLeft`, `ButtonsOnRight` |
+| LXQt | frameless | KDE's | right: minimize, maximize, close | Openbox's `lxqt-rc.xml` on X11, or kwinrc where KWin runs |
+| Deepin | frameless | KDE's | right: minimize, maximize, close | |
+| Cinnamon | frameless | GNOME's, plain | right: minimize, maximize, close | `org.cinnamon.desktop.wm.preferences button-layout` |
+| MATE | frameless | GNOME's, plain | right: minimize, maximize, close | `org.mate.Marco.general button-layout` |
+| Xfce | frameless | GNOME's, plain | right: minimize, maximize, close | xfwm4's xfconf file, `button_layout` |
+| LXDE, Openbox | frameless | GNOME's, plain | right: minimize, maximize, close | Openbox's `lxde-rc.xml` or `rc.xml`, `titleLayout` |
+| COSMIC | frameless | GNOME's, plain | right: minimize, maximize, close | its toolkit's `show_minimize`, `show_maximize` |
+| labwc | frameless | GNOME's, plain | right: minimize, maximize, close | `rc.xml`, `<titlebar><layout>` |
+| Wayfire | frameless | GNOME's, plain | right: minimize, maximize, close | `wayfire.ini`, `[decoration] button_order` |
+| Another stacking window manager, or none known | frameless | GNOME's, plain | right: minimize, maximize, close | where its window manager is one above, there |
+| An X11 window manager that can't move a window on its asking | the window manager's | none | | |
+| KWin, Xfwm4, Marco or Muffin with a title bar double-click set to other than maximize | the window manager's | none | | kwinrc `TitlebarDoubleClickCommand`, xfwm4's `double_click_action`, `action-double-click-titlebar` |
 
+- **The system's frame stays in two cases only.** First, an X11 window
+  manager that can't move a window on its asking: one that doesn't list
+  `_NET_WM_MOVERESIZE` in `_NET_SUPPORTED`, or one from before EWMH, known by
+  its marks on the root window (Motif's `_MOTIF_WM_INFO`, GNOME 1's
+  `_WIN_SUPPORTING_WM_CHECK`, Window Maker's, CDE's). A frameless window is
+  moved and resized by asking the window manager to do it, and such a one
+  wouldn't, so the window could be neither dragged nor resized. Every Wayland
+  compositor does it (`xdg_toplevel.move` and `resize` are xdg-shell's own),
+  and so do all the X11 window managers named above. A display with no
+  window manager and no such marks stays frameless: either there is none,
+  with no frame to draw, or it is one like twm, which frames every window
+  whatever it asks, so the window still moves by that frame. Second, a
+  window manager whose title bar double-click the person set to something
+  other than maximize (shade, minimize, lower, nothing): Chromium's frameless
+  bar can only maximize, by GTK's setting, which KDE doesn't sync, so the
+  window manager's frame keeps the person's choice. It is read where the
+  window manager keeps it: KWin's kwinrc, Xfwm4's xfconf file, Marco's and
+  Muffin's gsettings keys. GNOME's key is the one Chromium follows.
+  Openbox's, labwc's, Wayfire's and COSMIC's aren't read, and their default
+  (maximize) stands.
+- **What the frame gave, the strip gives:** its empty stretches drag the
+  window, through the window manager; a double-click there maximizes and
+  restores (Chromium does it, by GTK's titlebar setting); the window resizes
+  from a few pixels inside its edges (Electron's frameless border); and the
+  buttons are real, named buttons reached by keyboard. The window manager's
+  right-click window menu isn't there yet: Electron doesn't ask for it on
+  Linux.
+- **The buttons go where the desktop puts them:** its own setting where it
+  can be read, its own default where it can't, never a generic set. The
+  setting is read where the window manager that runs keeps it, so Xfce on
+  Mutter reads GNOME's key, LXQt on KWin kwinrc. A setting kept by a desktop
+  other than the one running (GNOME's key on Xfce, which the portal also
+  answers) is passed over. The first window waits for these quick reads.
 - **The frame is decided as the first window opens,** since Electron fixes
-  it then. Slow reads don't hold the launch: what they found last time is
-  cached in the profile (`window-chrome.json`) for the same desktop, so on
-  X11 the first launch may go by the environment alone and the second is
-  right.
+  it then, so the first window waits for what it hangs on: on X11 xprop's
+  word on the window manager, past the launch's usual wait if need be, up to
+  xprop's own timeouts (a live display answers at once); and the
+  double-click setting beside the button layout. Where xprop can't answer
+  (not installed, or the display not answering), what was cached of this
+  desktop decides, and else the desktop's name: every stacking window
+  manager it names moves a frameless window. The slow reads (GNOME
+  Shell's version, KDE's decoration) don't hold the launch: what they found
+  last time is cached in the profile (`window-chrome.json`) for the same
+  desktop, and what X11 says now replaces what was cached of it.
 - **The buttons are Althar's own drawing** (`WindowButtons`), in each
   desktop's manner, never its artwork. Each is a real, named button reached
   by keyboard, its glyph always shown.
@@ -550,7 +699,8 @@ test holds the list.
   Althar keeps its own and says why.
 
 **Not built yet:** Windows' own caption buttons (`titleBarOverlay`), left
-until the build is checked on a real Windows machine.
+until the build is checked on a real Windows machine. The window manager's
+right-click menu on the strip, on Linux.
 
 ## Motion
 
@@ -597,7 +747,10 @@ A delivered task message with a complete checkpoint offers **Undo from here**. T
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: what stands open after a turn folds carries everything the person needs, never "see above" (#699).
+- 8 Nov 2026: comments on lines of the diff go to the lead with their file, lines and code, and show addressed once a commit changes their lines (DEV-175).
 - 10 Nov 2026: a thread marks a new change as a stamped row of its own; the board keeps chats on Scratch behind one chip; the plan card's kicker names its preset; the header's parts move a task, point it elsewhere, run a review's code and stop a helper ([tasks](tasks.md#changing-parts)).
 - 10 Nov 2026: Scratch is a shelf of its own, by each chat's latest exchange, with Clear; the board card says one sentence across a task's changes with a mark for each; Shipped, Merged and Helper rows in the thread, a helper's opening in place to its work, and helpers' lanes on the Graph face; the plan card's preset picks another; Settings edits presets ([tasks](tasks.md#asides)).
 - 11 Nov 2026: asides over the coordinator's conversation replace Scratch's chip beside it; the chip stays with the board alone ([tasks](tasks.md#asides)).
 - 13 Nov 2026: the cache is patched by what the person does, at once, and held until a read confirms it ([foundations § The UI is instant](foundations.md#the-ui-is-instant)); it used to say the cache was never patched.
+- 14 Nov 2026: markdown files open rendered, with what the task changed marked, and Source a key away ([Code beside the conversation](#code-beside-the-conversation)).
+- 14 Nov 2026: one bar on every Linux desktop but a tiling one, KDE and the other frame-drawing desktops included, with the buttons where each desktop puts them; the system's frame only where an X11 window manager can't move a frameless window ([The window on each desktop](#the-window-on-each-desktop)).

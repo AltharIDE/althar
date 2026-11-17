@@ -1,9 +1,19 @@
 import { plainTitle, toolWordsOf } from '@althar/contracts'
-import type { AllowedBy, AttachedFile, FileMention, Picture, ShownPicture, ThreadItem, TurnTime, Unfurl } from '@althar/contracts'
+import type {
+  AllowedBy,
+  AttachedFile,
+  FileMention,
+  Picture,
+  SentLineComment,
+  ShownPicture,
+  ThreadItem,
+  TurnTime,
+  Unfurl,
+} from '@althar/contracts'
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
-import { isSending } from './items'
+import { isSending, messageMove } from './items'
 import { took } from './time'
 import { type Spent, spentOf, turnOfItems } from './turnTime'
 
@@ -144,6 +154,7 @@ export const setupStanding = (setup: SetupContent): 'running' | 'stopped' | 'don
 export type Block =
   | {
       readonly kind: 'you'
+      readonly move?: string
       readonly id: string
       readonly text: string
       readonly at: string
@@ -154,6 +165,8 @@ export type Block =
       readonly pictures: ReadonlyArray<Picture>
       /** The files and folders the person sent with it. */
       readonly files: ReadonlyArray<AttachedFile>
+      /** What they said of lines of the task's diff, each with its code (decisions: desktop-app § Comments on the diff). */
+      readonly comments?: ReadonlyArray<SentLineComment>
     }
   | {
       readonly kind: 'turn'
@@ -181,7 +194,14 @@ export type Block =
       /** Once it is over, where its time went, as the runtime kept it for its turns; null where none of them did. */
       readonly spent: Spent | null
     }
-  | { readonly kind: 'divider'; readonly id: string; readonly text: string }
+  | {
+      readonly kind: 'divider'
+      readonly id: string
+      readonly text: string
+      /** Words in the text that are links, and what the line is built on, folded under it. */
+      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string }>
+      readonly details?: string
+    }
   /** A review a lead or the coordinator offers a task: its line and its buttons. */
   | {
       readonly kind: 'offer'
@@ -776,12 +796,14 @@ export const blocksOf = (
         blocks.push({
           kind: 'you',
           id: item.id,
+          move: messageMove(item),
           text: item.content.text,
           at: ago(item.createdAt),
           delivery,
           links: item.content.links,
           pictures: item.content.pictures,
           files: item.content.files,
+          ...(item.content.comments === undefined || item.content.comments.length === 0 ? {} : { comments: item.content.comments }),
         })
         if (delivery === Delivery.Delivered) {
           asked = item
@@ -867,7 +889,13 @@ export const blocksOf = (
         }
         // What Althar itself says, such as a change of agent, is a line across the thread.
         if (item.content.source === 'runtime') {
-          blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
+          blocks.push({
+            kind: 'divider',
+            id: item.id,
+            text: noticeText(item.content),
+            ...(item.content.links === undefined ? {} : { links: item.content.links }),
+            ...(item.content.details === undefined ? {} : { details: item.content.details }),
+          })
           if (carriedOn(item.content)) restartedAt = blocks.length - 1
           if (relayed(item.content)) {
             asked = item

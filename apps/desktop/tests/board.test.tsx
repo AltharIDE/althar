@@ -231,19 +231,20 @@ describe('the board’s lanes', () => {
     const working = task({ taskId: 'w', title: 'At work', phase: 'running', step: 'implement', startedAt: '2026-10-01T09:00:00.000Z' })
     const tasks = [working, stopped('d', 'declined'), stopped('i', 'interrupted'), stopped('n', null)]
 
-    it('is in Needs you, not Running, and Running counts only the work an agent is on', () => {
+    it('is held Up next, outside Needs you, and Running counts only work an agent is on', () => {
       const lanes = lanesOf(board({ tasks, calls: [] }))
       expect(lanes.running.map((work) => work.taskId)).toEqual(['w'])
       expect(lanes.atWork).toBe(1)
       expect(lanes.stopped.map((work) => work.taskId).toSorted()).toEqual(['d', 'i', 'n'])
-      expect(yoursOf(lanes)).toBe(3)
+      expect(yoursOf(lanes)).toBe(0)
+      expect(lanes.upNext).toBe(3)
     })
 
     it('says what stopped it and when, not a running time, and an automation run still says where it is from', () => {
       const from = { id: 'a1', name: 'Nightly dependency check' } as unknown as NonNullable<BoardTask['automation']>
       const lanes = lanesOf(board({ tasks: [...tasks, stopped('r', 'declined', { automation: from })], calls: [] }))
       withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
-      const yours = within(screen.getByRole('region', { name: 'Needs you' }))
+      const yours = within(screen.getByRole('region', { name: 'Up next' }))
       const card = (title: string) => within(yours.getByRole('button', { name: title }).closest('article') as HTMLElement)
       expect(card('Stopped d').getByText('Stopped when you declined a command')).toBeTruthy()
       expect(card('Stopped i').getByText('Stopped when you interrupted it')).toBeTruthy()
@@ -1121,6 +1122,29 @@ describe('the board', () => {
     await waitFor(() => expect(answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow' }))
   })
 
+  it('sends the dock’s explicit queue bypass through the shared merge action', async () => {
+    const merge = vi.fn(async () => {})
+    const { client } = fakeClient({
+      merge,
+      getBoard: vi.fn(async () => {
+        const read = board()
+        return {
+          ...read,
+          tasks: read.tasks.map((task) =>
+            task.taskId === 't4' && task.change !== null ? { ...task, change: { ...task.change, canBypassQueue: true } } : task,
+          ),
+        }
+      }),
+      getThread: vi.fn(async () => snapshot({ session: null, task: { ...snapshot().task, id: 't4' } })),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(await within(dock).findByRole('button', { name: 'Other ways to merge' }))
+    expect(merge).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    await waitFor(() => expect(merge).toHaveBeenCalledWith('t4', 'abc123', 'https://github.com/meridian/api/pull/12', undefined, true))
+  })
+
   it('accepts a pull request by merging it, or sends it back with a note, and says when the host won’t', async () => {
     const merge = vi
       .fn<(taskId: string) => Promise<void>>()
@@ -1218,6 +1242,39 @@ describe('the board', () => {
       expect(await lane('Settled').findByText('Rate-limit refunds')).toBeTruthy()
       expect(lane('Running').queryByText('Rate-limit refunds')).toBeNull()
       expect(getBoard).toHaveBeenCalledTimes(reads + 1)
+    })
+
+    it('rings the card as it comes into Running, for the press of Merge on its strip in Needs you', async () => {
+      // The browser's animations, as asked for: what each animated, and in which card.
+      const runs: Array<{ target: Element; card: Element | null }> = []
+      const animate = vi.fn(function (this: Element) {
+        runs.push({ target: this, card: this.closest('article') })
+        return {
+          cancel: vi.fn(),
+          finished: new Promise(() => undefined),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        } as unknown as Animation
+      })
+      Object.defineProperty(HTMLElement.prototype, 'animate', { value: animate, configurable: true, writable: true })
+      Object.defineProperty(Element.prototype, 'getAnimations', { value: () => [], configurable: true, writable: true })
+      try {
+        const merge = vi.fn(() => new Promise<void>(() => undefined))
+        const { client } = fakeClient({ merge, getBoard: vi.fn(async () => board()) })
+        withServices(<Project />, client)
+        await pickLayout('Conversation')
+        const ready = (await lane('Needs you').findByText('Rate-limit refunds')).closest('article') as HTMLElement
+        await userEvent.click(within(ready).getByRole('button', { name: /merge/i }))
+        const there = (await lane('Running').findByText('Rate-limit refunds')).closest('article')
+        expect(lane('Running').getByText('Merging')).toBeTruthy()
+        // One ring, around the card where it is now, merging, as the host holds the merge.
+        const rings = () => runs.filter((run) => String((run.target as HTMLElement).className).includes('ring'))
+        await waitFor(() => expect(rings()).toHaveLength(1))
+        expect(rings()[0]?.card).toBe(there)
+      } finally {
+        Reflect.deleteProperty(HTMLElement.prototype, 'animate')
+        Reflect.deleteProperty(Element.prototype, 'getAnimations')
+      }
     })
 
     it('is in Running, in the merge queue, for as long as the board reads it so, and the person’s again once the queue takes it out', async () => {
@@ -1658,7 +1715,7 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Stopped when you declined a command')).toBeTruthy()
     expect(screen.getByText('2h ago')).toBeTruthy()
     expect(screen.queryByText('2h 30m')).toBeNull()
-    expect(within(screen.getByRole('region', { name: 'Needs you' })).getByText('Stopped work')).toBeTruthy()
+    expect(within(screen.getByRole('region', { name: 'Up next' })).getByText('Stopped work')).toBeTruthy()
     expect(within(screen.getByRole('region', { name: 'Running' })).queryByText('Stopped work')).toBeNull()
     expect(screen.getByText('Conversation')).toBeTruthy()
     expect(screen.getByText('Claude Code closed before finishing the step.')).toBeTruthy()
@@ -2236,10 +2293,10 @@ describe('a ready card’s next step, done from the card', () => {
     const settledWithOnePress = vi.fn(async () => {})
     withServices(<Board onOpen={onOpen} />, fakeClient({ send, startSession, getThread, settledWithOnePress, getBoard: getBoard() }).client)
     const card = await cardOf('Stopped d')
-    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await userEvent.click(card.getByRole('button', { name: 'Resume' }))
     await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th-sd', body: 'Carry on.', disposition: 'after_current' }))
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th-sd', agentId: 'claude-code' }))
-    await waitFor(() => expect(settledWithOnePress).toHaveBeenCalledWith({ taskId: 'sd', action: 'carry_on' }))
+    expect(settledWithOnePress).not.toHaveBeenCalled()
     expect(onOpen).not.toHaveBeenCalled()
   })
 
@@ -2256,8 +2313,12 @@ describe('a ready card’s next step, done from the card', () => {
         keptAt: '2026-09-30T11:00:00.000Z',
       }),
     ]
-    const markTaskDone = vi.fn(async () => {})
-    const keepTaskForLater = vi.fn(async () => {})
+    // Each kept as the runtime keeps it: the board read after says so.
+    const moved = (phase: BoardTask['phase']) => async (taskId: string) => {
+      tasks = tasks.map((one) => (one.taskId === taskId ? { ...one, phase } : one))
+    }
+    const markTaskDone = vi.fn(moved('settled'))
+    const keepTaskForLater = vi.fn(moved('kept'))
     const settledWithOnePress = vi.fn(async () => {})
     const onOpen = vi.fn()
     withServices(
@@ -2270,7 +2331,7 @@ describe('a ready card’s next step, done from the card', () => {
     // Done on the Kept shelf settles nothing in Needs you: it isn't counted.
     const lane = within(screen.getByRole('region', { name: /^Settled/ }))
     await userEvent.click(lane.getByRole('button', { name: /^Kept/, pressed: false }))
-    await userEvent.click(lane.getByRole('button', { name: 'Done' }))
+    await userEvent.click((await cardOf('Spike the limits')).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(markTaskDone).toHaveBeenCalledWith('p2'))
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(settledWithOnePress).toHaveBeenCalledOnce()
@@ -2407,11 +2468,11 @@ describe('a ready card’s next step, done from the card', () => {
     const merge = vi.fn(async () => {})
     withServices(<Board onOpen={vi.fn()} />, fakeClient({ merge, getBoard: getBoard() }).client)
     const green = await cardOf('Stopped with a green pull request')
-    expect(green.getByRole('button', { name: 'Carry on' })).toBeTruthy()
+    expect(green.getByRole('button', { name: 'Resume' })).toBeTruthy()
     await userEvent.click(green.getByRole('button', { name: 'Accept and merge #12' }))
     expect(merge).toHaveBeenCalledWith('sm', 'abc123', 'https://github.com/meridian/api/pull/12')
     const failing = await cardOf('Stopped with failing checks')
-    expect(failing.getByRole('button', { name: 'Carry on' })).toBeTruthy()
+    expect(failing.getByRole('button', { name: 'Resume' })).toBeTruthy()
     expect(failing.queryByRole('button', { name: /Accept and merge/ })).toBeNull()
   })
 
@@ -2461,8 +2522,8 @@ describe('a ready card’s next step, done from the card', () => {
       fakeClient({ send, resumeTask, startSession, getThread, resolveConflictsNow, getBoard: getBoard() }).client,
     )
     const card = await cardOf('Nightly dependency check, 27 Oct')
-    // In Needs you, stopped, with what stopped it and when; never under way, with a step and a running clock.
-    const yours = within(screen.getByRole('region', { name: 'Needs you' }))
+    // Held Up next, with what stopped it and when; never under way, with a step and a running clock.
+    const yours = within(screen.getByRole('region', { name: 'Up next' }))
     expect(yours.getByText('Nightly dependency check, 27 Oct')).toBeTruthy()
     expect(card.getByText('Stopped')).toBeTruthy()
     expect(card.getByText('Stopped by Althar')).toBeTruthy()
@@ -2473,7 +2534,7 @@ describe('a ready card’s next step, done from the card', () => {
     expect(card.queryByText(/stopped, so Althar/)).toBeNull()
     expect(card.queryByRole('button', { name: 'Resolve now' })).toBeNull()
     // One action covers both: the lead is told to merge the default branch in, then go on, and its run carries on.
-    await userEvent.click(card.getByRole('button', { name: 'Carry on' }))
+    await userEvent.click(card.getByRole('button', { name: 'Resume' }))
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith({
         threadId: 'th-s9',

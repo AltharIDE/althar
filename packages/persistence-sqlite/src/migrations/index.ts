@@ -1,6 +1,7 @@
 import { SqliteMigrator } from '@effect/sql-sqlite-node'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { statements as clientIdentities } from './0086_client_identities'
 
 import { statements as initial } from './0001_initial'
 import { statements as permissionScopeTurn } from './0002_permission_scope_turn'
@@ -87,6 +88,10 @@ import { statements as notedInput } from './0082_noted_input'
 import { statements as externalWaits } from './0083_external_waits'
 import { statements as evidenceGalleries } from './0084_evidence_galleries'
 import { statements as turnUndo } from './0085_turn_undo'
+import { statements as errandWords } from './0087_errand_words'
+import { statements as taskWaits } from './0088_task_waits'
+import { statements as taskWaitsCleared } from './0089_task_waits_cleared'
+import { statements as cardReads } from './0090_card_reads'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -191,6 +196,11 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0083_external_waits', statements: externalWaits },
   { key: '0084_evidence_galleries', statements: evidenceGalleries },
   { key: '0085_turn_undo', statements: turnUndo },
+  { key: '0086_client_identities', statements: clientIdentities },
+  { key: '0087_errand_words', statements: errandWords },
+  { key: '0088_task_waits', statements: taskWaits },
+  { key: '0089_task_waits_cleared', statements: taskWaitsCleared },
+  { key: '0090_card_reads', statements: cardReads },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

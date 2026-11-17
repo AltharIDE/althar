@@ -46,6 +46,8 @@ export interface FileDiff {
   readonly file: ChangedFile
   readonly lines: ReadonlyArray<DiffLine>
   readonly truncated: boolean
+  /** Whether the lines are the whole file, from its first line to its last, with its unchanged lines: one read in hunks, or cut short, is not. */
+  readonly whole: boolean
 }
 
 /**
@@ -71,6 +73,7 @@ const reader = (output: string) => {
   let at = 0
   return {
     more: () => at < parts.length,
+    peek: () => parts[at],
     // `more` says there is one.
     next: () => parts[at++] as string,
   }
@@ -131,7 +134,7 @@ export const baseOf = (worktree: string, baseRef: string | null, started: string
 
 /**
  * The files git tracks that a task changed since `base`, committed or not:
- * without reading any of them. Its three diffs run at once. With `head`, a
+ * without reading any of them. Names and sizes come from one diff. With `head`, a
  * commit, what changed between the two in a repository rather than a
  * worktree, as for a task whose folder was removed (ADR-056): nothing is
  * uncommitted there, and the working tree, the person's own, isn't read.
@@ -139,16 +142,22 @@ export const baseOf = (worktree: string, baseRef: string | null, started: string
 const trackedFiles = (worktree: string, base: string, head?: string) =>
   Effect.gen(function* () {
     const range = head === undefined ? [base] : [base, head]
-    const [named, numbered, uncommitted] = yield* Effect.all(
+    const [tracked, uncommitted] = yield* Effect.all(
       [
-        git(worktree, 'diff', '--name-status', '-z', '-M', ...range),
-        git(worktree, 'diff', '--numstat', '-z', '-M', ...range),
+        gitExactly(worktree, 'diff', '--raw', '--numstat', '-z', '-M', ...range),
         head === undefined ? git(worktree, 'diff', '--name-only', '-z', 'HEAD') : Effect.succeed(''),
       ],
       { concurrency: 'unbounded' },
     )
-    const statuses = reader(named)
-    const counts = reader(numbered)
+    const counts = reader(tracked)
+    const named: Array<{ readonly code: string; readonly path: string; readonly from: string | null }> = []
+    while (counts.peek()?.startsWith(':')) {
+      const code = counts.next().split(' ').at(-1) as string
+      const first = counts.next()
+      const from = code.startsWith('R') || code.startsWith('C') ? first : null
+      const path = from === null ? first : counts.next()
+      named.push({ code, path, from })
+    }
     const dirty = new Set(split(uncommitted))
 
     // Sizes, by the path a file has now: `add del path`, or for a move `add del` then its old and new paths.
@@ -164,12 +173,10 @@ const trackedFiles = (worktree: string, base: string, head?: string) =>
     }
 
     const files: Array<ChangedFile> = []
-    while (statuses.more()) {
-      const code = statuses.next()
-      const from = code.startsWith('R') || code.startsWith('C') ? statuses.next() : null
-      const path = statuses.next()
+    for (const { code, from, path } of named) {
       // Both lists come from the same diff, so every file has its size.
-      const size = sizes.get(path) as { readonly add: number; readonly del: number; readonly binary: boolean }
+      const size = sizes.get(path)
+      if (size === undefined) return yield* Effect.fail(new Error(`Git reported no size for ${path}.`))
       files.push({
         path,
         from: code.startsWith('R') ? from : null,
@@ -311,6 +318,19 @@ export const parseDiff = (text: string, limit = LINES_SHOWN): { readonly lines: 
   return { lines, truncated: false }
 }
 
+/** Whether a path is a markdown file, which the window can open as a page. */
+const isMarkdownFile = (path: string) => /\.(md|markdown)$/i.test(path)
+
+/** A file's text as the lines of a diff that changed none of them, the first WHOLE_LINES of it. */
+const unchangedLines = (text: string): { readonly lines: ReadonlyArray<DiffLine>; readonly truncated: boolean } => {
+  const all = text === '' ? [] : (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n')
+  const shown = all.slice(0, WHOLE_LINES)
+  return {
+    lines: shown.map((line, at) => ({ kind: 'context', old: at + 1, new: at + 1, text: line }) as const),
+    truncated: shown.length < all.length,
+  }
+}
+
 /** One file's diff, from the task's base to its worktree, or with `head` to that commit in a repository: only a file the task changed. */
 export const fileDiff = (worktree: string, base: string, path: string, head?: string): Effect.Effect<FileDiff, unknown> =>
   Effect.gen(function* () {
@@ -326,12 +346,14 @@ export const fileDiff = (worktree: string, base: string, path: string, head?: st
       const content = listed ? yield* newFile(worktree, path, true) : ({ kind: 'other' } as const)
       const file = newEntry(path, content)
       if (file === null) return yield* new NotFound({ kind: 'changed file', id: path })
-      if (content.kind !== 'text' && content.kind !== 'link') return { file, lines: [], truncated: false }
+      if (content.kind !== 'text' && content.kind !== 'link') return { file, lines: [], truncated: false, whole: false }
       const text = content.kind === 'link' ? content.target : content.text
       const all = text.endsWith('\n') ? text.slice(0, -1).split('\n') : text.split('\n')
-      return { file, ...parseDiff(`@@ -0,0 +1,${all.length} @@\n${all.map((line) => `+${line}`).join('\n')}`) }
+      const read = parseDiff(`@@ -0,0 +1,${all.length} @@\n${all.map((line) => `+${line}`).join('\n')}`)
+      // A new file read whole, unless it was cut short, or too large to have been read to its end.
+      return { file, ...read, whole: !read.truncated && content.kind === 'text' && Buffer.byteLength(text) < READ_AT_MOST }
     }
-    if (known.binary) return { file: known, lines: [], truncated: false }
+    if (known.binary) return { file: known, lines: [], truncated: false, whole: false }
     const diff = (context: string) =>
       gitExactly(
         worktree,
@@ -352,9 +374,19 @@ export const fileDiff = (worktree: string, base: string, path: string, head?: st
       Effect.map((text) => parseDiff(text, WHOLE_LINES)),
       Effect.orElseSucceed(() => null),
     )
-    if (whole !== null && !whole.truncated) return { file: known, ...whole }
+    if (whole !== null && !whole.truncated) {
+      // A markdown file moved with nothing else changed has no lines in a diff; as a page it is read as it is, every line unchanged.
+      if (whole.lines.length === 0 && known.from !== null && isMarkdownFile(path)) {
+        const text =
+          head === undefined
+            ? yield* newFile(worktree, path, true).pipe(Effect.map((content) => (content.kind === 'text' ? content.text : null)))
+            : yield* gitExactly(worktree, 'show', `${head}:${path}`).pipe(Effect.orElseSucceed(() => null))
+        if (text !== null && text !== '') return { file: known, ...unchangedLines(text), whole: Buffer.byteLength(text) < READ_AT_MOST }
+      }
+      return { file: known, ...whole, whole: true }
+    }
     // Too long to read whole: its hunks, as git gives them, so every change is there.
-    return { file: known, ...parseDiff(yield* diff('-U3')) }
+    return { file: known, ...parseDiff(yield* diff('-U3')), whole: false }
   })
 
 /**
@@ -378,13 +410,8 @@ export const unchangedFileDiff = (worktree: string, path: string): Effect.Effect
       binary: content.kind === 'binary',
       uncommitted: false,
     }
-    if (content.kind !== 'text' && content.kind !== 'link') return { file, lines: [], truncated: false }
+    if (content.kind !== 'text' && content.kind !== 'link') return { file, lines: [], truncated: false, whole: false }
     const text = content.kind === 'link' ? content.target : content.text
-    const all = text === '' ? [] : (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n')
-    const shown = all.slice(0, WHOLE_LINES)
-    return {
-      file,
-      lines: shown.map((line, at) => ({ kind: 'context', old: at + 1, new: at + 1, text: line }) as const),
-      truncated: shown.length < all.length,
-    }
+    const read = unchangedLines(text)
+    return { file, ...read, whole: !read.truncated && content.kind === 'text' && Buffer.byteLength(text) < READ_AT_MOST }
   })

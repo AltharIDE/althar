@@ -125,6 +125,29 @@ export const Open: Story = {
   },
 }
 
+/** Merge pressed: its pull request's row says In the merge queue as the runtime reads it, with nothing to merge again. */
+export const InTheQueue: Story = {
+  args: {
+    parts: PARTS.map((part) =>
+      part.id === 'pr1'
+        ? {
+            id: part.id,
+            icon: part.icon,
+            name: part.name,
+            detail: 'In the merge queue',
+            tone: 'live' as const,
+            ...(part.facts === undefined ? {} : { facts: part.facts }),
+          }
+        : part,
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: /Parts, 6/ }))
+    await expect(within(document.body).getByText('In the merge queue')).toBeVisible()
+    await expect(within(document.body).queryByRole('button', { name: 'Merge' })).not.toBeInTheDocument()
+  },
+}
+
 /** A part open in place: the worktree, with its branch, the files it changed, See the changes. */
 export const AWorktree: Story = {
   play: async ({ canvasElement }) => {

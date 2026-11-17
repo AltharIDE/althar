@@ -2,6 +2,16 @@
 
 ## Local persistence
 
+The commercial boundary agreed on 14 Nov 2026 is independent of identity and
+authorization: local singleplayer is free; singleplayer mobile is undecided
+between free and a one-time purchase; managed singleplayer Pro has a monthly
+fee with included compute and metered overage; multiplayer cloud charges per
+organization seat and includes mobile. Self-hosted multiplayer pricing is
+undecided. Billing and entitlement enforcement are not implemented by the
+shared API foundation. A plan never supplies project permission or approval
+authority. Person-owned and organization-owned projects must coexist, and a
+person's memberships, devices, execution machines and payer remain separate.
+
 Use one SQLite database per local Althar profile and one
 content-addressed artifact store.
 

@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import type { AgentStatus, BoardTask, ThreadSnapshot } from '@althar/contracts'
 import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, WorkPeek, Problem } from '@althar/ui'
 
+import { mergeStandingOf, usePressedMerges } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
@@ -119,6 +120,8 @@ export function DockView({
   )
   useThreadAhead(call?.threadId ?? task?.threadId ?? null)
   const named = useModelNames()
+  // Its pull request's merge as the window keeps it, wherever pressed: a bypass under way stays Merging, not In the queue.
+  const pressed = usePressedMerges(task?.change == null ? null : [task.change])
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const open = (threadId: string) => (
     <div className={s.actions}>
@@ -173,6 +176,9 @@ export function DockView({
           checks={(change.checks?.list ?? []).map(checkOf)}
           // The head the dock showed: a pull request that moved on since isn't merged unseen.
           onAccept={() => void model.merge(task.taskId, change.head ?? '', change.url)}
+          {...(change.canBypassQueue === true
+            ? { onBypassQueue: () => void model.merge(task.taskId, change.head ?? '', change.url, true) }
+            : {})}
           onSendBack={(note) => void model.sendBack(task, note)}
           // What the lead committed since, up to the head the dock showed: pushed first, as the person says.
           // Going up on their own as the lead's turn ends, where the project's rules say so, they aren't the person's (ADR-072),
@@ -187,6 +193,12 @@ export function DockView({
             : { held: task.held.commits, onShip: () => void model.ship(task.taskId), shipping: model.shipping.has(task.taskId) })}
           onOpenFile={(path) => onChanges(task, path)}
           accepting={model.merging.has(task.taskId)}
+          // Pressed here or anywhere in the window: Merging at once, then In the queue as the runtime reads it, never Accept again.
+          standing={mergeStandingOf(
+            change,
+            model.merging.has(task.taskId) || pressed.has(change.url),
+            pressed.get(change.url) === 'bypass',
+          )}
           sendingBack={model.sending.has(task.taskId)}
           {...(model.error === null ? {} : { error: model.error })}
           text={{ number: (n: number) => `${change.prefix}${n}` }}

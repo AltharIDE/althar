@@ -1,4 +1,4 @@
-import { basename } from 'node:path'
+import { basename, dirname } from 'node:path'
 
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
@@ -7,6 +7,7 @@ import { Cause, Option } from 'effect'
 
 import { thisDevice } from './device'
 import { redact } from './diagnostics'
+import { type GitFailure, gitLine, gitSummary, redacted, subcommandOf } from './gitSaid'
 import type { AccountRefused } from './Accounts'
 import type {
   CantMerge,
@@ -50,15 +51,6 @@ const text = (error: unknown, key: string): string => {
 }
 
 /** The last line of an agent's error output, which usually says why. */
-/** What git said without the advice it ends a remote it couldn't read with, whose last line says nothing alone. */
-const saidByGit = (stderr: string): string =>
-  lastLine(
-    stderr.replace(
-      /(fatal: )?Could not read from remote repository\.\s*(Please make sure you have the correct access rights\s*and the repository exists\.\s*)?/i,
-      '',
-    ),
-  )
-
 const lastLine = (output: string): string =>
   output
     .split('\n')
@@ -75,7 +67,7 @@ const hostDenied =
   'Althar can’t reach this computer from inside its Flatpak sandbox. Give the Flatpak permission to talk to org.freedesktop.Flatpak (flatpak override --user --talk-name=org.freedesktop.Flatpak dev.althar.app), then try again.'
 
 /** A sentence, with its full stop. */
-const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${words}.`)
+export const sentence = (words: string): string => (/[.!?…]$/.test(words) ? words : `${words}.`)
 
 /**
  * OpenCode 1.x on a data folder OpenCode 2 has migrated: 2's `workspace_domain`
@@ -216,10 +208,14 @@ export const agentSaid = (error: unknown): string | undefined => {
   }
 }
 
+/** A git failure, summed up: the subcommand and git's most telling line, `git rev-parse: gitfile does not point to a valid repository: ~/….` */
+const gitFailed = (error: unknown): string | undefined =>
+  tagOf(error) === 'GitFailed' ? sentence(gitSummary(error as GitFailure)) : undefined
+
 /** A cause, summed up for a person: what the agent said, what the host said no to, or the first line of what went wrong. */
 export const summarize = (cause: Cause.Cause<unknown>): string => {
   const error = Cause.findErrorOption(cause)
-  const said = Option.isSome(error) ? (agentSaid(error.value) ?? hostFailed(error.value)) : undefined
+  const said = Option.isSome(error) ? (agentSaid(error.value) ?? hostFailed(error.value) ?? gitFailed(error.value)) : undefined
   if (said !== undefined) return said
   const first = lastLine(Cause.pretty(cause).split('\n')[0] ?? '').replace(/^\w*Error: /, '')
   return first === '' ? '' : sentence(first)
@@ -258,6 +254,54 @@ export const words = (
     switch (reason) {
       case 'NotARepository':
         return `${text(error, 'path')} isn't a git repository. Choose another folder.`
+      case 'FolderRefused': {
+        const folder = basename(text(error, 'path'))
+        switch (text(error, 'reason')) {
+          case 'unreadable':
+            return `Althar can’t read ${folder}. Give it access to the folder, then choose it again.`
+          case 'too_wide':
+            return `${folder} holds too much to be one project. Choose the folder its code is in.`
+          case 'too_many': {
+            const count = fieldOf(error, 'count')
+            return `${folder} has ${typeof count === 'number' ? count.toLocaleString('en') : 'too many'} files, too many to start a repository with. Choose the folder its code is in.`
+          }
+          case 'broken_repository':
+            return `${folder} has a .git that git can’t read. Mend it, or choose another folder.`
+          case 'repositories_inside': {
+            const names = fieldOf(error, 'names')
+            const listed = Array.isArray(names) ? names.filter((one): one is string => typeof one === 'string') : []
+            return listed.length === 0
+              ? `${folder} has git repositories inside it. Choose one of them instead.`
+              : `${folder} has git repositories inside it: ${listed.slice(0, 3).join(', ')}${listed.length > 3 ? ` and ${listed.length - 3} more` : ''}. Choose one of them, or the folder each is in.`
+          }
+          default:
+            return `There’s a folder named ${folder} in ${basename(dirname(text(error, 'path')))} already, with something in it. Choose another place.`
+        }
+      }
+      case 'CloneRefused': {
+        const remote = text(error, 'remote')
+        const host = text(error, 'host')
+        switch (text(error, 'reason')) {
+          case 'sso':
+            return `${host} wants you signed in to its organization’s single sign-on before ${remote} can be cloned.`
+          case 'not_found':
+            return host === '' ? `${remote} isn’t a repository’s address.` : `${host} has no ${remote} that Althar can see.`
+          default:
+            return `${remote} couldn’t be cloned from ${host}.`
+        }
+      }
+      case 'PublishRefused': {
+        const remote = text(error, 'remote')
+        const host = text(error, 'host')
+        switch (text(error, 'reason')) {
+          case 'has_remote':
+            return `Its repository is on ${remote} already.`
+          case 'taken':
+            return `There’s a ${remote} on ${host} already. Choose another name.`
+          default:
+            return `${remote} is made on ${host}, but pushing to it didn’t work. Try again.`
+        }
+      }
       case 'RepositoryRefused':
         return text(error, 'reason') === 'taken'
           ? `There’s a folder named ${text(error, 'name')} in ${basename(text(error, 'parent'))} already. Choose another place, or rename the project.`
@@ -345,11 +389,11 @@ export const words = (
         return 'The agent already has that message.'
       case 'GitFailed': {
         const args = fieldOf(error, 'args')
-        const command = `git ${Array.isArray(args) ? String(args.find((arg) => !String(arg).startsWith('-') && !String(arg).includes('=')) ?? '') : ''}`
-        const said = saidByGit(text(error, 'stderr'))
+        const command = `git ${Array.isArray(args) ? subcommandOf(args.map(String)) : ''}`
+        const said = gitLine(text(error, 'stderr'))
         if (said !== '') return sentence(`${command} didn't work: ${said}`)
         const reason = text(error, 'reason')
-        if (reason !== '') return sentence(`${command} couldn't complete: ${reason}`)
+        if (reason !== '') return sentence(`${command} couldn't complete: ${redacted(reason)}`)
         // git said nothing: what Althar knows of how it ended.
         if (fieldOf(error, 'timedOut') === true) {
           const timeout = fieldOf(error, 'timeout')
@@ -365,7 +409,9 @@ export const words = (
       case 'DatabaseInUse':
         return 'Another copy of Althar is using this profile.'
       case 'PushRefused': {
-        const remote = text(error, 'remote')
+        // Every field shown is redacted here, for a refusal kept before Althar hid secrets in what git said.
+        const remote = redacted(text(error, 'remote'))
+        const said = redacted(text(error, 'said'))
         const why = text(error, 'why')
         if (why === 'behind')
           return `${remote} has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.`
@@ -376,7 +422,7 @@ export const words = (
         if (why === 'protected') {
           const needs = fieldOf(error, 'needs')
           if (Array.isArray(needs)) {
-            const held = text(error, 'said')
+            const held = said
             const many = held.includes(',')
             const named = needs
               .map((setting) => repositorySwitches[setting as keyof typeof repositorySwitches])
@@ -392,10 +438,10 @@ export const words = (
         if (why === 'unplaced')
           return `The host doesn’t say where ${remote}’s branch is, and this project’s remotes don’t settle it, so nothing was pushed.`
         if (why === 'no_push_address')
-          return `This clone’s push address for ${remote} is ‘${text(error, 'said')}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
-        if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
+          return `This clone’s push address for ${remote} is ‘${said}’, which isn’t a repository, so nothing was pushed. Set another with git remote set-url --push.`
+        if (why === 'refused') return sentence(`${remote} refused the push${said === '' ? '' : `: ${said}`}`)
         // Where the person's own git pushed, the host by name: GitLab, not origin/a-long-branch-name.
-        const host = text(error, 'host')
+        const host = redacted(text(error, 'host'))
         const where = host === '' ? remote : host
         if (why === 'forbidden')
           return `Your account can’t push to this repository on ${where}, so nothing was pushed. Push to a fork of it, or ask its owners for access.`
@@ -497,11 +543,23 @@ export const words = (
       ...(Array.isArray(files) && files.length > 0 ? { detail: JSON.stringify(files) } : {}),
     }
   }
+  // A folder, clone or publish refused says why, for the window to offer what puts it right; with git's words, where git said any.
+  if (reason === 'FolderRefused' || reason === 'CloneRefused' || reason === 'PublishRefused') {
+    const url = text(error, 'url')
+    const detail = url !== '' ? url : text(error, 'detail')
+    return { reason, message, why: text(error, 'reason'), ...(detail === '' ? {} : { detail }) }
+  }
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
+  // Its Details are redacted as they were kept, and again here, for one kept before Althar hid secrets in them.
   if (reason === 'PushRefused')
-    return { reason, message, why: text(error, 'why'), ...(text(error, 'detail') === '' ? {} : { detail: text(error, 'detail') }) }
+    return {
+      reason,
+      message,
+      why: text(error, 'why'),
+      ...(text(error, 'detail') === '' ? {} : { detail: redacted(text(error, 'detail')) }),
+    }
   // A git failure that said anything keeps it all, and how it ended, for a quiet Details under its line.
   if (reason === 'GitFailed') {
     const code = fieldOf(error, 'code')
@@ -605,6 +663,8 @@ const shipRefused = {
   held: 'These commits wait for Ship, which runs the review first.',
   working: 'The task is at work. Ship once it’s done.',
   nothing: 'Nothing waits to ship.',
+  not_shipping: 'The task isn’t shipping now, so there is no route to change.',
+  merging: 'It’s merging already: the merge reached its host before the change.',
 } as const satisfies Record<ShipRefused['why'], string>
 
 /** Why a task can't be abandoned, reopened or renamed, by reason. */
@@ -649,6 +709,9 @@ const reviewIncomplete = {
 
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'FolderRefused',
+  'CloneRefused',
+  'PublishRefused',
   'ChangeRefused',
   'MergeReviewRefused',
   'ToolRefused',
@@ -757,4 +820,5 @@ const accountRefused = {
   no_name: 'Give the account a name.',
   one: "This agent can't have a second account yet.",
   no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
+  host: 'Enter a GitHub Enterprise hostname or HTTPS address for GitHub Copilot CLI.',
 } as const satisfies Record<AccountRefused['reason'], string>

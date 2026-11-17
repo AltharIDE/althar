@@ -96,11 +96,23 @@ function Bar({ left, className }: { left: number; className?: string }) {
 
 function Window({ window, t }: { window: PlanWindow; t: PlanPeekText }) {
   return (
-    <li className={s.window} data-tone={usageTone(window.left)}>
+    <li
+      className={s.window}
+      data-tone={window.unread === true ? undefined : usageTone(window.left)}
+      data-unread={window.unread === true ? '' : undefined}
+    >
       <span>{window.label}</span>
-      <Bar left={window.left} className={s.windowBar} />
-      <span className={s.windowLeft}>{window.left === 0 ? t.shareOut : t.share(window.left)}</span>
-      <span className={s.windowUntil}>{window.until ?? ''}</span>
+      {window.unread === true ? (
+        <span className={s.windowUnknown}>{window.note}</span>
+      ) : (
+        <>
+          <Bar left={window.left} className={s.windowBar} />
+          <span className={s.windowLeft}>{window.left === 0 ? t.shareOut : t.share(window.left)}</span>
+        </>
+      )}
+      <span className={s.windowUntil} title={window.resetsTitle}>
+        {window.resets ?? window.until ?? ''}
+      </span>
     </li>
   )
 }

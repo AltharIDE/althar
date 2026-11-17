@@ -2,6 +2,7 @@ import {
   type BoardCall,
   type BoardSnapshot,
   type BoardTask,
+  blockerAbandoned,
   type HomeSnapshot,
   isAside,
   waitingCount,
@@ -20,11 +21,10 @@ import { asMerging } from '../../data/merges'
  * kind (a change with a plan, a quick task, a review), the person's order
  * where they gave one, else what continues first; then a plan waiting to
  * start, on its countdown or held, which starts where the person moves it
- * among them; then work under way paused for a usage limit or the
+ * among them; stopped work waits beside those plans with Resume; then work under way paused for a usage limit or the
  * connection, which waits for no agent's place but its own. Running: work an agent is on, or whose checks
  * Althar sees through. Needs you: a task that waits on a call of yours, once,
- * as one card that says the call; a task whose lead stopped with no agent on
- * it, which waits for the person to carry on or abandon it; a call no task on the board waits on (the
+ * as one card that says the call; a call no task on the board waits on (the
  * coordinator's own question, or one for a task held up next); a task
  * that waits on issues its lead drafted, or changes to its issue, for the
  * person; and work ready for the person, a task that isn't a change and
@@ -95,12 +95,14 @@ export interface Lanes {
   readonly waiting: ReadonlyArray<Waiting>
   /** Tasks that wait on nothing but issues their lead drafted, or changes to their issue, for the person to file or apply. */
   readonly issues: ReadonlyArray<BoardTask>
-  /** Tasks whose lead stopped with no agent on them, waiting for the person to carry on or abandon, the latest stopped first. */
+  /** Stopped tasks held Up next for Resume, the latest stopped first; outside Needs you. */
   readonly stopped: ReadonlyArray<BoardTask>
   /** Calls no task on the board waits on: the coordinator's questions, and a held plan's. */
   readonly calls: ReadonlyArray<BoardCall>
   /** Work ready for the person: the home lists these too. */
   readonly ready: ReadonlyArray<BoardTask>
+  /** Plans that wait for a task that was abandoned (tasks wait for their blockers): out of Up next, the person's in Needs you. */
+  readonly abandoned: ReadonlyArray<BoardTask>
   /** Finished tasks that aren't changes, which the person kept for later: out of Needs you, the latest kept first. */
   readonly kept: ReadonlyArray<BoardTask>
   /** The most recently settled the board has loaded; `settledTotal` is how many there are in all. */
@@ -195,20 +197,26 @@ export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new
   const tasks = every.filter((task) => !isAside(task))
   const of = (...phases: ReadonlyArray<BoardTask['phase']>) => tasks.filter((task) => phases.includes(task.phase))
   const waits = waitingOn(tasks, board.calls)
+  const stopped = waits.stopped.toSorted((a, b) => (b.stopped?.at ?? '').localeCompare(a.stopped?.at ?? ''))
+  const arranged = laid(
+    // One whose call isn't read yet has nothing to say: it stays under way until it is.
+    [...of('running'), ...waits.unread.map((task) => ({ ...task, phase: 'running' as const }))],
+    of('planned', 'held')
+      .filter((task) => !blockerAbandoned(task))
+      .toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿')),
+    null,
+  )
   return {
     // By their latest exchange, the latest first; one with nothing said yet, by when it began.
     scratch: scratch.toSorted((a, b) => (b.latest?.at ?? b.createdAt).localeCompare(a.latest?.at ?? a.createdAt)),
-    ...laid(
-      // One whose call isn't read yet has nothing to say: it stays under way until it is.
-      [...of('running'), ...waits.unread.map((task) => ({ ...task, phase: 'running' as const }))],
-      of('planned', 'held').toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿')),
-      null,
-    ),
+    ...arranged,
+    upNext: arranged.upNext + stopped.length,
     waiting: waits.waiting,
     issues: waits.issues,
-    stopped: waits.stopped.toSorted((a, b) => (b.stopped?.at ?? '').localeCompare(a.stopped?.at ?? '')),
+    stopped,
     calls: waits.calls,
     ready: waits.ready,
+    abandoned: waits.abandoned,
     kept: of('kept').toSorted((a, b) => (b.keptAt ?? '').localeCompare(a.keptAt ?? '')),
     settled: of('settled').toSorted((a, b) => (b.settledAt ?? '').localeCompare(a.settledAt ?? '')),
     settledTotal: board.settledTotal,
@@ -235,7 +243,8 @@ export const heldOf = (lanes: Lanes): Held => {
 export const holding = (lanes: Lanes, held: Held): Lanes => {
   const plans = plansOf(lanes)
   const tasks = [...lanes.next.filter((task) => !plans.includes(task)), ...lanes.running]
-  return { ...lanes, ...laid(tasks, plans, held) }
+  const arranged = laid(tasks, plans, held)
+  return { ...lanes, ...arranged, upNext: arranged.upNext + lanes.stopped.length }
 }
 
 /** How many cards are in Needs you: what waits on the person, each once. */

@@ -1,8 +1,10 @@
+import { makeGitHub } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
+import sharp from 'sharp'
 
 import { Artifacts } from '../src/Artifacts'
 import { evidenceGallery } from '../src/evidenceGallery'
@@ -108,6 +110,94 @@ const commentSaying = (github: FakeService, words: string) =>
 const comments = (github: FakeService) => github.commentsOn(1).filter((comment) => comment.body.includes(SCREENSHOTS_MARK))
 
 describe('a task’s screenshots on its pull request', () => {
+  it.live('shrinks an oversized picture, leaves an unreadable one out by name, and posts the rest', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    const upload = github.uploadPicture!.bind(github)
+    let rejected = false
+    let attemptedBytes = 0
+    let allowRefused = false
+    const real = makeGitHub({
+      apiUrl: 'https://api.github.com',
+      webUrl: 'https://github.com',
+      credential: Effect.succeed({ kind: 'bearer', token: 'fixture' }),
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            message: 'Validation Failed',
+            errors: [{ message: `Yowza that's a big file. <span>Try again with a file size less than 10MB.</span>` }],
+          }),
+          { status: 422 },
+        ),
+    })
+    github.uploadPicture = (repository, picture) => {
+      if (picture.name === 'refused.png' && !allowRefused)
+        return makeGitHub({
+          apiUrl: 'https://api.github.com',
+          webUrl: 'https://github.com',
+          credential: Effect.succeed({ kind: 'bearer', token: 'fixture' }),
+          fetch: async () => new Response(JSON.stringify({ message: 'Maximum size is 0.000001 MB' }), { status: 413 }),
+        }).uploadPicture!(repository, picture)
+
+      if (picture.name === 'large.jpg' && !rejected) {
+        rejected = true
+        attemptedBytes = picture.bytes.byteLength
+        return real.uploadPicture!(repository, picture)
+      }
+      return upload(repository, picture)
+    }
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId, url } = yield* opened(github, working)
+      const original = yield* firstPicture(threadId)
+      const png = yield* Effect.promise(() =>
+        sharp({ create: { width: 512, height: 512, channels: 3, background: 'red' } })
+          .png()
+          .toBuffer(),
+      )
+      const bytes = new Uint8Array(10_000_001)
+      bytes.set(png)
+      const big = yield* (yield* Artifacts).put(bytes)
+      const broken = yield* (yield* Artifacts).put(new Uint8Array(10_000_002))
+      const refused = yield* (yield* Artifacts).put(png)
+      yield* report(projectId, threadId, [
+        { view: 'Small', caption: 'Small', picture: original },
+        { view: 'Large', caption: 'Large', picture: { ...original, sha256: big?.sha256, bytes: big?.size, name: 'large.png' } },
+        { view: 'Broken', caption: 'Broken', picture: { ...original, sha256: broken?.sha256, bytes: broken?.size, name: 'broken.png' } },
+        {
+          view: 'Refused',
+          caption: 'Refused',
+          picture: { ...original, sha256: refused?.sha256, bytes: refused?.size, name: 'refused.png' },
+        },
+      ])
+      yield* (yield* PullRequestScreenshots).post({ taskId, url, leftOut: [] })
+      assert.lengthOf(github.uploads, 2)
+      const resized = github.uploads.find((one) => one.name === 'large.jpg')
+      assert.isDefined(resized)
+      assert.isTrue(rejected)
+      assert.isBelow(resized?.bytes ?? Infinity, attemptedBytes)
+      assert.strictEqual(resized?.mediaType, 'image/jpeg')
+      const body = comments(github)[0]?.body ?? ''
+      assert.include(body, 'Left out: broken.png')
+      assert.include(body, resized?.url ?? 'missing')
+      const state = yield* standing(threadId)
+      assert.strictEqual(state?.standing, 'changed')
+      assert.strictEqual(state?.changed, 2)
+      assert.include(state?.failed ?? '', 'broken.png')
+      assert.include(state?.failed ?? '', 'image processor')
+      // A subsequent press retries the omitted digest rather than treating its empty URL as uploaded.
+      const sql = yield* SqlClient.SqlClient
+      const kept = yield* sql<{ uploads: string }>`SELECT uploads FROM pull_request_pictures`
+      assert.notProperty(JSON.parse(kept[0]?.uploads ?? '{}') as object, broken?.sha256 ?? '')
+      allowRefused = true
+      yield* (yield* PullRequestScreenshots).post({ taskId, url, leftOut: [] })
+      assert.lengthOf(github.uploads, 3)
+      assert.include(comments(github)[0]?.body ?? '', github.uploads[2]?.url ?? 'missing')
+      assert.strictEqual((yield* standing(threadId))?.changed, 1)
+      assert.notInclude((yield* standing(threadId))?.failed ?? '', 'refused.png')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('keeps all twelve feature views when a follow-up adds a GIF, uploading each digest only once', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })

@@ -1,5 +1,7 @@
 import { Schema } from 'effect'
 
+import { gitSummary } from './gitSaid'
+
 /**
  * A git command failed: what git wrote to stderr, never the command line in
  * its place. Where it wrote nothing, how it ended says why: its exit code, the
@@ -16,7 +18,12 @@ export class GitFailed extends Schema.TaggedError<GitFailed>()('GitFailed', {
   signal: Schema.optional(Schema.String),
   timedOut: Schema.optional(Schema.Boolean),
   timeout: Schema.optional(Schema.Number),
-}) {}
+}) {
+  /** What git said, in a line with no secret in it, so a pretty-printed cause, as a log's, says it after `GitFailed:`. */
+  override get message() {
+    return gitSummary(this)
+  }
+}
 
 /** The folder opened as a project is not inside a git repository. */
 export class NotARepository extends Schema.TaggedError<NotARepository>()('NotARepository', {
@@ -30,6 +37,51 @@ export class RepositoryRefused extends Schema.TaggedError<RepositoryRefused>()('
   name: Schema.String,
   /** The folder it would be in. */
   parent: Schema.String,
+}) {}
+
+/**
+ * A folder Althar won't make a project's repository of as it is: one it
+ * can't read; one too wide to be one project, the home folder or the disk's
+ * root; one with more files than a repository should start with (`count`);
+ * one with git repositories inside it already (`names`), which git would
+ * take in as empty links; one with a .git git can't read (`broken_repository`),
+ * left as it is; or the folder a clone would go in, there already
+ * with something in it.
+ */
+export class FolderRefused extends Schema.TaggedError<FolderRefused>()('FolderRefused', {
+  reason: Schema.Literals(['unreadable', 'too_wide', 'too_many', 'repositories_inside', 'broken_repository', 'taken']),
+  path: Schema.String,
+  count: Schema.optional(Schema.Number),
+  names: Schema.optional(Schema.Array(Schema.String)),
+}) {}
+
+/**
+ * A repository that couldn't be cloned: its host wants the person signed in
+ * to its organization's single sign-on first (`url`, where they can); it
+ * isn't there, or the sign-in can't see it; or git failed otherwise
+ * (`detail`, its words).
+ */
+export class CloneRefused extends Schema.TaggedError<CloneRefused>()('CloneRefused', {
+  reason: Schema.Literals(['sso', 'not_found', 'failed']),
+  /** The repository, as its host names it: northwind/app. */
+  remote: Schema.String,
+  /** Its host's name: GitHub. */
+  host: Schema.String,
+  url: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+}) {}
+
+/**
+ * A project's repository that can't be put on a host: it has a remote
+ * already (`remote`); one of that name is there already, with something in
+ * it; or it was made there and pushing to it failed (`detail`), which trying
+ * again picks up from.
+ */
+export class PublishRefused extends Schema.TaggedError<PublishRefused>()('PublishRefused', {
+  reason: Schema.Literals(['has_remote', 'taken', 'push_failed']),
+  remote: Schema.String,
+  host: Schema.String,
+  detail: Schema.optional(Schema.String),
 }) {}
 
 /** A task in a project of several repositories that names none, or one the project doesn't have: `choices` are the ones it has. */
@@ -192,7 +244,11 @@ export class ChangeRefused extends Schema.TaggedError<ChangeRefused>()('ChangeRe
 
 export class ShipRefused extends Schema.TaggedError<ShipRefused>()('ShipRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['held', 'working', 'nothing']),
+  /**
+   * `not_shipping`: no Ship of the task is under way, for RouteShip to change the route of. `merging`: its merge went to
+   * its host before RouteShip took it no further than ready.
+   */
+  why: Schema.Literals(['held', 'working', 'nothing', 'not_shipping', 'merging']),
 }) {}
 
 /**

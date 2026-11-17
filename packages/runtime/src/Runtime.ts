@@ -4,9 +4,11 @@ import { Context, Layer } from 'effect'
 import { startupLayer } from './startup'
 
 import { Accounts } from './Accounts'
+import { AgentCatalog } from './AgentCatalog'
 import { Artifacts } from './Artifacts'
 import { Automations } from './Automations'
 import { AccountSignIns } from './AccountSignIns'
+import { Copilot } from './Copilot'
 import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
@@ -58,12 +60,17 @@ import { SignIns } from './SignIns'
 import { Errands } from './Errands'
 import { MergeLine } from './MergeLine'
 import { ToolServer } from './ToolServer'
+import { WorktreeRepair } from './WorktreeRepair'
+import { ApiCommands } from './ApiCommands'
+import { ClientIdentities } from './ClientIdentities'
 
 export interface RuntimeLayerOptions extends RuntimeOptions {
   /** The profile's database file, or `:memory:` for tests. */
   readonly database: string
   /** Where the store copies itself before an update migrates it (`backupsIn(profile)`); without it, no copy is made. */
   readonly backups?: string
+  /** An update reservation permit supplied only by the trusted host. */
+  readonly databaseMaintenanceToken?: string
   /** Migrations a test adds after the store's own, such as one that fails. Never in a packaged app. */
   readonly extraMigrations?: ReadonlyArray<Migration>
   /** The agents it may start. The registry's, unless a test gives others. */
@@ -87,12 +94,14 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
  * can't be copied or migrated fails the build, so nothing runs on it.
  */
 export const layer = (options: RuntimeLayerOptions) => {
+  const copilotClientId = options.copilotClientId ?? options.clientIds?.github
   const store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(
     Layer.provideMerge(
       startupLayer(
         'store',
         Database.layer({
           filename: options.database,
+          ...(options.databaseMaintenanceToken === undefined ? {} : { maintenanceToken: options.databaseMaintenanceToken }),
           ...(options.backups === undefined ? {} : { backups: options.backups }),
           ...(options.extraMigrations === undefined ? {} : { migrations: [...migrations, ...options.extraMigrations] }),
         }),
@@ -101,7 +110,15 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(WebCrypto),
   )
   const base = Layer.mergeAll(
-    ToolServer.layer.pipe(Layer.provideMerge(Errands.layer.pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))))),
+    ToolServer.layer.pipe(
+      Layer.provideMerge(
+        Errands.layer.pipe(
+          Layer.provideMerge(
+            Layer.mergeAll(ApiCommands.layer, ClientIdentities.layer).pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))),
+          ),
+        ),
+      ),
+    ),
     Live.layer,
     startupLayer('modelfacts', ModelFacts.layer),
     Artifacts.layer,
@@ -109,6 +126,14 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry(options.agentStderr)),
+    Layer.provideMerge(
+      Copilot.layer({
+        ...(copilotClientId ? { clientId: copilotClientId } : {}),
+        ...(options.copilotEnterpriseClientIds === undefined ? {} : { enterpriseClientIds: options.copilotEnterpriseClientIds }),
+        ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+        appVersion: options.appVersion,
+      }),
+    ),
     // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
     Layer.provideMerge(
       Installs.layer({ root: options.agentsRoot, fetch: options.fetch, onDevice: options.onDevice, search: options.agentSearch }),
@@ -119,7 +144,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   // Each project's rules; each agent's accounts, whether each is signed in, and which are out of usage until their reset (ADR-012).
   // The models each agent offers, read from its sessions, or asked of it once: sessions name them to the coordinator.
   // Whether the computer is online, as the app says, and whether an agent's service answers (ADR-060).
-  const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(base))
+  const catalog = AgentCatalog.layer.pipe(Layer.provideMerge(base))
+  const connected = startupLayer('connectivity', Connectivity.layer).pipe(Layer.provideMerge(catalog))
   const able = Layer.mergeAll(
     startupLayer('limits', Limits.layer),
     startupLayer('planusage', PlanUsage.layer),
@@ -163,7 +189,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   const shown = PullRequestScreenshots.layer.pipe(Layer.provideMerge(linked))
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   // Finished tasks' folders go after their wait, or when the person cleans up, and come back when needed (ADR-056).
-  const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer).pipe(
+  // Worktrees whose link to their repository broke are repaired as Althar starts, or as git fails in one (decisions: workspaces-and-runs, A worktree whose link broke).
+  const work = Layer.mergeAll(Tasks.layer, FolderCleanup.layer, WorktreeRepair.layer).pipe(
     Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(startupLayer('runs', Runs.layer).pipe(Layer.provideMerge(shown))))),
   )
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).

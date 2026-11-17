@@ -83,6 +83,24 @@ export const limitsRewritten = limits({
   since: { commit: '8c1f2ad', said: '2026-10-18T16:40:00.000Z', now: null },
 })
 
+/**
+ * The limiter as a long generated file has it: its lines over and over, a few thousand of them, and the lines named far down,
+ * for how a long file opens at them and scrolls.
+ */
+const LONG = Array.from({ length: 150 }, (_, i) => LIMITS.replaceAll('checkRefundLimit', `checkRefundLimit${i}`)).join('')
+
+export const longRead: CodeRead = { text: LONG, from: 1, total: LONG.split('\n').length - 1, cut: false }
+
+export const longFound = limits({
+  name: 'src/refunds/limits.generated.ts:5022-5033',
+  path: 'src/refunds/limits.generated.ts',
+  bytes: LONG.length,
+  lines: longRead.total,
+  line: 5022,
+  end: 5033,
+  changed: null,
+})
+
 /** A name in code, at the line that declares it. */
 export const limitFn = limits({ name: 'checkRefundLimit', line: 22, symbol: 'checkRefundLimit', changed: null })
 
@@ -143,6 +161,23 @@ export const decisionFound: FoundFile = {
   changed: { add: 14, del: 0 },
   since: null,
 }
+
+/** What the lead changed in the decision: its title and first lines stand, the rest of it is new, and one line it began with is gone. */
+export const decisionChange: readonly DiffLine[] = [
+  { kind: DiffLineKind.Hunk, text: `@@ -1,5 +1,${decisionRead.total} @@` },
+  ...DECISION.replace(/\n$/, '')
+    .split('\n')
+    .flatMap((text, at): DiffLine[] =>
+      at < 2
+        ? [{ kind: DiffLineKind.Context, old: at + 1, new: at + 1, text }]
+        : at === 2
+          ? [
+              { kind: DiffLineKind.Removed, old: 3, text: 'It is limited per merchant.' },
+              { kind: DiffLineKind.Added, new: 3, text },
+            ]
+          : [{ kind: DiffLineKind.Added, new: at + 1, text }],
+    ),
+]
 
 /** What the lead changed in the limiter: the check's window, and the 429. */
 export const limitsChange: readonly DiffLine[] = [

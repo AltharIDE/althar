@@ -1,9 +1,10 @@
 import { copilotDefinition } from './copilot'
 import type { InAppSignIn } from './signInFlow'
-import { spawnSync } from 'node:child_process'
+import type { NativeProcessHooks } from './native/tools'
+import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join, posix } from 'node:path'
 import { claudeHolding, codexHolding, type HeldSkill, openCodeHolding } from './heldSkills'
 import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt, upToRepository } from './ownTools'
 import { SECRET_PLACES, secretReadRules } from './secrets'
@@ -117,8 +118,10 @@ export interface PermissionMeanings {
 /** The key in a permission answer's `_meta` that carries why Althar refused, for an agent that reads it (`reasonInBand`). */
 export const REFUSAL_META = 'althar/refusal'
 
-export interface AgentDefinition {
-  readonly id: AgentId
+export interface AgentDefinition<Id extends string = string> {
+  readonly id: Id
+  /** Althar owns the account and agent loop; no external executable is started. */
+  readonly native?: 'copilot'
   readonly name: string
   /** Bundled adapters ship with Althar at pinned versions; user-installed agents are found on the machine. */
   readonly source: 'bundled' | 'user_installed'
@@ -302,6 +305,8 @@ export interface AgentDefinition {
    * folder, whatever Althar's rules let it ask for.
    */
   readonly contains?: () => boolean
+  /** False until its launch can suppress an untrusted repository's config, hooks and credentials. */
+  readonly untrustedRepositories?: false
   /**
    * Its session settings take what a lead's sandbox lets through from the
    * start (`SessionOptions.sandbox`): commands it runs outside it, and hosts
@@ -338,6 +343,15 @@ export interface AgentDefinition {
    * every command, as before.
    */
   readonly holds?: (role: 'lead' | 'reader', options?: SessionOptions) => SandboxHold | undefined
+  /**
+   * What its sessions wait for before `holds` and `sessionMeta` are asked,
+   * once a launch: Claude Code's sandbox probe (`probeClaudeSandbox`), which
+   * the app starts as its runtime does, so it is usually in long before.
+   * Nothing where it is in already: a session then starts with no pause, as
+   * it did before the probe moved off the thread, so nothing reads it as not
+   * yet at work in between (Quit asking what it would stop).
+   */
+  readonly ready?: () => Promise<unknown> | undefined
   /**
    * Where a session's shell is now, from its agent's own record, read again
    * on each call: `home`, the account's folder (`home.variable`), `cwd`, where
@@ -405,6 +419,7 @@ export interface AgentDefinition {
  * from the start, where the agent's settings can say it.
  */
 export interface SessionOptions {
+  readonly nativeProcesses?: NativeProcessHooks
   /** Native web tools, for project leads and reviewers; never an offline review or coordinator. */
   readonly web?: boolean
   readonly offline?: boolean
@@ -900,29 +915,79 @@ const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean, web
   },
 })
 
+/** Where Claude Code's sandbox would start: the system, its environment, and how a file is looked for and bubblewrap tried. */
+export interface SandboxPlace {
+  readonly platform: string
+  readonly env: Readonly<Record<string, string | undefined>>
+  readonly exists: (path: string) => boolean
+  /** Runs a command to its end, or for 5 s at most, answering whether it exited cleanly. */
+  readonly run: (command: string, args: ReadonlyArray<string>) => Promise<boolean>
+}
+
+/** What bubblewrap is asked to do: start a user and network namespace over the whole system, read-only, and run `true` in it. */
+export const BWRAP_TRY = ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-user', '--unshare-net', 'true'] as const
+
+/** This computer, with bubblewrap tried asynchronously: the thread waits for nothing while it starts and runs. */
+const placeHere = (): SandboxPlace => ({
+  platform: process.platform,
+  env: process.env,
+  exists: existsSync,
+  run: (command, args) =>
+    new Promise((resolve) => {
+      execFile(command, [...args], { timeout: 5_000, windowsHide: true }, (error) => resolve(error === null))
+    }),
+})
+
+/** What is known of the sandbox without trying it: macOS's own, or none; null where bubblewrap and socat are there to try. */
+const startsUntried = ({ platform, env, exists }: SandboxPlace): boolean | null => {
+  if (platform === 'darwin') return exists('/usr/bin/sandbox-exec')
+  if (platform !== 'linux' || env.FLATPAK_ID !== undefined) return false
+  // Linux's own PATH, read by Linux's rules wherever this is worked out, as a test on Windows does.
+  const onPath = (name: string) => (env.PATH ?? '').split(':').some((folder) => folder !== '' && exists(posix.join(folder, name)))
+  return onPath('bwrap') && onPath('socat') ? null : false
+}
+
 /**
- * Whether Claude Code's sandbox can start here: macOS's own, or bubblewrap
- * and socat on Linux, outside a Flatpak (no nested user namespaces there),
- * where bubblewrap starts a namespace (some distributions keep unprivileged
- * user namespaces off). Not yet on Windows, where Althar hasn't tried it.
- * Worked out once.
+ * Whether Claude Code's sandbox can start in `place`: macOS's own, or
+ * bubblewrap and socat on Linux, outside a Flatpak (no nested user
+ * namespaces there), where bubblewrap starts a namespace (some distributions
+ * keep unprivileged user namespaces off). Not yet on Windows, where Althar
+ * hasn't tried it.
  */
+export const sandboxStartsIn = async (place: SandboxPlace): Promise<boolean> =>
+  startsUntried(place) ?? (await place.run('bwrap', BWRAP_TRY).catch(() => false))
+
 let sandboxStarts: boolean | undefined
+let probing: Promise<boolean> | undefined
+
+/**
+ * Works out once a launch whether Claude Code's sandbox can start here
+ * (`sandboxStartsIn`), off the thread: the app starts it as its runtime
+ * does, and a Claude Code session waits for it (`ready`) where it isn't in
+ * yet. On Linux it starts bubblewrap, which can take seconds on a busy
+ * computer.
+ */
+export const probeClaudeSandbox = (place: SandboxPlace = placeHere()): Promise<boolean> => {
+  probing ??= sandboxStartsIn(place).then((starts) => (sandboxStarts = starts))
+  return probing
+}
+
+/**
+ * Whether Claude Code's sandbox can start here, as the probe found
+ * (`probeClaudeSandbox`). Where it isn't in yet, the probe starts and this
+ * says no: nothing is held by a sandbox not known to start, so every command
+ * meets Althar's rules (ADR-071). A session waits for it first, so its hold
+ * and its settings agree.
+ */
+/** Whether the probe has its answer, or needs none here (`sandboxStartsIn` without trying): what a session waits for is in. */
+export const sandboxProbed = (): boolean => sandboxStarts !== undefined || startsUntried(placeHere()) !== null
+
 export const claudeSandboxStarts = (): boolean => {
-  sandboxStarts ??= (() => {
-    if (process.platform === 'darwin') return existsSync('/usr/bin/sandbox-exec')
-    if (process.platform !== 'linux' || process.env.FLATPAK_ID !== undefined) return false
-    const onPath = (name: string) =>
-      (process.env.PATH ?? '').split(delimiter).some((folder) => folder !== '' && existsSync(join(folder, name)))
-    if (!onPath('bwrap') || !onPath('socat')) return false
-    // oxlint-disable-next-line althar/off-the-thread -- Not off the thread yet: once a launch, on Linux with bubblewrap, up to 5 s (foundations.md).
-    const tried = spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-user', '--unshare-net', 'true'], {
-      stdio: 'ignore',
-      timeout: 5_000,
-    })
-    return tried.status === 0
-  })()
-  return sandboxStarts
+  if (sandboxStarts !== undefined) return sandboxStarts
+  const untried = startsUntried(placeHere())
+  if (untried !== null) return (sandboxStarts = untried)
+  void probeClaudeSandbox()
+  return false
 }
 
 /**
@@ -1029,7 +1094,7 @@ const claudeJudges = {
   },
 }
 
-const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefinition>> = {
+const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefinition<AgentId>>> = {
   'claude-code': {
     id: 'claude-code',
     name: 'Claude Code',
@@ -1108,6 +1173,8 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
         options.heldSkills,
       ),
     contains: claudeSandboxStarts,
+    // Its sandbox probe, once a launch, which its hold and its settings both read (ADR-071).
+    ready: () => (sandboxProbed() ? undefined : probeClaudeSandbox()),
     upFront: true,
     /* A local plugin its session loads (claudeAsks); it dispatches subagents. */
     skills: { layout: 'claude-plugin', capabilities: ['subagents'], via: { kind: 'meta' } },
@@ -1441,8 +1508,8 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
       command: 'copilot',
       args: ['--acp', '--no-auto-update', '--excluded-tools', 'task'],
       env: { COPILOT_AUTO_UPDATE: 'false', COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' },
-      // GH_HOST names a GHE.com tenant (`yourorg.ghe.com`) for those whose Copilot is there, as `copilot login --host` does.
-      inheritEnv: ['COPILOT_HOME', 'GH_HOST'],
+      // The host variables name a GHE.com tenant (`yourorg.ghe.com`), as `copilot login --host` does.
+      inheritEnv: ['COPILOT_HOME', 'GH_HOST', 'COPILOT_GH_HOST'],
     }),
     modes: {
       ask: 'https://agentclientprotocol.com/protocol/session-modes#agent',
@@ -1903,9 +1970,9 @@ const cliAgents: Readonly<Record<Exclude<AgentId, 'copilot-direct'>, AgentDefini
 
 /** Native Copilot keeps its identity and credentials separate from the existing CLI connection. */
 const { 'claude-code': firstClaude, codex: firstCodex, ...otherAgents } = cliAgents
-export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
+export const agents: Readonly<Record<AgentId, AgentDefinition<AgentId>>> = {
   'claude-code': firstClaude,
   codex: firstCodex,
-  'copilot-direct': copilotDefinition(cliAgents.opencode),
+  'copilot-direct': copilotDefinition,
   ...otherAgents,
 }

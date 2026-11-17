@@ -10,12 +10,15 @@ import {
   type AgentDefinition,
   inFlatpakSandbox,
   type SessionOptions,
+  nativeAgent,
+  type NativeProvider,
   type Transport,
   usingLocated,
 } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
+import { Copilot } from './Copilot'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
@@ -48,6 +51,8 @@ export interface Screenshot {
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
   readonly worktreeRoot: string
+  /** The profile and the logs, which About › Storage measures beside the worktrees; without them it says it can't. */
+  readonly storage?: { readonly profile: string; readonly logs: string }
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
   /**
@@ -163,8 +168,16 @@ export interface RuntimeOptions {
    * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
    */
   readonly betweenAgents?: Duration.Duration
+  /**
+   * How long a board's card is kept between reads at most, until its task moves (Queries.ts): ten seconds unless a test
+   * says otherwise. Zero keeps none, as for a test that writes the store by hand, which no change says.
+   */
+  readonly keptFor?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
+  /** Althar's public OAuth app ID for native Copilot; falls back to its own GitHub app ID. */
+  readonly copilotClientId?: string
+  readonly copilotEnterpriseClientIds?: Readonly<Record<string, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
   readonly githubApp?: string
   /**
@@ -323,17 +336,29 @@ export class Agents extends Context.Service<
     /** Every agent the runtime can start. */
     readonly list: ReadonlyArray<AgentEntry>
     get(agentId: string): Effect.Effect<AgentEntry, UnknownAgent>
+    readonly register?: (entry: AgentEntry) => void
+    readonly remove?: (agentId: string) => void
   }
 >()('@althar/runtime/Agents') {
   /** Agents from a list of entries. */
-  static readonly from = (entries: ReadonlyArray<AgentEntry>) =>
-    Agents.of({
-      list: entries,
+  static readonly from = (entries: ReadonlyArray<AgentEntry>) => {
+    const current = new Map(entries.map((entry) => [entry.definition.id as string, entry]))
+    return Agents.of({
+      get list() {
+        return [...current.values()]
+      },
+      register: (entry) => {
+        current.set(entry.definition.id, entry)
+      },
+      remove: (agentId) => {
+        current.delete(agentId)
+      },
       get: (agentId) => {
-        const entry = entries.find((candidate) => candidate.definition.id === agentId)
+        const entry = current.get(agentId)
         return entry === undefined ? Effect.fail(new UnknownAgent({ agentId })) : Effect.succeed(entry)
       },
     })
+  }
 
   /**
    * The registry's agents, carrying the person's own code-host sign-ins (ADR-097).
@@ -341,16 +366,18 @@ export class Agents extends Context.Service<
    * outside review still loads none of the repository's config or hooks and
    * uses git's untrusted-copy settings (`readingUntrusted`).
    */
-  static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs> =>
+  static readonly registry = (stderr?: AgentStderr): Layer.Layer<Agents, never, Installs | Copilot> =>
     Layer.effect(
       Agents,
       Effect.gen(function* () {
         const installs = yield* Installs
+        const copilot = yield* Copilot
         // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
         // line the person runs names the app that carries it (`usingLocated`).
         return Agents.fromRegistry(
           (definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID),
           stderr,
+          (accountId) => copilot.provider(accountId),
         )
       }),
     )
@@ -362,47 +389,72 @@ export class Agents extends Context.Service<
   static readonly fromRegistry = (
     located: (definition: AgentDefinition) => AgentDefinition = (definition) => definition,
     stderr?: AgentStderr,
+    nativeCopilot?: (accountId: string) => NativeProvider,
+    definitions: ReadonlyArray<AgentDefinition> = Object.values(agents),
   ) => {
-    const signedOut = mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
+    let signedOut: string | undefined
     return Agents.from(
-      Object.values(agents)
-        .map(located)
-        .map((definition) => ({
-          definition,
-          transport: (cwd: string, env: Readonly<Record<string, string>> = {}, options: SessionOptions = {}) => {
-            const spec = definition.launch(adapterNode())
-            const own =
-              definition.withoutOwnTools?.({
-                env: { ...process.env, ...env },
-                homeDir: homedir(),
-                cwd,
-                inSandbox: inFlatpakSandbox(spec),
-              }) ?? {}
-            const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
-            // The run's skills, where the agent finds them through its environment: what it would have, with the folder added.
-            const via = definition.skills?.via
-            const skills =
-              options.skills !== undefined && via?.kind === 'env' ? via.env(options.skills, { ...spec.env, ...own, ...held }) : {}
+      definitions.map(located).map((definition) => ({
+        definition,
+        transport: (cwd: string, env: Readonly<Record<string, string>> = {}, options: SessionOptions = {}) => {
+          if (options.untrusted === true) signedOut ??= mkdtempSync(join(tmpdir(), 'althar-no-sign-in-'))
+          if (definition.native === 'copilot') {
+            const provider = nativeCopilot?.(env.ALTHAR_COPILOT_ACCOUNT ?? '') ?? {
+              models: async () => {
+                throw new Error('GitHub Copilot authentication required. Sign in through Althar.')
+              },
+              complete: async () => {
+                throw new Error('GitHub Copilot authentication required. Sign in through Althar.')
+              },
+            }
             return {
-              _tag: 'Process' as const,
-              spec: {
-                ...spec,
+              _tag: 'InProcess' as const,
+              agent: nativeAgent(provider, {
                 env: {
-                  ...spec.env,
                   ...agentGit,
-                  ...(options.untrusted === true ? withoutSignIns(signedOut) : {}),
-                  ...own,
-                  ...held,
-                  ...skills,
-                  ...definition.sessionEnv?.({ ...spec.env, ...own, ...held, ...skills }, options),
+                  ...(signedOut !== undefined && options.untrusted === true ? { ...withoutSignIns(signedOut), ...readingUntrusted } : {}),
                   ...env,
                 },
-              },
-              cwd,
-              ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
+                ...(options.skills === undefined ? {} : { skills: options.skills }),
+                ...(options.untrusted === undefined ? {} : { untrusted: options.untrusted }),
+                ...(options.offline === undefined ? {} : { offline: options.offline }),
+                ...(options.nativeProcesses === undefined ? {} : { processes: options.nativeProcesses }),
+              }),
             }
-          },
-        })),
+          }
+          const spec = definition.launch(adapterNode())
+          const own =
+            definition.withoutOwnTools?.({
+              env: { ...process.env, ...env },
+              homeDir: homedir(),
+              cwd,
+              inSandbox: inFlatpakSandbox(spec),
+            }) ?? {}
+          const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
+          // The run's skills, where the agent finds them through its environment: what it would have, with the folder added.
+          const via = definition.skills?.via
+          const skills =
+            options.skills !== undefined && via?.kind === 'env' ? via.env(options.skills, { ...spec.env, ...own, ...held }) : {}
+          return {
+            _tag: 'Process' as const,
+            spec: {
+              ...spec,
+              env: {
+                ...spec.env,
+                ...agentGit,
+                ...(signedOut !== undefined && options.untrusted === true ? withoutSignIns(signedOut) : {}),
+                ...own,
+                ...held,
+                ...skills,
+                ...definition.sessionEnv?.({ ...spec.env, ...own, ...held, ...skills }, options),
+                ...env,
+              },
+            },
+            cwd,
+            ...(stderr === undefined ? {} : { stderr: (chunk: string, pid: number) => stderr(definition.id, chunk, pid) }),
+          }
+        },
+      })),
     )
   }
 }

@@ -118,6 +118,9 @@ export type RoundBlock =
       readonly id: string
       readonly text: string
       readonly tone: 'info' | 'warning'
+      readonly links?: ReadonlyArray<{ readonly label: string; readonly url: string }>
+      /** What the line is built on, such as a host's raw answer: folded under it. */
+      readonly details?: string
       /** A task the line is about, which it links to: one this task's lead started (ADR-097), in one line. */
       readonly task?: { readonly threadId: string; readonly title: string }
     }
@@ -411,6 +414,8 @@ export const roundsOf = (
           id: block.id,
           text: shorter(block.text),
           tone: content.severity === 'info' ? 'info' : 'warning',
+          ...(block.links === undefined ? {} : { links: block.links }),
+          ...(block.details === undefined ? {} : { details: block.details }),
           ...(content.task === undefined ? {} : { task: { threadId: content.task.threadId, title: content.task.title } }),
         })
         return

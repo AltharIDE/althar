@@ -1,5 +1,6 @@
 import type { ProjectSummary, SearchDocument, ThreadSnapshot } from '@althar/contracts'
 import { modKey, Room } from '@althar/ui'
+import { SHORTCUT as DICTATE } from '../../shared/dictation/text'
 import { sectionText } from '../settings/sections'
 import type { Context, Entry, Act, Go, Stand } from './model'
 
@@ -171,6 +172,16 @@ export const entriesFor = (
       shortcut: modKey('U'),
       scope: 'app',
       go: { to: 'command', command: 'usage' },
+    },
+    {
+      id: 'command:dictate',
+      kind: 'action',
+      title: 'Dictate',
+      icon: 'mic',
+      also: 'voice speak microphone talk',
+      shortcut: DICTATE,
+      scope: 'app',
+      go: { to: 'command', command: 'dictate' },
     },
   ]
   if (project !== undefined) {

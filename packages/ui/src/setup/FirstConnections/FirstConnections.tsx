@@ -6,6 +6,7 @@ import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
 import { SizeMotion } from '../../lib/SizeMotion'
 import type { RootProps } from '../../lib/props'
+import { Path } from '../../primitives/Path/Path'
 import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
@@ -32,6 +33,18 @@ export interface FirstConnectionsService {
   readonly id: string
   readonly name: string
   readonly brand?: Brand
+}
+
+/** A row of its own, before the services: what the project needs that isn't a service, such as git. */
+export interface FirstConnectionsRow {
+  readonly id: string
+  /** In the marks' column. */
+  readonly mark: ReactNode
+  readonly name: string
+  /** Where it stands: Not a repository yet; main, 1 commit. */
+  readonly note?: ReactNode
+  /** Its press, or a tick once it's done. */
+  readonly end?: ReactNode
 }
 
 export interface FirstConnectionsText {
@@ -75,6 +88,8 @@ export type FirstConnectionsProps = RootProps<
     hosts?: readonly FirstConnectionsService[]
     /** The trackers, while none is connected. */
     trackers?: readonly FirstConnectionsService[]
+    /** Rows of its own, first: what the project needs that isn't a service, or a service already chosen. */
+    rows?: readonly FirstConnectionsRow[]
     /** Opens a service's walk in. */
     onConnect: (service: string) => void
     /** Puts the card away. */
@@ -90,6 +105,7 @@ export function FirstConnections({
   host,
   hosts = [],
   trackers = [],
+  rows = [],
   onConnect,
   onHide,
   walk,
@@ -99,7 +115,7 @@ export function FirstConnections({
 }: FirstConnectionsProps) {
   const t = { ...firstConnectionsText, ...text }
   const code = host !== undefined || hosts.length > 0
-  if (!code && trackers.length === 0) return null
+  if (!code && trackers.length === 0 && rows.length === 0) return null
   return (
     <section aria-label={code ? t.title : t.issuesTitle} className={cx(s.card, className)} {...rest}>
       <div className={s.head}>
@@ -112,6 +128,16 @@ export function FirstConnections({
       <SizeMotion step={walk === undefined ? 'rows' : 'walk'}>
         {walk ?? (
           <ul className={s.rows}>
+            {rows.map((row) => (
+              <li key={row.id} className={s.row}>
+                <span className={s.marks} aria-hidden="true">
+                  {row.mark}
+                </span>
+                <span className={s.name}>{row.name}</span>
+                {row.note !== undefined && <span className={s.note}>{row.note}</span>}
+                {row.end !== undefined && <span className={s.end}>{row.end}</span>}
+              </li>
+            ))}
             {host !== undefined && (
               <li className={s.row}>
                 <span className={s.marks}>
@@ -119,8 +145,8 @@ export function FirstConnections({
                 </span>
                 <span className={s.name}>{host.service.name}</span>
                 {host.where !== undefined && (
-                  <span className={s.note} title={host.where}>
-                    {host.where}
+                  <span className={s.note}>
+                    <Path path={host.where} />
                   </span>
                 )}
                 <span className={s.end}>

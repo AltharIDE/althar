@@ -17,6 +17,8 @@ import { Instance } from './Instance'
 import { branchName, prepareWorktree, startCommitOf, startOf, towardHere } from './Projects'
 import { change, fact, timestamp } from './records'
 import { addItem } from './threads'
+import { blockersOf } from './waits'
+import { removeWorktree } from './worktreeRemoval'
 
 /*
  * Local tasks (ADR-091). A task works either in worktrees of its own, as
@@ -293,13 +295,17 @@ export const toCheckout = (spot: Spot) =>
 /**
  * A worktree made with a draft whose branch to work toward changed on its
  * plan card (ADR-093): unused, it moves to where the task starts now, the
- * branch with it, keeping the files its setup made, which git ignores.
+ * branch with it, keeping the files its setup made, which git ignores. One
+ * whose task waited for other tasks (waits.ts) moves up to its base as it is
+ * now, fetched, so it starts with what they merged meanwhile.
  */
 export const retarget = (spot: Spot) =>
   Effect.gen(function* () {
     const { remote, base } = yield* startOf(spot)
-    if (branchName(spot.baseRef) === base) return
+    const moved = branchName(spot.baseRef) !== base
+    if (!moved && (yield* blockersOf(spot.taskId)).length === 0) return
     const { baseRef, baseCommit } = yield* startCommitOf(spot.repository, base, remote)
+    if (!moved && baseCommit === spot.baseCommit) return
     yield* git(spot.path, 'reset', '-q', '--keep', baseCommit)
     if (spot.toward !== null) yield* towardHere(spot.repository, spot.toward, remote)
     yield* record(spot, { baseRef, baseCommit }, 'workspace.retargeted', { baseRef, baseCommit, toward: spot.toward })
@@ -662,9 +668,7 @@ export const moveToLocal = (taskId: string, change: string | null = null, consen
         }
         // Then each moves: the worktree lets go of the branch, and the checkout takes it.
         for (const { spot, was } of taking) {
-          yield* git(spot.repository, 'worktree', 'remove', spot.path).pipe(
-            Effect.catch(() => git(spot.repository, 'worktree', 'remove', '--force', spot.path)),
-          )
+          yield* removeWorktree(spot.repository, spot.path)
           yield* git(spot.repository, 'switch', '--quiet', spot.branch)
           const returnsTo = was.branch ?? was.head
           yield* record(

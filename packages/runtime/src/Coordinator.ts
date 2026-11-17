@@ -99,6 +99,7 @@ import {
 } from './drafts'
 import { stepOf, StepPick } from './stepPick'
 import { describeModels, usableModels } from './usableModels'
+import { waitFor } from './waits'
 
 /**
  * How many tasks a lead may start (ADR-097): in one turn, and from its task in all. Beyond them it says what else it would
@@ -245,6 +246,8 @@ const Proposed = Schema.Struct({
   small_change: Schema.optional(Schema.Boolean),
   /* The preset its parts are, by name: its parts replace the plan's. */
   preset: Schema.optional(Schema.String),
+  /* The tasks it waits for, by slug (waits.ts): its plan starts once they have all merged. */
+  waits_for: Schema.optional(Schema.Array(Schema.String)),
   ...Where,
 })
 /* A mini task: what to do, and the one model that does it. */
@@ -310,8 +313,12 @@ const SoughtPullRequests = Schema.Struct({
   review_requested: Schema.optional(Schema.Boolean),
   draft: Schema.optional(Schema.Boolean),
 })
-/* A thread to read: a task's, or, with none, the coordinator's own; and, to read further back, where the part read before began. */
-const Reading = Schema.Struct({ task: Schema.optional(Schema.String), before: Schema.optional(Schema.Int) })
+/* A thread to read: a task's, the coordinator's, or the caller's own; and, to read further back, where the part read before began. */
+const Reading = Schema.Struct({
+  task: Schema.optional(Schema.String),
+  coordinator: Schema.optional(Schema.Boolean),
+  before: Schema.optional(Schema.Int),
+})
 /* Another task's change to read: all of it, or some of its paths, and which page of a long one. */
 const DiffAsked = Schema.Struct({
   task: Schema.String,
@@ -863,12 +870,18 @@ export class Coordinator extends Context.Service<
       /** A task's thread, or the coordinator's own conversation: its latest part, or the part before an earlier read. */
       const readThread = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const { task: reference, before } = yield* read(Reading, input)
-          const threadId = reference === undefined ? access.threadId : (yield* taskOf(access, reference)).threadId
+          const { task: reference, coordinator, before } = yield* read(Reading, input)
+          if (coordinator === true && reference !== undefined) return 'Choose either a task or coordinator: true.'
+          const threadId =
+            coordinator === true
+              ? yield* thread(access.projectId)
+              : reference === undefined
+                ? access.threadId
+                : (yield* taskOf(access, reference)).threadId
           const record = yield* transcript(threadId, 30_000, {
             ...(before === undefined ? {} : { before }),
             // In its own conversation, what it said is its own.
-            ...(reference === undefined ? { agent: 'you' } : {}),
+            ...(threadId === access.threadId ? { agent: 'you' } : {}),
           })
           if (record.text === '') return before === undefined ? 'The thread is empty.' : 'Nothing comes before that.'
           return record.omitted > 0
@@ -1678,6 +1691,26 @@ export class Coordinator extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [held] = yield* sql<{ id: string }>`
             SELECT id FROM task_plans WHERE task_id = ${task.id} AND state = 'proposed' AND starts_at IS NULL`
+          // What it waits for, recorded before its plan, so no countdown can start it first.
+          const blockers = yield* Effect.forEach(proposed.waits_for ?? [], (one) => taskOf(access, one))
+          const waits =
+            blockers.length === 0
+              ? []
+              : yield* waitFor({ taskId: task.id, on: blockers.map((one) => one.id), actorId: instance.coordinatorId })
+          const waitsLine = waits
+            .map((outcome) =>
+              'refused' in outcome
+                ? ` It doesn't wait for ${outcome.on}: ${outcome.refused}`
+                : outcome.added || outcome.why === 'waits'
+                  ? ''
+                  : ` ${outcome.on} has merged already: nothing to wait for.`,
+            )
+            .join('')
+          const waitsFor = waits.filter((outcome) => !('refused' in outcome) && (outcome.added || outcome.why === 'waits'))
+          const waitsSaid =
+            waitsFor.length === 0
+              ? waitsLine
+              : ` It waits for ${waitsFor.map((outcome) => outcome.on).join(' and ')}, and starts once ${waitsFor.length === 1 ? 'it has' : 'they have'} merged.${waitsLine}`
           // The person held it while it was drafted: it comes held, a small change too, whatever the window is doing.
           const heldWhileDrafted = heldTasks.delete(task.id)
           const planId = yield* plans.propose({
@@ -1714,7 +1747,7 @@ export class Coordinator extends Context.Service<
                       ),
                     ),
                   )
-          const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}`
+          const where = `${preset === undefined ? '' : ` As ${preset}.`}${yield* localLine(access.projectId, task.id, worksIn)}${waitsSaid}`
           if (held !== undefined)
             return `Changed ${task.slug}'s plan.${where} It stays held until the person starts it; they see it as a card, so there's no need to describe the plan again.`
           if (small) {
@@ -2492,11 +2525,19 @@ export class Coordinator extends Context.Service<
       )
       const readThreadTool = tool(
         'read_thread',
-        "A thread as text, oldest first: a task's, with what the person, its lead and Althar said, the person's messages included; or, without a task, your own (the coordinator's is its conversation with the person). It reads the latest part; to read further back, pass before as it says. It only reads.",
+        "A thread as text, oldest first: a task's, with what the person, its lead and Althar said, the person's messages included; or the project's coordinator conversation with the person, with coordinator: true. Without either, it reads your own thread. It reads the latest part; to read further back, pass before as it says. It only reads.",
         {
           type: 'object',
           properties: {
-            task: { type: 'string', description: "The task's slug, as list_tasks shows it. Leave it out for your own thread." },
+            task: {
+              type: 'string',
+              description: "The task's slug, as list_tasks shows it. Leave it out for your own thread or coordinator: true.",
+            },
+            coordinator: {
+              type: 'boolean',
+              description:
+                "Read the project's coordinator conversation with the person. Omit task. Keep coordinator: true when paging with before.",
+            },
             before: { type: 'integer', description: 'To read further back: the number an earlier read_thread gave.' },
           },
         },
@@ -2811,6 +2852,12 @@ export class Coordinator extends Context.Service<
                 type: 'string',
                 description:
                   "The branch it works toward, such as release/0.8.0: it starts from it, and its pull request goes into it. Only where the person asked for that branch, or the task is a fix for it; the project's Work toward without it. Its repository's remote must have it.",
+              },
+              waits_for: {
+                type: 'array',
+                items: { type: 'string' },
+                description:
+                  'Tasks it waits for, by slug, where the person said it comes after them: its plan starts by itself once they have all merged (wait_for_tasks changes it later).',
               },
               preset: {
                 type: 'string',

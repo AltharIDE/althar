@@ -7,6 +7,9 @@
   --max: 1280px;
   --edge: max(var(--gut), calc((100vw - var(--max)) / 2 + var(--gut)));
   --display: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  /* Althar's cobalt as the light theme has it, taken here at the root: where a page lends the app's dark to a part of
+     itself (the cabin's pictures), --live there turns pale, for dark grounds, and this stays the ink for a white one. */
+  --cobalt: var(--live);
 }
 @media (max-width: 900px) { :root { --gut: 28px; } }
 @media (max-width: 640px) { :root { --gut: 16px; } }

@@ -1,4 +1,5 @@
 import {
+  type NudgeKind,
   kindWords,
   plainTitle,
   type ReadyTask,
@@ -21,7 +22,7 @@ import { Sessions } from './Sessions'
 /*
  * What reaches the person outside the window (docs/plans/usable.md, work
  * that doesn't need you): a nudge each time something comes to need them,
- * a call, work that stopped, or a task ready to accept, each said by its
+ * a call or a task ready to accept, each said by its
  * kind so the app can keep to what the person wants told; and how many such
  * things wait, for the app's badge. Never for progress. What waits, and how
  * many things that is, is `waitingOn`'s (in contracts), the rule the board's
@@ -39,23 +40,8 @@ import { Sessions } from './Sessions'
 /** How long changes are gathered, so a burst is read once. */
 const GATHER = Duration.millis(250)
 
-/** What a nudge is about: an agent asks the person, work stopped and couldn't start again, or a task is ready. */
-export type NudgeKind = 'call' | 'stopped' | 'ready'
-
-export type NudgeEvent =
-  /** Something came to need the person. */
-  | {
-      readonly _tag: 'Nudge'
-      readonly kind: NudgeKind
-      readonly key: string
-      readonly title: string
-      readonly body: string
-      readonly threadId: string
-    }
-  /** How many things wait on the person, across every project. */
-  | { readonly _tag: 'Waiting'; readonly count: number }
-  /** Whether any work runs: a task's run under way, or an agent mid-turn anywhere. */
-  | { readonly _tag: 'Working'; readonly working: boolean }
+export type { NudgeKind } from '@althar/contracts'
+export type NudgeEvent = import('@althar/contracts').AttentionEvent
 
 /** What a step that needs the person is called in a nudge. */
 const STEPS: Readonly<Record<StuckStep['step'], string>> = {
@@ -157,7 +143,7 @@ export class Nudges extends Context.Service<
        * counts them (`waitingOn`): read from the cards the card watcher
        * keeps, none worked out here. Each call is said as it comes, though a
        * task that waits on several is one thing; a task whose lead stopped
-       * is counted, but nothing is said of it: the person stopped it, or saw
+       * is held Up next and not counted: the person stopped it, or saw
        * it stop where they were.
        */
       const needs = Effect.gen(function* () {
@@ -176,6 +162,11 @@ export class Nudges extends Context.Service<
           )
         // Issues a lead drafted, or changes it proposed to its issue, for the person: one nudge for a task, whatever the number.
         for (const task of on.issues) nudge(`issues:${task.threadId}`, 'call', task.title, issuesWords(task.issues), task.threadId)
+        // A plan that waits for a task that was abandoned: the person's to start anyway, reopen it, or stop waiting.
+        for (const task of on.abandoned) {
+          const gone = task.waitsFor?.find((one) => one.stands === 'abandoned')
+          nudge(`abandoned:${task.taskId}`, 'call', task.title, `${gone?.title ?? 'A task it waits for'} was abandoned`, task.threadId)
+        }
         for (const task of on.ready) nudge(`ready:${task.taskId}`, 'ready', task.title, readyBody(task), task.threadId)
         return { found, count: waitingCount(on) }
       })

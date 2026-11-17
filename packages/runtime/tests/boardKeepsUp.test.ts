@@ -6,7 +6,7 @@ import type { BoardSnapshot, ThreadSnapshot } from '@althar/contracts'
 import { AggregateType } from '@althar/domain'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Deferred, Duration, Effect } from 'effect'
+import { Deferred, Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
@@ -22,7 +22,7 @@ import { TASK_OF } from '../src/taskOf'
 import * as Runtime from '../src/Runtime'
 import { retitleTask } from '../src/taskTitle'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { callTool, HOST, hosted, turns, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, runtime, turns, until } from './support'
 import { ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
 
 /*
@@ -33,19 +33,16 @@ import { ask, cards, connect, git, runtimeWith, tipOf } from './changesSupport'
  * through a task's life its card says what the task's head says, every time.
  */
 
-/** What the window read its board again on before: a list of kinds, which missed whatever moved a card through another. */
-const LISTED = new Set([
-  'task',
-  'task_plan',
-  'run',
-  'node_attempt',
-  'provider_session',
-  'turn_delivery',
-  'attention_request',
-  'external_link',
-  'workspace',
-  'conflict_resolution',
-])
+/**
+ * The runtime keeping each card between reads until its task moves, as Althar does (Queries.ts), for as long as a test
+ * lasts: what a window reads again is the watcher's card, or one a read worked out ahead of it.
+ */
+const keeping = (services: Parameters<typeof runtimeWith>[0], file = ':memory:') =>
+  Queries.layer.pipe(
+    Layer.provideMerge(
+      runtime(file, {}, { connectors: fakeConnectors(services), listenEvery: Duration.millis(100), keptFor: Duration.hours(1) }),
+    ),
+  )
 
 /** What it reads its board again on now (feed.ts `BOARD`). */
 const NOW = new Set(['card', 'project'])
@@ -233,7 +230,7 @@ describe('the board keeps up with a task as its view does', () => {
           'merged, settled: settled',
           'settled, renamed: settled',
         ])
-      }).pipe(Effect.scoped, Effect.provide(runtimeWith({ github })))
+      }).pipe(Effect.scoped, Effect.provide(keeping({ github })))
     },
   )
 })
@@ -375,7 +372,7 @@ describe('the board keeps up with several tasks moving at once', () => {
         assert.includeMembers(stood.get('tidy-the-docs') ?? [], ['held', 'running (implement)'])
         assert.include(stood.get('add-a-retry') ?? [], 'waiting')
         assert.strictEqual(stood.get('cache-the-config')?.at(-1), 'settled checks passed')
-      }).pipe(Effect.scoped, Effect.provide(runtimeWith({ github })))
+      }).pipe(Effect.scoped, Effect.provide(keeping({ github })))
     },
   )
 })
@@ -407,9 +404,7 @@ describe('a card that moves through a kind of change the board read nothing of b
       )
       const since = yield* Effect.orDie(queries.changesSince(from, 500))
       assert.isTrue(since.some((change) => change.aggregateType === 'card' && change.aggregateId === taskId))
-      // This operation emits no event the old rule named, so it needs the card event to refresh.
-      assert.isFalse(since.some((change) => LISTED.has(change.aggregateType)))
-    }).pipe(Effect.scoped, Effect.provide(runtimeWith({ github })))
+    }).pipe(Effect.scoped, Effect.provide(keeping({ github })))
   })
 })
 
@@ -486,7 +481,7 @@ describe("a call on the board that is no task's", () => {
       const said = since.filter((change) => change.aggregateType === 'card').map((change) => change.aggregateId)
       assert.isAbove(said.length, 0)
       assert.isTrue(said.every((id) => id === projectId))
-    }).pipe(Effect.scoped, Effect.provide(runtimeWith({})))
+    }).pipe(Effect.scoped, Effect.provide(keeping({})))
   })
 })
 
@@ -511,7 +506,7 @@ describe("a call on the board that is no task's, kept over a restart", () => {
         (calls) => calls.length === 1,
       )
       return { projectId, attentionId: call?.id ?? '' }
-    }).pipe(Effect.scoped, Effect.provide(runtimeWith({}, file)))
+    }).pipe(Effect.scoped, Effect.provide(keeping({}, file)))
     return Effect.gen(function* () {
       const { projectId, attentionId } = yield* asked
       yield* Effect.gen(function* () {
@@ -528,7 +523,7 @@ describe("a call on the board that is no task's, kept over a restart", () => {
           (calls) => calls.length === 0,
           'the answered question to leave the board',
         )
-      }).pipe(Effect.scoped, Effect.provide(runtimeWith({}, file)))
+      }).pipe(Effect.scoped, Effect.provide(keeping({}, file)))
     })
   })
 })

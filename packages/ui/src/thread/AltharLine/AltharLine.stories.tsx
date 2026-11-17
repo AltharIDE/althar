@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, within } from 'storybook/test'
+import { expect, userEvent, within } from 'storybook/test'
 
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
@@ -36,6 +36,49 @@ export const StartedATask: Story = {
   },
 }
 
+const RAW = JSON.stringify(
+  {
+    status: 200,
+    body: {
+      url: 'https://api.github.com/repos/AltharIDE/althar/pulls/698',
+      html_url: 'https://github.com/AltharIDE/althar/pull/698',
+      title: 'Errand notes: one short line, raw response folded',
+      body: 'The note an errand step leaves was the person’s whole message and the host’s whole answer. '.repeat(8),
+      user: { login: 'ninemate', url: 'https://api.github.com/users/ninemate' },
+    },
+  },
+  null,
+  2,
+)
+
+/** An errand step's note: one short line, the host's raw answer folded under Details and wrapped when open. */
+export const WithDetails: Story = {
+  args: {
+    children: (
+      <>
+        Asked balazsotakomaiya to review <a href="https://github.com/AltharIDE/althar/pull/698">#698</a>
+      </>
+    ),
+    details: RAW,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.queryByText(/"status": 200/)).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Details' }))
+    await expect(canvas.getByText(/"status": 200/)).toBeVisible()
+  },
+}
+
+/** A long answer, open: it wraps at the column and keeps to a height, with no sideways scroll. */
+export const LongNoteOpen: Story = {
+  args: { children: 'Merged #662', details: RAW.repeat(4) },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Details' }))
+    const block = await within(canvasElement).findByText(/"status": 200/)
+    await expect(block.scrollWidth).toBeLessThanOrEqual(block.clientWidth)
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States
@@ -68,6 +111,82 @@ export const AllStates: Story = {
             </AltharLine>
           ),
         },
+      ]}
+    />
+  ),
+}
+
+/** A task's folder whose link to its repository git couldn't repair: the fact, the way out, then what git said; the folder left as it was (decisions: workspaces-and-runs, A worktree whose link broke). */
+export const FolderNotRepaired: Story = {
+  args: {
+    tone: 'warning',
+    children:
+      'This task’s folder lost its link to the repository, and Althar couldn’t restore it. Its commits are safe on its branch, althar/fix-login, and the folder is left as it is, uncommitted changes and all. To work in it again, move the folder aside and add it back with git worktree add ~/.local/share/althar/worktrees/orchy/fix-login/orchy althar/fix-login in ~/projects/orchy. Git said: unable to locate repository; .git file does not reference a repository: ~/.local/share/althar/worktrees/orchy/fix-login/orchy/.git.',
+  },
+}
+/** One linked to another copy, as a profile copied rather than moved leaves it: both left as they are, and what to do. */
+export const FolderLinkedElsewhere: Story = {
+  args: {
+    tone: 'warning',
+    children:
+      'This task’s folder is linked to another copy, at ~/.var/app/dev.althar.app/data/althar/worktrees/orchy/fix-login/orchy, so Althar left both as they are. If that copy is from an old profile, remove it and restart Althar.',
+  },
+}
+export const FolderLinkedElsewhereDark: Story = { ...FolderLinkedElsewhere, globals: { theme: 'dark' } }
+export const FolderNotRepairedDark: Story = { ...FolderNotRepaired, globals: { theme: 'dark' } }
+/** An errand's lines in the thread, in plain words: kept, on hold (two ways), resumed, a step failing, called off. */
+export const ErrandLines: Story = {
+  render: () => (
+    <States
+      size="thread"
+      cells={[
+        {
+          state: 'on hold: a wait Althar can’t watch',
+          node: (
+            <AltharLine>
+              Errand on hold: tag v0.9.0 — Althar can’t tell when it’s merged. Ask for it again to keep it another way.
+            </AltharLine>
+          ),
+        },
+        {
+          state: 'on hold: two waits it can’t watch',
+          node: (
+            <AltharLine>
+              Errand on hold: merge the 0.9.0 pull request, then tag v0.9.0 — Althar can’t tell when it’s open and its checks pass. Ask for
+              it again to keep it another way.
+            </AltharLine>
+          ),
+        },
+        {
+          state: 'on hold: an objection',
+          node: (
+            <AltharLine>
+              Errand on hold: merge the 0.9.0 pull request, then tag v0.9.0 — #958 went back to a draft after you asked. Say go ahead to
+              continue.
+            </AltharLine>
+          ),
+        },
+        {
+          state: 'resumed',
+          node: <AltharLine>Errand resumed: merge the 0.9.0 pull request once it’s open and its checks pass, then tag v0.9.0</AltharLine>,
+        },
+        {
+          state: 'a step failed',
+          node: <AltharLine tone="warning">Couldn’t do this: merge the 0.9.0 pull request — failed: The head moved.</AltharLine>,
+        },
+        {
+          state: 'called off by the person',
+          node: <AltharLine>Errand called off: merge the 0.9.0 pull request, then tag v0.9.0</AltharLine>,
+        },
+        {
+          state: 'called off, with why',
+          node: (
+            <AltharLine>
+              Errand called off: merge the 0.9.0 pull request, then tag v0.9.0 — #958 was closed on GitHub, so it isn’t merged
+            </AltharLine>
+          ),
+        },
+        { state: 'the last step done: the errand is done', node: <AltharLine>Merged #958. Errand done</AltharLine> },
       ]}
     />
   ),

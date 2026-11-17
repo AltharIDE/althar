@@ -19,6 +19,7 @@ import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { atReset, items, later, onTestClock, repository, runtime, until } from './support'
+import { knownModels } from './knownModels'
 
 /*
  * The coordinator out of usage, where limits.test.ts and accounts.test.ts
@@ -36,6 +37,7 @@ const withAgents = (each: Readonly<Record<string, FakeAgentOptions>>, signedOut:
 /** A project, and the person asking its coordinator something. */
 const asked = (body: string) =>
   Effect.gen(function* () {
+    yield* knownModels
     const projects = yield* Projects
     const coordinator = yield* Coordinator
     const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })

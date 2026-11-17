@@ -1,15 +1,15 @@
+import { MessageMotion } from '../../shared/MessageMotion'
 import { useSearchReveal } from '../finder/revealSearch'
 import { reveal } from '../task/reveal'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { BoardTask, ThreadItem } from '@althar/contracts'
 
 import {
   Behind,
-  Composer,
   DictationTray,
   LinkButton,
   ResizeHandle,
@@ -30,9 +30,11 @@ import { contextMeter } from '../../shared/ContextMeter'
 import { useModels } from '../../data/models'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { catalogRead } from '../finder/catalog'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { draftKey, setDraftDictated, useDraft } from '../../shared/drafts'
+import { draftKey, draftOf as draftNow, setDraftDictated, useSetDraft } from '../../shared/drafts'
+import { DraftComposer } from '../../shared/DraftComposer'
 import { pillOf, runIdOf } from '../../shared/running'
 import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -42,13 +44,14 @@ import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { usualLead } from '../automations/lead'
 import { RunOf } from '../../shared/RunOf'
 import { Runs } from '../runs/Runs'
-import { ago, useNow } from '../../shared/time'
-import { blocksOf } from '../../shared/thread'
-import { ThreadBlocks } from '../../shared/ThreadBlocks'
+import { LiveBlocks } from '../../shared/LiveBlocks'
+import { NOTHING_HEARD } from '../../shared/heard'
+import { Now } from '../../shared/Now'
+import { MINUTE, SECOND } from '../../shared/time'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
-import { pages } from '../browser/pages'
+import { pages, usePage } from '../browser/pages'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import { ArtifactsView } from '../canvases/ArtifactsView'
 import {
@@ -65,8 +68,9 @@ import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
 import { BoardView } from '../board/BoardView'
-import { ChangeTeam, teamChangeOf } from '../team/Team'
+import { TeamOf } from '../team/Team'
 import type { SettingsWays } from '../settings/open'
+import { useSendMidTurn } from '../settings/useSendMidTurn'
 import { useFolds } from '../board/folds'
 import { useClosePullRequests } from '../board/useClosePullRequests'
 import { lanesOf, yoursOf } from '../board/lanes'
@@ -89,6 +93,7 @@ import {
   AsideMoveFailed,
   AsideQuote,
   AsidesBar,
+  passagesOf,
   AskInAside,
   asidesText,
   COORDINATOR,
@@ -137,6 +142,7 @@ export const text = {
   queued: 'Queued',
   queue: (n: number) => (n === 1 ? 'Queued' : `${n} queued`),
   placeholderBusy: 'Add to the queue, or interrupt the coordinator',
+  placeholderBusySteer: 'Steer the coordinator, or add to the queue',
   /** Whose usage the composer's ring says, under the context. */
   usageHeading: 'Today',
   signedOut: (agent: string, instead: string) => `${agent} isn't signed in. Using ${instead}.`,
@@ -350,7 +356,13 @@ export function ProjectView({
   // The board as the person's moves on asides leave it, at once: one cleared gone, one made a task on it as work (`useAsideMoves`).
   const asideMoves = useAsideMoves(useServices().client, board.board, model.project?.id ?? model.coordinator?.project.id ?? null)
   const seen = asideMoves.over
-  const lanes = seen === null ? null : lanesOf(seen, board.merging)
+  // The same lanes while the board and what merges stay as they were: the board's cards are measured, and drawn, only then.
+  // Beside the conversation, its asides are there; the board alone keeps them behind its chip.
+  const talkShown = shownOf(room).talk
+  const { lanes, boardLanes } = useMemo(() => {
+    const all = seen === null ? null : lanesOf(seen, board.merging)
+    return { lanes: all, boardLanes: all === null || !talkShown ? all : { ...all, scratch: NO_TASKS } }
+  }, [seen, board.merging, talkShown])
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
   const closing = useClosePullRequests()
@@ -374,10 +386,36 @@ export function ProjectView({
   }, [togglePane])
   // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
+  // What was said in every conversation, for the bar's search: read as it opens (the finder's catalog, kept a moment), the
+  // titles being found at once without it.
+  const [asideSearching, setAsideSearching] = useState(false)
+  const catalogClient = useServices().client
+  const said = useQuery({ ...catalogRead(catalogClient), enabled: asideSearching }).data
+  const passages = useMemo(() => (said === undefined ? undefined : passagesOf(said, about)), [said, about])
   const draftOf = draftKey.coordinator(about ?? '')
-  const [draft, setDraft] = useDraft(draftOf)
+  // The words themselves are its composer's to show (DraftComposer): a word typed doesn't draw the project again.
+  const setDraft = useSetDraft(draftOf)
   // A page beside the coordinator's conversation (ADR-100): the project goes to its conversation, the board stepping aside for it.
+  // The room it stepped aside from is kept with the page, in the window's storage, so closing the page brings the board back even after a reload.
+  const beforeKey = `althar.before.${about ?? ''}`
+  const rememberRoom = useCallback(
+    (was: Room) => {
+      if (was === Room.Talk || about === null) return
+      try {
+        window.localStorage.setItem(beforeKey, String(was))
+      } catch {
+        // Kept for nothing.
+      }
+    },
+    [about, beforeKey],
+  )
   const showTalk = useCallback(() => setRoom(Room.Talk), [])
+  const showTalkForPage = useCallback(() => {
+    setRoom((was) => {
+      rememberRoom(was)
+      return Room.Talk
+    })
+  }, [rememberRoom])
   const latestSearch = useRef(model)
   latestSearch.current = model
   useSearchReveal(model.coordinator?.threadId, (itemId) => {
@@ -389,7 +427,27 @@ export function ProjectView({
       return true
     })
   })
-  const opener = useOpener(about, showTalk)
+  const opener = useOpener(about, showTalkForPage)
+  const { where: pageWhere } = usePage(about, useServices().host.pages)
+  const wasBeside = useRef(false)
+  useEffect(() => {
+    // Only a page that was beside the conversation and went is a close; a view that opens with none is not.
+    const closed = wasBeside.current && pageWhere !== 'beside'
+    wasBeside.current = pageWhere === 'beside'
+    if (!closed) return
+    // The page went from beside the conversation: the right side returns to what was there before it opened.
+    // A page its window's storage kept, main yet to say it still has it, isn't closed.
+    if (about !== null && pages.waking(about)) return
+    let back: Room | null = null
+    try {
+      const kept = window.localStorage.getItem(beforeKey)
+      window.localStorage.removeItem(beforeKey)
+      back = kept === String(Room.Both) ? Room.Both : kept === String(Room.Board) ? Room.Board : null
+    } catch {
+      // Nothing kept.
+    }
+    if (back !== null && pageWhere === null) setRoom((now) => (now === Room.Talk ? (back as Room) : now))
+  }, [pageWhere, beforeKey, about])
   const navigate = useNavigate()
   const comments = useComments(draftOf)
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
@@ -444,20 +502,35 @@ export function ProjectView({
   const projectRuns = launches.filter((launch) => launch.taskId === null)
   const offer = useForkOffer(about ?? '', model.repositories)
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
-  const now = useNow(
+  // Each place that says so ticks by itself (Now): the project isn't drawn again each second.
+  const ticking =
     (coordinator?.session?.turnRunning ?? false) ||
-      // While what the person sent is on its way, or the coordinator starts for it, how long they have waited.
-      model.pending ||
-      coordinator?.session?.state === 'starting' ||
-      (lanes?.next.some((task) => task.phase === 'planned') ?? false) ||
-      launches.some((launch) => launch.ended === null),
-  )
+    // While what the person sent is on its way, or the coordinator starts for it, how long they have waited.
+    model.pending ||
+    coordinator?.session?.state === 'starting' ||
+    (lanes?.next.some((task) => task.phase === 'planned') ?? false) ||
+    launches.some((launch) => launch.ended === null)
   const host = coordinator?.host ?? null
   const named = useModelNames()
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
-  const queue = queueShown(session, model.pending)
+  const steers = useSendMidTurn()?.to === 'steer'
+  const queue = queueShown(session, model.pending, coordinator?.accepting)
+  // What the coordinator's thread is drawn from, kept while its items and its turn are: its words streaming, its commands
+  // printing and its clock ticking draw the thread alone (LiveBlocks), not the project.
+  const coordinatorItems = coordinator?.items
+  const turnStarted = session?.turnStartedAt ?? null
+  const turnEnded = session?.turnEndedAt ?? null
+  const reading = readingNow(session, model.pending)
+  const turns = coordinator?.turns
+  const coordinatorSource = useMemo(
+    () =>
+      coordinatorItems === undefined
+        ? null
+        : { items: coordinatorItems, turnRunning: busy, turnStarted, reading, turnEnded, worktree: null, queue, turns: turnsById(turns) },
+    [coordinatorItems, busy, turnStarted, reading, turnEnded, queue, turns],
+  )
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
@@ -483,6 +556,9 @@ export function ProjectView({
     moves: asideMoves,
   })
   const aside = asides.open
+  // A new aside's thread: what the coordinator's composer quotes into it, with no turn of its own yet.
+  const asideItems = asides.items
+  const newAside = useMemo(() => ({ items: asideItems, turnRunning: false, worktree: null }), [asideItems])
   // Who the composer tells: the conversation open, or, under the board with the conversation hidden, the coordinator always,
   // whatever aside was open; sending from there brings the coordinator's conversation back for the answer.
   const docked = !panes.talk
@@ -498,6 +574,8 @@ export function ProjectView({
     queryFn: () => client.listPresets(about ?? undefined),
   }).data
 
+  // The team of a task, open from its row up next or from a small change's card, while it can still change.
+  const [teamFor, setTeamFor] = useState<string | null>(null)
   const actions: CardActions = {
     project: name,
     ...(about === null ? {} : { projectId: about }),
@@ -505,10 +583,13 @@ export function ProjectView({
     agentName,
     onStart: (planId) => void model.startPlan(planId),
     onHold: (planId) => void model.holdPlan(planId),
+    onStopWaiting: (taskId, on) => model.stopWaiting(taskId, on),
+    onReopen: (taskId) => void model.reopenTask(taskId),
     onChange: (planId, steps, end, worksIn, toward) => void model.changePlan(planId, steps, end, worksIn, toward),
     onCreateBranch: (planId, steps, end, repositoryId, branch) =>
       void model.changePlanToNewBranch(planId, steps, end, repositoryId, branch),
     onOpen: onTask,
+    onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),
@@ -605,26 +686,42 @@ export function ProjectView({
     void model.choose(next).then(() => setMoving((now) => (now === next ? null : now)))
   }
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
-  const edit = async (id: string) => {
+  // Out of the queue and in the composer at once; one the coordinator had already read comes back where it was, said why,
+  // and the composer goes back to what it held, unless written in since.
+  const edit = (id: string) => {
     const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
     // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
     if (said === undefined || !images.fits(said)) return
-    if (await model.takeBack(id)) {
+    let was: string | null = null
+    let put: string | null = null
+    // Taken back where the lead had it already: the words, images, files and whether it was dictated, as the composer held them.
+    let unrestore: () => void = () => undefined
+    const dictatedBefore = draftNow(draftOf).dictated
+    const refused = () => {
+      setDraft((current) => (current === put && was !== null ? was : current))
+      unrestore()
+      setDraftDictated(draftOf, dictatedBefore)
+    }
+    if (!model.takeBack(id, refused)) return
+    setDraft((current) => {
+      was = current
+      put = withQueued(current, said.text)
+      return put
+    })
+    if (said.dictated === true) setDraftDictated(draftOf, true)
+    unrestore = images.restore(said)
+  }
+
+  // A queued message goes to the coordinator now, interrupting it, rather than when it is done: out of the queue, and said
+  // again, at once. One it has already read stays as it was; one Althar didn't take goes back in the composer.
+  const sendQueuedNow = (id: string) => {
+    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
+    if (said === undefined) return
+    model.sayQueuedNow(id, said.text, outgoingOf(said), () => {
       setDraft((current) => withQueued(current, said.text))
       if (said.dictated === true) setDraftDictated(draftOf, true)
       images.restore(said)
-    }
-  }
-
-  // A queued message goes to the coordinator now, interrupting it, rather than when it is done: out of the queue, and said again. One it has already read stays as it was.
-  const sendQueuedNow = async (id: string) => {
-    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
-    if (said === undefined || !(await model.takeBack(id))) return
-    if (await model.sayNow(said.text, outgoingOf(said))) return
-    // Althar didn't take it: it goes back in the composer, as one taken back to edit does.
-    setDraft((current) => withQueued(current, said.text))
-    if (said.dictated === true) setDraftDictated(draftOf, true)
-    images.restore(said)
+    })
   }
 
   const line: ReactNode =
@@ -646,9 +743,8 @@ export function ProjectView({
 
   const composer = (
     <div className={s.composer}>
-      <Composer
-        value={draft}
-        onChange={setDraft}
+      <DraftComposer
+        draft={draftOf}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
@@ -674,38 +770,46 @@ export function ProjectView({
             : (offer.offering !== null || projectRuns.some((launch) => launch.ended === null)) && (
                 <>
                   {offer.offering !== null && <ForkOffer offer={offer} />}
-                  <Behind
-                    processes={pillOf([], projectRuns, now, { where: true })}
-                    onStop={(id) => {
-                      const run = runIdOf(id)
-                      if (run !== null) void model.stopLaunch(run)
-                    }}
-                    onOpenUrl={(id) => {
-                      const url = projectRuns.find((launch) => launch.id === runIdOf(id))?.url
-                      // Beside the coordinator's conversation, the board stepping aside for it.
-                      if (url != null) opener.run(url)
-                    }}
-                  />
+                  <Now ticking={ticking}>
+                    {(now) => (
+                      <Behind
+                        processes={pillOf([], projectRuns, now, { where: true })}
+                        onStop={(id) => {
+                          const run = runIdOf(id)
+                          if (run !== null) void model.stopLaunch(run)
+                        }}
+                        onOpenUrl={(id) => {
+                          const url = projectRuns.find((launch) => launch.id === runIdOf(id))?.url
+                          // Beside the coordinator's conversation, the board stepping aside for it.
+                          if (url != null) opener.run(url)
+                        }}
+                      />
+                    )}
+                  </Now>
                 </>
               )
         }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
+        steer={steers}
         {...images.props(receiver)}
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
           if (about === null) return
           // Pressed, a comment opens again on its page beside the conversation.
           pages.place(about, 'beside')
-          setRoom(Room.Talk)
+          setRoom((was) => {
+            rememberRoom(was)
+            return Room.Talk
+          })
           pages.reopen(about, id)
         }}
         onRemoveComment={(id) => drop(draftOf, id)}
         {...(busy && talkingTo.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy && talkingTo.kind !== 'new'}
         queued={talkingTo.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue)}
-        onEditQueued={(id) => void edit(id)}
-        onSendQueuedNow={(id) => void sendQueuedNow(id)}
+        onEditQueued={edit}
+        onSendQueuedNow={sendQueuedNow}
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue, sendNowKey: modKey(keys.return) }}
         placeholder={
@@ -714,7 +818,9 @@ export function ProjectView({
               ? asidesText.newPlaceholder
               : asidesText.quotePlaceholder
             : busy
-              ? text.placeholderBusy
+              ? steers
+                ? text.placeholderBusySteer
+                : text.placeholderBusy
               : text.placeholder
         }
         // A new aside has used nothing of the coordinator's context.
@@ -742,9 +848,6 @@ export function ProjectView({
 
   /** Into the coordinator's composer, from an empty board: beside it, or under it where the conversation is hidden. */
   const talkToCoordinator = () => requestAnimationFrame(() => voice.inputRef.current?.focus())
-  // The team of a plan up next, open from its row, while it can still change.
-  const [teamFor, setTeamFor] = useState<string | null>(null)
-  const teamTask = teamFor === null || lanes === null ? null : (lanes.next.find((one) => one.taskId === teamFor) ?? null)
   /** The first thing that waits on you, in its task. */
   const openYours = () => {
     const first = lanes === null ? null : firstNeedOf(lanes)
@@ -802,25 +905,29 @@ export function ProjectView({
         ? {}
         : {
             run: (
-              <Runs
-                projectId={projectId}
-                project={kept.name ?? name}
-                taskId={null}
-                // Its tasks run in their worktrees: those under way with a branch, not a review, which runs nothing of what it reads.
-                tasks={
-                  board.board?.tasks
-                    .filter((task) => task.settledAt === null && task.branch !== null && task.reviewing == null)
-                    .map((task) => ({ id: task.taskId, title: task.title })) ?? null
-                }
-                {...(ways === undefined ? {} : { onConnect: ways.connections })}
-                runnables={coordinator.runnables}
-                launches={coordinator.launches}
-                now={now}
-                onRun={(id, taskId) => void model.runProject(taskId, id)}
-                onStop={(id) => void model.stopLaunch(id)}
-                onClear={(id) => void model.clearLaunch(id)}
-                onRunRef={model.runRef}
-              />
+              <Now ticking={ticking}>
+                {(now) => (
+                  <Runs
+                    projectId={projectId}
+                    project={kept.name ?? name}
+                    taskId={null}
+                    // Its tasks run in their worktrees: those under way with a branch, not a review, which runs nothing of what it reads.
+                    tasks={
+                      board.board?.tasks
+                        .filter((task) => task.settledAt === null && task.branch !== null && task.reviewing == null)
+                        .map((task) => ({ id: task.taskId, title: task.title })) ?? null
+                    }
+                    {...(ways === undefined ? {} : { onConnect: ways.connections })}
+                    runnables={coordinator.runnables}
+                    launches={coordinator.launches}
+                    now={now}
+                    onRun={(id, taskId) => void model.runProject(taskId, id)}
+                    onStop={(id) => void model.stopLaunch(id)}
+                    onClear={(id) => void model.clearLaunch(id)}
+                    onRunRef={model.runRef}
+                  />
+                )}
+              </Now>
             ),
           })}
     />
@@ -828,7 +935,23 @@ export function ProjectView({
 
   return (
     <PageOpenerProvider value={opener}>
-      <div className={s.window}>
+      <MessageMotion
+        className={s.window}
+        // What moves a message between the conversation and its composer, or what shows with the rooms: not a word typed or
+        // streamed, nor a second ticking. The board's cards are its own (BoardView).
+        version={[
+          coordinator?.items,
+          queue,
+          model.pending,
+          asides.items,
+          room,
+          panes.talk,
+          panes.board,
+          swapped,
+          aside.kind === 'aside' ? aside.threadId : aside.kind,
+          teamFor,
+        ]}
+      >
         {header}
         {room === Room.Automations ? (
           <AutomationsView
@@ -893,17 +1016,23 @@ export function ProjectView({
                   <>
                     {/* The coordinator first, then its asides: the conversation says who it is with. */}
                     {lanes !== null && (
-                      <AsidesBar
-                        scratch={lanes.scratch}
-                        open={aside}
-                        first={asides.first}
-                        title={asides.title}
-                        onPick={asides.pick}
-                        onNew={() => asides.begin(null)}
-                        onClear={asides.clear}
-                        board={seen?.tasks ?? []}
-                        now={Date.parse(now)}
-                      />
+                      <Now ticking every={ticking ? SECOND : MINUTE}>
+                        {(now) => (
+                          <AsidesBar
+                            scratch={lanes.scratch}
+                            open={aside}
+                            first={asides.first}
+                            title={asides.title}
+                            onPick={asides.pick}
+                            onNew={() => asides.begin(null)}
+                            onClear={asides.clear}
+                            board={seen?.tasks ?? []}
+                            now={Date.parse(now)}
+                            passages={passages}
+                            onSearching={setAsideSearching}
+                          />
+                        )}
+                      </Now>
                     )}
                     {aside.kind === 'aside' ? (
                       <AsideConversation
@@ -917,13 +1046,11 @@ export function ProjectView({
                     ) : aside.kind === 'new' ? (
                       <TaskFace className={s.face} composer={composer}>
                         <Thread label={asidesText.newPlaceholder}>
-                          <ThreadBlocks
-                            blocks={blocksOf(
-                              { items: asides.items, turnRunning: false, worktree: null },
-                              new Map(),
-                              (iso) => ago(iso),
-                              now,
-                            )}
+                          <LiveBlocks
+                            source={newAside}
+                            streaming={NOTHING_HEARD}
+                            outputs={NOTHING_HEARD}
+                            ticking={false}
                             threadId={aside.threadId ?? aside.taskId}
                           />
                         </Thread>
@@ -956,23 +1083,11 @@ export function ProjectView({
                             {clearing.line}
                             {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                             <ThreadShellProvider value={shown.shell}>
-                              <ThreadBlocks
-                                blocks={blocksOf(
-                                  {
-                                    items: coordinator.items,
-                                    turnRunning: busy,
-                                    turnStarted: session?.turnStartedAt ?? null,
-                                    reading: readingNow(session, model.pending),
-                                    turnEnded: session?.turnEndedAt ?? null,
-                                    worktree: null,
-                                    queue,
-                                    outputs: model.outputs,
-                                    turns: turnsById(coordinator.turns),
-                                  },
-                                  model.streaming,
-                                  (iso) => ago(iso),
-                                  now,
-                                )}
+                              <LiveBlocks
+                                source={coordinatorSource ?? newAside}
+                                streaming={model.streaming}
+                                outputs={model.outputs}
+                                ticking={ticking}
                                 threadId={coordinator.threadId}
                                 session={session}
                                 retryable={coordinator.retryable}
@@ -1002,6 +1117,7 @@ export function ProjectView({
                                 queued={text.queued}
                                 onAnswerQuestion={model.answerQuestion}
                                 signed={coordinatorSigned}
+                                virtual={coordinator.threadId}
                               />
                               {drafting.shown.map((draft) => (
                                 <DraftingCard
@@ -1034,44 +1150,38 @@ export function ProjectView({
                       </Problem>
                     )}
                     {!panes.talk && <AsideMoveFailed moves={asideMoves} className={s.failure} />}
-                    <BoardView
-                      // Beside the conversation, its asides are there; the board alone keeps them behind its chip.
-                      lanes={panes.talk ? { ...lanes, scratch: [] } : lanes}
-                      agents={model.agents}
-                      now={now}
-                      onOpen={onTask}
-                      closing={closing}
-                      // An aside cleared from the chip goes at once, as from its pill.
-                      actions={{
-                        ...board,
-                        markDone: (taskId) => {
-                          if (!lanes.scratch.some((one) => one.taskId === taskId)) return board.markDone(taskId)
-                          asides.clear([taskId])
-                          return Promise.resolve(true)
-                        },
-                      }}
-                      line={board.line}
-                      folds={folds}
-                      onFoldsChange={setFolds}
-                      onTalk={talkToCoordinator}
-                      {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
-                      team={{
-                        projectId,
-                        start: (planId) => model.startPlan(planId),
-                        hold: (planId) => model.holdPlan(planId),
-                        change: setTeamFor,
-                      }}
-                      {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
-                    />
-                    {teamFor !== null && (
-                      <ChangeTeam
-                        key={teamFor}
-                        projectId={projectId}
-                        task={teamTask !== null && teamChangeOf(teamTask) !== null ? teamTask : null}
-                        agents={model.agents}
-                        onClose={() => setTeamFor(null)}
-                      />
-                    )}
+                    <Now ticking every={ticking ? SECOND : MINUTE}>
+                      {(now) => (
+                        <BoardView
+                          lanes={boardLanes ?? lanes}
+                          agents={model.agents}
+                          now={now}
+                          onOpen={onTask}
+                          closing={closing}
+                          // An aside cleared from the chip goes at once, as from its pill.
+                          actions={{
+                            ...board,
+                            markDone: (taskId) => {
+                              if (!lanes.scratch.some((one) => one.taskId === taskId)) return board.markDone(taskId)
+                              asides.clear([taskId])
+                              return Promise.resolve(true)
+                            },
+                          }}
+                          line={board.line}
+                          folds={folds}
+                          onFoldsChange={setFolds}
+                          onTalk={talkToCoordinator}
+                          {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
+                          team={{
+                            projectId,
+                            start: (planId) => model.startPlan(planId),
+                            hold: (planId) => model.holdPlan(planId),
+                            change: setTeamFor,
+                          }}
+                          {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
+                        />
+                      )}
+                    </Now>
                   </>
                 ) : board.error === null ? (
                   <PartPending label={text.boardReading} />
@@ -1086,7 +1196,11 @@ export function ProjectView({
             )}
           </div>
         )}
-      </div>
+        {/* A team opened from a card in the conversation or a row of the board: whichever of them is on show, and before the board is. */}
+        {teamFor !== null && (
+          <TeamOf key={teamFor} projectId={projectId} taskId={teamFor} agents={model.agents} onClose={() => setTeamFor(null)} />
+        )}
+      </MessageMotion>
     </PageOpenerProvider>
   )
 }

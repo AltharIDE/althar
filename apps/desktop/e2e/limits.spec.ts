@@ -33,6 +33,8 @@ const startWhileOut = async (out: string, { asks = false, waits = false }: { rea
     await openFirstProject(planning.electronApp, planning.page, repo)
     await expect(planning.page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await planTask(planning.page, 'Add a retry to the checkout call')
+    // This fixture needs the complete plan held across launch; holding the still-streaming draft is covered on its own.
+    await expect(planning.page.getByRole('button', { name: 'Start now', exact: true })).toBeVisible()
     await planning.page.getByRole('button', { name: 'Hold' }).click()
     await expect(planning.page.getByRole('region', { name: 'Conversation' }).getByText('Held', { exact: true })).toBeVisible()
   } finally {

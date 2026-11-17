@@ -16,8 +16,8 @@ export const refOf = (project: ProjectSummary): ProjectRef => ({ seed: project.i
  * board's lanes put it (`lanesOf`, by `waitingOn`), so the home, the edge and
  * the tabs count what the board's Needs you and Running show: a task that
  * waits on a call has its call, not a line again among what is in progress;
- * one that waits on issues to file, one whose lead stopped, and one ready to
- * accept wait too; an aside, a chat on Scratch, is in neither.
+ * one that waits on issues to file and one ready to accept wait too; stopped
+ * work without a call is held Up next; an aside, a chat on Scratch, is in neither.
  */
 
 /** Where the board's lanes put the home's tasks and calls, across every project. */
@@ -26,10 +26,10 @@ export interface HomeWaits {
   readonly calls: HomeSnapshot['calls']
   /** Tasks that wait on issues their lead drafted, or changes to their issue. */
   readonly issues: ReadonlyArray<HomeTask>
-  /** Tasks whose lead stopped with no agent on them, the latest stopped first. */
-  readonly stopped: ReadonlyArray<HomeTask>
   /** Work ready for the person. */
   readonly ready: ReadonlyArray<HomeTask>
+  /** Plans that wait for a task that was abandoned (tasks wait for their blockers). */
+  readonly abandoned: ReadonlyArray<HomeTask>
   /** What is in progress: Running's and Up next's, and what waits on a call, in the home's order. */
   readonly working: ReadonlyArray<HomeTask>
   /** How many things wait, each once, as the tabs count them. */
@@ -51,8 +51,8 @@ export const waitsOf = (home: HomeSnapshot | null, merging: ReadonlySet<string> 
   return {
     calls: standingCalls(tasks, calls),
     issues: homeOf(lanes.issues),
-    stopped: homeOf(lanes.stopped),
     ready: homeOf(lanes.ready),
+    abandoned: homeOf(lanes.abandoned),
     working: tasks.filter((task) => under.has(task.taskId)),
     waiting: yoursOf(lanes),
   }
@@ -73,6 +73,7 @@ export const homeGlanceOf = (
   {
     answered = [],
     merging = new Set(),
+    mergedHere = new Set(),
     agentName,
     modelName,
   }: {
@@ -80,23 +81,31 @@ export const homeGlanceOf = (
     readonly answered?: ReadonlyArray<AnsweredCall>
     /** Tasks being merged, which are in progress, not waiting on the person, until they settle. */
     readonly merging?: ReadonlySet<string>
+    /** Tasks merged from their lines here: each stays its line, where it was, while it merges, its Merge answering the press. */
+    readonly mergedHere?: ReadonlySet<string>
     readonly agentName: (id: string | null) => string
     readonly modelName: (agentId: string, model: string | null) => string
   },
 ): HomeGlance => {
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
-  const { calls: standing, issues, stopped, ready, working: all, waiting } = waitsOf(home, merging)
+  const { calls: standing, issues, ready: waits, abandoned, working: all, waiting } = waitsOf(home, merging)
+  // Merged from its line here, a ready change stays that line while its merge is under way, not counted as waiting; its
+  // host having it, in its queue or merged, it goes on.
+  const stays = [...mergedHere].filter((id) => merging.has(id))
+  const ready = stays.length === 0 ? waits : waitsOf(home, new Set([...merging].filter((id) => !stays.includes(id)))).ready
+  const kept = new Set(ready.filter((task) => merging.has(task.taskId)).map((task) => task.taskId))
   const calls = standing.filter((call) => !answered.some((one) => one.call.id === call.id))
   // What has a card above isn't listed again under it: a task whose call was answered here is, until it goes on.
   const carded = new Set(calls.map((call) => call.threadId))
   // A project not known yet has none of its work shown, nor counted as in progress.
-  const working = all.filter((task) => refs.has(task.projectId) && !carded.has(task.threadId))
-  const needs = needsOf({ calls: standing, answered, issues, stopped, ready, refs, agentName, modelName })
+  const working = all.filter((task) => refs.has(task.projectId) && !carded.has(task.threadId) && !kept.has(task.taskId))
+  const needs = needsOf({ calls: standing, answered, issues, abandoned, ready, refs, agentName, modelName })
+  const waitsStill = (need: Need) => need.answer === undefined && (need.ready === undefined || !kept.has(need.ready.task.taskId))
   return {
     calls,
     working,
     waiting,
     needs,
-    edge: { waiting, needs: needs.filter((need) => need.answer === undefined).slice(0, 3), work: workOf(working) },
+    edge: { waiting, needs: needs.filter(waitsStill).slice(0, 3), work: workOf(working) },
   }
 }

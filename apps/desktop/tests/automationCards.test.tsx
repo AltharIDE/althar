@@ -81,12 +81,40 @@ describe('an automation’s card in the coordinator’s thread', () => {
     expect(client.runAutomationNow).toHaveBeenCalledWith('auto1', 'ia1')
   })
 
-  it('turns a proposed one on by its item, and stays pressed until the card comes back', async () => {
-    const { client } = fakeClient({ getCoordinator: talking(items.automation({}, 'ia1')) })
+  it('turns a proposed one on by its item, on from the press, through the card read again before the answer', async () => {
+    let answer: () => void = () => undefined
+    const { client, emit } = fakeClient({
+      getCoordinator: talking(items.automation({}, 'ia1')),
+      turnOnAutomation: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))),
+      getThreadItem: vi.fn(async () => items.automation({}, 'ia1')),
+    })
     withServices(<Project />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Turn on' }))
     expect(client.turnOnAutomation).toHaveBeenCalledWith('auto1', 'ia1')
+    // Folded to its line at once, as it will be once on.
+    expect(screen.getByText(/^is on\./)).toBeTruthy()
+    // Its card read again before the runtime answers, still proposed: it stays on.
+    act(() => emit(changed('thread_item', 'ia1', 'thc')))
+    await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', 'ia1'))
+    await act(async () => {})
+    expect(screen.getByText(/^is on\./)).toBeTruthy()
+    // Answered, the card as read after says where it stands.
+    vi.mocked(client.getThreadItem).mockResolvedValue(items.automation({ state: 'on' }, 'ia1'))
+    await act(async () => answer())
+    act(() => emit(changed('thread_item', 'ia1', 'thc')))
+    await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText(/^is on\./)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Turn on' })).toBeNull()
+  })
+
+  it('tries a proposed one once by its item, pressed until the card comes back', async () => {
+    const { client } = fakeClient({ getCoordinator: talking(items.automation({}, 'ia1')) })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Try it once now' }))
+    expect(client.runAutomationNow).toHaveBeenCalledWith('auto1', 'ia1')
+    // What a run comes to can't be shown before it: the card waits, its Turn on busy.
     expect(screen.getByRole('button', { name: 'Turn on' }).getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Try it once now' }).hasAttribute('disabled')).toBe(true)
   })
 
   it('on: folded to one line, opening it in Automations, and turned off there', async () => {
@@ -178,13 +206,16 @@ describe('an automation’s card in the coordinator’s thread', () => {
       ),
     })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Resume' }))
+    const resume = await screen.findByRole('button', { name: 'Resume' })
+    expect(screen.getAllByText('Morning review · Every weekday at 9:00')).toHaveLength(2)
+    await userEvent.click(resume)
     expect(client.turnOnAutomation).toHaveBeenCalledWith('auto1', 'ia4')
+    // Done from the press, its line said at once.
+    expect(screen.getAllByText('Resumed.')).toHaveLength(2)
     await userEvent.click(screen.getByRole('button', { name: 'Run now' }))
     expect(client.runAutomationNow).toHaveBeenCalledWith('auto2', 'ia5')
-    expect(screen.getByText('Resumed.')).toBeTruthy()
-    expect(screen.getByText('Started a run.')).toBeTruthy()
-    expect(screen.getAllByText('Morning review · Every weekday at 9:00')).toHaveLength(2)
+    expect(screen.getAllByText('Started a run.')).toHaveLength(2)
+    expect(screen.getAllByText('Morning review · Every weekday at 9:00')).toHaveLength(4)
   })
 
   it('deleted: a line saying so', async () => {

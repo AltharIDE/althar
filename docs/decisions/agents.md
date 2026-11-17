@@ -6,7 +6,7 @@ How Althar runs coding agents: the protocol it speaks to them, which agents join
 
 ## ACP for every agent
 
-Althar connects to every agent through the Agent Client Protocol (ACP), behind its own adapter interface (`AgentConnection`, in `@althar/provider-adapters`). This makes agents interchangeable, and makes another agent a registry entry plus the contract suite rather than an integration of its own. Althar runs no model loop of its own, which is also what lets it run on the person's Claude and ChatGPT plans.
+Althar connects to every agent through the Agent Client Protocol (ACP), behind its own adapter interface (`AgentConnection`, in `@althar/provider-adapters`). External agents supply their own model loops. Native GitHub Copilot uses Althar's model loop and an in-process ACP transport, keeping the same sessions, permissions and events without another agent executable.
 
 - **How each agent runs:** Claude Code through `claude-agent-acp` and Codex through `codex-acp`, both bundled at pinned versions; OpenCode through `opencode acp`; the others through their own ACP servers.
 - **Where ACP falls short,** an agent gets a side channel, such as Codex's app-server, or a patch to its adapter. The domain stays the same either way.
@@ -24,7 +24,9 @@ An agent joins where Althar sees every command before it runs and can stop it. T
 3. **It was read at the version the ACP registry lists,** with permission options of known kinds.
 4. **Its vendor lets a third-party app use its sign-in,** or publishes it for any ACP client. Where the two disagree, the person is told before they sign in.
 
-Eleven connections join: Claude Code, Codex, OpenCode, GitHub Copilot, GitHub Copilot CLI, Junie, Grok Build, Kimi Code, Mistral Vibe, Qwen Code and Google Antigravity. The person's own install normally runs where present; native Copilot uses a managed OpenCode engine. Althar can download engines whose licenses allow it. Each entry's `knownGaps` says what it does differently.
+Eleven connections join: Claude Code, Codex, OpenCode, GitHub Copilot, GitHub Copilot CLI, Junie, Grok Build, Kimi Code, Mistral Vibe, Qwen Code and Google Antigravity. The person's own install normally runs where present; native Copilot runs inside Althar. Althar can download external engines whose licenses allow it. Each entry's `knownGaps` says what it does differently.
+
+Settings also offers [external ACP connections](../plans/acp-catalog.md): registry discovery and custom commands, including twelve setup profiles. These are unavailable until a person runs a version-bound compatibility check. A profile's presence does not qualify its agent as a built-in adapter or waive the requirements above. Generic connections have one existing sign-in, no selected skills or permission-judge role, and cannot lead untrusted repository reviews.
 
 - **Google Antigravity** runs Google's own ACP server (`agy_acp_server.par`), as Orca runs it. Althar downloads it from Google only when the person asks, pinned by sha256, and there is no Windows build. Google's terms may count signing in from a third-party app as a breach, while Google lists the server for other editors. The sign-in says so before the person picks it.
 - **What holds an agent is data in its registry entry,** not code of its own. For example:
@@ -60,6 +62,19 @@ The cost is about 120 MB unpacked (about 40 MB to download), and one more runtim
 
 ## Copilot without Copilot CLI
 
+**Decision, 14 November 2026. Owner: repository maintainers. Supersedes the managed-engine decision below.** Althar owns the native Copilot connection (`copilot-direct`): OAuth device flow, encrypted per-account credentials, model discovery, streaming inference, tools and the agent loop. It has no OpenCode executable, package, credential or OAuth-application dependency, and no Copilot CLI or SDK runtime dependency. OpenCode remains a separate optional agent. The original `copilot` connection remains GitHub Copilot CLI.
+
+- **Authorize Althar.** GitHub personal and work accounts use github.com. Enterprise-address sign-in targets that host throughout authorization and account discovery. Desktop builds bundle Althar's registered public OAuth application ID, with optional build and runtime overrides; replacement apps must enable device flow. Enterprise instances can supply their own registered IDs through `copilotEnterpriseClientIds`. No third-party client ID is substituted. The code is shown and copyable while the browser opens.
+- **Keep credentials in Althar.** Each account uses the existing encrypted `Secrets` service. Removing an account deletes its local credential. Existing native account IDs and names survive the change, but need a fresh Althar authorization; no engine credentials are imported. A fresh installation has no default external Copilot account.
+- **Ask GitHub what is available.** Sign-in checks Copilot entitlement and available coding models before saving credentials. Inference follows the account's validated endpoint and each model's advertised Chat Completions, Responses or Messages protocol. Signed reasoning is retained for tool continuations. Usage limits surface through request errors; plan windows are unavailable.
+- **Own the work.** Althar supplies file, command and MCP tools, streams updates through its in-process ACP boundary, and applies the existing permission decisions before executing tools. Review writes are refused by the existing role permissions; offline reviews omit shell tools. The native read-only mode also removes writable tools. Commands and stdio MCP servers have owned process groups, durable process records and cancellation cleanup. This is not an OS sandbox. Context compaction and model changes belong to Althar too.
+
+These Copilot account and inference endpoints are a compatibility integration, not a promise of a stable public API. GitHub's own-app OAuth setup is documented for its SDK, but direct inference with Althar's application still needs live validation. On 14 November 2026, GitHub accepted Althar's registered app ID and issued a device challenge. Completing sign-in and a prompt on a CLI-disabled enterprise account remains required before release. The connection respects organization restrictions on applications, Copilot Chat, models, SSO and network access; it cannot bypass a policy that rejects Althar's app or direct model access.
+
+References: [GitHub's own-app OAuth setup](https://docs.github.com/en/copilot/how-tos/copilot-sdk/setup/github-oauth), [Copilot SDK authentication](https://github.com/github/copilot-sdk/blob/main/docs/auth/authenticate.md), and [OpenCode's provider](https://github.com/anomalyco/opencode/blob/dev/packages/core/src/plugin/provider/github-copilot.ts), used to investigate endpoint behavior rather than as a runtime dependency.
+
+### Superseded: managed engine
+
 **Decision, 13 November 2026. Owner: repository maintainers.** GitHub Copilot is a native connection in Althar, backed by a managed OpenCode engine. GitHub supplies the models; OpenCode supplies OAuth and the agent loop, over Althar's existing ACP boundary. It does not run GitHub Copilot CLI. The existing `copilot` connection stays as **GitHub Copilot CLI**, so existing accounts and work keep their identity. The new connection is `copilot-direct`.
 
 - **Sign in inside Althar.** Continue with GitHub uses github.com for personal and work accounts alike. A separate enterprise-address field accepts a hostname or HTTPS origin only. OpenCode's own non-interactive `auth login github-copilot --standalone --method device --answer …` owns the device flow and credentials. The code is shown and copyable while the browser opens. The screen says GitHub will ask to authorize OpenCode.
@@ -73,6 +88,10 @@ This avoids a dependency on the enterprise's **Copilot CLI** permission. It does
 **Alternatives:** owning a model loop would duplicate OpenCode's tools and approval integration; using the Copilot SDK would retain its runtime and an unverified policy dependency. Revisit the managed engine when GitHub publishes a suitable standalone model integration or maintaining the engine costs more than a native runtime.
 
 Reference: [OpenCode's Copilot provider](https://github.com/anomalyco/opencode/blob/f91b88efac039856f284979984ac43cd93bce8f5/packages/core/src/plugin/provider/github-copilot.ts), read against OpenCode 2.3.0's CLI and configuration. OpenCode is [MIT licensed](https://github.com/anomalyco/opencode/blob/f91b88efac039856f284979984ac43cd93bce8f5/LICENSE).
+
+## Copilot CLI enterprise sign-in
+
+The separate GitHub Copilot CLI connection also offers an enterprise-address choice. Althar passes that choice explicitly as `copilot login --host https://company.ghe.com`, rather than relying on the login command to honor `GH_HOST`. The selected hostname is kept per account in Althar's settings and passed as both `GH_HOST` and `COPILOT_GH_HOST` to CLI sessions and model discovery. A remembered choice takes precedence over shell defaults; choosing github.com resets it. Copilot CLI continues to own its credentials. See [GitHub's CLI authentication guide](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli).
 
 ## Accounts
 

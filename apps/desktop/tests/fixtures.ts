@@ -1,5 +1,7 @@
 import { isoAfter } from '@althar/testing'
 import type {
+  HostRepository,
+  RepositoryOwner,
   AccountSignInState,
   AgentModels,
   AgentStatus,
@@ -27,6 +29,7 @@ import type {
   ProjectRulesView,
   ProjectRepository,
   TaskFindings,
+  TaskLineComments,
   ProjectSummary,
   RepositoryScript,
   SkillReviewCard,
@@ -1096,6 +1099,23 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       grant: 'grant_made',
       path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     })),
+    prepareFolder: vi.fn(async (grant: string, path?: string) => ({
+      did: 'started' as const,
+      path: path ?? `/Users/ada/code/${grant.replace(/^grant_/, '')}`,
+      branch: 'main',
+      files: 1,
+    })),
+    listHostRepositories: vi.fn(async (): Promise<ReadonlyArray<HostRepository>> => []),
+    listRepositoryOwners: vi.fn(async (): Promise<ReadonlyArray<RepositoryOwner>> => [{ id: 'ada', name: 'ada', kind: 'user' as const }]),
+    cloneRepository: vi.fn(async (_grant: string, from: { readonly path: ReadonlyArray<string> } | { readonly url: string }) => {
+      const name = ('url' in from ? (from.url.split('/').at(-1) ?? 'repo') : (from.path.at(-1) ?? 'repo')).replace(/\.git$/, '')
+      return { grant: `grant_${name}`, path: `/Users/ada/code/${name}` }
+    }),
+    publishRepository: vi.fn(async (input: { readonly owner: RepositoryOwner; readonly name: string }) => ({
+      remote: `${input.owner.id}/${input.name}`,
+      webUrl: `https://github.com/${input.owner.id}/${input.name}`,
+      branch: 'main',
+    })),
     listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
     getSearchDocuments: vi.fn(async () => ({ documents: [], next: null })),
     getSearchFiles: vi.fn(async () => ({ files: [] })),
@@ -1103,6 +1123,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
+    // Each as `getThreadItem` reads it, whatever a test makes that do.
+    getThreadItems: vi.fn(async (threadId: string, itemIds: Iterable<string>) => {
+      const ids = [...itemIds]
+      const read = await Promise.all(ids.map((id) => client.getThreadItem(threadId, id)))
+      return new Map(ids.map((id, at) => [id, read[at] ?? null]))
+    }),
+    behind: (start) => start(),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
     readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readLaunchOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
@@ -1126,6 +1153,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     ship: vi.fn(async () => {}),
+    routeShip: vi.fn(async () => {}),
     fixAfterMerge: vi.fn(async () => {}),
     leaveAfterMerge: vi.fn(async () => {}),
     replacePullRequest: vi.fn(async () => {}),
@@ -1151,6 +1179,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     readCode: vi.fn(async (_threadId: string, path: string) => ({ path, text: 'const tries = 5\n', from: 1, total: 1, cut: false })),
     installAgent: vi.fn(async () => {}),
+    getAgentCatalog: vi.fn(async () => ({ revision: 0, items: [], connections: [], problem: null, refreshing: false })),
+    saveAcpConnection: vi.fn(async () => 1),
+    startAcpCheck: vi.fn(async () => 1),
+    removeAcpConnection: vi.fn(async () => 1),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
       file: { path, from: null, status: 'modified' as const, add: 1, del: 1, binary: false, uncommitted: false },
       lines: [
@@ -1161,6 +1193,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       truncated: false,
     })),
     getTaskFindings: vi.fn(async (_taskId: string, _review?: string): Promise<TaskFindings> => ({ findings: [], review: null })),
+    getLineComments: vi.fn(async (_taskId: string): Promise<TaskLineComments> => ({ comments: [] })),
     startSession: vi.fn(async () => 's1'),
     switchAgent: vi.fn(async () => 's2'),
     setModel: vi.fn(async () => {}),
@@ -1202,6 +1235,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
+    setSendMidTurn: vi.fn(async () => {}),
+    setShipRoute: vi.fn(async () => {}),
     setRunOutside: vi.fn(async () => {}),
     shelveTask: vi.fn(async () => {}),
     stopHelper: vi.fn(async () => {}),
@@ -1246,6 +1281,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setFolderWait: vi.fn(async () => {}),
     setPlansAndReviews: vi.fn(async () => {}),
     setNewProjectDefaults: vi.fn(async () => {}),
+    getStorageSize: vi.fn(async () => ({ state: 'done' as const, bytes: 3 * 1024 ** 3, approximate: false, unreadable: 0 })),
     getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),
     cleanUpFolders: vi.fn(async () => ({ freed: 0, failed: 0 })),
     removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
@@ -1278,7 +1314,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),
     startTask: vi.fn(async () => task),
     startPlan: vi.fn(async () => {}),
-    holdPlan: vi.fn(async () => {}),
+    stopWaiting: vi.fn(async () => {}),
+    holdPlan: vi.fn(async () => true),
     holdDraft: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
     changeTeam: vi.fn(async () => {}),
@@ -1474,9 +1511,20 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   attachPasted: vi.fn(async () => []),
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
+  clonePlace: vi.fn(async () => ({ grant: 'grant_code', where: '~/code' })),
+  openFolderAccess: vi.fn(async () => true),
+  pickClonePlace: vi.fn(async () => ({ grant: 'grant_elsewhere', where: '~/elsewhere' })),
   onOpen: vi.fn(() => () => {}),
   onStoreFailed: vi.fn(() => () => {}),
   showBackup: vi.fn(async () => {}),
+  storage: {
+    places: vi.fn(async () => ({
+      profile: '/home/me/.local/share/althar',
+      logs: '/home/me/.local/share/althar/logs',
+      worktrees: '/home/me/Althar',
+    })),
+    show: vi.fn(async () => {}),
+  },
   tryAgain: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
@@ -1501,6 +1549,7 @@ export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}):
   observedAt: '2026-10-15T10:00:00.000Z',
   plan: 'pro',
   windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
+  resetWindows: [],
   fault: null,
   noReading: null,
   resetSince: false,

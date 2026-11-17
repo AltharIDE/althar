@@ -24,18 +24,21 @@
 }
 .reason {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
   min-width: 0;
 }
 .reason > svg {
   flex: none;
+  margin-top: 2.5px;
 }
+/* a reason that names other tasks takes a second line before it is cut: Starts when Pairing and Hosts screen merge */
 .words {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* one that can start now: its line turns into Start, in the same place and colour, while the row is pointed at or has focus */

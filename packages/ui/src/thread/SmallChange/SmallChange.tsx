@@ -5,6 +5,8 @@ import type { RootProps } from '../../lib/props'
 import { Rhythm } from '../../lib/rhythm'
 import { AskCard } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
+import { MergeButton } from '../../primitives/MergeButton/MergeButton'
+import { MergeFeel } from '../../primitives/MergeFeel/MergeFeel'
 import { HoverCard } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
@@ -18,7 +20,9 @@ import s from './SmallChange.module.css'
  * merge, moved before Merge where it was made a full task, and left off
  * where no review follows. Pressing it changes which, until it merges. What
  * a small change is waits behind its name; what its review found, in the
- * thread, behind See findings.
+ * thread, behind See findings. Under its title, who is on it (the lead, its
+ * effort, the reviewer) with Change the team…, from the moment the card
+ * appears: a small change starts at once, and its team still changes.
  */
 
 /** When its review reads it: after the merge, before it (a full task), or not at all. */
@@ -72,6 +76,7 @@ export interface SmallChangeText {
   left: (count: number) => string
   stopped: string
   addReview: string
+  changeTeam: string
   seeFindings: string
   choices: string
   before: string
@@ -105,6 +110,7 @@ export const smallChangeText: SmallChangeText = {
   left: (count) => `${count} left as is`,
   stopped: 'Stopped',
   addReview: 'Review',
+  changeTeam: 'Change the team…',
   seeFindings: 'See findings',
   choices: 'Review',
   before: 'Before it merges',
@@ -147,9 +153,14 @@ export type SmallChangeProps = RootProps<
     review: SmallChangeReview
     /** What a small change is, behind its name. */
     explain?: ReactNode
+    /** Who is on it, in a line: "Sonnet 5.5 · Low, GPT-6.1 Sol reviews". */
+    team?: string
+    /** Opens the team dialog: its lead from its next turn, its reviewer until its review starts. Without it, no way in. */
+    onTeam?: () => void
     onOpen?: () => void
     /** Merge asks first, as every merge does; offered once it is ready. */
     onMerge?: () => void
+    onBypassQueue?: () => void
     /** Changes when its review reads it, until it merges: before it makes it a full task. Without it, the stop is no button. */
     onReview?: (when: SmallChangeReviewWhen) => void
     /** Takes the person to what its review found, in the thread. */
@@ -170,8 +181,11 @@ export function SmallChange({
   merge,
   review,
   explain,
+  team,
+  onTeam,
   onOpen,
   onMerge,
+  onBypassQueue,
   onReview,
   onFindings,
   onOpenReview,
@@ -269,7 +283,6 @@ export function SmallChange({
   const adding = choosing && review.when === 'none'
   const columns = { gridTemplateColumns: `repeat(${stops.length + (adding ? 1 : 0)}, minmax(0, 1fr))` }
   const under = (key: Stop['key']) => ({ gridColumn: stops.findIndex((stop) => stop.key === key) + 1 })
-  const ready = merge.state === 'ready' || merge.state === 'merging'
   const found = review.state === 'found' && onFindings !== undefined
   const kicker = full ? t.fullTask : t.kicker
 
@@ -301,10 +314,21 @@ export function SmallChange({
           title
         )}
       </p>
+      {(team !== undefined || onTeam !== undefined) && (
+        <p className={s.team}>
+          {team !== undefined && <span className={s.who}>{team}</span>}
+          {onTeam !== undefined && (
+            <LinkButton className={s.choose} onClick={onTeam}>
+              {t.changeTeam}
+            </LinkButton>
+          )}
+        </p>
+      )}
       <ol className={s.route} style={columns}>
         {stops.map((stop) => (
           <li key={stop.key} className={s.stop} data-at={stop.at} data-later={stop.later || undefined}>
-            <span className={s.knot} aria-hidden="true">
+            {/* Merge's knot is where a merge goes once pressed, and fills as it lands. */}
+            <span className={s.knot} aria-hidden="true" data-merge-target={stop.key === 'merge' ? 'knot' : undefined}>
               {stop.at === 'done' && <Icon name="check" size={9} />}
               {stop.at === 'failed' && <Icon name="close" size={9} />}
               {stop.at === 'found' && review.findings < 10 && review.findings}
@@ -329,18 +353,23 @@ export function SmallChange({
         )}
       </ol>
       {/* What waits on the person sits under its stop: Merge under Merge, See findings under Review. */}
-      {ready && onMerge !== undefined ? (
+      {/* Pressed, Merge gives its place at once to where the merge stands: never Merge again while its host has it. */}
+      {(merge.state === 'ready' && onMerge !== undefined) ||
+      merge.state === 'merging' ||
+      (merge.state === 'queued' && onBypassQueue !== undefined) ? (
         <div className={s.foot} style={columns}>
-          <Button
+          <MergeButton
             size="small"
             variant="signal"
             className={s.act}
             style={under('merge')}
-            busy={busy || merge.state === 'merging'}
-            onClick={onMerge}
+            busy={busy}
+            onMerge={onMerge}
+            onBypassQueue={onBypassQueue}
+            standing={merge.state === 'merging' || merge.state === 'queued' ? merge.state : null}
           >
             {t.merge}
-          </Button>
+          </MergeButton>
         </div>
       ) : found ? (
         <div className={s.foot} style={columns}>
@@ -349,6 +378,7 @@ export function SmallChange({
           </Button>
         </div>
       ) : null}
+      <MergeFeel stage={merge.state === 'waiting' ? null : merge.state} />
     </AskCard>
   )
 }

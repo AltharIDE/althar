@@ -2,6 +2,7 @@ import { hashKey, type QueryClient, type QueryKey } from '@tanstack/react-query'
 
 import type { AutomationSnapshot, CoordinatorSnapshot, ThreadSnapshot, WatchEvent } from '@althar/contracts'
 
+import { heardRename } from './agentRenames'
 import type { Client } from './client'
 import { keys } from './reads'
 
@@ -10,13 +11,14 @@ import { keys } from './reads'
  * ends the reads it touches, so the cache never shows what the runtime has
  * moved past:
  *
- * - a whole read (the projects, the home, a board, the connections, the
- *   skills) is read again, gathered a moment so a burst of changes reads
- *   once; on screen or not, so whichever the person goes to next is already
- *   right. Only a
- *   permission the rules answered, which moves nothing but the home's count
- *   of them and comes with every edit an agent makes, reads the home again
- *   only while it shows; off screen it is marked, for its next visit;
+ * - a whole read (the projects, the home, a board) is read again while it
+ *   shows, gathered a moment so a burst of changes reads once; off screen it
+ *   is only marked, and read again as the person next goes to it, behind
+ *   what the window holds of it, which shows at once (`held`). Every card an
+ *   agent's edit moves would otherwise read every board the window ever
+ *   opened, on the runtime's one thread. What changes rarely and shows in
+ *   other windows too (the connections, the skills) is read again on screen
+ *   or not;
  * - what moves a board, the home and the cards in a coordinator's thread is
  *   one change, `card`: the runtime works a task's card out again as
  *   anything of the task changes, whatever kind of record it is (its
@@ -34,8 +36,14 @@ import { keys } from './reads'
  *   the same change; one that isn't showing is read again when it is next
  *   opened.
  *
+ * A read the feed starts for what shows goes at once; one that also reads
+ * what doesn't show goes behind (`client.behind`), where nobody waits on it,
+ * so the runtime answers a press first. In the lane, a screen's own read
+ * waited behind every other the window had, and under agents' work showed
+ * seconds late (the responsiveness run's `window.board`).
+ *
  * A read that was under way when a change touched it may not hold it, so
- * it is read once more as it ends. It is let finish, never cut short to
+ * it is read once more as it ends, while it shows; marked, where it doesn't. It is let finish, never cut short to
  * begin again: changes that keep coming would never let a slow read land,
  * and the screen would show the one before them for as long as they came.
  * Screens hear every change through `listen`, from
@@ -57,7 +65,7 @@ export const BOARD = new Set(['card', 'project'])
 /** What changes the home: what changes a board, and a permission the rules answered. */
 export const HOME = new Set([...BOARD, 'decision'])
 
-/** What changes the home only while it shows: the count of permissions the rules answered. */
+/** What moves no more of the home than its count of permissions the rules answered, which comes with every edit an agent makes. */
 export const HOME_SHOWN = new Set(['decision'])
 
 /** What changes the projects as listed: a name, their tasks and runs, who is working, what waits on you. */
@@ -107,11 +115,11 @@ interface Due {
   readonly offScreen: boolean
 }
 
-/** The whole reads a change ends. */
+/** The whole reads a change ends. The projects, the home and a board only while they show: off screen, each is read as it next opens. */
 const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
-  ...(PROJECTS.has(event.aggregateType) ? [{ key: keys.projects, offScreen: true }] : []),
-  ...(HOME.has(event.aggregateType) ? [{ key: keys.home, offScreen: !HOME_SHOWN.has(event.aggregateType) }] : []),
-  ...(event.projectId !== null && BOARD.has(event.aggregateType) ? [{ key: keys.board(event.projectId), offScreen: true }] : []),
+  ...(PROJECTS.has(event.aggregateType) ? [{ key: keys.projects, offScreen: false }] : []),
+  ...(HOME.has(event.aggregateType) ? [{ key: keys.home, offScreen: false }] : []),
+  ...(event.projectId !== null && BOARD.has(event.aggregateType) ? [{ key: keys.board(event.projectId), offScreen: false }] : []),
   // The connections, which say where each project's code is: a connection, or a project's repositories, name or removal.
   ...(CONNECTIONS.has(event.aggregateType) ? [{ key: keys.connections, offScreen: true }] : []),
   // The skills each lead is given, as a window changes them: so every other window shows them too.
@@ -163,6 +171,12 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
           .getQueryCache()
           .findAll({ predicate: (query) => SETTING_READS.has(String(query.queryKey[0])) })
           .map((query) => ({ key: query.queryKey, offScreen: false })),
+      ]
+    : []),
+  ...(event.aggregateType === 'setting' && event.aggregateId.startsWith('acp-catalog:')
+    ? [
+        { key: keys.agentCatalog, offScreen: false },
+        { key: keys.status, offScreen: true },
       ]
     : []),
   // The project's canvases and the one that changed (ADR-104): a version published, a comment sent or answered, one archived.
@@ -235,15 +249,25 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
     due.clear()
     // A read under way is let finish, not cut short and begun again: changes that keep coming would never let a slow one
     // land. It is read once more as it ends, for what came while it ran.
-    for (const { key, offScreen } of reads)
-      void cache.invalidateQueries({ queryKey: key, exact: true, refetchType: offScreen ? 'all' : 'active' }, { cancelRefetch: false })
+    // What shows is read at once: in the lane behind, each waited for the rest of the window's, and a board under agents'
+    // work showed seconds late. Only what also reads off screen goes behind, as nobody waits on that.
+    for (const { key, offScreen } of reads) {
+      const read = () =>
+        void cache.invalidateQueries({ queryKey: key, exact: true, refetchType: offScreen ? 'all' : 'active' }, { cancelRefetch: false })
+      if (offScreen) client.behind(read)
+      else read()
+    }
   }
+
+  /** Which reads a change touched are read again off screen too, by their keys' hashes: a read under way is read once more there as well. */
+  const readsOffScreen = new Map<string, boolean>()
 
   // A read under way when a change touched it is read once more; one begun after the change holds it. A read the cache let go is forgotten.
   const unsubscribe = cache.getQueryCache().subscribe((event) => {
     if (event.type === 'removed') {
       touched.delete(event.query.queryHash)
       begun.delete(event.query.queryHash)
+      readsOffScreen.delete(event.query.queryHash)
       return
     }
     if (event.type !== 'updated') return
@@ -256,16 +280,23 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
     begun.set(queryHash, heardSoFar)
     // Read now, so not again when the gathered changes are read.
     due.delete(queryHash)
-    void cache.invalidateQueries({ queryKey, exact: true, refetchType: isThread(queryKey) ? 'active' : 'all' }, { cancelRefetch: false })
+    const refetchType = !isThread(queryKey) && readsOffScreen.get(queryHash) === true ? 'all' : 'active'
+    const read = () => void cache.invalidateQueries({ queryKey, exact: true, refetchType }, { cancelRefetch: false })
+    if (refetchType === 'all') client.behind(read)
+    else read()
   })
 
   const heard = (event: WatchEvent) => {
     if (event._tag === 'Changed') {
       heardSoFar += 1
+      if (event.renamedTo !== undefined) heardRename(event.aggregateId, event.renamedTo, event.renamedByAgent === true)
       for (const read of wholeReads(cache, event)) {
         const hash = hashKey(read.key)
         // Only a read the cache holds can be under way, and needs its change remembered.
-        if (cache.getQueryCache().get(hash) !== undefined) touched.set(hash, heardSoFar)
+        if (cache.getQueryCache().get(hash) !== undefined) {
+          touched.set(hash, heardSoFar)
+          readsOffScreen.set(hash, read.offScreen || (readsOffScreen.get(hash) ?? false))
+        }
         // Off screen if any change gathered with it says so.
         due.set(hash, { key: read.key, offScreen: read.offScreen || (due.get(hash)?.offScreen ?? false) })
       }

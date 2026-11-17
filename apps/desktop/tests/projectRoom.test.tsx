@@ -8,13 +8,25 @@ import { Room } from '@althar/ui'
 
 import type { Client } from '../src/renderer/data/client'
 import { ServicesProvider } from '../src/renderer/data/services'
+import { forgetPages, pages } from '../src/renderer/features/browser/pages'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { hostNameOf, partsOf, trackersOf, trackerUrlOf } from '../src/renderer/features/project/front'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { keys } from '../src/renderer/data/reads'
-import { card, change, changed, connectionList, coordinatorSnapshot, fakeClient, items, streamed } from './fixtures'
+import {
+  card,
+  change,
+  changed,
+  connectionList,
+  coordinatorSnapshot,
+  fakeClient,
+  fakeHost,
+  fakePagesHost,
+  items,
+  streamed,
+} from './fixtures'
 import { servicesFor, useSettingsOf, withServices } from './render'
 
 /*
@@ -148,7 +160,7 @@ describe('the Talk room’s model, once the thread is read', () => {
       })
       await waitFor(() => expect(result.current.coordinator?.items).toHaveLength(2))
       act(() => emit(streamed('old', 'I’ve planned it as you asked. Earlier turns load as you scroll. A small indicator app', 'thc')))
-      expect(result.current.streaming.get('old')?.text).toMatch(/indicator app$/)
+      expect(result.current.streaming.read().get('old')?.text).toMatch(/indicator app$/)
       stop({
         emit,
         rewatch: () => act(() => rewatch()),
@@ -167,7 +179,7 @@ describe('the Talk room’s model, once the thread is read', () => {
       rerender()
       await act(async () => services.cache.refetchQueries({ queryKey: keys.coordinator('p1') }))
       await waitFor(() => expect(result.current.coordinator?.items.map((item) => item.id)).toEqual(newer.map((item) => item.id)))
-      return result.current.streaming
+      return result.current.streaming.read()
     }
 
     it('goes once the screen is hidden (`KeptScreens`), and doesn’t show under the turn that runs after', async () => {
@@ -224,10 +236,10 @@ describe('the Talk room’s model, once the thread is read', () => {
     })
     await waitFor(() => expect(result.current.coordinator).not.toBeNull())
     act(() => emit(streamed('m', 'Hello', 'thc')))
-    expect(result.current.streaming.has('m')).toBe(true)
+    expect(result.current.streaming.read().has('m')).toBe(true)
     getCoordinator.mockResolvedValue(coordinatorSnapshot({ items: [{ ...items.says('Hello there', 'claude-code', 'm'), sequence: 1 }] }))
     await act(async () => services.cache.refetchQueries({ queryKey: keys.coordinator('p1') }))
-    await waitFor(() => expect(result.current.streaming.has('m')).toBe(false))
+    await waitFor(() => expect(result.current.streaming.read().has('m')).toBe(false))
   })
 
   it('compacts the coordinator’s context', async () => {
@@ -358,11 +370,11 @@ describe('a task’s card in the Talk room', () => {
         queued: { busy: 4, atOnce: 4, holders },
       })
     const client = await talking(waiting(1), waiting(2), waiting(3))
-    expect(await screen.findAllByText('Waiting: 4 of 4 agents busy on this Mac')).toHaveLength(3)
+    expect(await screen.findAllByText('Waiting: 4 of 4 agents busy on this Mac: Start the dev server')).toHaveLength(3)
     const pills = screen.getAllByRole('button', { name: /^Keeping a place/ })
     expect(pills).toHaveLength(1)
     // It sits under the lowest card.
-    const last = screen.getAllByText('Waiting: 4 of 4 agents busy on this Mac').at(-1)!
+    const last = screen.getAllByText('Waiting: 4 of 4 agents busy on this Mac: Start the dev server').at(-1)!
     expect(last.compareDocumentPosition(pills[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await userEvent.click(pills[0]!)
     const list = within(await screen.findByRole('dialog', { name: 'Keeping a place' }))
@@ -370,14 +382,13 @@ describe('a task’s card in the Talk room', () => {
     await waitFor(() => expect(client.stopBackground).toHaveBeenCalledWith('th9', 'bg1'))
   })
 
-  it('shows its card alone when only agents at work hold the places, naming none of them', async () => {
+  it('names active holders in the card without offering background stop controls', async () => {
     const holders = [
       { taskId: 't9', title: 'Run the suite', threadId: 'th9', kept: false, running: [] },
       { taskId: 't8', title: 'Fix the login', threadId: null, kept: false, running: [] },
     ]
     await talking(card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4, holders } }))
-    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
-    expect(screen.queryByText(/Run the suite|Fix the login/)).toBeNull()
+    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac: Run the suite; Fix the login')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Keeping a place/ })).toBeNull()
   })
 
@@ -540,6 +551,43 @@ describe('a run, in the list Run opens', () => {
     expect(open).toHaveBeenCalledWith('http://localhost:5199/', '_blank')
     open.mockRestore()
     expect(screen.queryByRole('button', { name: /^Running/ })).toBeNull()
+  })
+})
+
+describe('a page beside the coordinator’s conversation', () => {
+  it('gives the right side back to the board when it closes', async () => {
+    forgetPages()
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('See [the docs](https://example.com/docs).')] })),
+    })
+    const host = fakeHost({ pages: fakePagesHost() })
+    render(
+      <ServicesProvider value={servicesFor(client, host)}>
+        <Project room={Room.Both} />
+      </ServicesProvider>,
+    )
+    expect(await screen.findByRole('separator', { name: 'Width of the conversation' })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('link', { name: /the docs/ }))
+    await waitFor(() => expect(screen.queryByRole('separator', { name: 'Width of the conversation' })).toBeNull())
+    expect(pages.where('p1')).toBe('beside')
+    act(() => pages.hide('p1'))
+    expect(await screen.findByRole('separator', { name: 'Width of the conversation' })).toBeTruthy()
+  })
+
+  it('brings the board back after the window reloaded with the page open', async () => {
+    forgetPages()
+    window.localStorage.setItem('althar.before.p1', 'both')
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('Ready.')] })) })
+    render(
+      <ServicesProvider value={servicesFor(client, fakeHost({ pages: fakePagesHost() }))}>
+        <Project room={Room.Talk} />
+      </ServicesProvider>,
+    )
+    await screen.findByText('Ready.')
+    act(() => pages.place('p1', 'beside'))
+    expect(screen.queryByRole('separator', { name: 'Width of the conversation' })).toBeNull()
+    act(() => pages.hide('p1'))
+    expect(await screen.findByRole('separator', { name: 'Width of the conversation' })).toBeTruthy()
   })
 })
 

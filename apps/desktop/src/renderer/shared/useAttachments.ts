@@ -1,6 +1,7 @@
 import {
   type AgentModels,
   type AttachedFile,
+  type LineComment,
   MESSAGE_FILES,
   MESSAGE_IMAGES,
   type Picture,
@@ -13,7 +14,7 @@ import { useState } from 'react'
 
 import { pictureUrl } from '../../main/pictureAddress'
 import type { Host } from '../data/services'
-import { nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftOf } from './drafts'
+import { nextImageId as next, setDraftDictated, setDraftFiles, setDraftImages, useDraftAttached } from './drafts'
 import { type Attached, metaOf, refusedText, text as filesText } from './files'
 import { pictureOf, previewOf, readImage, remember, type Shrink, sentOf, shrinkInWindow, text } from './images'
 
@@ -51,22 +52,26 @@ export interface Outgoing {
   readonly attached: ReadonlyArray<AttachedFile>
   /** Some of its words were dictated, even if edited after: the agent is told so. Set with the images, so each send carries it. */
   readonly dictated?: boolean
+  /** Comments on lines of the task's diff (decisions: desktop-app § Comments on the diff), sent with it from the Changes view. */
+  readonly comments?: ReadonlyArray<LineComment>
   /** The person's comments on canvases, kept with the message as it is sent (ADR-104). */
   readonly canvasComments?: ReadonlyArray<SentCanvasComment>
 }
 
-/** What a send or a switch carries of a message's images and files and of its being dictated: nothing where it has none. */
+/** What a send or a switch carries of a message's images, files and comments on the diff and of its being dictated: nothing where it has none. */
 export const sentWith = (
   outgoing: Outgoing | undefined,
 ): {
   readonly images?: ReadonlyArray<SentImage>
   readonly files?: ReadonlyArray<SentFile>
   readonly dictated?: boolean
+  readonly comments?: ReadonlyArray<LineComment>
   readonly canvasComments?: ReadonlyArray<SentCanvasComment>
 } => ({
   ...(outgoing === undefined || outgoing.sent.length === 0 ? {} : { images: outgoing.sent }),
   ...(outgoing === undefined || outgoing.files.length === 0 ? {} : { files: outgoing.files }),
   ...(outgoing?.dictated === true ? { dictated: true } : {}),
+  ...(outgoing?.comments === undefined || outgoing.comments.length === 0 ? {} : { comments: outgoing.comments }),
   ...(outgoing?.canvasComments === undefined || outgoing.canvasComments.length === 0 ? {} : { canvasComments: outgoing.canvasComments }),
 })
 
@@ -75,6 +80,7 @@ export interface Said {
   readonly pictures: ReadonlyArray<Picture>
   readonly files: ReadonlyArray<AttachedFile>
   readonly dictated?: boolean
+  readonly comments?: ReadonlyArray<LineComment>
 }
 
 /** What goes again with a queued message: its images by their digests and its files by their copies, which Althar keeps, and its being dictated. */
@@ -88,6 +94,7 @@ export const outgoingOf = (said: Said): Outgoing => {
     files: said.files.map((file) => ({ kept: file.id })),
     attached: said.files,
     ...(said.dictated === true ? { dictated: true } : {}),
+    ...(said.comments === undefined ? {} : { comments: said.comments }),
   }
 }
 
@@ -131,8 +138,11 @@ export interface Attachments {
   readonly giveBack: (outgoing: Outgoing) => void
   /** Whether a queued message's images and files fit beside those waiting, to take it back to edit; saying why not where they don't. */
   readonly fits: (said: Said) => boolean
-  /** Puts back the images and files of a message taken back from the queue, after any already there. */
-  readonly restore: (said: Said) => void
+  /**
+   * Puts back the images and files of a message taken back from the queue, after any already there; returns how to take
+   * exactly those off again, leaving any added or removed since as they are, as where the lead had the message already.
+   */
+  readonly restore: (said: Said) => () => void
 }
 
 /** A file main measured and granted, as it waits to go and as the window's copy of its message shows it. */
@@ -152,7 +162,8 @@ const readyOf = (attached: Extract<Attached, { ok: true }>): NonNullable<Waiting
 
 /** The images and files waiting in the draft kept under `key` (`drafts.ts`). */
 export function useAttachments(key: string, host: Attacher, shrink: Shrink = shrinkInWindow): Attachments {
-  const { images: waiting, files: waitingFiles, dictated } = useDraftOf<Waiting, WaitingFile>(key)
+  // Not the words: a screen with its images isn't drawn again for each one typed.
+  const { images: waiting, files: waitingFiles, dictated } = useDraftAttached<Waiting, WaitingFile>(key)
   const setWaiting = (change: (now: ReadonlyArray<Waiting>) => ReadonlyArray<Waiting>) => setDraftImages(key, change)
   const setFiles = (change: (now: ReadonlyArray<WaitingFile>) => ReadonlyArray<WaitingFile>) => setDraftFiles(key, change)
   const [note, setNote] = useState<string | null>(null)
@@ -342,18 +353,19 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
     restore: (said) => {
       // Kept by the store, they go again by their digests; the files by the copies Althar made of them.
       const kept = said.pictures.flatMap((picture) => (picture.digest === null ? [] : [{ ...picture, digest: picture.digest }]))
-      setWaiting((now) => [
-        ...now,
-        ...kept.map((picture, index) => ({
-          id: next(),
-          name: picture.name ?? text.image(index + 1),
-          ready: { data: null, picture, src: previewOf(picture.digest) ?? pictureUrl(picture.digest, true) },
-        })),
-      ])
-      setFiles((now) => [
-        ...now,
-        ...said.files.map((attached) => ({ id: next(), name: attached.name, ready: { sent: { kept: attached.id }, attached } })),
-      ])
+      const pictures = kept.map((picture, index) => ({
+        id: next(),
+        name: picture.name ?? text.image(index + 1),
+        ready: { data: null, picture, src: previewOf(picture.digest) ?? pictureUrl(picture.digest, true) },
+      }))
+      const files = said.files.map((attached) => ({ id: next(), name: attached.name, ready: { sent: { kept: attached.id }, attached } }))
+      setWaiting((now) => [...now, ...pictures])
+      setFiles((now) => [...now, ...files])
+      const put = new Set([...pictures, ...files].map((one) => one.id))
+      return () => {
+        setWaiting((now) => now.filter((one) => !put.has(one.id)))
+        setFiles((now) => now.filter((one) => !put.has(one.id)))
+      }
     },
   }
 }

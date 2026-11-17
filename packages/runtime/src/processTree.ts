@@ -1,11 +1,12 @@
-import { execFile } from 'node:child_process'
+import { Duration, Effect } from 'effect'
 
-import { Effect } from 'effect'
+import { startApart } from './spawner'
 
 /*
  * How much CPU an agent and everything it started have used: the sign of life
  * a turn shows while nothing it says reaches Althar, such as a long build or
- * a test run (Stalls.ts). Read from `ps`, which macOS and Linux both have.
+ * a test run (Stalls.ts). Read from `ps`, which macOS and Linux both have,
+ * started on the runner's thread.
  */
 
 /** `ps`'s CPU time, `[[dd-]hh:]mm:ss[.cc]`, in milliseconds. */
@@ -73,27 +74,45 @@ export const workedBetween = (before: ReadonlyMap<number, number>, after: Readon
   return spent >= share * ms
 }
 
+/** How long `ps` may take before Althar stops waiting for it, and how much of what it prints Althar reads. */
+const PS_WAIT = Duration.seconds(10)
+const PS_MOST = 8 * 1024 * 1024
+
+/**
+ * Every process's id, parent and CPU time, as `ps -A -o pid=,ppid=,time=`
+ * lists them, or null where it can't say. It starts on the runner's thread
+ * (spawner.ts), never the one that answers the window: Busy.ts reads it
+ * every couple of seconds while an agent has left something running, and
+ * starting a process holds the thread that starts it.
+ */
+export const processListing = (start: typeof startApart = startApart): Effect.Effect<string | null> =>
+  Effect.suspend(() => {
+    const started = start({ command: 'ps', args: ['-A', '-o', 'pid=,ppid=,time='], env: process.env, detached: false, max: PS_MOST })
+    return Effect.promise(() => started.result).pipe(
+      Effect.map((ended) => (ended.error === null && ended.code === 0 && !ended.over ? ended.stdout : null)),
+      Effect.timeoutOrElse({ duration: PS_WAIT, orElse: () => Effect.sync(() => (started.stop(), null)) }),
+      Effect.onInterrupt(() => Effect.sync(started.stop)),
+    )
+  })
+
 /**
  * The CPU time each of `pids` and everything it started have used, in
  * milliseconds, or null once it's gone or `ps` can't say: from one listing,
  * however many there are.
  */
-export const treeCpus = (pids: ReadonlyArray<number>): Effect.Effect<ReadonlyMap<number, number | null>> =>
-  Effect.callback<ReadonlyMap<number, number | null>>((resume) => {
-    if (pids.length === 0) return resume(Effect.succeed(new Map()))
-    execFile('ps', ['-A', '-o', 'pid=,ppid=,time='], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-      resume(Effect.succeed(new Map(pids.map((pid) => [pid, error === null ? treeCpuOf(stdout, pid) : null]))))
-    })
-  })
+export const treeCpus = (pids: ReadonlyArray<number>, listing = processListing()): Effect.Effect<ReadonlyMap<number, number | null>> =>
+  pids.length === 0
+    ? Effect.succeed(new Map())
+    : Effect.map(listing, (listed) => new Map(pids.map((pid) => [pid, listed === null ? null : treeCpuOf(listed, pid)])))
 
 /**
  * The CPU time of each process in the tree of each of `pids`, by process, or
  * null once it's gone or `ps` can't say: from one listing, however many there are.
  */
-export const treeMembers = (pids: ReadonlyArray<number>): Effect.Effect<ReadonlyMap<number, ReadonlyMap<number, number> | null>> =>
-  Effect.callback<ReadonlyMap<number, ReadonlyMap<number, number> | null>>((resume) => {
-    if (pids.length === 0) return resume(Effect.succeed(new Map()))
-    execFile('ps', ['-A', '-o', 'pid=,ppid=,time='], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-      resume(Effect.succeed(new Map(pids.map((pid) => [pid, error === null ? treeMembersOf(stdout, pid) : null]))))
-    })
-  })
+export const treeMembers = (
+  pids: ReadonlyArray<number>,
+  listing = processListing(),
+): Effect.Effect<ReadonlyMap<number, ReadonlyMap<number, number> | null>> =>
+  pids.length === 0
+    ? Effect.succeed(new Map())
+    : Effect.map(listing, (listed) => new Map(pids.map((pid) => [pid, listed === null ? null : treeMembersOf(listed, pid)])))

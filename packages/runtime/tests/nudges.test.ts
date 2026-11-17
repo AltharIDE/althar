@@ -19,6 +19,7 @@ import { Runs } from '../src/Runs'
 import { shelve } from '../src/scratch'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
+import { waitFor } from '../src/waits'
 import * as Runtime from '../src/Runtime'
 import { repository, runtime, until } from './support'
 
@@ -97,8 +98,7 @@ describe('nudges', () => {
         Effect.sync(() => counts(events)),
         (seen) => seen.at(-1) === 2,
       )
-      // Its step given up, the call is answered, and the task stopped waits on the person still, as its board's Needs you
-      // shows it; abandoned, it waits no more.
+      // Its step given up, the call is answered: stopped work waits Up next and leaves Needs you.
       const sql = yield* SqlClient.SqlClient
       const [call] = yield* sql<{ id: string; taskId: string }>`SELECT id, task_id FROM attention_requests WHERE state = 'open'`
       const runs = yield* Runs
@@ -114,7 +114,7 @@ describe('nudges', () => {
       )
       yield* until(
         Effect.sync(() => counts(events)),
-        (seen) => seen.at(-1) === 2,
+        (seen) => seen.at(-1) === 1,
       )
       const taskId = call?.taskId ?? ''
       yield* (yield* Tasks).abandon({ envelope: yield* Runtime.envelope('task.abandon', { taskId }), taskId })
@@ -289,6 +289,46 @@ describe('nudges', () => {
     }).pipe(Effect.provide(withNudges())),
   )
 
+  it.live('say a plan whose task it waits for was abandoned, naming that one, and count it as the person’s', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const projects = yield* Projects
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const draft = (title: string) =>
+        Effect.flatMap(Runtime.envelope('task.create', {}), (envelope) =>
+          projects.createTask({ envelope, projectId: project.projectId, title, draft: true }),
+        )
+      const sealing = yield* draft('Seal secrets')
+      const ssh = yield* draft('SSH setup')
+      yield* waitFor({ taskId: ssh.taskId, on: [sealing.taskId], actorId: instance.coordinatorId })
+      yield* (yield* Plans).propose({
+        projectId: project.projectId as ProjectId,
+        taskId: ssh.taskId,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.coordinatorId,
+        end: null,
+        startsIn: Duration.hours(1),
+      })
+      yield* (yield* Tasks).abandon({
+        envelope: yield* Runtime.envelope('task.abandon', { taskId: sealing.taskId }),
+        taskId: sealing.taskId,
+      })
+      yield* until(
+        Effect.sync(() => nudged(events)),
+        (said) => said.length === 1,
+      )
+      assert.deepStrictEqual(nudged(events), [['SSH setup', 'Seal secrets was abandoned']])
+      assert.deepStrictEqual(kinds(events), ['call'])
+      yield* until(
+        Effect.sync(() => counts(events)),
+        (seen) => seen.at(-1) === 1,
+      )
+      yield* stop
+    }).pipe(Effect.provide(withNudges())),
+  )
+
   it.live('don’t say again what already waited when Althar started, though they count it', () => {
     const database = join(mkdtempSync(join(tmpdir(), 'althar-nudges-')), 'profile.sqlite')
     return Effect.gen(function* () {
@@ -314,7 +354,7 @@ describe('nudges', () => {
     })
   })
 
-  it.live('count a task whose lead stopped with no agent on it, as its board puts it in Needs you, and say nothing of it', () =>
+  it.live('leave stopped work out of the badge, as its board holds it Up next, and say nothing of it', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
       const queries = yield* Queries
@@ -328,10 +368,10 @@ describe('nudges', () => {
         Effect.map(queries.card(held.taskId), (card) => [card.phase]),
         ([phase]) => phase === 'stopped',
       )
-      // One thing waits on the person, as the board's Needs you and its tab count it; the person stopped it, so none is said.
+      // The stopped task is held Up next, with no open call: no badge and no nudge.
       yield* until(
         Effect.sync(() => counts(events)),
-        (seen) => seen.at(-1) === 1,
+        (seen) => seen.at(-1) === 0,
       )
       assert.deepStrictEqual(nudged(events), [])
       yield* stop

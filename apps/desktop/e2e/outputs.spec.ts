@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { type ElectronApplication, expect, type Page, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, pushByHand, shown, sizeWindow, startTask, still } from './support'
+import { connectGitHub, launch, openFirstProject, pushByHand, SHIP_ON_CARD, shown, sizeWindow, startTask, still } from './support'
 
 /*
  * A task's outputs in a real window, with the fake agent and the fake GitHub,
@@ -159,7 +159,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     await expect(branch.getByText('1 commit not pushed')).toBeVisible()
     await expect(branch.getByText('2 commits not pushed')).toBeHidden()
     await expect(branch.getByRole('button', { name: 'Open the diff of apps/cli/package.json' })).toBeVisible()
-    await expect(branch.getByRole('button', { name: /^Ship \d+ commits?$/ })).toBeVisible()
+    await expect(branch.getByRole('button', { name: SHIP_ON_CARD })).toBeVisible()
     await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toHaveCount(0)
     await shoot(electronApp, page, 'branch')
     // The person pushes the rest externally: Ship remains the publication action, with no raw push or host-page bypass.
@@ -173,7 +173,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
     await toOutputs(page)
     await expect(branch.getByText(/not pushed/)).toBeHidden()
     await expect(branch.getByRole('link', { name: /Open a pull request/ })).toHaveCount(0)
-    await expect(branch.getByRole('button', { name: /^Ship \d+ commits?$/ })).toBeVisible()
+    await expect(branch.getByRole('button', { name: SHIP_ON_CARD })).toBeVisible()
     await expect(branch.getByRole('button', { name: 'Open a draft pull request' })).toHaveCount(0)
     await shoot(electronApp, page, 'branch-pushed')
 
@@ -216,7 +216,7 @@ test('a stopped branch with no pull request opens its draft one; a pull request 
       .first()
       .click()
     await toOutputs(page)
-    await branch.getByRole('button', { name: /^Ship \d+ commits?$/ }).click()
+    await branch.getByRole('button', { name: SHIP_ON_CARD }).click()
     const opened = page.getByRole('article', { name: 'Nightly dependency check, 27 Oct' })
     await expect(opened.getByText('PR #2')).toBeVisible()
     await expect(opened.getByText('Draft', { exact: true })).toBeVisible()

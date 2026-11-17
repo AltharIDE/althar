@@ -18,9 +18,9 @@ import { holdRuntime, launch, openFirstProject, say, shown, startTask, still } f
  * this change's evidence (test-results/asides-*.png).
  */
 
-/** The conversation's column, from its pills down, at 1×. */
+/** The conversation's column, from the bar over it down, at 1×. */
 const shoot = async (page: Page, pills: Locator, name: string) => {
-  const box = await pills.boundingBox()
+  const box = await pills.locator('xpath=ancestor::*[@data-conversation-bar][1]').boundingBox()
   const height = page.viewportSize()?.height ?? 800
   if (box === null) return
   await still(page)
@@ -103,6 +103,14 @@ test('asides: started beside the coordinator, opened in its place with a compose
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText('Which file holds the retry?')).toBeVisible()
     await line.scrollIntoViewIfNeeded()
     await shoot(page, pills, 'made-a-task')
+
+    // ⌘J, from anywhere in the window, opens the search over every conversation; Escape shuts it.
+    await page.keyboard.press('ControlOrMeta+j')
+    const search = page.getByRole('combobox', { name: 'Search conversations' })
+    await expect(search).toBeFocused()
+    await shoot(page, pills, 'search')
+    await page.keyboard.press('Escape')
+    await expect(search).toHaveCount(0)
 
     // One whose agent changes the repository goes to the board by itself.
     await startAside(page, 'Shorten the retry wait\n[lead:finish] [lead:edit]')
@@ -229,20 +237,31 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
     await shoot(page, pills, 'clear')
 
     // Pressed, it is gone in the same frame, the coordinator's conversation open, and no frame after brings it back.
-    const id = (await aside.locator('..').getAttribute('data-aside')) ?? ''
+    const id = (await aside.getAttribute('data-aside')) ?? ''
     expect(id).not.toBe('')
     const gone = await page.evaluate(async (taskId) => {
       const pill = `[data-aside="${CSS.escape(taskId)}"]`
-      const button = document.querySelector<HTMLButtonElement>(`${pill} button[aria-label^="Clear"]`)
+      // The open aside's ×, at the bar's end.
+      const button = document.querySelector<HTMLButtonElement>('[data-conversation-bar] button[aria-label^="Clear"]')
       if (button === null) return { pill: false, coordinator: false, found: false }
-      const back = { seen: false }
+      const back = { seen: false, first: null as Record<string, unknown> | null }
+      const pressedAt = performance.now()
       button.click()
       // Before the frame after the press is painted: what the person sees next. From then, no frame may draw it again.
       await new Promise((painted) => requestAnimationFrame(painted))
       new MutationObserver(() => {
-        if (document.querySelector(pill) !== null) back.seen = true
+        const returned = document.querySelector<HTMLElement>(pill)
+        if (returned === null) return
+        back.seen = true
+        back.first ??= {
+          afterMs: performance.now() - pressedAt,
+          visible: returned.getClientRects().length > 0,
+          node: returned.outerHTML.slice(0, 800),
+          parent: returned.parentElement?.outerHTML.slice(0, 1000),
+          alerts: [...document.querySelectorAll<HTMLElement>('[role="alert"]')].map((one) => one.innerText),
+        }
       }).observe(document.body, { childList: true, subtree: true })
-      Object.assign(window, { clearedBack: () => back.seen })
+      Object.assign(window, { clearedBack: () => back.seen, clearedBackDetails: () => back.first })
       return {
         found: true,
         pill: document.querySelector(`[data-aside="${CSS.escape(taskId)}"]`) === null,
@@ -252,8 +271,10 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
     expect(gone).toEqual({ found: true, pill: true, coordinator: true })
     // Althar catches up behind: the board's own read says it settled, and still nothing of it came back.
     const clearedBack = () => page.evaluate(() => (window as unknown as { clearedBack: () => boolean }).clearedBack())
+    const details = () =>
+      page.evaluate(() => JSON.stringify((window as unknown as { clearedBackDetails: () => unknown }).clearedBackDetails()))
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText('Which file holds the retry?')).toBeVisible()
-    expect(await clearedBack()).toBe(false)
+    expect(await clearedBack(), await details()).toBe(false)
     await expect(page.getByRole('alert').filter({ visible: true })).toHaveCount(0)
 
     // Make it a task: its pill goes and its card is on the board in the frame it is pressed.
@@ -261,7 +282,7 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
     const work = pills.getByRole('tab', { name: 'Shorten the retry wait' })
     await expect(work).toHaveAttribute('aria-selected', 'true')
     await expect(page.getByRole('button', { name: 'Make it a task' })).toBeVisible()
-    const workId = (await work.locator('..').getAttribute('data-aside')) ?? ''
+    const workId = (await work.getAttribute('data-aside')) ?? ''
     const moved = await page.evaluate(async (taskId) => {
       const make = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
         (button) => button.textContent?.trim() === 'Make it a task',
@@ -277,7 +298,7 @@ test('an aside’s × clears it in the frame it is pressed, for good, and Make i
     await expect(shown(page, 'An aside became a task: Shorten the retry wait')).toBeVisible()
     await expect(work).toHaveCount(0)
     // Through every read of the board since, the cleared one never came back.
-    expect(await clearedBack()).toBe(false)
+    expect(await clearedBack(), await details()).toBe(false)
   } finally {
     await electronApp.close()
   }

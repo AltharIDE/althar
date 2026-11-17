@@ -21,8 +21,8 @@ import type { PageKey, PageState } from '../main/browser/page'
  * install, and restarting into it. An update that couldn't move the
  * store, with where its copy is as the person knows the place, which main
  * shows in the file manager when asked. Quit with work under way, asking what to do. Whether DO_NOT_TRACK is set, which
- * keeps usage data off. And reporting a problem, and the page's own errors,
- * for the log. And the pages beside the conversations (ADR-100): opening,
+ * keeps usage data off. And reporting a problem, and the page's own errors
+ * and slow frames, for the log. And the pages beside the conversations (ADR-100): opening,
  * placing and pointing at one, as main holds it, and how each stands. The page never sees or sends a path. It gets no Node, no
  * file system, no shell.
  */
@@ -170,6 +170,9 @@ contextBridge.exposeInMainWorld('althar', {
   sounds: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:sounds'),
   editorPicture: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:editor-picture', id),
   findRepositories: (): Promise<unknown> => ipcRenderer.invoke('althar:find-repositories'),
+  clonePlace: (): Promise<unknown> => ipcRenderer.invoke('althar:clone-place'),
+  openFolderAccess: (): Promise<boolean> => ipcRenderer.invoke('althar:open-folder-access'),
+  pickClonePlace: (): Promise<unknown> => ipcRenderer.invoke('althar:pick-clone-place'),
   grantFound: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:grant-found', id),
   playSound: (name: string): Promise<void> => ipcRenderer.invoke('althar:play-sound', name),
   edge: (): Promise<{ place: string; notch: boolean; platform: string; tray: boolean } | null> => ipcRenderer.invoke('althar:edge'),
@@ -216,6 +219,10 @@ contextBridge.exposeInMainWorld('althar', {
     return () => void storeFailed.delete(listener)
   },
   showBackup: (): Promise<void> => ipcRenderer.invoke('althar:show-backup'),
+  storage: {
+    places: (): Promise<Record<string, string>> => ipcRenderer.invoke('althar:storage-places'),
+    show: (place: string): Promise<void> => ipcRenderer.invoke('althar:storage-show', place),
+  },
   tryAgain: (): Promise<void> => ipcRenderer.invoke('althar:try-again'),
   // Report a problem (DEV-61): the page's dialog opens, about what it was asked from; main takes the screenshot as it opens, gathers the rest, and sends or saves it.
   reportProblem: (about: unknown): void => reportAsked(about),
@@ -288,6 +295,8 @@ contextBridge.exposeInMainWorld('althar', {
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>
     ipcRenderer.send('althar:window-error', error),
+  // What made the page slow, for main's log: its long frames and slow presses, by what they were on, never what it shows.
+  logFrames: (frames: unknown): void => ipcRenderer.send('althar:window-frames', frames),
   onOpen: (listener: (threadId: string) => void): (() => void) => {
     opening.add(listener)
     if (pending !== undefined) {

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ConversationView, CoordinatorSnapshot, ThreadItem } from '@althar/contracts'
+import { ApiError, type ConversationView, type CoordinatorSnapshot, type ThreadItem } from '@althar/contracts'
 
 import { ServicesProvider } from '../src/renderer/data/services'
 import { continued } from '../src/renderer/data/reads'
@@ -416,5 +416,101 @@ describe('what the thread shows of words still being written, by its view', () =
     now = talk({ clearable: false, forgettable: false, version: 2 }, { items: [] })
     act(() => emit(changed('thread', 'thc', 'thc', 'p1')))
     await waitFor(() => expect(screen.queryByText('Half of an answer')).toBeNull())
+  })
+})
+
+describe('a clear, from its press', () => {
+  /** An answer the test gives when it says, as a busy runtime's. */
+  const later = () => {
+    let settle: { resolve: () => void; reject: (failure: unknown) => void } = { resolve: () => undefined, reject: () => undefined }
+    const promise = new Promise<void>((resolve, reject) => (settle = { resolve, reject }))
+    return { promise, ...settle }
+  }
+  const card: ThreadItem = { ...items.says('A card'), id: 'card1', kind: 'task', content: { taskId: 't1' } } as unknown as ThreadItem
+  const ids = (model: { coordinator: CoordinatorSnapshot | null }) => model.coordinator?.items.map((item) => item.id)
+
+  it.each([
+    ['clearing the view', (model: ReturnType<typeof useProject>) => model.clearView()],
+    ['forgetting the conversation', (model: ReturnType<typeof useProject>) => model.forgetConversation()],
+  ] as const)(
+    'takes the conversation from the thread at once on %s, keeping the cards that may be open, through a read from before it',
+    async (_name, press) => {
+      const before = talk({}, { items: [items.you('Where were we?'), card, items.says('On the retry.')] })
+      const getCoordinator = vi.fn(async () => structuredClone(before))
+      const { client, emit } = fakeClient({ getCoordinator })
+      const rewritten = later()
+      vi.mocked(client.clearView).mockReturnValue(rewritten.promise)
+      vi.mocked(client.forgetConversation).mockReturnValue(rewritten.promise)
+      const { result } = modelOf(client)
+      await waitFor(() => expect(result.current.coordinator).not.toBeNull())
+      act(() => void press(result.current))
+      expect(ids(result.current)).toEqual(['card1'])
+      // The whole thread read again from before the runtime rewrote it: the conversation stays gone.
+      getCoordinator.mockClear()
+      act(() => emit(changed('thread', 'thc', 'thc', 'p1')))
+      await waitFor(() => expect(getCoordinator).toHaveBeenCalled())
+      await act(async () => {})
+      expect(ids(result.current)).toEqual(['card1'])
+      // Rewritten, and read so: from then on, the thread as read.
+      getCoordinator.mockImplementation(async () =>
+        talk({ cleared: true, from: 9, version: 2 }, { items: [card, { ...items.says('Fresh.'), id: 'n1' }] }),
+      )
+      await act(async () => rewritten.resolve())
+      await waitFor(() => expect(ids(result.current)).toEqual(['card1', 'n1']))
+    },
+  )
+
+  it('puts the conversation back where the clear failed, saying why', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
+    vi.mocked(client.clearView).mockRejectedValue(new ApiError({ reason: 'NothingToClear', message: 'There is nothing to clear.' }))
+    const { result } = modelOf(client)
+    await waitFor(() => expect(result.current.coordinator?.items).toHaveLength(2))
+    await act(() => result.current.clearView())
+    expect(result.current.coordinator?.items).toHaveLength(2)
+    expect(result.current.error).toBe('There is nothing to clear.')
+  })
+})
+
+describe('a message taken back from the coordinator’s queue', () => {
+  const queued: ThreadItem = { ...items.you('Then the docs', { state: 'queued', interrupting: false }), id: 'q1' }
+  const stateOf = (coordinator: CoordinatorSnapshot | null) => {
+    const item = coordinator?.items.find((one) => one.id === 'q1')
+    return item?.kind === 'user_message' ? item.input?.state : undefined
+  }
+
+  it('is out of the queue from the press, though a read of it from before lands, and back where the coordinator had it', async () => {
+    const { client, emit } = fakeClient({
+      getCoordinator: vi.fn(async () => talk({}, { session, items: [items.says('On it.'), queued] })),
+      getThreadItem: vi.fn(async (_threadId: string, itemId: string) => (itemId === 'q1' ? queued : null)),
+    })
+    let refuse: (failure: unknown) => void = () => undefined
+    vi.mocked(client.takeBack).mockImplementation(() => new Promise<void>((_, reject) => (refuse = reject)))
+    const { result } = modelOf(client)
+    await waitFor(() => expect(result.current.coordinator).not.toBeNull())
+    const refused = vi.fn()
+    act(() => void result.current.takeBack('q1', refused))
+    expect(stateOf(result.current.coordinator)).toBe('withdrawn')
+    act(() => emit(changed('user_input', 'in1', 'thc', 'p1')))
+    await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', 'q1'))
+    await act(async () => {})
+    expect(stateOf(result.current.coordinator)).toBe('withdrawn')
+    await act(async () => refuse(new ApiError({ reason: 'AlreadyDelivered', message: 'The coordinator has it already.' })))
+    expect(stateOf(result.current.coordinator)).toBe('queued')
+    expect(refused).toHaveBeenCalled()
+    expect(result.current.error).toBe('The coordinator has it already.')
+  })
+
+  it('says it now, at once, and never twice where the coordinator had read it', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => talk({}, { session, items: [items.says('On it.'), queued] })) })
+    vi.mocked(client.takeBack).mockRejectedValue(new ApiError({ reason: 'AlreadyDelivered', message: 'The coordinator has it already.' }))
+    const { result } = modelOf(client)
+    await waitFor(() => expect(result.current.coordinator).not.toBeNull())
+    const unsent = vi.fn()
+    act(() => result.current.sayQueuedNow('q1', 'Then the docs', undefined, unsent))
+    expect(stateOf(result.current.coordinator)).toBe('withdrawn')
+    expect(result.current.coordinator?.items.filter((item) => item.kind === 'user_message')).toHaveLength(2)
+    await waitFor(() => expect(result.current.error).toBe('The coordinator has it already.'))
+    expect(client.send).not.toHaveBeenCalled()
+    expect(unsent).not.toHaveBeenCalled()
   })
 })

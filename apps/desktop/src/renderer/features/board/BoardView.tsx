@@ -10,7 +10,7 @@ import {
 } from '@althar/contracts'
 import {
   Board,
-  BoardCard,
+  BoardCard as KitBoardCard,
   boardCardText,
   type BoardCardProps,
   BoardColumn,
@@ -27,15 +27,16 @@ import {
   FactLine,
   FileChips,
   Findings,
-  KeptRow,
+  KeptRow as KitKeptRow,
   LinkButton,
   MenuItem,
+  MergeButton,
   NextLine,
-  NextRow,
+  NextRow as KitNextRow,
   NextStep,
   Outcome,
   PullChip,
-  SettledRow,
+  SettledRow as KitSettledRow,
   ScratchShelf,
   SettleWays,
   StartedBy,
@@ -48,9 +49,11 @@ import {
   Wait,
   Problem,
 } from '@althar/ui'
-import { Fragment, type ReactNode, useEffect, useState } from 'react'
+import { type ComponentProps, Fragment, type ReactNode, useEffect, useMemo, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
+import { abandonedBlocker, blockerText, blockerWords } from '../../shared/blockers'
+import { MERGING_STEP } from '../../data/merges'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
@@ -70,7 +73,8 @@ import {
   standingOf,
   standingText,
 } from '../../shared/standing'
-import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
+import { afterSteps, isAutomatedStep, stepNow, stepText } from '../../shared/steps'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock, runningCalmly } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
@@ -132,7 +136,7 @@ export const text = {
   } satisfies Record<TaskStatus, string>,
   /** Why a stopped task's lead stopped, in a card's words, where something says; else the card says nothing more. */
   stoppedBy: stepText.stoppedBy,
-  carryOn: 'Carry on',
+  carryOn: 'Resume',
   carryingOn: 'Telling the lead',
   /** What the lead is told to carry on. */
   carryOnNote: 'Carry on.',
@@ -392,7 +396,7 @@ const empty = (size: { readonly add: number; readonly del: number } | null | und
 
 /** The step a change is on, in its word: its step's name on its track, or what it does once its steps are done. */
 const stepWordOf = (work: BoardTask): string => {
-  if (work.step === 'publish' || afterSteps(work.step)) return stepText.now[work.step ?? ''] ?? ''
+  if (work.step === 'publish' || afterSteps(work.step)) return stepNow(work.step, work.shipAt) ?? ''
   const { steps, at } = trackOf(work)
   return steps[at] ?? text.status[TaskStatus.Running]
 }
@@ -407,6 +411,25 @@ const findingsOf = (reviewing: ReviewBrief) => {
 }
 
 /** The card's own props, without how it opens. */
+/** The kit's card, its title typed in where an agent renames the task (the person's own rename shows at once). */
+function BoardCard({ taskId, ...props }: BoardCardProps & { taskId: string }) {
+  return <KitBoardCard {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+/** The kit's settled and kept rows, typed in the same way. */
+function SettledRow({ taskId, ...props }: ComponentProps<typeof KitSettledRow> & { taskId: string }) {
+  return <KitSettledRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+function KeptRow({ taskId, ...props }: ComponentProps<typeof KitKeptRow> & { taskId: string }) {
+  return <KitKeptRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+/** The kit's queue row, typed in the same way. */
+function NextRow({ taskId, ...props }: ComponentProps<typeof KitNextRow> & { taskId: string }) {
+  return <KitNextRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
 /** What a task handed back, as its card shows it: a row of pictures, or else a few files; nothing where it handed back none. */
@@ -457,7 +480,9 @@ const parentOf = (work: BoardTask, open: (threadId: string) => void): Pick<Board
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
-  const card = withHanded(work, runningCard(work, now, name))
+  const base = withHanded(work, runningCard(work, now, name))
+  // Merge pressed on its strip in Needs you, it is here at once, merging: it answers that press as it comes (MergeFeel).
+  const card = work.step === MERGING_STEP && actions?.merging.has(work.taskId) === true ? { ...base, merge: 'merging' as const } : base
   // Stopped, or its lead not yet started, with a conflict not asked of it: why, in place of its foot, and Resolve now.
   if (work.conflictUnsent != null) return { ...card, ...unsentOf(work, work.conflictUnsent, actions) }
   if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
@@ -583,18 +608,22 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
           ...(sendBack === undefined && !merges
             ? {}
             : {
+                // Its strip is Merge: pressed, the whole card answers.
+                ...(merges ? { merge: actions?.merging?.has(work.taskId) === true ? ('merging' as const) : ('ready' as const) } : {}),
                 next: (
                   <>
                     {merges && (
-                      <NextStep
-                        signal
+                      <MergeButton
+                        strip
                         busy={actions?.merging?.has(work.taskId) ?? false}
-                        doing={doingWords({ kind: 'merge' })}
-                        label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
-                        onPress={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                        aria-label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
+                        onMerge={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                        {...(work.change?.canBypassQueue === true && work.change.unpushed === 0 && work.held === undefined
+                          ? { onBypassQueue: () => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url, true) }
+                          : {})}
                       >
                         {nextWords({ kind: 'merge' })}
-                      </NextStep>
+                      </MergeButton>
                     )}
                     {sendBack !== undefined && (
                       <NextStep
@@ -680,6 +709,24 @@ export const issuesCardOf = (work: BoardTask): Card => ({
   ...fromOf(work),
   word: issuesWordOf(work.issues),
 })
+
+/**
+ * A plan that waits for a task that was abandoned (tasks wait for their blockers): the person's, in Needs you, saying which;
+ * its page and its plan card start it anyway, reopen that one, or stop waiting for it.
+ */
+export const abandonedCardOf = (work: BoardTask): Card => {
+  const gone = abandonedBlocker(work)
+  return {
+    status: TaskStatus.Yours,
+    kind: kindOf(work),
+    ...localOf(work),
+    ...towardOf(work),
+    title: work.title,
+    ...fromOf(work),
+    word: kindWords.abandoned,
+    ...(gone === undefined ? {} : { why: blockerText.abandoned(gone.title) }),
+  }
+}
 
 /**
  * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
@@ -984,6 +1031,18 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   const step =
     next === null || (next.kind === 'fix' && work.checksBack != null) ? null : here === null || actions === undefined ? (
       <NextStep>{nextWords(next)}</NextStep>
+    ) : here.kind === 'merge' ? (
+      <MergeButton
+        strip
+        busy={actions.merging.has(work.taskId)}
+        aria-label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
+        onMerge={() => void actions.merge(work.taskId, change.head ?? '', change.url)}
+        {...(change.canBypassQueue === true
+          ? { onBypassQueue: () => void actions.merge(work.taskId, change.head ?? '', change.url, true) }
+          : {})}
+      >
+        {actions.merging.has(work.taskId) ? doingWords(here) : failed === null ? nextWords(here) : standingText.nextFailed.again}
+      </MergeButton>
     ) : (
       <NextStep
         signal
@@ -1082,6 +1141,7 @@ export function BoardView({
         ...lanes.waiting.map(({ task }) => task),
         ...lanes.stopped,
         ...lanes.ready,
+        ...lanes.abandoned,
         ...lanes.kept,
       ].map((work) => work.taskId),
     )
@@ -1096,7 +1156,8 @@ export function BoardView({
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set())
   // While the person points at Up next or Running, or drags in the line, what would move between them stays where it was.
   const [held, setHeld] = useState<Held | null>(null)
-  const shown = held === null ? lanes : holding(lanes, held)
+  // The same lanes as long as neither changes, so the board's cards are measured only where they can have moved.
+  const shown = useMemo(() => (held === null ? lanes : holding(lanes, held)), [lanes, held])
   const { continuing, free, paused } = shown
   // What waits for an agent's place, what continues and the line in the one order places are given in; then the plans.
   const waitingRows = shown.next.slice(0, continuing + free)
@@ -1136,9 +1197,13 @@ export function BoardView({
         : startsAt === null
           ? text.held
           : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
+    // A plan that waits for other tasks says what for, in place of its countdown: "Starts when Pairing merges"; and that it
+    // waits on the person once one of them was abandoned, or it is held.
+    const after = waits || pausedRow ? null : blockerWords(work)
     return (
       <NextRow
         key={work.taskId}
+        taskId={work.taskId}
         data-move={work.taskId}
         place={index + 1}
         task={work.slug}
@@ -1146,8 +1211,16 @@ export function BoardView({
         {...(goesOn ? { continues: work.kind === 'change' ? stepWordOf(work) : '' } : {})}
         {...(parent === undefined ? {} : { foot: <StartedBy task={parent.title} onOpen={() => onOpen(parent.threadId)} /> })}
         title={work.title}
-        wait={waits || pausedRow || startsAt !== null ? Wait.Workers : Wait.You}
-        reason={reason}
+        wait={
+          after !== null
+            ? abandonedBlocker(work) !== undefined || startsAt === null
+              ? Wait.You
+              : Wait.After
+            : waits || pausedRow || startsAt !== null
+              ? Wait.Workers
+              : Wait.You
+        }
+        reason={after ?? reason}
         onOpen={() => onOpen(work.threadId)}
         {...teamOf(work)}
         text={{ task: unnamed }}
@@ -1195,11 +1268,28 @@ export function BoardView({
       {...(folds === undefined ? {} : { folds })}
       {...(onFoldsChange === undefined ? {} : { onFoldsChange })}
       onPointerLane={pointed}
+      // What moves its cards: the lanes as shown, the shelf Settled shows, and what grows or shrinks a card (a press under
+      // way, what failed); not the clock, nor anything drawn again around it.
+      version={[
+        shown,
+        shelf,
+        starting,
+        closing?.busy,
+        closing?.failed,
+        actions?.failed,
+        actions?.merging,
+        actions?.pushing,
+        actions?.settling,
+        actions?.resolving,
+        actions?.sending,
+        actions?.shipping,
+        actions?.answeringAfterMerge,
+      ]}
     >
       <BoardColumn
         lane={BoardLane.Next}
         count={shown.upNext}
-        filled={shown.next.length > 0}
+        filled={shown.next.length > 0 || lanes.stopped.length > 0}
         // Chats on Scratch, off the lanes: one chip, opened in place, by their latest exchange; Clear settles one. It heads
         // Up next whether anything waits there or not.
         lead={
@@ -1220,7 +1310,7 @@ export function BoardView({
           />
         }
         // Whenever nothing is in Up next, it says where work comes from.
-        {...(shown.next.length === 0
+        {...(shown.next.length === 0 && lanes.stopped.length === 0
           ? {
               empty: (
                 <BoardEmpty
@@ -1276,6 +1366,21 @@ export function BoardView({
                 })}
           />
         )}
+        {lanes.stopped.length > 0 && (
+          <BoardList>
+            {lanes.stopped.map((work) => (
+              <BoardCard
+                taskId={work.taskId}
+                key={work.taskId}
+                data-move={work.taskId}
+                {...stoppedCardOf(work, now, actions)}
+                {...parentOf(work, onOpen)}
+                errands={work.errands}
+                onOpen={() => onOpen(work.threadId)}
+              />
+            ))}
+          </BoardList>
+        )}
         {[halted, forLocal].map(
           (rows, at) =>
             rows.length > 0 && (
@@ -1290,6 +1395,7 @@ export function BoardView({
       <BoardColumn lane={BoardLane.Running} count={shown.atWork} filled={shown.running.length > 0}>
         {shown.running.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...runningCardOf(work, now, name, actions)}
@@ -1304,6 +1410,7 @@ export function BoardView({
         {asks.map((ask) =>
           ask.waiting !== null ? (
             <BoardCard
+              taskId={ask.waiting.task.taskId}
               key={ask.waiting.task.taskId}
               data-move={ask.waiting.task.taskId}
               {...waitingCardOf(ask.waiting, name, onSignIn)}
@@ -1322,6 +1429,7 @@ export function BoardView({
         )}
         {lanes.issues.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...issuesCardOf(work)}
@@ -1330,10 +1438,12 @@ export function BoardView({
             onOpen={() => onOpen(work.threadId)}
           />
         ))}
-        {lanes.stopped.map((work) => (
+        {lanes.abandoned.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
-            {...stoppedCardOf(work, now, actions)}
+            data-move={work.taskId}
+            {...abandonedCardOf(work)}
             {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
@@ -1341,6 +1451,7 @@ export function BoardView({
         ))}
         {lanes.ready.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...readyCardOf(work, actions)}
@@ -1388,6 +1499,7 @@ export function BoardView({
                 return (
                   <SettledRow
                     key={work.taskId}
+                    taskId={work.taskId}
                     data-move={work.taskId}
                     // Moved into Settled before, or settled before this window looked: drawn there without moving or coming in.
                     {...(arrivesQuietly(work.taskId) ? { 'data-move-seen': '' } : {})}
@@ -1447,6 +1559,7 @@ function Kept({ work, now, onOpen, actions }: { work: BoardTask; now: string; on
   const failed = actions?.failed[work.taskId]
   return (
     <KeptRow
+      taskId={work.taskId}
       data-move={work.taskId}
       title={work.title}
       at={work.keptAt == null ? '' : text.keptAt(ago(work.keptAt, new Date(now)))}

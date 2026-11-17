@@ -3,7 +3,20 @@ import { mkdtempSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { ClientAuthority, Api, ApiError, type DomMessagePort, emitterPort, serverProtocol, type WatchEvent } from '@althar/contracts'
+import {
+  apiLayer,
+  type ApiHandlers,
+  BACKGROUND,
+  LANE_HEADER,
+  THREAD_ITEMS_AT_ONCE,
+  ClientAuthority,
+  Api,
+  ApiError,
+  type DomMessagePort,
+  emitterPort,
+  serverProtocol,
+  type WatchEvent,
+} from '@althar/contracts'
 import { connection, Folders, services } from '@althar/runtime'
 import { Context, Effect, Exit, Layer, Scope, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
@@ -12,6 +25,7 @@ import { waitFor } from '@althar/testing'
 
 import { connect, messageOf, newCommandId, receivePort } from '../src/renderer/data/client'
 import { fakeAgents } from '../src/runtime/fakeAgents'
+import { items } from './fixtures'
 import { repository } from './repository'
 
 /*
@@ -190,13 +204,14 @@ describe('the client', () => {
       "Althar only gives gh's sign-in to a server it knows, over HTTPS. http://github.com isn't one.",
     )
     // A connection to sign in again, or to check, that isn't there.
-    for (const call of [
-      client.connectCli('github', 'https://github.com', 'conn_gone'),
-      client.startSignIn('github', 'https://github.com', 'conn_gone'),
-      client.checkConnection('conn_gone'),
-      client.connectToken({ product: 'linear', token: 'lin_api_x', connectionId: 'conn_gone' }),
-    ])
-      await expect(call).rejects.toBeInstanceOf(ApiError)
+    await Promise.all(
+      [
+        client.connectCli('github', 'https://github.com', 'conn_gone'),
+        client.startSignIn('github', 'https://github.com', 'conn_gone'),
+        client.checkConnection('conn_gone'),
+        client.connectToken({ product: 'linear', token: 'lin_api_x', connectionId: 'conn_gone' }),
+      ].map((call) => expect(call).rejects.toBeInstanceOf(ApiError)),
+    )
     await expect(client.startSignIn('trello')).rejects.toBeInstanceOf(ApiError)
     await client.close()
   })
@@ -207,13 +222,20 @@ describe('the client', () => {
     const watches: Array<number | undefined> = []
     const refuse = (): Effect.Effect<never, ApiError> =>
       Effect.fail(new ApiError({ reason: 'NoSession', message: 'No agent is working on this task.' }))
-    const handlers = Api.toLayer(
+    const handlers = apiLayer(
       Effect.succeed(
         Api.of({
+          WatchAttention: () => Stream.die('unused'),
+          GetConnectionInfo: () => Effect.die('unused'),
+          ListClientDevices: () => Effect.die('unused'),
+          RegisterClientDevice: () => Effect.die('unused'),
+          RevokeClientDevice: () => Effect.die('unused'),
+          WatchFrom: () => Stream.die('unused'),
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
           TrustBot: () => Effect.die('unused'),
           GetTaskFindings: () => Effect.die('unused'),
+          GetLineComments: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
           GetOlderSettled: () => Effect.die('unused'),
           GetHome: () => Effect.die('unused'),
@@ -223,6 +245,11 @@ describe('the client', () => {
           ReadFolder: () => Effect.die('unused'),
           PlaceRepository: () => Effect.die('unused'),
           MakeRepository: () => Effect.die('unused'),
+          PrepareFolder: () => Effect.die('unused'),
+          ListHostRepositories: () => Effect.die('unused'),
+          ListRepositoryOwners: () => Effect.die('unused'),
+          CloneRepository: () => Effect.die('unused'),
+          PublishRepository: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),
           ReplacePullRequest: () => Effect.die('unused'),
           MergeNote: () => Effect.die('unused'),
@@ -236,6 +263,10 @@ describe('the client', () => {
           GetModelRooms: () => Effect.die('unused'),
           GetMissedReports: () => Effect.die('unused'),
           InstallAgent: () => Effect.die('unused'),
+          GetAgentCatalog: () => Effect.succeed({ revision: 0, items: [], connections: [], problem: null, refreshing: false }),
+          SaveAcpConnection: () => Effect.succeed(1),
+          CheckAcpConnection: () => Effect.succeed(1),
+          RemoveAcpConnection: () => Effect.succeed(1),
           OpenInEditor: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
@@ -246,6 +277,7 @@ describe('the client', () => {
           CreateTask: () => Effect.die('unused'),
           GetThread: () => Effect.die('unused'),
           GetThreadItem: () => Effect.die('unused'),
+          GetThreadItems: () => Effect.die('unused'),
           ReadOutput: () => Effect.die('unused'),
           ReadBackgroundOutput: () => Effect.die('unused'),
           ReadDocument: () => Effect.die('unused'),
@@ -281,6 +313,8 @@ describe('the client', () => {
           SignInToolServer: () => Effect.die('unused'),
           SetCoAuthor: () => Effect.die('unused'),
           SetPostTeamReviews: () => Effect.die('unused'),
+          SetSendMidTurn: () => Effect.die('unused'),
+          SetShipRoute: () => Effect.die('unused'),
           SetReviewSeal: () => Effect.die('unused'),
           SetReviewSealStyle: () => Effect.die('unused'),
           GetAutomations: () => Effect.die('unused'),
@@ -306,6 +340,7 @@ describe('the client', () => {
           SetPlansAndReviews: () => Effect.die('unused'),
           SetNewProjectDefaults: () => Effect.die('unused'),
           GetTaskFolders: () => Effect.die('unused'),
+          GetStorageSize: () => Effect.die('unused'),
           CleanUpFolders: () => Effect.die('unused'),
           RemoveTaskFolder: () => Effect.die('unused'),
           MoveInLine: () => Effect.die('unused'),
@@ -347,6 +382,7 @@ describe('the client', () => {
           GetCoordinator: () => Effect.die('unused'),
           StartTask: () => Effect.die('unused'),
           StartPlan: () => Effect.die('unused'),
+          StopWaiting: () => Effect.die('unused'),
           HoldPlan: () => Effect.die('unused'),
           HoldDraft: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),
@@ -431,6 +467,7 @@ describe('the client', () => {
           ShapeTask: () => Effect.die('unused'),
           SetReviewAfterMerge: () => Effect.die('unused'),
           Ship: () => Effect.die('unused'),
+          RouteShip: () => Effect.die('unused'),
           FixAfterMerge: () => Effect.die('unused'),
           LeaveAfterMerge: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
@@ -503,6 +540,8 @@ describe('the client’s calls', () => {
   const recording = async (moreAnswers: Readonly<Record<string, unknown>> = {}) => {
     const channel = new MessageChannel()
     const sent: Array<readonly [string, unknown]> = []
+    /** Which lane each call came in: behind, or none. */
+    const lanes: Array<readonly [string, string | undefined]> = []
     const automation = {
       id: 'auto1',
       projectId: 'p1',
@@ -533,27 +572,31 @@ describe('the client’s calls', () => {
       MakeAutomation: { automationId: 'auto2' },
       ...moreAnswers,
     }
-    // Every call it is sent is answered here: the ones a test uses by what they were sent, the rest never.
+    // Every call it is sent is answered here: the ones a test uses by what they were sent, the rest never. A stream's
+    // answer is the stream, made for what it was sent.
     const handlers = new Proxy(
       {},
       {
         get:
           (_target, tag: string) =>
-          (payload: unknown): Effect.Effect<unknown> => {
+          (payload: unknown, options?: { readonly headers?: Readonly<Record<string, string | undefined>> }): unknown => {
             sent.push([tag, payload])
-            return tag in answers ? Effect.succeed(answers[tag]) : Effect.void
+            lanes.push([tag, options?.headers?.[LANE_HEADER]])
+            const answer = answers[tag]
+            if (typeof answer === 'function') return (answer as (payload: unknown) => unknown)(payload)
+            return tag in answers ? Effect.succeed(answer) : Effect.void
           },
       },
     )
     // Handlers made on the fly need nothing, as their type can't say.
     const server: Layer.Layer<never> = RpcServer.layer(Api).pipe(
       Layer.provide(Layer.succeed(ClientAuthority, (effect) => effect)),
-      Layer.provide(Api.toLayer(Effect.succeed(Api.of(handlers as Parameters<typeof Api.of>[0])))),
+      Layer.provide(apiLayer(handlers as ApiHandlers)),
       Layer.provide(serverProtocol(emitterPort(channel.port1 as never, (data) => data))),
     ) as Layer.Layer<never>
     await serving(server)
     const client = await connect(channel.port2 as unknown as DomMessagePort)
-    return { client, sent, definition }
+    return { client, sent, lanes, definition }
   }
 
   /** What each call was sent, without the command's id, which is the client's own. */
@@ -585,6 +628,7 @@ describe('the client’s calls', () => {
     await client.getTaskFindings('t1', 'review1')
     expect((await client.readCode('th1', 'src/retry.ts')).text).toBe('const tries = 3')
     await client.readCode('th1', 'src/retry.ts', { commit: 'abc123', line: 7 })
+    await client.readCode('th1', 'docs/flow.png', { image: true })
     await client.getFileDiff('t1', 'src/retry.ts')
     await client.getFileDiff('t1', 'src/retry.ts', true)
     await client.getPlanUsage()
@@ -602,6 +646,7 @@ describe('the client’s calls', () => {
       ['GetTaskFindings', { taskId: 't1', review: 'review1' }],
       ['ReadCode', { threadId: 'th1', path: 'src/retry.ts' }],
       ['ReadCode', { threadId: 'th1', path: 'src/retry.ts', commit: 'abc123', line: 7 }],
+      ['ReadCode', { threadId: 'th1', path: 'docs/flow.png', image: true }],
       ['GetFileDiff', { taskId: 't1', path: 'src/retry.ts' }],
       ['GetFileDiff', { taskId: 't1', path: 'src/retry.ts', untouched: true }],
       ['GetPlanUsage', {}],
@@ -647,6 +692,99 @@ describe('the client’s calls', () => {
     const ids = sent.map(([, payload]) => (payload as { commandId: string }).commandId)
     expect(ids.every((id) => /^cmd_[0-9a-f]{32}$/.test(id))).toBe(true)
     expect(new Set(ids).size).toBe(ids.length)
+    await client.close()
+  })
+
+  it('says a read nobody waits on goes behind, while what it starts runs; and nothing else', async () => {
+    const { client, lanes } = await recording({
+      ListProjects: { cursor: 1, projects: [] },
+      GetBoard: { cursor: 1, tasks: [], calls: [], settledTotal: 0 },
+    })
+    await client.listProjects()
+    const reading = client.behind(() => Promise.all([client.getBoard('p1'), client.listProjects()]))
+    // Started after it returns, a read is the person's again.
+    await client.getBoard('p1')
+    await reading
+    expect(lanes.toSorted(([a], [b]) => a.localeCompare(b))).toEqual([
+      ['GetBoard', BACKGROUND],
+      ['GetBoard', undefined],
+      ['ListProjects', undefined],
+      ['ListProjects', BACKGROUND],
+    ])
+    expect(client.behind(() => 'what it returns')).toBe('what it returns')
+    // A start that throws leaves nothing behind it.
+    expect(() =>
+      client.behind(() => {
+        throw new Error('no')
+      }),
+    ).toThrow('no')
+    await client.getBoard('p1')
+    expect(lanes.at(-1)).toEqual(['GetBoard', undefined])
+    await client.close()
+  })
+
+  it('reads several items of a thread in as few calls as they take, each id once, null for one not shown', async () => {
+    const said = (id: string) => items.says(id, 'codex', id)
+    const { client, sent } = await recording({
+      // Every one it was asked for but the odd ones.
+      GetThreadItems: (payload: { readonly itemIds: ReadonlyArray<string> }) =>
+        Effect.succeed(payload.itemIds.filter((id) => Number(id.slice(1)) % 2 === 0).map(said)),
+    })
+    const ids = Array.from({ length: THREAD_ITEMS_AT_ONCE + 3 }, (_, at) => `i${at}`)
+    const read = await client.getThreadItems('th1', [...ids, 'i0'])
+    expect(sent.map(([tag, payload]) => [tag, (payload as { itemIds: ReadonlyArray<string> }).itemIds.length])).toEqual([
+      ['GetThreadItems', THREAD_ITEMS_AT_ONCE],
+      ['GetThreadItems', 3],
+    ])
+    expect(read.size).toBe(ids.length)
+    expect(read.get('i2')).toMatchObject({ id: 'i2' })
+    expect(read.get('i3')).toBeNull()
+    expect(await client.getThreadItems('th1', [])).toEqual(new Map())
+    expect(sent).toHaveLength(2)
+    await client.close()
+  })
+
+  it('asks for what streams as it is added, and hears each message whole again', async () => {
+    const streamed = (text: string, offset: number) => ({
+      _tag: 'Streaming' as const,
+      threadId: 'th1',
+      itemId: 'i1',
+      sequence: 3,
+      kind: 'agent_message' as const,
+      agentId: 'codex',
+      text,
+      offset,
+    })
+    const { client, sent } = await recording({
+      Watch: () =>
+        Stream.make(
+          streamed('Look', 0),
+          streamed('ing at', 4),
+          // What came before it never came on this watch: nothing to add it to, so it is left out.
+          { ...streamed('lost', 99), itemId: 'i2' },
+          streamed(' it.', 10),
+          // Sent whole again, as after the runtime forgot it.
+          streamed('Looking at it. Done.', 0),
+          { _tag: 'Changed' as const, cursor: 9, aggregateType: 'task', aggregateId: 't1', projectId: 'p1', threadId: 'th1' },
+        ),
+    })
+    const heard: Array<WatchEvent> = []
+    const unwatch = client.watch((event) => heard.push(event))
+    await waitFor(
+      async () => heard,
+      (events) => events.some((event) => event._tag === 'Changed'),
+    )
+    unwatch()
+    expect(sent[0]).toEqual(['Watch', { deltas: true }])
+    expect(heard.slice(0, 5)).toEqual(
+      [
+        { ...streamed('Look', 0), offset: undefined },
+        { ...streamed('Looking at', 0), offset: undefined },
+        { ...streamed('Looking at it.', 0), offset: undefined },
+        { ...streamed('Looking at it. Done.', 0), offset: undefined },
+        { _tag: 'Changed', cursor: 9, aggregateType: 'task', aggregateId: 't1', projectId: 'p1', threadId: 'th1' },
+      ].map((event) => Object.fromEntries(Object.entries(event).filter(([, value]) => value !== undefined))),
+    )
     await client.close()
   })
 

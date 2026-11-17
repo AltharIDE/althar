@@ -27,6 +27,8 @@ import type {
   IssuePage,
   IssueQuery,
   ListedChange,
+  ListedRepository,
+  MergeMethod,
   MergeRules,
   Person,
   BranchUpdate,
@@ -100,6 +102,7 @@ const RepositoryAnswer = Schema.Struct({
 })
 
 const PullAnswer = Schema.Struct({
+  merge_commit_sha: Schema.optional(Schema.NullOr(Schema.String)),
   id: Schema.Number,
   node_id: Schema.String,
   number: Schema.Number,
@@ -254,6 +257,7 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   source: pull.head.ref,
   target: pull.base.ref,
   headSha: pull.head.sha,
+  ...(pull.merged_at != null && pull.merge_commit_sha != null ? { mergeCommit: pull.merge_commit_sha } : {}),
   author: pull.user == null ? null : personOf(pull.user),
   additions: pull.additions ?? null,
   deletions: pull.deletions ?? null,
@@ -766,6 +770,38 @@ const Listed = Schema.Struct({
   archived: Schema.optional(Schema.Boolean),
 })
 
+/** A repository the account can reach, as a list of them says it, for choosing one to clone. */
+const ReachedRepository = Schema.Struct({
+  full_name: Schema.String,
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  private: Schema.Boolean,
+  pushed_at: Schema.optional(Schema.NullOr(Schema.String)),
+  html_url: Schema.String,
+  archived: Schema.optional(Schema.Boolean),
+  // Disabled by GitHub's staff, as for a billing or legal hold: still listed, never pushed to.
+  disabled: Schema.optional(Schema.Boolean),
+})
+
+/** An organization the account is a member of. */
+const Organization = Schema.Struct({ login: Schema.String })
+
+/**
+ * A repository as GitHub answers for one: read, or just made. Its
+ * merge settings are said only to someone who can push.
+ */
+const repositoryOf = (answer: typeof RepositoryAnswer.Type): Repository => ({
+  id: String(answer.id),
+  path: answer.full_name.split('/'),
+  defaultBranch: answer.default_branch,
+  webUrl: answer.html_url,
+  canPush: answer.permissions?.push ?? false,
+  merges: [
+    ...(answer.allow_squash_merge === true ? (['squash'] as const) : []),
+    ...(answer.allow_merge_commit !== false ? (['merge'] as const) : []),
+    ...(answer.allow_rebase_merge === true ? (['rebase'] as const) : []),
+  ],
+})
+
 /**
  * How long a listing is kept: a GraphQL search is a POST, with no ETag to ask
  * "anything new?" by, so the same search again within a minute is answered
@@ -867,6 +903,25 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         })
       queues.set(queueKey(repository, target), { at: yield* Clock.currentTimeMillis, enabled: pull.isMergeQueueEnabled })
       return pull
+    })
+
+  /** A direct merge, pinned to the head the person saw. GitHub remains the authority on every branch rule. */
+  const mergePlain = (repository: Repository, change: ChangeRequest, method?: MergeMethod) =>
+    Effect.gen(function* () {
+      const answer = yield* http.json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
+        merge_method: method ?? repository.merges[0] ?? 'merge',
+        ...(change.headSha === null ? {} : { sha: change.headSha }),
+      })
+      const { conflicts: _, ...seen } = change
+      if (answer.merged === true)
+        return {
+          ...seen,
+          state: 'merged',
+          draft: false,
+          queued: false,
+          updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
+        } as const
+      return changeOf(yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`))
     })
   /**
    * Validate a removal's candidate against merge-group workflow runs for this
@@ -1396,6 +1451,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     ...makeGitHubReleases({ http, repo }),
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
     capabilities: {
+      pictureLimit: 10_000_000,
       drafts: true,
       checkLogs: true,
       threads: true,
@@ -1406,19 +1462,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       ...TRACKING,
     },
     account,
-    repository: (path) =>
-      Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
-        id: String(answer.id),
-        path: answer.full_name.split('/'),
-        defaultBranch: answer.default_branch,
-        webUrl: answer.html_url,
-        canPush: answer.permissions?.push ?? false,
-        merges: [
-          ...(answer.allow_squash_merge === true ? (['squash'] as const) : []),
-          ...(answer.allow_merge_commit !== false ? (['merge'] as const) : []),
-          ...(answer.allow_rebase_merge === true ? (['rebase'] as const) : []),
-        ],
-      })),
+    repository: (path) => Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), repositoryOf),
     findChange,
     openChange: (repository, change) =>
       http
@@ -1615,32 +1659,60 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         if (how?.auto === true)
           return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Althar doesn’t turn on GitHub’s auto-merge' })
         const { conflicts: _, ...seen } = change
-        const answer = yield* http
-          .json(MergeAnswer, 'PUT', `${repo(repository)}/pulls/${change.number}/merge`, {
-            merge_method: how?.method ?? repository.merges[0] ?? 'merge',
-            // Only the head Althar last saw: a push since then isn't merged unseen.
-            ...(change.headSha === null ? {} : { sha: change.headSha }),
-          })
-          .pipe(
-            // A branch that merges through a merge queue refuses a merge as one it can't make (405), in words that vary: asked,
-            // GitHub says which, and the pull request goes in the queue, which merges it once the queue's checks pass.
-            Effect.catchIf(
-              (error) => error.status === 405,
-              (refused) =>
-                Effect.gen(function* () {
-                  const queue = yield* queueOf(repository, change.number, change.target).pipe(Effect.mapError(() => refused))
-                  if (!queue.isMergeQueueEnabled) return yield* Effect.fail(refused)
-                  if (!queue.isInMergeQueue)
-                    yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
-                  return null
-                }),
-            ),
-          )
-        if (answer === null)
+        // A merge queue is the branch's normal way to merge, even where this account may bypass it. Ask before trying a
+        // direct merge: an admin's successful merge would otherwise skip the queue. Never use a listening turn's cached no.
+        const queue = yield* queueOf(repository, change.number, change.target).pipe(
+          // Older Enterprise Servers have no merge-queue fields. Other lookup failures must not become a direct merge.
+          Effect.catchIf(
+            (error) =>
+              server &&
+              error.reason === 'rejected' &&
+              error.message.includes('isMergeQueueEnabled') &&
+              /doesn't exist|cannot query field/i.test(error.message),
+            () => Effect.succeed(null),
+          ),
+        )
+        if (queue?.isMergeQueueEnabled) {
+          if (!queue.isInMergeQueue) yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
           return { ...seen, state: 'open', queued: true, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
-        if (answer.merged === true)
-          return { ...seen, state: 'merged', draft: false, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
-        return changeOf(yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`))
+        }
+        return yield* mergePlain(repository, change, how?.method).pipe(
+          // The queue may have been turned on since the read above. GitHub refuses a direct merge (405): ask again and
+          // put it in the queue, which merges it once the queue's checks pass.
+          Effect.catchIf(
+            (error) => error.status === 405,
+            (refused) =>
+              Effect.gen(function* () {
+                const queue = yield* queueOf(repository, change.number, change.target).pipe(Effect.mapError(() => refused))
+                if (!queue.isMergeQueueEnabled) return yield* Effect.fail(refused)
+                if (!queue.isInMergeQueue) yield* http.graphql(Schema.Unknown, graphqlUrl, ENQUEUE, { id: change.id, head: change.headSha })
+                return { ...seen, state: 'open', queued: true, updatedAt: new Date(yield* Clock.currentTimeMillis).toISOString() } as const
+              }),
+          ),
+        )
+      }),
+    mergeWithoutQueue: (repository, change) =>
+      Effect.gen(function* () {
+        const answer = yield* http.graphql(
+          Schema.Struct({
+            repository: Schema.NullOr(
+              Schema.Struct({ pullRequest: Schema.NullOr(Schema.Struct({ viewerCanMergeAsAdmin: Schema.Boolean })) }),
+            ),
+          }),
+          graphqlUrl,
+          `query($owner: String!, $name: String!, $number: Int!) {
+            repository(owner: $owner, name: $name) { pullRequest(number: $number) { viewerCanMergeAsAdmin } }
+          }`,
+          { owner: repository.path[0], name: repository.path[1], number: change.number },
+        )
+        if (answer.repository?.pullRequest?.viewerCanMergeAsAdmin !== true)
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'forbidden',
+            message: 'GitHub does not allow you to bypass this merge queue. Use the merge queue instead.',
+          })
+        // No queue fallback: a refusal must not silently change the action the person chose.
+        return yield* mergePlain(repository, change)
       }),
     mergeWays: (repository, target) =>
       Effect.gen(function* () {
@@ -1982,6 +2054,82 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         (comment) => commentOf(comment, false),
       ),
     pushTarget,
+    // Its own, its collaborations and its organizations', last pushed to first; a page short of a hundred is the last.
+    repositories: () =>
+      paged(1, (page) =>
+        Effect.map(
+          http.json(
+            Schema.Array(ReachedRepository),
+            'GET',
+            `${api}/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&page=${page}`,
+          ),
+          (repositories) => ({
+            items: repositories.map((found): ListedRepository => ({
+              path: found.full_name.split('/'),
+              description: found.description == null || found.description === '' ? null : found.description,
+              private: found.private,
+              pushedAt: found.pushed_at ?? null,
+              webUrl: found.html_url,
+              archived: found.archived === true || found.disabled === true,
+            })),
+            next: repositories.length < 100 ? undefined : page + 1,
+          }),
+        ),
+      ),
+    /*
+     * The account, then each organization it is a member of. Whether a member
+     * may make repositories is the organization's setting, which GitHub says
+     * only to its owners, one organization a call: one that doesn't let it is
+     * listed, and refuses the repository as forbidden.
+     */
+    owners: () =>
+      Effect.gen(function* () {
+        const [me, organizations] = yield* Effect.all(
+          [
+            account,
+            paged(1, (page) =>
+              Effect.map(http.json(Schema.Array(Organization), 'GET', `${api}/user/orgs?per_page=100&page=${page}`), (found) => ({
+                items: found,
+                next: found.length < 100 ? undefined : page + 1,
+              })),
+            ),
+          ],
+          { concurrency: 2 },
+        )
+        return [
+          { id: me.login, name: me.login, kind: 'user' as const },
+          ...organizations.map((organization) => ({ id: organization.login, name: organization.login, kind: 'organization' as const })),
+        ]
+      }),
+    // Empty: no README, licence or .gitignore, so the project's own first commit is pushed as it is.
+    createRepository: (made) =>
+      http
+        .json(
+          RepositoryAnswer,
+          'POST',
+          made.owner.kind === 'user' ? `${api}/user/repos` : `${api}/orgs/${encodeURIComponent(made.owner.id)}/repos`,
+          {
+            name: made.name,
+            private: made.private,
+            ...(made.description === undefined || made.description === '' ? {} : { description: made.description }),
+            auto_init: false,
+          },
+        )
+        .pipe(
+          // The account made it, so it may push to it, whatever the answer says.
+          Effect.map((answer) => ({ ...repositoryOf(answer), canPush: true })),
+          // An organization GitHub hides from the account is one it may not make a repository in.
+          Effect.mapError((error) =>
+            error.reason === 'not_found' && made.owner.kind !== 'user'
+              ? new ConnectorFailed({
+                  product,
+                  reason: 'forbidden',
+                  ...(error.status === undefined ? {} : { status: error.status }),
+                  message: `The account may not make a repository in ${made.owner.name}`,
+                })
+              : error,
+          ),
+        ),
     issue: (ref) =>
       Effect.gen(function* () {
         const { owner, name, number } = yield* parseRef(ref)

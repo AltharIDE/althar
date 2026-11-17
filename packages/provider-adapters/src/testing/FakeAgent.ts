@@ -373,8 +373,8 @@ export interface FakeAgentOptions {
   readonly leavesForGood?: boolean
   /** Called as it is asked to set its model or effort, before it answers. */
   readonly optionAsked?: (configId: string, value: string) => void
-  /** Called as it is given a prompt, before it answers. */
-  readonly promptAsked?: () => void
+  /** Called as it is given a prompt; an async callback holds its answer until the test lets it go on. */
+  readonly promptAsked?: (prompt: string) => void | Promise<void>
   /**
    * Whether it holds its answer to a request to set its model or effort, asked while one waits: as an agent does that answers
    * one request at a time and is at its turn. It answers once this says no.
@@ -384,7 +384,7 @@ export interface FakeAgentOptions {
 
 /** The holds a test opens, by marker, for an agent to go on from (`FakeAgentOptions.holds`). */
 export interface Holds {
-  /** A file-backed hold may name only some markers; other markers keep their usual behaviour. */
+  /** Names only some markers; others keep their usual behaviour. Background tests use only explicitly named holds. */
   readonly has?: (marker: string) => boolean
   /** Lets what waits on the marker go on, now and from now on. */
   readonly open: (marker: string) => void
@@ -675,7 +675,7 @@ const playStall = async (
  * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does),
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
- * effort), and `[coordinator:start]` starts one at once, without a plan;
+ * effort; `[after:<slug>]` makes it wait for that task), and `[coordinator:start]` starts one at once, without a plan;
  * `[coordinator:review]` starts a review of the pull request whose link the
  * person gave, `[coordinator:keep-note]` keeps what the person said
  * before it as one of the project's notes, and `[coordinator:automate]`
@@ -834,6 +834,19 @@ const leaveTests = async (
     readonly again?: boolean
   },
 ) => {
+  // Explicit background holds leave the ordinary turn holds alone. A test can report a job after its turn
+  // has ended, or keep it running while it advances the runtime's clock beyond the report window.
+  const later = (marker: string, milliseconds: number, run: () => void) => {
+    const held = session.holds?.has?.(marker) === true ? session.holds : undefined
+    if (held === undefined) {
+      setTimeout(run, milliseconds).unref()
+      return
+    }
+    void (async () => {
+      while (!session.closed && !held.opened(marker)) await pause(10)
+      if (!session.closed) run()
+    })()
+  }
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
   session.served += 1
@@ -866,7 +879,7 @@ const leaveTests = async (
     await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
     await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
     if (plan.lasts === undefined) return
-    const timer = setTimeout(() => {
+    later('[tests:complete]', plan.lasts, () => {
       // Stopped meanwhile, they have ended already.
       if (!session.background.delete(id)) return
       appendFileSync(outputPath, 'all passed\n[exited with code 0]\n')
@@ -896,11 +909,10 @@ const leaveTests = async (
         await notify({ sessionUpdate: 'tool_call_update', toolCallId: call, status: 'completed' })
         await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Committed.' } })
       })()
-    }, plan.lasts)
-    timer.unref()
+    })
   }
   if (plan.reportsAfter === undefined) await report()
-  else setTimeout(() => void report(), plan.reportsAfter).unref()
+  else later('[tests:report]', plan.reportsAfter, () => void report())
 }
 
 /**
@@ -1543,6 +1555,7 @@ const playRole = async (
       const which = /as repositories: (.+)\.$/.exec(first)?.[1]
       const drafted = which === undefined ? first : await callStreamed('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
+      const after = /\[after:([a-z0-9-]+)\]/.exec(ask)?.[1]
       const planned = await callStreamed('propose_plan', {
         task: slug,
         lead: {
@@ -1554,6 +1567,8 @@ const playRole = async (
         review: ask.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
         // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
         ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
+        // `[after:<slug>]`: it waits for that task, and starts by itself once it has merged.
+        ...(after === undefined ? {} : { waits_for: [after] }),
       })
       // `[coordinator:plan-branch]`: it ends with its branch, as a prototype does, set on the plan before it starts.
       if (ask.includes('[coordinator:plan-branch]') && available.has('change_part'))
@@ -1838,7 +1853,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // What it was given in the prompts it did nothing with, it reads with this one, as its transcript keeps them.
       const prompted = `${session.unread}${params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')}`
       session.prompts += 1
-      options.promptAsked?.()
+      if (options.promptAsked !== undefined) await options.promptAsked(prompted)
       const blank = options.blank ?? 0
       if (
         typeof blank === 'number'

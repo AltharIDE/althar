@@ -52,6 +52,24 @@ const refs = new Map([['p1', refOf(project)]])
 const agentName = () => ''
 
 describe('a ready task’s line', () => {
+  it('offers queue bypass only as the explicit secondary action', async () => {
+    const work = task({
+      kind: 'change',
+      change: change({
+        draft: false,
+        canBypassQueue: true,
+        checks: { outcome: 'passed', passed: 1, failed: 0, running: 0, total: 1, failing: [], list: [] },
+      }),
+    })
+    const [need] = needsOf({ calls: [], ready: [work], refs, agentName })
+    const next = vi.fn()
+    render(<>{needLineOf(need!, { onOpen: vi.fn(), onAnswer: vi.fn(), onNext: next })}</>)
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    expect(next).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    expect(next).toHaveBeenCalledWith(work, { kind: 'merge' }, true)
+  })
+
   it('says its commits in no pull request, one or more', () => {
     const merged = change({ state: 'merged' })
     expect(briefOf(task({ change: merged, unshipped: { commits: 1, add: 5, del: 1 } }))).toBe('1 commit in no pull request · +5 −1')
@@ -204,16 +222,18 @@ describe('the home', () => {
     await waitFor(() => expect(client.fixAfterMerge).toHaveBeenCalledWith('t7'))
   })
 
-  it('takes a change out of what waits on the person while it merges, and puts it back with why where it didn’t', async () => {
+  it('keeps a change merged from its line where it was, Merging and waiting on nobody, and says why where it didn’t', async () => {
     const ready = task({ taskId: 't5', threadId: 'th5', title: 'Name it better', change: change({ draft: false, checks: null }) })
     let refuse = (_: unknown) => undefined as void
     const merge = vi.fn(() => new Promise<void>((_, reject) => (refuse = reject)))
     const { client } = fakeClient({ merge, getHome: vi.fn(async () => home({ tasks: [ready] })) })
     withServices(<Home />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge #12' }))
-    // Merging, it waits on nobody, until it settles.
+    // Merging, it waits on nobody, until it settles; its line stays under the pointer, Merge answering the press in its place.
     await waitFor(() => expect(screen.queryByRole('button', { name: /Accept and merge/ })).toBeNull())
-    expect(screen.queryByRole('article', { name: 'Name it better' })).toBeNull()
+    const merging = screen.getByRole('article', { name: 'Name it better' })
+    expect(within(merging).getByRole('status').textContent).toContain('Merging')
+    expect(screen.queryByRole('heading', { name: '1 thing needs you' })).toBeNull()
     await act(async () => refuse(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub says: Pull Request is not mergeable' })))
     // On its line, with a way to merge it again.
     const line = await screen.findByRole('article', { name: 'Name it better' })

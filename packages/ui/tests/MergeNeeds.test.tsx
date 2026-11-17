@@ -37,6 +37,23 @@ describe('what merging needs', () => {
     expect(screen.getByText('No conflicts with main')).toBeInTheDocument()
   })
 
+  it('says to push commits not pushed, and to ship those that wait for Ship', () => {
+    render(
+      <MergeNeeds
+        needs={[
+          { kind: 'pushed', state: 'unmet', have: 2 },
+          { kind: 'pushed', state: 'unmet', have: 1, said: '1 commit not shipped' },
+        ]}
+        host="GitHub"
+      />,
+    )
+    const said = lines().map((li) => li.textContent)
+    expect(said[0]).toContain('Push them')
+    expect(said[1]).toContain('1 commit not shipped')
+    expect(said[1]).toContain('Ship them')
+    expect(said[1]).not.toContain('Push them')
+  })
+
   it('shows what the host does not say as not known, never ticked, and with nothing to do', () => {
     render(<MergeNeeds needs={[{ kind: 'conversations', state: 'unknown' }]} host="Bitbucket" />)
     const [line] = lines()

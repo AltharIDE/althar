@@ -83,7 +83,7 @@ export interface PlanUsageOptions {
   /** An agent's version as its CLI says it; as it is, unless a test says. OpenCode is listed only on a version known to list its sign-ins. */
   readonly readVersion?: (agent: AgentDefinition) => Promise<string | null>
   /** How a provider's usage endpoint is read with an account's sign-in (ADR-062); the package's reader, unless a test says. */
-  readonly readEndpoint?: (sourceId: string, account: UsageAccount, now: () => Date) => Promise<EndpointRead>
+  readonly readEndpoint?: (sourceId: string, account: UsageAccount, now: () => Date, afterLimit?: boolean) => Promise<EndpointRead>
   /** How an OpenCode account's sign-ins are listed. */
   readonly readCredentials?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<CredentialsRead>
   /** How OpenCode's own server is asked for an account's OpenCode Go limits. */
@@ -141,16 +141,18 @@ const readAt = (held: Held, now: number) =>
       null,
     ) ?? held.observedAt
 
+const viewOf = (window: UsageWindow) => ({
+  kind: window.kind,
+  label: window.label ?? null,
+  usedPercent: window.usedPercent,
+  resetsAt: window.resetsAt ?? null,
+})
+
 /** The windows as the view shows them: one whose reset has passed is unknown until it is read again, so it isn't shown. */
-const shown = (windows: ReadonlyArray<UsageWindow>, now: number) =>
-  windows
-    .filter((window) => !past(window.resetsAt, now))
-    .map((window) => ({
-      kind: window.kind,
-      label: window.label ?? null,
-      usedPercent: window.usedPercent,
-      resetsAt: window.resetsAt ?? null,
-    }))
+const shown = (windows: ReadonlyArray<UsageWindow>, now: number) => windows.filter((window) => !past(window.resetsAt, now)).map(viewOf)
+
+/** The windows that have reset since they were read, as last read: said apart, with no figure to rely on until they are read again. */
+const reset = (windows: ReadonlyArray<UsageWindow>, now: number) => windows.filter((window) => past(window.resetsAt, now)).map(viewOf)
 
 type Failure = SqlError.SqlError
 
@@ -161,9 +163,11 @@ export class PlanUsage extends Context.Service<
     readonly now: (refresh?: boolean) => Effect.Effect<PlanUsageView, Failure>
     /**
      * Asks the sources again for these accounts only and waits for the readings (at most once every few seconds each), for steering
-     * that finds an account marked out of usage: the person may have reset it since. Tells the view once they are read.
+     * that finds an account marked out of usage: the person may have reset it since. After a limit error without a reset,
+     * `afterLimit` bypasses the local reading cache so a just-exhausted window is read. Provider backoff still applies.
+     * Tells the view once they are read.
      */
-    readonly refresh: (accountIds: ReadonlyArray<string>) => Effect.Effect<void, Failure>
+    readonly refresh: (accountIds: ReadonlyArray<string>, afterLimit?: boolean) => Effect.Effect<void, Failure>
     /** The windows Claude Code's adapter reported on a session of the account, from one event. */
     readonly heard: (accountId: string, agentId: string, windows: ReadonlyArray<UsageWindow>) => Effect.Effect<void, never>
     /**
@@ -345,7 +349,7 @@ export class PlanUsage extends Context.Service<
           })
 
         /* Reads one account from its agent's source and keeps what it said; `onDemand` where steering wants it read again, whatever a session said lately. */
-        const readAccount = (account: Account, onDemand = false) =>
+        const readAccount = (account: Account, onDemand = false, afterLimit = false) =>
           Effect.gen(function* () {
             const entry = agents.list.find((each) => each.definition.id === account.agentId)
             if (entry === undefined) return
@@ -419,6 +423,7 @@ export class PlanUsage extends Context.Service<
                       ...(version === undefined ? {} : { agentVersion: version }),
                     },
                     nowAsDate,
+                    afterLimit,
                   ).catch((): EndpointRead => ({ kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' })),
                 )
                 if (got.kind === 'fault' && got.waiting !== undefined)
@@ -572,7 +577,7 @@ export class PlanUsage extends Context.Service<
             })
           })
 
-        const readAll = (force: boolean, only?: ReadonlyArray<string>) =>
+        const readAll = (force: boolean, only?: ReadonlyArray<string>, afterLimit = false) =>
           Effect.gen(function* () {
             yield* hydrate
             const now = yield* Clock.currentTimeMillis
@@ -582,14 +587,15 @@ export class PlanUsage extends Context.Service<
               const due = (yield* accounts.of(entry.definition.id)).filter((account) => {
                 if (only !== undefined && !only.includes(account.id)) return false
                 const last = asked.get(account.id)
-                if (last !== undefined && now - last < Duration.toMillis(options.kept ?? (force ? LEAST : KEPT))) return false
+                if (!afterLimit && last !== undefined && now - last < Duration.toMillis(options.kept ?? (force ? LEAST : KEPT)))
+                  return false
                 asked.set(account.id, now)
                 return true
               })
               yield* Effect.forEach(
                 due,
                 (account) =>
-                  readAccount(account, only !== undefined).pipe(
+                  readAccount(account, only !== undefined, afterLimit).pipe(
                     Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause)),
                   ),
                 { concurrency: 'unbounded', discard: true },
@@ -635,6 +641,7 @@ export class PlanUsage extends Context.Service<
               const key = paidBy === 'key'
               const noReading = mine?.noReading ?? null
               const windows = shown(key ? [] : (mine?.windows ?? []), now)
+              const resetWindows = reset(key ? [] : (mine?.windows ?? []), now)
               // No window and no fault yet, where there is a reading to have, is a fault too: the agent has not been read yet.
               const fault =
                 mine?.fault ??
@@ -651,6 +658,7 @@ export class PlanUsage extends Context.Service<
                 observedAt: mine === undefined ? null : readAt(mine, now),
                 plan: mine?.plan ?? null,
                 windows,
+                resetWindows,
                 fault,
                 noReading,
                 // Read with windows, every one of which has reset since: said so, as no window shown isn't the same as none read.
@@ -727,8 +735,10 @@ export class PlanUsage extends Context.Service<
                   ),
                   view,
                 ),
-          refresh: (accountIds) =>
-            accountIds.length === 0 ? Effect.void : afterOpen(startup('plan-usage-read', Effect.andThen(readAll(true, accountIds), told))),
+          refresh: (accountIds, afterLimit = false) =>
+            accountIds.length === 0
+              ? Effect.void
+              : afterOpen(startup('plan-usage-read', Effect.andThen(readAll(true, accountIds, afterLimit), told))),
           // One event at a time, so two heard together don't write over each other; the session forks it, and never waits on it.
           heard: (accountId, agentId, said) =>
             hearing
