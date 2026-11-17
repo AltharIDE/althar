@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -9,14 +9,16 @@ import { useConnections } from '../src/renderer/features/connections/useConnecti
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { placeOfLaunch, targetsOf } from '../src/renderer/features/runs/Runs'
+import { askText } from '../src/renderer/features/runs/useRuns'
 import { coordinatorSnapshot, fakeClient, repositories, runnables } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
 /*
  * What a project runs, where the rest of its tests don't go: a run in a
  * task that says nothing of where it answers, a project of one repository
- * or none read, and each dialog kept open when what it asked didn't go
- * through.
+ * or none read, each dialog kept open when what the runtime checks didn't
+ * go through, and what is shown at once, the ask and a removal, taken back
+ * with a line where it didn't.
  */
 
 function Project() {
@@ -85,13 +87,10 @@ describe('adding something to run', () => {
     await waitFor(() => expect(client.keepRunnable).toHaveBeenCalledWith({ projectId: 'p1', name: null, command: 'make docs' }))
   })
 
-  it('stays open, saying why, where scripts couldn’t be kept or the coordinator couldn’t be asked', async () => {
-    const client = await shown({
+  it('stays open, saying why, where scripts couldn’t be kept', async () => {
+    await shown({
       keepRunnable: vi.fn(async () => {
         throw refused('The project has no repository on this Mac to run it in.')
-      }),
-      send: vi.fn(async () => {
-        throw refused('The coordinator isn’t running.')
       }),
     })
     await pick('Add something to run')
@@ -100,21 +99,32 @@ describe('adding something to run', () => {
     await userEvent.click((await add.findAllByRole('checkbox'))[0]!)
     await userEvent.click(add.getByRole('button', { name: 'Add' }))
     expect((await add.findByRole('alert')).textContent).toContain('no repository on this Mac')
+    expect(screen.getByRole('dialog', { name: 'Add something to run' })).toBeTruthy()
+  })
+
+  it('asks the coordinator at once, said in its thread, and asks again where it couldn’t, saying why', async () => {
+    let refuse: (failure: unknown) => void = () => undefined
+    const client = await shown({ send: vi.fn(() => new Promise<void>((_, reject) => (refuse = reject))) })
+    await pick('Add something to run')
+    const add = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.click(add.getByRole('radio', { name: 'Ask the coordinator' }))
     await userEvent.click(add.getByRole('button', { name: 'Ask the coordinator' }))
-    await waitFor(() => expect(client.send).toHaveBeenCalled())
-    expect(screen.getByRole('dialog', { name: 'Add something to run' })).toBeTruthy()
+    // Closed from the press, and said in the conversation, before the runtime has it.
+    expect(screen.queryByRole('dialog', { name: 'Add something to run' })).toBeNull()
+    expect(screen.getByText(askText)).toBeTruthy()
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: askText, disposition: 'after_current' }))
+    await act(async () => refuse(refused('The coordinator isn’t running.')))
+    const again = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
+    expect((await again.findByRole('alert')).textContent).toContain('The coordinator isn’t running.')
+    expect(screen.queryByText(askText)).toBeNull()
   })
 })
 
 describe('changing one', () => {
-  it('stays open, saying why, where it couldn’t be kept or removed', async () => {
-    const client = await shown({
+  it('stays open, saying why, where it couldn’t be kept', async () => {
+    await shown({
       keepRunnable: vi.fn(async () => {
         throw refused('That command is kept already.')
-      }),
-      dropRunnable: vi.fn(async () => {
-        throw refused('Storybook is running; stop it first.')
       }),
     })
     await pick('Edit the list')
@@ -124,10 +134,25 @@ describe('changing one', () => {
     const edit = within(await screen.findByRole('dialog', { name: 'Edit Storybook' }))
     await userEvent.click(edit.getByRole('button', { name: 'Save' }))
     expect((await edit.findByRole('alert')).textContent).toBe('That command is kept already.')
-    await userEvent.click(edit.getByRole('button', { name: 'Remove' }))
-    await waitFor(() => expect(client.dropRunnable).toHaveBeenCalledWith('p1', 'rnbl_storybook'))
-    expect((await edit.findByRole('alert')).textContent).toBe('Storybook is running; stop it first.')
     expect(screen.getByRole('dialog', { name: 'Edit Storybook' })).toBeTruthy()
+  })
+
+  it('removes it at once, back on the list, and puts it back there, saying why, where it couldn’t be removed', async () => {
+    let refuse: (failure: unknown) => void = () => undefined
+    const client = await shown({ dropRunnable: vi.fn(() => new Promise<void>((_, reject) => (refuse = reject))) })
+    await pick('Edit the list')
+    await userEvent.click(
+      within(await screen.findByRole('dialog', { name: 'What meridian runs' })).getByRole('button', { name: 'Edit Storybook' }),
+    )
+    const edit = within(await screen.findByRole('dialog', { name: 'Edit Storybook' }))
+    await userEvent.click(edit.getByRole('button', { name: 'Remove' }))
+    expect(client.dropRunnable).toHaveBeenCalledWith('p1', 'rnbl_storybook')
+    // Gone from the list it goes back to, before the runtime answers.
+    const list = within(screen.getByRole('dialog', { name: 'What meridian runs' }))
+    expect(list.queryByRole('button', { name: 'Edit Storybook' })).toBeNull()
+    await act(async () => refuse(refused('Storybook is running; stop it first.')))
+    expect((await list.findByRole('alert')).textContent).toBe('Storybook is running; stop it first.')
+    expect(list.getByRole('button', { name: 'Edit Storybook' })).toBeTruthy()
   })
 
   it('keeps one in its own repository where the project’s aren’t read', async () => {

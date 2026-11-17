@@ -36,6 +36,7 @@ import { change, timestamp } from './records'
 import { commandIn, essentials } from './rules'
 import { indexThread } from './Search'
 import { mcpActOf } from './mcpActs'
+import { toolCallMoved } from './toolMoves'
 
 /** How long the words an MCP call posted are kept on its item: what it said, at a glance. */
 const WORDS_KEPT = 600
@@ -127,6 +128,8 @@ export const addItem = (
         if (kind === 'user_message' || kind === 'step_result') yield* indexThread(place.threadId)
       }),
     )
+    // A tool call started: what the lead's edits left is read again (toolMoves.ts).
+    if (kind === 'tool_call') toolCallMoved(place.threadId)
     return id
   })
 
@@ -158,23 +161,35 @@ export const updateItem = (projectId: ProjectId, id: string, content: unknown) =
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
-    yield* sql.withTransaction(
+    const status = typeof content === 'object' && content !== null && 'status' in content ? content.status : undefined
+    const moved = yield* sql.withTransaction(
       Effect.gen(function* () {
+        // A tool call's status, as it stood: one that changes moves what the lead's edits left (toolMoves.ts).
+        const [was] =
+          status === undefined
+            ? []
+            : yield* sql<{ threadId: string; kind: string; status: unknown }>`
+                SELECT thread_id, kind, json_extract(content, '$.status') AS status FROM thread_items WHERE id = ${id}`
         const revision = yield* change('thread_items', id, { content: JSON.stringify(content) })
         yield* ledger.notify({ projectId, aggregateType: 'thread_item', aggregateId: id, aggregateRevision: revision })
+        return was !== undefined && was.kind === 'tool_call' && was.status !== status ? was.threadId : null
       }),
     )
+    if (moved !== null) toolCallMoved(moved)
   })
 
-/** A session's tool call, as the thread keeps it. */
+/** A session's tool call, as the thread keeps it, and the revision it is at. */
 export const toolItem = (sessionId: string, toolCallId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [row] = yield* sql<{
       id: string
       content: string
-    }>`SELECT id, content FROM thread_items WHERE provider_session_id = ${sessionId} AND tool_call_id = ${toolCallId}`
-    return row === undefined ? undefined : { id: row.id, content: JSON.parse(row.content) as Record<string, unknown> }
+      revision: number
+    }>`SELECT id, content, revision FROM thread_items WHERE provider_session_id = ${sessionId} AND tool_call_id = ${toolCallId}`
+    return row === undefined
+      ? undefined
+      : { id: row.id, content: JSON.parse(row.content) as Record<string, unknown>, revision: row.revision }
   })
 
 /** How much of an Althar tool's input, and of its error, a thread keeps of a call made inside another tool. */
@@ -370,6 +385,35 @@ const skillsRead = (place: ItemPlace, content: Readonly<Record<string, unknown>>
 const WRITE_EVERY_CHARACTERS = 2_000
 const WRITE_EVERY_MILLIS = 2_000
 
+/**
+ * How long what changes of a running tool call, other than where it stands,
+ * is gathered before it is written: what a window shows of it lags by no
+ * more. A call that starts, moves on, ends or fails is written at once.
+ */
+export const TOOL_GATHER = Duration.millis(150)
+
+/**
+ * A tool call as this recorder last wrote it, so an event that changes
+ * nothing of it writes nothing, and one that changes only what it says
+ * while it runs waits a moment for the next.
+ */
+interface Call {
+  readonly id: string
+  /** Its content as it will be written, with what is held. */
+  content: Record<string, unknown>
+  /** Its content as last written, as written. */
+  written: string
+  /** Where it stood as last written: a call that moves on is written at once. */
+  stood: unknown
+  /** The revision it was last written or read at: another writer moved it where the store's differs (`keepAltharCall`). */
+  revision: number
+  /** What its events said since it was last written, to put over what another writer kept on it meanwhile. */
+  held: Record<string, unknown>
+}
+
+/** Whether a tool call has ended: what comes after changes little, and it needn't be kept to hand. */
+const over = (status: unknown) => status === 'completed' || status === 'failed'
+
 /** What was left out of a stored tool call, as it says. */
 const cutOf = (content: Record<string, unknown> | undefined): ReadonlyArray<string> =>
   Array.isArray(content?.cut) ? content.cut.filter((entry): entry is string => typeof entry === 'string') : []
@@ -400,10 +444,11 @@ export interface OutputSoFar {
 
 /**
  * Turns one session's events into items. `record` takes each event as it
- * streams; `flush` writes the message being gathered, and is called when the
- * turn ends.
+ * streams; `flush` writes the message being gathered, and what is held of
+ * tool calls, and is called when the turn ends. `gather` is how long what a
+ * running call says is held before it is written (`TOOL_GATHER`).
  */
-export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
+export const recorder = (place: ItemPlace & { readonly sessionId: string; readonly gather?: Duration.Input }) => {
   let gathering:
     | {
         readonly kind: 'agent_message' | 'agent_thought'
@@ -430,6 +475,12 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const servers = new Map<string, string>()
   /** Commands that ended, whose output is kept. */
   const finished = new Set<string>()
+  /** Each tool call as last written, by its id, while it runs. */
+  const calls = new Map<string, Call>()
+  /** Recording a tool call, and writing what was held of one, take turns: a gathered write never meets an event midway. */
+  const writing = Semaphore.makeUnsafe(1)
+  /** Whether a gathered write of what is held of tool calls is on its way. */
+  let writeDue = false
   const folders = place.folders ?? []
   const where = (itemId: string) => ({ projectId: place.projectId, itemId, folders })
 
@@ -442,7 +493,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
    * It is let go once written, or failed; a write cut short by interruption leaves it
    * to be written again, as when a session ends while one is under way.
    */
-  const flush = Effect.gen(function* () {
+  const flushMessage = Effect.gen(function* () {
     const open = gathering
     if (open === undefined) return
     yield* updateItem(place.projectId, open.id, withHanded(said(open), open.handed)).pipe(
@@ -464,7 +515,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         gathering !== undefined &&
         (gathering.kind !== kind || (messageId !== undefined && gathering.messageId !== undefined && messageId !== gathering.messageId))
       )
-        yield* flush
+        yield* flushMessage
       if (gathering !== undefined) return { open: gathering, fresh: false }
       // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
       const id = yield* addItem(place, kind, said({ text, answer }))
@@ -512,6 +563,90 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       open.written = open.text.length
       open.writtenAt = yield* Clock.currentTimeMillis
     })
+
+  /**
+   * Writes a tool call as it stands now, in one statement with its next
+   * revision, unless it is as last written. Where another writer kept
+   * something on it since, what that kept stays, under what this call's
+   * events said since.
+   */
+  const writeCall = (toolCallId: string, call: Call) =>
+    Effect.gen(function* () {
+      const json = JSON.stringify(call.content)
+      if (json === call.written) {
+        call.held = {}
+        return
+      }
+      const sql = yield* SqlClient.SqlClient
+      const ledger = yield* Ledger
+      const wrote = yield* sql.withTransaction(
+        Effect.gen(function* () {
+          const [moved] = yield* sql<{ revision: number }>`
+            UPDATE thread_items SET content = ${json}, revision = revision + 1
+            WHERE id = ${call.id} AND revision = ${call.revision} RETURNING revision`
+          let wrote = { content: call.content, json, revision: moved?.revision ?? 0 }
+          if (moved === undefined) {
+            const [now] = yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE id = ${call.id}`
+            // Gone from the thread: nothing to show it on, and a later event of it starts it again.
+            if (now === undefined) return undefined
+            const content = { ...(JSON.parse(now.content) as Record<string, unknown>), ...call.held }
+            const merged = JSON.stringify(content)
+            wrote = { content, json: merged, revision: yield* change('thread_items', call.id, { content: merged }) }
+          }
+          yield* ledger.notify({
+            projectId: place.projectId,
+            aggregateType: 'thread_item',
+            aggregateId: call.id,
+            aggregateRevision: wrote.revision,
+          })
+          return wrote
+        }),
+      )
+      if (wrote === undefined) return void calls.delete(toolCallId)
+      // Its status changed: what the lead's edits left is read again (toolMoves.ts).
+      if (wrote.content.status !== call.stood) toolCallMoved(place.threadId)
+      call.content = wrote.content
+      call.written = wrote.json
+      call.stood = wrote.content.status
+      call.revision = wrote.revision
+      call.held = {}
+      // Ended, its next event (if any) reads it again from the store.
+      if (over(wrote.content.status)) calls.delete(toolCallId)
+    })
+
+  /** Writes every tool call with something held, each on its own: one that fails says so and the rest are written. */
+  const writeHeld = Effect.suspend(() =>
+    Effect.forEach(
+      [...calls].filter(([, call]) => JSON.stringify(call.content) !== call.written),
+      ([toolCallId, call]) =>
+        writeCall(toolCallId, call).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record a tool call', cause))),
+      { discard: true },
+    ),
+  )
+
+  /** Writes what is held of tool calls a moment from now, gathering whatever else comes meanwhile; once, however much is held. */
+  const writeSoon = Effect.suspend(() => {
+    if (writeDue) return Effect.void
+    writeDue = true
+    return Effect.asVoid(
+      Effect.forkChild(
+        Effect.andThen(
+          Effect.sleep(place.gather ?? TOOL_GATHER),
+          writing.withPermits(1)(
+            Effect.andThen(
+              Effect.sync(() => {
+                writeDue = false
+              }),
+              writeHeld,
+            ),
+          ),
+        ),
+      ),
+    )
+  })
+
+  /** Writes the message being gathered, and what is held of tool calls: the thread as far as it has come. */
+  const flush = Effect.andThen(flushMessage, writing.withPermits(1)(writeHeld))
 
   /** Keeps a command's output once it ends, and its exit, on its item. */
   const ended = (toolCallId: string, output: Output) =>
@@ -590,17 +725,46 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     })
 
   /** Ends what the turn left open: a command's output, kept as far as it came, as when the turn was stopped. */
-  const end = Effect.gen(function* () {
-    yield* flush
-    // A Map lets the entry being visited go as it is kept.
-    for (const [toolCallId, output] of outputs) {
-      const item = yield* toolItem(place.sessionId, toolCallId)
-      const kept = yield* ended(toolCallId, output)
-      if (item !== undefined) yield* updateItem(place.projectId, item.id, { ...item.content, ...kept })
-    }
-  })
+  const end = Effect.andThen(
+    flush,
+    writing.withPermits(1)(
+      Effect.gen(function* () {
+        // A Map lets the entry being visited go as it is kept.
+        for (const [toolCallId, output] of outputs) {
+          const item = yield* toolItem(place.sessionId, toolCallId)
+          const kept = yield* ended(toolCallId, output)
+          calls.delete(toolCallId)
+          if (item !== undefined) yield* updateItem(place.projectId, item.id, { ...item.content, ...kept })
+        }
+      }),
+    ),
+  )
 
-  const notice = (content: Record<string, unknown>) => Effect.andThen(flush, addItem(place, 'notice', defined(content)))
+  /** A tool call as last written, or as the store has it where another writer moved it since, or this recorder never saw it. */
+  const callOf = (toolCallId: string) =>
+    Effect.gen(function* () {
+      const known = calls.get(toolCallId)
+      if (known !== undefined) {
+        const sql = yield* SqlClient.SqlClient
+        const [now] = yield* sql<{ revision: number }>`SELECT revision FROM thread_items WHERE id = ${known.id}`
+        if (now?.revision === known.revision) return known
+      }
+      const found = yield* toolItem(place.sessionId, toolCallId)
+      if (found === undefined) return void calls.delete(toolCallId)
+      // What was held of it goes over what the store has now.
+      const call: Call = {
+        id: found.id,
+        content: { ...found.content, ...known?.held },
+        written: JSON.stringify(found.content),
+        stood: found.content.status,
+        revision: found.revision,
+        held: { ...known?.held },
+      }
+      calls.set(toolCallId, call)
+      return call
+    })
+
+  const notice = (content: Record<string, unknown>) => Effect.andThen(flushMessage, addItem(place, 'notice', defined(content)))
 
   const record = (event: SessionEvent) => {
     switch (event._tag) {
@@ -612,52 +776,81 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         return handedInMessage(event.content, event.messageId)
       case 'ToolCall':
       case 'ToolCallUpdate':
-        return Effect.gen(function* () {
-          yield* flush
-          // The call's command and paths are kept, not what it writes or what came back (docs/architecture/07).
-          const kept = event.rawInput === undefined ? undefined : essentials(event.rawInput)
-          const output = event.rawOutput !== undefined
-          const content = defined({
-            title: event.title,
-            kind: event._tag === 'ToolCall' ? event.kind : undefined,
-            status: event.status,
-            rawInput: kept?.input,
-            locations: event.locations,
-          })
-          const existing = yield* toolItem(place.sessionId, event.toolCallId)
-          const cut = [...new Set([...cutOf(existing?.content), ...(kept?.cut ?? []), ...(output ? ['output'] : [])])]
-          const marked = {
-            ...(cut.length === 0 ? content : { ...content, cut }),
-            ...(event.skill === undefined ? {} : { skill: { names: [event.skill], reported: true } }),
-            ...mcpKept(event, existing?.content),
-            ...serverDown(event),
-          }
-          // Only what it read of the skills its agent listed: an agent that says what it loads has said so.
-          const read = (stored: Readonly<Record<string, unknown>>) =>
-            stored.skill === undefined
-              ? Effect.map(skillsRead(place, stored), (names) => (names.length === 0 ? {} : { skill: { names, reported: false } }))
-              : Effect.succeed({})
-          if (existing === undefined) {
-            const first = { title: '', kind: 'other', status: 'pending', ...marked }
-            const stored = { ...first, ...(yield* read(first)) }
-            const id = yield* addItem(place, 'tool_call', stored, { toolCallId: event.toolCallId })
-            const extras = yield* extrasOf(event.toolCallId, id, stored, event)
-            if (extras !== undefined) yield* updateItem(place.projectId, id, { ...stored, ...extras })
-          } else {
+        return writing.withPermits(1)(
+          Effect.gen(function* () {
+            yield* flushMessage
+            // The call's command and paths are kept, not what it writes or what came back (docs/architecture/07).
+            const kept = event.rawInput === undefined ? undefined : essentials(event.rawInput)
+            const output = event.rawOutput !== undefined
+            const content = defined({
+              title: event.title,
+              kind: event._tag === 'ToolCall' ? event.kind : undefined,
+              status: event.status,
+              rawInput: kept?.input,
+              locations: event.locations,
+            })
+            const existing = yield* callOf(event.toolCallId)
+            const cut = [...new Set([...cutOf(existing?.content), ...(kept?.cut ?? []), ...(output ? ['output'] : [])])]
+            const marked = {
+              ...(cut.length === 0 ? content : { ...content, cut }),
+              ...(event.skill === undefined ? {} : { skill: { names: [event.skill], reported: true } }),
+              ...mcpKept(event, existing?.content),
+              ...serverDown(event),
+            }
+            // Only what it read of the skills its agent listed: an agent that says what it loads has said so.
+            const read = (stored: Readonly<Record<string, unknown>>) =>
+              stored.skill === undefined
+                ? Effect.map(skillsRead(place, stored), (names) => (names.length === 0 ? {} : { skill: { names, reported: false } }))
+                : Effect.succeed({})
+            if (existing === undefined) {
+              // Placed at once, as it is when it happened, with what it handed back already: one write.
+              const first = { title: '', kind: 'other', status: 'pending', ...marked }
+              const stored = { ...first, ...(yield* read(first)) }
+              const id = yield* newId(Ids.threadItem)
+              const whole = { ...stored, ...(yield* extrasOf(event.toolCallId, id, stored, event)) }
+              yield* addItem(place, 'tool_call', whole, { toolCallId: event.toolCallId, id })
+              if (!over(whole.status))
+                calls.set(event.toolCallId, {
+                  id,
+                  content: whole,
+                  written: JSON.stringify(whole),
+                  stood: whole.status,
+                  revision: 1,
+                  held: {},
+                })
+              return
+            }
             const merged = { ...existing.content, ...marked }
-            const stored = { ...merged, ...(yield* read(merged)) }
-            const extras = yield* extrasOf(event.toolCallId, existing.id, stored, event)
-            yield* updateItem(place.projectId, existing.id, { ...stored, ...extras })
-          }
-        })
+            const said = yield* read(merged)
+            const extras = yield* extrasOf(event.toolCallId, existing.id, { ...merged, ...said }, event)
+            existing.content = { ...merged, ...said, ...extras }
+            existing.held = { ...existing.held, ...marked, ...said, ...extras }
+            // Where it stands, and what it handed back, show at once; what it says as it runs, a moment later, gathered.
+            if (existing.content.status !== existing.stood || extras !== undefined) yield* writeCall(event.toolCallId, existing)
+            else if (JSON.stringify(existing.content) !== existing.written) yield* writeSoon
+          }),
+        )
+      // What it left running is read from its call next: written now, as far as it has come.
+      case 'BackgroundStarted': {
+        const toolCallId = event.toolCallId
+        if (toolCallId === undefined) return Effect.void
+        return writing.withPermits(1)(
+          Effect.suspend(() => {
+            const call = calls.get(toolCallId)
+            return call === undefined ? Effect.void : writeCall(toolCallId, call)
+          }),
+        )
+      }
       case 'Plan':
         return Effect.gen(function* () {
-          yield* flush
+          yield* flushMessage
           if (plan === undefined) plan = yield* addItem(place, 'plan', { entries: event.entries })
           else yield* updateItem(place.projectId, plan, { entries: event.entries })
         })
       case 'SkillsSeen':
-        return place.lead === undefined ? Effect.void : Effect.andThen(flush, sawSkills({ ...place, lead: place.lead }, event.skills))
+        return place.lead === undefined
+          ? Effect.void
+          : Effect.andThen(flushMessage, sawSkills({ ...place, lead: place.lead }, event.skills))
       case 'Notice':
         if (event.server !== undefined) {
           if (event.server.status === 'needs-auth' || event.server.status === 'failed') down.set(event.server.name, event.server.status)

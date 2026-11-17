@@ -46,9 +46,13 @@ export interface ThinkingProps {
  */
 export function Thinking({ children, took, slow = false, text }: ThinkingProps) {
   const t = { ...reasoningText, ...text }
+  const words = children ?? t.thinking
   return (
     <div className={s.thinking} role="status">
-      <span className={s.shimmer}>{children ?? t.thinking}</span>
+      <span className={s.shimmer}>
+        {words}
+        {typeof words === 'string' && <Sheen words={words} />}
+      </span>
       {took !== undefined && (
         <span className={s.took} aria-hidden="true">
           {took}
@@ -58,6 +62,9 @@ export function Thinking({ children, took, slow = false, text }: ThinkingProps) 
     </div>
   )
 }
+
+/** The light passing over words at work: their copy, drawn by its style, so it is never read, found or copied twice. */
+const Sheen = ({ words }: { words: string }) => <span className={s.sheen} data-words={words} aria-hidden="true" />
 
 export interface ReasoningProps extends Disclosable {
   /** How long it thought, once it is done: 14s. Without it, it says only that it thought. */
@@ -114,6 +121,7 @@ export function Reasoning({
           {/* What it is on, or how long it took: each comes in by a fade, not a flip. */}
           <span key={live ? `on:${label}` : 'done'} className={cx(s.label, live && s.shimmer, watched && s.relabelled)}>
             {label}
+            {live && <Sheen words={label} />}
           </span>
           {!live && about !== '' && <span className={cx(s.about, watched && s.relabelled)}>{about}</span>}
           <Caret open={opened} />
