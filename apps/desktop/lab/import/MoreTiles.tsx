@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, Fragment, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { Icon, LinkButton } from '@althar/ui'
 
@@ -10,7 +10,7 @@ import s from './tiles.module.css'
 
 /*
  * More of H, the tiles (K–M): a tile a tool, a press takes all of it. K opens
- * a tile's list in a panel under its row. L shows the latest few things on
+ * a tile's list in a panel under its row, on the kit's fold and spring. L shows the latest few things on
  * the tile itself, each tickable. M starts with what's under way, a meter on
  * each tile for how much of it comes.
  */
@@ -98,24 +98,208 @@ const useColumns = (ref: RefObject<HTMLElement | null>) => {
   return columns
 }
 
+/** A cubic Bézier easing, as CSS draws one. */
+const bezier = (x1: number, y1: number, x2: number, y2: number) => {
+  const cx = 3 * x1
+  const bx = 3 * (x2 - x1) - cx
+  const ax = 1 - cx - bx
+  const cy = 3 * y1
+  const by = 3 * (y2 - y1) - cy
+  const ay = 1 - cy - by
+  return (t: number) => {
+    let at = t
+    for (let i = 0; i < 8; i++) {
+      const slope = (3 * ax * at + 2 * bx) * at + cx
+      if (Math.abs(slope) < 1e-6) break
+      at -= (((ax * at + bx) * at + cx) * at - t) / slope
+    }
+    at = Math.min(1, Math.max(0, at))
+    return ((ay * at + by) * at + cy) * at
+  }
+}
+/** The kit's --ease-fold, for a scroll that keeps pace with the fold. */
+const easeFold = bezier(0.32, 0.72, 0, 1)
+
+const scrollerOf = (el: HTMLElement): HTMLElement | null => {
+  for (let at = el.parentElement; at !== null; at = at.parentElement) {
+    const y = getComputedStyle(at).overflowY
+    if (y === 'auto' || y === 'scroll') return at
+  }
+  return null
+}
+
+/**
+ * Brings a panel into view as it opens, frame by frame at the fold's own pace, so the page and the panel move as one;
+ * never so far that the row it opened from leaves the top, nor, over the first row, the heading above it.
+ */
+const followFold = (drawer: HTMLElement, height: number, first: boolean) => {
+  const scroller = scrollerOf(drawer)
+  if (scroller === null) return
+  const view = scroller.getBoundingClientRect()
+  const top = drawer.getBoundingClientRect().top
+  // What stays in sight: the row the panel opened from, and over the first row, the heading above the grid too.
+  const keep = first ? drawer.parentElement?.previousElementSibling : drawer.previousElementSibling
+  const row = keep?.getBoundingClientRect().top ?? top
+  const by = Math.min(top + height + 16 - view.bottom, row - view.top - 12)
+  if (by <= 0) return
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    requestAnimationFrame(() => scroller.scrollBy({ top: by }))
+    return
+  }
+  const takes = Number.parseFloat(getComputedStyle(scroller).getPropertyValue('--fold')) || 320
+  const start = performance.now()
+  // By steps, not to a place: a panel folding shut above moves the page too, and the browser's scroll anchoring keeps that.
+  let gone = 0
+  const step = (now: number) => {
+    const t = Math.min(1, (now - start) / takes)
+    const to = by * easeFold(t)
+    scroller.scrollTop += to - gone
+    gone = to
+    if (t < 1) requestAnimationFrame(step)
+  }
+  requestAnimationFrame(step)
+}
+
+/** Numbers what's inside as it mounts, so its rows rise in one after another. */
+function Rise({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    ref.current
+      ?.querySelectorAll<HTMLElement>('section > :first-child, li')
+      .forEach((el, i) => el.style.setProperty('--i', String(Math.min(i, 10))))
+  }, [])
+  return (
+    <div ref={ref} className={s.rise}>
+      {children}
+    </div>
+  )
+}
+
+/**
+ * The panel under a row: it grows out of the row on the kit's fold, its notch on the opened tile; another tile in the
+ * row slides the notch over, on the kit's spring, and the height morphs to what's in it now. Closing, it folds back,
+ * quicker than it came.
+ */
+function Drawer({
+  picks,
+  who,
+  open,
+  column,
+  columns,
+  first,
+}: {
+  picks: Picks
+  who: Source
+  open: boolean
+  column: number
+  columns: number
+  /** Under the first row. */
+  first: boolean
+}) {
+  const box = useRef<HTMLDivElement>(null)
+  const inner = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState(0)
+  const followed = useRef<Source | null>(null)
+  // What it showed before another tile in the row took it over: it fades out over what rises in.
+  const [was, setWas] = useState<Source | null>(null)
+  const [last, setLast] = useState(who)
+  if (last !== who) {
+    setLast(who)
+    setWas(last)
+  }
+  useEffect(() => {
+    if (was === null) return
+    const done = setTimeout(() => setWas(null), 260)
+    return () => clearTimeout(done)
+  }, [was])
+  useLayoutEffect(() => {
+    const el = inner.current
+    if (el === null) return
+    // Measured after the first layout, at no height: the change to its height is the fold.
+    const watch = new ResizeObserver(() => setHeight(el.offsetHeight))
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [])
+  useEffect(() => {
+    if (!open) {
+      followed.current = null
+      return
+    }
+    if (height === 0 || followed.current === who || box.current === null) return
+    followed.current = who
+    followFold(box.current, height, first)
+  }, [open, who, height, first])
+  return (
+    <div
+      ref={box}
+      className={s.drawer}
+      data-open={open || undefined}
+      inert={!open}
+      style={{ '--h': `${open ? height : 0}px`, '--notch': (column + 0.5) / columns } as CSSProperties}
+    >
+      <div ref={inner} className={s.drawerInner}>
+        <div className={s.inside}>
+          <span className={s.notch} aria-hidden="true" />
+          {was !== null && open && (
+            <div key={`was-${was}`} className={s.was} aria-hidden="true" inert>
+              <ByKind picks={narrowed(picks, picks.setsOf([was]))} setup={false} />
+            </div>
+          )}
+          <Rise key={who}>
+            <ByKind picks={narrowed(picks, picks.setsOf([who]))} setup={false} />
+          </Rise>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** K: H's tiles; a tile's chevron opens what's in it in a panel under its row, to pick inside. */
 export function OpeningTiles({ picks }: { picks: Picks }) {
   const [open, setOpen] = useState<Source | null>(null)
+  // A panel folding shut while another opens in another row.
+  const [leaving, setLeaving] = useState<{ readonly row: number; readonly who: Source } | null>(null)
   const grid = useRef<HTMLDivElement>(null)
   const columns = useColumns(grid)
   const sources = offered(picks)
-  const at = open === null ? -1 : sources.indexOf(open)
-  // The panel goes after the last tile of the opened one's row.
-  const rowEnd = at < 0 ? -1 : Math.min(sources.length, Math.ceil((at + 1) / columns) * columns) - 1
+  const rowOf = (who: Source) => Math.floor(sources.indexOf(who) / columns)
+  const toggle = (who: Source | null) => {
+    const next = who === open ? null : who
+    if (open !== null && (next === null || rowOf(next) !== rowOf(open))) setLeaving({ row: rowOf(open), who: open })
+    setOpen(next)
+  }
+  useEffect(() => {
+    if (leaving === null) return
+    const done = setTimeout(() => setLeaving(null), 420)
+    return () => clearTimeout(done)
+  }, [leaving])
+  useEffect(() => {
+    if (open === null) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setLeaving({ row: Math.floor(sources.indexOf(open) / columns), who: open })
+      setOpen(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, sources, columns])
   return (
     <div className={s.wrap}>
       <SectionHead title={text.found} count={sources.length}>
         <AllNone onAll={() => takeAll(picks, sources, true)} onNone={() => takeAll(picks, sources, false)} />
       </SectionHead>
-      <div className={s.grid} ref={grid}>
+      <div className={s.openGrid} ref={grid}>
         {sources.map((who, i) => {
           const { state } = tileState(picks, who)
           const isOpen = open === who
+          const row = Math.floor(i / columns)
+          const lastOfRow = i === Math.min(sources.length, (row + 1) * columns) - 1
+          const here =
+            open !== null && rowOf(open) === row
+              ? { who: open, open: true }
+              : leaving !== null && leaving.row === row
+                ? { who: leaving.who, open: false }
+                : null
           return (
             <Fragment key={who}>
               <div className={s.tile} data-state={state} data-open={isOpen || undefined}>
@@ -128,15 +312,21 @@ export function OpeningTiles({ picks }: { picks: Picks }) {
                   aria-expanded={isOpen}
                   aria-label={text.inside(nameOf(who))}
                   title={text.lookInside}
-                  onClick={() => setOpen(isOpen ? null : who)}
+                  onClick={() => toggle(who)}
                 >
                   <Icon name="chevronD" size={13} />
                 </button>
               </div>
-              {i === rowEnd && open !== null && (
-                <div className={s.inside}>
-                  <ByKind picks={narrowed(picks, picks.setsOf([open]))} setup={false} />
-                </div>
+              {lastOfRow && here !== null && (
+                <Drawer
+                  key={`row-${row}`}
+                  picks={picks}
+                  who={here.who}
+                  open={here.open}
+                  column={sources.indexOf(here.who) % columns}
+                  columns={columns}
+                  first={row === 0}
+                />
               )}
             </Fragment>
           )

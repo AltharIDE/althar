@@ -24,11 +24,16 @@
   background: var(--paper);
   box-shadow: inset 0 0 0 1px var(--line-2);
   transition:
-    background var(--fast) var(--ease),
-    box-shadow var(--fast) var(--ease);
+    background var(--base) var(--ease),
+    box-shadow var(--base) var(--ease),
+    scale var(--press) var(--ease-out);
 }
 .tile:hover {
   background: var(--hover-paper);
+}
+/* an answer to the press, on the tile as a whole */
+.tile:has(> .take:active) {
+  scale: var(--scale-press);
 }
 .tile[data-state='on'] {
   box-shadow: inset 0 0 0 1.5px var(--ink-fill);
@@ -64,6 +69,21 @@
   border-radius: 5px;
   box-shadow: inset 0 0 0 1.5px var(--t-3);
   color: var(--on-ink);
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+/* the tick or the dash pops in on the kit's spring */
+.box > * {
+  transition:
+    scale var(--enter) var(--ease-move),
+    opacity var(--enter) var(--ease-out);
+}
+@starting-style {
+  .box > * {
+    scale: 0.4;
+    opacity: 0;
+  }
 }
 .box[data-state='on'],
 .box[data-state='mixed'] {
@@ -110,7 +130,21 @@
   border-top: 1px solid var(--line);
 }
 
-/* K: a chevron in the tile's corner opens a panel under its row */
+/* K: a chevron in the tile's corner opens a panel under its row. The rows
+   keep their gap as the tiles' own margin, so a panel between two rows
+   starts from nothing and grows. */
+.openGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  column-gap: 8px;
+}
+.openGrid > .tile {
+  margin-bottom: 8px;
+}
+.tile[data-open],
+.tile[data-open]:hover {
+  background: var(--sunk);
+}
 .open {
   position: absolute;
   right: 6px;
@@ -124,36 +158,136 @@
   transition:
     background var(--fast) var(--ease),
     color var(--fast) var(--ease),
-    transform var(--fast) var(--ease);
+    rotate var(--fold) var(--ease-fold),
+    scale var(--press) var(--ease-out);
 }
 .open:hover {
   background: var(--pressed-paper);
   color: var(--t-1);
 }
+.open:active {
+  scale: var(--scale-press);
+}
 .open[aria-expanded='true'] {
   color: var(--t-1);
-  transform: rotate(180deg);
+  rotate: 180deg;
 }
-/* the opened tile points at its panel */
-.tile[data-open]::after {
-  content: '';
-  position: absolute;
-  bottom: -9px;
-  left: 50%;
-  width: 18px;
-  height: 9px;
-  transform: translateX(-50%);
-  background: var(--sunk);
-  clip-path: polygon(50% 0, 100% 100%, 0 100%);
-}
-.inside {
+
+/* the panel: its height eases out on the fold; closing, quicker */
+.drawer {
   grid-column: 1 / -1;
-  padding: 14px 6px 6px;
+  min-height: 0;
+  height: var(--h, 0px);
+  /* clipped below as it grows, never above, where its notch reaches up to the tile */
+  clip-path: inset(-10px -8px 0 -8px);
+  transition: height var(--fold) var(--ease-fold);
+}
+.drawer:not([data-open]) {
+  transition-duration: var(--slow);
+}
+.drawerInner {
+  padding-bottom: 8px;
+}
+/* it grows from the opened tile, from --scale-pop with a fade */
+.inside {
+  position: relative;
+  container-type: inline-size;
   border-radius: 12px;
   background: var(--sunk);
+  transform-origin: calc((100% + 8px) * var(--notch) - 4px) 0;
+  transition:
+    opacity var(--enter) var(--ease-out),
+    scale var(--fold) var(--ease-fold);
 }
-.inside :global([class*='picker']) {
+.drawer:not([data-open]) .inside {
+  opacity: 0;
+  scale: var(--scale-pop);
+  transition-duration: var(--exit), var(--slow);
+}
+@starting-style {
+  .drawer[data-open] .inside {
+    opacity: 0;
+    scale: var(--scale-pop);
+  }
+}
+/* the notch under the opened tile: grows from the panel's edge, slides on the spring to another tile in the row */
+.notch {
+  position: absolute;
+  top: -8px;
+  left: -9px;
+  width: 18px;
+  height: 8px;
+  background: var(--sunk);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  translate: calc((100cqw + 8px) * var(--notch) - 4px) 0;
+  transform-origin: 50% 100%;
+  transition:
+    translate var(--move) var(--ease-move),
+    scale var(--enter) var(--ease-out) 80ms;
+}
+.drawer:not([data-open]) .notch {
+  scale: 1 0;
+  transition-delay: 0s;
+}
+@starting-style {
+  .drawer[data-open] .notch {
+    scale: 1 0;
+  }
+}
+/* what's inside rises in, a row after another */
+.rise,
+.was {
+  padding: 14px 6px 6px;
+}
+/* what it showed before, fading out over what rises in, quicker than it came */
+.was {
+  position: absolute;
+  inset: 0 0 auto;
+  max-height: 100%;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--exit) var(--ease-out);
+}
+@starting-style {
+  .was {
+    opacity: 1;
+  }
+}
+.rise :global(section) > :first-child,
+.rise :global(li) {
+  transition:
+    opacity var(--enter) var(--ease-out) calc(70ms + var(--i, 0) * 18ms),
+    translate var(--fold) var(--ease-out) calc(70ms + var(--i, 0) * 18ms),
+    background var(--fast) var(--ease);
+}
+@starting-style {
+  .rise :global(section) > :first-child,
+  .rise :global(li) {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+.rise :global([class*='picker']),
+.was :global([class*='picker']) {
   gap: 14px;
+}
+/* with reduced motion, nothing travels or grows: what comes and goes only fades */
+@media (prefers-reduced-motion: reduce) {
+  .drawer,
+  .open,
+  .tile {
+    transition: none;
+  }
+  .inside,
+  .drawer:not([data-open]) .inside,
+  .notch,
+  .drawer:not([data-open]) .notch {
+    scale: none;
+  }
+  .rise :global(li) {
+    translate: none;
+  }
 }
 
 /* L: bigger tiles, the latest few things on each */

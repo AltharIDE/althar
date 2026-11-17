@@ -24,6 +24,7 @@ import {
   worktreeOf,
   worktreesOf,
 } from './world'
+import { LOGOS } from './logos'
 import s from './found.module.css'
 
 /*
@@ -78,6 +79,28 @@ export function Mark({ of, size = 16 }: { of: Tool | Agent; size?: number }) {
     return (
       <span className={s.mark} role="img" aria-label={name} style={{ width: size, height: size }}>
         <BrandMark brand={brand} size={size} />
+      </span>
+    )
+  const logo = of in LOGOS ? LOGOS[of as Tool] : undefined
+  if (logo !== undefined)
+    return (
+      <span className={s.mark} role="img" aria-label={name} style={{ width: size, height: size }}>
+        <svg
+          viewBox={logo.viewBox}
+          width={size}
+          height={size}
+          fill="currentColor"
+          stroke={logo.stroke === undefined && logo.weight === undefined ? undefined : 'currentColor'}
+          strokeWidth={logo.weight ?? logo.stroke}
+          strokeLinejoin="round"
+          fillRule={logo.evenOdd ? 'evenodd' : 'nonzero'}
+          aria-hidden="true"
+          focusable="false"
+        >
+          {logo.paths.map((d, i) => (
+            <path key={i} d={d} vectorEffect={logo.weight === undefined ? undefined : 'non-scaling-stroke'} />
+          ))}
+        </svg>
       </span>
     )
   if (of === 'git')
