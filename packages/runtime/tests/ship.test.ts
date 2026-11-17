@@ -889,6 +889,59 @@ describe('a merge of main into the task’s branch after its pull request opened
 })
 
 describe('releasing holds', () => {
+  it.live('releases only the selected local writable workspace', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      const [local] = yield* sql<{ id: string; heldAt: string }>`SELECT id, held_at FROM workspaces WHERE task_id = ${task.taskId}`
+      const other = yield* otherDeviceHold(task.taskId)
+      const selected = `ws_${'a'.repeat(32)}`
+      const readOnly = `ws_${'b'.repeat(32)}`
+      yield* sql`
+        INSERT INTO workspaces (id, project_id, task_id, binding_id, device_id, access, path, base_ref, base_commit, branch, state, created_at, held_at, reviewing)
+        SELECT ${selected}, project_id, task_id, binding_id, device_id, 'write', path, base_ref, base_commit, branch || '-other', state, created_at, held_at, NULL
+        FROM workspaces WHERE id = ${local!.id}`
+      yield* sql`
+        INSERT INTO workspaces (id, project_id, task_id, binding_id, device_id, access, path, base_ref, base_commit, branch, state, created_at, held_at, reviewing)
+        SELECT ${readOnly}, project_id, task_id, binding_id, device_id, 'read', path, base_ref, base_commit, branch, state, created_at, held_at, 'https://example.test/review/1'
+        FROM workspaces WHERE id = ${local!.id}`
+
+      yield* (yield* Changes).releaseHolds(task.taskId, 'shipped', [selected, other.workspace, readOnly])
+      assert.isNull(yield* holdOn(selected))
+      assert.strictEqual(yield* holdOn(local!.id), local!.heldAt)
+      assert.strictEqual(yield* holdOn(other.workspace), other.held)
+      assert.strictEqual(yield* holdOn(readOnly), local!.heldAt)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('holds commits beyond the accepted head until that head is included', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      const [local] = yield* sql<{ id: string }>`SELECT id FROM workspaces WHERE task_id = ${task.taskId}`
+      const accepted = git(task.path, 'rev-parse', 'HEAD')
+      yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      const current = git(task.path, 'rev-parse', 'HEAD')
+      const changes = yield* Changes
+      // Simulate a hold released before the accepted boundary is reconciled.
+      yield* sql`UPDATE workspaces SET held_at = NULL WHERE id = ${local!.id}`
+      yield* changes.releaseHolds(task.taskId, 'shipped', [local!.id], { [local!.id]: accepted })
+      const held = yield* holdOn(local!.id)
+      assert.isNotNull(held)
+      yield* changes.releaseHolds(task.taskId, 'shipped', [local!.id], { [local!.id]: accepted })
+      assert.strictEqual(yield* holdOn(local!.id), held)
+      yield* changes.releaseHolds(task.taskId, 'shipped', [local!.id], { [local!.id]: current })
+      assert.isNull(yield* holdOn(local!.id))
+      yield* changes.releaseHolds(task.taskId, 'shipped', [local!.id], { [local!.id]: current })
+      assert.isNull(yield* holdOn(local!.id))
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('leaves another device’s hold alone when no heads are supplied', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
