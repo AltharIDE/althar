@@ -193,7 +193,10 @@ jobs:
           security default-keychain -d user -s "$keychain"
           # Grant this test's real Electron binary access to its own fixture secret, avoiding an unattended consent dialog.
           electron="$(node -p 'require("electron")')"
-          security add-generic-password -a Althar -s 'Althar Safe Storage' -w "$(openssl rand -base64 24)" -T "$electron" "$keychain"
+          # The unpackaged binary may initialize OSCrypt under its bundle name before JS applies the app name.
+          for application in Electron Althar; do
+            security add-generic-password -a "$application" -s "$application Safe Storage" -w "$(openssl rand -base64 24)" -T "$electron" "$keychain"
+          done
       - run: bun run test:e2e e2e/pairing.spec.ts --reporter=list
       - uses: actions/upload-artifact@v6
         if: failure()

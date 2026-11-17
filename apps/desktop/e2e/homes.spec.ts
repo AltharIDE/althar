@@ -85,8 +85,9 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     await page.evaluate(() => localStorage.setItem('home-isolation', 'local-only'))
     await still(page)
     await page.screenshot({ path: 'test-results/homes-flow-01-local.png', scale: 'css' })
-    // No home is saved yet, so this computer's window has no chip: File › Homes… opens Connect a home.
-    await electronApp.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('homes')?.click())
+    // The first connection is reachable from the app itself, even where its native menu bar is hidden.
+    await page.getByRole('button', { name: 'Homes', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
     const connect = page.getByRole('dialog', { name: 'Connect a home' })
     await expect(connect).toBeVisible()
     await page.getByRole('radio', { name: 'SSH', exact: true }).click()

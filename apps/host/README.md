@@ -162,7 +162,7 @@ systemctl --user restart althar-host.service
 althar-host pair --profile /path/to/profile
 ```
 
-In the desktop, open **File → Homes…** for the first connection, or **Homes → Connect a home…** when a home is already saved. Choose **Pairing code**. Paste the code,
+In the desktop, open **Homes → Connect a home…** (also available from **File → Homes…**). Choose **Pairing code**. Paste the code,
 check the destination, name the home and choose **Pair and open**. A home opens
 in its own window; its projects stay on the host. SSH remains another route.
 A code enrolls one device key and expires after five minutes or on host restart.

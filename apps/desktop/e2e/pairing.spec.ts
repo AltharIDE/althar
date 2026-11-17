@@ -93,7 +93,13 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
   let host = await start()
   progress('Native pairing: standalone host ready')
   const clientRoot = mkdtempSync(join(tmpdir(), 'althar-pairing-client-'))
-  const clientEnvironment = { ALTHAR_API_SOCKET: '1', ALTHAR_NATIVE_KEYRING: '1' }
+  const clientEnvironment = {
+    ALTHAR_API_SOCKET: '1',
+    ALTHAR_NATIVE_KEYRING: '1',
+    // macOS resolves the logged-in user's keychain through its home. Keep that OS context on the isolated CI runner;
+    // launch still supplies this test's own profile, worktrees and provider home.
+    ...(process.platform === 'darwin' && process.env.CI === 'true' && process.env.HOME !== undefined ? { HOME: process.env.HOME } : {}),
+  }
   let {
     electronApp,
     page,
@@ -107,6 +113,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     progress('Native pairing: desktop opened')
     await openFirstProject(electronApp, page, repo(clientRoot, 'local-project'))
     progress('Native pairing: local project opened')
+    progress(`Native pairing: keyring application ${await electronApp.evaluate(({ app }) => app.getName())}`)
     const storage = await electronApp.evaluate(({ app, safeStorage }) => ({
       available: safeStorage.isEncryptionAvailable(),
       backend: process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'OS keychain',
@@ -122,7 +129,8 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     const invitation = Schema.decodeUnknownSync(Schema.Struct({ code: Schema.String }))(
       JSON.parse(execFileSync(process.execPath, [entry, 'pair', root], { encoding: 'utf8' })),
     )
-    await electronApp.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('homes')?.click())
+    await page.getByRole('button', { name: 'Homes', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
     await page.getByLabel('Name', { exact: true }).fill('My VPS')
     await still(page)
     await page.screenshot({ path: 'test-results/pairing-flow-01-entry.png', scale: 'css' })
