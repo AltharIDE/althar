@@ -543,6 +543,40 @@ describe('a task', () => {
     answer()
   })
 
+  it('switches one of two issues sharing a key on its own, by the task’s tie to it', async () => {
+    const base = snapshot()
+    const issue = (product: 'linear' | 'jira_cloud', link: string) => ({
+      product,
+      ref: 'DEV-37',
+      key: 'DEV-37',
+      title: `DEV-37 on ${product}`,
+      url: `https://example.com/${product}/DEV-37`,
+      status: { name: 'Todo', category: 'todo' as const },
+      priority: null,
+      container: null,
+      link,
+    })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          task: {
+            ...base.task,
+            issue: issue('linear', 'xlink_linear'),
+            fromIssues: [issue('linear', 'xlink_linear'), issue('jira_cloud', 'xlink_jira')],
+          },
+        }),
+      ),
+      setTaskIssuePart: vi.fn(() => new Promise<void>(() => {})),
+    })
+    withServices(<Task />, client)
+    await screen.findAllByRole('switch', { name: 'Only part of DEV-37' })
+    const [linear, jira] = screen.getAllByRole('switch', { name: 'Only part of DEV-37' })
+    await userEvent.click(jira as HTMLElement)
+    expect(jira?.getAttribute('aria-checked')).toBe('true')
+    expect(linear?.getAttribute('aria-checked')).toBe('false')
+    expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true, 'xlink_jira')
+  })
+
   it('shows the issues its lead drafted as cards in the thread, files them one by one or all at once, and waits on the person', async () => {
     const base = snapshot()
     const { client } = fakeClient({

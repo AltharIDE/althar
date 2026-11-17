@@ -157,6 +157,7 @@ import {
   titleWords,
   unsettledLine,
   withDescribed,
+  withIssues,
   commitsWord,
   type PullRequestIssue,
 } from './pullRequestWords'
@@ -719,6 +720,17 @@ interface HereRow {
   readonly opened: number
 }
 
+/** An issue a task came from, as its pull requests name and link it. */
+interface IssueLinkRow {
+  readonly id: string
+  readonly product: Product
+  readonly key: string
+  readonly url: string
+  readonly ref: string
+  readonly connectionId: string | null
+  readonly partOf: number
+}
+
 interface LinkRow {
   readonly id: string
   readonly projectId: ProjectId
@@ -742,6 +754,14 @@ export class Changes extends Context.Service<
      * Call within exclusive(taskId): git checkout and its workspace update must stay together before branch discovery reads them.
      */
     publish(input: PublishInput): Effect.Effect<Published, unknown>
+    /**
+     * Brings the task's open pull requests in line with the issues it comes
+     * from now, as one added or switched to only part of: each description
+     * Althar wrote names them in its issue lines, the rest of it as it was,
+     * and each tracker links its issue back. In the background; what can't
+     * be done is logged, and nothing fails.
+     */
+    issuesChanged(taskId: string): Effect.Effect<void>
     /**
      * Whether its lead built nothing: it has a branch, with no commits on it, nothing uncommitted but evidence, and no pull
      * request open or merged (one closed with nothing left counts); false where a branch can't be read. Such a change has
@@ -1928,20 +1948,8 @@ export class Changes extends Context.Service<
           yield* settle
           if (input.end === 'none') return { kind: 'pushed', branch: task.branch, left } as const
           const draft = input.end === 'draft' && host.capabilities.drafts
-          const issueLinks = yield* sql<{
-            id: string
-            product: Product
-            key: string
-            url: string
-            ref: string
-            connectionId: string | null
-            partOf: number
-          }>`
-            SELECT id, product, key, url, ref, connection_id, part_of FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue'
-            ORDER BY created_at, rowid`
-          // A link's spelling of the repository may differ in case from the host's, which GitHub and GitLab don't mind.
-          const sameHostOf = (link: { readonly product: Product; readonly ref: string }) =>
-            link.product === host.product && link.ref.toLowerCase().startsWith(`${path.join('/').toLowerCase()}#`)
+          const issueLinks = yield* issueLinksOf(input.taskId)
+          const sameHostOf = sameHostAs(host.product, path)
           // Its title carries the first one's key, as its branch does; its description names each.
           const [issueLink] = issueLinks
           const sameHost = issueLink !== undefined && sameHostOf(issueLink)
@@ -2074,29 +2082,7 @@ export class Changes extends Context.Service<
               return id
             }),
           )
-          // Each issue it came from gets a link to it, where its tracker has links.
-          for (const linked of issueLinks) {
-            if (linked.connectionId === null || sameHostOf(linked)) continue
-            yield* Effect.gen(function* () {
-              const adapters = yield* connections.adapters(linked.connectionId ?? '')
-              const tracker = adapters.tracker
-              if (tracker === undefined || !tracker.capabilities.links) return
-              const issue = yield* tracker.issue(linked.ref)
-              yield* outward({
-                projectId: input.projectId,
-                subject: { type: 'external_link', id: linked.id },
-                target: `${tracker.product}:${linked.key}`,
-                operation: 'link_issue',
-                key: `link_issue:${linked.id}:${opened.url}`,
-                request: { url: opened.url },
-                retryable: true,
-                perform: Effect.as(tracker.link(issue, { url: opened.url, title: `${nameOf(snapshot)}: ${opened.title}` }), true),
-                encode: () => true,
-                // Linked once, by this or its lead's link_pull_request, which shares its key: its receipt answers.
-                decode: () => true,
-              })
-            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not link the pull request to its issue', cause)))
-          }
+          yield* linkIssues(input.projectId, issueLinks, sameHostOf, { url: opened.url, title: `${nameOf(snapshot)}: ${opened.title}` })
           // Its issues, moved on to review.
           if (issueLinks.length > 0) yield* follow(input.taskId, 'opened', snapshot)
           yield* touchCard(input.taskId)
@@ -2109,6 +2095,84 @@ export class Changes extends Context.Service<
             change: { ...snapshot, linkId, product: host.product, listening: row?.listening === 1 },
             left,
           } as const
+        })
+
+      /**
+       * Each issue a task came from gets a link to its pull request, where
+       * its tracker has links: one on the pull request's own host links
+       * itself. Each once, by this or its lead's link_pull_request, which
+       * shares its key; one tracker that can't leaves the others linked.
+       */
+      const linkIssues = (
+        projectId: ProjectId,
+        issueLinks: ReadonlyArray<IssueLinkRow>,
+        sameHostOf: (link: IssueLinkRow) => boolean,
+        change: { readonly url: string; readonly title: string },
+      ) =>
+        Effect.forEach(
+          issueLinks.filter((linked) => linked.connectionId !== null && !sameHostOf(linked)),
+          (linked) =>
+            Effect.gen(function* () {
+              const adapters = yield* connections.adapters(linked.connectionId ?? '')
+              const tracker = adapters.tracker
+              if (tracker === undefined || !tracker.capabilities.links) return
+              const issue = yield* tracker.issue(linked.ref)
+              yield* outward({
+                projectId,
+                subject: { type: 'external_link', id: linked.id },
+                target: `${tracker.product}:${linked.key}`,
+                operation: 'link_issue',
+                key: `link_issue:${linked.id}:${change.url}`,
+                request: { url: change.url },
+                retryable: true,
+                perform: Effect.as(tracker.link(issue, change), true),
+                encode: () => true,
+                // Linked once, by this or its lead's link_pull_request, which shares its key: its receipt answers.
+                decode: () => true,
+              })
+            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not link the pull request to its issue', cause))),
+          { discard: true },
+        )
+
+      /** Each issue a task came from, as a pull request names and links it, in the order they were tied to it. */
+      const issueLinksOf = (taskId: string) =>
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<IssueLinkRow>`
+            SELECT id, product, key, url, ref, connection_id, part_of FROM external_links WHERE task_id = ${taskId} AND kind = 'issue'
+            ORDER BY created_at, rowid`,
+        )
+
+      /** Whether an issue lives on a pull request's own host and repository, which links its key by itself; case aside, as hosts don't mind it. */
+      const sameHostAs =
+        (product: Product, repository: ReadonlyArray<string>) => (link: { readonly product: Product; readonly ref: string }) =>
+          link.product === product && link.ref.toLowerCase().startsWith(`${repository.join('/').toLowerCase()}#`)
+
+      const issuesChanged = (taskId: string) =>
+        Effect.gen(function* () {
+          const issueLinks = yield* issueLinksOf(taskId)
+          for (const link of yield* linksOf(taskId)) {
+            if (link.connectionId === null) continue
+            const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(link.snapshot)))
+            if (seen === undefined || seen.state !== 'open') continue
+            yield* Effect.gen(function* () {
+              const host = (yield* connections.adapters(link.connectionId ?? '')).host
+              if (host === undefined) return
+              const repository = yield* host.repository(seen.repository)
+              const now = yield* host.change(repository, seen.number)
+              if (now.state !== 'open') return
+              const sameHostOf = sameHostAs(link.product, seen.repository)
+              // Only a description Althar wrote: someone's own, on one the task was attached to, stays theirs.
+              if ((yield* lastSetBody(link, seen.url)) !== null) {
+                const body = withIssues(
+                  now.body,
+                  issueLinks.map((one) => ({ key: one.key, url: one.url, sameHost: sameHostOf(one), partOf: one.partOf === 1 })),
+                )
+                if (!sameDescription(body, now.body)) yield* editOnHost(link, { snapshot: seen, host, repository, now }, { body })
+              }
+              yield* linkIssues(link.projectId, issueLinks, sameHostOf, { url: seen.url, title: `${nameOf(seen)}: ${now.title}` })
+            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not bring a pull request in line with its issues', cause)))
+          }
         })
 
       /** The open pull request a repository of the task was attached to, as its record and link keep it: the one its work goes to now. */
@@ -9390,6 +9454,15 @@ export class Changes extends Context.Service<
 
       return Changes.of({
         publish: (input) => provide(publish(input)),
+        issuesChanged: (taskId) =>
+          Effect.asVoid(
+            Effect.forkIn(
+              provide(locked(taskId)(issuesChanged(taskId))).pipe(
+                Effect.catchCause((cause) => Effect.logWarning('Could not bring a task’s pull requests in line with its issues', cause)),
+              ),
+              scope,
+            ),
+          ),
         nothingBuilt: (taskId) => provide(nothingBuiltOf(taskId)),
         unshipped: (taskId, options) => provide(unshippedOf(taskId, options?.kept === true)),
         inHands: (taskId) => provide(handsOf(taskId)),

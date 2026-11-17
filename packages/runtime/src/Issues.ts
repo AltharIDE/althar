@@ -72,13 +72,29 @@ export type Unfurl =
       readonly repository: string
     }
 
-/** An issue a task came from: as last seen, and whether the task does only part of it. */
-export type TaskIssue = IssueSummary & { readonly partOf: boolean }
+/** An issue a task came from: as last seen, whether the task does only part of it, and the id of the task's tie to it, which names it alone. */
+export type TaskIssue = IssueSummary & { readonly partOf: boolean; readonly link: string }
 
-/** Whether what was typed names this issue of a task's: its key, its link or its ref, in any case. */
-export const namesIssue = (typed: string, link: { readonly key: string; readonly url: string; readonly ref: string }) => {
+/** Whether what was typed names this issue of a task's: its key, its link or its ref, in any case, or the id of the task's tie to it. */
+export const namesIssue = (
+  typed: string,
+  link: { readonly key: string; readonly url: string; readonly ref: string; readonly link?: string; readonly id?: string },
+) => {
   const wanted = typed.trim().toLowerCase()
-  return wanted !== '' && [link.key, link.url, link.ref].some((one) => one.toLowerCase() === wanted)
+  return (
+    wanted !== '' &&
+    [link.key, link.url, link.ref, link.link ?? '', link.id ?? ''].some((one) => one !== '' && one.toLowerCase() === wanted)
+  )
+}
+
+/**
+ * The one of a task's issues what was typed names: none, or several where
+ * two trackers share a key (Linear's and Jira's DEV-37), which only a link
+ * tells apart.
+ */
+export const pickIssue = <A extends Parameters<typeof namesIssue>[1]>(typed: string, all: ReadonlyArray<A>) => {
+  const named = all.filter((one) => namesIssue(typed, one))
+  return named.length === 1 ? { one: named[0] as A } : { one: null, several: named }
 }
 
 /** An issue as a picker lists it: which service, and what it is. */
@@ -713,6 +729,8 @@ export class Issues extends Context.Service<
             SELECT id, project_id, key, url, ref, part_of FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' ORDER BY created_at`
           const chosen = named === undefined ? links : links.filter((link) => namesIssue(named, link))
           if (chosen.length === 0) return yield* new NotFound({ kind: 'task issue', id: named ?? taskId })
+          // A key two trackers share names neither: switching both could close the wrong one as it merges.
+          if (named !== undefined && chosen.length > 1) return yield* new NotFound({ kind: 'one task issue', id: named })
           const changing = chosen.filter((link) => (link.partOf === 1) !== partOf)
           if (changing.length === 0) return
           yield* sql.withTransaction(
@@ -817,8 +835,16 @@ export class Issues extends Context.Service<
       const allOfTask = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const links = yield* sql<{ product: Product; ref: string; key: string; url: string; snapshot: string; partOf: number }>`
-            SELECT product, ref, key, url, snapshot, part_of FROM external_links WHERE task_id = ${taskId} AND kind = 'issue'
+          const links = yield* sql<{
+            id: string
+            product: Product
+            ref: string
+            key: string
+            url: string
+            snapshot: string
+            partOf: number
+          }>`
+            SELECT id, product, ref, key, url, snapshot, part_of FROM external_links WHERE task_id = ${taskId} AND kind = 'issue'
             ORDER BY created_at, rowid`
           return links.map((link): TaskIssue => {
             const kept = JSON.parse(link.snapshot) as Partial<IssueSummary>
@@ -833,6 +859,7 @@ export class Issues extends Context.Service<
               container: kept.container ?? null,
               updatedAt: kept.updatedAt ?? '',
               partOf: link.partOf === 1,
+              link: link.id,
             }
           })
         })
@@ -841,7 +868,7 @@ export class Issues extends Context.Service<
         Effect.map(allOfTask(taskId), (all): IssueSummary | null => {
           const [first] = all
           if (first === undefined) return null
-          const { partOf: _partOf, ...summary } = first
+          const { partOf: _partOf, link: _link, ...summary } = first
           return summary
         })
 

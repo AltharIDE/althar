@@ -1893,6 +1893,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const links = yield* sql<{
+            id: string
             kind: string
             product: string
             ref: string
@@ -1903,7 +1904,7 @@ export class Queries extends Context.Service<
             connectionId: string | null
             partOf: number
           }>`
-            SELECT kind, product, ref, key, url, snapshot, listening, connection_id, part_of FROM external_links WHERE task_id = ${taskId}
+            SELECT id, kind, product, ref, key, url, snapshot, listening, connection_id, part_of FROM external_links WHERE task_id = ${taskId}
             ORDER BY created_at`
           const issueRows = links.filter((link) => link.kind === 'issue')
           const issueRow = issueRows[0]
@@ -1939,7 +1940,9 @@ export class Queries extends Context.Service<
           // Each issue it came from, on any trackers, in the order they were tied to it: the first is the one a task always had.
           const issues = issueRows.flatMap((row) => {
             const summary = summaryOf(row)
-            return summary === null ? [] : [{ ...summary, ...(row.partOf === 1 ? { partOf: true } : {}), connectionId: row.connectionId }]
+            return summary === null
+              ? []
+              : [{ ...summary, ...(row.partOf === 1 ? { partOf: true } : {}), link: row.id, connectionId: row.connectionId }]
           })
           const issue = issueRow === undefined ? null : summaryOf(issueRow)
           // Where the project's rules push its leads' commits on their own, whether those here wait for the person, and why (ADR-072).
@@ -2271,7 +2274,7 @@ export class Queries extends Context.Service<
         links?: {
           readonly issue: IssueSummary | null
           readonly issueConnection: string | null
-          readonly fromIssues: ReadonlyArray<IssueSummary & { readonly connectionId: string | null }>
+          readonly fromIssues: ReadonlyArray<IssueSummary & { readonly link: string; readonly connectionId: string | null }>
           readonly changes: ReadonlyArray<ChangeSummary>
         },
         /** Read only for how it stands, as a task waiting for it says: without what it waits for in turn. */

@@ -459,7 +459,7 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
-  // An issue's "Only part of" as just switched, by its ref, until Althar's answer shows it.
+  // An issue's "Only part of" as just switched, by the task's tie to it, until Althar's answer shows it.
   const [partShown, setPartShown] = useState<Readonly<Record<string, boolean>>>({})
   // Tasks the person just stopped this one waiting for: gone from its list at once, until its head is read again.
   const [letGo, setLetGo] = useState<ReadonlySet<string>>(new Set())
@@ -1541,37 +1541,41 @@ export function TaskView({
               <Thread label={text.thread} busy={busy}>
                 {fromIssues.length > 0 && !snapshot.earlier && (
                   <div className={s.issues}>
-                    {fromIssues.map((issue) => (
-                      <div key={`${issue.product}:${issue.ref}`} className={s.issue}>
-                        <Issue
-                          mark={productBrand(issue.product)}
-                          source={productName(issue.product)}
-                          id={issue.key}
-                          tone={issue.product === 'linear' ? 'linear' : 'plain'}
-                          title={issue.title}
-                          href={issue.url}
-                          status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
-                          {...(issue.priority === null || issue.priority.level === 'none'
-                            ? {}
-                            : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
-                          {...(issue.container === null ? {} : { meta: issue.container })}
-                        />
-                        {/* Whether the task does all of its issue, so its merge closes it, or only part, so its merge leaves it open. */}
-                        {snapshot.task.state !== 'done' && snapshot.task.state !== 'abandoned' && (
-                          <IssuePart
+                    {fromIssues.map((issue) => {
+                      // The task's tie to it names it alone: two trackers may share its key.
+                      const tie = issue.link ?? `${issue.product}:${issue.ref}`
+                      return (
+                        <div key={tie} className={s.issue}>
+                          <Issue
+                            mark={productBrand(issue.product)}
+                            source={productName(issue.product)}
                             id={issue.key}
-                            partOf={partShown[issue.ref] ?? issue.partOf === true}
-                            onChange={(partOf) => {
-                              // Shown at once; the task as Althar has it shows again once it answers, rolled back where it failed.
-                              setPartShown((shown) => ({ ...shown, [issue.ref]: partOf }))
-                              void model
-                                .setIssuePart(partOf, issue.ref)
-                                .finally(() => setPartShown(({ [issue.ref]: _done, ...left }) => left))
-                            }}
+                            tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                            title={issue.title}
+                            href={issue.url}
+                            status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                            {...(issue.priority === null || issue.priority.level === 'none'
+                              ? {}
+                              : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                            {...(issue.container === null ? {} : { meta: issue.container })}
                           />
-                        )}
-                      </div>
-                    ))}
+                          {/* Whether the task does all of its issue, so its merge closes it, or only part, so its merge leaves it open. */}
+                          {snapshot.task.state !== 'done' && snapshot.task.state !== 'abandoned' && (
+                            <IssuePart
+                              id={issue.key}
+                              partOf={partShown[tie] ?? issue.partOf === true}
+                              onChange={(partOf) => {
+                                // Shown at once; the task as Althar has it shows again once it answers, rolled back where it failed.
+                                setPartShown((shown) => ({ ...shown, [tie]: partOf }))
+                                void model
+                                  .setIssuePart(partOf, issue.link ?? issue.ref)
+                                  .finally(() => setPartShown(({ [tie]: _done, ...left }) => left))
+                              }}
+                            />
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
                 <EarlierTurns

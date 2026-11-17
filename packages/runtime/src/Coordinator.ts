@@ -31,7 +31,7 @@ import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
-import { findWords, foundLine, Issues, keysOf, namesIssue, READ_ISSUE, READ_ISSUE_INPUT, readRefusal, stoppedAt } from './Issues'
+import { findWords, foundLine, Issues, keysOf, pickIssue, READ_ISSUE, READ_ISSUE_INPUT, readRefusal, stoppedAt } from './Issues'
 import { asideIn, quickIn } from './kinds'
 import { DRAFT_THEN_PRESET, PICK_A_PRESET } from './presetBrief'
 import { presetModels } from './presetModels'
@@ -2089,12 +2089,17 @@ export class Coordinator extends Context.Service<
           const all = yield* issues.allOfTask(task.id)
           if (all.length === 0)
             return yield* new ToolRefused({ message: `${task.slug} didn't come from an issue: there is nothing to set.` })
-          const named = asked.issue === undefined ? undefined : all.find((one) => namesIssue(asked.issue ?? '', one))
-          if (asked.issue !== undefined && named === undefined)
+          const picked = asked.issue === undefined ? undefined : pickIssue(asked.issue, all)
+          if (picked !== undefined && picked.one === null)
             return yield* new ToolRefused({
-              message: `${task.slug} didn't come from ${asked.issue}: it came from ${all.map((one) => one.key).join(', ')}.`,
+              message:
+                picked.several.length > 1
+                  ? `${task.slug} came from more than one ${asked.issue}, on different trackers: name the one you mean by its link, ${picked.several.map((one) => one.url).join(' or ')}.`
+                  : `${task.slug} didn't come from ${asked.issue}: it came from ${all.map((one) => one.key).join(', ')}.`,
             })
-          yield* issues.setPart(task.id, asked.part_of, named?.ref)
+          const named = picked?.one ?? undefined
+          yield* issues.setPart(task.id, asked.part_of, named?.link)
+          yield* changes.issuesChanged(task.id)
           // Said for the one named, or for its only issue; for all of several, by their keys.
           const which = named?.key ?? (all.length === 1 ? 'its issue' : all.map((one) => one.key).join(' and '))
           const how = asked.part_of ? `does only part of ${which}` : `does all of ${which}`
@@ -2119,7 +2124,11 @@ export class Coordinator extends Context.Service<
             .attach({ projectId: access.projectId as ProjectId, taskId: task.id, issue: asked.issue })
             .pipe(Effect.mapError((error) => new ToolRefused({ message: readRefusal(error, asked.issue) })))
           const again = had.some((one) => one.product === added.product && one.ref === added.ref)
-          if (asked.part_of !== undefined) yield* issues.setPart(task.id, asked.part_of, added.ref)
+          // By the tie's id: another tracker's issue of this task may share its key.
+          const tie = (yield* issues.allOfTask(task.id)).find((one) => one.product === added.product && one.ref === added.ref)
+          if (asked.part_of !== undefined && tie !== undefined) yield* issues.setPart(task.id, asked.part_of, tie.link)
+          // An open pull request names it, and its tracker links back to it, as one opened now would.
+          yield* changes.issuesChanged(task.id)
           if (again)
             return `${task.slug} came from ${added.key} already${asked.part_of === undefined ? '' : asked.part_of ? ': it does only part of it now' : ': it does all of it now'}.`
           // A task whose work has begun moves it as it moved the others; one not started moves each as it starts.

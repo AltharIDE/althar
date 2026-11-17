@@ -1524,7 +1524,12 @@ export const IssueSummary = Schema.Struct({
 export type IssueSummary = typeof IssueSummary.Type
 
 /** An issue a task came from: as last seen, and whether the task does only part of it, so its merge comments on it rather than closing it. */
-export const TaskIssue = Schema.Struct({ ...IssueSummary.fields, partOf: Schema.optional(Schema.Boolean) })
+export const TaskIssue = Schema.Struct({
+  ...IssueSummary.fields,
+  partOf: Schema.optional(Schema.Boolean),
+  /** The id of the task's tie to it, which names it alone where two trackers share its key. Absent from a runtime before. */
+  link: Schema.optional(Schema.String),
+})
 export type TaskIssue = typeof TaskIssue.Type
 
 export const IssueList = Schema.Struct({ issues: Schema.Array(IssueSummary) })

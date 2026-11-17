@@ -1865,8 +1865,10 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const named = issue ?? (yield* issues.ofTask(taskId))?.ref
+              const named = issue ?? (yield* issues.allOfTask(taskId))[0]?.link
               yield* issues.setPart(taskId, partOf, named ?? '')
+              // Its open pull request says it in the words trackers read: in the background, as the switch shows it at once.
+              yield* pullRequests.issuesChanged(taskId)
             }),
           ),
         ),
