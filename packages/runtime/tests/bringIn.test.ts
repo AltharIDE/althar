@@ -75,7 +75,7 @@ describe('bringing in other tools’ work', () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const { client, project, machine, sql } = yield* connectedTo()
+          const { client, store, project, machine, sql } = yield* connectedTo()
           const found = yield* client.LookElsewhere({ projectId: project.id })
           assert.strictEqual(found.worktrees.length, 7)
           const lima = found.worktrees.find((one) => one.path === machine.worktrees.conductor)
@@ -83,6 +83,22 @@ describe('bringing in other tools’ work', () => {
           assert.deepStrictEqual(lima?.conversations, [`claude_code:${sessionIds.inLima}`])
           const conductorSetup = found.setups.find((one) => one.tool === 'conductor')
           assert.isFalse(conductorSetup?.current)
+          // Read from the folder before its project is made, what is found has the same keys, so picks made there come in.
+          const folder = yield* client.LookElsewhere({
+            grant: yield* store(Effect.flatMap(Folders, (folders) => folders.allow(machine.repository))),
+          })
+          assert.deepStrictEqual(
+            [
+              ...folder.worktrees.map((one) => one.key),
+              ...folder.setups.map((one) => one.key),
+              ...folder.conversations.map((one) => one.key),
+            ].toSorted(),
+            [
+              ...found.worktrees.map((one) => one.key),
+              ...found.setups.map((one) => one.key),
+              ...found.conversations.map((one) => one.key),
+            ].toSorted(),
+          )
           const before = digest(machine.home)
 
           const brought = yield* client.BringIn({
@@ -100,7 +116,7 @@ describe('bringing in other tools’ work', () => {
           // One no longer there, and a second setup for the same repository, each say why; the rest came in.
           assert.deepStrictEqual(
             brought.failed.map((one) => one.key),
-            ['setup:orca:' + (conductorSetup?.repositoryId ?? ''), 'worktree:/nowhere'],
+            [`setup:orca:${machine.repository}`, 'worktree:/nowhere'],
           )
 
           // Each worktree is its task's workspace where its tool made it, set up already, its plan held Up next.

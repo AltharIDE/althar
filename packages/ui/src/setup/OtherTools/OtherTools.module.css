@@ -1,4 +1,4 @@
-/* K–M: more of H's tiles. The face is H's: mark and tick, name, how much, a fact. */
+/* What other tools left, a tile each, that opens: the face is a tool's mark and tick, its name, how much, a fact. */
 
 .wrap {
   display: flex;
@@ -6,16 +6,44 @@
   gap: 4px;
   min-width: 0;
 }
+.top,
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 10px 6px;
+}
+.heading,
+.headTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font: 600 12.5px/1.2 var(--font);
+  color: var(--t-1);
+}
+.headCount {
+  font: 500 11px/1 var(--mono);
+  color: var(--t-3);
+}
 .grow {
   flex: 1;
 }
+.allNone {
+  display: inline-flex;
+  gap: 10px;
+  font-size: 12px;
+}
+
+/* The rows keep their gap as the tiles' own margin, so a panel between two rows starts from nothing and grows. */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
-  gap: 8px;
+  column-gap: 8px;
+}
+.grid > .tile {
   margin-bottom: 8px;
 }
-
 .tile {
   position: relative;
   display: flex;
@@ -41,6 +69,10 @@
 .tile[data-state='mixed'] {
   box-shadow: inset 0 0 0 1px var(--line-3);
 }
+.tile[data-open],
+.tile[data-open]:hover {
+  background: var(--sunk);
+}
 .take {
   display: flex;
   flex-direction: column;
@@ -52,13 +84,21 @@
   border-radius: inherit;
   text-align: left;
 }
-
-.top {
+.take:focus-visible {
+  outline-offset: 2px;
+}
+.faceTop {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   align-self: stretch;
   margin-bottom: 6px;
+}
+.mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--t-1);
 }
 .box {
   display: grid;
@@ -96,54 +136,23 @@
   border-radius: 1px;
   background: var(--on-ink);
 }
-.name {
+.tileName {
   font-size: 13.5px;
   font-weight: 550;
   color: var(--t-1);
 }
-.count {
+.size {
   font-size: 12px;
   color: var(--t-2);
 }
 .some {
   color: var(--t-3);
 }
-.fact {
+.tileFact {
   min-height: 16px;
+  padding-right: 22px;
   font-size: 11.5px;
   color: var(--t-3);
-}
-.fact :global([class*='facts']) {
-  font-size: 11.5px;
-}
-
-.foot {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 0 10px;
-  font-size: 12.5px;
-}
-.listUnder {
-  margin-top: 10px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
-}
-
-/* K: a chevron in the tile's corner opens a panel under its row. The rows
-   keep their gap as the tiles' own margin, so a panel between two rows
-   starts from nothing and grows. */
-.openGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
-  column-gap: 8px;
-}
-.openGrid > .tile {
-  margin-bottom: 8px;
-}
-.tile[data-open],
-.tile[data-open]:hover {
-  background: var(--sunk);
 }
 .open {
   position: absolute;
@@ -167,6 +176,9 @@
 }
 .open:active {
   scale: var(--scale-press);
+}
+.open:focus-visible {
+  outline-offset: 1px;
 }
 .open[aria-expanded='true'] {
   color: var(--t-1);
@@ -234,7 +246,6 @@
     scale: 1 0;
   }
 }
-/* what's inside rises in, a row after another */
 .rise,
 .was {
   padding: 14px 6px 6px;
@@ -254,24 +265,160 @@
     opacity: 1;
   }
 }
-.rise :global(section) > :first-child,
-.rise :global(li) {
+/* what's inside rises in, a row after another */
+.rise [data-rise] {
   transition:
     opacity var(--enter) var(--ease-out) calc(70ms + var(--i, 0) * 18ms),
     translate var(--fold) var(--ease-out) calc(70ms + var(--i, 0) * 18ms),
     background var(--fast) var(--ease);
 }
 @starting-style {
-  .rise :global(section) > :first-child,
-  .rise :global(li) {
+  .rise [data-rise] {
     opacity: 0;
     translate: 0 6px;
   }
 }
-.rise :global([class*='picker']),
-.was :global([class*='picker']) {
+
+/* what's in a tool: a group each, a tick a row */
+.groups {
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+  min-width: 0;
 }
+.group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  position: relative;
+  border-radius: 8px;
+}
+.row:hover {
+  background: var(--hover-paper);
+}
+.row + .row::before {
+  content: '';
+  position: absolute;
+  top: -1.5px;
+  left: 36px;
+  right: 10px;
+  height: 1px;
+  background: var(--line);
+}
+.row:hover::before,
+.row:hover + .row::before {
+  opacity: 0;
+}
+.rowHit {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.tick {
+  display: grid;
+  place-items: center;
+  flex: none;
+  margin-top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
+}
+.tick[data-state='checked'] {
+  background: var(--ink-fill);
+  box-shadow: none;
+  color: var(--on-ink);
+}
+.tick:focus-visible {
+  outline-offset: 2px;
+}
+.tickMark {
+  display: grid;
+  place-items: center;
+}
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.titleLine {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--t-1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.row[data-off] .name {
+  color: var(--t-2);
+}
+.at {
+  flex: none;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.where {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.where :global(code) {
+  overflow: hidden;
+  font: 11.5px/1.4 var(--mono);
+  color: var(--t-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.where :global(code + code) {
+  min-width: 0;
+  color: var(--t-3);
+}
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.fact :global(svg) {
+  color: var(--t-3);
+}
+
 /* with reduced motion, nothing travels or grows: what comes and goes only fades */
 @media (prefers-reduced-motion: reduce) {
   .drawer,
@@ -285,135 +432,7 @@
   .drawer:not([data-open]) .notch {
     scale: none;
   }
-  .rise :global(li) {
+  .rise [data-rise] {
     translate: none;
   }
-}
-
-/* L: bigger tiles, the latest few things on each */
-.peekGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(256px, 1fr));
-  align-items: start;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.peek {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  border-radius: 12px;
-  background: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--line-2);
-  transition: box-shadow var(--fast) var(--ease);
-}
-.peek[data-state='on'] {
-  box-shadow: inset 0 0 0 1.5px var(--ink-fill);
-}
-.peek[data-state='mixed'] {
-  box-shadow: inset 0 0 0 1px var(--line-3);
-}
-.peekHead {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 12px 10px;
-  border-radius: 12px 12px 0 0;
-  text-align: left;
-  transition: background var(--fast) var(--ease);
-}
-.peekHead:hover {
-  background: var(--hover-paper);
-}
-.peekTitle {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex: 1;
-  min-width: 0;
-}
-.peekList {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 2px 4px 4px;
-  border-top: 1px solid var(--line);
-  list-style: none;
-}
-.peekItem {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.peekItem:hover {
-  background: var(--hover-paper);
-}
-.peekItem[data-off] .peekName {
-  color: var(--t-3);
-}
-.peekMain {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  flex: 1;
-  min-width: 0;
-}
-.peekLine {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-.peekName {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  font-size: 12.5px;
-  line-height: 18px;
-  color: var(--t-1);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.peekAt {
-  flex: none;
-  font-size: 11.5px;
-  color: var(--t-3);
-}
-.peekFact {
-  font-size: 11.5px;
-  color: var(--t-3);
-}
-.peekFact :global([class*='facts']) {
-  font-size: 11.5px;
-}
-.peekFoot {
-  padding: 0 12px 10px 38px;
-  font-size: 12px;
-}
-
-/* M: grouped by kind, a meter on each tile */
-.group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 10px;
-}
-.meter {
-  position: relative;
-  align-self: stretch;
-  height: 3px;
-  margin-top: 8px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: var(--line-2);
-}
-.meterFill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: inherit;
-  background: var(--ink-fill);
-  transition: width var(--slow, 240ms) var(--ease);
 }

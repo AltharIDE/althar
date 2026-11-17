@@ -78,7 +78,8 @@ export interface Found {
 }
 
 export const worktreeKey = (path: string) => `worktree:${path}`
-export const setupKey = (tool: OtherTool, bindingId: string) => `setup:${tool}:${bindingId}`
+/** A setup's key, by its tool and its repository's checkout: the same before its project is made and after. */
+export const setupKey = (tool: OtherTool, repository: string) => `setup:${tool}:${repository}`
 export const conversationKey = (agent: Agent, id: string) => `${agent}:${id}`
 
 const real = (path: string) => {
@@ -233,7 +234,7 @@ export const lookAt = (repositories: ReadonlyArray<Repository>, places: Places, 
       for (const setup of kept)
         setups.push({
           ...setup,
-          key: `setup:${setup.tool}:${repository.bindingId}`,
+          key: setupKey(setup.tool, root),
           bindingId: repository.bindingId,
           repository: repository.name,
         })

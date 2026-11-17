@@ -1,109 +1,255 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
-import type { Section } from '../src/renderer/features/settings/sections'
-import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
+import type { Elsewhere, FolderReading } from '@althar/contracts'
+
+import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
+import { picked, picksOf, tilesOf, words } from '../src/renderer/features/elsewhere/tiles'
+import { merged } from '../src/renderer/features/elsewhere/useElsewhere'
+import { StartView } from '../src/renderer/features/start/StartView'
 import { useStart } from '../src/renderer/features/start/useStart'
-import { fakeClient, fakeHost, withoutOpenCode } from './fixtures'
+import { fakeClient, fakeHost } from './fixtures'
 import { withServices } from './render'
+import { seenTheTour, toTheProject } from './welcome'
 
 /*
- * Settings off a Mac: as Windows has it, a PC, no count on the app's icon,
- * the system's own sound rather than named ones, and Althar in the system
- * tray; and on Linux, in the tray where the desktop has one.
+ * Bringing in other tools' work (docs/decisions/workspaces-and-runs.md, "Bringing in other tools' work"): what was found,
+ * as the kit's tiles show it, and the welcome's step that brings it in once the project is made, with nothing taken at
+ * first and the welcome moving on at once.
  */
 
-vi.mock('../src/renderer/shared/device', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/renderer/shared/device')>()
-  return { ...actual, platform: 'win32', device: actual.deviceWords('win32') }
-})
+const NOW = new Date('2026-11-17T12:00:00.000Z')
 
-/* The Settings tab, on a section. */
-function Settings({ at }: { at: Section }) {
-  const [section, setSection] = useState<Section>(at)
-  return <SettingsPage start={useStart()} section={section} onSection={setSection} />
+const FOUND: Elsewhere = {
+  worktrees: [
+    {
+      key: 'worktree:/h/conductor/workspaces/meridian/lima',
+      tool: 'conductor',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      path: '/Users/ada/conductor/workspaces/meridian/lima',
+      branch: 'feature/lima',
+      name: 'lima',
+      uncommitted: 3,
+      unpushed: 2,
+      ahead: 2,
+      pullRequest: { number: 812, url: 'https://github.com/acme/meridian/pull/812' },
+      archived: false,
+      lastAt: '2026-11-17T10:00:00.000Z',
+      conversations: ['claude_code:s2'],
+      taskId: null,
+    },
+    {
+      key: 'worktree:/h/orca/workspaces/meridian/fix',
+      tool: 'orca',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      path: '/Users/ada/orca/workspaces/meridian/fix',
+      branch: null,
+      name: 'Flaky login test',
+      uncommitted: 0,
+      unpushed: 0,
+      ahead: 0,
+      pullRequest: null,
+      archived: true,
+      lastAt: '2026-11-10T10:00:00.000Z',
+      conversations: [],
+      taskId: null,
+    },
+    { ...FOUND_BROUGHT() },
+  ],
+  setups: [
+    {
+      key: 'setup:conductor:/m',
+      tool: 'conductor',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      file: 'conductor.json',
+      commands: ['bun install'],
+      copy: [],
+      current: false,
+    },
+    {
+      key: 'setup:orca:/m',
+      tool: 'orca',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      file: 'orca.yaml',
+      commands: ['pnpm i\npnpm build'],
+      copy: [],
+      current: false,
+    },
+    {
+      key: 'setup:t_three_code:/m',
+      tool: 't_three_code',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      file: 't3.json',
+      commands: ['bun install'],
+      copy: [],
+      current: true,
+    },
+  ],
+  conversations: [
+    {
+      key: 'claude_code:s1',
+      agent: 'claude_code',
+      title: 'Gyroscope fixture',
+      startedAt: '2026-11-17T11:00:00.000Z',
+      lastAt: '2026-11-17T11:30:00.000Z',
+      prompts: 4,
+      worktree: null,
+      taskId: null,
+    },
+    {
+      key: 'claude_code:s2',
+      agent: 'claude_code',
+      title: 'Lima export',
+      startedAt: '2026-11-17T09:00:00.000Z',
+      lastAt: null,
+      prompts: null,
+      worktree: 'worktree:/h/conductor/workspaces/meridian/lima',
+      taskId: null,
+    },
+    {
+      key: 'codex:t1',
+      agent: 'codex',
+      title: 'Rename to compass',
+      startedAt: '2026-11-12T10:00:00.000Z',
+      lastAt: '2026-11-12T10:10:00.000Z',
+      prompts: null,
+      worktree: null,
+      taskId: 'task_x',
+    },
+  ],
 }
 
-const sections = () => within(screen.getByRole('navigation', { name: 'Settings' }))
+function FOUND_BROUGHT() {
+  return {
+    key: 'worktree:/h/.t3/worktrees/meridian/t3',
+    tool: 't_three_code' as const,
+    repositoryId: 'b1',
+    repository: 'meridian',
+    path: '/Users/ada/.t3/worktrees/meridian/t3',
+    branch: 't3/1a2b',
+    name: 'Dark mode',
+    uncommitted: 0,
+    unpushed: null,
+    ahead: 1,
+    pullRequest: null,
+    archived: false,
+    lastAt: null,
+    conversations: [],
+    taskId: 'task_brought',
+  }
+}
 
-describe('settings on Windows', () => {
-  it('keep this PC awake, and offer no count on the icon and the system’s sound, heard when chosen', async () => {
-    const host = fakeHost({ platform: 'win32', sounds: vi.fn(async () => []) })
-    const { client } = fakeClient({ status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: withoutOpenCode })) })
-    withServices(<Settings at="this-mac" />, client, host)
-    expect(screen.getByRole('heading', { name: 'Work on this PC', level: 1 })).toBeTruthy()
-    expect(await screen.findByRole('switch', { name: 'Keep this PC awake while work runs' })).toBeTruthy()
-    expect(sections().getByRole('button', { name: 'Work on this PC' })).toBeTruthy()
-
-    // An agent not here says so in the PC's words.
-    await userEvent.click(sections().getByRole('button', { name: /^Agents/ }))
-    await userEvent.click(await screen.findByRole('tab', { name: /OpenCode/ }))
-    expect(screen.getByRole('region', { name: 'OpenCode isn’t on this PC' })).toBeTruthy()
-
-    await userEvent.click(sections().getByRole('button', { name: 'Notifications' }))
-    expect(screen.queryByRole('switch', { name: /Count them/ })).toBeNull()
-    await userEvent.click(screen.getByRole('combobox', { name: 'Sound' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'The system’s sound' }))
-    expect(host.setPreference).toHaveBeenLastCalledWith('sound', 'default')
-    expect(host.playSound).toHaveBeenCalledWith('default')
-    // Its card down the side says it.
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Sound\s*System sound/ })).toBeTruthy())
+describe('what other tools left, as tiles', () => {
+  it('has a tile for each tool with anything new, in order, and leaves out what came in already', () => {
+    const tiles = tilesOf(FOUND, NOW)
+    expect(tiles.map((tile) => tile.id)).toEqual(['conductor', 'orca', 'claude_code'])
+    const conductor = tiles[0]
+    expect(conductor?.size).toBe('1 worktree')
+    expect(conductor?.groups.map((group) => [group.title, group.items.map((item) => item.key)])).toEqual([
+      ['Worktrees', ['worktree:/h/conductor/workspaces/meridian/lima']],
+      ['Setup', ['setup:conductor:/m']],
+      ['Conversations', []],
+    ])
+    expect(conductor?.groups[0]?.items[0]?.at).toBe('2h ago')
+    // Orca's is detached, archived there, and its setup comes with its tile; T3 Code's setup is the repository's already.
+    expect(tiles[1]?.groups[1]?.items[0]?.title).toBe('Orca’s setup')
+    // An agent's tile counts its conversations, the newest first, one that ran in a worktree saying which.
+    const claude = tiles[2]
+    expect(claude?.size).toBe('2 conversations')
+    expect(claude?.groups[2]?.items.map((item) => [item.title, item.where])).toEqual([
+      ['Gyroscope fixture', '4 messages'],
+      ['Lima export', 'in lima'],
+    ])
   })
 
-  it('put back the system’s sound, where there are no named ones to choose from', async () => {
-    const host = fakeHost({ platform: 'win32', sounds: vi.fn(async () => []) })
-    withServices(<QuickSettings open onOpenChange={vi.fn()} onSettings={vi.fn()} />, fakeClient().client, host)
-    const panel = await screen.findByRole('dialog', { name: 'Quick settings' })
-    await userEvent.click(within(panel).getByRole('switch', { name: 'Sound' }))
-    expect(host.setPreference).toHaveBeenLastCalledWith('sound', 'default')
-    await waitFor(() => expect(within(panel).getByRole('button', { name: /^Sound\s*System sound/ })).toBeTruthy())
-  })
-
-  it('offers light, dark or as the PC is, in the PC’s words', async () => {
-    const host = fakeHost({ platform: 'win32', appIcon: vi.fn(async () => null) })
-    withServices(<Settings at="appearance" />, fakeClient().client, host)
-    const choice = await screen.findByRole('radiogroup', { name: 'Light or dark' })
-    expect(
-      within(choice)
-        .getAllByRole('radio')
-        .map((radio) => radio.textContent),
-    ).toEqual(['Light', 'Dark', 'Match the PC'])
-    await userEvent.click(within(choice).getByRole('radio', { name: 'Match the PC' }))
-    // already as the system is: nothing to keep
-    await userEvent.click(within(choice).getByRole('radio', { name: 'Light' }))
-    await waitFor(() => expect(host.setPreference).toHaveBeenCalledWith('appearance', 'light'))
-  })
-
-  it('says Althar is in the system tray, where Windows may tuck it away, with nothing to choose', async () => {
-    const host = fakeHost({
-      platform: 'win32',
-      appIcon: vi.fn(async () => null),
-      edge: vi.fn(async () => ({ place: 'island', notch: false, platform: 'win32', tray: true })),
+  it('takes one setup for a repository, and counts what the picks bring in', () => {
+    const one = picked(FOUND, new Set(), ['setup:conductor:/m'], true)
+    const other = picked(FOUND, one, ['setup:orca:/m', 'worktree:/h/conductor/workspaces/meridian/lima'], true)
+    expect([...other].toSorted()).toEqual(['setup:orca:/m', 'worktree:/h/conductor/workspaces/meridian/lima'])
+    expect(picksOf(FOUND, other)).toEqual({
+      worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+      setups: ['setup:orca:/m'],
+      conversations: [],
     })
-    withServices(<Settings at="appearance" />, fakeClient().client, host)
-    expect(await screen.findByText('In the system tray')).toBeTruthy()
-    expect(screen.queryByRole('radiogroup', { name: 'In other apps' })).toBeNull()
-    expect(screen.getByText('Windows may tuck it under the ^. Drag it onto the taskbar to keep it in sight.')).toBeTruthy()
+    expect([...picked(FOUND, other, ['setup:orca:/m'], false)]).toEqual(['worktree:/h/conductor/workspaces/meridian/lima'])
+    expect(words.bring(1, 1, 2)).toBe('Bring in 1 worktree, 1 setup and 2 conversations')
+    expect(words.bring(0, 0, 1)).toBe('Bring in 1 conversation')
+    expect(words.bring(0, 0, 0)).toBeNull()
+    expect(words.andThen('Bring in 1 worktree')).toBe('Then bring in 1 worktree.')
+  })
+
+  it('reads several folders as one, each thing once', () => {
+    const both = merged([FOUND, { worktrees: FOUND.worktrees.slice(0, 1), setups: [], conversations: FOUND.conversations }])
+    expect(both.worktrees).toHaveLength(3)
+    expect(both.conversations).toHaveLength(3)
   })
 })
 
-describe('settings on Linux', () => {
-  it('says Althar is in the tray, or, on a desktop without one, only in its window', async () => {
-    const linux = (tray: boolean) =>
-      fakeHost({
-        platform: 'linux',
-        appIcon: vi.fn(async () => null),
-        edge: vi.fn(async () => ({ place: 'island', notch: false, platform: 'linux', tray })),
-      })
-    const first = withServices(<Settings at="appearance" />, fakeClient().client, linux(true))
-    // A desktop may take the mark and not show it, which nothing tells Althar: the page says where it would be then.
-    expect(await screen.findByText('Without a tray, Althar shows only in its window.')).toBeTruthy()
-    first.unmount()
-    withServices(<Settings at="appearance" />, fakeClient().client, linux(false))
-    expect(await screen.findByText('Only in Althar’s window')).toBeTruthy()
-    expect(screen.getByText('This desktop has no system tray.')).toBeTruthy()
+function Start({ onProject = vi.fn() }: { onProject?: (id: string) => void }) {
+  const start = useStart()
+  return <StartView model={start} accounts={useAccountSignIn(start)} onProject={onProject} home={() => null} />
+}
+
+const reading: FolderReading = {
+  kind: 'repository',
+  name: 'meridian',
+  repositories: [{ path: '/w/meridian', folder: null, name: 'meridian', branch: 'main', remote: null }],
+  project: null,
+}
+
+describe('the welcome’s step for what other tools left', () => {
+  it('comes after the project with nothing taken, and brings in what a press took as the welcome goes on', async () => {
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => reading),
+      lookElsewhere: vi.fn(async () => FOUND),
+    })
+    seenTheTour()
+    withServices(<Start />, client, fakeHost())
+    await toTheProject()
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
+    await screen.findByRole('list', { name: 'Repositories for the project' })
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    expect(await screen.findByRole('heading', { name: 'Already under way' })).toBeTruthy()
+    expect(client.lookElsewhere).toHaveBeenCalledWith({ projectId: expect.any(String) })
+    // Nothing taken: its button lets it be.
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /^Conductor/ }))
+    const go = screen.getByRole('button', { name: 'Bring in 1 worktree and 1 setup' })
+    await userEvent.click(go)
+    await waitFor(() =>
+      expect(client.bringIn).toHaveBeenCalledWith({
+        projectId: expect.any(String),
+        worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+        setups: ['setup:conductor:/m'],
+        conversations: [],
+        steps: [],
+      }),
+    )
+    // On to the next step at once.
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Already under way' })).toBeNull())
+  })
+
+  it('isn’t a step where other tools left nothing', async () => {
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => reading),
+    })
+    seenTheTour()
+    withServices(<Start />, client, fakeHost())
+    await toTheProject()
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
+    await screen.findByRole('list', { name: 'Repositories for the project' })
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    await waitFor(() => expect(client.lookElsewhere).toHaveBeenCalled())
+    // Straight on to where its code is.
+    expect(await screen.findByRole('heading', { name: 'Pull requests' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Already under way' })).toBeNull()
   })
 })

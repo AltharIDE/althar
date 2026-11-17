@@ -226,6 +226,46 @@ describe('a new project from a folder', () => {
     expect(client.prepareFolder).toHaveBeenCalledWith('grant_unborn', UNBORN.path)
   })
 
+  it('shows what other tools left in its folders, nothing taken, and brings in what was taken once it is made', async () => {
+    const lima = {
+      key: 'worktree:/Users/me/conductor/workspaces/tidepool/lima',
+      tool: 'conductor' as const,
+      repositoryId: '/Users/me/code/tidepool',
+      repository: 'tidepool',
+      path: '/Users/me/conductor/workspaces/tidepool/lima',
+      branch: 'feature/lima',
+      name: 'lima',
+      uncommitted: 1,
+      unpushed: 0,
+      ahead: 1,
+      pullRequest: null,
+      archived: false,
+      lastAt: null,
+      conversations: [],
+      taskId: null,
+    }
+    const { client, onCreated } = opened(
+      { lookElsewhere: vi.fn(async () => ({ worktrees: [lima], setups: [], conversations: [] })) },
+      { pickFolders: vi.fn(async () => ['grant_local']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    const found = await screen.findByRole('region', { name: 'Already under way' })
+    expect(client.lookElsewhere).toHaveBeenCalledWith({ grant: 'grant_local' })
+    await userEvent.click(within(found).getByRole('button', { name: /^Conductor/ }))
+    expect(await screen.findByText('Then bring in 1 worktree.')).toBeTruthy()
+    await create('Tidepool')
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(client.bringIn).toHaveBeenCalledWith({
+      projectId: onCreated.mock.calls[0]?.[0],
+      worktrees: [lima.key],
+      setups: [],
+      conversations: [],
+      steps: [],
+    })
+  })
+
   it('says a folder that is a project already, opens that project from there, and makes no second one', async () => {
     const { client, onOpen } = opened({}, { pickFolders: vi.fn(async () => ['grant_halyard']) })
     await named('Again')

@@ -903,13 +903,16 @@ export const handlers = apiLayer(
           }),
         ),
       ListProjects: () => api(queries.projects),
-      LookElsewhere: ({ projectId }) =>
+      LookElsewhere: ({ projectId, grant }) =>
         api(
-          Effect.map(elsewhere.look(projectId), (found) => ({
-            worktrees: [...found.worktrees],
-            setups: [...found.setups],
-            conversations: [...found.conversations],
-          })),
+          Effect.map(
+            grant !== undefined ? Effect.flatMap(folders.path(grant), (path) => elsewhere.lookIn(path)) : elsewhere.look(projectId ?? ''),
+            (found) => ({
+              worktrees: [...found.worktrees],
+              setups: [...found.setups],
+              conversations: [...found.conversations],
+            }),
+          ),
         ),
       BringIn: ({ commandId, projectId, worktrees, setups, conversations, steps }) =>
         once(

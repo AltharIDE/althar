@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { keys, LinkButton, modKey } from '@althar/ui'
+import { keys, LinkButton, modKey, OtherTools } from '@althar/ui'
 import { NewProject } from '@althar/ui/screens'
 
 import { useServices } from '../../data/services'
@@ -8,6 +8,8 @@ import { device, platform } from '../../shared/device'
 import { codeHostOf } from '../../shared/remotes'
 import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
+import { words as elsewhereWords } from '../elsewhere/tiles'
+import { useElsewhere } from '../elsewhere/useElsewhere'
 import type { DraftError } from './draft'
 import s from './NewProject.module.css'
 import { SetupSide } from './SetupSide'
@@ -85,11 +87,15 @@ export function NewProjectView({
   /** Escape: nothing is made, and the tab closes. */
   onClose: () => void
 }) {
-  const { host } = useServices()
+  const { host, client } = useServices()
   const [dropping, setDropping] = useState(false)
   const [opening, setOpening] = useState<Opening | null>(null)
   const { draft, setup } = model
+  // What other tools left in the folders chosen, read before the project is made and brought in once it is.
+  const grants = setup?.way === 'folder' ? [...new Set((draft?.folders ?? []).map((folder) => folder.grant))] : []
+  const elsewhere = useElsewhere(client, grants.length === 0 ? null : { grants })
   if (draft === null || setup === null) return null
+  const go = elsewhere.go
   const chooseFolder = () => void model.choose()
   return (
     <div
@@ -127,24 +133,42 @@ export function NewProjectView({
           setOpening(product === null ? 'all' : openingFor(connections?.list ?? null, product, host))
         }}
         side={
-          <SetupSide
-            setup={setup}
-            draft={draft}
-            creating={draft.creating}
-            onChoose={chooseFolder}
-            onLeaveOut={model.leaveOut}
-            onReplace={(path) => void model.replace(path)}
-            onStartFresh={() => void model.startFresh()}
-            onChooseCloneInto={() => void model.chooseCloneInto()}
-            onOpenProject={onOpen}
-            dropping={dropping}
-          />
+          <>
+            <SetupSide
+              setup={setup}
+              draft={draft}
+              creating={draft.creating}
+              onChoose={chooseFolder}
+              onLeaveOut={model.leaveOut}
+              onReplace={(path) => void model.replace(path)}
+              onStartFresh={() => void model.startFresh()}
+              onChooseCloneInto={() => void model.chooseCloneInto()}
+              onOpenProject={onOpen}
+              dropping={dropping}
+            />
+            {setup.way === 'folder' && elsewhere.tiles.length > 0 && (
+              <section className={s.elsewhere} aria-label={elsewhereWords.heading}>
+                <div className={s.elsewhereHead}>
+                  <h2 className={s.elsewhereTitle}>{elsewhereWords.heading}</h2>
+                  <p className={s.elsewhereLine}>{elsewhereWords.line}</p>
+                </div>
+                <OtherTools tiles={elsewhere.tiles} picked={elsewhere.picked} onPick={elsewhere.onPick} />
+              </section>
+            )}
+          </>
         }
-        {...(setup.footNote === null ? {} : { footNote: setup.footNote })}
+        {...(setup.footNote !== null
+          ? { footNote: setup.footNote }
+          : go === null || setup.way !== 'folder'
+            ? {}
+            : { footNote: elsewhereWords.andThen(go) })}
         // oxlint-disable-next-line althar/press-at-once -- A form the runtime and a code host check (a clone, a repository made there): it stays, each part ticking as it is done, until made, so a refusal lands in it.
         onCreate={() =>
           void model.create().then((made) => {
-            if (made !== null) onCreated(made.id)
+            if (made === null) return
+            // What was picked comes in behind the tab, which opens on the project at once: its board shows each as it comes.
+            if (setup.way === 'folder') void elsewhere.bring(made.id)
+            onCreated(made.id)
           })
         }
         onCancel={onClose}

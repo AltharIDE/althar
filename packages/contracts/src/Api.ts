@@ -4850,9 +4850,11 @@ const ProjectApi = RpcGroup.make(
    * (docs/decisions/workspaces-and-runs.md, "Bringing in other tools' work"):
    * their worktrees, the setups they keep, and Claude Code's and Codex's
    * conversations there, each with what it became where it was brought in
-   * already. Read only: nothing of another tool's changes.
+   * already. Read only: nothing of another tool's changes. Of a project, or
+   * of a folder the person chose (`grant`), before its project is made: the
+   * keys are the same, so what is picked there is brought in once it is.
    */
-  call('LookElsewhere', { projectId: Schema.String }, Elsewhere),
+  call('LookElsewhere', { projectId: Schema.optional(Schema.String), grant: Schema.optional(Schema.String) }, Elsewhere),
   /**
    * Brings in what the person picked, by the keys LookElsewhere gave: each
    * worktree as a task in place, its plan held on `steps` until they start

@@ -1,4 +1,4 @@
-import type { SearchDocuments } from '@althar/contracts'
+import type { BroughtIn, Elsewhere, SearchDocuments } from '@althar/contracts'
 import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
 
 import {
@@ -147,6 +147,16 @@ export interface Client {
   readonly listProjects: () => Promise<ProjectList>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
+  /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
+  readonly lookElsewhere: (at: { readonly projectId: string } | { readonly grant: string }) => Promise<Elsewhere>
+  /** Brings in what was picked of it, by its keys: worktrees as tasks held Up next on `steps`, setups, conversations. */
+  readonly bringIn: (input: {
+    readonly projectId: string
+    readonly worktrees: ReadonlyArray<string>
+    readonly setups: ReadonlyArray<string>
+    readonly conversations: ReadonlyArray<string>
+    readonly steps: ReadonlyArray<PlanStep>
+  }) => Promise<BroughtIn>
   /** Where a new repository named after `name` would go in the folder a grant names, read without making it; refused where it can't. */
   readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
   /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
@@ -881,6 +891,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    lookElsewhere: (at) => settle(api.LookElsewhere(at)),
+    bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
     makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
     prepareFolder: (grant, path) =>

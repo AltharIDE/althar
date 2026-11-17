@@ -10,7 +10,8 @@ import { Context, type Crypto, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from './Changes'
-import { RuntimeConfig } from './Config'
+import { Agents, RuntimeConfig } from './Config'
+import { suggestedCoordinator } from './coordinatorChoice'
 import { branchFor, ruleOf } from './conventions'
 import { type Message, transcriptOf } from './elsewhere/conversations'
 import { type FoundConversation, type FoundWorktree, lookAt } from './elsewhere/look'
@@ -22,6 +23,7 @@ import { Plans } from './Plans'
 import { freeSlug, Projects, slugify } from './Projects'
 import { fact, timestamp } from './records'
 import { indexTask } from './Search'
+import { SignIns } from './SignIns'
 
 /*
  * Bringing in other tools' work (docs/decisions/workspaces-and-runs.md,
@@ -117,13 +119,15 @@ export const taskTitleOf = (worktree: Pick<FoundWorktree, 'tool' | 'name' | 'bra
   return titleOfBranch(worktree.branch).slice(0, 120)
 }
 
-type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | RuntimeConfig
+type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | RuntimeConfig | Agents | SignIns
 
 export class Elsewhere extends Context.Service<
   Elsewhere,
   {
     /** What other tools left for a project's repositories on this computer, with what came in already. */
     look(projectId: string): Effect.Effect<Found, unknown>
+    /** What other tools left for the repositories at a folder, before it is a project: the same keys as `look` gives once it is. */
+    lookIn(path: string): Effect.Effect<Found, unknown>
     /** Brings in what the person picked, by the keys `look` gave: each on its own, what came in before found, never made twice. */
     bringIn(input: {
       readonly envelope: CommandEnvelope
@@ -176,23 +180,72 @@ export class Elsewhere extends Context.Service<
           return { project, bindings }
         })
 
+      /** What is Althar's own, never offered: its folders, whatever project they are a task's, and the sessions its agents ran. */
+      const knownOf = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const ours = new Set(
+          (yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE device_id = ${instance.deviceId} AND made_by IS NULL`).map(
+            (row) => real(row.path),
+          ),
+        )
+        const sessions = new Set(
+          (yield* sql<{
+            id: string
+          }>`SELECT DISTINCT external_session_id AS id FROM provider_sessions WHERE external_session_id IS NOT NULL`).map((row) => row.id),
+        )
+        return { ours: (path: string) => within(path, worktreeRoot) || ours.has(path), sessions }
+      })
+
+      /** What was found, as the window reads it: each thing with what it became where it was brought in already. */
+      const shaped = (
+        found: Effect.Success<ReturnType<typeof lookAt>>,
+        taskOf: (key: string) => string | null,
+        current: (setup: Effect.Success<ReturnType<typeof lookAt>>['setups'][number]) => boolean,
+      ): Found => ({
+        worktrees: found.worktrees.map((one): ElsewhereWorktree => ({
+          key: one.key,
+          tool: one.tool,
+          repositoryId: one.bindingId,
+          repository: one.repository,
+          path: one.path,
+          branch: one.branch,
+          name: one.name,
+          uncommitted: one.uncommitted,
+          unpushed: one.unpushed,
+          ahead: one.ahead,
+          pullRequest: one.pullRequest,
+          archived: one.archived,
+          lastAt: one.lastAt,
+          conversations: found.conversations.filter((said) => said.worktree === one.key).map((said) => said.key),
+          taskId: taskOf(one.key),
+        })),
+        setups: found.setups.map((one) => ({
+          key: one.key,
+          tool: one.tool,
+          repositoryId: one.bindingId,
+          repository: one.repository,
+          file: one.file,
+          commands: [...one.commands],
+          copy: [...one.copy],
+          current: current(one),
+        })),
+        conversations: found.conversations.map((one): ElsewhereConversation => ({
+          key: one.key,
+          agent: one.agent,
+          title: one.title,
+          startedAt: one.startedAt,
+          lastAt: one.lastAt,
+          prompts: one.prompts,
+          worktree: one.worktree,
+          taskId: taskOf(one.key),
+        })),
+      })
+
       const look = (projectId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { bindings } = yield* repositoriesOf(projectId)
-          // Althar's own folders, whatever project they are a task's, and the sessions its agents ran.
-          const ours = new Set(
-            (yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE device_id = ${instance.deviceId} AND made_by IS NULL`).map(
-              (row) => real(row.path),
-            ),
-          )
-          const sessions = new Set(
-            (yield* sql<{
-              id: string
-            }>`SELECT DISTINCT external_session_id AS id FROM provider_sessions WHERE external_session_id IS NOT NULL`).map(
-              (row) => row.id,
-            ),
-          )
+          const known = yield* knownOf
           const brought = new Map(
             (yield* sql<{ key: string; taskId: string | null }>`SELECT key, task_id FROM brought_in WHERE project_id = ${projectId}`).map(
               (row) => [row.key, row.taskId] as const,
@@ -201,7 +254,7 @@ export class Elsewhere extends Context.Service<
           const found = yield* lookAt(
             bindings.map((binding) => ({ bindingId: binding.id, name: binding.name, path: binding.path, defaultBranch: binding.base })),
             places,
-            { ours: (path) => within(path, worktreeRoot) || ours.has(path), sessions },
+            known,
           )
           const recordedOf = (bindingId: string) => {
             const raw = bindings.find((binding) => binding.id === bindingId)?.recorded ?? null
@@ -214,45 +267,11 @@ export class Elsewhere extends Context.Service<
               return null
             }
           }
-          return {
-            worktrees: found.worktrees.map((one): ElsewhereWorktree => ({
-              key: one.key,
-              tool: one.tool,
-              repositoryId: one.bindingId,
-              repository: one.repository,
-              path: one.path,
-              branch: one.branch,
-              name: one.name,
-              uncommitted: one.uncommitted,
-              unpushed: one.unpushed,
-              ahead: one.ahead,
-              pullRequest: one.pullRequest,
-              archived: one.archived,
-              lastAt: one.lastAt,
-              conversations: found.conversations.filter((said) => said.worktree === one.key).map((said) => said.key),
-              taskId: brought.get(one.key) ?? null,
-            })),
-            setups: found.setups.map((one) => ({
-              key: one.key,
-              tool: one.tool,
-              repositoryId: one.bindingId,
-              repository: one.repository,
-              file: one.file,
-              commands: [...one.commands],
-              copy: [...one.copy],
-              current: JSON.stringify(recordedOf(one.bindingId)) === JSON.stringify(one.commands),
-            })),
-            conversations: found.conversations.map((one): ElsewhereConversation => ({
-              key: one.key,
-              agent: one.agent,
-              title: one.title,
-              startedAt: one.startedAt,
-              lastAt: one.lastAt,
-              prompts: one.prompts,
-              worktree: one.worktree,
-              taskId: brought.get(one.key) ?? null,
-            })),
-          } satisfies Found
+          return shaped(
+            found,
+            (key) => brought.get(key) ?? null,
+            (one) => JSON.stringify(recordedOf(one.bindingId)) === JSON.stringify(one.commands),
+          )
         })
 
       /** An item in a thread, at the time it was said there: after what the thread has, in the order it is brought in. */
@@ -475,23 +494,18 @@ export class Elsewhere extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const { project, bindings } = yield* repositoriesOf(input.projectId)
           const actorId = input.envelope.actorId
+          // Planned on the lead the window chose; else the one the project's coordinator is on, which its plan card changes.
+          const suggested = input.steps.length > 0 ? null : yield* suggestedCoordinator(project.id).pipe(Effect.orElseSucceed(() => null))
+          const steps: ReadonlyArray<PlanStep> =
+            suggested === null
+              ? input.steps
+              : [{ key: 'implement', agentId: suggested.agentId, model: suggested.model, effort: suggested.effort, skipped: false }]
           // Read again now: what was listed may have moved on, and only what is there now comes in.
-          const ours = new Set(
-            (yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE device_id = ${instance.deviceId} AND made_by IS NULL`).map(
-              (row) => real(row.path),
-            ),
-          )
-          const sessions = new Set(
-            (yield* sql<{
-              id: string
-            }>`SELECT DISTINCT external_session_id AS id FROM provider_sessions WHERE external_session_id IS NOT NULL`).map(
-              (row) => row.id,
-            ),
-          )
+          const known = yield* knownOf
           const found = yield* lookAt(
             bindings.map((binding) => ({ bindingId: binding.id, name: binding.name, path: binding.path, defaultBranch: binding.base })),
             places,
-            { ours: (path) => within(path, worktreeRoot) || ours.has(path), sessions },
+            known,
           )
           const broughtTask = (key: string) =>
             Effect.map(
@@ -644,11 +658,11 @@ export class Elsewhere extends Context.Service<
                     }),
                 })
                 // Planned on the person's lead and reviewer, held: it waits Up next until they start it.
-                if (input.steps.length > 0)
+                if (steps.length > 0)
                   yield* plans.propose({
                     projectId: project.id,
                     taskId: created.taskId,
-                    steps: input.steps,
+                    steps,
                     reason: null,
                     actorId,
                     held: true,
@@ -745,8 +759,38 @@ export class Elsewhere extends Context.Service<
           return { tasks, asides, setups, histories, failed } satisfies BroughtIn
         })
 
+      /** A repository's default branch as this computer knows it, without the network: origin's, else main or master. */
+      const localDefault = (path: string) =>
+        git(path, 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD').pipe(
+          Effect.map((ref) => ref.replace(/^origin\//, '')),
+          Effect.catch(() => Effect.as(git(path, 'rev-parse', '--verify', '--quiet', 'refs/heads/main'), 'main')),
+          Effect.catch(() => Effect.as(git(path, 'rev-parse', '--verify', '--quiet', 'refs/heads/master'), 'master')),
+          Effect.orElseSucceed(() => null),
+        )
+
+      const lookIn = (path: string) =>
+        Effect.gen(function* () {
+          const reading = yield* projects.read(path)
+          const repositories = yield* Effect.forEach(reading.repositories, (found) =>
+            Effect.map(localDefault(found.path), (base) => ({
+              bindingId: real(found.path),
+              name: found.name,
+              path: found.path,
+              defaultBranch: base,
+            })),
+          )
+          const known = yield* knownOf
+          const found = yield* lookAt(repositories, places, known)
+          return shaped(
+            found,
+            () => null,
+            () => false,
+          )
+        })
+
       return Elsewhere.of({
         look: (projectId) => run(look(projectId)),
+        lookIn: (path) => run(lookIn(path)),
         bringIn: (input) => run(bringIn(input)),
       })
     }),

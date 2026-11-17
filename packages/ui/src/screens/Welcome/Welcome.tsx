@@ -40,6 +40,7 @@ import s from './Welcome.module.css'
  * Then the setup, one thing a step: the agents on this computer, signed in
  * or not, with the one thing each needs, and those it could have; the first
  * project, of a folder chosen or the repositories found, found by typing;
+ * what other tools left in its folders, to bring in, where they left anything;
  * where its code is, for pull requests; and a tracker, for issues. Only the
  * project is needed: a project can be made with no agent ready, and the code
  * host and the tracker can wait. The project is made on its step, so the
@@ -51,7 +52,7 @@ import s from './Welcome.module.css'
  * or `still`, every scene arrives finished.
  */
 
-/** Where the welcome is: the tour's four pages, then the setup's four steps. */
+/** Where the welcome is: the tour's four pages, then the setup's steps, bringing in other tools' work only where it found some. */
 export type WelcomeStep = 'projects' | 'coordinator' | 'makers' | 'review' | 'agents' | 'project' | 'bring' | 'code' | 'issues'
 
 type TourStep = 'projects' | 'coordinator' | 'makers' | 'review'
