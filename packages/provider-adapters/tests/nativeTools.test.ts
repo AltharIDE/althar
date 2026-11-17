@@ -191,23 +191,38 @@ describe('Althar’s native tools', () => {
     }
   })
 
-  it('owns a stdio MCP process for its whole lifetime', async () => {
+  it('owns a stdio MCP process for its whole lifetime and keeps it in its session’s worker allocation', async () => {
     const cwd = await folder()
     const script = join(cwd, 'server.cjs')
     const pidFile = join(cwd, 'server.pid')
+    const envFile = join(cwd, 'server-env.json')
     await writeFile(
       script,
-      `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); let input = ''; process.stdin.on('data', chunk => { input += chunk; let at; while ((at = input.indexOf('\\n')) >= 0) { const line = input.slice(0, at); input = input.slice(at + 1); const value = JSON.parse(line); if (value.id === undefined) continue; const result = (${mcpAnswer.toString()})(value.method); process.stdout.write(JSON.stringify({jsonrpc:'2.0', id:value.id, result}) + '\\n'); } });`,
+      `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); fs.writeFileSync(${JSON.stringify(envFile)}, JSON.stringify({worker:process.env.ALTHAR_WORKER,work:process.env.ALTHAR_WORK,configured:process.env.MCP_CONFIGURED,unrelated:process.env.SESSION_ONLY})); let input = ''; process.stdin.on('data', chunk => { input += chunk; let at; while ((at = input.indexOf('\\n')) >= 0) { const line = input.slice(0, at); input = input.slice(at + 1); const value = JSON.parse(line); if (value.id === undefined) continue; const result = (${mcpAnswer.toString()})(value.method); process.stdout.write(JSON.stringify({jsonrpc:'2.0', id:value.id, result}) + '\\n'); } });`,
     )
     const controller = new AbortController()
     const mcp = await nativeMcp(
-      [{ type: 'stdio', name: 'fixture', command: process.execPath, args: [script], env: {} }],
+      [
+        {
+          type: 'stdio',
+          name: 'fixture',
+          command: process.execPath,
+          args: [script],
+          env: { MCP_CONFIGURED: 'kept', ALTHAR_WORKER: 'old' },
+        },
+      ],
       cwd,
       controller.signal,
+      undefined,
+      { ALTHAR_WORKER: 'native-session', ALTHAR_WORK: 'work-marker', SESSION_ONLY: 'not-for-server' },
     )
     const pid = Number(await readFile(pidFile, 'utf8'))
-    expect(await mcp.tools[0]?.run({}, signal())).toMatchObject({ text: 'Picture of the page.' })
-    await mcp.close()
+    try {
+      expect(JSON.parse(await readFile(envFile, 'utf8'))).toEqual({ worker: 'native-session', work: 'work-marker', configured: 'kept' })
+      expect(await mcp.tools[0]?.run({}, signal())).toMatchObject({ text: 'Picture of the page.' })
+    } finally {
+      await mcp.close()
+    }
     await waitFor(() => {
       try {
         process.kill(pid, 0)

@@ -7,7 +7,14 @@ on:
       - 'packages/provider-adapters/src/process*'
       - 'packages/provider-adapters/src/resourceGroups.ts'
       - 'packages/provider-adapters/src/keeper.ts'
+      - 'packages/provider-adapters/src/native/tools.ts'
       - 'packages/provider-adapters/tests/resource*'
+      - 'packages/provider-adapters/tests/process*'
+      - 'packages/provider-adapters/tests/keeper.test.ts'
+      - 'packages/provider-adapters/tests/nativeTools.test.ts'
+      - 'packages/runtime/src/resourcePressure.ts'
+      - 'packages/runtime/src/machine.ts'
+      - 'packages/runtime/tests/resourcePressure.test.ts'
       - '.github/workflows/resource-controls.yml'
 
 permissions:
@@ -55,7 +62,7 @@ jobs:
           if [ -n "${ALTHAR_TEST_CGROUP_ROOT:-}" ]; then
             echo "$$" | sudo tee "$ALTHAR_TEST_CGROUP_ROOT/control/cgroup.procs" >/dev/null
           fi
-          bun run test tests/resourceGroups.test.ts tests/resourceScheduling.test.ts tests/process.test.ts tests/processTrees.test.ts tests/keeper.test.ts --maxWorkers=1
+          bun run test tests/resourceGroups.test.ts tests/resourceScheduling.test.ts tests/process.test.ts tests/processTrees.test.ts tests/keeper.test.ts tests/nativeTools.test.ts --maxWorkers=1
       - name: Measure CPU sharing with competing process families
         if: runner.os == 'Linux'
         run: |
