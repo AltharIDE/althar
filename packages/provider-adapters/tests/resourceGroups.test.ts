@@ -167,6 +167,19 @@ const here = mkdtempSync(join(tmpdir(), 'althar-resource-launch-'))
 
 describe('optional Unix scheduling', () => {
   for (const platform of ['linux', 'darwin'] as const) {
+    it.live.skipIf(process.platform === 'win32')(`keeps missing-command start failures with ${platform} scheduling`, () =>
+      Effect.gen(function* () {
+        const trees = scheduledUnixTrees(platform, {
+          acquire: async () => {
+            throw new Error('No allocation should be acquired for a missing command')
+          },
+        })
+        for (const command of ['althar-resource-no-such-command', '/definitely/missing/althar-worker', '.']) {
+          const result = yield* Effect.scoped(spawnOwned({ command, args: [] }, here, { background: true, trees })).pipe(Effect.exit)
+          assert.isTrue(Exit.isFailure(result), command)
+        }
+      }),
+    )
     it.live.skipIf(process.platform === 'win32')(
       `preserves arguments, PID, stdin and protocol output with ${platform} scheduling and failed optional controls`,
       () =>

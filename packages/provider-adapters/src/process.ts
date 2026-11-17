@@ -201,7 +201,11 @@ export const spawnOwned = (
         const launched = spec.onDevice === undefined ? spec : spec.onDevice({ cwd, env: inherited })
         const env = launched === spec ? inherited : childEnvironment(launched)
         const launch = yield* trees
-          .launch(launched.command, launched.args, options.background === true ? { background: true, owner: workerOwner(env) } : {})
+          .launch(
+            launched.command,
+            launched.args,
+            options.background === true ? { background: true, owner: workerOwner(env), cwd, path: env.PATH ?? '/usr/bin:/bin' } : {},
+          )
           .pipe(
             Effect.mapError((reason) => new AgentStartFailed({ command: launched.command, reason })),
             Effect.tapError(() => removeTemp(temp?.folder)),

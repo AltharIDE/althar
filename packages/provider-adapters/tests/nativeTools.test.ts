@@ -1,6 +1,6 @@
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { mkdtemp, readFile, readdir, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -11,7 +11,7 @@ import { nativeCommand, nativeMcp, nativePath, nativeTools } from '../src/native
 
 const folders: string[] = []
 const folder = async () => {
-  const path = await mkdtemp(join(tmpdir(), 'althar-native-tools-'))
+  const path = await realpath(await mkdtemp(join(tmpdir(), 'althar-native-tools-')))
   folders.push(path)
   return path
 }

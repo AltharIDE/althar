@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { win32 } from 'node:path'
+import { constants, existsSync } from 'node:fs'
+import { access, stat } from 'node:fs/promises'
+import { resolve, win32 } from 'node:path'
 
 import { Clock, Duration, Effect } from 'effect'
 
@@ -37,6 +38,9 @@ export interface TreeOptions {
   readonly background?: boolean
   /** A launcher-owned key shared by every command of the worker. */
   readonly owner?: string
+  /** The original command's lookup context, before an optional shell wrapper is introduced. */
+  readonly cwd?: string
+  readonly path?: string
 }
 
 export interface ProcessTrees {
@@ -179,12 +183,29 @@ export const windowsTrees = (dependencies: WindowsDependencies = windowsDependen
     ),
 })
 
+const unixStartable = async (command: string, options: TreeOptions) => {
+  const cwd = options.cwd ?? process.cwd()
+  const candidates = command.includes('/')
+    ? [resolve(cwd, command)]
+    : (options.path ?? process.env.PATH ?? '/usr/bin:/bin').split(':').map((directory) => resolve(cwd, directory, command))
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.X_OK)
+      if ((await stat(candidate)).isFile()) return true
+    } catch {
+      // Let the original spawn report a missing or inaccessible command rather than successfully spawning its wrapper.
+    }
+  }
+  return false
+}
+
 /** Wrap only background work. Shell exec preserves PID, process group, arguments and protocol streams. */
 export const scheduledUnixTrees = (platform: NodeJS.Platform, groups: ResourceGroups = linuxGroups()): ProcessTrees => ({
   ...unixTrees,
   launch: (command, args, options) =>
     Effect.gen(function* () {
       if (options?.background !== true) return yield* unixTrees.launch(command, args)
+      if (!(yield* Effect.promise(() => unixStartable(command, options)))) return yield* unixTrees.launch(command, args)
       if (platform === 'darwin')
         return {
           command: '/bin/sh',
