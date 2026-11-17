@@ -32,23 +32,25 @@ const shots = [
   ['d-4-dropped', `d=d&${home}&conn=dropped`],
   ['c-6-checked-narrow', 'd=c&at=home&open=checked&narrow=1', [], 880],
   // The chip's Manage homes, three ways
-  ['m-1-rows', 'd=a&m=1&w=hetzner&open=manage&pick=hetzner'],
-  ['m-1-rows-many', 'd=a&m=1&open=manage&many=1&pick=studio'],
-  ['m-2-panes', 'd=a&m=2&w=hetzner&open=manage'],
+  ['m-1-sigils', 'd=a&m=1&w=hetzner&open=manage&many=1'],
+  ['m-1-passport', 'd=a&m=1&w=hetzner&open=manage&pick=studio'],
   [
-    'm-2-panes-other-home',
-    'd=a&m=2&w=hetzner&open=manage',
+    'm-1-other-home',
+    'd=a&m=1&w=hetzner&open=manage&pick=hetzner',
     ['click:[role=dialog] input[spellcheck=false]', 'ControlOrMeta+KeyA', 'type:hetzner-02', 'Enter'],
   ],
-  ['m-2-panes-many-narrow', 'd=a&m=2&open=manage&many=1&narrow=1', [], 880],
-  ['m-3-menu', 'd=a&m=3&open=manage&many=1'],
-  ['m-3-menu-open', 'd=a&m=3&open=manage', ['click:[role=dialog] li:nth-child(2) button[aria-label$="more"]']],
   [
-    'm-3-forgot',
-    'd=a&m=3&open=manage&many=1',
-    ['click:[role=dialog] li:nth-child(2) button[aria-label$="more"]', 'click:[role=menuitem]:has-text("Forget")'],
+    'm-1-same-home',
+    'd=a&m=1&w=hetzner&open=manage&pick=hetzner',
+    ['click:[role=dialog] input[spellcheck=false]', 'ControlOrMeta+KeyA', 'type:root@hetzner-01.example.com', 'Enter'],
   ],
-  ['m-3-edit', 'd=a&m=3&open=manage&pick=studio'],
+  ['m-2-orbit', 'd=a&m=2&w=hetzner&open=manage&many=1'],
+  ['m-2-picked', 'd=a&m=2&w=hetzner&open=manage&many=1&pick=studio'],
+  ['m-2-dropped', 'd=a&m=2&w=hetzner', ['KeyX', 'Digit2']],
+  ['m-2-narrow', 'd=a&m=2&w=hetzner&open=manage&many=1&pick=hetzner&narrow=1', [], 880],
+  ['m-3-keycards', 'd=a&m=3&w=hetzner&open=manage&many=1'],
+  ['m-3-turned', 'd=a&m=3&w=hetzner&open=manage&pick=studio'],
+  ['m-3-narrow', 'd=a&m=3&w=hetzner&open=manage&many=1&narrow=1', [], 880],
 ]
 const dark = [
   '0-2-remote',
@@ -61,9 +63,11 @@ const dark = [
   'd-1-palette',
   'd-3-remote',
   'd-4-dropped',
-  'm-1-rows',
-  'm-2-panes',
-  'm-3-menu-open',
+  'm-1-sigils',
+  'm-1-other-home',
+  'm-2-picked',
+  'm-3-keycards',
+  'm-3-turned',
 ]
 const only = process.argv.slice(2)
 const all = [

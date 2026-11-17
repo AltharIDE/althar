@@ -35,9 +35,9 @@ import {
   useWindowHome,
   Working,
 } from './parts'
-import { MenuManage } from './manage/three'
-import { PanesManage } from './manage/two'
-import { RowsManage } from './manage/one'
+import { SigilManage } from './manage/one'
+import { CardsManage } from './manage/three'
+import { OrbitManage } from './manage/two'
 import { store, useShowHomes } from './store'
 import type { DirectionParts } from './types'
 import s from './a.module.css'
@@ -299,7 +299,7 @@ export function Manage({
   )
 }
 
-const MANAGES = { '1': RowsManage, '2': PanesManage, '3': MenuManage }
+const MANAGES = { '1': SigilManage, '2': OrbitManage, '3': CardsManage }
 
 function Overlays({ windowId }: { windowId: string }) {
   const { dialog } = ui.use()

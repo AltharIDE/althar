@@ -53,3 +53,73 @@
   justify-content: flex-end;
   gap: 6px;
 }
+
+/* a home's sigil: its identity, drawn in its colour on a wash of it */
+.sigil {
+  display: inline-grid;
+  flex: none;
+  place-items: stretch;
+  border-radius: 24%;
+  background: color-mix(in oklab, var(--ink) 14%, var(--paper));
+  color: var(--ink);
+}
+.sigil svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+.sigilEmpty {
+  background: none;
+  border: 1.5px dashed var(--line-3);
+}
+
+/* a home's liveness: green and breathing while its window is connected */
+.dot {
+  position: relative;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--t-4);
+}
+.dot[data-state='rest'] {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--t-4);
+}
+.dot[data-state='live'] {
+  background: var(--ok);
+}
+.dot[data-state='down'] {
+  background: var(--danger);
+}
+.dot[data-state='connecting'] {
+  background: var(--signal);
+}
+.dot[data-state='live']::after,
+.dot[data-state='connecting']::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  content: '';
+  animation: breathe 2.4s var(--ease-out) infinite;
+}
+.dot[data-state='connecting']::after {
+  animation-duration: 1s;
+}
+@keyframes breathe {
+  from {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot::after {
+    display: none;
+  }
+}

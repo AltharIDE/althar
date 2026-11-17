@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { type CSSProperties, useEffect, useId, useRef, useState } from 'react'
 import { Button, Caret, CopyButton, Disclosure, DisclosureTrigger, Field, Fold, Icon, Problem } from '@althar/ui'
 
 import type { HomesHost, SshHomeTarget } from '../../../../src/homes'
@@ -14,6 +14,77 @@ import s from './shared.module.css'
  * kept only where the host still has the same home; and the few words that
  * say where each home stands.
  */
+
+const MARKS = ['teal', 'clay', 'indigo', 'moss', 'ochre', 'plum', 'rose', 'slate', 'olive', 'brick'] as const
+const nibbles = (homeId: string) => [...homeId.replace(/^home_/, '')].map((char) => Number.parseInt(char, 16) || 0)
+
+/** A home's colour, from its identity: the same home is the same colour, whichever host reaches it. */
+export const inkOf = (homeId: string) => {
+  const [a = 0, b = 0] = nibbles(homeId).slice(25, 27)
+  return `var(--mark-${MARKS[(a * 16 + b) % MARKS.length]})`
+}
+export const inked = (homeId: string) => ({ '--ink': inkOf(homeId) }) as CSSProperties
+
+/**
+ * A home's sigil: its identity drawn, a mirrored four-by-four of quarter
+ * circles, dots and squares read off the home's id. The same home draws the
+ * same sigil from any host; another home draws another, so checking a host
+ * is a picture to compare, not 32 letters.
+ */
+export function Sigil({
+  homeId,
+  size = 40,
+  className,
+  style: more,
+}: {
+  homeId: string | null
+  size?: number
+  className?: string
+  style?: CSSProperties
+}) {
+  const style = { ...(homeId === null ? {} : inked(homeId)), width: size, height: size, ...more }
+  if (homeId === null) return <span className={`${s.sigil} ${s.sigilEmpty} ${className ?? ''}`} style={style} aria-hidden="true" />
+  const n = nibbles(homeId)
+  const cell = 24
+  const shapes = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+    const v = n[i] ?? 0
+    const x = (i % 2) * cell
+    const y = Math.floor(i / 2) * cell
+    if (v < 7) {
+      // a quarter circle, its square corner in one of the cell's four
+      const corner = v % 4
+      const cx = corner === 1 || corner === 2 ? x + cell : x
+      const cy = corner >= 2 ? y + cell : y
+      const dx = cx === x ? cell : -cell
+      const dy = cy === y ? cell : -cell
+      const sweep = dx * dy > 0 ? 1 : 0
+      return <path key={i} d={`M${cx} ${cy}h${dx}A${cell} ${cell} 0 0 ${sweep} ${cx} ${cy + dy}Z`} />
+    }
+    if (v < 9) return <circle key={i} cx={x + cell / 2} cy={y + cell / 2} r={cell * 0.3} />
+    if (v < 10) return <rect key={i} x={x + 3} y={y + 3} width={cell - 6} height={cell - 6} rx={3} />
+    return null
+  })
+  return (
+    <span className={`${s.sigil} ${className ?? ''}`} style={style} aria-hidden="true">
+      <svg viewBox="-14 -14 124 124">
+        <g>{shapes}</g>
+        <g transform="translate(96 0) scale(-1 1)">{shapes}</g>
+      </svg>
+    </span>
+  )
+}
+
+/** How a home's connection stands, as a dot: live (breathing), dropped, on its way, or resting. */
+export type Liveness = 'live' | 'down' | 'connecting' | 'rest'
+export const useLiveness = (home: LabHome): Liveness => {
+  useWorld()
+  if (!isOpen(home.id)) return 'rest'
+  const { connection } = stateOf(home.id)
+  return connection === 'disconnected' ? 'down' : connection === 'connecting' ? 'connecting' : 'live'
+}
+export function LiveDot({ state, className }: { state: Liveness; className?: string }) {
+  return <span className={`${s.dot} ${className ?? ''}`} data-state={state} aria-hidden="true" />
+}
 
 /** What each Manage dialog is given: the window's homes, which window it is, and the ways out. */
 export interface ManageProps {
@@ -231,12 +302,15 @@ export function ConnectionFields({
   home,
   optionsOpen,
   actions = true,
+  results = true,
 }: {
   edit: Editing
   home: LabHome
   optionsOpen?: boolean
   /** Its Cancel and Check and save, under it; or the dialog's own, in its foot. */
   actions?: boolean
+  /** What the check found (another home, or the same one kept), here; or the dialog's own way of showing it. */
+  results?: boolean
 }) {
   const id = useId()
   const { form } = edit
@@ -274,7 +348,7 @@ export function ConnectionFields({
       {edit.checking && <Working>{`Checking ${host}…`}</Working>}
       {form.phase === 'refused' && form.problem !== null && <Refusal problem={form.problem} />}
       {edit.problem !== null && <Refusal problem={edit.problem} />}
-      {edit.other !== null && (
+      {results && edit.other !== null && (
         <Problem
           size="small"
           action={
@@ -286,7 +360,7 @@ export function ConnectionFields({
           {`${host} has a different home. ${home.name} stays on ${home.ssh.target}.`}
         </Problem>
       )}
-      {edit.kept && !edit.dirty && (
+      {results && edit.kept && !edit.dirty && (
         <span className={s.kept} role="status">
           <Icon name="check" size={13} />
           Same home as before
