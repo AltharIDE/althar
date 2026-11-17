@@ -11,6 +11,7 @@ describe('toolWordsOf', () => {
     expect(toolWordsOf('althar.list_tasks')).toBe('List the tasks')
     expect(toolWordsOf('althar_list_tasks', 'running')).toBe('Listing the tasks')
     expect(plainTitle('althar_propose_plan')).toBe('Plan the task')
+    expect(toolWordsOf('mcp__althar__wait_for_tasks', 'done')).toBe('Set what the task waits for')
   })
 
   it('says another server’s tool from its own name', () => {

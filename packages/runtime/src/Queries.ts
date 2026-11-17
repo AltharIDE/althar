@@ -36,6 +36,7 @@ import {
   type ProjectList,
   type StuckStep,
   type TaskCard,
+  type BlockerStanding,
   type TaskList,
   type TaskSummary,
   type CodeFound,
@@ -58,7 +59,9 @@ import {
   type TaskLineComments,
   type LineComment,
   waitingIn,
+  blockerAbandoned,
   plainTitle,
+  shipsToOpen,
   toolPhrase,
 } from '@althar/contracts'
 import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema } from 'effect'
@@ -67,6 +70,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { Ledger } from '@althar/persistence-sqlite'
 import { Busy, type Line } from './Busy'
 import { taskOfChange } from './taskOf'
+import { unstartedIn } from './waits'
 import { markOf, openItem, viewOf } from './chatView'
 import { ModelFacts } from './ModelFacts'
 import { PlanUsage } from './PlanUsage'
@@ -91,6 +95,7 @@ import { type KeptLineComment, keepLineComments, keptIn, lineCommentsOf, sentOf 
 import { filesOf, outputOf, picturesOf } from './handed'
 import { handedOf, issueCardsWaiting, issueChangesWaiting, issueDraftsWaiting, kindOf } from './kinds'
 import { reviewOfferOf } from './reviewOffer'
+import { shipUnderWayOf, taskShipRoute } from './shipRoute'
 import { repliedAt } from './replied'
 import { BETWEEN_AGENTS_MS, betweenAgents, byItself, DRAFTING_MS, isMergeable, stillAsked, stillDrafting } from './needsYou'
 import { mergeNeedsOf, withPushed } from './mergeNeeds'
@@ -145,6 +150,31 @@ const CARDS_GATHER = Duration.millis(50)
 
 /** How many changes are read at once as the cards they moved are found. */
 const CARD_CHANGES = 1000
+/** How many changed tasks are looked up at once for the tasks they wait for, or that wait for them. */
+const WAITS_BATCH = 500
+
+/**
+ * How a task another waits for stands, from its card (waits.ts): before its lead starts, under way (in review once its pull
+ * request is open), stuck where it waits on the person or stopped, and in review once it is the person's to merge.
+ */
+export const blockerStands = (card: Pick<TaskCard, 'phase' | 'change'>): BlockerStanding => {
+  switch (card.phase) {
+    case 'drafting':
+    case 'planned':
+    case 'held':
+      return 'planned'
+    case 'running':
+      return card.change?.state === 'open' ? 'review' : 'working'
+    case 'waiting':
+    case 'stopped':
+      return 'stuck'
+    case 'ready':
+    case 'kept':
+      return 'review'
+    case 'settled':
+      return 'merged'
+  }
+}
 
 /** How many of its steps' reports a thread reads beside its page, newest first: far more than a task's rounds have. */
 const REPORTS = 200
@@ -2243,6 +2273,40 @@ export class Queries extends Context.Service<
         })
 
       /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. Its links, where they are read already. */
+      /** A task's card as one waiting for it reads it, or none where it can't be read: how it stands, nothing of what it waits for. */
+      const shallowCard = (taskId: string): Effect.Effect<TaskCard | undefined, never, Store> =>
+        cardFor(taskId, undefined, true).pipe(Effect.orElseSucceed(() => undefined))
+      /** The tasks it waits for, in the order named, each with how it stands: its card's `waitsFor`, absent where none. */
+      const blockersFor = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ taskId: string; slug: string; title: string; threadId: string; state: string }>`
+            SELECT b.id AS task_id, b.slug, b.title, t.id AS thread_id,
+              CASE WHEN w.cleared_at IS NULL THEN b.state ELSE 'done' END AS state FROM task_waits w
+            JOIN tasks b ON b.id = w.on_task_id JOIN threads t ON t.task_id = b.id AND t.kind = 'task'
+            WHERE w.task_id = ${taskId} ORDER BY w.created_at, w.rowid`
+          if (rows.length === 0) return {}
+          const waitsFor = yield* Effect.forEach(rows, ({ state, ...blocker }) =>
+            Effect.gen(function* () {
+              if (state === 'done') return { ...blocker, stands: 'merged' as const }
+              if (state === 'abandoned') return { ...blocker, stands: 'abandoned' as const }
+              const card = yield* shallowCard(blocker.taskId)
+              return { ...blocker, stands: card === undefined ? ('planned' as const) : blockerStands(card) }
+            }),
+          )
+          return { waitsFor }
+        })
+      /** The open tasks that wait for it, before they start: its card's `waitedBy`, absent where none. */
+      const waitersOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const waitedBy = yield* sql<{ taskId: string; slug: string; title: string; threadId: string }>`
+            SELECT k.id AS task_id, k.slug, k.title, t.id AS thread_id FROM task_waits w
+            JOIN tasks k ON k.id = w.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE w.on_task_id = ${taskId} AND w.cleared_at IS NULL AND k.state IN ('draft', 'open') AND ${sql.unsafe(unstartedIn('k'))}
+            ORDER BY w.created_at, w.rowid`
+          return waitedBy.length === 0 ? {} : { waitedBy }
+        })
       const cardFor = (
         taskId: string,
         links?: {
@@ -2250,6 +2314,8 @@ export class Queries extends Context.Service<
           readonly issueConnection: string | null
           readonly changes: ReadonlyArray<ChangeSummary>
         },
+        /** Read only for how it stands, as a task waiting for it says: without what it waits for in turn. */
+        shallow = false,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -2283,6 +2349,7 @@ export class Queries extends Context.Service<
             runAt: string | null
             attemptAt: string | null
             step: string | null
+            shipAt: string | null
             waiting: number
             issueDrafts: number
             issueChanges: number
@@ -2317,6 +2384,8 @@ export class Queries extends Context.Service<
               (SELECT max(started_at) FROM run_attempts WHERE run_id = r.id) AS attempt_at,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
+              -- Its Ship's stop past its push, kept on its run as it gets there.
+              CASE WHEN r.state = 'running' THEN json_extract(r.parameters, '$.ships.at') END AS ship_at,
               -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
               (SELECT a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state = 'held' ORDER BY a.admitted_at DESC LIMIT 1) AS held,
@@ -2814,6 +2883,7 @@ export class Queries extends Context.Service<
                         : asked
                           ? 'implement'
                           : goes),
+            ...(task.step === 'publish' && (task.shipAt === 'ready' || task.shipAt === 'merge') ? { shipAt: task.shipAt } : {}),
             followUp: (task.runState === 'running' && task.runPlan === null) || asked,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: team?.current?.agentId ?? task.lead ?? (implement?.agentId || null),
@@ -2843,6 +2913,9 @@ export class Queries extends Context.Service<
                     error: externalWait.error,
                   },
                 }),
+            // What it waits for, before it starts (waits.ts), and what waits for it.
+            ...(shallow || task.runState !== null || task.state === 'done' || task.state === 'abandoned' ? {} : yield* blockersFor(taskId)),
+            ...(shallow ? {} : yield* waitersOf(taskId)),
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow(taskId) : null,
             // Its plan's first step waits for a place, or Local for its checkout, nothing of it begun: its plan can still change.
@@ -3137,11 +3210,14 @@ export class Queries extends Context.Service<
 
       /** The phases the home shows a task in: running, stopped or waiting on a call, and ready to accept. */
       const ON_HOME: ReadonlyArray<TaskPhase> = ['running', 'waiting', 'stopped', 'ready']
+      /** Whether the home shows a task: in a phase `ON_HOME` has, or a plan waiting for a task that was abandoned, the person's. */
+      const onHome = (task: Pick<BoardSnapshot['tasks'][number], 'phase' | 'waitsFor'>) =>
+        ON_HOME.includes(task.phase) || blockerAbandoned(task)
 
       /**
        * The tasks the home shows, across every project, as their cards on
        * the board say them: open ones, and the merged ones a board still
-       * shows, which can be ready again; each in a phase `ON_HOME` has. What
+       * shows, which can be ready again; each the home shows (`onHome`). What
        * the home, the edge, the Dock's badge and the notifications count is
        * read from these, so none can say a task waits where its card doesn't.
        */
@@ -3162,7 +3238,7 @@ export class Queries extends Context.Service<
             Effect.map(onBoard(row), (read) =>
               read.flatMap((task) =>
                 // A task kept for later waits on its board, not here.
-                ON_HOME.includes(task.phase) ? [{ ...task, projectId: row.projectId }] : [],
+                onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
               ),
             ),
           { concurrency: AT_ONCE },
@@ -3868,6 +3944,34 @@ export class Queries extends Context.Service<
             FROM workspaces w
             WHERE w.task_id = ${head.taskId} AND w.access = 'write' AND w.reviewing IS NULL AND w.state IN ('ready', 'away')
             ORDER BY w.created_at, w.rowid`
+          // The route its Ship takes when pressed without one, while something waits for Ship (held, or commits for a pull request
+          // still to open, as the card reads it): the same the press takes (shipRoute.ts).
+          const toShip =
+            card?.held !== undefined ||
+            shipsToOpen({
+              end: card?.plan?.end ?? null,
+              open: false,
+              commits: links.changes.length === 0 ? said.commits : (card?.unshipped?.commits ?? 0),
+            })
+          const shipRoute = toShip
+            ? yield* taskShipRoute(yield* Changes, head.taskId).pipe(Effect.orElseSucceed(() => undefined))
+            : undefined
+          // Its Ship under way: the route, as changed since, and the stop it is at. One whose step waits for the person (a push
+          // that failed, to try again) isn't: it does nothing until they answer, and its card says so, not a stop it is at.
+          const [shipRun] = yield* sql<{ parameters: string; step: string | null; stepState: string | null }>`
+            SELECT r.parameters,
+              (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = e.id
+                AND a.state IN ('admitted', 'running', 'held', 'waiting_attention') ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1) AS step,
+              (SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.execution_id = e.id
+                AND a.state IN ('admitted', 'running', 'held', 'waiting_attention') ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1)
+                AS step_state
+            FROM runs r JOIN workflow_executions e ON e.run_id = r.id
+            WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
+              AND r.state = 'running' AND json_type(r.parameters, '$.ships') = 'object'`
+          const shipping =
+            shipRun === undefined || shipRun.stepState === 'waiting_attention'
+              ? undefined
+              : shipUnderWayOf(shipRun.parameters, shipRun.step)
           // Several changes, by name: one in several repositories is one change, with its row there as it was.
           const severalChanges = new Set(lineRows.map((row) => row.name ?? '')).size > 1
           const waitingLines = !severalChanges
@@ -3935,6 +4039,8 @@ export class Queries extends Context.Service<
                     },
                   }),
               ...(card?.waitsForCheckout == null ? {} : { waitsForCheckout: card.waitsForCheckout }),
+              ...(card?.waitsFor === undefined ? {} : { waitsFor: card.waitsFor }),
+              ...(card?.waitedBy === undefined ? {} : { waitedBy: card.waitedBy }),
               ...(card?.toward === undefined ? {} : { toward: card.toward }),
               ...(folder === undefined ? {} : { folder }),
               baseRef: head.baseRef,
@@ -3995,6 +4101,8 @@ export class Queries extends Context.Service<
                 ? { nothingBuilt: true }
                 : {}),
               skipReview: (reviewing?.left ?? 0) > 0 && card?.step !== 'publish',
+              ...(shipRoute === undefined ? {} : { shipRoute }),
+              ...(shipping === undefined ? {} : { shipping }),
               // Begun, of its own work, not merged, and ending with no pull request: Make it a change gives it both at once.
               ...(card?.plan != null &&
               card.reviewing == null &&
@@ -4205,7 +4313,7 @@ export class Queries extends Context.Service<
       const primed = yield* Deferred.make<void>()
       const keep = (taskId: string, projectId: string, read: ReadonlyArray<BoardSnapshot['tasks'][number]>) => {
         const [card] = read
-        if (card !== undefined && ON_HOME.includes(card.phase)) standing.set(taskId, { ...card, projectId })
+        if (card !== undefined && onHome(card)) standing.set(taskId, { ...card, projectId })
         else standing.delete(taskId)
       }
       const waiting = Effect.gen(function* () {
@@ -4264,6 +4372,16 @@ export class Queries extends Context.Service<
               else projects.add(row.projectId)
             at = rows.at(-1)?.cursor ?? at
             if (rows.length < CARD_CHANGES) break
+          }
+          // A task's card says how the tasks it waits for stand, and which wait for it (waits.ts): theirs are read again too.
+          const changed = [...tasks.keys()]
+          for (let from = 0; from < changed.length; from += WAITS_BATCH) {
+            const some = changed.slice(from, from + WAITS_BATCH)
+            const linked = yield* sql<{ id: string; projectId: string }>`
+              SELECT w.task_id AS id, k.project_id FROM task_waits w JOIN tasks k ON k.id = w.task_id WHERE ${sql.in('w.on_task_id', some)}
+              UNION SELECT w.on_task_id AS id, k.project_id FROM task_waits w JOIN tasks k ON k.id = w.on_task_id
+                WHERE ${sql.in('w.task_id', some)}`
+            for (const one of linked) if (!tasks.has(one.id)) tasks.set(one.id, one.projectId)
           }
           yield* Effect.forEach(
             tasks,

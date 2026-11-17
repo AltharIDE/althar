@@ -207,6 +207,12 @@ export const shown = (page: Page, text: string | RegExp, options?: { readonly ex
   page.getByText(text, options).filter({ visible: true })
 
 /**
+ * Ship on a change's card, named by its route: its stops after Ship, as "Ship push" or "Ship review, then push, then
+ * ready". The header's and the board card's say how many commits instead.
+ */
+export const SHIP_ON_CARD = /^Ship (review|push)(, then (push|ready|merge))*$/
+
+/**
  * Once the window is still, for a screenshot: the launch has played over it,
  * and every animation and transition that ends (a fold opening, a dialog
  * fading in, lanes easing to their widths) has ended. One that loops, as a

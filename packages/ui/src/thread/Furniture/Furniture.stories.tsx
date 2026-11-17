@@ -34,6 +34,10 @@ export const ContextCompactedSummary: Story = {
     </Compacted>
   ),
 }
+/** A task's folder whose link to its repository broke, as after moving to another build with the same profile, repaired by Althar (decisions: workspaces-and-runs, A worktree whose link broke). */
+export const FolderRepaired: Story = {
+  args: { icon: 'folder', children: 'Folder link repaired, and its review copy’s', action: undefined, onAction: undefined },
+}
 /** You interrupted a turn with the composer's square; the task kept going. */
 export const InterruptedByYou: Story = {
   render: () => (
@@ -145,6 +149,7 @@ export const AllStates: Story = {
     />
   ),
 }
+export const FolderRepairedDark: Story = { ...FolderRepaired, globals: { theme: 'dark' } }
 
 const RAW_ANSWER = JSON.stringify(
   {

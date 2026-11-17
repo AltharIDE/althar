@@ -59,7 +59,9 @@ export const WINDOW_ACTIONS = {
   moveToFront: { tool: 'move_to_front' },
   // The plan card.
   startPlan: { tool: 'restart_task' },
+  reopenBlocker: { tool: 'restart_task' },
   holdPlan: { tool: 'hold_task' },
+  stopWaiting: { tool: 'wait_for_tasks' },
   // Calls that wait on the person.
   answer: { person: 'answers an agent’s permission request: an agent never answers one itself' },
   answerStuck: { tool: 'answer_stuck_step' },
@@ -85,10 +87,11 @@ export const WINDOW_ACTIONS = {
   pushHere: { word: 'push_accepted_task' },
   pushBranch: { tool: 'push_task_branch' },
   accept: { word: 'merge_pull_request' },
-  mergeWaiting: { word: 'merge_pull_request' },
   push: { tool: 'push_task' },
   ship: { tool: 'ship_task' },
   shipChange: { tool: 'ship_task' },
+  chooseShipRoute: { window: 'holds the route the person chose for the task’s next Ship (ship_task takes one)' },
+  routeShip: { tool: 'ship_task' },
   fixAfterMerge: { tool: 'answer_review_after_merge' },
   leaveAfterMerge: { tool: 'answer_review_after_merge' },
   replace: { person: 'a force push, which can’t be undone: the person confirms what it replaces' },

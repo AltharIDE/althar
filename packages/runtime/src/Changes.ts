@@ -39,6 +39,7 @@ import {
   Option,
   Queue,
   Ref,
+  Result,
   Schema,
   Scope,
   Semaphore,
@@ -102,6 +103,7 @@ import {
   commitsAhead,
   commitsOf,
   git,
+  fetchedInto,
   fetchInto,
   gitOutcome,
   patchIdsOf,
@@ -175,7 +177,8 @@ import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
 import { RECENT, refreshRemotes } from './recordedRemotes'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
-import { summarize, words } from './words'
+import { type GitFailure, gitFailureOf, gitLine, gitSummary, redacted } from './gitSaid'
+import { sentence, summarize, words } from './words'
 import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
 
 /*
@@ -699,13 +702,21 @@ const RoundWaiting = Schema.Struct({
 })
 type RoundWaiting = typeof RoundWaiting.Type
 
-/** Why reading a repository failed, in a sentence: git's first line, before any usage it adds, or what went wrong otherwise. */
-const gitSaid = (cause: Cause.Cause<unknown>) => {
-  const failed = Option.getOrUndefined(Cause.findErrorOption(cause))
-  if (!(failed instanceof GitFailed)) return summarize(cause)
-  const said = failed.stderr.trim().split('\n')[0]?.trim() ?? ''
-  return /[.!?]$/.test(said) ? said : `${said}.`
+/** Why something failed, after a sentence that already names what was tried: git's most telling line, or what went wrong otherwise. */
+const gitSaidOf = (cause: Cause.Cause<unknown>) => {
+  const failed = gitFailureOf(cause)
+  return failed === undefined ? summarize(cause) : sentence(gitLineOf(failed))
 }
+
+/** A branch that couldn't be fetched to merge with a task's, for its card: with what git said. */
+const couldntFetch = (target: string, failed: GitFailed) =>
+  `Althar couldn’t fetch ${target} to merge it with the branch here: ${sentence(gitLineOf(failed))}`
+
+/** A task's branch that couldn't be read here, for its card: with what git said. */
+const couldntRead = (failed: GitFailed) => `Althar couldn’t read the branch here: ${sentence(gitLineOf(failed))}`
+
+/** What git said of a failure, in a line, or how it ended where it said nothing. */
+const gitLineOf = (failed: GitFailure) => gitLine(failed.stderr) || gitSummary(failed)
 
 /** One of a task's repositories here: its worktree and branch, the default branch it merges into, and whether it has a pull request. */
 interface HereRow {
@@ -880,9 +891,13 @@ export class Changes extends Context.Service<
      * Merges the task's pull request at the head its host has now, where the
      * person's word covered what waited and has just gone up: Review and merge
      * once its review passed, or Merge now (a task is a conversation plus
-     * parts, "Merge, with commits not shipped").
+     * parts, "Merge, with commits not shipped"). `stands`, where given, is
+     * read in the transaction that records the merge's intent, after the lock
+     * and the host's reads, as the last thing before the merge request: its
+     * failure sends none, and is mergeAsItStands' (a Ship's route, changed by
+     * RouteShip while its merge stop read the host).
      */
-    mergeAsItStands(taskId: string, url: string): Effect.Effect<void, unknown>
+    mergeAsItStands(taskId: string, url: string, stands?: Effect.Effect<void, unknown>): Effect.Effect<void, unknown>
     /**
      * Points a running task's change at another branch to work toward, or back at its repository's default with null (a
      * task is a conversation plus parts, "Changing the branch a task works toward"), between its lead's turns. Nothing pushed
@@ -1658,9 +1673,8 @@ export class Changes extends Context.Service<
           let start: string | null = leftOut ? next.shipped : null
           if (next.change.state === 'merged') {
             // The default branch as its host has it now, with what merged: as this Mac last saw it, it may not have that yet.
-            const tip = yield* fetchInto(task.path, baseTarget, target, `refs/althar/base/${target}`)
-            if (tip === null)
-              return yield* new GitFailed({ args: ['fetch', target], cwd: task.path, stderr: `Couldn't fetch ${target} from the host.` })
+            // Where it can't be fetched, git's own words say why.
+            const tip = yield* fetchedInto(task.path, baseTarget, target, `refs/althar/base/${target}`)
             base = tip
             start = leftOut || !(yield* onHead(task.path, tip)) ? tip : null
           }
@@ -3446,13 +3460,8 @@ export class Changes extends Context.Service<
           const { snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
           const onto = sourceOf(snapshot, workspace.branch)
           const ref = `refs/althar/pull-request/${onto}`
-          const head = yield* fetchInto(workspace.path, pushTarget, onto, ref)
-          if (head === null)
-            return yield* new GitFailed({
-              args: ['fetch', onto],
-              cwd: workspace.path,
-              stderr: `Couldn't fetch ${onto} from the host.`,
-            })
+          // Where it can't be fetched, git's own words say why.
+          const head = yield* fetchedInto(workspace.path, pushTarget, onto, ref)
           const where = nameOf(snapshot)
           const short = head.slice(0, 12)
           const rewritten = head === sent && !(yield* onHead(workspace.path, head))
@@ -3500,7 +3509,13 @@ export class Changes extends Context.Service<
        * settles then: reading it back can still say open for a moment, and
        * what was said on it last is listened to after, not before.
        */
-      const merge = (taskId: string, head: string, url?: string, bypassQueue = false): Effect.Effect<void, unknown, Store> =>
+      const merge = (
+        taskId: string,
+        head: string,
+        url?: string,
+        bypassQueue = false,
+        stands?: Effect.Effect<void, unknown>,
+      ): Effect.Effect<void, unknown, Store> =>
         Effect.gen(function* () {
           const { link, snapshot, host, repository } = yield* current(taskId, url)
           if (snapshot.state !== 'open') return
@@ -3517,11 +3532,11 @@ export class Changes extends Context.Service<
           if (below !== undefined) {
             const under = yield* current(taskId, below.url)
             const now = yield* under.host.change(under.repository, under.snapshot.number)
-            yield* merge(taskId, now.headSha ?? under.snapshot.headSha ?? '', below.url)
+            yield* merge(taskId, now.headSha ?? under.snapshot.headSha ?? '', below.url, false, stands)
             const after = yield* current(taskId, below.url)
             if (after.snapshot.state !== 'merged')
               return yield* sayOn(link, `${nameOf(snapshot)} merges once ${nameOf(under.snapshot)} below it has: press Merge again then.`)
-            return yield* merge(taskId, head, snapshot.url, bypassQueue)
+            return yield* merge(taskId, head, snapshot.url, bypassQueue, stands)
           }
           const read = yield* host.change(repository, snapshot.number, { queue: true })
           // In its merge queue already, put there from outside Althar before a turn heard it, it isn't merged again: it is kept
@@ -3541,6 +3556,7 @@ export class Changes extends Context.Service<
               key: `merge:${link.id}:${head}${snapshot.leftQueue === undefined ? '' : `:${snapshot.leftQueue}`}${bypassQueue ? ':without_queue' : ''}`,
               request: { number: snapshot.number, head, ...(bypassQueue ? { bypassQueue: true } : {}) },
               retryable: false,
+              ...(stands === undefined ? {} : { stands }),
               perform: (bypassQueue
                 ? host.mergeWithoutQueue === undefined
                   ? Effect.fail(
@@ -4324,7 +4340,7 @@ export class Changes extends Context.Service<
                           : refused.why === 'refused'
                             ? `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`
                             : refused.why === 'failed'
-                              ? `Pushing ${tag} failed: ${failed.stderr.trim().split('\n').at(-1) ?? ''}`
+                              ? `Pushing ${tag} failed: ${redacted(failed.stderr.trim().split('\n').at(-1) ?? '')}`
                               : `${tag} wasn't pushed. ${words(refused, String).message} Tell the person.`,
                       ),
                     ),
@@ -5137,6 +5153,20 @@ export class Changes extends Context.Service<
           return run?.state === 'running'
         })
 
+      /**
+       * Whether how the task's checks end waits for its run, as while its plan still publishes (`publishing`): not for a Ship
+       * at its merge stop, which is up and waits on those very checks, so its card shows them as they go.
+       */
+      const checksWait = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [run] = yield* sql<{ state: string; at: string | null }>`
+            SELECT state, json_extract(parameters, '$.ships.at') AS at FROM runs
+            WHERE task_id = ${taskId} AND (plan_id IS NOT NULL OR json_type(parameters, '$.ships') = 'object')
+            ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          return run?.state === 'running' && run.at !== 'merge'
+        })
+
       /** Says in the task's thread that its checks still failed after FIX_ROUNDS fixes while Althar saw them through: the change is the person's now. */
       const gaveUp = (link: LinkRow, name: string) =>
         Effect.gen(function* () {
@@ -5282,8 +5312,8 @@ export class Changes extends Context.Service<
           let checks = before.checks
           let checksRevision = before.checksRevision ?? 0
           // While its plan still publishes, how its checks end waits: once the run has ended, they are heard as the change's,
-          // and a failure goes where it should (ADR-040).
-          const held = now.headSha !== null && (yield* publishing(link.taskId))
+          // and a failure goes where it should (ADR-040). A Ship waiting to merge on them hears them as they go.
+          const held = now.headSha !== null && (yield* checksWait(link.taskId))
           if (held) happened = true
           // Checks the host won't show Althar don't stop it hearing the rest: the thread says so, once a commit, and a change in
           // Althar's hands is the person's, since Althar can't see its checks through (ADR-041).
@@ -6590,7 +6620,7 @@ export class Changes extends Context.Service<
                 ? { why: 'Its worktree is gone.', uncommitted: false }
                 : yield* unresolved(worktree, conflict).pipe(
                     contained('Changes.settleRound', (cause) => ({
-                      why: `Althar couldn’t read its worktree: ${gitSaid(cause)}`,
+                      why: `Althar couldn’t read its worktree: ${gitSaidOf(cause)}`,
                       uncommitted: false,
                     })),
                   )
@@ -6753,7 +6783,8 @@ export class Changes extends Context.Service<
       /**
        * Where a pull request's target branch is, fetched into the task's
        * workspace at most every few turns, unless `fresh`: the worktrees of a
-       * repository share what one fetched. Null where it couldn't be fetched.
+       * repository share what one fetched. Where it couldn't be fetched, git's
+       * failure, which its caller puts in words.
        */
       const baseOf = (
         workspace: { readonly path: string; readonly binding: string },
@@ -6768,8 +6799,8 @@ export class Changes extends Context.Service<
           const at = yield* Clock.currentTimeMillis
           const known = fetchedAt.get(key)
           if (!fresh && known !== undefined && at - known.at < baseEvery) return known.tip
-          const tip = yield* fetchInto(workspace.path, yield* host.pushTarget(repository), branch, `refs/remotes/${ref}`)
-          if (tip !== null) fetchedAt.set(key, { at, tip })
+          const tip = yield* fetchedInto(workspace.path, yield* host.pushTarget(repository), branch, `refs/remotes/${ref}`)
+          fetchedAt.set(key, { at, tip })
           return tip
         })
 
@@ -6836,17 +6867,22 @@ export class Changes extends Context.Service<
           const remote =
             fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase() ? 'upstream' : 'origin'
           const ref = `${remote}/${now.target}`
-          const target = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says)
-          const from = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
-          if (target === null || from === null)
-            return yield* Effect.as(
-              couldnt(
-                target === null
-                  ? `Althar couldn’t fetch ${now.target} to merge it with the branch here.`
-                  : 'Althar couldn’t read the branch here.',
-              ),
-              false,
-            )
+          // Where either can't be had, the card says what git said, and the log keeps all of it.
+          const fetched = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says).pipe(
+            Effect.map((tip) => ({ tip })),
+            Effect.catchTag('GitFailed', (failed) => Effect.succeed({ failed })),
+          )
+          if ('failed' in fetched) {
+            yield* Effect.logWarning('Could not fetch the branch a pull request goes into', Cause.fail(fetched.failed))
+            return yield* Effect.as(couldnt(couldntFetch(now.target, fetched.failed)), false)
+          }
+          const target = fetched.tip
+          const read = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.result)
+          if (Result.isFailure(read)) {
+            yield* Effect.logWarning('Could not read the branch a pull request comes from', Cause.fail(read.failure))
+            return yield* Effect.as(couldnt(couldntRead(read.failure)), false)
+          }
+          const from = read.success
           const merged = yield* gitOutcome(workspace.path, 'merge-tree', '--write-tree', '--name-only', '--no-messages', target, from)
           if (merged.code === 0) {
             const was = cleanHere.get(link.id)
@@ -7557,7 +7593,7 @@ export class Changes extends Context.Service<
           return failed.why === 'failed'
             ? `Althar couldn't push: ${(failed.detail ?? '').trim().split('\n')[0]?.replace(/\.$/, '') ?? ''}`
             : words(failed, String).message.replace(/\.$/, '')
-        return `Althar couldn't push: ${gitSaid(cause).replace(/\.$/, '')}`
+        return `Althar couldn't push: ${gitSaidOf(cause).replace(/\.$/, '')}`
       }
 
       /**
@@ -8466,13 +8502,16 @@ export class Changes extends Context.Service<
             let couldnt: string | null = null
             for (const repository of yield* repositoriesHere(task.taskId)) {
               if (repository.opened !== 0) continue
-              const head = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.orElseSucceed(() => null))
-              if (head === null) {
+              const read = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.result)
+              if (Result.isFailure(read)) {
+                if (existsSync(repository.worktree))
+                  yield* Effect.logWarning('Could not read the branch a task works on', Cause.fail(read.failure))
                 couldnt ??= existsSync(repository.worktree)
-                  ? 'Althar couldn’t read the branch here.'
+                  ? couldntRead(read.failure)
                   : `Its folder isn’t on this computer, so Althar can’t merge ${repository.base} into it here.`
                 continue
               }
+              const head = read.success
               const files = yield* conflictsOf(repository.root, repository.base, head)
               if (files === null) couldnt ??= `Git couldn’t merge ${repository.base} with the branch here.`
               else if (files.length > 0) found.push(yield* conflictHere(repository, files))
@@ -9451,14 +9490,14 @@ export class Changes extends Context.Service<
         joinChanges: (taskId, change, into, actorId) => provide(locked(taskId)(joinChanges(taskId, change, into, actorId))),
         dropChange: (taskId, change, actorId) => provide(locked(taskId)(dropChange(taskId, change, actorId))),
         leaveWorktree: (taskId, actorId) => provide(locked(taskId)(leaveWorktree(taskId, actorId))),
-        mergeAsItStands: (taskId, url) =>
+        mergeAsItStands: (taskId, url, stands) =>
           provide(
             locked(taskId)(
               Effect.gen(function* () {
                 const { snapshot, host, repository } = yield* current(taskId, url)
                 if (snapshot.state !== 'open') return
                 const read = yield* host.change(repository, snapshot.number)
-                yield* merge(taskId, read.headSha ?? snapshot.headSha ?? '', url)
+                yield* merge(taskId, read.headSha ?? snapshot.headSha ?? '', url, false, stands)
               }),
             ),
           ),

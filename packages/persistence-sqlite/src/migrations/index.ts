@@ -89,6 +89,8 @@ import { statements as externalWaits } from './0083_external_waits'
 import { statements as evidenceGalleries } from './0084_evidence_galleries'
 import { statements as turnUndo } from './0085_turn_undo'
 import { statements as errandWords } from './0087_errand_words'
+import { statements as taskWaits } from './0088_task_waits'
+import { statements as taskWaitsCleared } from './0089_task_waits_cleared'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -195,6 +197,8 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0085_turn_undo', statements: turnUndo },
   { key: '0086_client_identities', statements: clientIdentities },
   { key: '0087_errand_words', statements: errandWords },
+  { key: '0088_task_waits', statements: taskWaits },
+  { key: '0089_task_waits_cleared', statements: taskWaitsCleared },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

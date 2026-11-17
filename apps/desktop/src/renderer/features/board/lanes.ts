@@ -2,6 +2,7 @@ import {
   type BoardCall,
   type BoardSnapshot,
   type BoardTask,
+  blockerAbandoned,
   type HomeSnapshot,
   isAside,
   waitingCount,
@@ -100,6 +101,8 @@ export interface Lanes {
   readonly calls: ReadonlyArray<BoardCall>
   /** Work ready for the person: the home lists these too. */
   readonly ready: ReadonlyArray<BoardTask>
+  /** Plans that wait for a task that was abandoned (tasks wait for their blockers): out of Up next, the person's in Needs you. */
+  readonly abandoned: ReadonlyArray<BoardTask>
   /** Finished tasks that aren't changes, which the person kept for later: out of Needs you, the latest kept first. */
   readonly kept: ReadonlyArray<BoardTask>
   /** The most recently settled the board has loaded; `settledTotal` is how many there are in all. */
@@ -198,7 +201,9 @@ export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new
   const arranged = laid(
     // One whose call isn't read yet has nothing to say: it stays under way until it is.
     [...of('running'), ...waits.unread.map((task) => ({ ...task, phase: 'running' as const }))],
-    of('planned', 'held').toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿')),
+    of('planned', 'held')
+      .filter((task) => !blockerAbandoned(task))
+      .toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿')),
     null,
   )
   return {
@@ -211,6 +216,7 @@ export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new
     stopped,
     calls: waits.calls,
     ready: waits.ready,
+    abandoned: waits.abandoned,
     kept: of('kept').toSorted((a, b) => (b.keptAt ?? '').localeCompare(a.keptAt ?? '')),
     settled: of('settled').toSorted((a, b) => (b.settledAt ?? '').localeCompare(a.settledAt ?? '')),
     settledTotal: board.settledTotal,

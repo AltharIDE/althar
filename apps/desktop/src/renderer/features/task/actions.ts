@@ -22,6 +22,5 @@ export const doing = {
   ship: 'ship',
   fixAfterMerge: 'fix-after-merge',
   /** Merge, with commits not shipped: Review and merge, or Merge now. */
-  mergeWaiting: 'merge-waiting',
   leaveAfterMerge: 'leave-after-merge',
 } as const
