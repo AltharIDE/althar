@@ -486,7 +486,7 @@ const homes = startHomeConnections({
   profile: locations().profile,
   entry: join(here, '../connection/connection.js'),
   mine,
-  open: (home) => {
+  open: (home, projectId) => {
     const existing = [...windows].find((window) => {
       if (window.isDestroyed()) return false
       const current = homes.state(window.webContents.id).current
@@ -495,7 +495,13 @@ const homes = startHomeConnections({
     if (existing !== undefined) {
       existing.show()
       if (!quiet) existing.focus()
-    } else openWindow(home)
+      if (projectId !== undefined) existing.webContents.send('althar:homes-project', projectId)
+      return
+    }
+    const opened = openWindow(home)
+    // Its preload holds the project until the page listens, once the window has drawn its first projects.
+    if (projectId !== undefined)
+      opened.webContents.once('did-finish-load', () => opened.webContents.send('althar:homes-project', projectId))
   },
   log: (message) => logs.error(message),
 })

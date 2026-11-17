@@ -1,4 +1,4 @@
-/* Manage 3 · By their projects: each home, and the projects on it by their marks */
+/* Manage homes: each home, and the projects on it by their marks */
 
 .homes {
   margin: 0;
@@ -49,13 +49,28 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.words .nameField {
+.nameField {
   width: calc(100% + 12px);
   height: 26px;
   margin: -4px -6px -2px;
   padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+  font: inherit;
   font-size: 14px;
   font-weight: 600;
+  color: var(--t-1);
+  outline: none;
+}
+/* a home whose connection dropped: still, in the colour of a failure */
+.dropped {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--danger);
 }
 .host {
   overflow: hidden;
@@ -151,6 +166,10 @@
 .shelf[data-rest] .project:hover {
   background: var(--paper);
 }
+.project:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
 .shelf[data-rest] .mark {
   grid-row: auto;
 }
@@ -174,18 +193,6 @@
   border-radius: 10px;
   background: var(--paper);
   box-shadow: inset 0 0 0 1px var(--line-2);
-}
-.identity {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-}
-.label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--t-2);
 }
 .done {
   display: flex;
@@ -215,7 +222,19 @@
 }
 
 .undo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
   margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.undoWords {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (prefers-reduced-motion: reduce) {

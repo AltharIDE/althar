@@ -1,93 +1,215 @@
-.list, .form {
+/* The window's homes: the chip at the bar's end, connecting a home, a home's connection, and its window before it connects. */
+
+/* the chip: the home's name, and its connection where it dropped */
+.chipRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 9px 0 8px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--t-1);
+  transition: background var(--fast) var(--ease);
+}
+.chip:hover,
+.chip[aria-expanded='true'] {
+  background: var(--line);
+}
+.chip svg {
+  color: var(--t-2);
+}
+.chip[data-down] svg {
+  color: var(--danger);
+}
+.chipName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chipDown {
+  flex: none;
+  color: var(--danger);
+}
+.chipQuiet {
+  flex: none;
+  color: var(--t-3);
+}
+
+.target {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Connect a home */
+.form {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
-
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-block: 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-.identity {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.identity strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.mono {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--t-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.note {
-  color: var(--t-3);
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 0;
-}
-
-.actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 .field {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  font-size: 13px;
+  gap: 6px;
+  font-size: 12.5px;
   color: var(--t-2);
 }
-
+.more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 2px 0;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.more:hover {
+  color: var(--t-1);
+}
+.options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+  padding-top: 12px;
+}
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-2);
+}
 .check {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 16px;
-  background: var(--inset);
-  border-radius: var(--r);
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--n-2);
 }
-
-.check strong {
-  font-size: 13px;
-  font-weight: 500;
+.label {
+  font-size: 12px;
+  color: var(--t-3);
 }
-
-.check code {
+.note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.homeId {
+  min-width: 0;
   font-family: var(--mono);
   font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-1);
   overflow-wrap: anywhere;
 }
+.copy {
+  flex: none;
+}
+.working {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
 
-.trigger {
-  max-width: 180px;
+/* a saved home's connection, changed */
+.connection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.kept {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.editActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.identityRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+/* a home's window before it first connects */
+.opening {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--n-2);
+}
+.openingBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 32px;
+  text-align: center;
+}
+.openingGlyph {
+  margin-bottom: 8px;
+  color: var(--t-3);
+}
+.openingName {
+  max-width: 100%;
+  margin: 0;
   overflow: hidden;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--t-1);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.openingState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 440px;
+  min-height: 72px;
+  margin-top: 18px;
+}
+.openingActions {
+  display: flex;
   gap: 8px;
 }
 
-.identity strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+@media (prefers-reduced-motion: reduce) {
+  .chip {
+    transition: none;
+  }
 }

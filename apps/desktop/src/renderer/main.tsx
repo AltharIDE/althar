@@ -12,6 +12,9 @@ import { Launch, OpenFailed } from '@althar/ui/screens'
 
 import { hostForHome, receiveHomeConnection } from './data/homeConnection'
 import { HomeConnections } from './features/homes/HomeConnections'
+import { HomeOpening } from './features/homes/HomeOpening'
+import { HomeReport } from './features/homes/HomeReport'
+import { useHomeState } from './features/homes/useHomes'
 import { openWindow } from './data/open'
 import { ServicesProvider, type StoreFailure } from './data/services'
 import { QuitDialog } from './features/quit/QuitDialog'
@@ -71,7 +74,7 @@ function FailedOpen({ reason }: { reason: string }) {
 function Window() {
   return (
     <>
-      <HomeConnections host={window.althar} ready />
+      <HomeConnections host={window.althar} />
       <WindowContent />
     </>
   )
@@ -82,6 +85,7 @@ function WindowContent() {
   const [failed, setFailed] = useState<string | null>(null)
   const [mismatch, setMismatch] = useState<ApiError | null>(null)
   const [storeFailure, setStoreFailure] = useState<StoreFailure | null>(null)
+  const home = useHomeState(window.althar.homes)
   useEffect(() => window.althar.onStoreFailed(setStoreFailure), [])
   useEffect(
     () =>
@@ -105,12 +109,10 @@ function WindowContent() {
         host={window.althar}
       />
     )
-  if (failed !== null)
-    return (
-      <>
-        <FailedOpen reason={failed} />
-      </>
-    )
+  // A home's window, until it first connects: its name, and how connecting goes; where it couldn't, why, and Try again.
+  if (home?.current.kind === 'ssh' && opened === null && window.althar.homes !== undefined)
+    return <HomeOpening host={window.althar} homes={window.althar.homes} home={home.current.home} problem={failed} />
+  if (failed !== null) return <FailedOpen reason={failed} />
   return (
     <>
       <Launch
@@ -126,6 +128,7 @@ function WindowContent() {
         {opened !== null && (
           <ServicesProvider value={opened.services}>
             <SystemAccent />
+            <HomeReport />
             <RouterProvider router={opened.router} />
           </ServicesProvider>
         )}

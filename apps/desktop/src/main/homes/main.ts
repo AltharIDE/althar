@@ -4,6 +4,7 @@ import { sshEnvironment } from '@althar/transport-node'
 
 import type { WindowHome } from '../../homes'
 import { homeController } from './controller'
+import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess } from './process'
 import { homePartition } from './policy'
 import { homeStore } from './store'
@@ -18,7 +19,7 @@ export const startHomeConnections = ({
   readonly profile: string
   readonly entry: string
   readonly mine: (contents: WebContents) => boolean
-  readonly open: (home: WindowHome) => void
+  readonly open: (home: WindowHome, projectId?: string) => void
   readonly log: (message: string) => void
 }) => {
   const connections = new Map<number, ReturnType<typeof connectHomeProcess>>()
@@ -51,11 +52,29 @@ export const startHomeConnections = ({
     const contents = BrowserWindow.getAllWindows().find((window) => window.webContents.id === owner)?.webContents
     if (contents !== undefined && !contents.isDestroyed()) contents.send('althar:home-state', state)
   }
+  // What the chip's menu and Manage homes show, sent to every window at most once a frame however much changed at once.
+  let telling: ReturnType<typeof setTimeout> | undefined
+  const overviewChanged = () => {
+    if (telling !== undefined) return
+    telling = setTimeout(() => {
+      telling = undefined
+      void controller
+        .overview()
+        .then((overview) => {
+          for (const window of BrowserWindow.getAllWindows())
+            if (!window.isDestroyed() && mine(window.webContents)) window.webContents.send('althar:homes-overview', overview)
+        })
+        .catch(() => undefined)
+    }, 16)
+  }
+  const glances = homeGlances({ profile, wanted: () => controller.wanted(), changed: overviewChanged })
   const controller = homeController({
     store: homeStore(profile),
     inspect: (target, signal) => inspectHomeProcess(fork, target, signal),
     open,
     changed: tell,
+    overviewChanged,
+    glances,
   })
   const owner = (event: IpcMainInvokeEvent) => {
     if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame)
@@ -69,9 +88,26 @@ export const startHomeConnections = ({
   })
   ipcMain.handle('althar:homes-inspect', (event, target: unknown) => controller.inspect(owner(event), target))
   ipcMain.handle('althar:homes-connect', (event, check: unknown, name: unknown) => controller.connect(owner(event), check, name))
-  ipcMain.handle('althar:homes-open', (event, id: unknown) => controller.open(owner(event), id))
+  ipcMain.handle('althar:homes-overview', (event) => {
+    owner(event)
+    return controller.overview()
+  })
+  ipcMain.handle('althar:homes-save', (event, check: unknown, name: unknown) => controller.save(owner(event), check, name))
+  ipcMain.handle('althar:homes-open', (event, id: unknown, projectId: unknown) => controller.open(owner(event), id, projectId))
+  ipcMain.handle('althar:homes-rename', (event, id: unknown, name: unknown) => controller.rename(owner(event), id, name))
+  ipcMain.handle('althar:homes-change', (event, id: unknown, check: unknown) => controller.change(owner(event), id, check))
   ipcMain.handle('althar:homes-forget', (event, id: unknown) => controller.forget(owner(event), id))
-  ipcMain.handle('althar:homes-cancel', (event) => controller.navigating(owner(event)))
+  ipcMain.handle('althar:homes-restore', (event, id: unknown) => controller.restore(owner(event), id))
+  // A window's projects, as it reads them: a report main can't read, or from anything but Althar's own window, is dropped.
+  ipcMain.on('althar:homes-report', (event, projects: unknown) => {
+    try {
+      if (!mine(event.sender) || event.senderFrame !== event.sender.mainFrame) return
+      controller.report(event.sender.id, projects)
+    } catch {
+      // Nothing to answer: the window reports again as its projects change.
+    }
+  })
+  ipcMain.handle('althar:homes-cancel', (event) => controller.cancel(owner(event)))
   const stop = (id: number) => {
     const connection = connections.get(id)
     connections.delete(id)
@@ -144,6 +180,8 @@ export const startHomeConnections = ({
     connect,
     stopAll: async () => {
       controller.stopping()
+      clearTimeout(telling)
+      const kept = glances.flush().catch(() => undefined)
       const stopped = Promise.all([...connections.keys()].map(stop))
       for (const child of children.keys()) {
         try {
@@ -154,7 +192,7 @@ export const startHomeConnections = ({
       }
       await Effect.runPromise(Effect.promise(() => Promise.all(children.values())).pipe(Effect.timeoutOption('12 seconds')))
       for (const child of children.keys()) child.kill()
-      await stopped
+      await Promise.all([stopped, kept])
     },
   }
 }
