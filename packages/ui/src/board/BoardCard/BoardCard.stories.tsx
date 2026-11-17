@@ -782,6 +782,13 @@ export const StartedByALead: Story = {
   },
 }
 
+/** The line is one line high and stays inside its card. */
+async function expectOneLine(line: HTMLElement) {
+  const card = line.closest('article')!
+  await expect(line.getBoundingClientRect().height).toBeLessThan(18)
+  await expect(line.getBoundingClientRect().right).toBeLessThanOrEqual(card.getBoundingClientRect().right)
+}
+
 /** A long parent title never makes the foot run to two lines: "Started by" stays whole and the title is cut with "…". */
 export const StartedByALongTitle: Story = {
   args: {
@@ -793,7 +800,40 @@ export const StartedByALongTitle: Story = {
   decorators: [(Story) => <div style={{ width: 300 }}>{Story()}</div>],
   play: async ({ canvasElement }) => {
     const link = within(canvasElement).getByRole('button', { name: /Only-part-of/ })
-    await expect(link.parentElement!.getBoundingClientRect().height).toBeLessThan(18)
+    await expectOneLine(link.closest('p')!)
+    await expect(link.scrollWidth).toBeGreaterThan(link.clientWidth)
+    await expect(link.closest('p')).toHaveAttribute('title', 'Started by Only-part-of switch sits under the issue, not beside it')
+  },
+}
+
+/** The same without a link, at the narrowest a lane goes: the label stays whole, the title gives way. */
+export const StartedByALongTitleNoLink: Story = {
+  args: { ...StartedByALongTitle.args, onOpenStartedBy: undefined },
+  decorators: [(Story) => <div style={{ width: 200 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const label = within(canvasElement).getByText('Started by')
+    await expectOneLine(label.closest('p')!)
+    await expect(label.scrollWidth).toBe(label.clientWidth)
+  },
+}
+
+/** An automation's long name and a changes count with marks: each footer keeps to one line inside the card. */
+export const LongFooters: Story = {
+  args: {
+    ...StartedByALead.args,
+    startedBy: undefined,
+    from: 'A nightly automation with a name much too long for a narrow lane to hold',
+    changes: 3,
+    marks: [
+      { name: 'a', says: 'a: checks passing', tone: 'ok' },
+      { name: 'b', says: 'b: checks failing', tone: 'ok' },
+    ],
+  },
+  decorators: [(Story) => <div style={{ width: 200 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const from = within(canvasElement).getByText(/A nightly automation/)
+    await expectOneLine(from.closest('p')!)
+    await expect(from.closest('p')).toHaveAttribute('title', expect.stringContaining('A nightly automation'))
   },
 }
 

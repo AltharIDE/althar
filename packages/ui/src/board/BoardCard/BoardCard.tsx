@@ -185,7 +185,10 @@ export function StartedBy({
     <p className={s.from} title={t.startedBy(task)}>
       <Icon name="corner" size={11} />
       {onOpen === undefined ? (
-        <span className={s.fromTask}>{t.startedBy(task)}</span>
+        <>
+          <span className={s.fromLead}>{t.startedByLead}</span>
+          <span className={s.fromTask}>{task}</span>
+        </>
       ) : (
         <>
           <span className={s.fromLead}>{t.startedByLead}</span>
@@ -277,7 +280,9 @@ export function BoardCard({
               ))}
             </span>
           )}
-          {t.changes(changes)}
+          <span className={s.fromTask} title={t.changes(changes)}>
+            {t.changes(changes)}
+          </span>
         </p>
       )}
       {toward !== undefined && toward !== '' && (
@@ -288,9 +293,9 @@ export function BoardCard({
         </p>
       )}
       {from !== undefined && from !== '' && (
-        <p className={s.from}>
+        <p className={s.from} title={t.from(from)}>
           <Icon name="automation" size={11} />
-          {t.from(from)}
+          <span className={s.fromTask}>{t.from(from)}</span>
         </p>
       )}
       {startedBy !== undefined && startedBy !== '' && <StartedBy task={startedBy} onOpen={onOpenStartedBy} text={text} />}

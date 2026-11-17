@@ -188,6 +188,7 @@
 
 /* a change's mark: a small dot in the colour of what it means */
 .marks {
+  flex: none;
   display: inline-flex;
   gap: 3px;
 }
