@@ -7828,7 +7828,8 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const rows = (yield* sql<{ id: string; projectId: ProjectId; path: string; heldAt: string | null }>`
               SELECT id, project_id, path, held_at FROM workspaces WHERE task_id = ${taskId}
-                AND (${heads === undefined ? 1 : 0} = 1 OR (device_id = ${instance.deviceId} AND access = 'write' AND state = 'ready' AND reviewing IS NULL))`).filter(
+                AND device_id = ${instance.deviceId} AND access = 'write'
+                AND (${heads === undefined ? 1 : 0} = 1 OR (state = 'ready' AND reviewing IS NULL))`).filter(
             (row) => (only === undefined || only.includes(row.id)) && (heads === undefined || heads[row.id] !== undefined),
           )
           for (const row of rows) {
