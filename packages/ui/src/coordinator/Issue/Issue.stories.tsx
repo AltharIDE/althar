@@ -101,24 +101,21 @@ export const AllStates: Story = {
   ),
 }
 
-/** Under a task's issue: the task does all of it, so its merge closes it; or, switched on, only part, and its merge leaves it open. */
+/** Under a task's issue: the task does all of it, so its merge closes it; or only part, and its merge leaves it open. */
 export const PartOfIt: Story = {
   render: function Render(args) {
     const [partOf, setPartOf] = useState(false)
     return (
-      <div>
+      <IssuePart id={args.id} partOf={partOf} onChange={setPartOf}>
         <Issue {...args} />
-        <IssuePart id={args.id} partOf={partOf} onChange={setPartOf} />
-      </div>
+      </IssuePart>
     )
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    const part = c.getByRole('switch', { name: 'Only part of MER-231' })
-    await expect(part).toHaveAttribute('aria-checked', 'false')
-    await expect(part).toHaveAccessibleDescription(/merge closes the issue/)
+    await expect(c.getByRole('radio', { name: 'Closes it' })).toHaveAttribute('aria-checked', 'true')
+    const part = c.getByRole('radio', { name: 'Part of it' })
     await userEvent.click(part)
     await expect(part).toHaveAttribute('aria-checked', 'true')
-    await expect(part).toHaveAccessibleDescription(/says on the issue what landed and leaves it open/)
   },
 }

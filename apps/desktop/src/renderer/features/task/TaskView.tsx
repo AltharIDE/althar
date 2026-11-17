@@ -1536,25 +1536,43 @@ export function TaskView({
               <Thread label={text.thread} busy={busy}>
                 {issue !== null && !snapshot.earlier && (
                   <div className={s.issue}>
-                    <Issue
-                      mark={productBrand(issue.product)}
-                      source={productName(issue.product)}
-                      id={issue.key}
-                      tone={issue.product === 'linear' ? 'linear' : 'plain'}
-                      title={issue.title}
-                      href={issue.url}
-                      status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
-                      {...(issue.priority === null || issue.priority.level === 'none'
-                        ? {}
-                        : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
-                      {...(issue.container === null ? {} : { meta: issue.container })}
-                    />
-                    {/* Whether the task does all of its issue, so its merge closes it, or only part, so its merge leaves it open. */}
-                    {snapshot.task.state !== 'done' && snapshot.task.state !== 'abandoned' && (
+                    {/* A task with a merge says at its issue's foot whether that closes it or leaves it open. */}
+                    {snapshot.task.state !== 'done' &&
+                    snapshot.task.state !== 'abandoned' &&
+                    snapshot.task.kind !== 'plain' &&
+                    snapshot.task.kind !== 'review' ? (
                       <IssuePart
                         id={issue.key}
                         partOf={snapshot.task.issuePartOf === true}
                         onChange={(partOf) => void model.setIssuePart(partOf)}
+                      >
+                        <Issue
+                          mark={productBrand(issue.product)}
+                          source={productName(issue.product)}
+                          id={issue.key}
+                          tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                          title={issue.title}
+                          href={issue.url}
+                          status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                          {...(issue.priority === null || issue.priority.level === 'none'
+                            ? {}
+                            : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                          {...(issue.container === null ? {} : { meta: issue.container })}
+                        />
+                      </IssuePart>
+                    ) : (
+                      <Issue
+                        mark={productBrand(issue.product)}
+                        source={productName(issue.product)}
+                        id={issue.key}
+                        tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                        title={issue.title}
+                        href={issue.url}
+                        status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                        {...(issue.priority === null || issue.priority.level === 'none'
+                          ? {}
+                          : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                        {...(issue.container === null ? {} : { meta: issue.container })}
                       />
                     )}
                   </div>

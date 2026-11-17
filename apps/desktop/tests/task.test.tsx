@@ -499,8 +499,9 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
-    const part = await screen.findByRole('switch', { name: 'Only part of MER-231' })
-    expect(part.getAttribute('aria-checked')).toBe('false')
+    await screen.findByRole('radiogroup', { name: 'What merging does to MER-231' })
+    expect(screen.getByRole('radio', { name: 'Closes it' }).getAttribute('aria-checked')).toBe('true')
+    const part = screen.getByRole('radio', { name: 'Part of it' })
     await userEvent.click(part)
     await waitFor(() => expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true))
   })

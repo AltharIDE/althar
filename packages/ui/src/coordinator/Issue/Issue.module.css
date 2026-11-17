@@ -140,25 +140,24 @@ a.issue:hover .pixels {
   cursor: auto;
 }
 
-/* under a task's issue: whether the task does all of it or only part */
-.part {
+/* a task's issue and its foot in one frame: the foot says what its merge does to the issue */
+.tray {
+  border-radius: 12px;
+  background: var(--paper);
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.tray > .issue,
+.tray > a.issue:hover {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.foot {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 2px 0;
-}
-.partWords {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.partLabel {
-  font-size: 12.5px;
-  font-weight: 550;
-  color: var(--t-1);
-}
-.partNote {
-  font-size: 12px;
-  color: var(--t-3);
+  align-items: center;
+  padding: 6px 10px 7px;
+  border-top: 1px solid var(--line);
 }
