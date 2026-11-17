@@ -160,8 +160,8 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     await remote.getByRole('menuitem', { name: 'Rename' }).click()
     await manage.getByLabel('Name', { exact: true }).fill('Fixture VPS')
     await manage.getByLabel('Name', { exact: true }).press('Enter')
-    await expect(remote.getByRole('button', { name: 'Fixture VPS, over SSH. Homes', exact: true })).toBeVisible()
     await manage.getByRole('button', { name: 'Done', exact: true }).click()
+    await expect(remote.getByRole('button', { name: 'Fixture VPS, over SSH. Homes', exact: true })).toBeVisible()
     await remote.close()
     await expect(
       page.getByRole('region', { name: 'Running', exact: true }).getByRole('button', { name: 'Work over SSH', exact: true }),

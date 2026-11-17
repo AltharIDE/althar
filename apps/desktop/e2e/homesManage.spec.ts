@@ -87,7 +87,7 @@ test('draws the chip once a home is saved, and Manage homes by each home’s pro
     const connect = page.getByRole('dialog', { name: 'Connect a home' })
     await connect.getByLabel('SSH host', { exact: true }).fill('me@nowhere.invalid')
     await connect.getByRole('button', { name: 'Check host', exact: true }).click()
-    await expect(connect.getByRole('alert')).toBeVisible({ timeout: 30_000 })
+    await expect(connect.getByRole('alert')).toBeVisible()
     await still(page)
     await connect.screenshot({ path: 'test-results/homes-manage-04-refused.png', scale: 'css' })
   } finally {
