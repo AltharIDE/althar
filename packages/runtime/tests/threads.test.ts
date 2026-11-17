@@ -4,7 +4,7 @@ import type { ProjectId } from '@althar/domain'
 import type { SessionEvent } from '@althar/provider-adapters'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit, Fiber, Layer, Scope, Stream } from 'effect'
+import { Duration, Effect, Exit, Fiber, Layer, Scope, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents, WebCrypto } from '../src/Config'
@@ -72,6 +72,137 @@ describe('an Althar tool called inside an agent’s code tool', () => {
       yield* keepAltharCall(place3, { tool: 'list_tasks', input: {} })
       const after = (yield* items(where.threadId)).find((item) => item.content.title === 'execute')
       assert.lengthOf(after?.content.althar as ReadonlyArray<unknown>, 2)
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+/** How often the item of a tool call was written, as clients hear of it on the change feed. */
+const writesOf = (threadId: string, toolCallId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ writes: number }>`
+      SELECT count(*) AS writes FROM change_log c JOIN thread_items i ON i.id = c.aggregate_id
+      WHERE c.aggregate_type = 'thread_item' AND i.thread_id = ${threadId} AND i.tool_call_id = ${toolCallId}`
+    return row?.writes ?? 0
+  })
+
+/** A tool call's item, as the store has it. */
+const callIn = (threadId: string, toolCallId: string) =>
+  Effect.map(items(threadId), (all) => all.find((item) => item.toolCallId === toolCallId)?.content)
+
+describe('a running tool call, as the store keeps it', () => {
+  // Held for longer than any test takes: what is held is written only when the test says.
+  const HELD = Duration.hours(1)
+
+  it.live('is written as it changes: what it prints writes nothing, where it stands at once, what it says gathered', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder({ ...where, gather: HELD })
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'build', title: 'Terminal', kind: 'execute', status: 'pending' })
+      assert.strictEqual(yield* writesOf(where.threadId, 'build'), 1)
+      // What it prints goes to whoever watches as it comes (`outputsSoFar`), not to the store: each update of it alone writes nothing.
+      for (let line = 1; line <= 20; line++)
+        yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'build', terminal: { output: `line ${line}\n` } })
+      assert.strictEqual(yield* writesOf(where.threadId, 'build'), 1)
+      assert.lengthOf(record.outputsSoFar(), 1)
+      // Where it stands shows at once.
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'build', status: 'in_progress' })
+      assert.strictEqual(yield* writesOf(where.threadId, 'build'), 2)
+      assert.strictEqual((yield* callIn(where.threadId, 'build'))?.status, 'in_progress')
+      // What it says as it runs is gathered: three changes are held, and written as one.
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'build', title: 'Run the tests' })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'build', rawInput: { command: 'bun test' } })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'build', locations: [{ path: '/w/a.test.ts' }] })
+      assert.strictEqual(yield* writesOf(where.threadId, 'build'), 2)
+      yield* record.flush
+      assert.strictEqual(yield* writesOf(where.threadId, 'build'), 3)
+      const held = yield* callIn(where.threadId, 'build')
+      assert.strictEqual(held?.title, 'Run the tests')
+      assert.deepStrictEqual(held?.rawInput, { command: 'bun test' })
+      assert.deepStrictEqual(held?.locations, [{ path: '/w/a.test.ts' }])
+      // Flushed again with nothing new, nothing is written.
+      yield* record.flush
+      assert.strictEqual(yield* writesOf(where.threadId, 'build'), 3)
+      // It ends at once, with what it printed.
+      yield* record.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'build',
+        status: 'completed',
+        terminal: { exit: { code: 0, signal: null } },
+      })
+      assert.strictEqual(yield* writesOf(where.threadId, 'build'), 4)
+      assert.strictEqual((yield* callIn(where.threadId, 'build'))?.status, 'completed')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('writes what it says a moment later, unasked', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder(where)
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'read', title: 'Read', kind: 'read', status: 'in_progress' })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'read', title: 'Read app.ts' })
+      yield* until(callIn(where.threadId, 'read'), (content) => content?.title === 'Read app.ts')
+      assert.strictEqual(yield* writesOf(where.threadId, 'read'), 2)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps what another writer kept on it while what its agent said was held', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder({ ...where, gather: HELD })
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'code', title: 'execute', kind: 'execute', status: 'in_progress', rawInput: {} })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'code', title: 'execute: plan the task' })
+      yield* keepAltharCall(where, { tool: 'propose_plan', input: { task: 'add-a-retry' } })
+      yield* record.flush
+      const kept = yield* callIn(where.threadId, 'code')
+      assert.strictEqual(kept?.title, 'execute: plan the task')
+      assert.deepStrictEqual(
+        ((kept?.althar ?? []) as ReadonlyArray<{ tool: string }>).map((call) => call.tool),
+        ['propose_plan'],
+      )
+      // And an event after it reads what the other writer kept, rather than write over it.
+      yield* keepAltharCall(where, { tool: 'list_tasks', input: {} })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'code', status: 'completed' })
+      const after = yield* callIn(where.threadId, 'code')
+      assert.strictEqual(after?.status, 'completed')
+      assert.lengthOf(after?.althar as ReadonlyArray<unknown>, 2)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('writes what it says at once as it is left running, for what reads its command next', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder({ ...where, gather: HELD })
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'serve', title: 'Terminal', kind: 'execute', status: 'in_progress' })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'serve', rawInput: { command: 'bun dev' } })
+      yield* record.record({ _tag: 'BackgroundStarted', id: 'bg1', name: 'dev server', toolCallId: 'serve' })
+      assert.deepStrictEqual((yield* callIn(where.threadId, 'serve'))?.rawInput, { command: 'bun dev' })
+      // One it never saw, or none at all, writes nothing.
+      yield* record.record({ _tag: 'BackgroundStarted', id: 'bg2', name: 'other', toolCallId: 'unknown' })
+      yield* record.record({ _tag: 'BackgroundStarted', id: 'bg3', name: 'none' })
+      assert.strictEqual(yield* writesOf(where.threadId, 'serve'), 2)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('lets go of what it held of a call gone from the thread, and starts it again as it is heard of again', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const record = recorder({ ...where, gather: HELD })
+      const sql = yield* SqlClient.SqlClient
+      const gone = sql`DELETE FROM thread_items WHERE thread_id = ${where.threadId} AND tool_call_id = 'lint'`
+      yield* record.record({ _tag: 'ToolCall', toolCallId: 'lint', title: 'Lint', kind: 'execute', status: 'in_progress' })
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'lint', title: 'Lint the app' })
+      // Gone while what its agent said was held: there is nothing to write it on, and nothing goes wrong.
+      yield* gone
+      yield* record.flush
+      assert.isUndefined(yield* callIn(where.threadId, 'lint'))
+      // Heard of again, it is placed again.
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'lint', title: 'Lint it all' })
+      assert.strictEqual((yield* callIn(where.threadId, 'lint'))?.title, 'Lint it all')
+      // And gone between its events, it is placed again too.
+      yield* gone
+      yield* record.record({ _tag: 'ToolCallUpdate', toolCallId: 'lint', status: 'completed' })
+      assert.strictEqual((yield* callIn(where.threadId, 'lint'))?.status, 'completed')
     }).pipe(Effect.provide(runtime())),
   )
 })
@@ -517,6 +648,21 @@ describe('the runtime helpers', () => {
     Effect.gen(function* () {
       const exit = yield* Effect.exit(change('tasks', 'task_missing', { title: 'x' }))
       assert.isTrue(Exit.isFailure(exit))
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('changes a row and moves its revision on together, or only its revision', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      const sql = yield* SqlClient.SqlClient
+      const revisionOf = Effect.map(
+        sql<{ revision: number; title: string }>`SELECT revision, title FROM tasks WHERE id = ${created.taskId}`,
+        ([row]) => row,
+      )
+      const before = yield* revisionOf
+      assert.strictEqual(yield* change('tasks', created.taskId, { title: 'Renamed' }), (before?.revision ?? 0) + 1)
+      assert.deepStrictEqual(yield* revisionOf, { revision: (before?.revision ?? 0) + 1, title: 'Renamed' })
+      assert.strictEqual(yield* change('tasks', created.taskId, {}), (before?.revision ?? 0) + 2)
     }).pipe(Effect.provide(runtime())),
   )
 

@@ -35,18 +35,18 @@ describe('commands’ output', () => {
   it('lets go of what streamed once the store has the command whole', () => {
     const { emit, view, run } = hook()
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'ok\n', dropped: 0 }))
-    expect(view.result.current.get(run.id)?.text).toBe('ok\n')
+    expect(view.result.current.read().get(run.id)?.text).toBe('ok\n')
     view.rerender({ threadId: 'th1', shown: [ended(run)] })
-    expect(view.result.current.size).toBe(0)
+    expect(view.result.current.read().size).toBe(0)
     // Not kept behind: shown as running again, nothing of it is left.
     view.rerender({ threadId: 'th1', shown: [run] })
-    expect(view.result.current.size).toBe(0)
+    expect(view.result.current.read().size).toBe(0)
   })
 
   it('lets go of a thread’s output as another shows', () => {
     const { emit, view, run } = hook()
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'ok\n', dropped: 0 }))
     view.rerender({ threadId: 'th2', shown: [run] })
-    expect(view.result.current.size).toBe(0)
+    expect(view.result.current.read().size).toBe(0)
   })
 })

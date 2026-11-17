@@ -613,6 +613,7 @@ describe('the API', () => {
               PasteAccountSignInCode: () => Effect.die('unused'),
               CancelAccountSignIn: () => Effect.die('unused'),
               GetThreadItem: () => Effect.die('unused'),
+              GetThreadItems: () => Effect.die('unused'),
               ReadOutput: () => Effect.die('unused'),
               ReadDocument: () => Effect.die('unused'),
               ListCanvases: () => Effect.succeed([]),

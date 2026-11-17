@@ -14,6 +14,8 @@ import {
   limitsMoved,
   limitsRead,
   limitsRewritten,
+  longFound,
+  longRead,
   modelSeveral,
 } from '../../fixtures/code'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
@@ -193,6 +195,17 @@ export const PanelMoved: Story = {
     await expect(c.queryByText(/then is line/)).not.toBeInTheDocument()
     await userEvent.click(c.getByRole('radio', { name: 'Now' }))
     await expect(c.getByText(/then is line 17 now/)).toBeInTheDocument()
+  },
+}
+
+/** A long file, opened at lines named far down it: they show a third of the way down, as an editor puts a line it goes to. */
+export const PanelLong: Story = {
+  args: Peek.args,
+  decorators: [beside],
+  render: () => <Stateful found={longFound} where={TASK} read={longRead} change={[]} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(await c.findByText('5022')).toBeInTheDocument()
   },
 }
 

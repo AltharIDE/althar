@@ -2391,7 +2391,8 @@ describe('the coordinator, through the API', () => {
         )
         // The window's interrupt: the conflict is the person's, as the lead left it, and the lead isn't asked again.
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
-        const [interrupted] = yield* rounds()
+        // Recorded behind the press, which answers once the lead is told: the round is the person's as that is done.
+        const [interrupted] = yield* until(rounds(), ([one]) => one?.state !== 'resolving')
         assert.strictEqual(interrupted?.state, 'failed')
         assert.match(interrupted?.failure ?? '', /^You interrupted the lead\. /)
         const thread = yield* until(client.GetThread({ threadId: task.threadId }), (one) => one.session?.turnRunning !== true)
@@ -2424,7 +2425,8 @@ describe('the coordinator, through the API', () => {
         )
         // Whether or not a lead is there to interrupt.
         yield* Effect.exit(client.Interrupt({ commandId: commandId(), threadId: task.threadId }))
-        assert.deepStrictEqual((yield* rounds()).find((round) => round.id === checking)?.state, 'resolved')
+        const handed = yield* until(rounds(), (all) => all.find((round) => round.id === checking)?.state !== 'checking')
+        assert.deepStrictEqual(handed.find((round) => round.id === checking)?.state, 'resolved')
       }),
     ),
   )
@@ -2504,7 +2506,7 @@ describe('the coordinator, through the API', () => {
         // So does stopping its lead alone.
         const checkingAgain = yield* waiting()
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
-        assert.deepStrictEqual(yield* stateOf(checkingAgain), [{ state: 'resolved' }])
+        assert.deepStrictEqual(yield* until(stateOf(checkingAgain), ([one]) => one?.state !== 'checking'), [{ state: 'resolved' }])
         // On an agent picked with no model or effort of its own, as the window sends one: its own.
         yield* client.StopTask({ commandId: commandId(), taskId: task.id })
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'claude-code', model: null, effort: null })
@@ -2898,7 +2900,7 @@ describe('words', () => {
     assert.strictEqual(said({ _tag: 'AttentionClosed' }), 'That call is closed.')
     assert.strictEqual(
       said(new GitFailed({ args: ['worktree', 'add'], cwd: '/r', stderr: 'fatal: a branch named x already exists\n' })),
-      "git worktree didn't work: fatal: a branch named x already exists.",
+      "git worktree didn't work: a branch named x already exists.",
     )
     assert.strictEqual(said(new GitFailed({ args: ['fetch'], cwd: '/r', stderr: '' })), "git fetch didn't work.")
     assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'Something went wrong. Try again.')

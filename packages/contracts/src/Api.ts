@@ -48,6 +48,18 @@ export const API_VERSION = 1
 /** The header every client request carries, naming the API version the client speaks. Compatibility is an exact match. */
 export const API_VERSION_HEADER = 'x-althar-api-version'
 
+/**
+ * The header a read carries when nobody waits on it: one the change feed
+ * started, to keep what a screen holds current (`BACKGROUND`). The runtime
+ * runs those a few at a time, behind everything else, so a burst of them
+ * never holds up a press. Without it, a call is answered as it comes.
+ */
+export const LANE_HEADER = 'x-althar-lane'
+export const BACKGROUND = 'background'
+
+/** The most items one `GetThreadItems` reads. */
+export const THREAD_ITEMS_AT_ONCE = 500
+
 /** The reason of the error a runtime answers a client of another API version with. */
 export const API_VERSION_MISMATCH = 'ApiVersionMismatch'
 
@@ -276,6 +288,11 @@ export const AccountUsage = Schema.Struct({
   /** The plan as the agent names it: plus, pro, max. */
   plan: Schema.NullOr(Schema.String),
   windows: Schema.Array(UsageWindow),
+  /**
+   * The windows last read of it that have reset since, as last read: not in `windows`, and their `usedPercent` is what it was
+   * then, not now. Until they are read again they are only a reset to show.
+   */
+  resetWindows: Schema.optional(Schema.Array(UsageWindow)),
   /** Why the numbers are missing or old, where they are; the windows shown are the last ones then. */
   fault: Schema.NullOr(Schema.Struct({ kind: UsageFaultKind, message: Schema.String })),
   /** Why Althar reads no usage for it, where the agent reports none anyone can read: shown calmly, not as a fault. */
@@ -4399,7 +4416,14 @@ export const WatchEvent = Schema.Union([
     /** What it is and who is saying it, so a client can show it before it has read the item. */
     kind: Schema.Literals(['agent_message', 'agent_thought']),
     agentId: Schema.String,
+    /** Its text as far as it has come; to a watch that asked for `deltas`, what came after `offset`. */
     text: Schema.String,
+    /**
+     * To a watch that asked for `deltas`: how much of the item's text came
+     * before `text`, which the same watch sent already. 0 sends it whole,
+     * as the first time an item streams on that watch.
+     */
+    offset: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   }),
   Schema.Struct({ _tag: Schema.Literal('Context'), threadId: Schema.String, ...ContextUse.fields }),
   /** What the session on a thread has left running, whole each time it changes. */
@@ -4751,6 +4775,7 @@ const socketCalls = new Set<string>([
   'GetTask',
   'GetThread',
   'GetThreadItem',
+  'GetThreadItems',
   'ReadOutput',
   'ReadDocument',
   'ListCanvases',
@@ -5063,6 +5088,16 @@ const ProjectApi = RpcGroup.make(
   ),
   /** One item of a thread, as its page has it: null for one the thread keeps for Althar and never shows, such as what a lead could see. */
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, Schema.NullOr(ThreadItem)),
+  /**
+   * Several items of a thread at once, as `GetThreadItem` reads each: what a
+   * burst of changes touched, in one call. Those of them the thread shows; an
+   * item asked for and not among them is one it keeps for Althar, or gone.
+   */
+  call(
+    'GetThreadItems',
+    { threadId: Schema.String, itemIds: Schema.Array(Schema.String).check(Schema.isMaxLength(THREAD_ITEMS_AT_ONCE)) },
+    Schema.Array(ThreadItem),
+  ),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
   /** What a command a thread's session left running has printed so far, while its session lives. */
@@ -6082,11 +6117,17 @@ const WorkApi = RpcGroup.make(
   command('RollBackSkill', { id: Schema.String }, InstalledSkill),
   /** Removes a skill the person installed; one Althar ships can only be turned off. */
   command('UninstallSkill', { id: Schema.String }, Schema.Void),
-  /** What changes after `since`, or from now without it. */
-  Rpc.make('Watch', { payload: { since: Schema.optional(Cursor) }, success: WatchEvent, error: ApiError, stream: true }).annotate(
-    SocketAllowed,
-    true,
-  ),
+  /**
+   * What changes after `since`, or from now without it. With `deltas`, an
+   * agent's message as it streams comes as what was added since this watch
+   * last sent it (`Streaming`'s `offset`), not whole each time.
+   */
+  Rpc.make('Watch', {
+    payload: { since: Schema.optional(Cursor), deltas: Schema.optional(Schema.Boolean) },
+    success: WatchEvent,
+    error: ApiError,
+    stream: true,
+  }).annotate(SocketAllowed, true),
 ).middleware(ClientAuthority)
 
 /** External ACP connections share the API's authority boundary, with a small handler group of their own. */

@@ -1,8 +1,10 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
+import { CHUNK, chunkOf, useNear, widthOf } from '../../lib/chunks'
+import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
-import { isProse, useColoured } from '../../lib/syntax'
+import { inked, isProse, type TokenLines, useTokens } from '../../lib/syntax'
 import type { CodeRead } from './code'
 import s from './Code.module.css'
 
@@ -40,12 +42,77 @@ export interface CodeLinesProps {
 /** How many more lines a gap shows each time it is pressed. */
 const MORE = 20
 
+type Mark = { readonly line: number; readonly end: number } | null
+
+interface LinesProps {
+  /** Every line read, the first numbered `first`, and their tokens where coloured. */
+  rows: readonly string[]
+  first: number
+  tokens: TokenLines | null
+  /** The numbers of the first and last lines to draw. */
+  from: number
+  to: number
+  mark: Mark
+}
+
+/** Which of the lines from `from` to `to` are named, as a word that changes only when that does. */
+const namedIn = (mark: Mark, from: number, to: number) =>
+  mark === null || mark.end < from || mark.line > to ? '' : `${Math.max(mark.line, from)}-${Math.min(mark.end, to)}`
+
+/** The same lines, named alike, in the same colours: as a file's colours come, only the lines that took them are drawn again. */
+const sameLines = (a: LinesProps, b: LinesProps) => {
+  if (a.rows !== b.rows || a.first !== b.first || a.from !== b.from || a.to !== b.to) return false
+  if (namedIn(a.mark, a.from, a.to) !== namedIn(b.mark, b.from, b.to)) return false
+  if (a.tokens === b.tokens) return true
+  for (let n = a.from; n <= a.to; n += 1) if (a.tokens?.[n - a.first] !== b.tokens?.[n - b.first]) return false
+  return true
+}
+
+/** Lines from `from` to `to`: numbered, in their colours where they have them, those named marked. */
+const Lines = memo(function Lines({ rows, first, tokens, from, to, mark }: LinesProps) {
+  const lines: ReactNode[] = []
+  for (let n = from; n <= to; n += 1) {
+    const named = mark !== null && n >= mark.line && n <= mark.end
+    const line = tokens?.[n - first]
+    lines.push(
+      <span key={n} className={cx(s.line, named && s.named)} data-named={named || undefined}>
+        <span className={s.n} aria-hidden="true">
+          {n}
+        </span>
+        <span className={s.text}>{line === undefined ? (rows[n - first] ?? '') : inked(line)}</span>
+        {'\n'}
+      </span>,
+    )
+  }
+  return lines
+}, sameLines)
+
+/**
+ * A chunk of a long file's lines: laid out and painted only near the screen, held until then as tall as its lines and as wide
+ * as its longest (Code.module.css), and in its colours once near (lib/chunks.ts).
+ */
+function Chunk({ initially, ...lines }: LinesProps & { initially: boolean }) {
+  const box = useRef<HTMLSpanElement>(null)
+  const near = useNear(box, initially)
+  const { rows, first, from, to } = lines
+  const widest = useMemo(() => {
+    let most = 0
+    for (let n = from; n <= to; n += 1) most = Math.max(most, widthOf(rows[n - first] ?? ''))
+    return most
+  }, [rows, first, from, to])
+  return (
+    <span ref={box} className={s.chunk} style={cssVars({ '--rows': to - from + 1, '--cols': widest })}>
+      <Lines {...lines} tokens={near ? lines.tokens : null} />
+    </span>
+  )
+}
+
 /** A file's lines, read-only: numbered, in their colours, the lines named marked. Prose wraps; code scrolls sideways, its numbers staying put. */
 export function CodeLines({ path, read, mark = null, around, text, className }: CodeLinesProps) {
   const t = { ...codeLinesText, ...text }
   const box = useRef<HTMLPreElement>(null)
   const rows = useMemo(() => read.text.replace(/\n$/, '').split('\n'), [read.text])
-  const coloured = useColoured(read.text, path)
+  const tokens = useTokens(read.text, path)
   const [more, setMore] = useState({ above: 0, below: 0 })
   const grew = useRef(false)
 
@@ -58,12 +125,13 @@ export function CodeLines({ path, read, mark = null, around, text, className }: 
     return () => fit.disconnect()
   }, [])
 
-  // The lines named a third of the way down.
+  // The lines named a third of the way down: where they are in the lines, measured, as a chunk they are in is drawn for it.
   useLayoutEffect(() => {
     const el = box.current
     if (el === null) return
     const first = el.querySelector<HTMLElement>('[data-named]')
-    el.scrollTop = first === null ? 0 : Math.max(0, first.offsetTop - el.clientHeight / 3)
+    const top = first === null ? 0 : first.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+    el.scrollTop = first === null ? 0 : Math.max(0, top - el.clientHeight / 3)
   }, [read, mark?.line])
 
   // Lines shown below come into view.
@@ -78,25 +146,31 @@ export function CodeLines({ path, read, mark = null, around, text, className }: 
   const last = first + rows.length - 1
   const lo = around === undefined || mark === null ? first : Math.max(first, mark.line - around - more.above)
   const hi = around === undefined ? last : Math.min(last, (mark === null ? first + around * 2 + 1 : mark.end + around) + more.below)
+  const lines = { rows, first, tokens, mark }
   return (
     // Focusable, to scroll from the keyboard as from a pointer, as a code block is; what holds it names it.
     <pre ref={box} className={cx(s.lines, isProse(path) && s.wrap, className)} tabIndex={0}>
       {around !== undefined && lo > 1 && (
         <Gap hidden={lo - 1} loaded={lo - first} where="above" t={t} onMore={() => setMore({ ...more, above: more.above + MORE })} />
       )}
-      {rows.slice(lo - first, hi - first + 1).map((row, i) => {
-        const n = lo + i
-        const named = mark !== null && n >= mark.line && n <= mark.end
-        return (
-          <span key={n} className={cx(s.line, named && s.named)} data-named={named || undefined}>
-            <span className={s.n} aria-hidden="true">
-              {n}
-            </span>
-            <span className={s.text}>{coloured?.[n - first] ?? row}</span>
-            {'\n'}
-          </span>
-        )
-      })}
+      {hi - lo < CHUNK ? (
+        <Lines {...lines} from={lo} to={hi} />
+      ) : (
+        // A long file in chunks, by where each line is in the file, so lines shown later join the chunk they are in; those
+        // about where it opens, at the lines named or its top, are near from the start.
+        Array.from({ length: chunkOf(hi - first) - chunkOf(lo - first) + 1 }, (_, i) => {
+          const k = chunkOf(lo - first) + i
+          return (
+            <Chunk
+              key={k}
+              {...lines}
+              from={Math.max(lo, first + k * CHUNK)}
+              to={Math.min(hi, first + (k + 1) * CHUNK - 1)}
+              initially={Math.abs(k - chunkOf((mark?.line ?? lo) - first)) <= 1}
+            />
+          )
+        })
+      )}
       {around !== undefined && hi < read.total && (
         <Gap
           hidden={read.total - hi}
