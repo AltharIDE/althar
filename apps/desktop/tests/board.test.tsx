@@ -2313,8 +2313,12 @@ describe('a ready card’s next step, done from the card', () => {
         keptAt: '2026-09-30T11:00:00.000Z',
       }),
     ]
-    const markTaskDone = vi.fn(async () => {})
-    const keepTaskForLater = vi.fn(async () => {})
+    // Each kept as the runtime keeps it: the board read after says so.
+    const moved = (phase: BoardTask['phase']) => async (taskId: string) => {
+      tasks = tasks.map((one) => (one.taskId === taskId ? { ...one, phase } : one))
+    }
+    const markTaskDone = vi.fn(moved('settled'))
+    const keepTaskForLater = vi.fn(moved('kept'))
     const settledWithOnePress = vi.fn(async () => {})
     const onOpen = vi.fn()
     withServices(
@@ -2327,7 +2331,7 @@ describe('a ready card’s next step, done from the card', () => {
     // Done on the Kept shelf settles nothing in Needs you: it isn't counted.
     const lane = within(screen.getByRole('region', { name: /^Settled/ }))
     await userEvent.click(lane.getByRole('button', { name: /^Kept/, pressed: false }))
-    await userEvent.click(lane.getByRole('button', { name: 'Done' }))
+    await userEvent.click((await cardOf('Spike the limits')).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(markTaskDone).toHaveBeenCalledWith('p2'))
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(settledWithOnePress).toHaveBeenCalledOnce()

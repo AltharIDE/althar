@@ -48,6 +48,18 @@ export const API_VERSION = 1
 /** The header every client request carries, naming the API version the client speaks. Compatibility is an exact match. */
 export const API_VERSION_HEADER = 'x-althar-api-version'
 
+/**
+ * The header a read carries when nobody waits on it: one the change feed
+ * started, to keep what a screen holds current (`BACKGROUND`). The runtime
+ * runs those a few at a time, behind everything else, so a burst of them
+ * never holds up a press. Without it, a call is answered as it comes.
+ */
+export const LANE_HEADER = 'x-althar-lane'
+export const BACKGROUND = 'background'
+
+/** The most items one `GetThreadItems` reads. */
+export const THREAD_ITEMS_AT_ONCE = 500
+
 /** The reason of the error a runtime answers a client of another API version with. */
 export const API_VERSION_MISMATCH = 'ApiVersionMismatch'
 
@@ -276,6 +288,11 @@ export const AccountUsage = Schema.Struct({
   /** The plan as the agent names it: plus, pro, max. */
   plan: Schema.NullOr(Schema.String),
   windows: Schema.Array(UsageWindow),
+  /**
+   * The windows last read of it that have reset since, as last read: not in `windows`, and their `usedPercent` is what it was
+   * then, not now. Until they are read again they are only a reset to show.
+   */
+  resetWindows: Schema.optional(Schema.Array(UsageWindow)),
   /** Why the numbers are missing or old, where they are; the windows shown are the last ones then. */
   fault: Schema.NullOr(Schema.Struct({ kind: UsageFaultKind, message: Schema.String })),
   /** Why Althar reads no usage for it, where the agent reports none anyone can read: shown calmly, not as a fault. */
@@ -741,6 +758,18 @@ export const AgentTools = Schema.Struct({
 })
 export type AgentTools = typeof AgentTools.Type
 
+/**
+ * How far a Ship takes what waits: as far as a push (a draft stays one, a new
+ * pull request opens as one), ready for review (a draft is marked ready, a new
+ * one opens ready), or merged, once the checks main requires pass.
+ */
+export const ShipFar = Schema.Literals(['push', 'ready', 'merge'])
+export type ShipFar = typeof ShipFar.Type
+
+/** A Ship's route: whether its review comes first, and how far it goes. */
+export const ShipRoute = Schema.Struct({ review: Schema.Boolean, far: ShipFar })
+export type ShipRoute = typeof ShipRoute.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   plansAndReviews: PlansAndReviews,
@@ -756,6 +785,8 @@ export const AppSettings = Schema.Struct({
   runOutside: Schema.optional(Schema.Literals(['ask', 'safe', 'full'])),
   /** What sending does while an agent is mid-turn: `queue` it for the turn's end, its default, or `steer` it to the agent at once. */
   sendMidTurn: Schema.optional(Schema.Literals(['queue', 'steer'])),
+  /** The route the person's Ships take unless they choose another for one: absent until they make one their default. */
+  shipRoute: Schema.optional(ShipRoute),
   /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
   automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
@@ -1508,6 +1539,15 @@ export const IssueSummary = Schema.Struct({
   container: Schema.NullOr(Schema.String),
 })
 export type IssueSummary = typeof IssueSummary.Type
+
+/** An issue a task came from: as last seen, and whether the task does only part of it, so its merge comments on it rather than closing it. */
+export const TaskIssue = Schema.Struct({
+  ...IssueSummary.fields,
+  partOf: Schema.optional(Schema.Boolean),
+  /** The id of the task's tie to it, which names it alone where two trackers share its key. Absent from a runtime before. */
+  link: Schema.optional(Schema.String),
+})
+export type TaskIssue = typeof TaskIssue.Type
 
 export const IssueList = Schema.Struct({ issues: Schema.Array(IssueSummary) })
 export type IssueList = typeof IssueList.Type
@@ -2348,6 +2388,30 @@ export const HeldForShip = Schema.Struct({
 })
 export type HeldForShip = typeof HeldForShip.Type
 
+/** A stop on a Ship's route. */
+export const ShipStop = Schema.Literals(['review', 'push', 'ready', 'merge'])
+export type ShipStop = typeof ShipStop.Type
+
+/**
+ * The route Ship takes on a task when pressed without one chosen: the
+ * person's own default (Settings' `shipRoute`), else what the task's plan and
+ * ending say, bent where the task makes a stop pointless: no review where it
+ * has no reviewer (`reviewable` false), and no further than Ready where main
+ * needs someone else's approval (`bent`).
+ */
+export const ShipRouteOf = Schema.Struct({
+  route: ShipRoute,
+  /** Whether a review can come first: it has a reviewer to run one. */
+  reviewable: Schema.Boolean,
+  /** Why it goes less far than the person's default, where it does: main needs an approval from someone else. */
+  bent: Schema.NullOr(Schema.Literals(['approval'])),
+})
+export type ShipRouteOf = typeof ShipRouteOf.Type
+
+/** A Ship under way: its route, as chosen or changed since, and the stop it is at. */
+export const ShipUnderWay = Schema.Struct({ route: ShipRoute, at: ShipStop })
+export type ShipUnderWay = typeof ShipUnderWay.Type
+
 export const Unshipped = Schema.Struct({
   commits: Schema.Int,
   /** Lines they add and remove, all together. */
@@ -2513,6 +2577,32 @@ export const AfterMergeReview = Schema.Struct({
 })
 export type AfterMergeReview = typeof AfterMergeReview.Type
 
+/**
+ * How a task another waits for stands (tasks wait for their blockers): `planned` before its lead starts, `working` while it
+ * does, `stuck` where it waits on the person or stopped, `review` with its pull request open, `merged` once it is done (its
+ * work in), `abandoned` once given up: the task waiting for it then waits on the person.
+ */
+export const BlockerStanding = Schema.Literals(['planned', 'working', 'stuck', 'review', 'merged', 'abandoned'])
+export type BlockerStanding = typeof BlockerStanding.Type
+
+/** Another task named on a task's card: what it waits for, or what waits for it. */
+export const LinkedTask = Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })
+export type LinkedTask = typeof LinkedTask.Type
+
+/** A task this one waits for, and how it stands. */
+export const TaskBlocker = Schema.Struct({ ...LinkedTask.fields, stands: BlockerStanding })
+export type TaskBlocker = typeof TaskBlocker.Type
+
+/** An issue a task came from, as its card shows it, with the connection Althar reads it and moves it through, where it has one. */
+export const CardIssue = Schema.Struct({
+  product: Product,
+  key: Schema.String,
+  title: Schema.String,
+  url: Schema.String,
+  connectionId: Schema.optional(Schema.String),
+})
+export type CardIssue = typeof CardIssue.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2581,16 +2671,10 @@ export const TaskCard = Schema.Struct({
       repositoryId: Schema.optional(Schema.String),
     }),
   ),
-  /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
-  issue: Schema.NullOr(
-    Schema.Struct({
-      product: Product,
-      key: Schema.String,
-      title: Schema.String,
-      url: Schema.String,
-      connectionId: Schema.optional(Schema.String),
-    }),
-  ),
+  /** The (first) issue it came from, and the connection Althar reads it and moves it through, where it has one. */
+  issue: Schema.NullOr(CardIssue),
+  /** Each issue it came from, on any trackers, the first being `issue`. Absent where it came from one or none, and from a runtime before. */
+  fromIssues: Schema.optional(Schema.Array(CardIssue)),
   /** Its pull request, once opened: the open one, else its latest. */
   change: Schema.NullOr(ChangeSummary),
   /** Its other pull requests, newest first: those of earlier rounds of its work, merged or closed (ADR-034). */
@@ -2666,6 +2750,11 @@ export const TaskCard = Schema.Struct({
   reviewOffer: Schema.optional(PlanStep),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
+  /**
+   * Its Ship's stop past its push, while `step` is still `publish`: marking its pull request ready, or waiting to merge on the
+   * checks main requires. Its card and header say that stop, not the opening of a pull request. Absent otherwise.
+   */
+  shipAt: Schema.optional(Schema.Literals(['ready', 'merge'])),
   /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
   followUp: Schema.optional(Schema.Boolean),
   /** The latest summary the lead reported. */
@@ -2718,6 +2807,14 @@ export const TaskCard = Schema.Struct({
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
+  /**
+   * The tasks it waits for (tasks wait for their blockers), in the order they were named, merged ones included: its plan
+   * starts by itself once they have all merged, and waits on the person once one of them is abandoned. Absent where it waits
+   * for none, and once it started.
+   */
+  waitsFor: Schema.optional(Schema.Array(TaskBlocker)),
+  /** The open tasks that wait for it, whose plans start once it merges. Absent where none does. */
+  waitedBy: Schema.optional(Schema.Array(LinkedTask)),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
   /**
@@ -3951,6 +4048,10 @@ export const ThreadSnapshot = Schema.Struct({
     ),
     /** Started Local, what it waits for before its lead starts, as its card says. */
     waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
+    /** The tasks its plan waits for, and how each stands, as its card says (tasks wait for their blockers). */
+    waitsFor: Schema.optional(Schema.Array(TaskBlocker)),
+    /** The open tasks that wait for it, as its card says. */
+    waitedBy: Schema.optional(Schema.Array(LinkedTask)),
     /** The branch its work goes into, where it isn't its repository's default (ADR-093): release/0.8.0; absent for the default. */
     toward: Schema.optional(Schema.String),
     /**
@@ -4009,10 +4110,12 @@ export const ThreadSnapshot = Schema.Struct({
     /** When its work started, and when it settled: how long it has run. */
     startedAt: Schema.NullOr(Schema.String),
     settledAt: Schema.NullOr(Schema.String),
-    /** The issue it came from. */
+    /** The (first) issue it came from. */
     issue: Schema.NullOr(IssueSummary),
-    /** It does only part of its issue: its merge comments on it and leaves it open, rather than closing it. */
+    /** It does only part of its (first) issue: its merge comments on it and leaves it open, rather than closing it. */
     issuePartOf: Schema.optional(Schema.Boolean),
+    /** Each issue it came from, on any trackers, the first being `issue`, each with its own `partOf`. Absent from a runtime before. */
+    fromIssues: Schema.optional(Schema.Array(TaskIssue)),
     /** Its pull requests, as last seen, oldest first. */
     changes: Schema.Array(ChangeSummary),
     /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
@@ -4027,6 +4130,10 @@ export const ThreadSnapshot = Schema.Struct({
     nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
     skipReview: Schema.optional(Schema.Boolean),
+    /** The route its Ship takes when pressed without one chosen, while something waits for Ship. Absent otherwise. */
+    shipRoute: Schema.optional(ShipRouteOf),
+    /** Its Ship under way: the route and the stop it is at. Absent while none is. */
+    shipping: Schema.optional(ShipUnderWay),
     /**
      * It can be made a change in one move, as its menu's Make it a change does: begun, of its own work, not merged, and
      * ending with no pull request (a prototype, a chat, a quick task).
@@ -4319,7 +4426,14 @@ export const WatchEvent = Schema.Union([
     /** What it is and who is saying it, so a client can show it before it has read the item. */
     kind: Schema.Literals(['agent_message', 'agent_thought']),
     agentId: Schema.String,
+    /** Its text as far as it has come; to a watch that asked for `deltas`, what came after `offset`. */
     text: Schema.String,
+    /**
+     * To a watch that asked for `deltas`: how much of the item's text came
+     * before `text`, which the same watch sent already. 0 sends it whole,
+     * as the first time an item streams on that watch.
+     */
+    offset: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   }),
   Schema.Struct({ _tag: Schema.Literal('Context'), threadId: Schema.String, ...ContextUse.fields }),
   /** What the session on a thread has left running, whole each time it changes. */
@@ -4671,6 +4785,7 @@ const socketCalls = new Set<string>([
   'GetTask',
   'GetThread',
   'GetThreadItem',
+  'GetThreadItems',
   'ReadOutput',
   'ReadDocument',
   'ListCanvases',
@@ -4708,6 +4823,8 @@ const socketCalls = new Set<string>([
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
+/** The same deny-by-default policy used at authenticated ingress, for clients that show their connection's capabilities. */
+export const socketCanCall = (tag: string): boolean => tag === 'WatchFrom' || tag === 'WatchAttention' || socketCalls.has(tag)
 
 /** The prompt returned to the composer after its turn and later conversation were undone. */
 export const UndoTurnResult = Schema.Struct({
@@ -4718,7 +4835,7 @@ export const UndoTurnResult = Schema.Struct({
 export type UndoTurnResult = typeof UndoTurnResult.Type
 
 const call = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
-  Rpc.make(tag, { payload, success, error: ApiError }).annotate(SocketAllowed, socketCalls.has(tag))
+  Rpc.make(tag, { payload, success, error: ApiError }).annotate(SocketAllowed, socketCanCall(tag))
 
 /** A command: what it says, and the client's id for it. */
 const command = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
@@ -4917,6 +5034,8 @@ const ProjectApi = RpcGroup.make(
       title: Schema.String,
       description: Schema.optional(Schema.String),
       issue: Schema.optional(Schema.String),
+      /** Other issues it comes from, beside issue, on any trackers: each its link or key. */
+      issues: Schema.optional(Schema.Array(Schema.String)),
       /** The project's repositories it changes, by name: needed only in a project of several. */
       repositories: Schema.optional(Schema.Array(Schema.String)),
     },
@@ -4983,6 +5102,16 @@ const ProjectApi = RpcGroup.make(
   ),
   /** One item of a thread, as its page has it: null for one the thread keeps for Althar and never shows, such as what a lead could see. */
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, Schema.NullOr(ThreadItem)),
+  /**
+   * Several items of a thread at once, as `GetThreadItem` reads each: what a
+   * burst of changes touched, in one call. Those of them the thread shows; an
+   * item asked for and not among them is one it keeps for Althar, or gone.
+   */
+  call(
+    'GetThreadItems',
+    { threadId: Schema.String, itemIds: Schema.Array(Schema.String).check(Schema.isMaxLength(THREAD_ITEMS_AT_ONCE)) },
+    Schema.Array(ThreadItem),
+  ),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
   /** What a command a thread's session left running has printed so far, while its session lives. */
@@ -5047,6 +5176,8 @@ const ProjectApi = RpcGroup.make(
       steps: Schema.Array(PlanStep),
       /** The issue it comes from: its link or its key. */
       issue: Schema.optional(Schema.String),
+      /** Other issues it comes from, beside issue, on any trackers: each its link or key. */
+      issues: Schema.optional(Schema.Array(Schema.String)),
       /** What happens when the work is done; without it, a draft pull request where the repository's host is connected. */
       end: Schema.optional(Schema.NullOr(TaskEnd)),
       /** The project's repositories it changes, by name: needed only in a project of several. */
@@ -5064,6 +5195,8 @@ const ProjectApi = RpcGroup.make(
   ),
   /** Starts a planned task now, rather than when its time runs out. */
   command('StartPlan', { planId: Schema.String }, Schema.Void),
+  /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
+  command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
   command('HoldPlan', { planId: Schema.String }, Schema.Boolean),
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
@@ -5116,7 +5249,8 @@ const ProjectApi = RpcGroup.make(
    */
   command('PreferIssueCards', { threadId: Schema.String, atOnce: Schema.Boolean }, Schema.Void),
   /** Whether a task does only part of its issue: its merge comments on the issue and leaves it open, rather than closing it. */
-  command('SetTaskIssuePart', { taskId: Schema.String, partOf: Schema.Boolean }, Schema.Void),
+  /** Whether a task does only part of an issue it came from: the one named by its ref or key, or its first where none is. */
+  command('SetTaskIssuePart', { taskId: Schema.String, partOf: Schema.Boolean, issue: Schema.optional(Schema.String) }, Schema.Void),
   /** Discards changes to issues: nothing changes on the tracker. */
   command('DiscardIssueChanges', { changesId: Schema.String }, Schema.Void),
   /**
@@ -5236,6 +5370,8 @@ const ProjectApi = RpcGroup.make(
   command('SetRunOutside', { to: Schema.Literals(['ask', 'safe', 'full']) }, Schema.Void),
   /** What sending a message does while an agent is mid-turn: queue it, or steer the agent with it at once. */
   command('SetSendMidTurn', { to: Schema.Literals(['queue', 'steer']) }, Schema.Void),
+  /** Makes a route the person's default for every Ship, as Make this my default does; null goes back to each task's own. */
+  command('SetShipRoute', { route: Schema.NullOr(ShipRoute) }, Schema.Void),
   /**
    * Saves a preset: a task's parts, team and first lines of its brief (Save as preset), or the parts the coordinator offered;
    * kept to the task's project with `projectOnly`. Its name, as kept.
@@ -5771,7 +5907,14 @@ const WorkApi = RpcGroup.make(
    * where nothing waits (`ShipRefused`).
    */
   // A change named ships alone, with what waits beneath it in its stack; none, every change waiting, the bottom of a stack first.
-  command('Ship', { taskId: Schema.String, change: Schema.optional(Schema.String) }, Schema.Void),
+  // `route` is this Ship's, as the person chose it; without it, the task's own (`TaskView.shipRoute`).
+  command('Ship', { taskId: Schema.String, change: Schema.optional(Schema.String), route: Schema.optional(ShipRoute) }, Schema.Void),
+  /**
+   * Changes the route of the task's Ship under way: how far it goes, where it
+   * hasn't gone past that yet, and its review, which stops as Skip review
+   * stops it where the route turns it off. Refused where no Ship is under way.
+   */
+  command('RouteShip', { taskId: Schema.String, route: ShipRoute }, Schema.Void),
   /**
    * Fix it, on what a review after a merge found (a task is a conversation
    * plus parts, "After merge, in the same task"): the findings go to the
@@ -5991,11 +6134,17 @@ const WorkApi = RpcGroup.make(
   command('RollBackSkill', { id: Schema.String }, InstalledSkill),
   /** Removes a skill the person installed; one Althar ships can only be turned off. */
   command('UninstallSkill', { id: Schema.String }, Schema.Void),
-  /** What changes after `since`, or from now without it. */
-  Rpc.make('Watch', { payload: { since: Schema.optional(Cursor) }, success: WatchEvent, error: ApiError, stream: true }).annotate(
-    SocketAllowed,
-    true,
-  ),
+  /**
+   * What changes after `since`, or from now without it. With `deltas`, an
+   * agent's message as it streams comes as what was added since this watch
+   * last sent it (`Streaming`'s `offset`), not whole each time.
+   */
+  Rpc.make('Watch', {
+    payload: { since: Schema.optional(Cursor), deltas: Schema.optional(Schema.Boolean) },
+    success: WatchEvent,
+    error: ApiError,
+    stream: true,
+  }).annotate(SocketAllowed, true),
 ).middleware(ClientAuthority)
 
 /** External ACP connections share the API's authority boundary, with a small handler group of their own. */

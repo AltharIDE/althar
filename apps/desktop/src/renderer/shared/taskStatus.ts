@@ -1,5 +1,7 @@
-import type { TaskPhase } from '@althar/contracts'
+import type { TaskBlocker, TaskPhase } from '@althar/contracts'
 import { TaskStatus } from '@althar/ui'
+
+import { openBlockers } from './blockers'
 
 /*
  * Where a task stands, as its card on the board, its line on the home and
@@ -26,6 +28,8 @@ export interface Standing {
   readonly inMergeQueue?: boolean
   /** Its folder coming back from its branch, set up again, before anything it was asked goes on (ADR-056): its view says so. */
   readonly folder?: string | undefined
+  /** The tasks its plan waits for (tasks wait for their blockers): after them, or the person's once one was abandoned. */
+  readonly waitsFor?: ReadonlyArray<TaskBlocker> | undefined
 }
 
 /**
@@ -40,6 +44,9 @@ export const taskStatusOf = (task: Standing): TaskStatus => {
   if (task.waits != null || task.reconnects != null) return TaskStatus.Paused
   if (task.queued != null || task.waitsForCheckout != null) return TaskStatus.Queued
   if (task.folder === 'returning') return TaskStatus.Running
+  // Its plan waits for other tasks: after them, as one waiting for an agent is; the person's once one of them was abandoned.
+  const after = openBlockers(task)
+  if (after.length > 0) return after.some((one) => one.stands === 'abandoned') ? TaskStatus.Yours : TaskStatus.Queued
   switch (task.phase) {
     case 'ready':
       return task.inMergeQueue === true ? TaskStatus.Running : TaskStatus.Yours

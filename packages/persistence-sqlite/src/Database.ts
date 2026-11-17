@@ -7,6 +7,9 @@ import { BackupFailed, backUpBeforeMigrating, latestBackup, reasonOf } from './b
 import { idOf, loaderFor, type Migration, MIGRATIONS_TABLE, migrations } from './migrations'
 import { checkMaintenance, DatabaseInMaintenance } from './maintenance'
 
+/** How many prepared statements the store keeps: more than the runtime has. */
+export const PREPARED = 2_000
+
 /** Timings stay in the runtime log even if opening or migration fails. */
 const timed = <A, E, R>(stage: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
   Effect.gen(function* () {
@@ -172,6 +175,9 @@ export const layer = (
           Layer.buildWithMemoMap(
             SqliteClient.layer({
               filename: options.filename,
+              // Each statement is prepared once and kept: the runtime has some 1,500, and a board's cards alone run hundreds
+              // of them on every change, so the client's 200 had each read prepare most of them again.
+              prepareCacheSize: PREPARED,
               transformQueryNames: camelToSnake,
               transformResultNames: snakeToCamel,
               ...(options.busyTimeout === undefined ? {} : { busyTimeout: options.busyTimeout }),

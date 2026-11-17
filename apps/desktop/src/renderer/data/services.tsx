@@ -1,4 +1,5 @@
 import type { StartupStage } from '../../startup'
+import type { HomesHost } from '../../homes'
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
@@ -12,6 +13,7 @@ import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '
 import type { UpdateGlance } from '../../main/updates'
 
 import type { Attached } from '../shared/files'
+import type { SlowFrames } from '../shared/frames'
 import type { Client } from './client'
 import type { Feed } from './feed'
 
@@ -180,6 +182,7 @@ export interface StorageHost {
 }
 
 export interface Host {
+  readonly homes?: HomesHost
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
@@ -290,6 +293,8 @@ export interface Host {
   readonly quit?: QuitHost
   /** Keeps an error the page didn't handle in main's log. */
   readonly logError?: (error: WindowError) => void
+  /** Keeps the page's long frames and slow presses in main's log (`shared/frames.ts`). */
+  readonly logFrames?: (frames: SlowFrames) => void
   /** The pages beside the conversations (ADR-100); absent where a page can't have them, as the edge's. */
   readonly pages?: PagesHost
   /** The HTML canvases beside the conversations (ADR-104); absent where a page can't have them, as the edge's. */

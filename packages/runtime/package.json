@@ -24,7 +24,8 @@
     "test:coverage": "vp test run --coverage",
     "test:performance": "vp test bench --run",
     "verify": "bun run check && bun run test:coverage",
-    "test:agents": "vp test run --config vite.agents.config.ts"
+    "test:agents": "vp test run --config vite.agents.config.ts",
+    "test:responsiveness": "vp test run --config vite.real.config.ts tests/real/responsiveness.test.ts"
   },
   "dependencies": {
     "@althar/connectors": "workspace:*",

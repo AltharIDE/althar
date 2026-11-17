@@ -83,6 +83,24 @@ export const limitsRewritten = limits({
   since: { commit: '8c1f2ad', said: '2026-10-18T16:40:00.000Z', now: null },
 })
 
+/**
+ * The limiter as a long generated file has it: its lines over and over, a few thousand of them, and the lines named far down,
+ * for how a long file opens at them and scrolls.
+ */
+const LONG = Array.from({ length: 150 }, (_, i) => LIMITS.replaceAll('checkRefundLimit', `checkRefundLimit${i}`)).join('')
+
+export const longRead: CodeRead = { text: LONG, from: 1, total: LONG.split('\n').length - 1, cut: false }
+
+export const longFound = limits({
+  name: 'src/refunds/limits.generated.ts:5022-5033',
+  path: 'src/refunds/limits.generated.ts',
+  bytes: LONG.length,
+  lines: longRead.total,
+  line: 5022,
+  end: 5033,
+  changed: null,
+})
+
 /** A name in code, at the line that declares it. */
 export const limitFn = limits({ name: 'checkRefundLimit', line: 22, symbol: 'checkRefundLimit', changed: null })
 

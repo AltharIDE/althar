@@ -1082,7 +1082,7 @@ export const agentTools: AgentTools = {
 
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
-  const watching: Array<number | undefined> = []
+  const watching: Array<number | import('@althar/contracts').FeedPosition | undefined> = []
   const starts = new Set<() => void>()
   const client: Client = {
     status: vi.fn(async () => status),
@@ -1121,6 +1121,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
+    // Each as `getThreadItem` reads it, whatever a test makes that do.
+    getThreadItems: vi.fn(async (threadId: string, itemIds: Iterable<string>) => {
+      const ids = [...itemIds]
+      const read = await Promise.all(ids.map((id) => client.getThreadItem(threadId, id)))
+      return new Map(ids.map((id, at) => [id, read[at] ?? null]))
+    }),
+    behind: (start) => start(),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
     readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readLaunchOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
@@ -1144,6 +1151,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     ship: vi.fn(async () => {}),
+    routeShip: vi.fn(async () => {}),
     fixAfterMerge: vi.fn(async () => {}),
     leaveAfterMerge: vi.fn(async () => {}),
     replacePullRequest: vi.fn(async () => {}),
@@ -1226,6 +1234,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setCoAuthor: vi.fn(async () => {}),
     setPostTeamReviews: vi.fn(async () => {}),
     setSendMidTurn: vi.fn(async () => {}),
+    setShipRoute: vi.fn(async () => {}),
     setRunOutside: vi.fn(async () => {}),
     shelveTask: vi.fn(async () => {}),
     stopHelper: vi.fn(async () => {}),
@@ -1303,6 +1312,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),
     startTask: vi.fn(async () => task),
     startPlan: vi.fn(async () => {}),
+    stopWaiting: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => true),
     holdDraft: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
@@ -1536,6 +1546,7 @@ export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}):
   observedAt: '2026-10-15T10:00:00.000Z',
   plan: 'pro',
   windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
+  resetWindows: [],
   fault: null,
   noReading: null,
   resetSince: false,
