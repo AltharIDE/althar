@@ -527,7 +527,7 @@ export function TaskThread({
         )
       case 'folder':
         return (
-          <ThreadDivider key={block.id} icon={block.brought === true ? 'download' : 'folder'}>
+          <ThreadDivider key={block.id} icon="folder">
             {block.text}
           </ThreadDivider>
         )

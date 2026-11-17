@@ -2058,9 +2058,10 @@ export const NoticeItem = Schema.Struct({
     links: Schema.optional(Schema.Array(Schema.Struct({ label: Schema.String, url: Schema.String }))),
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
-     * work, what the coordinator relayed, its task's folder going or coming
-     * back (ADR-056), or what was brought in from another tool and where from
-     * (workspaces-and-runs, "Bringing in other tools' work"), a line across the thread.
+     * work, what the coordinator relayed, or its task's folder going or coming
+     * back, a line across the thread (ADR-056). What was brought in from another
+     * tool, and where from, is Althar's own line (`brought`, workspaces-and-runs,
+     * "Bringing in other tools' work").
      */
     role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'brought'])),
     /** A task the line is about, which it links to: one this task's lead started (ADR-097), once. */
