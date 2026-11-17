@@ -9,12 +9,13 @@ import type { CredentialsRead, EndpointRead, UsageAccount, UsageRead, UsageWindo
 import { agents as registry } from '@althar/provider-adapters'
 import { isoAfter } from '@althar/testing'
 import { readClock } from '@althar/testing/effect'
-import { Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
+import { Clock, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts } from '../src/Accounts'
 import { Agents } from '../src/Config'
+import { Instance } from '../src/Instance'
 import { Limits } from '../src/Limits'
 import { Live } from '../src/Live'
 import { Models } from '../src/Models'
@@ -349,6 +350,65 @@ describe('Claude Code’s plan, read from its endpoint and heard from its sessio
         assert.deepStrictEqual([asked, accountOf(yield* usage.now(true), 'claude-code').source], [1, 'acp_extension'])
       }).pipe(Effect.provide(layer))
     }),
+  )
+
+  it.effect('is asked of its endpoint, though sessions said their windows lately, while its account is out of usage', () =>
+    Effect.gen(function* () {
+      let asked = 0
+      const layer = withUsage({
+        readEndpoint: async (sourceId, _account, now) =>
+          sourceId === 'claude-oauth'
+            ? (asked++, { kind: 'usage', stale: false, usage: { windows: [used(5)], source: 'endpoint', observedAt: now().toISOString() } })
+            : { kind: 'none' },
+      })
+      yield* Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const sql = yield* SqlClient.SqlClient
+        const [account] = yield* (yield* Accounts).of('claude-code')
+        // With room, what a session said a minute ago stands.
+        yield* usage.heard(account!.id, 'claude-code', [used(35)])
+        yield* TestClock.adjust(Duration.minutes(1))
+        assert.deepStrictEqual([asked, accountOf(yield* usage.now(true), 'claude-code').source], [0, 'acp_extension'])
+        // Its window full: no session works on it to say the person reset it, and only the endpoint says so.
+        yield* usage.heard(account!.id, 'claude-code', [used(100)])
+        yield* TestClock.adjust(Duration.minutes(1))
+        const reset = accountOf(yield* usage.now(true), 'claude-code')
+        assert.deepStrictEqual([asked, reset.source, reset.windows.map((window) => window.usedPercent)], [1, 'endpoint', [5]])
+        // Said out of usage by a turn's error, its window not yet full as a session last said it: the endpoint too.
+        yield* TestClock.adjust(Duration.minutes(1))
+        yield* usage.heard(account!.id, 'claude-code', [used(90)])
+        const principalId = yield* newId(Ids.principal)
+        const at = new Date(yield* Clock.currentTimeMillis).toISOString()
+        yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId: 'claude-code', accountId: account!.id, deviceId: (yield* Instance).deviceId, subjectHint: 'Fake', authMode: 'vendor_cli', observedAt: at })}`
+        yield* sql`INSERT INTO account_statuses ${sql.insert({ id: yield* newId(Ids.accountStatus), principalId, state: 'limited', windows: JSON.stringify([{ kind: 'usage', resetsAt: RESET }]), source: 'error', observedAt: at })}`
+        const limited = accountOf(yield* usage.now(true), 'claude-code')
+        assert.deepStrictEqual([asked, limited.source], [2, 'endpoint'])
+      }).pipe(Effect.provide(layer))
+    }),
+  )
+
+  it.effect('tells what it read when asked again, so what waits for an account’s reset reads it at once', () =>
+    Effect.gen(function* () {
+      const usage = yield* PlanUsage
+      const events = yield* (yield* Live).subscribe
+      const told = yield* Effect.forkChild(
+        events.pipe(
+          Stream.filter((event) => event._tag === 'PlanUsage'),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.timeoutOption(Duration.seconds(1)),
+        ),
+      )
+      yield* usage.now(true)
+      yield* TestClock.adjust(Duration.seconds(1))
+      const heard = yield* Fiber.join(told)
+      assert.isTrue(Option.isSome(heard))
+      const [plan] = Option.getOrThrow(heard) as unknown as ReadonlyArray<{ _tag: 'PlanUsage'; usage: PlanUsageView }>
+      assert.deepStrictEqual(
+        accountOf(plan!.usage, 'codex').windows.map((window) => window.usedPercent),
+        [40],
+      )
+    }).pipe(Effect.provide(Layer.fresh(withUsage({ readAgent: async () => read(used(40)) })))),
   )
 
   it.effect('reads the endpoint again for a window no session says, as a model’s own week, and says how old it is meanwhile', () =>

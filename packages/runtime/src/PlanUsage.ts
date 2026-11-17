@@ -23,6 +23,7 @@ import {
   type UsageRead,
   type UsageSource,
   type UsageWindow,
+  leftOf,
 } from '@althar/provider-adapters'
 import { Clock, Context, Duration, Effect, Layer, Semaphore } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -346,6 +347,14 @@ export class PlanUsage extends Context.Service<
               windows = excluded.windows, observed_at = excluded.observed_at`
           })
 
+        /* Whether an account was last said to be out of usage (Limits): a session's error, or a reading. */
+        const limited = (accountId: string) =>
+          sql<{ state: string }>`SELECT s.state FROM account_statuses s JOIN principals p ON p.id = s.principal_id
+            WHERE p.account_id = ${accountId} ORDER BY s.observed_at DESC LIMIT 1`.pipe(
+            Effect.map(([latest]) => latest?.state === 'limited'),
+            Effect.orElseSucceed(() => false),
+          )
+
         /* Reads one account from its agent's source and keeps what it said; `onDemand` where steering wants it read again, whatever a session said lately. */
         const readAccount = (account: Account, onDemand = false, afterLimit = false) =>
           Effect.gen(function* () {
@@ -490,11 +499,15 @@ export class PlanUsage extends Context.Service<
               const now = yield* Clock.currentTimeMillis
               const lately = now - Duration.toMillis(HEARD_LATELY)
               const windows = before?.windows ?? []
+              // Out of usage, no session of it works to say otherwise: only the endpoint says the person reset their usage, topped up
+              // or changed plan, and what waits for the reset goes on as soon as it does.
               if (
                 !onDemand &&
                 before?.source === 'acp_extension' &&
                 windows.length > 0 &&
-                windows.every((window) => !past(window.resetsAt, now) && Date.parse(window.observedAt) > lately)
+                windows.every((window) => !past(window.resetsAt, now) && Date.parse(window.observedAt) > lately) &&
+                !windows.some((window) => window.spend !== true && leftOf(window) <= 0) &&
+                !(yield* limited(account.id))
               )
                 return
               return yield* fromEndpoint('claude-oauth', 'anthropic', unfound)
@@ -715,10 +728,23 @@ export class PlanUsage extends Context.Service<
                 ...(one.noReading === undefined ? {} : { noReading: one.noReading }),
               }
             }),
-          // Asked again, it waits for the reading; opened, it answers with what it has, and tells the view again once the accounts are read.
+          // Asked again, it waits for the reading, and tells it, as what waits for an account's reset reads it (Runs.ts); opened, it
+          // answers with what it has, and tells the view again once the accounts are read.
           now: (refresh = false) =>
             refresh
-              ? afterOpen(startup('plan-usage-read', Effect.andThen(readAll(true), view)))
+              ? afterOpen(
+                  startup(
+                    'plan-usage-read',
+                    Effect.andThen(
+                      readAll(true),
+                      Effect.tap(view, (usage) =>
+                        live
+                          .publish({ _tag: 'PlanUsage', usage })
+                          .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell plan usage', cause))),
+                      ),
+                    ),
+                  ),
+                )
               : Effect.andThen(
                   Effect.forkIn(
                     afterOpen(
