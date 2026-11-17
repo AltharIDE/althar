@@ -190,7 +190,8 @@ const todoOf = (need: MergeNeed, host: string): string | null => {
     case 'draft':
       return 'Mark it ready'
     case 'pushed':
-      return (need.have ?? 0) > 0 ? 'Push them' : null
+      // Said as not shipped where they wait for Ship, which sends them: Ship is the card's press for them, not Push.
+      return (need.have ?? 0) > 0 ? (need.said === undefined ? 'Push them' : 'Ship them') : null
     case 'linear_history':
     case 'other':
       return `See it on ${host}`

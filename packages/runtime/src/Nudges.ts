@@ -162,6 +162,11 @@ export class Nudges extends Context.Service<
           )
         // Issues a lead drafted, or changes it proposed to its issue, for the person: one nudge for a task, whatever the number.
         for (const task of on.issues) nudge(`issues:${task.threadId}`, 'call', task.title, issuesWords(task.issues), task.threadId)
+        // A plan that waits for a task that was abandoned: the person's to start anyway, reopen it, or stop waiting.
+        for (const task of on.abandoned) {
+          const gone = task.waitsFor?.find((one) => one.stands === 'abandoned')
+          nudge(`abandoned:${task.taskId}`, 'call', task.title, `${gone?.title ?? 'A task it waits for'} was abandoned`, task.threadId)
+        }
         for (const task of on.ready) nudge(`ready:${task.taskId}`, 'ready', task.title, readyBody(task), task.threadId)
         return { found, count: waitingCount(on) }
       })

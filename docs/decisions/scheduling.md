@@ -384,9 +384,45 @@ services can feed the same lifecycle later. Repository maintainers own this
 decision; revisit the transport when polling latency or request volume
 justifies a receiver.
 
+## Tasks wait for their blockers
+
+A task can name other tasks it waits for, its blockers. Its plan counts down
+as any plan does, but doesn't start on its own while any of them is open: it
+starts by itself once they have all merged. Up next says so in its row
+("Starts when Pairing merges"), and its card and page name each blocker with
+how it stands.
+
+- **Plain blockers, set by word.** The person tells the coordinator ("start
+  Reconnect after Pairing"); the coordinator or a lead sets them with
+  `wait_for_tasks`, or `propose_plan`'s `waits_for`. There is no graph planned
+  and run as a whole: the person decided on 15 Nov that a task waiting for its
+  blockers covers what is needed for now.
+- **Kept in the record.** `task_waits` holds one row for each blocker, in the
+  order named; adding or removing one is a fact on the task. A task can't
+  wait for itself, nor for one that waits for it however far along: neither
+  would ever start. One merged already is nothing to wait for.
+- **Merged means done, once.** A blocker counts once its task is done: its
+  pull request merged, or, for a task with none, marked done. Cleared then, it
+  stays cleared (`cleared_at`), though it opens again for follow-up work or is
+  abandoned after. The countdown looks again when a waiting plan's time comes,
+  and then whenever the record changes, so it starts as soon as its last
+  blocker is done. A plan that waits stays waiting across a restart, rather
+  than being held as an overdue one is.
+- **It starts with what they merged.** A worktree made with its draft is
+  moved up, unused, to its base as the remote has it when its lead starts, so
+  it has what its blockers merged meanwhile.
+- **Only an abandoned blocker asks the person.** The waiting task leaves Up
+  next for Needs you, counted wherever Needs you is (`waitingOn`), and
+  notified: its page and plan card start it anyway, reopen the blocker, or
+  stop waiting for it. Everything else goes on by itself.
+- **The person's word comes first.** Start now starts a waiting plan at once,
+  and a held plan stays held whatever its blockers do. Stop waiting takes one
+  blocker off.
+
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
+- 16 Nov 2026: tasks wait for their blockers, plain ones the coordinator and leads set, and start by themselves once they have merged (DEV-228, DEV-230).
 - 12 Nov 2026: leads can yield on durable external conditions and resume when they are met, without holding an agent place (DEV-176).
 - 11 Nov 2026: the runtime reads the computer in the background while the meter is on, so the peek's trace isn't empty when a window comes back into view.
 - 10 Nov 2026: a lead's helpers each take a place of their own, four of a task's at once (ADR-087, [tasks § Helpers](tasks.md#helpers)).

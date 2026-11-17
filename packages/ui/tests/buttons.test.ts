@@ -76,6 +76,8 @@ const PLAIN: Readonly<Record<string, string>> = {
     'a new project’s ways in, and where its code lives, as large options; a repository’s row, the whole of which chooses it',
   'setup/SettingsNav/SettingsNav.tsx': 'a section in the list down the side of Settings',
   /* a shape of its own */
+  'outputs/ShipButton/ShipButton.tsx':
+    'a stop’s round mark on How Ship works’ path, joined to the next by its line, which turns that stop on or off',
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
   'chrome/PlanGauge/PlanGauge.tsx': 'the plan gauge, drawn in steps as the load meters are',
@@ -98,10 +100,15 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   'board/NextRow/NextRow.tsx': 'Start, in a held row’s line, in the line’s own place, words and colour while the row is pointed at',
   'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',
+  'chrome/TaskHeader/TaskHeader.tsx':
+    'the words of the chip that says where a task stands, which open what it waits for, a segment of that chip',
+  'chrome/TaskWaits/TaskWaits.tsx':
+    'a task’s row in what one waits for, the whole of which opens it; what waits for a task, a segment of its header’s chip',
   'board/ScratchShelf/ScratchShelf.tsx': 'a chat on Scratch, the whole of its row, its title, last words and when, which opens it',
   'thread/Asides/Asides.tsx':
     'a pill over the coordinator’s conversation, a tab with its mark or a live dot, the × inside an aside’s pill that clears it, and the older ones’ pill, which opens their menu',
   'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
+  'chrome/ProjectHeader/ProjectHeader.tsx': 'the project’s mark and name, the whole of which goes to its board',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }

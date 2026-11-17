@@ -21,6 +21,7 @@ import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { SCREEN_CHANGES, SettingsTools } from '../src/SettingsTools'
+import { shipRouteSetting } from '../src/shipRoute'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, listTools, repository, runtime } from './support'
 
@@ -685,6 +686,35 @@ describe('each section of the settings, as agents change it', () => {
       })
       assert.include(seal, 'The review seal: on → off')
       assert.include(seal, 'The seal’s look: ring → wax')
+      // Ship's default route: one that still reviews and goes no further than ready goes at once; merging, or no review first,
+      // loosens what asks; back to each task's own goes at once too.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'althar/pull-requests',
+          change: { shipRoute: { review: true, far: 'push' } },
+        }),
+        /^Changed Pull requests: Ship’s default route: /,
+      )
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/pull-requests' }), '"far":"push"')
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'althar/pull-requests',
+          change: { shipRoute: { review: true, far: 'merge' } },
+        }),
+        /loosens what asks \(Ship’s default route\)/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'althar/pull-requests',
+          change: { shipRoute: { review: false, far: 'push' } },
+        }),
+        /loosens what asks \(Ship’s default route\)/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/pull-requests', change: { shipRoute: null } }),
+        /^Changed Pull requests: Ship’s default route: /,
+      )
+      assert.isUndefined(yield* shipRouteSetting)
       // Althar's own changes show in Settings with no project, the coordinator's by its name.
       const changed = yield* (yield* SettingsTools).changed(null)
       assert.includeMembers(

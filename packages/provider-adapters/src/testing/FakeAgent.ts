@@ -675,7 +675,7 @@ const playStall = async (
  * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does),
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
- * effort), and `[coordinator:start]` starts one at once, without a plan;
+ * effort; `[after:<slug>]` makes it wait for that task), and `[coordinator:start]` starts one at once, without a plan;
  * `[coordinator:review]` starts a review of the pull request whose link the
  * person gave, `[coordinator:keep-note]` keeps what the person said
  * before it as one of the project's notes, and `[coordinator:automate]`
@@ -1555,6 +1555,7 @@ const playRole = async (
       const which = /as repositories: (.+)\.$/.exec(first)?.[1]
       const drafted = which === undefined ? first : await callStreamed('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
+      const after = /\[after:([a-z0-9-]+)\]/.exec(ask)?.[1]
       const planned = await callStreamed('propose_plan', {
         task: slug,
         lead: {
@@ -1566,6 +1567,8 @@ const playRole = async (
         review: ask.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
         // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
         ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
+        // `[after:<slug>]`: it waits for that task, and starts by itself once it has merged.
+        ...(after === undefined ? {} : { waits_for: [after] }),
       })
       // `[coordinator:plan-branch]`: it ends with its branch, as a prototype does, set on the plan before it starts.
       if (ask.includes('[coordinator:plan-branch]') && available.has('change_part'))
