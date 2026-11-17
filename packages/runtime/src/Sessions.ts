@@ -3231,7 +3231,11 @@ export class Sessions extends Context.Service<
             ...(skills === undefined ? {} : { skills: skills.folder }),
             ...heldSkills,
           }
-          const transport = entry.transport(cwdOf(thread), { ...accounts.env(account), [WORK]: work, ...guarded }, transportOptions)
+          const transport = entry.transport(
+            cwdOf(thread),
+            { ...accounts.env(account), [WORK]: work, ...guarded, ALTHAR_WORKER: sessionId },
+            transportOptions,
+          )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.

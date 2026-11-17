@@ -1,12 +1,13 @@
 import { execFile } from 'node:child_process'
 import { readdir, readFile } from 'node:fs/promises'
-import { type CpuInfo, cpus, freemem, totalmem } from 'node:os'
+import { type CpuInfo, cpus, freemem, totalmem, loadavg } from 'node:os'
 
 import type { MemoryPressure } from '@althar/contracts'
 import { Clock, Effect } from 'effect'
 
 import { processReader, runReader } from './processReader'
 import { cpuTimeOf } from './processTree'
+import type { PressureReading } from './resourcePressure'
 
 /*
  * What this computer says of how hard it works, read the cheapest way each
@@ -347,6 +348,24 @@ const memoryOn = (platform: NodeJS.Platform): Effect.Effect<Reading['memory']> =
       return (text === null ? null : memoryOfMeminfo(text)) ?? fallback
     }
     return fallback
+  })
+
+/** Host pressure only: no process scan, ownership lookup or load-meter subscription. */
+export const readPressure = (platform: NodeJS.Platform = process.platform): Effect.Effect<PressureReading> =>
+  Effect.gen(function* () {
+    const at = yield* Clock.currentTimeMillis
+    const cores = coresOf(cpus())
+    const [memory, level] = yield* Effect.all(
+      [memoryOn(platform), platform === 'darwin' ? output('sysctl', ['-n', 'kern.memorystatus_vm_pressure_level']) : Effect.succeed(null)],
+      { concurrency: 'unbounded' },
+    )
+    return {
+      at,
+      cores,
+      memory,
+      pressure: level === null ? null : pressureOf(level),
+      contention: platform === 'win32' ? null : (loadavg()[0] ?? 0) / Math.max(1, cores.count),
+    }
   })
 
 let pageSize: number | undefined

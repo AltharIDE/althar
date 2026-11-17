@@ -14,6 +14,8 @@ import { treeMembers, workedBetween } from './processTree'
 import { plannedSmall, QUICK_LANE } from './quickLane'
 import { timestamp } from './records'
 import { Sessions } from './Sessions'
+import { readPressure } from './machine'
+import { PressureAdmission } from './resourcePressure'
 
 /*
  * How many agents are at work at once on this machine, and what waits for a
@@ -301,6 +303,7 @@ export class Busy extends Context.Service<
       const live = yield* Live
       const connectivity = yield* Connectivity
       const options = (yield* RuntimeConfig).busy ?? {}
+      const pressure = new PressureAdmission()
       const every = options.every ?? Duration.seconds(5)
       const sampleEvery = options.sample ?? Duration.seconds(2)
       const quiet = Duration.toMillis(options.quiet ?? Duration.seconds(30))
@@ -361,6 +364,7 @@ export class Busy extends Context.Service<
       const scope = yield* Effect.scope
       const lock = Semaphore.makeUnsafe(1)
       const wakes = yield* Queue.sliding<void>(1)
+      const pressureWakes = yield* Queue.sliding<void>(1)
       const sources: Array<Effect.Effect<ReadonlyArray<Waiter>, unknown>> = []
       /* The agents whose waiting work has been started and is on its way, each held until its start ends, by how many hold it. */
       const starting = new Map<string, number>()
@@ -403,7 +407,7 @@ export class Busy extends Context.Service<
         { pid: number | null; at: number; tree: ReadonlyMap<number, number> | null; busyAt: number; working: boolean }
       >()
 
-      const wake = Queue.offer(wakes, undefined).pipe(Effect.asVoid)
+      const wake = Effect.andThen(Queue.offer(wakes, undefined), Queue.offer(pressureWakes, undefined)).pipe(Effect.asVoid)
 
       const atOnce = Effect.gen(function* () {
         const [kept] = yield* sql<{ value: string }>`SELECT value FROM settings WHERE key = ${KEY}`
@@ -411,6 +415,7 @@ export class Busy extends Context.Service<
         return { count: own ?? machine.count, own, machine } satisfies AtOnce
       })
 
+      const admission = Effect.map(atOnce, (settings) => pressure.capacity(settings.count))
       /**
        * Reads the CPU of what sessions left running, and keeps whether each is at work. A server that sits idle isn't:
        * it takes no place however long it runs (ADR-032). One just started, or whose CPU can't be read, counts, until
@@ -653,6 +658,38 @@ export class Busy extends Context.Service<
       /** Everything waiting, in the order it starts. */
       const waiting = Effect.flatMap(everything, rank)
 
+      if (options.pressure !== false) {
+        const observe = options.pressure?.read ?? readPressure()
+        let warned = false
+        yield* Effect.forkScoped(
+          Effect.forever(
+            Effect.gen(function* () {
+              const active = (yield* sessions.onTasks).filter((one) => one.turnRunning || one.background)
+              if (active.length === 0 && (yield* waiting).length === 0) {
+                if (pressure.reset()) yield* wake
+                yield* Queue.take(pressureWakes)
+                return
+              }
+              const configured = (yield* atOnce).count
+              const reading = yield* observe
+              warned = false
+              if (pressure.observe(reading, configured, active.length)) yield* wake
+            }).pipe(
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.gen(function* () {
+                      if (pressure.reset()) yield* wake
+                      if (!warned) yield* Effect.logDebug('Host pressure unavailable; keeping normal background scheduling', cause)
+                      warned = true
+                    }),
+              ),
+              Effect.andThen(Effect.sleep(options.pressure?.every ?? Duration.seconds(5))),
+            ),
+          ),
+        )
+      }
+
       /** A task at work, or gone from Up next: where the person put it there no longer stands. */
       const unplace = (taskId: string) => sql`UPDATE tasks SET line_at = NULL WHERE id = ${taskId} AND line_at IS NOT NULL`
 
@@ -677,7 +714,7 @@ export class Busy extends Context.Service<
           // A task's helpers, or automations' runs, as many at work as may be: it waits its turn, whatever is free.
           if (helpersFull(agent, at)) return false
           if (agent.helper === undefined && keptPlace(agent.taskId, holders) !== undefined) return true
-          const most = (yield* atOnce).count
+          const most = yield* admission
           // Every place of the number taken, only a small task's lead has room, in the quick lane beyond it.
           const beyond = at.size >= most
           if (beyond && at.size >= roomUpTo(most, agent, yield* smallOf([agent.taskId]))) return false
@@ -722,7 +759,7 @@ export class Busy extends Context.Service<
           const queue = yield* waiting
           if (queue.length === 0) return false
           const { at: busy, holders } = yield* atWork
-          const most = (yield* atOnce).count
+          const most = yield* admission
           const tasks = yield* automated
           const online = yield* connectivity.online
           const scratch = yield* asides
@@ -854,7 +891,9 @@ export class Busy extends Context.Service<
                   said = ''
                   return wake
                 })
-              : event._tag === 'TurnEnded' ||
+              : event._tag === 'SessionStarted' ||
+                  event._tag === 'TurnStarted' ||
+                  event._tag === 'TurnEnded' ||
                   event._tag === 'AttentionNeeded' ||
                   event._tag === 'AttentionClosed' ||
                   event._tag === 'Connection'
@@ -1129,7 +1168,7 @@ export class Busy extends Context.Service<
         set,
         now: Effect.gen(function* () {
           const { at, holders } = yield* atWork
-          return { busy: at.size, atOnce: (yield* atOnce).count, holders }
+          return { busy: at.size, atOnce: yield* admission, holders }
         }),
         order: Effect.map(waiting, (all) => all.map(({ waiter, line }) => ({ taskId: waiter.taskId, review: waiter.review, line }))),
         line: (projectId) =>
