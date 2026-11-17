@@ -1,4 +1,5 @@
 import type { GitFailed, PushRefused } from './errors'
+import { redacted } from './gitSaid'
 
 /*
  * Why a push failed, read from what git wrote: the common refusals each by
@@ -38,7 +39,8 @@ const remoteLines = (stderr: string) =>
 export const pushFailureOf = (
   failed: Pick<GitFailed, 'stderr' | 'timedOut'>,
 ): { readonly why: PushRefused['why']; readonly said?: string } | null => {
-  const { stderr } = failed
+  // What the remote said goes on the card: one that echoes a credential, as in a `remote:` line or a traced header, has it hidden.
+  const stderr = redacted(failed.stderr)
   const said = remoteLines(stderr)[0]
   if (PROTECTED.test(stderr)) return { why: 'protected', ...(said === undefined ? {} : { said }) }
   if (SIGN_IN.test(stderr)) return { why: 'denied' }
@@ -56,9 +58,9 @@ export const pushFailureOf = (
   return null
 }
 
-/** All git said and how it ended, for a quiet Details: what the sentence leaves out. */
+/** All git said and how it ended, for a quiet Details: what the sentence leaves out, with no secret in it. */
 export const pushDetailOf = (failed: Pick<GitFailed, 'stderr' | 'reason' | 'code' | 'signal' | 'timedOut' | 'timeout'>): string =>
-  [failed.stderr.trim(), failed.reason?.trim() ?? '', endedOf(failed)].filter((line) => line !== '').join('\n')
+  [redacted(failed.stderr.trim()), redacted(failed.reason?.trim() ?? ''), endedOf(failed)].filter((line) => line !== '').join('\n')
 
 /** How a git command ended, where it failed: past its time, stopped by a signal, or its exit code. */
 export const endedOf = (failed: Pick<GitFailed, 'code' | 'signal' | 'timedOut' | 'timeout'>): string =>
