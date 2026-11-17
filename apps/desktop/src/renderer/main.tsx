@@ -10,7 +10,11 @@ import { createRoot } from 'react-dom/client'
 import { API_VERSION_MISMATCH, ApiError } from '@althar/contracts'
 import { Launch, OpenFailed } from '@althar/ui/screens'
 
-import { receivePort } from './data/client'
+import { hostForHome, receiveHomeConnection } from './data/homeConnection'
+import { HomeConnections } from './features/homes/HomeConnections'
+import { HomeOpening } from './features/homes/HomeOpening'
+import { HomeReport } from './features/homes/HomeReport'
+import { useHomeState } from './features/homes/useHomes'
 import { openWindow } from './data/open'
 import { ServicesProvider, type StoreFailure } from './data/services'
 import { QuitDialog } from './features/quit/QuitDialog'
@@ -18,6 +22,7 @@ import { ReportDialog } from './features/report/ReportDialog'
 import { ApiVersionMismatchView } from './features/update/ApiVersionMismatchView'
 import { ProfileInUseView } from './features/update/ProfileInUseView'
 import { UpdateStoppedView } from './features/update/UpdateStoppedView'
+import { watchFrames } from './shared/frames'
 import { followScheme } from './shared/scheme'
 import { SystemAccent } from './shared/SystemAccent'
 import { useHostChrome } from './shared/useWindowChrome'
@@ -34,28 +39,18 @@ import { keepWindowErrors } from './shared/windowErrors'
  * whatever it was showing.
  */
 
-/** How long the window waits for the runtime's port before it says it couldn't open. */
-const WAIT_PORT = 15_000
-
-const text = {
-  noRuntime: 'The runtime didn’t start.',
-}
-
 // Light or dark, before anything draws.
 followScheme()
 
-// What the page doesn't handle goes to the app's log.
+// What the page doesn't handle goes to the app's log, and so does what made it slow.
 keepWindowErrors(window.althar)
+watchFrames(window.althar)
 
 // Listen before anything else: the port arrives once the page has loaded.
-const port = Promise.race([
-  receivePort(),
-  new Promise<never>((_, reject) => setTimeout(() => reject(new Error(text.noRuntime)), WAIT_PORT)),
-])
 window.althar.startup?.('renderer-entry')
-const opening = port.then((given) => {
+const opening = receiveHomeConnection(window.althar).then(({ port, home }) => {
   window.althar.startup?.('port-received')
-  return openWindow(given, window.althar)
+  return openWindow(port, hostForHome(window.althar, home), home)
 })
 
 /** The first-run welcome plays the full launch; returning profiles and reloads take its quick opening. */
@@ -79,10 +74,20 @@ function FailedOpen({ reason }: { reason: string }) {
 }
 
 function Window() {
+  return (
+    <>
+      <HomeConnections host={window.althar} />
+      <WindowContent />
+    </>
+  )
+}
+
+function WindowContent() {
   const [opened, setOpened] = useState<Awaited<typeof opening> | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   const [mismatch, setMismatch] = useState<ApiError | null>(null)
   const [storeFailure, setStoreFailure] = useState<StoreFailure | null>(null)
+  const home = useHomeState(window.althar.homes)
   useEffect(() => window.althar.onStoreFailed(setStoreFailure), [])
   useEffect(
     () =>
@@ -106,25 +111,31 @@ function Window() {
         host={window.althar}
       />
     )
+  // A home's window, until it first connects: its name, and how connecting goes; where it couldn't, why, and Try again.
+  if (home?.current.kind === 'ssh' && opened === null && window.althar.homes !== undefined)
+    return <HomeOpening host={window.althar} homes={window.althar.homes} home={home.current.home} problem={failed} />
   if (failed !== null) return <FailedOpen reason={failed} />
   return (
-    <Launch
-      ready={opened !== null}
-      quick={openedBefore || opened?.hasProjects === true}
-      onDone={() =>
-        requestAnimationFrame(() => {
-          window.althar.startup?.('first-screen-drawn')
-          opened?.afterOpen()
-        })
-      }
-    >
-      {opened !== null && (
-        <ServicesProvider value={opened.services}>
-          <SystemAccent />
-          <RouterProvider router={opened.router} />
-        </ServicesProvider>
-      )}
-    </Launch>
+    <>
+      <Launch
+        ready={opened !== null}
+        quick={openedBefore || opened?.hasProjects === true}
+        onDone={() =>
+          requestAnimationFrame(() => {
+            window.althar.startup?.('first-screen-drawn')
+            opened?.afterOpen()
+          })
+        }
+      >
+        {opened !== null && (
+          <ServicesProvider value={opened.services}>
+            <SystemAccent />
+            <HomeReport />
+            <RouterProvider router={opened.router} />
+          </ServicesProvider>
+        )}
+      </Launch>
+    </>
   )
 }
 

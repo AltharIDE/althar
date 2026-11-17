@@ -739,6 +739,37 @@ describe('changes to issues', () => {
       }).pipe(Effect.provide(withQueries({ linear: tracker })))
     })
 
+    it.live('close each issue of several, and comment on the one the task did only part of', () => {
+      const tracker = linear()
+      tracker.addIssue({ ref: 'MER-235', title: 'Charge limits too' })
+      return Effect.gen(function* () {
+        yield* connect('linear')
+        const { projectId, access } = yield* project()
+        const changes = yield* IssueChanges
+        const issues = yield* Issues
+        const { task, lead } = yield* led(projectId, access, 'Rate-limit refunds', 'MER-231')
+        yield* issues.attach({ projectId, taskId: task.id, issue: 'MER-235' })
+        // Only part of the second, by its key: the first stays one the task does whole.
+        yield* issues.setPart(task.id, true, 'mer-235')
+        assert.deepStrictEqual(
+          (yield* issues.allOfTask(task.id)).map((one) => [one.key, one.partOf]),
+          [
+            ['MER-231', false],
+            ['MER-235', true],
+          ],
+        )
+        yield* changes.followPullRequest(task.id, 'merged', pr(12))
+        assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'done')
+        assert.notStrictEqual((yield* tracker.issue('MER-235')).status.category, 'done')
+        assert.deepStrictEqual(tracker.issueComments('MER-235'), [
+          'Part of this landed in [PR #12](https://github.com/meridian/api/pull/12), merged:\n\nRate-limit refunds',
+        ])
+        assert.deepStrictEqual(tracker.issueComments('MER-231'), [])
+        // Its lead names which of them it means, where it names none.
+        assert.match(yield* callTool(lead, 'comment_on_issue', { body: 'Hi' }), /came from MER-231, MER-235\. Name the one you mean/)
+      }).pipe(Effect.provide(withQueries({ linear: tracker })))
+    })
+
     it.live('leave an issue done or cancelled as it is', () => {
       const tracker = linear()
       tracker.addIssue({ ref: 'MER-233', title: 'Shipped', status: { name: 'Done', category: 'done' } })

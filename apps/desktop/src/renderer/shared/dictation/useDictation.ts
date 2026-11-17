@@ -4,7 +4,7 @@ import { commandDown, type Dictation, type DictationState as TrayState, Dictatio
 
 import { reads } from '../../data/reads'
 import { type DictationEvent, type DictationHost, type DictationState, type DownloadStop, useServices } from '../../data/services'
-import { draftOf, setDraftDictated, setDraftText, useDraftOf } from '../drafts'
+import { draftOf, setDraftDictated, setDraftText, useDraftWords } from '../drafts'
 import { joined, live } from './live'
 import { chooseMicrophone, microphoneToUse, useChosenMicrophone, useMicrophones } from './microphones'
 import { type Record, type Recorded, record as recordMicrophone } from './recorder'
@@ -293,7 +293,8 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
   const [asking, setAsking] = useState(false)
   const [problem, setProblem] = useState<Problem | null>(null)
   const { phase, seconds, levels, interim, at, failed, arrived } = useSession(key)
-  const draft = useDraftOf(key).text
+  // Whether the draft is still what was written down while the person was away: the screen isn't drawn again for each word typed.
+  const arrivedAsIs = useDraftWords(key, (text) => arrived !== null && arrived === text)
   const vocabulary = useRef<{ readonly projectId: string | null; readonly words: Vocabulary }>({ projectId: null, words: NO_VOCABULARY })
   const prepared = useRef(false)
   /* Download was pressed: once the model is here, it listens, if the tray is still open. */
@@ -666,7 +667,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       kbd: SHORTCUT,
       busy: phase === 'writing',
       // Written down while the person was away, and the draft not changed since.
-      arrived: arrived !== null && arrived === draft,
+      arrived: arrivedAsIs,
       // What couldn't be written down, by identity: sending while it listens waits, and holds back if this fails.
       failed,
       expanded: shown !== null,

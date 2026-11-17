@@ -32,7 +32,9 @@ import {
   Globe,
   HalfMoon,
   KanbanBoard,
+  Laptop,
   LightBulb,
+  LinkSlash,
   List,
   Lock,
   LongArrowDownLeft,
@@ -56,6 +58,7 @@ import {
   Quote,
   Refresh,
   Search,
+  Server,
   ServerConnection,
   Settings,
   ShieldCheck,
@@ -141,6 +144,12 @@ export const ICONS = {
   offline: WifiOff,
   /** An MCP server. */
   plug: ServerConnection,
+  /** A home: one of the person's own computers that keeps Althar's work, reached over SSH. */
+  home: Server,
+  /** This computer, as one of the homes. */
+  computer: Laptop,
+  /** A home's connection that dropped. */
+  unlinked: LinkSlash,
   agents: Community,
   copy: Copy,
   clip: Attachment,

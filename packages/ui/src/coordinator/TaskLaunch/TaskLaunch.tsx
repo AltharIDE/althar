@@ -267,7 +267,11 @@ function Roll({ children }: { children: ReactNode }) {
 /** Words for something still going on, a light passing over them. */
 const Going = ({ children }: { children: string }) => (
   <Roll>
-    <span className={s.going}>{children}</span>
+    <span className={s.going}>
+      {children}
+      {/* the light: their copy, drawn by its style, never read, found or copied twice */}
+      <span className={s.sheen} data-words={children} aria-hidden="true" />
+    </span>
   </Roll>
 )
 

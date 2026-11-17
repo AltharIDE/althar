@@ -96,29 +96,78 @@ export const AllStates: Story = {
         },
         { state: 'from, linear', node: <IssueRef mark={Brand.Linear} id="MER-231" linear /> },
         { state: 'from, plain', node: <IssueRef mark={Brand.Jira} id="PAY-212" /> },
+        {
+          state: 'from, several',
+          node: (
+            <IssueRef
+              mark={Brand.Linear}
+              id="DEV-211"
+              linear
+              also={[
+                { mark: Brand.Linear, id: 'DEV-37', linear: true },
+                { mark: Brand.GitHub, id: '#412' },
+              ]}
+            />
+          ),
+        },
       ]}
     />
   ),
 }
 
-/** Under a task's issue: the task does all of it, so its merge closes it; or, switched on, only part, and its merge leaves it open. */
-export const PartOfIt: Story = {
+/**
+ * A task from several issues, on any trackers, heading its thread as the
+ * task's screen lays them out: each with its own choice, set on its own.
+ */
+export const SeveralIssues: Story = {
   render: function Render(args) {
-    const [partOf, setPartOf] = useState(false)
+    const [parts, setParts] = useState<Readonly<Record<string, boolean>>>({ 'PAY-212': true })
+    const issues = [
+      args,
+      { ...args, mark: Brand.Jira, source: 'Jira', id: 'PAY-212', title: 'Partners can retry refunds', tone: 'plain' as const },
+    ]
     return (
-      <div>
-        <Issue {...args} />
-        <IssuePart id={args.id} partOf={partOf} onChange={setPartOf} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {issues.map((issue) => (
+          <IssuePart
+            key={issue.id}
+            id={issue.id}
+            partOf={parts[issue.id] === true}
+            onChange={(partOf) => setParts((all) => ({ ...all, [issue.id]: partOf }))}
+          >
+            <Issue {...issue} />
+          </IssuePart>
+        ))}
       </div>
     )
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    const part = c.getByRole('switch', { name: 'Only part of MER-231' })
-    await expect(part).toHaveAttribute('aria-checked', 'false')
-    await expect(part).toHaveAccessibleDescription(/merge closes the issue/)
+    const first = within(c.getByRole('radiogroup', { name: 'What merging does to MER-231' }))
+    const second = within(c.getByRole('radiogroup', { name: 'What merging does to PAY-212' }))
+    await expect(first.getByRole('radio', { name: 'Closes it' })).toHaveAttribute('aria-checked', 'true')
+    await expect(second.getByRole('radio', { name: 'Part of it' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(first.getByRole('radio', { name: 'Part of it' }))
+    await expect(first.getByRole('radio', { name: 'Part of it' })).toHaveAttribute('aria-checked', 'true')
+    await expect(second.getByRole('radio', { name: 'Part of it' })).toHaveAttribute('aria-checked', 'true')
+  },
+}
+
+/** Under a task's issue: the task does all of it, so its merge closes it; or only part, and its merge leaves it open. */
+export const PartOfIt: Story = {
+  render: function Render(args) {
+    const [partOf, setPartOf] = useState(false)
+    return (
+      <IssuePart id={args.id} partOf={partOf} onChange={setPartOf}>
+        <Issue {...args} />
+      </IssuePart>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('radio', { name: 'Closes it' })).toHaveAttribute('aria-checked', 'true')
+    const part = c.getByRole('radio', { name: 'Part of it' })
     await userEvent.click(part)
     await expect(part).toHaveAttribute('aria-checked', 'true')
-    await expect(part).toHaveAccessibleDescription(/says on the issue what landed and leaves it open/)
   },
 }

@@ -18,6 +18,7 @@ import {
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
+import type { PressureReading } from './resourcePressure'
 import { Copilot } from './Copilot'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
@@ -173,6 +174,11 @@ export interface RuntimeOptions {
    * under way rather than the person's: 30 seconds unless a test says otherwise (DEV-173).
    */
   readonly betweenAgents?: Duration.Duration
+  /**
+   * How long a board's card is kept between reads at most, until its task moves (Queries.ts): ten seconds unless a test
+   * says otherwise. Zero keeps none, as for a test that writes the store by hand, which no change says.
+   */
+  readonly keptFor?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's public OAuth app ID for native Copilot; falls back to its own GitHub app ID. */
@@ -258,6 +264,13 @@ export interface IdleOptions {
 }
 
 export interface BusyOptions {
+  /** Automatic pressure-aware admission; false for a test that is not about this host's load. */
+  readonly pressure?:
+    | false
+    | {
+        readonly read?: Effect.Effect<PressureReading, unknown>
+        readonly every?: Duration.Duration
+      }
   /** The machine the default is worked out from: this one, as Node says it, unless a test says. */
   readonly machine?: Machine
   /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */

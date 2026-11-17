@@ -550,8 +550,20 @@ export function Composer({
             {t.notSent}
           </Problem>
         )}
-        {/* what is attached grows in, and fades once taken off */}
-        <ListMotion within={form} enter="grow">
+        {/* what is attached grows in, and fades once taken off; only what is queued, attached or said above them moves them, not a word typed */}
+        <ListMotion
+          within={form}
+          enter="grow"
+          version={[
+            ...queued.map((q) => q.move),
+            onAddFiles !== undefined && fileNote !== undefined && fileNote !== '',
+            dictation?.arrived === true,
+            notSent,
+            ...comments.map((comment) => comment.id),
+            ...images.map((image) => image.id),
+            ...files.map((file) => file.id),
+          ]}
+        >
           {attached > 0 && (
             <ul className={s.images} aria-label={t.attachments(attached)}>
               {comments.map((comment) => (

@@ -1714,6 +1714,10 @@ CREATE TRIGGER task_waits_cleared AFTER UPDATE OF state ON tasks WHEN NEW.state 
     UPDATE task_waits SET cleared_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE on_task_id = NEW.id AND cleared_at IS NULL;
   END;
 
+CREATE INDEX turn_deliveries_by_thread_time ON turn_deliveries (thread_id, requested_at);
+
+CREATE INDEX thread_items_tool_calls ON thread_items (thread_id, sequence) WHERE kind = 'tool_call';
+
 CREATE TABLE brought_in (
     project_id TEXT NOT NULL REFERENCES projects (id),
     key TEXT NOT NULL CHECK (length(key) > 0),

@@ -34,11 +34,19 @@ export const windowOptions = (platform: NodeJS.Platform, icon: NativeImage, dark
 })
 
 /** The menu off a Mac: accelerators without a bar; null on macOS, which keeps the system's own menu bar. */
-export const appMenu = (platform: NodeJS.Platform, dev: boolean): MenuItemConstructorOptions[] | null =>
+export const appMenu = (platform: NodeJS.Platform, dev: boolean, homes?: () => void): MenuItemConstructorOptions[] | null =>
   platform === 'darwin'
     ? null
     : [
-        { label: 'File', submenu: [{ role: 'quit' }] },
+        {
+          label: 'File',
+          submenu: [
+            ...(homes === undefined
+              ? []
+              : [{ id: 'homes', label: 'Homes…', accelerator: 'CommandOrControl+Shift+H', click: homes }, { type: 'separator' as const }]),
+            { role: 'quit' },
+          ],
+        },
         {
           label: 'Edit',
           submenu: [

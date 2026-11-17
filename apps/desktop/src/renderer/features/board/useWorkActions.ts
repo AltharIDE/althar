@@ -15,6 +15,12 @@ import { headsOf } from '../../shared/mergeHere'
  * change (Done) or keep it for later. Each says what went wrong, if it did.
  * Each that settles a card in one press is kept on this computer as so
  * (DEV-173), to count what Needs you held that wasn't a decision.
+ *
+ * Done and Keep move the card from the press (`over`), held by the task
+ * until a read of it says so, as an aside's Clear is; one the runtime
+ * answered without moving comes back, saying so. The others' cards stay busy
+ * from the press until a read of the board after the answer is shown, so a
+ * card never offers again for a moment what it just did.
  */
 
 /** What went wrong with a task's last push or merge. */
@@ -28,6 +34,8 @@ const planIt = (task: { readonly title: string; readonly slug: string }) =>
   `Plan “${task.title}” (${task.slug}): it is a draft with no plan. Call propose_plan for it, or tell me why you can't.`
 
 export interface WorkActions {
+  /** The tasks as the person's presses left them: those Done or kept for later moved at once, until a read says so. */
+  readonly over: <T extends BoardTask>(tasks: ReadonlyArray<T>) => ReadonlyArray<T>
   readonly error: string | null
   /** What last failed for each task, which action it was, and why, for its own card to say; a task's is cleared when it is tried again, and no other's. */
   readonly failed: Readonly<Record<string, ActionFailure>>
@@ -80,9 +88,39 @@ export interface WorkActions {
 /** Where a task's card is in Needs you: a call waits on the person, or its work is ready (`lanesOf`). */
 const NEEDS_YOU: ReadonlySet<BoardTask['phase']> = new Set(['waiting', 'ready'])
 
-/** What the actions act on: the tasks shown, by which a merge that went through shows as merging until it reads so. */
-export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): WorkActions => {
+/** Where the tasks aren't read again by a press: its card is busy until its answer. */
+const READ_NOTHING = () => Promise.resolve(undefined)
+
+/** Where Done and Keep for later move a card: settled, or kept for later, as the runtime's card then says. */
+type Settling = Extract<BoardTask['phase'], 'settled' | 'kept'>
+
+/** What the window says where the runtime answered Done or Keep for later but the task didn't move. */
+export const workText = {
+  stillOpen: 'Something of it opened meanwhile, so it stays as it was.',
+}
+
+/**
+ * What the actions act on: the tasks shown, by which a merge that went through shows as merging until it reads so, and
+ * how to read them again, by which a card stays busy until a read after its press's answer is shown, and Done and Keep
+ * for later check what the runtime did: the tasks as that read has them, or none where it failed.
+ */
+export const useWorkActions = (
+  tasks: ReadonlyArray<BoardTask> | null = null,
+  readAgain: () => Promise<ReadonlyArray<BoardTask> | undefined> = READ_NOTHING,
+): WorkActions => {
   const { client } = useServices()
+  // The cards moved by Done or Keep for later, by task, until a read of each says so.
+  const [moved, setMoved] = useState<ReadonlyMap<string, Settling>>(new Map())
+  const agreed =
+    tasks === null ? [] : [...moved].filter(([taskId, to]) => (tasks.find((task) => task.taskId === taskId)?.phase ?? to) === to)
+  if (agreed.length > 0) setMoved((now) => new Map([...now].filter(([taskId]) => !agreed.some(([one]) => one === taskId))))
+  const over = useCallback(
+    <T extends BoardTask>(shown: ReadonlyArray<T>): ReadonlyArray<T> =>
+      moved.size === 0 ? shown : shown.map((task) => (moved.has(task.taskId) ? { ...task, phase: moved.get(task.taskId)! } : task)),
+    [moved],
+  )
+  // The tasks read again from after a press's answer: what failed to read is the feed's to catch up on.
+  const readAfter = useCallback(() => readAgain().catch(() => undefined), [readAgain])
   const [error, setError] = useState<string | null>(null)
   const [failed, setFailed] = useState<WorkActions['failed']>({})
   // Merging here is this screen's; a pull request's merge is the window's, wherever it was pressed.
@@ -120,13 +158,18 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
     [client],
   )
 
-  /** Runs an action, marking the task busy with it meanwhile (each task on its own, so cards act side by side); whether it went through. */
+  /**
+   * Runs an action, marking the task busy with it meanwhile (each task on its own, so cards act side by side); whether it
+   * went through. Its card stays busy until a read of the board after the answer is shown, so it never offers again for a
+   * moment what it just did; one that moves its card at once (`to`) holds it moved until a read says so.
+   */
   const busy = useCallback(
     async (
       mark: Dispatch<SetStateAction<ReadonlySet<string>>>,
       taskId: string,
       act: () => Promise<unknown>,
       action: 'push' | 'merge' | 'ship' | 'other' = 'other',
+      to?: Settling,
     ) => {
       const set = (on: boolean) =>
         mark((now) => {
@@ -138,10 +181,25 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
       set(true)
       setError(null)
       setFailed(({ [taskId]: _, ...rest }) => rest)
+      if (to !== undefined) setMoved((now) => new Map([...now, [taskId, to]]))
+      const back = () =>
+        setMoved((now) => {
+          if (!now.has(taskId)) return now
+          const next = new Map(now)
+          next.delete(taskId)
+          return next
+        })
       try {
         await act()
+        const after = await readAfter()
+        if (to !== undefined) {
+          // Read afresh after the answer, as an aside's Clear is: one the runtime answered without moving comes back, saying so.
+          const now = after?.find((task) => task.taskId === taskId)
+          if (now !== undefined && now.phase !== to) throw new ApiError({ reason: 'Unchanged', message: workText.stillOpen })
+        }
         return true
       } catch (failure) {
+        back()
         fail(failure)
         setFailed((now) => ({ ...now, [taskId]: { action, message: messageOf(failure) } }))
         return false
@@ -149,10 +207,17 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
         set(false)
       }
     },
-    [fail],
+    [fail, readAfter],
+  )
+
+  /** Done or Keep for later: the card moved from the press, until a read says so. */
+  const settle = useCallback(
+    (taskId: string, to: Settling, act: () => Promise<unknown>) => busy(setSettling, taskId, act, 'other', to),
+    [busy],
   )
 
   return {
+    over,
     error,
     failed: failures,
     merging,
@@ -169,14 +234,18 @@ export const useWorkActions = (tasks: ReadonlyArray<BoardTask> | null = null): W
       [busy, client, pressed, inNeeds],
     ),
     markDone: useCallback(
-      async (taskId) =>
-        pressed(inNeeds(taskId), await busy(setSettling, taskId, () => client.markTaskDone(taskId)), { taskId, action: 'done' }),
-      [busy, client, pressed, inNeeds],
+      async (taskId) => {
+        const from = inNeeds(taskId)
+        return pressed(from, await settle(taskId, 'settled', () => client.markTaskDone(taskId)), { taskId, action: 'done' })
+      },
+      [settle, client, pressed, inNeeds],
     ),
     keep: useCallback(
-      async (taskId) =>
-        pressed(inNeeds(taskId), await busy(setSettling, taskId, () => client.keepTaskForLater(taskId)), { taskId, action: 'keep' }),
-      [busy, client, pressed, inNeeds],
+      async (taskId) => {
+        const from = inNeeds(taskId)
+        return pressed(from, await settle(taskId, 'kept', () => client.keepTaskForLater(taskId)), { taskId, action: 'keep' })
+      },
+      [settle, client, pressed, inNeeds],
     ),
     mergeHere: useCallback(
       (task) => busy(setMerging, task.taskId, () => client.mergeHere(task.taskId, headsOf(task.here))),

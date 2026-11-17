@@ -60,6 +60,16 @@ const dirsOf = async (cwd: string): Promise<Dirs | undefined> => {
   return { git: gitDir, common }
 }
 
+/**
+ * Whether `cwd`'s repository has all of its history: not shallow, so what git says of two commits it has (which is under
+ * which, what one has that the other doesn't) never changes. A shallow one's answers change as a fetch deepens it; no
+ * repository Althar can read so, no.
+ */
+export const historyWhole = async (cwd: string): Promise<boolean> => {
+  const dirs = await dirsOf(cwd)
+  return dirs !== undefined && (await statOf(join(dirs.common, 'shallow'))) === '-'
+}
+
 /** Every file a ref's name could be read from, as git looks for it, in the worktree's folder and the shared one. */
 const candidates = (dirs: Dirs, name: string) => {
   const forms = [name, `refs/${name}`, `refs/tags/${name}`, `refs/heads/${name}`, `refs/remotes/${name}`, `refs/remotes/${name}/HEAD`]
