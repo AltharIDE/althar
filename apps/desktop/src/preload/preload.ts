@@ -1,4 +1,5 @@
 import { isStartupStage, type StartupStage } from '../startup'
+import { isHomesOverview, isHomeState, type HomeProject, type HomesOverview, type HomeState } from '../homes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import { doNotTrack } from '../main/appPreferences'
@@ -125,7 +126,73 @@ ipcRenderer.on('althar:page-opened', (_event, owner: string) => {
   for (const listener of pagesOpened) listener(owner)
 })
 
+const homeStates = new Set<(state: HomeState) => void>()
+const homeDialogs = new Set<() => void>()
+ipcRenderer.on('althar:home-state', (_event, value: unknown) => {
+  if (isHomeState(value)) for (const listener of homeStates) listener(value)
+})
+ipcRenderer.on('althar:homes-open', () => {
+  for (const listener of homeDialogs) listener()
+})
+/* What main knows of every home, as it changes: for the chip's menu and Manage homes. */
+const overviews = new Set<(overview: HomesOverview) => void>()
+ipcRenderer.on('althar:homes-overview', (_event, value: unknown) => {
+  if (isHomesOverview(value)) for (const listener of overviews) listener(value)
+})
+/* A project to show, from another window's Manage homes: held until the page listens, as a window that just opened doesn't yet. */
+let pendingProject: string | undefined
+const projectShown = new Set<(projectId: string) => void>()
+ipcRenderer.on('althar:homes-project', (_event, projectId: unknown) => {
+  if (typeof projectId !== 'string') return
+  if (projectShown.size === 0) pendingProject = projectId
+  for (const listener of projectShown) listener(projectId)
+})
+
 contextBridge.exposeInMainWorld('althar', {
+  homes: {
+    state: () => ipcRenderer.invoke('althar:homes-state'),
+    list: () => ipcRenderer.invoke('althar:homes-list'),
+    overview: () => ipcRenderer.invoke('althar:homes-overview'),
+    inspect: (target: unknown) => ipcRenderer.invoke('althar:homes-inspect', target),
+    connect: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-connect', checkId, name),
+    save: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-save', checkId, name),
+    open: (id: string, projectId?: string) => ipcRenderer.invoke('althar:homes-open', id, projectId),
+    rename: (id: string, name: string) => ipcRenderer.invoke('althar:homes-rename', id, name),
+    change: (id: string, checkId: string) => ipcRenderer.invoke('althar:homes-change', id, checkId),
+    forget: (id: string) => ipcRenderer.invoke('althar:homes-forget', id),
+    restore: (id: string) => ipcRenderer.invoke('althar:homes-restore', id),
+    report: (projects: ReadonlyArray<HomeProject>): void => ipcRenderer.send('althar:homes-report', projects),
+    cancelCheck: () => ipcRenderer.invoke('althar:homes-cancel'),
+    reconnect: () => ipcRenderer.invoke('althar:homes-reconnect'),
+    onState: (listener: (state: HomeState) => void) => {
+      homeStates.add(listener)
+      return () => {
+        homeStates.delete(listener)
+      }
+    },
+    onOpen: (listener: () => void) => {
+      homeDialogs.add(listener)
+      return () => {
+        homeDialogs.delete(listener)
+      }
+    },
+    onOverview: (listener: (overview: HomesOverview) => void) => {
+      overviews.add(listener)
+      return () => {
+        overviews.delete(listener)
+      }
+    },
+    onProject: (listener: (projectId: string) => void) => {
+      projectShown.add(listener)
+      if (pendingProject !== undefined) {
+        listener(pendingProject)
+        pendingProject = undefined
+      }
+      return () => {
+        projectShown.delete(listener)
+      }
+    },
+  },
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
   startup: (stage: string, duration?: number): void => ipcRenderer.send('althar:startup', stage, duration),

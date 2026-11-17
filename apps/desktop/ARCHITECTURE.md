@@ -6,6 +6,30 @@ The desktop shell of [docs/architecture/02](../../docs/architecture/02-desktop-r
 - **Consumers:** people using Althar.
 - **Dependency direction:** the window depends on `@althar/ui` and `@althar/contracts`; the runtime's process on `@althar/runtime`. The window never imports the runtime, and the kit never imports Effect.
 
+## Personal homes over SSH
+
+SSH is an optional connection adapter. It is not required by the home identity or API model; direct and relay connections can use those contracts too. This slice connects to an already-installed host with an ordinary user’s SSH key/agent, without a root password or an exposed API port.
+
+A window's home is the chip at its bar's end; its menu (Ctrl+Shift+H, ⌘⇧H on a Mac, or File › Homes…) opens saved homes or checks an existing SSH host. Manage homes renames a home, changes how SSH reaches it (checked first, and kept only where the host has the same home), and forgets it, with a short Undo that main holds: the renderer names only the id it forgot, never a home to put back. Each window reports the projects it reads on its own home, keyed by the home main gave that window; main keeps them live while that window is connected, and their names and inks only in `home-glances.json`, a display cache that is ignored and written over where it doesn't read. Discovery is read-only. Main binds the checked identity to the initiating window and a short-lived, one-use confirmation; the renderer cannot supply a replacement home ID. Saved settings contain names and targets, never provider credentials or person-authority signing keys. OpenSSH owns authentication and strict host-key checking, including aliases and jump hosts from the person's SSH configuration. Unknown or changed host keys must be resolved outside this flow.
+
+```mermaid
+flowchart LR
+    Local["Local window"] <-->|"MessagePort"| Runtime["Local runtime"]
+    Remote["Home window<br/>separate storage partition"] <-->|"MessagePort"| Transport["Connection utility<br/>no runtime or database"]
+    Transport <-->|"SSH / framed stdio"| Host["Host launcher<br/>connect-stdio"]
+    Host <-->|"private API socket"| Home["Existing home runtime<br/>owns projects and work"]
+    Main["Desktop main<br/>saved targets and lifecycle"] --> Transport
+    Main --> Remote
+```
+
+A remote window never starts or migrates the home's store. Its connection utility receives a minimal SSH environment, and disconnecting it does not stop the home or its work. Each window owns its tunnel; navigation and close dispose it. A local runtime failure does not reconnect remote windows. Shutdown cancels discovery and bounds utility cleanup.
+
+The renderer verifies the API version, home, actor, device and socket authority before loading data. Remote feeds use home-scoped positions with history checkpoints, never numeric cursor fallback. A restored history requires a fresh snapshot and cache reset; a broken connection requires explicit reconnect and never automatically replays commands. Each home has its own persistent browser storage partition, query cache and drafts.
+
+SSH grants restricted socket capabilities: existing projects and task conversations. It does not prove human presence or enroll a trusted device. Permission approvals and other person-only operations remain denied by the runtime and are refused by the client before transmission. Protected signing keys and trusted approvals are a separate feature; ordinary encrypted desktop storage is not assumed to resist an agent running as the same OS user. An unrestricted shell account remains outside this application-level boundary.
+
+Desktop-local folder grants, attachments, clipboard credential helpers, embedded pages, canvases and local previews are unavailable to remote windows. Main enforces these boundaries independently of renderer controls. Remote links must use public HTTPS addresses. Host updates remain the host launcher's responsibility; the desktop connects through its active release and refuses incompatible API versions rather than starting or upgrading a remote runtime.
+
 ## Processes
 
 ```mermaid

@@ -1,6 +1,6 @@
 import { hashKey, type QueryClient, type QueryKey } from '@tanstack/react-query'
 
-import type { AutomationSnapshot, CoordinatorSnapshot, ThreadSnapshot, WatchEvent } from '@althar/contracts'
+import type { AutomationSnapshot, CoordinatorSnapshot, FeedPosition, ThreadSnapshot, WatchEvent } from '@althar/contracts'
 
 import { heardRename } from './agentRenames'
 import type { Client } from './client'
@@ -233,7 +233,7 @@ const threadReads = (cache: QueryClient, event: Changed): ReadonlyArray<QueryKey
 const isThread = (key: QueryKey) => key[0] === 'thread' || key[0] === 'coordinator'
 
 /** Starts watching the runtime's changes after `since` (or from now), keeping `cache` up to date, until `stop`. */
-export const follow = (client: Client, cache: QueryClient, since?: number): Feed => {
+export const follow = (client: Client, cache: QueryClient, since?: number | FeedPosition): Feed => {
   const listeners = new Set<(event: WatchEvent) => void>()
   const rewatching = new Set<() => void>()
   // Changes heard so far; for each read, by its key's hash, how many had been heard when a change last touched it, and when it last began.
@@ -318,15 +318,27 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
   }
 
   let watched = false
-  const unwatch = client.watch(heard, since, () => {
-    // A watch that broke may have missed a plan usage, which only the feed says changed: read again if it shows.
-    if (watched) {
-      void cache.invalidateQueries({ queryKey: keys.planUsage, exact: true })
-      void cache.invalidateQueries({ queryKey: ['modelRooms'] })
-    }
-    watched = true
-    for (const listener of rewatching) listener()
-  })
+  const unwatch = client.watch(
+    heard,
+    since,
+    () => {
+      // A watch that broke may have missed a plan usage, which only the feed says changed: read again if it shows.
+      if (watched) {
+        void cache.invalidateQueries({ queryKey: keys.planUsage, exact: true })
+        void cache.invalidateQueries({ queryKey: ['modelRooms'] })
+      }
+      watched = true
+      for (const listener of rewatching) listener()
+    },
+    () => {
+      // A restored history invalidates every old read. Cancel in-flight reads before resetting so none can land afterwards.
+      void cache.cancelQueries().then(() => cache.resetQueries())
+      touched.clear()
+      begun.clear()
+      due.clear()
+      for (const listener of rewatching) listener()
+    },
+  )
   return {
     listen: (listener) => {
       listeners.add(listener)

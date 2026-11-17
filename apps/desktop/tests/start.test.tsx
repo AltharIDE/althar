@@ -953,3 +953,23 @@ describe('the start', () => {
     expect(() => render(<Bare />)).toThrow('useServices needs a ServicesProvider')
   })
 })
+
+it('shows an empty remote home without offering desktop folders or agent installation', async () => {
+  const homeId = `home_${'1'.repeat(32)}`
+  const { client } = fakeClient({
+    connection: {
+      identity: { homeId, actorId: `act_${'2'.repeat(32)}`, deviceId: `dev_${'3'.repeat(32)}`, role: 'socket' },
+      hostDeviceId: `dev_${'3'.repeat(32)}`,
+      apiVersion: 1,
+      appVersion: 'fixture',
+      position: { homeId, cursor: 0, checkpoint: null },
+    },
+    listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+  })
+  const host = fakeHost()
+  withServices(<Start onProject={() => {}} />, client, host)
+  expect(await screen.findByRole('heading', { name: 'No projects on this home yet' })).not.toBeNull()
+  expect(screen.queryByRole('button', { name: /Choose a folder/ })).toBeNull()
+  expect(host.pickFolder).not.toHaveBeenCalled()
+  expect(screen.getByText('Add a project on the host and it shows here.')).not.toBeNull()
+})

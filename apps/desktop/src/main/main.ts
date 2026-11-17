@@ -8,6 +8,9 @@ import { homedir, hostname, userInfo } from 'node:os'
 import { join } from 'node:path'
 
 import { locations as locationsOf } from './locations'
+import type { WindowHome } from '../homes'
+import { startHomeConnections } from './homes/main'
+import { homePartition, localServicesUnavailable, remoteExternalUrl } from './homes/policy'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
@@ -484,6 +487,43 @@ let bridge: Bridge | undefined
 /** Whether web contents are one of Althar's own windows: only they reach its bridge's calls. */
 const mine = (contents: WebContents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents)
 
+const homes = startHomeConnections({
+  profile: locations().profile,
+  entry: join(here, '../connection/connection.js'),
+  mine,
+  open: (home, projectId) => {
+    const existing = [...windows].find((window) => {
+      if (window.isDestroyed()) return false
+      const current = homes.state(window.webContents.id).current
+      return home.kind === 'local' ? current.kind === 'local' : current.kind === 'ssh' && current.home.homeId === home.home.homeId
+    })
+    if (existing !== undefined) {
+      existing.show()
+      if (!quiet) existing.focus()
+      if (projectId !== undefined) existing.webContents.send('althar:homes-project', projectId)
+      return
+    }
+    const opened = openWindow(home)
+    // Its preload holds the project until the page listens, once the window has drawn its first projects.
+    if (projectId !== undefined)
+      opened.webContents.once('did-finish-load', () => opened.webContents.send('althar:homes-project', projectId))
+  },
+  log: (message) => logs.error(message),
+})
+const mineLocal = (contents: WebContents) => mine(contents) && homes.state(contents.id).current.kind === 'local'
+const localWindows = () =>
+  new Set([...windows].filter((window) => !window.isDestroyed() && homes.state(window.webContents.id).current.kind === 'local'))
+const handleLocal: typeof ipcMain.handle = (channel, listener) =>
+  ipcMain.handle(channel, (event, ...args) => {
+    if (homes.state(event.sender.id).current.kind === 'ssh') throw new Error(localServicesUnavailable)
+    return listener(event, ...args)
+  })
+const showHomes = () => {
+  const focused = BrowserWindow.getFocusedWindow()
+  const window = focused !== null && mine(focused.webContents) ? focused : bringForward().window
+  window.webContents.send('althar:homes-open')
+}
+
 /* What the runtime is asked of which tasks and projects are over, by request. */
 const settling = new Map<string, (owners: ReadonlyArray<string>) => void>()
 const askSettled = (owners: ReadonlyArray<string>) =>
@@ -498,7 +538,7 @@ const ownersIn = (said: unknown): ReadonlyArray<string> =>
 
 /** Brings Althar's window forward, a window there is or a new one, from wherever the person is. */
 const bringForward = () => {
-  return raiseWindow(availableWindows(windows, closingWindows), openWindow, () => app.focus({ steal: true }), quiet)
+  return raiseWindow(availableWindows(localWindows(), closingWindows), openWindow, () => app.focus({ steal: true }), quiet)
 }
 
 /** Opens the window on a thread, as a notification or the edge asks. */
@@ -528,7 +568,13 @@ const nudged = (event: AttentionEvent) => {
   }
   if (event._tag !== 'Nudge' || typeof event.title !== 'string' || typeof event.body !== 'string' || typeof event.threadId !== 'string')
     return
-  if (!tells(event.kind, preferences) || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
+  const focused = BrowserWindow.getFocusedWindow()
+  if (
+    !tells(event.kind, preferences) ||
+    (focused !== null && homes.state(focused.webContents.id).current.kind === 'local') ||
+    !Notification.isSupported()
+  )
+    return
   const { threadId } = event
   const notification = new Notification({ title: event.title, body: event.body, ...soundOf(preferences) })
   notification.on('click', () => {
@@ -677,7 +723,7 @@ const startRuntime = () => {
         logs.info('Profile is open in another Althar or the command line', { reason: storeFailure.reason })
       else if (storeFailure !== undefined)
         logs.error('Update couldn’t move the store', { stopped: storeFailure.stopped, reason: storeFailure.reason })
-      for (const window of BrowserWindow.getAllWindows()) connect(window)
+      for (const window of BrowserWindow.getAllWindows()) if (homes.state(window.webContents.id).current.kind === 'local') connect(window)
       return
     }
     if (message.type !== 'folder-allowed' || message.requestId === undefined) return
@@ -712,7 +758,8 @@ const startRuntime = () => {
       retrying = false
       storeFailure = undefined
       startRuntime()
-      for (const window of BrowserWindow.getAllWindows()) window.webContents.reload()
+      for (const window of BrowserWindow.getAllWindows())
+        if (homes.state(window.webContents.id).current.kind === 'local') window.webContents.reload()
       return
     }
     logs.error('Runtime keeps stopping; quitting', { restarts: restarts.length })
@@ -738,6 +785,7 @@ const allowFolder = (path: string): Promise<string | null> =>
 
 /** Gives a window a port to the runtime: once per page load, so a reload gets a fresh connection. */
 const connect = (window: BrowserWindow) => {
+  if (homes.connect(window)) return
   window.webContents.send('althar:startup-stage', startupStage)
   if (storeFailure !== undefined) return window.webContents.send('althar:store-failed', failureForWindow(storeFailure, homedir()))
   if (runtime === undefined) return
@@ -842,7 +890,8 @@ const chromeArgs = () => {
   return chrome === undefined ? [] : [CHROME_ARG + JSON.stringify(chrome)]
 }
 
-const openWindow = () => {
+const openWindow = (home: WindowHome = { kind: 'local' }) => {
+  const partition = homePartition(home)
   const window = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -854,6 +903,7 @@ const openWindow = () => {
     ...windowOptions(process.platform, windowIcon(), nativeTheme.shouldUseDarkColors, framedNow()),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
+      ...(partition === undefined ? {} : { partition }),
       // What the desktop says of the window's buttons, for its first frame (desktop.ts); changes come as althar:chrome.
       additionalArguments: chromeArgs(),
       sandbox: true,
@@ -868,6 +918,7 @@ const openWindow = () => {
     window.setIgnoreMouseEvents(true)
   }
   windows.add(window)
+  homes.register(window, home)
   window.on('focus', () => focusedLast(windows, window))
   window.on('close', () => closingWindows.add(window))
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
@@ -887,18 +938,22 @@ const openWindow = () => {
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    openOutside(url)
+    const remote = homes.state(window.webContents.id).current.kind === 'ssh'
+    const allowed = remote ? remoteExternalUrl(url) : url
+    if (allowed !== null) openOutside(allowed)
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {
     event.preventDefault()
-    openOutside(url)
+    const remote = homes.state(window.webContents.id).current.kind === 'ssh'
+    const allowed = remote ? remoteExternalUrl(url) : url
+    if (allowed !== null) openOutside(allowed)
   })
   void window.loadFile(join(here, '../renderer/index.html'))
   return window
 }
 
-ipcMain.handle('althar:pick-folder', async (event, purpose: unknown) => {
+handleLocal('althar:pick-folder', async (event, purpose: unknown) => {
   const window = BrowserWindow.fromWebContents(event.sender)
   // An account's folder is often hidden, as ~/.codex-work is: those show too.
   const options =
@@ -930,7 +985,7 @@ ipcMain.on('althar:window', (event, action: unknown) => {
 })
 
 // Folders for a new project, several at once: a grant for each, in the order chosen.
-ipcMain.handle('althar:pick-folders', async (event) => {
+handleLocal('althar:pick-folders', async (event) => {
   const window = BrowserWindow.fromWebContents(event.sender)
   const options = { properties: ['openDirectory' as const, 'multiSelections' as const], message: 'Choose the project’s folders' }
   const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
@@ -940,7 +995,7 @@ ipcMain.handle('althar:pick-folders', async (event) => {
 })
 
 // Where a new project's new repository goes: the folder it is made in, named after the project, and a grant for that folder.
-ipcMain.handle('althar:pick-place', async (event, name: unknown) => {
+handleLocal('althar:pick-place', async (event, name: unknown) => {
   const window = BrowserWindow.fromWebContents(event.sender)
   const options = {
     properties: ['openDirectory' as const, 'createDirectory' as const],
@@ -955,20 +1010,20 @@ ipcMain.handle('althar:pick-place', async (event, name: unknown) => {
 })
 
 // A folder dropped on the window, by the path the preload read from the drop: only a folder on disk gets a grant.
-ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
+handleLocal('althar:grant-dropped', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null
   const found = await stat(path).catch(() => undefined)
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
 // A file or folder added to a message, by the path the preload read from the drop or the picker: measured, and granted where a message may carry it.
-ipcMain.handle('althar:attach', async (_event, path: unknown) => {
+handleLocal('althar:attach', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null
   return attachedOf(path, allowFolder)
 })
 
 // The files copied in the file manager and pasted into a message, as the clipboard names them: each as one dropped.
-ipcMain.handle('althar:attach-pasted', async () => {
+handleLocal('althar:attach-pasted', async () => {
   const paths = await clipboardPaths(async (format, raw) => {
     const type = raw ? rawFormat(format) : format
     for (const item of await clipboard.read()) {
@@ -985,7 +1040,7 @@ ipcMain.handle('althar:attach-pasted', async () => {
 const foundHere = foundIds()
 
 // The repositories where people keep code on this computer, for the first screen and a new project: each by an id, never by its path.
-ipcMain.handle('althar:find-repositories', async () => {
+handleLocal('althar:find-repositories', async () => {
   // The end-to-end tests give a home of their own, so what the tester keeps isn't offered.
   const home = process.env.ALTHAR_CODE_HOME || homedir()
   const found = await findRepositories(placesFor(home, process.platform))
@@ -1028,21 +1083,21 @@ ipcMain.handle('althar:pick-clone-place', async (event) => {
 })
 
 // A grant for one of them, once the person ticks or adds it: one main found, still where it was found, and nothing else.
-ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
+handleLocal('althar:grant-found', async (_event, id: unknown) => {
   const repository = typeof id === 'string' ? foundHere.found(id) : undefined
   const path = repository === undefined ? null : await stillFound(repository)
   return path === null ? null : allowFolder(path)
 })
 
 // The person closed whatever had the profile open and asks Althar to try it again: the runtime that found it held stops, and a new one starts.
-ipcMain.handle('althar:try-again', () => {
+handleLocal('althar:try-again', () => {
   if (storeFailure?.stopped !== 'held' || retrying) return
   retrying = true
   runtime?.postMessage({ type: 'shutdown' })
 })
 
 // Shows the copy of the store from before an update that couldn't move it, in the system's file manager.
-ipcMain.handle('althar:show-backup', () => {
+handleLocal('althar:show-backup', () => {
   const backup = storeFailure?.backup
   if (typeof backup === 'string') shell.showItemInFolder(backup)
 })
@@ -1098,7 +1153,7 @@ ipcMain.handle('althar:set-preference', async (_event, key: unknown, value: unkn
 })
 
 // An editor's icon, as Finder draws it, by its id; null for one not found. Only editors Althar knows are drawn.
-ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
+handleLocal('althar:editor-picture', async (_event, id: unknown) => {
   const path = typeof id === 'string' ? bundleOf(id) : null
   if (path === null) return null
   const picture = await nativeImage
@@ -1112,7 +1167,7 @@ ipcMain.handle('althar:sounds', () => alertSounds())
 ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name, undefined, () => shell.beep()))
 
 // A token on the clipboard, while connecting a service waits for one; anything else stays on the clipboard alone.
-ipcMain.handle('althar:clipboard-token', async () => tokenIn(await clipboard.readText()))
+handleLocal('althar:clipboard-token', async () => tokenIn(await clipboard.readText()))
 
 // An update ready to install, as a window shows it (null where the app doesn't update, as in development); and restarting into it, at the person's word, only while no work runs.
 ipcMain.handle('althar:update', () => updates?.glance() ?? null)
@@ -1171,24 +1226,24 @@ void ready.then(() => {
       if (out !== null) void shell.openExternal(out)
     },
     tell: (state) => {
-      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page', state)
+      for (const window of localWindows()) if (!window.isDestroyed()) window.webContents.send('althar:page', state)
     },
     pressed: (owner, key) => {
-      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page-key', owner, key)
+      for (const window of localWindows()) if (!window.isDestroyed()) window.webContents.send('althar:page-key', owner, key)
     },
     closed: (owner) => {
-      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page-closed', owner)
+      for (const window of localWindows()) if (!window.isDestroyed()) window.webContents.send('althar:page-closed', owner)
     },
     chrome: process.versions.chrome,
     agent: browserAgent(app.userAgentFallback),
     // A page a lead opened, or woke, with no window showing it: the windows place it beside its conversation.
     opened: (owner) => {
-      for (const window of windows) if (!window.isDestroyed()) window.webContents.send('althar:page-opened', owner)
+      for (const window of localWindows()) if (!window.isDestroyed()) window.webContents.send('althar:page-opened', owner)
     },
     windows: () => [...windows].filter((window) => !window.isDestroyed()).length,
     quitting: () => quitting,
   })
-  handlePages(pages, mine)
+  handlePages(pages, mineLocal)
   // The canvases beside the conversations, each in its project's canvas partition (ADR-104).
   canvases = startCanvases({
     root: join(locations().profile, 'artifacts'),
@@ -1199,7 +1254,7 @@ void ready.then(() => {
       if (out !== null) void shell.openExternal(out)
     },
   })
-  handleCanvases(canvases, mine)
+  handleCanvases(canvases, mineLocal)
   bridge = bridgeOf({
     pages,
     isRuntime: (from) => from !== undefined && from === runtime,
@@ -1240,9 +1295,10 @@ void ready.then(() => {
       name: app.name,
       ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }),
       report: () => bringForward().window.webContents.send('althar:report'),
+      homes: showHomes,
     })
   } else {
-    const menu = appMenu(process.platform, !app.isPackaged)
+    const menu = appMenu(process.platform, !app.isPackaged, showHomes)
     if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
   }
   // Opened at login, it starts in the background, with no window: the runtime and its automations run, and a window opens as the person asks.
@@ -1281,7 +1337,7 @@ void ready.then(() => {
     installId: () => install.then((kept) => kept.id),
     logs: logs.dir,
     askRuntime: (threadId) => facts.ask(runtime, threadId),
-    mine,
+    mine: mineLocal,
     address: process.env.ALTHAR_REPORT_URL ?? __ALTHAR_REPORT_URL__,
     email: process.env.ALTHAR_REPORT_EMAIL ?? __ALTHAR_REPORT_EMAIL__,
   })
@@ -1421,7 +1477,13 @@ const askToQuit = async () => {
 
 // Quitting asks the runtime to stop every session and record it, then waits for it, within a limit.
 app.on('before-quit', (event) => {
-  if (quitting || runtime === undefined) return
+  if (quitting) return
+  if (runtime === undefined) {
+    event.preventDefault()
+    quitting = true
+    void Promise.all([homes.stopAll(), sendersStopped()]).finally(() => app.exit(0))
+    return
+  }
   if (!quitConfirmed && !quitWithoutAsking) {
     event.preventDefault()
     void askToQuit()
@@ -1432,6 +1494,7 @@ app.on('before-quit', (event) => {
   dictation?.stop()
   // Pages whose cookies are kept only until Althar quits clear them as it goes, a few seconds at most.
   const cleared = Promise.race([pages?.moment('quit'), new Promise((resolve) => setTimeout(resolve, 4_000))]).catch(() => undefined)
+  const remoteStopped = homes.stopAll()
   const child = runtime
   const timer = setTimeout(() => {
     child.kill()
@@ -1440,7 +1503,7 @@ app.on('before-quit', (event) => {
   child.once('exit', () => {
     clearTimeout(timer)
     // Usage data and crash reports on their way get a moment to go.
-    void Promise.all([sendersStopped(), cleared]).finally(() => app.exit(0))
+    void Promise.all([sendersStopped(), cleared, remoteStopped]).finally(() => app.exit(0))
   })
   child.postMessage({ type: 'shutdown' })
 })

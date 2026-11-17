@@ -4823,6 +4823,8 @@ const socketCalls = new Set<string>([
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
+/** The same deny-by-default policy used at authenticated ingress, for clients that show their connection's capabilities. */
+export const socketCanCall = (tag: string): boolean => tag === 'WatchFrom' || tag === 'WatchAttention' || socketCalls.has(tag)
 
 /** The prompt returned to the composer after its turn and later conversation were undone. */
 export const UndoTurnResult = Schema.Struct({
@@ -4833,7 +4835,7 @@ export const UndoTurnResult = Schema.Struct({
 export type UndoTurnResult = typeof UndoTurnResult.Type
 
 const call = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
-  Rpc.make(tag, { payload, success, error: ApiError }).annotate(SocketAllowed, socketCalls.has(tag))
+  Rpc.make(tag, { payload, success, error: ApiError }).annotate(SocketAllowed, socketCanCall(tag))
 
 /** A command: what it says, and the client's id for it. */
 const command = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>

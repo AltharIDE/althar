@@ -43,7 +43,7 @@ jobs:
       # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
       # a runner's desktop isn't one Electron recognises, so it would fall back to plain text, which Althar
       # refuses; the main process asks for libsecret (keyring.ts), and gnome-keyring answers.
-      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
+      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0 openssh-server
       # Tests with an open flaky issue run, but don't fail this job (packages/testing).
       - uses: ./.github/actions/flaky/quarantine
       - env:
