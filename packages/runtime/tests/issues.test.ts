@@ -333,6 +333,34 @@ describe('an issue', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
   })
 
+  it.live('opens its pull request without linking it on the issue when the project’s rules say not to link issues', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    const tracker = linear()
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      yield* connect('linear')
+      const { projectId, threadId } = yield* opened(working)
+      yield* (yield* Policies).set(projectId, { linkIssues: false }, (yield* Instance).personId)
+      const body = `Rate-limit refunds ${LINK} [coordinator:plan] [lead:finish] [lead:edit] [review:pass]`
+      const envelope = yield* Runtime.envelope('thread.send', { body })
+      yield* (yield* Coordinator).say({ envelope, threadId, body, disposition: 'after_current' })
+      yield* (yield* Issues).unfurlInput(envelope.commandId)
+      const cards = Effect.map((yield* Queries).coordinator(projectId), (snapshot) =>
+        snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
+      )
+      yield* until(cards, (all) => all[0]?.phase === 'ready')
+      assert.strictEqual(github.changes[0]?.title, 'MER-231: Rate-limit refunds')
+      assert.deepStrictEqual(tracker.linksOn('MER-231'), [])
+      assert.notInclude(tracker.calls, 'link')
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }) }))),
+      ),
+    )
+  })
+
   it.live('stays where it is when the project’s rules say not to move issues', () => {
     const { working } = hosted()
     const tracker = linear()

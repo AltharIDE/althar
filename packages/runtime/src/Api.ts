@@ -93,6 +93,7 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
+  linksIssues,
   Policies,
   type ProjectRules,
   repositoryFilesOf,
@@ -667,6 +668,7 @@ export const handlers = apiLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        linkIssues: linksIssues(rules),
         afterMergeReview: afterMergeReviewOf(rules),
         repositoryFiles: repositoryFilesOf(rules),
       }

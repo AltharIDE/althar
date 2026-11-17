@@ -1271,6 +1271,8 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved along with it: to its tracker's In Progress as it starts, In Review and Done with its pull request. */
   moveIssues: Schema.Boolean,
+  /** Whether a task's pull request is linked on its issue as it opens: an attachment, a remote link, or a comment on ClickUp. */
+  linkIssues: Schema.Boolean,
   /** What a small change's review after it merges brings back to the person: only major findings, any, or no review at all. */
   afterMergeReview: AfterMergeRule,
   /** Whether skill and OpenSpec files may be written to, committed in, or pushed from the project's repositories; each off unless turned on. */
@@ -5810,6 +5812,7 @@ const WorkApi = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      linkIssues: Schema.optional(Schema.Boolean),
       afterMergeReview: Schema.optional(AfterMergeRule),
       repositoryFiles: Schema.optional(RepositoryFilesSetting),
       /** What the person changed of what leads' sandboxes let through, each list whole. */

@@ -1372,6 +1372,8 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // Its pull request is linked on the issue it came from, until the person says.
+          linkIssues: true,
           // A small change's review after it merges brings back only blocking and major findings, until the person says.
           afterMergeReview: 'major',
           // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.

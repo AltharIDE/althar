@@ -165,7 +165,7 @@ import { type Answers, answersOf, followUpBody, followUpWords } from './followUp
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { FastLane } from './fastLane'
-import { Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
+import { linksIssues, Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { guardPush } from './repositoryGuard'
 import { pushDetailOf, pushFailureOf } from './pushFailure'
 import { Sessions } from './Sessions'
@@ -2071,9 +2071,10 @@ export class Changes extends Context.Service<
               return id
             }),
           )
-          // The issue it came from gets a link to it, where its tracker has links.
+          // The issue it came from gets a link to it, where its tracker has links and the project links them.
           if (issueLink !== undefined && issueLink.connectionId !== null && !sameHost)
             yield* Effect.gen(function* () {
+              if (!linksIssues((yield* (yield* Policies).current(input.projectId)).rules)) return
               const adapters = yield* connections.adapters(issueLink.connectionId ?? '')
               const tracker = adapters.tracker
               if (tracker === undefined || !tracker.capabilities.links) return

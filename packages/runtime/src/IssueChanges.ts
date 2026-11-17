@@ -1294,7 +1294,7 @@ export class IssueChanges extends Context.Service<
         ),
         tool(
           'link_pull_request',
-          'Links this task’s pull request to the issue it came from, at once, where its tracker takes links (Linear, Jira, Trello; ClickUp by a comment on the task); GitHub and GitLab link a pull request that names the issue already. Althar links it itself as it opens it: for one opened another way, or one that wasn’t linked.',
+          'Links this task’s pull request to the issue it came from, at once, where its tracker takes links (Linear, Jira, Trello; ClickUp by a comment on the task) and the project links them; GitHub and GitLab link a pull request that names the issue already. Althar links it itself as it opens it: for one opened another way, or one that wasn’t linked.',
           { type: 'object', properties: {} },
           (access) => linkTool(access),
         ),
