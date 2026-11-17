@@ -135,6 +135,7 @@ it('slides following text only when it moved and opens the box with its scrim', 
   drop(null, el)
   leave(null)
   lift(null, null)
+  expect(animate).toHaveBeenCalledTimes(3)
 })
 
 it.each([true, false])('closes immediately and removes the inert exit copy on completion (reduced=%s)', async (reduced) => {
