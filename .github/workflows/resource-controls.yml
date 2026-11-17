@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2025]
+        os: [ubuntu-24.04, macos-26, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     defaults:
@@ -36,7 +36,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
       - name: Prepare a private Linux delegation
         if: runner.os == 'Linux'
         run: |
