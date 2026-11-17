@@ -378,6 +378,8 @@ export const thingsOf = (who: Source, era: Era) => {
 /** Picked by default: work not finished (no merged PR, not someone else's), and conversations of the last month. */
 export const pickedByDefault = (one: Worktree) => one.pr?.state !== 'merged' && one.pr?.theirs === undefined
 export const recent = (one: Conversation) => now - Date.parse(one.at) < 30 * DAY
+/** Whether a time is within the last days. */
+export const within = (iso: string, days: number) => now - Date.parse(iso) < days * DAY
 
 /** How long ago, as a list says it: 2h, yesterday, 4 days, 3 Oct. */
 export const when = (iso: string) => {

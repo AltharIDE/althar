@@ -45,7 +45,7 @@ export const text = {
 }
 
 /** What a shortcut brings in, as a line: "5 worktrees, 11 conversations and Conductor’s setup". */
-const said = (count: { worktrees: number; conversations: number; setup: string | null }) => {
+export const said = (count: { worktrees: number; conversations: number; setup: string | null }) => {
   const setup = SETUPS.find((one) => one.id === count.setup)
   const parts = [
     count.worktrees > 0 ? text.worktrees(count.worktrees) : null,
@@ -56,16 +56,16 @@ const said = (count: { worktrees: number; conversations: number; setup: string |
   const last = parts.pop()
   return parts.length === 0 ? `${last}` : `${parts.join(', ')} and ${last}`
 }
-const capital = (line: string) => `${line[0]?.toUpperCase() ?? ''}${line.slice(1)}`
+export const capital = (line: string) => `${line[0]?.toUpperCase() ?? ''}${line.slice(1)}`
 
 /** The sources a shortcut names: the agents and the tools, not worktrees made by hand. */
-const chipSources = (picks: Picks) => SOURCES.filter((who) => who !== 'git' && picks.stateOf(who).of > 0)
+export const chipSources = (picks: Picks) => SOURCES.filter((who) => who !== 'git' && picks.stateOf(who).of > 0)
 
 /** What a source's chip counts: an agent's conversations, a tool's worktrees. */
-const countOf = (picks: Picks, who: Source) => (isAgent(who) ? picks.stateOf(who).of : picks.things(who).worktrees.length)
+export const countOf = (picks: Picks, who: Source) => (isAgent(who) ? picks.stateOf(who).of : picks.things(who).worktrees.length)
 
 /** A source as a chip, pressed where it's all in. */
-function SourceChip({ who, on, count, onPress }: { who: Source; on: boolean; count: number; onPress: () => void }) {
+export function SourceChip({ who, on, count, onPress }: { who: Source; on: boolean; count: number; onPress: () => void }) {
   return (
     <button type="button" className={s.chip} aria-pressed={on} onClick={onPress}>
       <Mark of={who} size={14} />

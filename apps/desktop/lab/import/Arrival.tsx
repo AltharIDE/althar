@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { Brand, Icon, ProjectInk, RuntimeState } from '@althar/ui'
 import { NewProject, Welcome } from '@althar/ui/screens'
 
-import { ByKind, ByPlace, type Picks, usePicks } from './Found'
+import { ByKind, ByPlace, type Picks, type Sets, usePicks } from './Found'
 import { ByTool, Choose, WithShortcuts } from './Shortcuts'
+import { Filtered, OnePress, Sentence, startOf, Tiles } from './Variants'
 import { opening, useLab } from './state'
 import { world } from './world'
 import s from './arrival.module.css'
@@ -16,7 +17,9 @@ import s from './arrival.module.css'
  * folder: A by kind, B by place. C changes neither: what was found waits on
  * the board. D–F are the same step with shortcuts, for someone who wants
  * all of one tool, or all of it, in a press: one question (D), a row a tool
- * (E), or A's list under a row of shortcuts (F).
+ * (E), or A's list under a row of shortcuts (F). G–J are more of it: ranked
+ * actions that act in a press (G), a tile a tool (H), a sentence of menus
+ * (I), filters where what's shown comes in (J).
  */
 
 const RUNTIMES = [
@@ -31,27 +34,56 @@ const REPOSITORIES = [
   { id: 'site', name: 'site', where: '~/Code/site', facts: 'main · in September' },
 ]
 
-const bring = (picks: Picks) =>
-  world.bring({ worktrees: [...picks.worktrees], conversations: [...picks.conversations], setup: picks.setup, older: picks.olderAgents })
+const bringSets = (sets: Sets) =>
+  world.bring({ worktrees: [...sets.worktrees], conversations: [...sets.conversations], setup: sets.setup, older: [...sets.older] })
+const bring = (picks: Picks) => bringSets(picks.sets())
 
-const Picker = ({ picks }: { picks: Picks }) => {
+/** What's picked, started again as a direction starts, when the bar swaps it in place. */
+const useArrivalPicks = () => {
+  const { d } = useLab()
+  const picks = usePicks('arriving')
+  const [list, setList] = useState(false)
+  useEffect(() => {
+    picks.pickSets(startOf(d, picks))
+    setList(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only as the direction changes
+  }, [d])
+  // G's actions act; its button is "Not now" until the list is open.
+  const go = d === 'g' && !list ? null : picks.go()
+  return { picks, list, setList, go }
+}
+
+const Picker = ({
+  picks,
+  list,
+  onList,
+  onGo,
+}: {
+  picks: Picks
+  list: boolean
+  onList: (on: boolean) => void
+  onGo: (sets: Sets) => void
+}) => {
   const { d } = useLab()
   if (d === 'b') return <ByPlace picks={picks} />
   if (d === 'd') return <Choose picks={picks} />
   if (d === 'e') return <ByTool picks={picks} />
   if (d === 'f') return <WithShortcuts picks={picks} />
+  if (d === 'g') return <OnePress picks={picks} list={list} onList={onList} onGo={onGo} />
+  if (d === 'h') return <Tiles picks={picks} />
+  if (d === 'i') return <Sentence picks={picks} />
+  if (d === 'j') return <Filtered picks={picks} />
   return <ByKind picks={picks} />
 }
 
 /** The first run's welcome, on the project's step. */
 export function WelcomeArrival({ onOpen }: { onOpen: () => void }) {
   const { d } = useLab()
-  const picks = usePicks('arriving')
+  const { picks, list, setList, go } = useArrivalPicks()
   const [picked, setPicked] = useState<readonly string[]>(['althar'])
   const [name, setName] = useState('althar')
   // The address can open it on its step after the project's made, for a screenshot.
   const [made, setMade] = useState(() => opening.get('step') === 'bring')
-  const go = picks.go()
   return (
     <div className={s.bare}>
       <Welcome
@@ -70,7 +102,17 @@ export function WelcomeArrival({ onOpen }: { onOpen: () => void }) {
           ? {}
           : {
               bring: {
-                content: <Picker picks={picks} />,
+                content: (
+                  <Picker
+                    picks={picks}
+                    list={list}
+                    onList={setList}
+                    onGo={(sets) => {
+                      bringSets(sets)
+                      onOpen()
+                    }}
+                  />
+                ),
                 go,
                 onGo: () => bring(picks),
               },
@@ -84,10 +126,9 @@ export function WelcomeArrival({ onOpen }: { onOpen: () => void }) {
 /** A New project tab, its folder read. */
 export function NewProjectArrival({ onCreated }: { onCreated: () => void }) {
   const { d } = useLab()
-  const picks = usePicks('arriving')
+  const { picks, list, setList, go } = useArrivalPicks()
   const [name, setName] = useState('althar')
   const [ink, setInk] = useState<ProjectInk>(ProjectInk.Clay)
-  const go = picks.go()
   const folder = {
     id: 'f_althar',
     name: 'althar',
@@ -127,13 +168,21 @@ export function NewProjectArrival({ onCreated }: { onCreated: () => void }) {
                     <h2 className={s.sideTitle}>Already under way</h2>
                     <p className={s.sideLine}>What other tools left in its folders. Nothing there changes.</p>
                   </div>
-                  <Picker picks={picks} />
+                  <Picker
+                    picks={picks}
+                    list={list}
+                    onList={setList}
+                    onGo={(sets) => {
+                      bringSets(sets)
+                      onCreated()
+                    }}
+                  />
                 </div>
               ),
               ...(go === null ? {} : { footNote: `Then ${go[0]?.toLowerCase()}${go.slice(1)}.` }),
             })}
         onCreate={() => {
-          if (d !== 'c') bring(picks)
+          if (d !== 'c' && go !== null) bring(picks)
           onCreated()
         }}
         onCancel={() => undefined}

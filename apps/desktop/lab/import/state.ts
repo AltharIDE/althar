@@ -4,22 +4,26 @@ import type { Era } from './world'
 
 /*
  * What the lab's bar picks: the direction, two sets of them, and where the
- * person is. Arriving (A–F), the project is being added: on the first run's
+ * person is. Arriving (A–C, and D–J with shortcuts), the project is being added: on the first run's
  * welcome (W) or in a New project tab (P), then its board. Later (1–3),
  * weeks on, from Settings. Kept in the address, so a reload or a screenshot
  * opens on the same.
  */
 
 export const DIRECTIONS = [
-  { key: 'a', kbd: 'A', label: 'A step', set: 'arriving' },
-  { key: 'b', kbd: 'B', label: 'By place', set: 'arriving' },
-  { key: 'c', kbd: 'C', label: 'On the board', set: 'arriving' },
-  { key: 'd', kbd: 'D', label: 'One question', set: 'arriving' },
-  { key: 'e', kbd: 'E', label: 'By tool', set: 'arriving' },
-  { key: 'f', kbd: 'F', label: 'Shortcuts', set: 'arriving' },
-  { key: '1', kbd: '1', label: 'Project settings', set: 'later' },
-  { key: '2', kbd: '2', label: 'Althar’s settings', set: 'later' },
-  { key: '3', kbd: '3', label: 'Keep in step', set: 'later' },
+  { key: 'a', kbd: 'A', label: 'A step', set: 'arriving', group: 'Arriving' },
+  { key: 'b', kbd: 'B', label: 'By place', set: 'arriving', group: 'Arriving' },
+  { key: 'c', kbd: 'C', label: 'On the board', set: 'arriving', group: 'Arriving' },
+  { key: 'd', kbd: 'D', label: 'One question', set: 'arriving', group: 'Shortcuts' },
+  { key: 'e', kbd: 'E', label: 'By tool', set: 'arriving', group: 'Shortcuts' },
+  { key: 'f', kbd: 'F', label: 'Chips', set: 'arriving', group: 'Shortcuts' },
+  { key: 'g', kbd: 'G', label: 'One press', set: 'arriving', group: 'Shortcuts' },
+  { key: 'h', kbd: 'H', label: 'Tiles', set: 'arriving', group: 'Shortcuts' },
+  { key: 'i', kbd: 'I', label: 'A sentence', set: 'arriving', group: 'Shortcuts' },
+  { key: 'j', kbd: 'J', label: 'Filters', set: 'arriving', group: 'Shortcuts' },
+  { key: '1', kbd: '1', label: 'Project settings', set: 'later', group: 'Later' },
+  { key: '2', kbd: '2', label: 'Althar’s settings', set: 'later', group: 'Later' },
+  { key: '3', kbd: '3', label: 'Keep in step', set: 'later', group: 'Later' },
 ] as const
 export type Direction = (typeof DIRECTIONS)[number]['key']
 

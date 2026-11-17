@@ -19,6 +19,7 @@ import {
   TOOLS,
   type Tool,
   when,
+  within,
   type Worktree,
   worktreeOf,
   worktreesOf,
@@ -48,7 +49,8 @@ export const text = {
   theirs: (who: string) => `${who}’s, to review`,
   messages: (n: number) => `${n} messages`,
   older: (cc: number, cx: number) => `${cc + cx} older, from before ${monthAgo()}`,
-  olderLine: (cc: number, cx: number) => `${cc} from Claude Code, ${cx} from Codex`,
+  olderLine: (cc: number, cx: number) =>
+    [cc > 0 ? `${cc} from Claude Code` : null, cx > 0 ? `${cx} from Codex` : null].filter((one) => one !== null).join(', '),
   noSetup: 'Neither: the first task works it out',
   setupReads: (file: string) => file,
   ownFolder: 'In althar itself',
@@ -177,7 +179,33 @@ export function usePicks(era: Era, except?: Brought, only?: 'new' | 'left') {
       setup: which === 'none' ? null : 'conductor',
     }
   }
+  /** What a filter picks: what, from whom, how old. A worktree's conversations come with it. */
+  const select = (c: Criteria): Sets => {
+    const has = (who: Source | undefined) => who !== undefined && (c.from === 'all' || c.from.includes(who))
+    const fresh = (iso: string) => c.since === 'any' || within(iso, c.since === 'month' ? 30 : 7)
+    const ws =
+      c.what === 'conversations'
+        ? []
+        : offeredWorktrees.filter((one) => has(one.tool) && fresh(one.touched) && (c.what !== 'unfinished' || pickedByDefault(one)))
+    const cs =
+      c.what === 'worktrees'
+        ? offeredConversations.filter((one) => ws.some((w) => w.id === one.in))
+        : offeredConversations.filter((one) => (has(one.agent) || has(worktreeOf(one.in)?.tool)) && fresh(one.at))
+    const agents = (['claude-code', 'codex'] as const).filter((who) => has(who) && offersOlder)
+    return {
+      worktrees: new Set(ws.map((one) => one.id)),
+      conversations: new Set(cs.map((one) => one.id)),
+      older: new Set(c.since === 'any' && c.what !== 'worktrees' ? agents : []),
+      setup: c.what === 'conversations' ? null : (SETUPS.find((one) => has(one.tool) && ws.some((w) => w.tool === one.tool))?.id ?? null),
+    }
+  }
   const same = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((one) => b.has(one))
+  const setTo = (to: Sets) => {
+    setWorktrees(to.worktrees)
+    setConversations(to.conversations)
+    setOlderOf(to.older)
+    setSetup(to.setup)
+  }
   return {
     offeredWorktrees,
     offeredConversations,
@@ -240,13 +268,26 @@ export function usePicks(era: Era, except?: Brought, only?: 'new' | 'left') {
       if (own !== undefined) setSetup((now) => (on ? (now ?? own.id) : now === own.id ? null : now))
     },
     /** A shortcut, at once: everything, what's under way, nothing, or everything from some sources. */
-    pick: (which: Preset | readonly Source[]) => {
-      const to = shortcut(which)
-      setWorktrees(to.worktrees)
-      setConversations(to.conversations)
-      setOlderOf(to.older)
-      setSetup(to.setup)
-    },
+    pick: (which: Preset | readonly Source[]) => setTo(shortcut(which)),
+    /** What a shortcut picks, or a filter, without picking it. */
+    setsOf: (which: Preset | readonly Source[]) => shortcut(which),
+    select,
+    /** Picks just these. */
+    pickSets: setTo,
+    /** Whether what's picked is just these; setup aside. */
+    isSets: (to: Sets) => same(to.worktrees, worktrees) && same(to.conversations, conversations) && same(to.older, olderOf),
+    /** What these would bring in, counted. */
+    countSets: (to: Sets) => ({
+      worktrees: to.worktrees.size,
+      conversations: to.conversations.size + [...to.older].reduce((n, who) => n + OLDER[who], 0),
+      setup: to.setup,
+    }),
+    /** What's picked, as sets. */
+    sets: (): Sets => ({ worktrees, conversations, older: olderOf, setup }),
+    /** How many older conversations each agent has here, counted, not listed. */
+    olderBy: { 'claude-code': offersOlder ? OLDER['claude-code'] : 0, codex: offersOlder ? OLDER.codex : 0 } as Record<Agent, number>,
+    worktreesOn: (ids: readonly string[], on: boolean) => setWorktrees((now) => ids.reduce((next, id) => flip(next, id, on), now)),
+    conversationsOn: (ids: readonly string[], on: boolean) => setConversations((now) => ids.reduce((next, id) => flip(next, id, on), now)),
     /** Whether what's picked is just what a shortcut picks; setup aside. */
     is: (which: Preset | readonly Source[]) => {
       const to = shortcut(which)
@@ -267,6 +308,19 @@ export function usePicks(era: Era, except?: Brought, only?: 'new' | 'left') {
 }
 /** The shortcuts that aren't a source: everything, what's under way (the defaults), nothing. */
 export type Preset = 'all' | 'underway' | 'none'
+/** What's picked, or would be. */
+export interface Sets {
+  readonly worktrees: ReadonlySet<string>
+  readonly conversations: ReadonlySet<string>
+  readonly older: ReadonlySet<Agent>
+  readonly setup: string | null
+}
+/** A filter: what (everything, work not finished, only conversations, only worktrees), from whom, how old. */
+export interface Criteria {
+  readonly what: 'everything' | 'unfinished' | 'conversations' | 'worktrees'
+  readonly from: readonly Source[] | 'all'
+  readonly since: 'any' | 'month' | 'week'
+}
 export type Picks = ReturnType<typeof usePicks>
 
 /** A worktree's facts, problems first: what's failing, what isn't saved, then its pull request. */
@@ -478,15 +532,15 @@ export function ByKind({ picks, setup = true }: { picks: Picks; setup?: boolean 
                     on={picks.older}
                     mixed={picks.olderMixed}
                     onChange={picks.setOlder}
-                    label={text.older(OLDER['claude-code'], OLDER.codex)}
+                    label={text.older(picks.olderBy['claude-code'], picks.olderBy.codex)}
                   />
                   <span className={s.markPair}>
-                    <Mark of="claude-code" size={14} />
-                    <Mark of="codex" size={14} />
+                    {picks.olderBy['claude-code'] > 0 && <Mark of="claude-code" size={14} />}
+                    {picks.olderBy.codex > 0 && <Mark of="codex" size={14} />}
                   </span>
                   <span className={s.main}>
-                    <span className={s.name}>{text.older(OLDER['claude-code'], OLDER.codex)}</span>
-                    <span className={s.sub}>{text.olderLine(OLDER['claude-code'], OLDER.codex)}</span>
+                    <span className={s.name}>{text.older(picks.olderBy['claude-code'], picks.olderBy.codex)}</span>
+                    <span className={s.sub}>{text.olderLine(picks.olderBy['claude-code'], picks.olderBy.codex)}</span>
                   </span>
                 </label>
               </li>

@@ -40,11 +40,17 @@
   align-items: center;
   gap: 2px;
   padding: 6px 10px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-wrap: wrap;
+  row-gap: 2px;
   border-top: 1px solid var(--line-2);
   background: var(--n-1);
   font-size: 12px;
+}
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 .bar button {
   flex-shrink: 0;
@@ -75,7 +81,7 @@
 .gap {
   flex: 1;
 }
-/* the second round, on C: set off from the first */
+/* each set after the first, set off from the one before */
 .round {
   margin: 0 2px 0 10px;
   padding-left: 12px;
@@ -86,7 +92,7 @@
   color: var(--t-3);
   white-space: nowrap;
 }
-.round:first-child {
+.group:first-child > .round {
   margin-left: 0;
   padding-left: 0;
   border-left: 0;

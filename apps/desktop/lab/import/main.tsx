@@ -20,7 +20,7 @@ import s from './lab.module.css'
 
 /*
  * The import lab (README.md): the desktop app's window, whole, in the
- * browser, on made-up data, with the page's bar under it. Arriving (A–F):
+ * browser, on made-up data, with the page's bar under it. Arriving (A–J):
  * the first run's welcome (W) or a New project tab (P), then the project's
  * board. Later (1–3): weeks on, from Settings. R starts again, T the dark
  * appearance.
@@ -94,8 +94,8 @@ function Bar() {
     if (eraOf(key) === eraOf(d) && place !== 'app') lab.set({ d: key })
     else restart(key, place === 'app' ? 'welcome' : place)
   }
-  const set = (era: 'arriving' | 'later') =>
-    DIRECTIONS.filter((one) => one.set === era).map((one) => (
+  const set = (group: (typeof DIRECTIONS)[number]['group']) =>
+    DIRECTIONS.filter((one) => one.group === group).map((one) => (
       <button key={one.key} type="button" aria-pressed={d === one.key} onClick={() => pick(one.key)}>
         <kbd>{one.kbd}</kbd> {one.label}
       </button>
@@ -103,10 +103,12 @@ function Bar() {
   const arriving = eraOf(d) === 'arriving'
   return (
     <div className={s.bar} role="toolbar" aria-label="Directions">
-      <span className={s.round}>Arriving</span>
-      {set('arriving')}
-      <span className={s.round}>Later</span>
-      {set('later')}
+      {(['Arriving', 'Shortcuts', 'Later'] as const).map((group) => (
+        <span key={group} className={s.group}>
+          <span className={s.round}>{group}</span>
+          {set(group)}
+        </span>
+      ))}
       <span className={s.gap} />
       <button type="button" aria-pressed={arriving && place === 'welcome'} onClick={() => restart(arriving ? d : 'a', 'welcome')}>
         <kbd>W</kbd> First run
