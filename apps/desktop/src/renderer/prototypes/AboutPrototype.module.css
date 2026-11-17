@@ -33,44 +33,6 @@
   color: var(--t-3);
 }
 
-.brandVersion {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 0;
-  color: var(--t-1);
-}
-
-.brandWords {
-  display: grid;
-  gap: 3px;
-}
-
-.brandWords > span:last-child {
-  font-size: 12px;
-  color: var(--t-3);
-}
-
-.brandName {
-  font-size: 19px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-}
-
-.brandName > a {
-  font-size: 12px;
-  font-weight: 450;
-  letter-spacing: 0;
-}
-
-.versionActions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px 16px;
-}
-
 .proportionSummary {
   display: grid;
   gap: 10px;
@@ -141,7 +103,7 @@
 
 .size,
 .folderSize {
-  min-width: 78px;
+  min-width: 96px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -149,61 +111,21 @@
   color: var(--t-2);
 }
 
-.reclaim {
+.reclaimRow {
+  padding: 16px 0;
+}
+
+.reclaimRow > div {
+  grid-column: 1 / -1;
+}
+
+.reclaimNote {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 14px 20px;
-  padding: 18px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  background: var(--well);
+  gap: 2px;
 }
 
-.reclaim h3 {
-  margin: 0 0 3px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.reclaim p {
-  margin: 0;
-  font-size: 12px;
-  color: var(--t-3);
-}
-
-.reclaimFigure {
-  display: grid;
-  justify-items: end;
-  align-content: start;
-  gap: 3px;
-}
-
-.reclaimFigure strong {
-  font-size: 25px;
-  font-weight: 650;
-  line-height: 1.1;
-  letter-spacing: -0.025em;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.reclaimFigure span {
-  font-size: 12px;
-  color: var(--t-3);
-}
-
-.reclaimActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.reclaimPath {
-  justify-self: end;
-  max-width: 280px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--t-3);
+.reclaimAction {
+  padding-top: 8px;
 }
 
 .cleanup,
@@ -421,15 +343,6 @@
     padding-bottom: 148px;
   }
 
-  .brandVersion {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .versionActions {
-    grid-column: 2;
-    justify-content: flex-start;
-  }
-
   .switcher {
     right: 12px;
     bottom: 12px;
@@ -468,19 +381,6 @@
 
   .proportionKey > button {
     margin-left: 0;
-  }
-
-  .reclaim {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .reclaimFigure {
-    justify-items: start;
-  }
-
-  .reclaimPath {
-    justify-self: start;
-    max-width: 100%;
   }
 
   .folderList li {

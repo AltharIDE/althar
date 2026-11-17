@@ -9,7 +9,6 @@ import {
   CrashReports,
   Icon,
   LinkButton,
-  Logo,
   Path,
   Segmented,
   SettingGroup,
@@ -43,7 +42,7 @@ const DIRECTIONS = [
   {
     id: 'b',
     name: 'Reclaim',
-    note: 'The fastest route to freeing space; task folders dominate the screen.',
+    note: 'One aligned storage list; task folders lead, with Free up space one press away.',
   },
   {
     id: 'c',
@@ -85,7 +84,7 @@ const INITIAL_FOLDERS = [
 
 function initialDirection(): Direction {
   const given = new URLSearchParams(window.location.search).get('direction')
-  return DIRECTIONS.some((direction) => direction.id === given) ? (given as Direction) : 'a'
+  return DIRECTIONS.some((direction) => direction.id === given) ? (given as Direction) : 'b'
 }
 
 function initialTheme(): Theme {
@@ -297,26 +296,11 @@ function Version({
   updateChecked,
   onCheck,
   onReport,
-}: Pick<DirectionProps, 'updateChecked' | 'onCheck' | 'onReport'> & { style: 'line' | 'brand' | 'quiet' }) {
-  if (style === 'brand')
-    return (
-      <header className={s.brandVersion}>
-        <Logo size={34} />
-        <div className={s.brandWords}>
-          <AppVersion version="0.9.0" notes={RELEASE_NOTES} className={s.brandName} />
-          <span>{updateChecked ? 'Checked just now' : 'Up to date'}</span>
-        </div>
-        <div className={s.versionActions}>
-          {!updateChecked && <LinkButton onClick={onCheck}>Check for updates</LinkButton>}
-          <LinkButton onClick={onReport}>Report a problem</LinkButton>
-        </div>
-      </header>
-    )
+}: Pick<DirectionProps, 'updateChecked' | 'onCheck' | 'onReport'> & { style: 'line' | 'quiet' }) {
   return (
     <div className={style === 'quiet' ? s.quietVersion : s.lineVersion}>
       <AppVersion version="0.9.0" notes={RELEASE_NOTES} />
-      <span className={s.updateState}>{updateChecked ? 'Checked just now' : 'Up to date'}</span>
-      {!updateChecked && <LinkButton onClick={onCheck}>Check for updates</LinkButton>}
+      {updateChecked ? <span className={s.updateState}>Up to date</span> : <LinkButton onClick={onCheck}>Check for updates</LinkButton>}
       <LinkButton onClick={onReport}>Report a problem</LinkButton>
     </div>
   )
@@ -326,10 +310,16 @@ function Measure({ measured, onMeasure }: { measured: boolean; onMeasure: () => 
   return <LinkButton onClick={onMeasure}>{measured ? 'Measured just now' : 'Measure again'}</LinkButton>
 }
 
-function ShowButton({ place, onShow }: { place: (typeof PLACES)[number]; onShow: () => void }) {
+function ShowButton({ place, onShow, compact = false }: { place: (typeof PLACES)[number]; onShow: () => void; compact?: boolean }) {
   return (
-    <Button size="small" icon="folder" aria-label={`Show in Finder, ${place.title}`} onClick={onShow}>
-      Show in Finder
+    <Button
+      size="small"
+      icon="folder"
+      aria-label={`Show in Finder, ${place.title}`}
+      title={compact ? `Show ${place.title} in Finder` : undefined}
+      onClick={onShow}
+    >
+      {compact ? undefined : 'Show in Finder'}
     </Button>
   )
 }
@@ -399,33 +389,39 @@ function Proportion(props: DirectionProps) {
 
 function Reclaim(props: DirectionProps) {
   const share = props.totalBytes === 0 ? 0 : Math.round((props.taskBytes / props.totalBytes) * 100)
+  const tasks = place('worktrees')
   return (
     <>
-      <Version style="brand" updateChecked={props.updateChecked} onCheck={props.onCheck} onReport={props.onReport} />
+      <Version style="line" updateChecked={props.updateChecked} onCheck={props.onCheck} onReport={props.onReport} />
       <SettingGroup
         title="Storage"
-        note={`At least ${storageSize(props.totalBytes)} in three places`}
+        note={`At least ${storageSize(props.totalBytes)} on this computer`}
         action={<Measure measured={props.measured} onMeasure={props.measure} />}
       >
-        <section className={s.reclaim} aria-labelledby="reclaim-title">
-          <div>
-            <h3 id="reclaim-title">Task folders</h3>
-            <p>A copy of each project for every task.</p>
-          </div>
-          <div className={s.reclaimFigure}>
-            <strong>at least {storageSize(props.taskBytes)}</strong>
-            <span>{share}% of Althar’s storage</span>
-          </div>
-          <div className={s.reclaimActions}>
-            <Button size="small" trailingIcon="arrow" onClick={() => props.setCleanupOpen(!props.cleanupOpen)}>
-              Review task folders
-            </Button>
-            <ShowButton place={place('worktrees')} onShow={() => props.show(place('worktrees'))} />
-          </div>
-          <Path path={place('worktrees').path} className={s.reclaimPath} />
-        </section>
-        {props.cleanupOpen && <Cleanup folders={props.folders} onRemove={props.remove} crowded />}
         <SettingList>
+          <SettingRow
+            title={tasks.title}
+            className={s.reclaimRow}
+            note={
+              <span className={s.reclaimNote}>
+                <span>{share}% of Althar’s storage</span>
+                <Path path={tasks.path} className={s.path} />
+                <span className={s.reclaimAction}>
+                  <Button size="small" onClick={() => props.setCleanupOpen(!props.cleanupOpen)}>
+                    {props.cleanupOpen ? 'Done' : 'Free up space…'}
+                  </Button>
+                </span>
+              </span>
+            }
+            under={props.cleanupOpen ? <Cleanup folders={props.folders} onRemove={props.remove} crowded /> : undefined}
+          >
+            {() => (
+              <>
+                <span className={s.size}>at least {storageSize(props.taskBytes)}</span>
+                <ShowButton compact place={tasks} onShow={() => props.show(tasks)} />
+              </>
+            )}
+          </SettingRow>
           {(['profile', 'logs'] as const).map((id) => {
             const one = place(id)
             return (
@@ -433,7 +429,7 @@ function Reclaim(props: DirectionProps) {
                 {() => (
                   <>
                     <span className={s.size}>{storageSize(bytesFor(id, props.taskBytes))}</span>
-                    <ShowButton place={one} onShow={() => props.show(one)} />
+                    <ShowButton compact place={one} onShow={() => props.show(one)} />
                   </>
                 )}
               </SettingRow>
@@ -441,7 +437,7 @@ function Reclaim(props: DirectionProps) {
           })}
         </SettingList>
       </SettingGroup>
-      <Privacy {...props} />
+      <Privacy {...props} compact />
     </>
   )
 }
