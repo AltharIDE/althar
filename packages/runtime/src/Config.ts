@@ -18,6 +18,7 @@ import {
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
+import type { PressureReading } from './resourcePressure'
 import { Copilot } from './Copilot'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
@@ -258,6 +259,13 @@ export interface IdleOptions {
 }
 
 export interface BusyOptions {
+  /** Automatic pressure-aware admission; false for a test that is not about this host's load. */
+  readonly pressure?:
+    | false
+    | {
+        readonly read?: Effect.Effect<PressureReading, unknown>
+        readonly every?: Duration.Duration
+      }
   /** The machine the default is worked out from: this one, as Node says it, unless a test says. */
   readonly machine?: Machine
   /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */

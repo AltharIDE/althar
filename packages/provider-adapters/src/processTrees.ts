@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { win32 } from 'node:path'
+import { constants, existsSync } from 'node:fs'
+import { access, stat } from 'node:fs/promises'
+import { resolve, win32 } from 'node:path'
 
 import { Clock, Duration, Effect } from 'effect'
 
 import { keeper, keeperStartedAt } from './keeper'
+import { linuxGroups, type ResourceGroups } from './resourceGroups'
 
 /*
  * How Althar reaches every process an agent started, to see whether any still
@@ -28,11 +30,22 @@ export interface Launch {
   readonly args: ReadonlyArray<string>
   /** In a process group of its own, on Unix; on Windows the keeper is not, and gives the command a console whose window is hidden. */
   readonly detached: boolean
+  /** Releases optional scheduling resources after this owned tree has stopped. */
+  readonly release?: Effect.Effect<void>
+}
+
+export interface TreeOptions {
+  readonly background?: boolean
+  /** A launcher-owned key shared by every command of the worker. */
+  readonly owner?: string
+  /** The original command's lookup context, before an optional shell wrapper is introduced. */
+  readonly cwd?: string
+  readonly path?: string
 }
 
 export interface ProcessTrees {
   /** How a command is spawned for its tree to be reached: as it is on Unix, under a keeper on Windows; why it can't be, where it can't. */
-  readonly launch: (command: string, args: ReadonlyArray<string>) => Effect.Effect<Launch, string>
+  readonly launch: (command: string, args: ReadonlyArray<string>, options?: TreeOptions) => Effect.Effect<Launch, string>
   /** Whether it can ask a tree to stop before killing it; Windows can't. */
   readonly asks: boolean
   /** Whether a tree lives on once the process spawned has exited: a Unix group does, until it is stopped; a keeper's job goes with it. */
@@ -144,9 +157,20 @@ const startable = (command: string, dependencies: WindowsDependencies) => {
  * keeper would only exit.
  */
 export const windowsTrees = (dependencies: WindowsDependencies = windowsDependencies): ProcessTrees => ({
-  launch: (command, args) =>
+  launch: (command, args, options) =>
     startable(command, dependencies)
-      ? Effect.map(dependencies.keeper, (path) => ({ command: path, args: ['run', command, ...args], detached: false }))
+      ? Effect.map(dependencies.keeper, (path) => ({
+          command: path,
+          args:
+            options?.background === true
+              ? [
+                  `background-${options.owner !== undefined && /^[a-zA-Z0-9_-]{1,128}$/.test(options.owner) ? options.owner : 'anonymous'}`,
+                  command,
+                  ...args,
+                ]
+              : ['run', command, ...args],
+          detached: false,
+        }))
       : Effect.fail(`spawn ${command} ENOENT`),
   asks: false,
   outlivesRoot: false,
@@ -159,9 +183,61 @@ export const windowsTrees = (dependencies: WindowsDependencies = windowsDependen
     ),
 })
 
+const unixStartable = async (command: string, options: TreeOptions) => {
+  const cwd = options.cwd ?? process.cwd()
+  const candidates = command.includes('/')
+    ? [resolve(cwd, command)]
+    : (options.path ?? process.env.PATH ?? '/usr/bin:/bin').split(':').map((directory) => resolve(cwd, directory, command))
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.X_OK)
+      if ((await stat(candidate)).isFile()) return true
+    } catch {
+      // Let the original spawn report a missing or inaccessible command rather than successfully spawning its wrapper.
+    }
+  }
+  return false
+}
+
+/** Wrap only background work. Shell exec preserves PID, process group, arguments and protocol streams. */
+export const scheduledUnixTrees = (platform: NodeJS.Platform, groups: ResourceGroups = linuxGroups()): ProcessTrees => ({
+  ...unixTrees,
+  launch: (command, args, options) =>
+    Effect.gen(function* () {
+      if (options?.background !== true) return yield* unixTrees.launch(command, args)
+      if (!(yield* Effect.promise(() => unixStartable(command, options)))) return yield* unixTrees.launch(command, args)
+      if (platform === 'darwin')
+        return {
+          command: '/bin/sh',
+          args: ['-c', '/usr/bin/taskpolicy -b -p "$$" >/dev/null 2>&1 || :; exec "$@"', 'althar-background', command, ...args],
+          detached: true,
+        }
+      const group = yield* Effect.promise(() => groups.acquire(options.owner ?? 'anonymous')).pipe(
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      )
+      if (group === undefined) return yield* unixTrees.launch(command, args)
+      return {
+        command: '/bin/sh',
+        args: [
+          '-c',
+          'group=$1; shift; { printf "%s\\n" "$$" > "$group/cgroup.procs"; } 2>/dev/null || :; exec "$@"',
+          'althar-background',
+          group.path,
+          command,
+          ...args,
+        ],
+        detached: true,
+        release: Effect.promise(group.release).pipe(Effect.catchCause(() => Effect.void)),
+      }
+    }),
+})
+
+const linux = scheduledUnixTrees('linux')
+const mac = scheduledUnixTrees('darwin')
+
 /** The trees of the platform Althar runs on. */
 export const platformTrees = (platform: NodeJS.Platform = process.platform): ProcessTrees =>
-  platform === 'win32' ? windowsTrees() : unixTrees
+  platform === 'win32' ? windowsTrees() : platform === 'darwin' ? mac : platform === 'linux' ? linux : unixTrees
 
 /** How stopping went: the last signal sent to the tree, and whether anything outlived it. */
 export interface StopReport {
