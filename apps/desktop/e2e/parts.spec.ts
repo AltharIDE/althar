@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, reveal, say, showPanes, shown, still, toConversation } from './support'
+import { connectGitHub, launch, openFirstProject, reveal, say, SHIP_ON_CARD, shown, showPanes, still, toConversation } from './support'
 
 /*
  * Every part of a task changes either way, just by the person telling its lead (a task is a conversation plus parts; the
@@ -107,7 +107,7 @@ test('a prototype becomes a change in one move on the person’s word, and Ship 
       .getByRole('radiogroup', { name: 'Face' })
       .getByRole('radio', { name: /Outputs/ })
       .click()
-    const ship = page.getByRole('button', { name: /^Ship \d+ commits?$/ })
+    const ship = page.getByRole('button', { name: SHIP_ON_CARD })
     await expect(ship).toBeVisible()
     await expect(page.getByRole('button', { name: 'Open a draft pull request', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: /^Push to origin/ })).toHaveCount(0)

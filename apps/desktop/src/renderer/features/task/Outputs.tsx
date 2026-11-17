@@ -3,6 +3,8 @@ import { doing, type Doing } from './actions'
 import { Failure } from './Failure'
 import type { ErrorMore } from './useTask'
 import {
+  BrandMark,
+  type Brand,
   Button,
   ChangeSet,
   ChangeState,
@@ -28,13 +30,14 @@ import { usageLines, useUsageOpen } from '../../shared/usage'
 import { checkOf } from '../../shared/checks'
 import { hasOutcome, outcomeOf } from '../../shared/outcome'
 import { mergeHereLabel } from '../../shared/mergeHere'
-import { shownQueued } from '../../data/merges'
+import { type MergeStanding, shownQueued } from '../../data/merges'
 import { productBrand, productName } from '../../shared/products'
 import { personPushes } from '../../shared/standing'
 import { commitsToShip } from '../../shared/shipping'
 import s from './Task.module.css'
 import { device } from '../../shared/device'
 import { ScreenshotsOnPullRequest, screenshotsTarget } from './ScreenshotsOnPullRequest'
+import { type ShipModel, ShipControl } from './ShipControl'
 
 /*
  * A task's outputs, as wide as the window: what it made on the left, what
@@ -90,13 +93,6 @@ export const text = {
   /** Opening a pull request from here opens a draft: its lead's work may not be done. */
   openChange: 'Open a draft pull request',
   openNewChange: 'Open a new draft pull request',
-  /** What waits on its branch for Ship goes up, its review first where its plan has one (a task is a conversation plus parts). */
-  ship: (n: number) => (n === 1 ? 'Ship 1 commit' : `Ship ${n} commits`),
-  /** Merge, with commits not shipped: one review of what waits, then it goes up and merges. */
-  reviewAndMerge: 'Review and merge',
-  /** Or up and merged at once, reviewed after the merge. */
-  mergeNow: 'Merge now',
-  mergeWays: 'Other ways to merge',
   /** One of the task's earlier pull requests, before its latest: merged or closed. In a task of several repositories, by its own. */
   earlier: (change: ChangeSummary, host: string, repository: string | undefined) =>
     `Before this: ${repository === undefined ? '' : `${repository} `}${change.short} ${change.prefix}${change.number}, ${change.state === 'open' ? 'open' : change.state} on ${host}.`,
@@ -127,7 +123,8 @@ export const text = {
     const remotes = names.join(' and ')
     if (merged.some((one) => one.ahead > 0))
       return `Into ${into} on ${device.this}. ${remotes} ${names.length > 1 ? 'don’t' : 'doesn’t'} have it yet.`
-    if (merged.every((one) => one.remote === null)) return `Into ${into} on ${device.this}. It has no remote to push to.`
+    // Only on this computer, as the project is: merged is all there is to say.
+    if (merged.every((one) => one.remote === null)) return `Into ${into} on ${device.this}.`
     return `Into ${into}, and pushed to ${remotes}.`
   },
   pushHere: (merged: ReadonlyArray<TaskRepositoryMerged>) => {
@@ -138,6 +135,11 @@ export const text = {
       : 'Push to each remote'
   },
   resolve: 'Ask the lead to resolve it',
+  /** A repository only on this computer, put on a host from its card: the menu of where. */
+  putOn: 'Push to…',
+  putOnLabel: 'Put it on a host',
+  newOn: (thing: string, host: string) => `A new ${thing} on ${host}`,
+  connectFor: (host: string) => `Connect ${host}…`,
   /** A pull request in a sentence, and by name: in a task of several, whose. */
   pullRequest: (change: ChangeSummary, several: boolean) =>
     several ? `${nameOf(change.repository)}’s ${change.noun}` : `the ${change.noun}`,
@@ -207,12 +209,13 @@ export function Outputs({
   onMergeHere,
   onOpenChange,
   onPush,
-  onShip,
-  onMergeWaiting,
+  ship,
   onMarkReady,
   onMarkAllReady,
   merging = null,
   mergeRefused = null,
+  mergeStanding,
+  mergeAwaits,
   onPostScreenshots,
   onOpenFile,
   conflict = null,
@@ -223,6 +226,7 @@ export function Outputs({
   refused = null,
   onReplace,
   onBringIn,
+  putOnHost,
 }: {
   snapshot: ThreadSnapshot
   pending: boolean
@@ -242,6 +246,22 @@ export function Outputs({
   /** Opens where the project's code host is connected. */
   onConnect: () => void
   /**
+   * For a task whose one repository is only on this computer: the code hosts
+   * it can go on (connected, or to connect first), and, once one is chosen,
+   * the form that puts it there, in the branch card's place.
+   */
+  putOnHost?: {
+    readonly hosts: ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly brand: Brand
+      readonly thing: string
+      readonly connected: boolean
+    }>
+    readonly onPut: (id: string) => void
+    readonly putting: ReactNode | null
+  }
+  /**
    * Accepts its pull requests: each merged on its host in turn, at the head shown, the next once the one before has landed,
    * stopping at the first refused.
    */
@@ -250,13 +270,18 @@ export function Outputs({
   merging?: string | null
   /** The pull request whose merge the error is about, by its address: said on its own part of the card. */
   mergeRefused?: string | null
+  /** Where the merge of its pull request at this address stands from the press on: shown in Merge's place, never Merge again. */
+  mergeStanding?: (url: string) => MergeStanding | null
+  /** Whether it merges later in a press under way, wherever pressed, once the one before it lands: waiting, nothing to press. */
+  mergeAwaits?: (url: string) => boolean
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
-  /** Ships what waits on its branch for Ship; without it, nothing is offered for it here. */
-  onShip?: () => void
-  /** Merge, with commits not shipped: Review and merge, or Merge now (a task is a conversation plus parts). */
-  onMergeWaiting?: (how: 'review' | 'now') => void
+  /**
+   * Ship: what waits on its branch goes up on its route, the one chosen for this Ship else its own, which reaches as far as
+   * a merge, so no Merge or Push is offered beside it; without it, nothing is offered for it here.
+   */
+  ship?: ShipModel
   /** The pull request a push was refused by for commits on it that aren't here, by its address. */
   refused?: string | null
   /** Replaces a pull request's commits with the branch, up to the head shown, while it is still at `replaces`: confirmed on the card. */
@@ -331,19 +356,21 @@ export function Outputs({
       {text.openNewChange}
     </Button>
   )
+  // Ship under way, as the runtime says it or as pressed here: the same button, greyed at its stop, and nothing beside it.
+  const shipUnder = ship === undefined ? null : (task.shipping ?? ship.shipPressed)
   const shipAction =
-    !waitsForShip ||
-    !(ready || task.phase === 'stopped') ||
-    snapshot.session?.turnRunning === true ||
-    onShip === undefined ||
-    (toShip > 0 && snapshot.host == null) ? null : toShip > 0 && snapshot.host?.connected === false ? (
+    ship !== undefined && shipUnder !== null ? (
+      <ShipControl key="ship" snapshot={snapshot} model={ship} />
+    ) : !waitsForShip ||
+      !(ready || task.phase === 'stopped') ||
+      snapshot.session?.turnRunning === true ||
+      ship === undefined ||
+      (toShip > 0 && snapshot.host == null) ? null : toShip > 0 && snapshot.host?.connected === false ? (
       <Button key="connect" variant="signal" onClick={onConnect}>
         {text.connect(snapshot.host.name)}
       </Button>
     ) : (
-      <Button key="ship" variant="signal" {...pressed(doing.ship)} onClick={onShip}>
-        {text.ship(held?.commits ?? toShip)}
-      </Button>
+      <ShipControl key="ship" snapshot={snapshot} model={ship} disabled={pending && acting !== doing.ship} />
     )
 
   // Its pull requests, as one change: merged once all are, a draft while any is, else ready to accept.
@@ -370,34 +397,10 @@ export function Outputs({
           // What the lead committed since goes up first: accepting merges what the pull request has.
           // Unshipped commits belong to repositories without an open PR, so they don't hold a sibling's published PR back.
           const accepting = (ready || task.mergeable === true) && state === ChangeState.Ready && pushes.length === 0 && held === undefined
+          const firstStanding = mergeStanding?.(first.url) ?? null
           if (open.length > 1) return track(accepting)
-          // Merge, with commits not shipped: Review and merge, or Merge now, beside Ship.
-          const mergingWaiting =
-            held !== undefined &&
-            onMergeWaiting !== undefined &&
-            ready &&
-            state === ChangeState.Ready &&
-            first.state === 'open' &&
-            !first.draft
-              ? [
-                  <SplitButton
-                    key="merge-waiting"
-                    moreLabel={text.mergeWays}
-                    {...pressed(doing.mergeWaiting)}
-                    onClick={() => onMergeWaiting('review')}
-                    menu={(trigger) => (
-                      <Menu trigger={trigger} label={text.mergeWays} align="end">
-                        <MenuItem onSelect={() => onMergeWaiting('now')}>{text.mergeNow}</MenuItem>
-                      </Menu>
-                    )}
-                  >
-                    {text.reviewAndMerge}
-                  </SplitButton>,
-                ]
-              : []
           const actions: ReactNode[] = [
             ...(shipAction === null ? [] : [shipAction]),
-            ...mergingWaiting,
             // Only those Althar held, where the project's rules push the lead's commits on their own (ADR-072); held for Ship, none.
             ...pushes
               .filter((one) => !waitsForShip && personPushes(one))
@@ -411,33 +414,43 @@ export function Outputs({
                   {several ? text.pushTo(one.unpushed, nameOf(one.repository)) : text.push(one.unpushed)}
                 </Button>
               )),
-            ...(accepting
-              ? [
-                  <MergeButton
-                    key="accept"
-                    variant="signal"
-                    {...pressed(doing.accept)}
-                    // In order, each at the head shown, so one that moved on since isn't merged unseen; the rest wait on a refusal.
-                    onMerge={() => onAccept(open.flatMap((one) => (one.state === 'open' ? [{ head: one.head ?? '', url: one.url }] : [])))}
-                    {...(first.canBypassQueue === true
-                      ? { onBypassQueue: () => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }]) }
-                      : {})}
-                  >
-                    {text.accept(open.filter((one) => one.state === 'open').length)}
-                  </MergeButton>,
-                ]
-              : []),
+            ...(accepting && firstStanding === 'merging'
+              ? [<MergeButton key="accept" variant="signal" standing="merging" />]
+              : accepting
+                ? [
+                    <MergeButton
+                      key="accept"
+                      variant="signal"
+                      {...pressed(doing.accept)}
+                      // In order, each at the head shown, so one that moved on since isn't merged unseen; the rest wait on a refusal.
+                      onMerge={() =>
+                        onAccept(open.flatMap((one) => (one.state === 'open' ? [{ head: one.head ?? '', url: one.url }] : [])))
+                      }
+                      {...(first.canBypassQueue === true
+                        ? { onBypassQueue: () => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }]) }
+                        : {})}
+                    >
+                      {text.accept(open.filter((one) => one.state === 'open').length)}
+                    </MergeButton>,
+                  ]
+                : []),
             ...(first.queued === true && first.canBypassQueue === true && first.unpushed === 0 && held === undefined
-              ? [
-                  <MergeButton
-                    key="queued"
-                    queued
-                    {...pressed(doing.accept)}
-                    onBypassQueue={() => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }])}
-                  />,
-                ]
+              ? // Its bypass under way, wherever pressed: Merging in its place, not the bypass again.
+                firstStanding === 'merging'
+                ? accepting
+                  ? []
+                  : [<MergeButton key="queued" variant="signal" standing="merging" />]
+                : [
+                    <MergeButton
+                      key="queued"
+                      queued
+                      {...pressed(doing.accept)}
+                      onBypassQueue={() => onAccept([{ head: first.head ?? '', url: first.url, bypassQueue: true }])}
+                    />,
+                  ]
               : []),
-            ...drafts.map((one) => (
+            // Ship marks them ready where its route goes that far: under way, not Mark ready beside it.
+            ...(shipUnder === null ? drafts : []).map((one) => (
               <Button key={`ready-${one.url}`} {...pressed(doing.markReady(one.url))} onClick={() => onMarkReady(one.url)}>
                 {several ? text.markReadyIn(nameOf(one.repository)) : text.markReady}
               </Button>
@@ -481,9 +494,9 @@ export function Outputs({
         ? 'merged'
         : refusedAt === one.url
           ? 'refused'
-          : merging === one.url
+          : merging === one.url || mergeStanding?.(one.url) === 'merging'
             ? 'merging'
-            : at !== -1 && i > at && acting === doing.accept
+            : (at !== -1 && i > at && acting === doing.accept) || mergeAwaits?.(one.url) === true
               ? 'waiting'
               : one.queued === true
                 ? 'queued'
@@ -513,7 +526,7 @@ export function Outputs({
     const bypass = () => (next === undefined ? undefined : onAccept([{ head: next.head ?? '', url: next.url, bypassQueue: true }]))
     // The next to merge still in its merge queue holds the rest: nothing to press until it has landed.
     const accept =
-      accepting && next !== undefined && next.queued !== true ? (
+      accepting && next !== undefined && next.queued !== true && mergeStanding?.(next.url) == null ? (
         left.length === 1 ? (
           <MergeButton
             key="accept"
@@ -542,6 +555,9 @@ export function Outputs({
             {left.length === open.length ? text.accept(left.length) : text.acceptLeft(left.map((one) => labelOf(one)))}
           </SplitButton>
         )
+      ) : next !== undefined && mergeStanding?.(next.url) === 'merging' ? (
+        // Pressed, here or anywhere in the window: Merging in its place, never the press again meanwhile.
+        <MergeButton key="accept" variant="signal" standing="merging" />
       ) : next?.queued === true && next.canBypassQueue === true && next.unpushed === 0 && held === undefined ? (
         <MergeButton
           key="queued"
@@ -592,7 +608,7 @@ export function Outputs({
           </Button>
         )),
       ...(accept === null ? [] : [accept]),
-      ...(markReady === null ? [] : [markReady]),
+      ...(markReady === null || shipUnder !== null ? [] : [markReady]),
       ...(openNew === false ? [] : [openNew]),
     ]
     return (
@@ -676,7 +692,29 @@ export function Outputs({
     task.here.length > 0 || branchOnly
       ? (() => {
           const merging = ready && task.here.length > 0 && toShip === 0
+          // Its one repository only on this computer: merged here, unless it's put on a host first, which the card offers quietly.
+          const onlyHere = hostless && task.here.length === 1 && task.here[0]?.remote == null && putOnHost !== undefined
+          if (onlyHere && putOnHost.putting !== null) return putOnHost.putting
           const actions: ReactNode[] = [
+            ...(onlyHere && putOnHost.hosts.length > 0
+              ? [
+                  <Menu
+                    key="put"
+                    label={text.putOnLabel}
+                    trigger={
+                      <Button trailingIcon="chevronD" disabled={doing.mergeHere === acting}>
+                        {text.putOn}
+                      </Button>
+                    }
+                  >
+                    {putOnHost.hosts.map((one) => (
+                      <MenuItem key={one.id} lead={<BrandMark brand={one.brand} size={14} />} onSelect={() => putOnHost.onPut(one.id)}>
+                        {one.connected ? text.newOn(one.thing, one.name) : text.connectFor(one.name)}
+                      </MenuItem>
+                    ))}
+                  </Menu>,
+                ]
+              : []),
             ...(first === undefined && shipAction !== null
               ? [shipAction]
               : opens
@@ -711,7 +749,7 @@ export function Outputs({
               {...(task.branch === null ? {} : { branch: task.branch })}
               {...(connects !== null
                 ? { note: waitsForShip ? text.connectShip(connects) : text.connectFirst(connects) }
-                : hostless
+                : hostless && !onlyHere
                   ? { note: text.noHost(task.here.find((repo) => repo.remote != null)?.remote?.name ?? null) }
                   : {})}
               prs={

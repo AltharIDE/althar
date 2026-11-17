@@ -41,6 +41,8 @@ export interface BackCrumbProps {
   /** Where you are now: the task's number. */
   task?: string
   title?: string
+  /** What the title shows in place of itself while it is being typed in (useTypedTitle); the title stays what is renamed and what a rename opens on. */
+  shown?: string
   /** The title as the page's heading, at this rank, where the bar is all the head the page has. */
   titleLevel?: HeadingLevel
   /** Renames it to a new title, trimmed and different from the one it has. Without it, the title is only read. */
@@ -59,6 +61,7 @@ export function BackCrumb({
   kbd,
   task,
   title,
+  shown,
   titleLevel,
   onRename,
   maxLength,
@@ -174,7 +177,7 @@ export function BackCrumb({
                   )}
                 </span>
               ) : onRename === undefined ? (
-                heading(title)
+                heading(shown ?? title)
               ) : (
                 heading(
                   <button
@@ -184,7 +187,7 @@ export function BackCrumb({
                     title={title}
                     onClick={() => setEditing(true)}
                   >
-                    {title}
+                    {shown ?? title}
                   </button>,
                 )
               ))}

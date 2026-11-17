@@ -51,6 +51,8 @@ export type YouProps = RootProps<
     delivery?: Delivery
     /** The links you pasted, unfurled in the bubble under what you said, so they read as part of the message. */
     unfurl?: ReactNode
+    /** What you said of lines of the diff, each with its code (`CommentExcerpt`), in the bubble after your words. */
+    comments?: ReactNode
     /** Restores this turn's files and conversation. Offered only for a delivered, checkpointed message. */
     onUndo?: () => void
     text?: Partial<YouText>
@@ -91,6 +93,7 @@ export function You({
   onOpenAttachment,
   delivery = Delivery.Delivered,
   unfurl,
+  comments,
   onUndo,
   text,
   className,
@@ -115,7 +118,7 @@ export function You({
         </div>
       )}
       {/* images sent with nothing written have no bubble of words */}
-      {(said || unfurl) && (
+      {(said || unfurl || comments) && (
         <div className={s.body}>
           {said && (
             <p className={s.said} data-thread-preview="">
@@ -123,6 +126,7 @@ export function You({
             </p>
           )}
           {unfurl && <div className={s.unfurl}>{unfurl}</div>}
+          {comments && <div className={s.comments}>{comments}</div>}
         </div>
       )}
       <span className={s.at}>

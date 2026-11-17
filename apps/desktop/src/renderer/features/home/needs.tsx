@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { type HomeCall, type HomeTask, issuesWordOf } from '@althar/contracts'
 import { Button, type EdgeWork, Fact, LinkButton, MergeButton, NeedLine, type ProjectRef } from '@althar/ui'
 
+import { abandonedBlocker, blockerText } from '../../shared/blockers'
 import { commandOf, titleOf } from '../../shared/callCommand'
 import { askOf, callKindOf, isUnshipped, kindWords, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
@@ -196,6 +197,7 @@ export const needsOf = ({
   calls,
   answered = [],
   issues = [],
+  abandoned = [],
   ready,
   refs,
   agentName,
@@ -207,6 +209,8 @@ export const needsOf = ({
   answered?: ReadonlyArray<AnsweredCall>
   /** Tasks that wait on issues their lead drafted, or changes to their issue, for the person to file or apply. */
   issues?: ReadonlyArray<HomeTask>
+  /** Plans that wait for a task that was abandoned: its page starts it anyway, reopens that one, or stops waiting. */
+  abandoned?: ReadonlyArray<HomeTask>
   ready: ReadonlyArray<HomeTask>
   refs: ReadonlyMap<string, ProjectRef>
   agentName: (id: string | null) => string
@@ -276,6 +280,23 @@ export const needsOf = ({
     return project === undefined
       ? []
       : [{ id: task.taskId, threadId: task.threadId, kind: issuesWordOf(task.issues), project, title: task.title }]
+  }),
+  // A plan that waits for a task that was abandoned, saying which.
+  ...abandoned.flatMap((task): ReadonlyArray<Need> => {
+    const project = refs.get(task.projectId)
+    const gone = abandonedBlocker(task)
+    return project === undefined
+      ? []
+      : [
+          {
+            id: task.taskId,
+            threadId: task.threadId,
+            kind: kindWords.abandoned,
+            project,
+            title: task.title,
+            ...(gone === undefined ? {} : { brief: blockerText.abandoned(gone.title) }),
+          },
+        ]
   }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
@@ -403,11 +424,12 @@ export function needLineOf(
                   ? undefined
                   : labelWords(here, `${ready.task.change.prefix}${ready.task.change.number}`, why !== null)
               }
-              busy={doing?.(ready.task.taskId) === true}
+              // Pressed, it stays its line while it merges (`mergedHere`): Merge answers the press in its place.
+              standing={doing?.(ready.task.taskId) === true ? 'merging' : null}
               onMerge={() => onNext(ready.task, here)}
               {...(ready.task.change?.canBypassQueue === true ? { onBypassQueue: () => onNext(ready.task, here, true) } : {})}
             >
-              {doing?.(ready.task.taskId) === true ? doingWords(here) : why === null ? nextWords(here) : standingText.nextFailed.again}
+              {why === null ? nextWords(here) : standingText.nextFailed.again}
             </MergeButton>
           ) : (
             <Button

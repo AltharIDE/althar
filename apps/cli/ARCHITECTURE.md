@@ -1,6 +1,6 @@
 # @althar/cli — Architecture
 
-A thin client over `@althar/runtime`. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
+A thin in-process or attached client over the shared runtime API. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
 
 - **Owner:** Repository maintainers
 - **Dependency direction:** depends on `@althar/runtime`, `@althar/provider-adapters` for the agents' sign-in checks, and the two bundled agent adapters, which it ships.
@@ -20,7 +20,8 @@ A thin client over `@althar/runtime`. The repository's [ARCHITECTURE.md](../../A
 - **Pure modules, tested; one entry point, not.** `options`, `input` and `printer` are pure and fully tested. `main.ts` only wires them together and is left out of coverage.
 - **Built into one file.** Node can't run the workspace's TypeScript as it is, and Bun lacks `node:sqlite`, so Vite+ builds `dist/althar.js` with everything but Node's own modules inlined. The agent adapters stay as packages, since they run as processes of their own.
 
-## Gaps
+## Attachment and remaining gaps
 
-- The runtime runs inside the CLI's process, so it can't run while the app has the profile open. It will attach to a running runtime over the local socket instead (DEV-128), and there it can't answer permissions or questions ([ADR-048](../../docs/decisions/foundations.md#where-the-runtime-runs-and-who-may-reach-it)).
-- It starts a new task each run. Listing and resuming tasks come later.
+- Attached mode uses `@althar/transport-node` over private local sockets or SSH. `attachmentOptions`, `attachmentInput`, `attachmentPrinter` and `attachment` handle target validation, bounded input, sanitized cumulative text, checked feed recovery and commands. It keeps no database or provider credentials locally. Disconnecting cannot stop the host.
+- Socket authority cannot answer permissions or questions ([ADR-048](../../docs/decisions/foundations.md#where-the-runtime-runs-and-who-may-reach-it)). Protected desktop pairing and rich remote files/previews remain later work.
+- The terminal shows the newest 100 items. Full history navigation remains in the desktop interface.

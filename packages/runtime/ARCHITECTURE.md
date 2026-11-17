@@ -3,7 +3,7 @@
 The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime.md): the composition root that owns the store, agent sessions and their processes. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
 
 - **Owner:** Repository maintainers
-- **Consumers:** the desktop app's utility process (`apps/desktop`), over the API; the command-line client (`apps/cli`), in its own process.
+- **Consumers:** the desktop app's utility process (`apps/desktop`), over the API; the command-line client (`apps/cli`), in its own process; the persistent Linux home (`apps/host`), as a supervised Node service.
 - **Dependency direction:** depends on `@althar/contracts`, `@althar/domain`, `@althar/persistence-sqlite`, `@althar/provider-adapters` and `effect`. It imports nothing from Electron.
 
 ## What it holds

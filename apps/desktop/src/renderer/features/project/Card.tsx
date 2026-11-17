@@ -15,13 +15,15 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 
 import { useServices } from '../../data/services'
+import { openBlockers, standsOf } from '../../shared/blockers'
 import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
-import { stepIndex, stepNames, stepText } from '../../shared/steps'
+import { stepIndex, stepNames, stepNow, stepText } from '../../shared/steps'
+import { useTaskTitle } from '../../shared/taskTitle'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
 import s from './Card.module.css'
@@ -72,6 +74,10 @@ export interface CardActions {
   readonly agentName: (id: string | null) => string
   readonly onStart: (planId: string) => void
   readonly onHold: (planId: string) => void
+  /** Stops a task waiting for another (tasks wait for their blockers); done once it has gone through or failed. */
+  readonly onStopWaiting?: (taskId: string, on: string) => Promise<void>
+  /** Reopens a task a plan waits for, once abandoned. */
+  readonly onReopen?: (taskId: string) => void
   readonly onChange: (
     planId: string,
     steps: ReadonlyArray<PlanStep>,
@@ -164,8 +170,31 @@ function PlanCard({
   /** Started, waiting for a free agent: what for. */
   queued?: string
 }) {
+  const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
   const effortOf = useEffortNames()
+  // What it waits for (tasks wait for their blockers), a row each before its lead: one the person stops waiting for goes at once.
+  const [letGo, setLetGo] = useState<ReadonlySet<string>>(new Set())
+  const waitsFor = openBlockers(card)
+    .filter((one) => !letGo.has(one.taskId))
+    .map((one) => ({
+      id: one.taskId,
+      name: one.title,
+      stands: standsOf(one.stands),
+      onOpen: () => actions.onOpen(one.threadId),
+      ...(actions.onReopen === undefined ? {} : { onReopen: () => actions.onReopen?.(one.taskId) }),
+      ...(actions.onStopWaiting === undefined
+        ? {}
+        : {
+            onStopWaiting: () => {
+              setLetGo((was) => new Set([...was, one.taskId]))
+              // Read again by then: gone where it went through, back with a line where it didn't.
+              void actions
+                .onStopWaiting?.(card.taskId, one.taskId)
+                .finally(() => setLetGo((was) => new Set([...was].filter((id) => id !== one.taskId))))
+            },
+          }),
+    }))
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
   const [shown, setShown] = useState<{
     readonly from: Plan
@@ -207,7 +236,7 @@ function PlanCard({
             presets: actions.presets.filter((one) => one.reviews === (card.reviewing != null)),
             onPresetChange: (name: string) => actions.onPreset?.(plan.id, name),
           })}
-      title={card.title}
+      title={title}
       {...(from === undefined ? {} : { from })}
       project={actions.project}
       steps={launchSteps({ ...plan, steps }, named, effortOf, card.reviewing != null)}
@@ -234,6 +263,7 @@ function PlanCard({
       }}
       wait={Math.max(1, plan.startsAfter ?? COUNTDOWN)}
       {...(queued === undefined ? {} : { queued })}
+      {...(waitsFor.length === 0 ? {} : { waitsFor })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
       onHeldChange={(held) => {
@@ -293,6 +323,7 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
 }
 
 function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
+  const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
   const effortOf = useEffortNames()
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
@@ -332,9 +363,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
               ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
               : card.reconnects != null
                 ? reconnectsWords(card.reconnects, clock)
-                : card.step === null
-                  ? undefined
-                  : text.now[card.step]
+                : stepNow(card.step, card.shipAt)
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   // A small change's card names who leads from its next turn, which its plan's lead is as the runtime reads it, so a team just changed shows.
@@ -349,7 +378,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
     <TaskCard
       errands={card.errands}
       task={card.slug}
-      title={card.title}
+      title={title}
       status={status}
       steps={steps}
       at={status === TaskStatus.Done || handedBack !== null ? steps.length - 1 : at}

@@ -3,6 +3,7 @@
    two for what the step asks. */
 .signIn {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   border-radius: 8px;
 }
 .line {
@@ -41,6 +42,7 @@
 
 .under {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   padding: 8px 4px 12px 34px;
   animation: in var(--slow) var(--ease-fold);

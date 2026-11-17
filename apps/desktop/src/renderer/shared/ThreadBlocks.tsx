@@ -1,10 +1,11 @@
 import { createContext, Fragment, useContext, useState, type ReactNode } from 'react'
 
-import type { FieldAnswer, Unfurl } from '@althar/contracts'
+import type { FieldAnswer, SentLineComment, Unfurl } from '@althar/contracts'
 import {
   AltharLine,
   Arrived,
   CodeBlock,
+  CommentExcerpt,
   FailedLogs,
   CanvasLine,
   Gallery,
@@ -30,9 +31,11 @@ import {
   You,
   McpAct,
   McpServer,
+  VirtualBlocks,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { holdsItem, stopOf } from './virtual'
 import { SettingChangeOf } from './SettingChangeOf'
 import { shotsOf } from './evidence'
 import { HandedBack } from './HandedBack'
@@ -214,6 +217,8 @@ export function McpActs({ parts }: { parts: ReadonlyArray<Part> }) {
 export interface ThreadWays {
   readonly onRules?: () => void
   readonly onSignIn?: (agentId: string) => void
+  /** Opens the task's diff on a comment the person sent on its lines (decisions: desktop-app § Comments on the diff). */
+  readonly onOpenComment?: (id: string, path: string) => void
 }
 export const ThreadWaysContext = createContext<ThreadWays>({})
 
@@ -330,6 +335,14 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'canvas':
       return <CanvasOf part={part} />
   }
+}
+
+/** The person's comments on lines of the diff, in their message: each opens the diff at its line, where the thread is a task's. */
+function SentComments({ comments }: { comments: ReadonlyArray<SentLineComment> }) {
+  const open = useContext(ThreadWaysContext).onOpenComment
+  return comments.map((comment) => (
+    <CommentExcerpt key={comment.id} comment={comment} {...(open === undefined ? {} : { onOpen: () => open(comment.id, comment.path) })} />
+  ))
 }
 
 /** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
@@ -545,8 +558,11 @@ export function ThreadBlocks({
   signed,
   undoable,
   onUndoFrom,
+  virtual,
 }: {
   blocks: ReadonlyArray<Block>
+  /** A whole conversation's blocks, drawn only near the view, with their heights kept under this: its thread's id. */
+  virtual?: string
   undoable?: ReadonlyArray<string> | undefined
   onUndoFrom?: ((itemId: string) => void) | undefined
   /** The thread they are of: what a command printed and the documents an agent wrote are read by it. */
@@ -624,7 +640,7 @@ export function ThreadBlocks({
     const who = agentId ?? session?.agentId ?? null
     return onSignIn === undefined || who === null ? undefined : () => onSignIn(who)
   }
-  return blocks.map((block) => {
+  const draw = (block: Block) => {
     switch (block.kind) {
       case 'you':
         return (
@@ -642,6 +658,8 @@ export function ThreadBlocks({
               : { attach: [...sentAttachments(block.pictures), ...fileAttachments(block.files)] })}
             // The links in it that unfurled, in the bubble under the words, so they read as part of what the person said.
             {...(block.links.length === 0 ? {} : { unfurl: block.links.map((link) => <LinkView key={link.url} link={link} />) })}
+            // What they said of lines of the diff, after their words, each with its code.
+            {...(block.comments === undefined ? {} : { comments: <SentComments comments={block.comments} /> })}
           >
             {block.links.length === 0 || block.text === '' ? block.text : <Said text={block.text} links={block.links} />}
           </You>
@@ -776,5 +794,18 @@ export function ThreadBlocks({
         )
       }
     }
-  })
+  }
+  // A whole conversation draws only the blocks near the view, however long it is (VirtualBlocks).
+  if (virtual !== undefined)
+    return (
+      <VirtualBlocks
+        count={blocks.length}
+        keyOf={(i) => blocks[i]!.id}
+        render={(i) => draw(blocks[i]!)}
+        holds={(i, itemId) => holdsItem(blocks[i], itemId)}
+        stopOf={(i) => stopOf(blocks, i)}
+        memory={virtual}
+      />
+    )
+  return blocks.map(draw)
 }

@@ -1,4 +1,4 @@
-import { basename } from 'node:path'
+import { basename, dirname } from 'node:path'
 
 import { MESSAGE_FILES } from '@althar/contracts'
 import { products } from '@althar/connectors'
@@ -258,6 +258,54 @@ export const words = (
     switch (reason) {
       case 'NotARepository':
         return `${text(error, 'path')} isn't a git repository. Choose another folder.`
+      case 'FolderRefused': {
+        const folder = basename(text(error, 'path'))
+        switch (text(error, 'reason')) {
+          case 'unreadable':
+            return `Althar can’t read ${folder}. Give it access to the folder, then choose it again.`
+          case 'too_wide':
+            return `${folder} holds too much to be one project. Choose the folder its code is in.`
+          case 'too_many': {
+            const count = fieldOf(error, 'count')
+            return `${folder} has ${typeof count === 'number' ? count.toLocaleString('en') : 'too many'} files, too many to start a repository with. Choose the folder its code is in.`
+          }
+          case 'broken_repository':
+            return `${folder} has a .git that git can’t read. Mend it, or choose another folder.`
+          case 'repositories_inside': {
+            const names = fieldOf(error, 'names')
+            const listed = Array.isArray(names) ? names.filter((one): one is string => typeof one === 'string') : []
+            return listed.length === 0
+              ? `${folder} has git repositories inside it. Choose one of them instead.`
+              : `${folder} has git repositories inside it: ${listed.slice(0, 3).join(', ')}${listed.length > 3 ? ` and ${listed.length - 3} more` : ''}. Choose one of them, or the folder each is in.`
+          }
+          default:
+            return `There’s a folder named ${folder} in ${basename(dirname(text(error, 'path')))} already, with something in it. Choose another place.`
+        }
+      }
+      case 'CloneRefused': {
+        const remote = text(error, 'remote')
+        const host = text(error, 'host')
+        switch (text(error, 'reason')) {
+          case 'sso':
+            return `${host} wants you signed in to its organization’s single sign-on before ${remote} can be cloned.`
+          case 'not_found':
+            return host === '' ? `${remote} isn’t a repository’s address.` : `${host} has no ${remote} that Althar can see.`
+          default:
+            return `${remote} couldn’t be cloned from ${host}.`
+        }
+      }
+      case 'PublishRefused': {
+        const remote = text(error, 'remote')
+        const host = text(error, 'host')
+        switch (text(error, 'reason')) {
+          case 'has_remote':
+            return `Its repository is on ${remote} already.`
+          case 'taken':
+            return `There’s a ${remote} on ${host} already. Choose another name.`
+          default:
+            return `${remote} is made on ${host}, but pushing to it didn’t work. Try again.`
+        }
+      }
       case 'RepositoryRefused':
         return text(error, 'reason') === 'taken'
           ? `There’s a folder named ${text(error, 'name')} in ${basename(text(error, 'parent'))} already. Choose another place, or rename the project.`
@@ -497,6 +545,12 @@ export const words = (
       ...(Array.isArray(files) && files.length > 0 ? { detail: JSON.stringify(files) } : {}),
     }
   }
+  // A folder, clone or publish refused says why, for the window to offer what puts it right; with git's words, where git said any.
+  if (reason === 'FolderRefused' || reason === 'CloneRefused' || reason === 'PublishRefused') {
+    const url = text(error, 'url')
+    const detail = url !== '' ? url : text(error, 'detail')
+    return { reason, message, why: text(error, 'reason'), ...(detail === '' ? {} : { detail }) }
+  }
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
@@ -605,6 +659,8 @@ const shipRefused = {
   held: 'These commits wait for Ship, which runs the review first.',
   working: 'The task is at work. Ship once it’s done.',
   nothing: 'Nothing waits to ship.',
+  not_shipping: 'The task isn’t shipping now, so there is no route to change.',
+  merging: 'It’s merging already: the merge reached its host before the change.',
 } as const satisfies Record<ShipRefused['why'], string>
 
 /** Why a task can't be abandoned, reopened or renamed, by reason. */
@@ -649,6 +705,9 @@ const reviewIncomplete = {
 
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'FolderRefused',
+  'CloneRefused',
+  'PublishRefused',
   'ChangeRefused',
   'MergeReviewRefused',
   'ToolRefused',
@@ -757,4 +816,5 @@ const accountRefused = {
   no_name: 'Give the account a name.',
   one: "This agent can't have a second account yet.",
   no_terminal: 'This agent signs in only inside Althar: sign in with the browser.',
+  host: 'Enter a GitHub Enterprise hostname or HTTPS address for GitHub Copilot CLI.',
 } as const satisfies Record<AccountRefused['reason'], string>

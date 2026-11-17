@@ -1560,7 +1560,9 @@ describe('a project, reaching outside', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
     await waitFor(() => expect(merge).toHaveBeenCalledTimes(1))
     expect(merge).toHaveBeenLastCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12')
-    expect(screen.getByRole('button', { name: 'Accept and merge both' }).getAttribute('aria-busy')).toBe('true')
+    // Merging in Accept's place at once, never Accept again meanwhile.
+    expect(screen.queryByRole('button', { name: 'Accept and merge both' })).toBeNull()
+    expect(screen.getAllByRole('status').some((status) => status.textContent?.includes('Merging'))).toBe(true)
     // api merges now, web after it.
     const order = within(screen.getByRole('list', { name: 'In the order they merge' })).getAllByRole('listitem')
     expect(order[0]?.textContent).toMatch(/Merging into main/)
@@ -1569,12 +1571,23 @@ describe('a project, reaching outside', () => {
     await waitFor(() => expect(merge).toHaveBeenLastCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
     view.unmount()
 
-    // Taken by its host but not landed yet, as in its merge queue, the first holds the second back: pressed again, it goes.
-    const queued = vi.fn(async () => undefined)
-    const held = fakeClient({ merge: queued, getThread: vi.fn(async () => snapshot({ task: ready })) })
+    // Taken by its host into its merge queue but not landed, the first holds the second back: nothing to press until it lands.
+    let inQueue = false
+    const queued = vi.fn(async () => {
+      inQueue = true
+    })
+    const held = fakeClient({
+      merge: queued,
+      getThread: vi.fn(async () => snapshot({ task: inQueue ? { ...ready, changes: [{ ...api, queued: true }, web] } : ready })),
+    })
     const again = withServices(<Task />, held.client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Accept and merge both' }).getAttribute('aria-busy')).toBeNull())
+    await waitFor(() =>
+      expect(within(screen.getByRole('list', { name: 'In the order they merge' })).getAllByRole('listitem')[0]?.textContent).toMatch(
+        /merge queue/i,
+      ),
+    )
+    expect(screen.queryByRole('button', { name: 'Accept and merge both' })).toBeNull()
     expect(queued).toHaveBeenCalledTimes(1)
     again.unmount()
 

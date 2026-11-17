@@ -40,7 +40,8 @@ There are no more numbered ADRs. A proposal that isn't decided yet lives in
 Proposals waiting now:
 
 - [ADR-103](proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md):
-  projects on a host, and work placed across pools.
+  projects on a host, and work placed across pools. Its accepted transport
+  and worker-language choices are in [Foundations](foundations.md#remote-connections-and-native-workers-decided-not-built); the wider design remains proposed.
 - [ADR-104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md):
   canvases the project's agents draw, version and hear comments on; the first slice is built.
 

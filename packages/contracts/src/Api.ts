@@ -17,6 +17,7 @@ import { CanvasDetail, CanvasKind, CanvasSummary, CanvasText, SentCanvasComment 
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
+import { LineComments, SentLineComment, TaskLineComments } from './lineComments'
 import { SettingChangeCard, SettingChanged } from './settings'
 
 /*
@@ -203,6 +204,8 @@ export const AccountStatus = Schema.Struct({
   outUntil: Schema.NullOr(Schema.String),
   /** What made its folder, when Althar didn't. */
   adoptedFrom: Schema.NullOr(Schema.String),
+  /** The selected GitHub sign-in host for the Copilot CLI account. */
+  signInHost: Schema.optional(Schema.String),
   /** When its sign-in ends, where its agent's status says (Claude Code's claude.ai sign-in); not given where it doesn't. */
   endsAt: Schema.optional(Schema.String),
   /** Its sign-in ends within the days the runtime warns in, or has ended: given with `endsAt`, so the row and the warning agree. */
@@ -738,6 +741,18 @@ export const AgentTools = Schema.Struct({
 })
 export type AgentTools = typeof AgentTools.Type
 
+/**
+ * How far a Ship takes what waits: as far as a push (a draft stays one, a new
+ * pull request opens as one), ready for review (a draft is marked ready, a new
+ * one opens ready), or merged, once the checks main requires pass.
+ */
+export const ShipFar = Schema.Literals(['push', 'ready', 'merge'])
+export type ShipFar = typeof ShipFar.Type
+
+/** A Ship's route: whether its review comes first, and how far it goes. */
+export const ShipRoute = Schema.Struct({ review: Schema.Boolean, far: ShipFar })
+export type ShipRoute = typeof ShipRoute.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   plansAndReviews: PlansAndReviews,
@@ -753,6 +768,8 @@ export const AppSettings = Schema.Struct({
   runOutside: Schema.optional(Schema.Literals(['ask', 'safe', 'full'])),
   /** What sending does while an agent is mid-turn: `queue` it for the turn's end, its default, or `steer` it to the agent at once. */
   sendMidTurn: Schema.optional(Schema.Literals(['queue', 'steer'])),
+  /** The route the person's Ships take unless they choose another for one: absent until they make one their default. */
+  shipRoute: Schema.optional(ShipRoute),
   /** Every automation is paused: none starts until the person resumes them. Runs under way finish. */
   automationsPaused: Schema.Boolean,
   /** When finished tasks' folders go: `smart` unless the person chose otherwise. */
@@ -808,6 +825,19 @@ export const TaskFolders = Schema.Struct({
   measuring: Schema.Boolean,
 })
 export type TaskFolders = typeof TaskFolders.Type
+
+/** A place Althar keeps data, by the id the window asks for it with (About › Storage). */
+export const PLACES = ['profile', 'logs', 'worktrees'] as const
+export const PlaceId = Schema.Literals(PLACES)
+export type PlaceId = typeof PlaceId.Type
+
+/** What measuring a place came to: bytes (approximate where the time was up, a lower bound too where entries couldn't be read), or that it isn't there, or couldn't be read. */
+export const StorageSize = Schema.Union([
+  Schema.Struct({ state: Schema.Literal('done'), bytes: Schema.Number, approximate: Schema.Boolean, unreadable: Schema.Int }),
+  Schema.Struct({ state: Schema.Literal('missing') }),
+  Schema.Struct({ state: Schema.Literal('failed') }),
+])
+export type StorageSize = typeof StorageSize.Type
 
 /** What removing finished tasks' folders freed, in bytes, as they were measured just before they went; and how many it couldn't remove. */
 export const FoldersFreed = Schema.Struct({ freed: Schema.Number, failed: Schema.Int })
@@ -994,6 +1024,8 @@ export const FoundRepository = Schema.Struct({
   branch: Schema.NullOr(Schema.String),
   /** Its first remote, without any password in it; null when it has none. */
   remote: Schema.NullOr(Schema.String),
+  /** Whether it has a commit yet: false for one just made with `git init`, which a task can't branch from. */
+  commits: Schema.optional(Schema.Boolean),
 })
 export type FoundRepository = typeof FoundRepository.Type
 
@@ -1012,6 +1044,53 @@ export const MadeRepository = Schema.Struct({
 })
 export type MadeRepository = typeof MadeRepository.Type
 
+/** What making a folder ready to be a project's repository did: started git in it, made its first commit, or nothing; on which branch. */
+export const PreparedFolder = Schema.Struct({
+  did: Schema.Literals(['started', 'committed', 'nothing']),
+  /** The repository's root: the folder, or the repository it is in. */
+  path: Schema.String,
+  branch: Schema.String,
+  /** The files its first commit has, where one was made. */
+  files: Schema.Number,
+})
+export type PreparedFolder = typeof PreparedFolder.Type
+
+/** A repository on a connected code host, for choosing one to clone. */
+export const HostRepository = Schema.Struct({
+  /** As its host names it, by its parts: northwind, app. */
+  path: Schema.Array(Schema.String),
+  description: Schema.NullOr(Schema.String),
+  private: Schema.Boolean,
+  /** When it was last pushed to, as an ISO time; null where the host doesn't say. */
+  pushedAt: Schema.NullOr(Schema.String),
+  webUrl: Schema.String,
+  archived: Schema.Boolean,
+})
+export type HostRepository = typeof HostRepository.Type
+
+/** Where a connection's account can make a repository: itself, an organization, a group, a workspace or a project. */
+export const RepositoryOwner = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  kind: Schema.Literals(['user', 'organization', 'group', 'workspace', 'project']),
+})
+export type RepositoryOwner = typeof RepositoryOwner.Type
+
+/** A repository cloned onto this computer: the grant of its folder, for OpenProject, and where it is. */
+export const ClonedRepository = Schema.Struct({
+  grant: Schema.String,
+  path: Schema.String,
+})
+export type ClonedRepository = typeof ClonedRepository.Type
+
+/** A project's repository put on a host: as the host names it, its page, and the branch pushed. */
+export const PublishedRepository = Schema.Struct({
+  remote: Schema.String,
+  webUrl: Schema.String,
+  branch: Schema.String,
+})
+export type PublishedRepository = typeof PublishedRepository.Type
+
 /**
  * What opening a folder would make, read before anything is: a repository, a
  * folder inside one, or a folder holding several, one level down. Reading it
@@ -1024,6 +1103,10 @@ export const FolderReading = Schema.Struct({
   repositories: Schema.Array(FoundRepository),
   /** The project it already is, when it was opened before. */
   project: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** A folder that isn't a repository: whether it has nothing in it but what is hidden, as .DS_Store is. */
+  empty: Schema.optional(Schema.Boolean),
+  /** A folder that isn't a repository: where it is, as git would be started in it. */
+  path: Schema.optional(Schema.String),
 })
 export type FolderReading = typeof FolderReading.Type
 
@@ -1782,6 +1865,8 @@ export const UserMessageItem = Schema.Struct({
     links: Schema.Array(Unfurl),
     pictures: Schema.Array(Picture),
     files: Schema.Array(AttachedFile),
+    /** What they said of lines of the task's diff, each with the code it is on (decisions: desktop-app § Comments on the diff). */
+    comments: Schema.optional(Schema.Array(SentLineComment)),
   }),
   input: Schema.NullOr(
     Schema.Struct({
@@ -2277,6 +2362,30 @@ export const HeldForShip = Schema.Struct({
 })
 export type HeldForShip = typeof HeldForShip.Type
 
+/** A stop on a Ship's route. */
+export const ShipStop = Schema.Literals(['review', 'push', 'ready', 'merge'])
+export type ShipStop = typeof ShipStop.Type
+
+/**
+ * The route Ship takes on a task when pressed without one chosen: the
+ * person's own default (Settings' `shipRoute`), else what the task's plan and
+ * ending say, bent where the task makes a stop pointless: no review where it
+ * has no reviewer (`reviewable` false), and no further than Ready where main
+ * needs someone else's approval (`bent`).
+ */
+export const ShipRouteOf = Schema.Struct({
+  route: ShipRoute,
+  /** Whether a review can come first: it has a reviewer to run one. */
+  reviewable: Schema.Boolean,
+  /** Why it goes less far than the person's default, where it does: main needs an approval from someone else. */
+  bent: Schema.NullOr(Schema.Literals(['approval'])),
+})
+export type ShipRouteOf = typeof ShipRouteOf.Type
+
+/** A Ship under way: its route, as chosen or changed since, and the stop it is at. */
+export const ShipUnderWay = Schema.Struct({ route: ShipRoute, at: ShipStop })
+export type ShipUnderWay = typeof ShipUnderWay.Type
+
 export const Unshipped = Schema.Struct({
   commits: Schema.Int,
   /** Lines they add and remove, all together. */
@@ -2442,6 +2551,22 @@ export const AfterMergeReview = Schema.Struct({
 })
 export type AfterMergeReview = typeof AfterMergeReview.Type
 
+/**
+ * How a task another waits for stands (tasks wait for their blockers): `planned` before its lead starts, `working` while it
+ * does, `stuck` where it waits on the person or stopped, `review` with its pull request open, `merged` once it is done (its
+ * work in), `abandoned` once given up: the task waiting for it then waits on the person.
+ */
+export const BlockerStanding = Schema.Literals(['planned', 'working', 'stuck', 'review', 'merged', 'abandoned'])
+export type BlockerStanding = typeof BlockerStanding.Type
+
+/** Another task named on a task's card: what it waits for, or what waits for it. */
+export const LinkedTask = Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })
+export type LinkedTask = typeof LinkedTask.Type
+
+/** A task this one waits for, and how it stands. */
+export const TaskBlocker = Schema.Struct({ ...LinkedTask.fields, stands: BlockerStanding })
+export type TaskBlocker = typeof TaskBlocker.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2595,6 +2720,11 @@ export const TaskCard = Schema.Struct({
   reviewOffer: Schema.optional(PlanStep),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
+  /**
+   * Its Ship's stop past its push, while `step` is still `publish`: marking its pull request ready, or waiting to merge on the
+   * checks main requires. Its card and header say that stop, not the opening of a pull request. Absent otherwise.
+   */
+  shipAt: Schema.optional(Schema.Literals(['ready', 'merge'])),
   /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
   followUp: Schema.optional(Schema.Boolean),
   /** The latest summary the lead reported. */
@@ -2647,6 +2777,14 @@ export const TaskCard = Schema.Struct({
   keptAt: Schema.optional(Schema.NullOr(Schema.String)),
   /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
+  /**
+   * The tasks it waits for (tasks wait for their blockers), in the order they were named, merged ones included: its plan
+   * starts by itself once they have all merged, and waits on the person once one of them is abandoned. Absent where it waits
+   * for none, and once it started.
+   */
+  waitsFor: Schema.optional(Schema.Array(TaskBlocker)),
+  /** The open tasks that wait for it, whose plans start once it merges. Absent where none does. */
+  waitedBy: Schema.optional(Schema.Array(LinkedTask)),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
   /**
@@ -3880,6 +4018,10 @@ export const ThreadSnapshot = Schema.Struct({
     ),
     /** Started Local, what it waits for before its lead starts, as its card says. */
     waitsForCheckout: Schema.optional(Schema.NullOr(CheckoutWait)),
+    /** The tasks its plan waits for, and how each stands, as its card says (tasks wait for their blockers). */
+    waitsFor: Schema.optional(Schema.Array(TaskBlocker)),
+    /** The open tasks that wait for it, as its card says. */
+    waitedBy: Schema.optional(Schema.Array(LinkedTask)),
     /** The branch its work goes into, where it isn't its repository's default (ADR-093): release/0.8.0; absent for the default. */
     toward: Schema.optional(Schema.String),
     /**
@@ -3956,6 +4098,10 @@ export const ThreadSnapshot = Schema.Struct({
     nothingBuilt: Schema.optional(Schema.Boolean),
     /** The review of its run under way can still be skipped, as the person may (ADR-034). */
     skipReview: Schema.optional(Schema.Boolean),
+    /** The route its Ship takes when pressed without one chosen, while something waits for Ship. Absent otherwise. */
+    shipRoute: Schema.optional(ShipRouteOf),
+    /** Its Ship under way: the route and the stop it is at. Absent while none is. */
+    shipping: Schema.optional(ShipUnderWay),
     /**
      * It can be made a change in one move, as its menu's Make it a change does: begun, of its own work, not merged, and
      * ending with no pull request (a prototype, a chat, a quick task).
@@ -4235,6 +4381,9 @@ export const WatchEvent = Schema.Union([
     aggregateId: Schema.String,
     projectId: Schema.NullOr(Schema.String),
     threadId: Schema.NullOr(Schema.String),
+    /** On a task's change that was a rename: the title it was given, and whether an agent (a lead or the coordinator) gave it, not the person. */
+    renamedTo: Schema.optional(Schema.String),
+    renamedByAgent: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     _tag: Schema.Literal('Streaming'),
@@ -4606,6 +4755,7 @@ const socketCalls = new Set<string>([
   'ReadCode',
   'GetFileDiff',
   'GetTaskFindings',
+  'GetLineComments',
   'GetBoard',
   'GetOlderSettled',
   'GetHome',
@@ -4684,6 +4834,61 @@ const ProjectApi = RpcGroup.make(
    * grant comes back, for OpenProject.
    */
   call('MakeRepository', { grant: Schema.String, name: Schema.String }, MadeRepository),
+  /**
+   * Makes the folder the person chose ready to be a project's repository, as
+   * the project is made: git on main, with what is in it as its first
+   * commit, where it has no git; its first commit, where it has git and no
+   * commit. Refused where it can't be read, is too wide to be one project
+   * (the home folder), has too many files, or has repositories inside it.
+   * What this made is taken away where it fails. `path` is a repository's
+   * root inside the folder chosen, where it is one of several found there.
+   */
+  command('PrepareFolder', { grant: Schema.String, path: Schema.optional(Schema.String) }, PreparedFolder),
+  /** Every repository a code host's connection reaches, last pushed to first. */
+  call('ListHostRepositories', { connectionId: Schema.String }, Schema.Array(HostRepository)),
+  /** Where a code host's connection can make a repository: its account first, then its organizations, groups or workspaces. */
+  call('ListRepositoryOwners', { connectionId: Schema.String }, Schema.Array(RepositoryOwner)),
+  /**
+   * Clones a repository into a folder of its name in the folder the person
+   * chose (`grant`): one on a connection's host, by its path there; or one by
+   * its URL, signed in through the connection whose host it is on, else with
+   * the person's own git sign-in. Refused where that folder has something in
+   * it already; what a failed clone made is taken away.
+   */
+  command(
+    'CloneRepository',
+    {
+      grant: Schema.String,
+      from: Schema.Union([
+        Schema.Struct({ connectionId: Schema.String, path: Schema.Array(Schema.String) }),
+        Schema.Struct({ url: Schema.String }),
+      ]),
+    },
+    ClonedRepository,
+  ),
+  /**
+   * Puts a repository only on this computer on a code host: a project's, or
+   * one in a folder the person chose, before its project is made. Makes an
+   * empty repository there, under `owner`, sets it as `origin`, and pushes
+   * the branch checked out, which follows it from then on. Refused where the
+   * repository has a remote already, or the host has one of that name. Made
+   * and not pushed, trying again pushes to the one made.
+   */
+  command(
+    'PublishRepository',
+    {
+      at: Schema.Union([
+        /** A project's repository, by its id, or its slug, as a task's names it. */
+        Schema.Struct({ projectId: Schema.String, repositoryId: Schema.String }),
+        Schema.Struct({ grant: Schema.String, path: Schema.optional(Schema.String) }),
+      ]),
+      connectionId: Schema.String,
+      owner: RepositoryOwner,
+      name: Schema.String,
+      private: Schema.Boolean,
+    },
+    PublishedRepository,
+  ),
   /**
    * Opens the folder the person chose, by the grant the app gave for it: the
    * window never names a path. A folder holding several repositories opens
@@ -4817,6 +5022,12 @@ const ProjectApi = RpcGroup.make(
    * `review`, a thread item; without it, the latest run that found anything.
    */
   call('GetTaskFindings', { taskId: Schema.String, review: Schema.optional(Schema.String) }, TaskFindings),
+  /**
+   * The comments the person sent on lines of a task's diff (decisions: desktop-app § Comments on the diff), each
+   * where its lines are in the change now, and addressed once a commit since
+   * it was made changed them.
+   */
+  call('GetLineComments', { taskId: Schema.String }, TaskLineComments),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
   /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
@@ -4928,6 +5139,8 @@ const ProjectApi = RpcGroup.make(
   ),
   /** Starts a planned task now, rather than when its time runs out. */
   command('StartPlan', { planId: Schema.String }, Schema.Void),
+  /** Stops a task waiting for another (tasks wait for their blockers): where it waits for nothing else, its plan starts as planned. */
+  command('StopWaiting', { taskId: Schema.String, on: Schema.String }, Schema.Void),
   /** Holds a planned task: it waits until you start it. Whether it was held: false where it had begun already, and its team changes as a running task's does. */
   command('HoldPlan', { planId: Schema.String }, Schema.Boolean),
   /** Holds a task the coordinator is drafting, by its draft's key: its plan comes held, even one that would start at once. */
@@ -5024,6 +5237,8 @@ const ProjectApi = RpcGroup.make(
       files: Schema.optional(SentFiles),
       /** Any of what the person said came from dictation. */
       dictated: Schema.optional(Schema.Boolean),
+      /** Comments on lines of the task's diff sent with what the person said (decisions: desktop-app § Comments on the diff). */
+      comments: Schema.optional(LineComments),
     },
     Schema.String,
   ),
@@ -5098,6 +5313,8 @@ const ProjectApi = RpcGroup.make(
   command('SetRunOutside', { to: Schema.Literals(['ask', 'safe', 'full']) }, Schema.Void),
   /** What sending a message does while an agent is mid-turn: queue it, or steer the agent with it at once. */
   command('SetSendMidTurn', { to: Schema.Literals(['queue', 'steer']) }, Schema.Void),
+  /** Makes a route the person's default for every Ship, as Make this my default does; null goes back to each task's own. */
+  command('SetShipRoute', { route: Schema.NullOr(ShipRoute) }, Schema.Void),
   /**
    * Saves a preset: a task's parts, team and first lines of its brief (Save as preset), or the parts the coordinator offered;
    * kept to the task's project with `projectOnly`. Its name, as kept.
@@ -5236,6 +5453,10 @@ const ProjectApi = RpcGroup.make(
 const WorkApi = RpcGroup.make(
   /** Finished tasks' folders on this computer, with the disk they are on: sizes not yet measured start being measured. */
   call('GetTaskFolders', {}, TaskFolders),
+  /**
+   * What a place Althar keeps data in takes on disk, as the same walk counts what removing task folders frees. Kept for the session; `refresh` measures again, for longer. Giving up on the call (About closed) stops the walk when no one else waits on it.
+   */
+  call('GetStorageSize', { place: PlaceId, refresh: Schema.Boolean }, StorageSize),
   /** Removes every finished task's folder nothing holds, whatever its wait; their branches stay, and each comes back when its task needs it. */
   command('CleanUpFolders', {}, FoldersFreed),
   /**
@@ -5358,6 +5579,8 @@ const WorkApi = RpcGroup.make(
       files: Schema.optional(SentFiles),
       /** Any of its words came from dictation, even if the person edited them after: the agent is told, so it reads past what was misheard. */
       dictated: Schema.optional(Schema.Boolean),
+      /** Comments on lines of a task's diff (decisions: desktop-app § Comments on the diff): the agent reads each with its file, its lines and the code quoted, after the words. */
+      comments: Schema.optional(LineComments),
       /** The person's comments on canvases (ADR-104), kept with the message and in the same command: until it is sent, each is only the person's draft. */
       canvasComments: Schema.optional(Schema.Array(SentCanvasComment).check(Schema.isMaxLength(50))),
     },
@@ -5516,8 +5739,13 @@ const WorkApi = RpcGroup.make(
   /**
    * Opens the agent's own sign-in for the account, in Terminal, where the
    * person signs in: the line it runs, and whether it could open it.
+   * Copilot CLI accepts a GitHub host, remembered for the account.
    */
-  command('SignInAccount', { accountId: Schema.String }, Schema.Struct({ line: Schema.String, opened: Schema.Boolean })),
+  command(
+    'SignInAccount',
+    { accountId: Schema.String, host: Schema.optional(Schema.String) },
+    Schema.Struct({ line: Schema.String, opened: Schema.Boolean }),
+  ),
   /** Signs an account in inside Althar, this way: its id, to ask how it stands. */
   command(
     'StartAccountSignIn',
@@ -5622,7 +5850,14 @@ const WorkApi = RpcGroup.make(
    * where nothing waits (`ShipRefused`).
    */
   // A change named ships alone, with what waits beneath it in its stack; none, every change waiting, the bottom of a stack first.
-  command('Ship', { taskId: Schema.String, change: Schema.optional(Schema.String) }, Schema.Void),
+  // `route` is this Ship's, as the person chose it; without it, the task's own (`TaskView.shipRoute`).
+  command('Ship', { taskId: Schema.String, change: Schema.optional(Schema.String), route: Schema.optional(ShipRoute) }, Schema.Void),
+  /**
+   * Changes the route of the task's Ship under way: how far it goes, where it
+   * hasn't gone past that yet, and its review, which stops as Skip review
+   * stops it where the route turns it off. Refused where no Ship is under way.
+   */
+  command('RouteShip', { taskId: Schema.String, route: ShipRoute }, Schema.Void),
   /**
    * Fix it, on what a review after a merge found (a task is a conversation
    * plus parts, "After merge, in the same task"): the findings go to the

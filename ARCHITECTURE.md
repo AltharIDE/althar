@@ -14,7 +14,7 @@ Use the smallest design that supports current behavior. Add an abstraction when 
 
 ### Types and boundaries
 
-Write all hand-authored application, package, test, configuration, and script code in TypeScript (`.ts` or `.tsx`) with strict compiler settings. Avoid `any`, unchecked casts, non-null assertions, and suppression comments. If one is necessary, explain the invariant and keep it local.
+Write hand-authored application, package, test, configuration, and script code in TypeScript (`.ts` or `.tsx`) with strict compiler settings, except the Rust worker supervisor and sandbox execution agent decided in [Foundations](docs/decisions/foundations.md#remote-connections-and-native-workers-decided-not-built). Their versioned worker wire contract is Protobuf, with generated TypeScript and Rust bindings. This does not authorize rewriting the home or desktop in Rust. Avoid `any`, unchecked casts, non-null assertions, and suppression comments. If one is necessary, explain the invariant and keep it local.
 
 Validate untrusted values at runtime, including files, network responses, provider output, and persisted data. Types alone do not validate them.
 
@@ -43,6 +43,8 @@ Test valuable behavior: invariants, boundaries, invalid input, failures, recover
 ### Static checks and gates
 
 Use strict TypeScript, type-aware linting, formatting, dependency and import-boundary rules, and build checks. Keep warnings and suppressions visible and justified.
+
+Before the native worker ships, pin its Rust and Protobuf toolchains and add locked builds, formatting, Clippy, contract compatibility and focused failure/recovery tests to CI. Generated bindings must be reproducible and checked for drift. Rust and generated schemas do not relax runtime validation, process ownership, coverage or release gates.
 
 CI must block release on failed static checks, tests, coverage, or production builds, plus applicable accessibility and end-to-end checks. It blocks merge on those it runs before merge, and one that runs only after merge still gates every release ([ADR-074](docs/decisions/foundations.md#what-ci-gates)). A check is a gate only when CI runs it and fails on a violation. A passing local run does not replace that gate; an untested failure path remains incomplete even when coverage is high.
 

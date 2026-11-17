@@ -17,6 +17,7 @@ import { Instance } from './Instance'
 import { branchName, prepareWorktree, startCommitOf, startOf, towardHere } from './Projects'
 import { change, fact, timestamp } from './records'
 import { addItem } from './threads'
+import { blockersOf } from './waits'
 import { removeWorktree } from './worktreeRemoval'
 
 /*
@@ -294,13 +295,17 @@ export const toCheckout = (spot: Spot) =>
 /**
  * A worktree made with a draft whose branch to work toward changed on its
  * plan card (ADR-093): unused, it moves to where the task starts now, the
- * branch with it, keeping the files its setup made, which git ignores.
+ * branch with it, keeping the files its setup made, which git ignores. One
+ * whose task waited for other tasks (waits.ts) moves up to its base as it is
+ * now, fetched, so it starts with what they merged meanwhile.
  */
 export const retarget = (spot: Spot) =>
   Effect.gen(function* () {
     const { remote, base } = yield* startOf(spot)
-    if (branchName(spot.baseRef) === base) return
+    const moved = branchName(spot.baseRef) !== base
+    if (!moved && (yield* blockersOf(spot.taskId)).length === 0) return
     const { baseRef, baseCommit } = yield* startCommitOf(spot.repository, base, remote)
+    if (!moved && baseCommit === spot.baseCommit) return
     yield* git(spot.path, 'reset', '-q', '--keep', baseCommit)
     if (spot.toward !== null) yield* towardHere(spot.repository, spot.toward, remote)
     yield* record(spot, { baseRef, baseCommit }, 'workspace.retargeted', { baseRef, baseCommit, toward: spot.toward })
