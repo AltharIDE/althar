@@ -10,7 +10,8 @@ import { createRoot } from 'react-dom/client'
 import { ServicesProvider } from '../../src/renderer/data/services'
 import { PARTS } from './directions'
 import { HomeConnections } from './seam/HomeConnections'
-import { DIRECTIONS, lab, useLab } from './state'
+import { showManage } from './directions/a'
+import { DIRECTIONS, lab, MANAGES, useLab } from './state'
 import { forgetWindow, rereadAll, windowOf } from './windows'
 import { againOf, homeOf, stateOf, useWorld, world } from './world'
 import s from './lab.module.css'
@@ -18,8 +19,9 @@ import s from './lab.module.css'
 /*
  * The homes lab (README.md): the desktop app's window, whole, in the
  * browser, on made-up data, with the page's bar under it. The bar swaps the
- * direction in place (0 as #982 has it, A–D, with keys too), brings a
- * window to the front (this computer's, or a home's once one is open),
+ * direction in place (0 as #982 has it, A–D, with keys too), opens the
+ * chip's Manage homes three ways (1–3), brings a window to the front (this
+ * computer's, or a home's once one is open),
  * drops the front window's connection (X) or makes its next connection fail
  * (F), and turns on many saved homes (M), a home with no projects (E), the
  * app's narrowest window (N) and dark (T). ⌘⇧H, Ctrl+Shift+H off a Mac, is
@@ -46,7 +48,7 @@ lab.subscribe(() => {
 const label = (id: string) => (id === 'local' ? 'This computer' : (homeOf(id)?.name ?? id))
 
 function Bar() {
-  const { d, w, many, empty, narrow, theme: dark } = useLab()
+  const { d, m, w, many, empty, narrow, theme: dark } = useLab()
   useWorld()
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -62,11 +64,16 @@ function Bar() {
         return
       if (document.querySelector('[role="dialog"], [role="menu"]') !== null && event.key !== 'Escape') {
         // A dialog or menu has the keys; the bar's letters wait.
-        if (!/^[0abcd]$/i.test(event.key)) return
+        if (!/^[0abcd123]$/i.test(event.key)) return
       }
       const key = event.key.toLowerCase()
       const direction = DIRECTIONS.find((one) => one.kbd.toLowerCase() === key)
       if (direction !== undefined) return lab.set({ d: direction.key })
+      const manage = MANAGES.find((one) => one.key === key)
+      if (manage !== undefined) {
+        lab.set({ d: 'a', m: manage.key })
+        return showManage()
+      }
       if (key === 'x') return world.drop(lab.get().w)
       if (key === 'f') return world.failNext()
       if (key === 'm') return lab.set({ many: !lab.get().many })
@@ -89,6 +96,24 @@ function Bar() {
           <kbd>{one.kbd}</kbd> {one.label}
         </button>
       ))}
+      {d === 'a' && (
+        <>
+          <span className={s.round}>Manage</span>
+          {MANAGES.map((one) => (
+            <button
+              key={one.key}
+              type="button"
+              aria-pressed={m === one.key}
+              onClick={() => {
+                lab.set({ m: one.key })
+                showManage()
+              }}
+            >
+              <kbd>{one.kbd}</kbd> {one.label}
+            </button>
+          ))}
+        </>
+      )}
       <span className={s.round}>Window</span>
       {world.windows().map((id) => (
         <span key={id} className={s.windowChip}>

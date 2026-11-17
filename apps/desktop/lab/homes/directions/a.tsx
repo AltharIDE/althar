@@ -20,14 +20,13 @@ import {
 import type { HomesHost } from '../../../src/homes'
 import { useServices } from '../../../src/renderer/data/services'
 import { opening, useLab } from '../state'
-import { homesFor, world } from '../world'
+import { homesFor, isSaved, type LabHome, world } from '../world'
 import {
   Compare,
   Glyph,
   homeOf,
   isOpen,
   lastOpened,
-  limitsLine,
   OptionFields,
   Refusal,
   Target,
@@ -36,6 +35,9 @@ import {
   useWindowHome,
   Working,
 } from './parts'
+import { MenuManage } from './manage/three'
+import { PanesManage } from './manage/two'
+import { RowsManage } from './manage/one'
 import { store, useShowHomes } from './store'
 import type { DirectionParts } from './types'
 import s from './a.module.css'
@@ -47,8 +49,8 @@ import s from './a.module.css'
  * Its menu is the chooser. Connecting is one dialog: the host, a check, and
  * the home's identity with the line that compares it on the host. A dropped
  * connection shows in the chip itself, with Reconnect beside it: the window
- * stays as it was, readable, and nothing covers it. What SSH can't do is the
- * menu's foot note, read when you look, not shown on every screen.
+ * stays as it was, readable, and nothing covers it. Manage homes is one of
+ * three dialogs (manage/, keys 1–3).
  */
 
 const ui = store({
@@ -59,6 +61,9 @@ const ui = store({
     | null,
 })
 
+/** The lab's 1–3: the chip's Manage homes, opened over the window in front. */
+export const showManage = () => ui.set({ menu: false, dialog: 'manage' })
+
 /** The menu of homes: this computer, each saved home, and the ways to add and manage them. */
 function HomesMenu({ windowId, trigger }: { windowId: string; trigger: React.ReactElement }) {
   const { menu } = ui.use()
@@ -66,6 +71,9 @@ function HomesMenu({ windowId, trigger }: { windowId: string; trigger: React.Rea
   const here = useWindowHome(windowId)
   const host = useServices().host.homes ?? homesFor(windowId)
   const remote = here.current.kind === 'ssh'
+  // A window on a home since forgotten stays on it: the menu still names it, as this window's.
+  const listed: ReadonlyArray<LabHome> =
+    here.current.kind === 'ssh' && !isSaved(windowId) ? [{ ...here.current.home, opened: 0 }, ...homes] : homes
   const hint = (id: string) => (id === windowId ? 'This window' : isOpen(id) ? 'Open' : undefined)
   return (
     <Menu
@@ -76,7 +84,6 @@ function HomesMenu({ windowId, trigger }: { windowId: string; trigger: React.Rea
       descriptions="under"
       open={menu}
       onOpenChange={(open) => ui.set({ menu: open })}
-      {...(remote ? { note: limitsLine() } : {})}
     >
       {remote && here.connection === 'disconnected' && (
         <>
@@ -90,7 +97,7 @@ function HomesMenu({ windowId, trigger }: { windowId: string; trigger: React.Rea
         <MenuItem lead={<Glyph kind="local" />} hint={hint('local')} onSelect={() => void host.open('local')}>
           This computer
         </MenuItem>
-        {homes.map((home) => (
+        {listed.map((home) => (
           <MenuItem
             key={home.id}
             lead={<Glyph kind="home" />}
@@ -292,6 +299,8 @@ export function Manage({
   )
 }
 
+const MANAGES = { '1': RowsManage, '2': PanesManage, '3': MenuManage }
+
 function Overlays({ windowId }: { windowId: string }) {
   const { dialog } = ui.use()
   const homes = useServices().host.homes ?? homesFor(windowId)
@@ -303,11 +312,14 @@ function Overlays({ windowId }: { windowId: string }) {
     else ui.set({ menu: true })
   }, [here.current.kind, saved.length])
   useShowHomes(homes, show)
+  const { m } = useLab()
   if (dialog === 'connect') return <Connect homes={homes} onClose={() => ui.set({ dialog: null })} />
-  if (dialog === 'manage')
+  if (dialog === 'manage') {
+    const Chosen = MANAGES[m]
     return (
-      <Manage homes={homes} windowId={windowId} onClose={() => ui.set({ dialog: null })} onConnect={() => ui.set({ dialog: 'connect' })} />
+      <Chosen homes={homes} windowId={windowId} onClose={() => ui.set({ dialog: null })} onConnect={() => ui.set({ dialog: 'connect' })} />
     )
+  }
   return null
 }
 
@@ -351,7 +363,7 @@ function Empty() {
     <main className={s.empty}>
       <Glyph kind="home" size={28} className={s.openingGlyph} />
       <h1 className={s.openingName}>No projects on {home?.name ?? 'this home'} yet</h1>
-      <p className={s.emptyWords}>Projects are added on the host for now. One added there shows here.</p>
+      <p className={s.emptyWords}>Add a project on the host and it shows here.</p>
     </main>
   )
 }

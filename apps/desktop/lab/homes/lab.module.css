@@ -106,3 +106,8 @@
 .bar {
   pointer-events: auto;
 }
+/* more than fits on one line: it wraps rather than cutting off its end */
+.bar {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}

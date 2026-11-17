@@ -58,9 +58,13 @@ const noOptions: Options = { profile: '', launcher: '', config: '', port: '' }
  * which opens the home's window. The name starts as the host's, until it is
  * typed.
  */
-export const useConnect = (homes: HomesHost, onDone?: () => void, start?: { target?: string; checked?: boolean; refused?: boolean }) => {
+export const useConnect = (
+  homes: HomesHost,
+  onDone?: () => void,
+  start?: { target?: string; options?: Partial<Options>; checked?: boolean; refused?: boolean },
+) => {
   const [target, setTargetNow] = useState(start?.target ?? '')
-  const [options, setOptionsNow] = useState<Options>(noOptions)
+  const [options, setOptionsNow] = useState<Options>({ ...noOptions, ...start?.options })
   const [name, setNameNow] = useState('')
   const [named, setNamed] = useState(false)
   const [phase, setPhase] = useState<Phase>('idle')

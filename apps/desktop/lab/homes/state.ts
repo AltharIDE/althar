@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from 'react'
 
 /*
- * What the lab's bar picks: the direction (0 as #982 has it, A–D), which
+ * What the lab's bar picks: the direction (0 as #982 has it, A–D), the
+ * chip's Manage homes dialog (1–3), which
  * window is in front (this computer's, or a home's), light or dark, the
  * app's narrowest window, many saved homes for the crowded case, and a home
  * with no projects yet. Kept in the address, so a reload or a screenshot
@@ -19,8 +20,18 @@ export const DIRECTIONS = [
 ] as const
 export type Direction = (typeof DIRECTIONS)[number]['key']
 
+/** The chip's Manage homes dialog, three ways. */
+export const MANAGES = [
+  { key: '1', kbd: '1', label: 'Rows' },
+  { key: '2', kbd: '2', label: 'Panes' },
+  { key: '3', kbd: '3', label: 'Menu' },
+] as const
+export type Manage = (typeof MANAGES)[number]['key']
+
 export interface LabState {
   readonly d: Direction
+  /** The chip's Manage homes dialog. */
+  readonly m: Manage
   /** The window in front: 'local', or a saved home's id. */
   readonly w: string
   readonly theme: 'light' | 'dark'
@@ -37,10 +48,13 @@ const asked = params.get('d')
 export const opening = {
   open: params.get('open'),
   conn: params.get('conn'),
+  /** Manage's home in view: the row open, the home picked, or the one whose connection is being changed. */
+  pick: params.get('pick'),
 } as const
 
 let state: LabState = {
   d: DIRECTIONS.find((one) => one.key === asked)?.key ?? 'a',
+  m: MANAGES.find((one) => one.key === params.get('m'))?.key ?? '1',
   w: params.get('w') ?? 'local',
   theme: params.get('theme') === 'dark' ? 'dark' : 'light',
   narrow: params.get('narrow') === '1',
@@ -57,6 +71,7 @@ export const lab = {
     state = { ...state, ...change }
     const url = new URL(window.location.href)
     url.searchParams.set('d', state.d)
+    url.searchParams.set('m', state.m)
     url.searchParams.set('w', state.w)
     if (state.theme === 'dark') url.searchParams.set('theme', 'dark')
     else url.searchParams.delete('theme')

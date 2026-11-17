@@ -13,7 +13,11 @@ import { lab, opening } from './state'
  * reconnect fail, to see those states.
  *
  * Beyond the HomesHost #982 has, the directions read two facts main keeps or
- * could keep: when each home was last opened, and whether its window is open.
+ * could keep: when each home was last opened, and whether its window is open;
+ * and Manage asks main for what #982 doesn't do yet: rename a home, change its
+ * connection once a check finds the same home there, save a checked home
+ * without opening it, and put a forgotten one back (Undo). Forgetting leaves
+ * an open window on the home as it is, as #982's main does.
  */
 
 export interface LabHome extends RemoteHome {
@@ -26,14 +30,15 @@ export interface LabHome extends RemoteHome {
 const hex = (seed: string) => {
   let out = ''
   let h = 2166136261
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619) >>> 0
   for (let i = 0; out.length < 32; i++) {
-    h ^= seed.charCodeAt(i % seed.length) + i
-    h = Math.imul(h, 16777619) >>> 0
+    h = Math.imul(h ^ i, 16777619) >>> 0
     out += h.toString(16).padStart(8, '0').slice(0, 4)
   }
   return out.slice(0, 32)
 }
-export const homeIdOf = (target: string) => `home_${hex(target)}`
+/** A host's home, the same whichever user or domain reaches it: `balazs@hetzner-01` and `root@hetzner-01.example.com` are one home. */
+export const homeIdOf = (target: string) => `home_${hex((target.split('@').at(-1) ?? target).split('.')[0] ?? target)}`
 
 const saved = (id: string, name: string, target: string, opened: number, many?: boolean): LabHome => ({
   id,
@@ -77,7 +82,11 @@ const changed = (windowId?: string) => {
 }
 
 export const shownHomes = (): ReadonlyArray<LabHome> => homes.filter((home) => lab.get().many || home.many !== true)
-export const homeOf = (id: string) => homes.find((home) => home.id === id)
+/** Forgotten homes whose window is still open: the window carries on until it is closed. */
+const gone = new Map<string, LabHome>()
+/** A saved home, or a forgotten one whose window is still open. */
+export const homeOf = (id: string) => homes.find((home) => home.id === id) ?? gone.get(id)
+export const isSaved = (id: string) => homes.some((home) => home.id === id)
 
 export const stateOf = (windowId: string): HomeState => {
   const home = homeOf(windowId)
@@ -131,10 +140,11 @@ export const openWindow = (id: string) => {
 
 export const world = {
   /** The windows open, this computer's first. */
-  windows: () => ['local', ...homes.filter((home) => windows.has(home.id)).map((home) => home.id)],
+  windows: () => ['local', ...windows.keys()],
   isOpen: (id: string) => id === 'local' || windows.has(id),
   closeWindow: (id: string) => {
     windows.delete(id)
+    gone.delete(id)
     if (lab.get().w === id) lab.set({ w: 'local' })
     changed()
   },
@@ -151,6 +161,38 @@ export const world = {
   failing: () => failNext,
   showHomes: (windowId: string) => {
     for (const listener of openListeners.get(windowId) ?? []) listener()
+  },
+  /** Manage's: a home renamed, at once. */
+  rename: (id: string, name: string) => {
+    const trimmed = name.trim()
+    if (trimmed === '') return
+    homes = homes.map((home) => (home.id === id ? { ...home, name: trimmed } : home))
+    changed(id)
+  },
+  /** Manage's: a home's connection changed, from a check that found the same home there. */
+  change: (id: string, checkId: string) => {
+    const target = checks.get(checkId)
+    const home = homes.find((one) => one.id === id)
+    if (target === undefined || home === undefined) throw new Error('This home check expired. Check the host again.')
+    if (homeIdOf(target.target) !== home.homeId) throw new Error(`${hostOf(target.target)} has a different home.`)
+    homes = homes.map((one) => (one.id === id ? { ...one, ssh: target } : one))
+    changed(id)
+  },
+  /** Manage's: a checked home saved beside the others, without opening it. */
+  add: (checkId: string, name: string) => {
+    const target = checks.get(checkId)
+    if (target === undefined) throw new Error('This home check expired. Check the host again.')
+    const id = `h_${hex(target.target).slice(0, 8)}`
+    homes = [{ id, name: name.trim(), homeId: homeIdOf(target.target), ssh: target, opened: 0 }, ...homes]
+    changed()
+    return id
+  },
+  /** Manage's Undo: a forgotten home back where it was. */
+  restore: (home: LabHome, at: number) => {
+    if (homes.some((one) => one.id === home.id)) return
+    gone.delete(home.id)
+    homes = [...homes.slice(0, at), home, ...homes.slice(at)]
+    changed(home.id)
   },
   subscribe: (listener: () => void) => {
     listeners.add(listener)
@@ -182,7 +224,6 @@ const checkOf = (target: SshHomeTarget): CheckedHome | Error => {
 
 const checks = new Map<string, SshHomeTarget>()
 
-/** The homes, as a window's preload hands them to it. */
 /** Each window's homes, one per window, as its preload gives it. */
 const hosts = new Map<string, HomesHost>()
 export const homesFor = (windowId: string): HomesHost => {
@@ -232,13 +273,15 @@ const makeHomes = (windowId: string): HomesHost => {
     },
     open: async (id) => {
       await new Promise((resolve) => setTimeout(resolve, 120))
-      if (id !== 'local' && homeOf(id) === undefined) throw new Error('This saved home was forgotten. Check its host to connect again.')
+      if (id !== 'local' && homeOf(id) === undefined && !windows.has(id))
+        throw new Error('This saved home was forgotten. Check its host to connect again.')
       openWindow(id)
     },
     forget: async (id) => {
       await new Promise((resolve) => setTimeout(resolve, 150))
-      homes = homes.filter((home) => home.id !== id)
-      if (windows.has(id)) world.closeWindow(id)
+      const home = homes.find((one) => one.id === id)
+      if (home !== undefined && windows.has(id)) gone.set(id, home)
+      homes = homes.filter((one) => one.id !== id)
       changed()
     },
     reconnect: async () => {

@@ -8,7 +8,7 @@ import { chromium } from '@playwright/test'
 const out = join(import.meta.dirname, 'shots')
 mkdirSync(out, { recursive: true })
 const home = 'w=hetzner&at=project'
-// [name, address, keys pressed once it has drawn, width]
+// [name, address, keys pressed once it has drawn (or `click:` a selector, `type:` some words), width]
 const shots = [
   ['0-1-homes', 'd=pr&at=home', ['Meta+Shift+KeyH']],
   ['0-2-remote', `d=pr&${home}`],
@@ -31,6 +31,24 @@ const shots = [
   ['d-3-remote', `d=d&${home}`],
   ['d-4-dropped', `d=d&${home}&conn=dropped`],
   ['c-6-checked-narrow', 'd=c&at=home&open=checked&narrow=1', [], 880],
+  // The chip's Manage homes, three ways
+  ['m-1-rows', 'd=a&m=1&w=hetzner&open=manage&pick=hetzner'],
+  ['m-1-rows-many', 'd=a&m=1&open=manage&many=1&pick=studio'],
+  ['m-2-panes', 'd=a&m=2&w=hetzner&open=manage'],
+  [
+    'm-2-panes-other-home',
+    'd=a&m=2&w=hetzner&open=manage',
+    ['click:[role=dialog] input[spellcheck=false]', 'ControlOrMeta+KeyA', 'type:hetzner-02', 'Enter'],
+  ],
+  ['m-2-panes-many-narrow', 'd=a&m=2&open=manage&many=1&narrow=1', [], 880],
+  ['m-3-menu', 'd=a&m=3&open=manage&many=1'],
+  ['m-3-menu-open', 'd=a&m=3&open=manage', ['click:[role=dialog] li:nth-child(2) button[aria-label$="more"]']],
+  [
+    'm-3-forgot',
+    'd=a&m=3&open=manage&many=1',
+    ['click:[role=dialog] li:nth-child(2) button[aria-label$="more"]', 'click:[role=menuitem]:has-text("Forget")'],
+  ],
+  ['m-3-edit', 'd=a&m=3&open=manage&pick=studio'],
 ]
 const dark = [
   '0-2-remote',
@@ -43,6 +61,9 @@ const dark = [
   'd-1-palette',
   'd-3-remote',
   'd-4-dropped',
+  'm-1-rows',
+  'm-2-panes',
+  'm-3-menu-open',
 ]
 const only = process.argv.slice(2)
 const all = [
@@ -57,7 +78,12 @@ for (const [name, query, keys = [], width = 1280] of all) {
   const page = await browser.newPage({ viewport: { width, height: 760 }, deviceScaleFactor: 1 })
   await page.goto(`http://localhost:6181/?${query}`)
   await page.waitForTimeout(900)
-  for (const key of keys) await page.keyboard.press(key)
+  for (const key of keys) {
+    if (key.startsWith('click:')) await page.locator(key.slice(6)).first().click()
+    else if (key.startsWith('type:')) await page.keyboard.type(key.slice(5))
+    else await page.keyboard.press(key)
+    await page.waitForTimeout(150)
+  }
   // the check takes 1.5 s; tabs and sheets settle after their motion
   await page.waitForTimeout(2200)
   await page.locator('[data-lab-window]').screenshot({ path: join(out, `${name}.png`) })
