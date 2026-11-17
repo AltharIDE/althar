@@ -3,6 +3,7 @@ import { realpath } from 'node:fs/promises'
 import { isIP } from 'node:net'
 import { isAbsolute, join, relative, sep } from 'node:path'
 
+import { TLS_CERTIFICATE_MAX_BYTES } from '@althar/contracts'
 import { httpsOrigin, tlsPublicKeyPin } from '@althar/transport-node'
 import { Effect, Schema } from 'effect'
 
@@ -65,8 +66,16 @@ export const networkFiles = (options: Pick<HostOptions, 'profile' | 'worktrees'>
         const parsed = new X509Certificate(certificate)
         if (!['rsa', 'rsa-pss', 'ec'].includes(parsed.publicKey.asymmetricKeyType ?? ''))
           throw new HostError({ code: 'InvalidConfig', message: 'Use an RSA or ECDSA TLS certificate for desktop compatibility.' })
+        if (parsed.raw.length > TLS_CERTIFICATE_MAX_BYTES)
+          throw new HostError({ code: 'InvalidConfig', message: 'Use a TLS leaf certificate of at most 4 KiB for pairing.' })
         if (!parsed.checkPrivateKey(createPrivateKey(key))) throw invalid()
-        return { config: { ...config, origin }, certificate, key, tlsKeyPin: tlsPublicKeyPin(certificate) }
+        return {
+          config: { ...config, origin },
+          certificate,
+          key,
+          tlsKeyPin: tlsPublicKeyPin(certificate),
+          tlsCertificate: parsed.raw.toString('base64url'),
+        }
       } catch (error) {
         key.fill(0)
         throw error

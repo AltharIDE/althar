@@ -150,9 +150,10 @@ API requires a compatible client before attachment.
 
 Direct access is opt-in. Supply a matching RSA or ECDSA PEM certificate and key as private
 regular files (mode 0600); keep the TLS key outside the profile and worktrees.
-The certificate may be private/self-signed: its public key is pinned by the
-pairing code. Reachability can use Tailscale, another private network or a
-direct HTTPS address. No relay or Althar account is required.
+The leaf certificate may be private or self-signed and can be up to 4 KiB
+in DER form. The pairing code carries the certificate and pins its public
+key. Reachability can use Tailscale, another private network or a direct
+HTTPS address. No relay or Althar account is required.
 
 ```sh
 althar-host configure-network --profile /path/to/profile \
@@ -184,6 +185,8 @@ Revocation ends the device's streams and prevents reconnect immediately;
 commands already admitted may finish. `devices` is paged: use its returned
 `next` value with `--after`. Disabling/reconfiguring the listener takes an
 explicit service restart. Existing updater policy stays unchanged. Compatible
-updates/restarts preserve registered devices; changing the TLS key requires
-pairing again. Keep the desktop keyring and home database in their respective
+updates and restarts preserve registered devices. Pair again after changing
+the TLS key or replacing a self-signed certificate. Renewals with the same
+key and a still-trusted certificate chain reconnect normally. Keep the
+desktop keyring and home database in their respective
 recovery plans. Invitations are deliberately not restored after a restart.

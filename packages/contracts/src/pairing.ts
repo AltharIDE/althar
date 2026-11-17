@@ -4,6 +4,27 @@ import { ClientDeviceId, ClientName, ClientPublicKey, ClientSignature, HomeId, R
 
 export const PairingToken = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_-]{43}$/))
 export const PairingTokenHash = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+export const PAIRING_CODE_MAX_LENGTH = 12 * 1024
+export const TLS_CERTIFICATE_MAX_BYTES = 4096
+const tlsTrust = {
+  tlsKeyPin: PairingTokenHash,
+  tlsCertificate: Schema.String.check(
+    Schema.isMaxLength(Math.ceil((TLS_CERTIFICATE_MAX_BYTES * 4) / 3)),
+    Schema.isPattern(/^[A-Za-z0-9_-]+$/),
+  ),
+}
+export const HomeTlsTrust = Schema.Struct(tlsTrust)
+export type HomeTlsTrust = typeof HomeTlsTrust.Type
+const Origin = Schema.String.check(Schema.isMaxLength(2048))
+export const HttpsHomeTarget = Schema.Struct({
+  origin: Origin,
+  homeId: HomeId,
+  deviceId: ClientDeviceId,
+  tlsKeyPin: tlsTrust.tlsKeyPin,
+  // Retain saved preview targets so people can still select, forget or re-pair them.
+  tlsCertificate: Schema.optional(tlsTrust.tlsCertificate),
+})
+export type HttpsHomeTarget = typeof HttpsHomeTarget.Type
 export const PairingInvitation = Schema.Struct({
   homeId: HomeId,
   expiresAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -15,8 +36,8 @@ export const PairingCode = Schema.Struct({
   protocol: Schema.Literal(1),
   homeId: HomeId,
   apiVersion: Schema.Int,
-  origin: Schema.String.check(Schema.isMaxLength(2048)),
-  tlsKeyPin: PairingTokenHash,
+  origin: Origin,
+  ...tlsTrust,
   token: PairingToken,
   expiresAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 })

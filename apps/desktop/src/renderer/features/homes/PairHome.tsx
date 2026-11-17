@@ -1,3 +1,4 @@
+import { PAIRING_CODE_MAX_LENGTH } from '@althar/contracts'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Button, Code, Dialog, Field, Problem } from '@althar/ui'
 
@@ -80,7 +81,7 @@ export function PairHome({ homes, onClose, choice }: { homes: HomesHost; onClose
             id={`${id}-code`}
             type="password"
             value={code}
-            maxLength={8192}
+            maxLength={PAIRING_CODE_MAX_LENGTH}
             disabled={pending}
             autoComplete="off"
             spellCheck={false}

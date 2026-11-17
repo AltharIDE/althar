@@ -1,10 +1,9 @@
 import { createHash, timingSafeEqual, X509Certificate } from 'node:crypto'
 import { Agent, request } from 'node:https'
-import { isIP } from 'node:net'
-import { connect } from 'node:tls'
+import { getCACertificates } from 'node:tls'
 
 import { Clock, Effect, Schema } from 'effect'
-import { PairingTokenHash } from '@althar/contracts'
+import { HomeTlsTrust, TLS_CERTIFICATE_MAX_BYTES } from '@althar/contracts'
 
 import { transportError } from './errors'
 
@@ -32,73 +31,56 @@ export const httpsOrigin = (given: string): string => {
   }
 }
 
-export const tlsPublicKeyPin = (certificate: string | Buffer): string =>
+const keyPinOf = (certificate: X509Certificate) =>
   createHash('sha256')
-    .update(new X509Certificate(certificate).publicKey.export({ format: 'der', type: 'spki' }))
-    .digest('hex')
+    .update(certificate.publicKey.export({ format: 'der', type: 'spki' }))
+    .digest()
 
-/** A pin is supplied by the operator's pairing code, never learned from a network response. */
-export const homeHttpsAgent = (origin: string, pin?: string) =>
+export const tlsPublicKeyPin = (certificate: string | Buffer): string => keyPinOf(new X509Certificate(certificate)).toString('hex')
+
+export const pairedCertificate = (given: HomeTlsTrust): X509Certificate => {
+  const trust = Schema.decodeUnknownSync(HomeTlsTrust)(given)
+  const bytes = Buffer.from(trust.tlsCertificate, 'base64url')
+  if (bytes.length > TLS_CERTIFICATE_MAX_BYTES || bytes.toString('base64url') !== trust.tlsCertificate)
+    throw new Error('Invalid home certificate')
+  const certificate = new X509Certificate(bytes)
+  if (!certificate.raw.equals(bytes) || !timingSafeEqual(keyPinOf(certificate), Buffer.from(trust.tlsKeyPin, 'hex')))
+    throw new Error('The home certificate does not match its key pin')
+  return certificate
+}
+
+/** The operator supplies the trust anchor and key pin in the pairing code. */
+export const homeHttpsAgent = (origin: string, trust?: HomeTlsTrust) =>
   Effect.acquireRelease(
     Effect.gen(function* () {
-      const url = new URL(httpsOrigin(origin))
+      yield* Effect.try({ try: () => httpsOrigin(origin), catch: () => transportError('InvalidConnection', 'Use an HTTPS home address.') })
+      const options = { keepAlive: false, maxSockets: 4, maxTotalSockets: 4, minVersion: 'TLSv1.2', rejectUnauthorized: true } as const
+      if (trust === undefined) return new Agent(options)
       const clock = yield* Clock.Clock
-      if (pin !== undefined)
-        yield* Schema.decodeUnknownEffect(PairingTokenHash)(pin).pipe(
-          Effect.mapError(() => transportError('InvalidConnection', 'This home certificate pin is invalid. Pair the home again.')),
-        )
-      const agent = new Agent({ keepAlive: false, maxSockets: 4, maxTotalSockets: 4, minVersion: 'TLSv1.2' })
-      if (pin !== undefined) {
-        const pending = new Set<ReturnType<typeof connect>>()
-        const destroy = agent.destroy.bind(agent)
-        agent.destroy = () => {
-          for (const socket of pending) socket.destroy()
-          destroy()
-        }
-        // A private/self-signed certificate is accepted only for the exact SPKI key
-        // in the out-of-band code. No HTTP header is sent before that check passes.
-        agent.createConnection = (_options, callback) => {
-          const host = url.hostname.replace(/^\[|\]$/g, '')
-          const socket = connect({
-            host,
-            port: Number(url.port || 443),
-            ...(isIP(host) ? {} : { servername: host }),
-            rejectUnauthorized: false,
-            minVersion: 'TLSv1.2',
-          })
-          pending.add(socket)
-          socket.once('close', () => pending.delete(socket))
-          let settled = false
-          const finish = (error: Error | null) => {
-            if (settled) return
-            settled = true
-            socket.off('error', fail)
-            if (error !== null) socket.destroy()
-            callback?.(error, socket)
+      const certificate = yield* Effect.try({
+        try: () => pairedCertificate(trust),
+        catch: () => transportError('InvalidConnection', 'This home certificate or pin is invalid. Pair the home again.'),
+      })
+      const pin = Buffer.from(trust.tlsKeyPin, 'hex')
+      return new Agent({
+        ...options,
+        ca: [...getCACertificates('default'), certificate.toString()],
+        allowPartialTrustChain: true,
+        maxCachedSessions: 0,
+        // The pairing code authenticates the key independently of the certificate's DNS name.
+        // Node verifies the chain before calling this check, and sends no HTTP bytes on failure.
+        checkServerIdentity: (_name, peer) => {
+          try {
+            const leaf = new X509Certificate(peer.raw)
+            const now = clock.currentTimeMillisUnsafe()
+            if (Date.parse(leaf.validFrom) <= now && Date.parse(leaf.validTo) > now && timingSafeEqual(keyPinOf(leaf), pin))
+              return undefined
+          } catch {
+            // An unreadable peer certificate cannot authenticate the home.
           }
-          const fail = () => finish(new Error('The home TLS connection failed.'))
-          socket.once('error', fail)
-          socket.setTimeout(10_000, fail)
-          socket.once('secureConnect', () => {
-            try {
-              const certificate = new X509Certificate(socket.getPeerCertificate().raw)
-              const at = clock.currentTimeMillisUnsafe()
-              if (
-                Date.parse(certificate.validFrom) > at ||
-                Date.parse(certificate.validTo) <= at ||
-                !timingSafeEqual(Buffer.from(tlsPublicKeyPin(certificate.raw), 'hex'), Buffer.from(pin, 'hex'))
-              )
-                return fail()
-              socket.setTimeout(0)
-              finish(null)
-            } catch {
-              fail()
-            }
-          })
-          return undefined
-        }
-      }
-      return agent
+          return new Error('The home certificate does not match this pairing.')
+        },
+      })
     }),
     (agent) => Effect.sync(() => agent.destroy()),
   )

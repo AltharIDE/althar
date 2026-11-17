@@ -2,13 +2,13 @@ import { constants, promises as fs } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
-import { ClientDeviceId, PairingTokenHash, HomeId } from '@althar/contracts'
+import { HttpsHomeTarget, HomeId } from '@althar/contracts'
 import { httpsOrigin, sshArguments } from '@althar/transport-node'
 import { Schema } from 'effect'
 
 import type { RemoteHome, SshHomeTarget } from '../../homes'
 
-const MAX_BYTES = 256 * 1024
+const MAX_BYTES = 384 * 1024
 const MAX_HOMES = 50
 const target = Schema.Struct({
   target: Schema.String,
@@ -26,7 +26,7 @@ const home = Schema.Union([
   Schema.Struct({ ...base, ssh: target }),
   Schema.Struct({
     ...base,
-    https: Schema.Struct({ origin: Schema.String, homeId: HomeId, deviceId: ClientDeviceId, tlsKeyPin: PairingTokenHash }),
+    https: HttpsHomeTarget,
   }),
 ])
 const file = Schema.Union([

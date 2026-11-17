@@ -30,6 +30,7 @@ const homeId = `home_${'1'.repeat(32)}`
 const deviceId = `dev_${'2'.repeat(32)}`
 const identity = { homeId, deviceId, actorId: `act_${'3'.repeat(32)}`, role: 'socket' as const }
 const pin = tlsPublicKeyPin(certificate)
+const trust = { tlsKeyPin: pin, tlsCertificate: new X509Certificate(certificate).raw.toString('base64url') }
 const Mini = RpcGroup.make(Rpc.make('GetConnectionInfo', { payload: {}, success: ConnectionInfo, error: ApiError }))
 const info = {
   identity,
@@ -39,10 +40,10 @@ const info = {
   position: { homeId, cursor: 0, checkpoint: null },
 }
 
-const fixture = (handler: (request: IncomingMessage, response: ServerResponse) => void) =>
+const fixture = (handler: (request: IncomingMessage, response: ServerResponse) => void, tls = { cert: certificate, key }) =>
   Effect.gen(function* () {
     const sockets = new Set<Duplex>()
-    const server = createServer({ cert: certificate, key, minVersion: 'TLSv1.2' }, handler)
+    const server = createServer({ ...tls, minVersion: 'TLSv1.2' }, handler)
     server.on('connection', (socket) => {
       sockets.add(socket)
       socket.once('close', () => sockets.delete(socket))
@@ -136,14 +137,14 @@ describe('secure bootstrap and device keys', () => {
           homeId,
           apiVersion: API_VERSION,
           origin: server.origin,
-          tlsKeyPin: pin,
+          ...trust,
           token: randomBytes(32).toString('base64url'),
           expiresAt: at + 60_000,
         }
         const decoded = decodePairingCode(encodePairingCode(code))
         assert.deepStrictEqual(decoded, code)
         const target = yield* completeDevicePairing(decoded, device, 'Desktop')
-        assert.deepStrictEqual(target, { origin: server.origin, tlsKeyPin: pin, homeId, deviceId })
+        assert.deepStrictEqual(target, { origin: server.origin, ...trust, homeId, deviceId })
         yield* Effect.flip(completeDevicePairing({ ...code, expiresAt: 0 }, device, 'Desktop'))
       }),
     ),
@@ -169,7 +170,7 @@ describe('secure bootstrap and device keys', () => {
     }),
   )
 
-  it.live('requires either an explicitly trusted TLS key or normal certificate validation', () =>
+  it.live('validates the certificate chain and pin before sending a request', () =>
     Effect.scoped(
       Effect.gen(function* () {
         let requests = 0
@@ -179,7 +180,7 @@ describe('secure bootstrap and device keys', () => {
         })
         const clock = yield* Clock.Clock
         let now = clock.currentTimeMillisUnsafe()
-        const trusted = yield* homeHttpsAgent(server.origin, pin).pipe(
+        const trusted = yield* homeHttpsAgent(server.origin, trust).pipe(
           Effect.provideService(Clock.Clock, {
             currentTimeMillisUnsafe: () => now,
             currentTimeMillis: clock.currentTimeMillis,
@@ -196,11 +197,32 @@ describe('secure bootstrap and device keys', () => {
         yield* Effect.flip(httpsJson(server.origin, '/v1/info', trusted))
         now = Date.parse(new X509Certificate(certificate).validFrom) - 1
         yield* Effect.flip(httpsJson(server.origin, '/v1/info', trusted))
-        const untrusted = yield* homeHttpsAgent(server.origin, '0'.repeat(64))
-        yield* Effect.flip(httpsJson(server.origin, '/v1/info', untrusted))
+        yield* Effect.flip(homeHttpsAgent(server.origin, { ...trust, tlsKeyPin: '0'.repeat(64) }))
         const ordinary = yield* homeHttpsAgent(server.origin)
         yield* Effect.flip(httpsJson(server.origin, '/v1/info', ordinary))
-        yield* Effect.flip(homeHttpsAgent(server.origin, 'bad'))
+        yield* Effect.flip(homeHttpsAgent(server.origin, { ...trust, tlsCertificate: 'bad' }))
+        assert.strictEqual(requests, 1)
+      }),
+    ),
+  )
+
+  it.live('accepts a renewed certificate under the trusted chain only with the pinned key', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const renewed = readFileSync(new URL('./fixtures/tls/renewed-certificate.pem', import.meta.url))
+        const other = readFileSync(new URL('./fixtures/tls/other-certificate.pem', import.meta.url))
+        const otherKey = readFileSync(new URL('./fixtures/tls/other-key.pem', import.meta.url))
+        let requests = 0
+        const handle = (_request: IncomingMessage, response: ServerResponse) => {
+          requests++
+          json(response, { ok: true })
+        }
+        const match = yield* fixture(handle, { cert: renewed, key })
+        const good = yield* homeHttpsAgent(match.origin, trust)
+        assert.deepStrictEqual(yield* httpsJson(match.origin, '/v1/info', good), { ok: true })
+        const mismatch = yield* fixture(handle, { cert: other, key: otherKey })
+        const rejected = yield* homeHttpsAgent(mismatch.origin, trust)
+        yield* Effect.flip(httpsJson(mismatch.origin, '/v1/pairing/complete', rejected, { token: 'fixture' }))
         assert.strictEqual(requests, 1)
       }),
     ),
@@ -229,7 +251,7 @@ describe('secure bootstrap and device keys', () => {
           response.writeHead(200, { 'content-type': request.url === '/text' ? 'text/plain' : 'application/json' })
           response.end('not-json')
         })
-        const agent = yield* homeHttpsAgent(server.origin, pin)
+        const agent = yield* homeHttpsAgent(server.origin, trust)
         for (const path of ['/redirect', '/large', '/cut', '/text', '/invalid']) yield* Effect.flip(httpsJson(server.origin, path, agent))
         yield* Effect.flip(httpsJson(server.origin, '/request', agent, 'a'.repeat(16 * 1024)))
       }),
@@ -265,7 +287,7 @@ describe('secure bootstrap and device keys', () => {
                 homeId,
                 apiVersion: API_VERSION,
                 origin: server.origin,
-                tlsKeyPin: pin,
+                ...trust,
                 token: randomBytes(32).toString('base64url'),
                 expiresAt: (yield* Clock.currentTimeMillis) + 60_000,
               },
@@ -281,6 +303,18 @@ describe('secure bootstrap and device keys', () => {
 })
 
 describe('authenticated WebSocket streams', () => {
+  it.live('requires a new pairing code for preview targets saved without a certificate', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const failure = yield* Effect.flip(
+          openHttpsConnection({ origin: 'https://127.0.0.1:1', homeId, deviceId, tlsKeyPin: pin }, () => Effect.die('Must not sign')),
+        )
+        assert.strictEqual(failure.reason, 'InvalidConnection')
+        assert.include(failure.message, 'Pair it again')
+      }),
+    ),
+  )
+
   it.effect('keeps responsive peers connected and retires a peer that stops answering pings', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -311,7 +345,7 @@ describe('authenticated WebSocket streams', () => {
                   port.post({ type: 'Authenticated', identity, apiVersion: API_VERSION })
                 }),
               )
-              const connection = yield* openHttpsConnection({ origin: server.origin, homeId, deviceId, tlsKeyPin: pin }, () =>
+              const connection = yield* openHttpsConnection({ origin: server.origin, homeId, deviceId, ...trust }, () =>
                 Effect.succeed('A'.repeat(86)),
               )
               const closed = yield* Deferred.make<void>()
@@ -357,7 +391,7 @@ describe('authenticated WebSocket streams', () => {
           const server = yield* fixture((_request, response) => json(response, challenge))
           yield* serveRpc(server.server, ready)
           const error = yield* Effect.flip(
-            openHttpsConnection({ origin: server.origin, homeId, deviceId, tlsKeyPin: pin }, () => Effect.succeed('A'.repeat(86))),
+            openHttpsConnection({ origin: server.origin, homeId, deviceId, ...trust }, () => Effect.succeed('A'.repeat(86))),
           )
           assert.strictEqual(error.reason, 'AuthenticationFailed')
         }
@@ -380,7 +414,7 @@ describe('authenticated WebSocket streams', () => {
         const device = yield* createDeviceKey
         const server = yield* fixture((_request, response) => json(response, challenge))
         yield* serveRpc(server.server)
-        const connection = yield* openHttpsConnection({ origin: server.origin, homeId, deviceId, tlsKeyPin: pin }, (message) => {
+        const connection = yield* openHttpsConnection({ origin: server.origin, homeId, deviceId, ...trust }, (message) => {
           assert.strictEqual(message, clientChallengeMessage(challenge))
           return signDeviceMessage(device.privateKey, message)
         })
@@ -410,7 +444,7 @@ describe('authenticated WebSocket streams', () => {
           const server = yield* fixture((_request, response) => json(response, { ...challenge, ...changed }))
           let signed = false
           yield* Effect.flip(
-            openHttpsConnection({ origin: server.origin, homeId, deviceId, tlsKeyPin: pin }, () =>
+            openHttpsConnection({ origin: server.origin, homeId, deviceId, ...trust }, () =>
               Effect.sync(() => {
                 signed = true
                 return 'A'.repeat(86)

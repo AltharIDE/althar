@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, X509Certificate } from 'node:crypto'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -60,6 +60,7 @@ const home = Effect.gen(function* () {
     ...invitation,
     token,
     tlsKeyPin: pin,
+    tlsCertificate: new X509Certificate(certificate).raw.toString('base64url'),
     origin: `https://127.0.0.1:${network.port}`,
   }
   return { instance, pairings, code }
@@ -95,7 +96,7 @@ describe('direct HTTPS and WSS home connections', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const { code } = yield* home
-        const agent = yield* homeHttpsAgent(code.origin, pin)
+        const agent = yield* homeHttpsAgent(code.origin, code)
         assert.strictEqual(yield* probe(code.origin, agent), 200)
         assert.strictEqual(yield* probe(code.origin, agent, { origin: 'https://foreign.test' }), 403)
         assert.strictEqual(yield* probe(code.origin, agent, { host: 'foreign.test' }), 403)

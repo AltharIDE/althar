@@ -1,9 +1,9 @@
 import { webcrypto } from 'node:crypto'
 
-import { API_VERSION, PairingCode, PairingResult, pairingRegistrationMessage } from '@althar/contracts'
+import { API_VERSION, PAIRING_CODE_MAX_LENGTH, PairingCode, PairingResult, pairingRegistrationMessage } from '@althar/contracts'
 import { Clock, Effect, Schema } from 'effect'
 
-import { homeHttpsAgent, httpsJson, httpsOrigin } from './https'
+import { homeHttpsAgent, httpsJson, httpsOrigin, pairedCertificate } from './https'
 import { transportError } from './errors'
 
 const invalid = () => transportError('InvalidConnection', 'Use a new pairing code from the host. This code is invalid or expired.')
@@ -44,12 +44,13 @@ export const encodePairingCode = (code: PairingCode): string => `althar-pairing1
 
 export const decodePairingCode = (given: string): PairingCode => {
   try {
-    if (given.length > 8192 || !/^althar-pairing1\.[A-Za-z0-9_-]+$/.test(given)) throw invalid()
+    if (given.length > PAIRING_CODE_MAX_LENGTH || !/^althar-pairing1\.[A-Za-z0-9_-]+$/.test(given)) throw invalid()
     const encoded = given.slice('althar-pairing1.'.length)
     const bytes = Buffer.from(encoded, 'base64url')
     if (bytes.toString('base64url') !== encoded) throw invalid()
     const code = Schema.decodeUnknownSync(PairingCode)(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)))
     if (code.apiVersion !== API_VERSION) throw invalid()
+    pairedCertificate(code)
     return { ...code, origin: httpsOrigin(code.origin) }
   } catch {
     throw invalid()
@@ -60,7 +61,7 @@ export const decodePairingCode = (given: string): PairingCode => {
 export const completeDevicePairing = (code: PairingCode, key: DeviceKey, name: string) =>
   Effect.gen(function* () {
     if (code.expiresAt <= (yield* Clock.currentTimeMillis)) return yield* invalid()
-    const agent = yield* homeHttpsAgent(code.origin, code.tlsKeyPin)
+    const agent = yield* homeHttpsAgent(code.origin, code)
     const input = { homeId: code.homeId, token: code.token, name, publicKey: key.publicKey }
     const signature = yield* signDeviceMessage(key.privateKey, pairingRegistrationMessage(input))
     const result = yield* Schema.decodeUnknownEffect(PairingResult)(
@@ -77,6 +78,7 @@ export const completeDevicePairing = (code: PairingCode, key: DeviceKey, name: s
     return {
       origin: code.origin,
       tlsKeyPin: code.tlsKeyPin,
+      tlsCertificate: code.tlsCertificate,
       homeId: code.homeId,
       deviceId: result.device.deviceId,
     }

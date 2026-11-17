@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { API_VERSION, ClientDeviceId, ClientIdentity, HomeId } from '@althar/contracts'
+import { API_VERSION, ClientDeviceId, ClientIdentity, HomeId, PAIRING_CODE_MAX_LENGTH } from '@althar/contracts'
 import { Schema } from 'effect'
 
 import type { CheckedHome, HomeProjects, HomeState, HomesOverview, RemoteHome, SshHomeTarget, WindowHome } from '../../homes'
@@ -154,7 +154,7 @@ export const homeController = ({
     pair: async (owner: number, code: unknown, name: unknown) => {
       available()
       const label = homeName(name)
-      if (pair === undefined || typeof code !== 'string' || code.length > 8192 || !windows.has(owner))
+      if (pair === undefined || typeof code !== 'string' || code.length > PAIRING_CODE_MAX_LENGTH || !windows.has(owner))
         throw new Error('Use a pairing code from the host in an open Althar window.')
       if (activeInspections.size >= 8) throw new Error('Several homes are being connected. Try again shortly.')
       cancelCheck(owner)

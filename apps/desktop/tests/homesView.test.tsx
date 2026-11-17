@@ -245,7 +245,13 @@ const paired: RemoteHome = {
   id: `remote_${'5'.repeat(32)}`,
   name: 'Secure server',
   homeId: home.homeId,
-  https: { origin: 'https://home.test:6769', homeId: home.homeId, deviceId: `dev_${'6'.repeat(32)}`, tlsKeyPin: '7'.repeat(64) },
+  https: {
+    origin: 'https://home.test:6769',
+    homeId: home.homeId,
+    deviceId: `dev_${'6'.repeat(32)}`,
+    tlsKeyPin: '7'.repeat(64),
+    tlsCertificate: 'certificate',
+  },
 }
 
 it('names a paired home in the chip and keeps an HTTPS disconnect explicit', async () => {

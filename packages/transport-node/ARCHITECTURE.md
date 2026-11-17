@@ -57,13 +57,14 @@ leases remain separate work.
 ## Direct HTTPS/WSS
 
 `https.ts` accepts canonical HTTPS origins only. Bootstrap requests are bounded
-at 16 KiB, follow no redirects and have a ten-second deadline. Normal CA
-validation remains available; the paired desktop instead uses the exact TLS
-SPKI pin delivered out of band in the operator's code. For a private or
-self-signed certificate, the agent withholds the socket from HTTP until the
-key pin and validity dates pass. No pairing token or authorization header is
-sent before that check. A renewal with the same key retains the pin; rotation
-to a different key requires pairing again.
+at 16 KiB, follow no redirects and have a ten-second deadline. The operator's
+code supplies the home certificate and its SPKI pin out of band. Node verifies
+the certificate chain against its normal roots and that certificate. The
+home key pin authenticates the peer independently of the certificate's DNS
+name. HTTP and WebSocket requests wait for certificate and key verification.
+A renewal can reconnect with the same key and a chain the client still
+trusts. Replacing a self-signed certificate with another self-signed
+certificate requires pairing again.
 
 `pairing.ts` generates an Ed25519 software key, proves possession against the
 invitation/home/name/key, and validates the returned connection-only device.

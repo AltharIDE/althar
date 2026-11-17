@@ -1,4 +1,4 @@
-import { API_VERSION, ApiError, ClientChallenge, clientChallengeMessage } from '@althar/contracts'
+import { API_VERSION, ApiError, ClientChallenge, type HttpsHomeTarget, clientChallengeMessage } from '@althar/contracts'
 import { Effect, Schema } from 'effect'
 import WebSocket, { createWebSocketStream, WebSocketServer } from 'ws'
 
@@ -21,17 +21,15 @@ export const webSocketPort = (socket: WebSocket) => {
   return streamPort({ readable: duplex, writable: duplex })
 }
 
-export interface HttpsHomeTarget {
-  readonly origin: string
-  readonly homeId: string
-  readonly deviceId: string
-  readonly tlsKeyPin: string
-}
-
 export const openHttpsConnection = (target: HttpsHomeTarget, sign: (message: string) => Effect.Effect<string, ApiError | TransportError>) =>
   Effect.gen(function* () {
     const origin = httpsOrigin(target.origin)
-    const agent = yield* homeHttpsAgent(origin, target.tlsKeyPin)
+    if (target.tlsCertificate === undefined)
+      return yield* transportError(
+        'InvalidConnection',
+        'This saved connection needs the home’s certificate. Pair it again with a new code.',
+      )
+    const agent = yield* homeHttpsAgent(origin, { tlsKeyPin: target.tlsKeyPin, tlsCertificate: target.tlsCertificate })
     const challenge = yield* Schema.decodeUnknownEffect(ClientChallenge)(
       yield* httpsJson(origin, '/v1/connections/challenge', agent, { homeId: target.homeId, deviceId: target.deviceId }),
     ).pipe(Effect.mapError(() => transportError('AuthenticationFailed', 'The home returned an invalid device challenge.')))

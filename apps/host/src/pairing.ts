@@ -44,6 +44,7 @@ export const issuePairing = (options: HostOptions) =>
           apiVersion: API_VERSION,
           origin: files.config.origin,
           tlsKeyPin: files.tlsKeyPin,
+          tlsCertificate: files.tlsCertificate,
           token,
         }),
       }

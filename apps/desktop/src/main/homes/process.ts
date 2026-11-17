@@ -1,6 +1,6 @@
 import { Schema } from 'effect'
-import type { DeviceKey, HttpsHomeTarget } from '@althar/transport-node'
-import { ClientDeviceId, HomeId, PairingTokenHash } from '@althar/contracts'
+import type { DeviceKey } from '@althar/transport-node'
+import { HttpsHomeTarget } from '@althar/contracts'
 import { Effect, Option } from 'effect'
 
 import type { RemoteHome, SshHomeTarget } from '../../homes'
@@ -150,7 +150,6 @@ export const inspectHomeProcess = (fork: ForkHomeProcess, target: SshHomeTarget,
     signal,
   )
 
-const SecureTarget = Schema.Struct({ origin: Schema.String, homeId: HomeId, deviceId: ClientDeviceId, tlsKeyPin: PairingTokenHash })
 export const pairHomeProcess = (
   fork: ForkHomeProcess,
   code: string,
@@ -161,6 +160,6 @@ export const pairHomeProcess = (
   requestHomeProcess(
     fork,
     { type: 'pair', code, key, name },
-    (message) => (message.type === 'paired' ? Schema.decodeUnknownSync(SecureTarget)(message.target) : undefined),
+    (message) => (message.type === 'paired' ? Schema.decodeUnknownSync(HttpsHomeTarget)(message.target) : undefined),
     signal,
   )

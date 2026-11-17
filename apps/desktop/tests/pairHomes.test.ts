@@ -27,7 +27,7 @@ const secureHome = (): Extract<RemoteHome, { https: unknown }> => ({
   id: `remote_${'3'.repeat(32)}`,
   name: 'My VPS',
   homeId,
-  https: { homeId, deviceId, origin: 'https://home.test:6769', tlsKeyPin: '4'.repeat(64) },
+  https: { homeId, deviceId, origin: 'https://home.test:6769', tlsKeyPin: '4'.repeat(64), tlsCertificate: 'certificate' },
 })
 // A per-test authenticated sealer substitutes only for the OS keyring port.
 const protection = () => {
@@ -136,8 +136,24 @@ describe('paired home routing', () => {
         .version,
     ).toBe(2)
     await expect(
-      store.save({ ...secureHome(), https: { homeId, deviceId, origin: 'http://home.test', tlsKeyPin: '4'.repeat(64) } }),
+      store.save({
+        ...secureHome(),
+        https: { homeId, deviceId, origin: 'http://home.test', tlsKeyPin: '4'.repeat(64), tlsCertificate: 'certificate' },
+      }),
     ).rejects.toThrow()
+  })
+
+  it('keeps preview connections selectable for re-pairing without hiding saved SSH homes', async () => {
+    const profile = temporary()
+    const ssh = { id: `remote_${'8'.repeat(32)}`, name: 'SSH', homeId, ssh: { target: 'fixture' } }
+    const paired = secureHome()
+    const { tlsCertificate: _certificate, ...target } = paired.https
+    const preview = { ...paired, https: target }
+    writeFileSync(join(profile, 'homes.json'), JSON.stringify({ version: 2, homes: [ssh, preview] }), { mode: 0o600 })
+    const store = homeStore(profile)
+    expect(await store.list()).toEqual([ssh, preview])
+    await store.forget(preview.id)
+    expect(await store.list()).toEqual([ssh])
   })
 
   it('does not open a window after cancellation, and checks the paired device identity on reconnect', async () => {
