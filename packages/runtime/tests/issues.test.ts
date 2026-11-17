@@ -477,6 +477,21 @@ describe('an issue', () => {
         // Those linked already aren't linked again; the one that refused is, now it may.
         assert.lengthOf(trello.linksOn('dRlAmgAi'), 1)
         assert.lengthOf(tracker.linksOn('MER-231'), 1)
+        // Switched to what it was already, its description stays as it is: nothing is edited.
+        const edits = () => github.calls.filter((call) => call === 'editChange').length
+        const edited = edits()
+        const reads = () => github.calls.filter((call) => call === 'change').length
+        let read = reads()
+        yield* callTool(access, 'set_part_of_issue', { task: created.slug, issue: 'kP2xQ9aZ', part_of: true })
+        yield* until(Effect.sync(reads), (now) => now > read)
+        // Closed on its host since, it is left as it is.
+        github.close(1)
+        read = reads()
+        yield* callTool(access, 'set_part_of_issue', { task: created.slug, issue: 'MER-231', part_of: true })
+        yield* until(Effect.sync(reads), (now) => now > read)
+        yield* Effect.sleep(Duration.millis(100))
+        assert.strictEqual(edits(), edited)
+        assert.notInclude(github.changes[0]?.body, 'Part of [MER-231]')
       }).pipe(
         Effect.provide(
           Queries.layer.pipe(
