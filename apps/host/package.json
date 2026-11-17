@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/claude-agent-acp": "0.107.3",
-    "@agentclientprotocol/codex-acp": "2.6.0",
+    "@agentclientprotocol/codex-acp": "2.7.0",
     "@althar/contracts": "workspace:*",
     "@althar/persistence-sqlite": "workspace:*",
     "@althar/provider-adapters": "workspace:*",
