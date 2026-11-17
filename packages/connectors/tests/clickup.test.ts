@@ -515,7 +515,7 @@ describe('the tracker', () => {
         priority: 'urgent',
         fields: {
           assignee: { add: [{ id: '183', name: 'Ada' }], remove: [] },
-          due: '2026-11-30',
+          due: '2025-11-30',
           status: { id: 'in progress', name: 'in progress' },
         },
       })
@@ -526,7 +526,7 @@ describe('the tracker', () => {
         tags: ['Bug'],
         priority: 1,
         assignees: [183],
-        due_date: Date.parse('2026-11-30T12:00:00.000Z'),
+        due_date: Date.parse('2025-11-30T12:00:00.000Z'),
         due_date_time: false,
         status: 'in progress',
       })
@@ -588,7 +588,7 @@ describe('the tracker', () => {
         description: 'New *body*',
         status: { id: 'in review', name: 'in review' },
         priority: 'low',
-        due: '2026-12-24',
+        due: '2025-12-24',
         assignee: { add: [{ id: '184', name: 'Grace' }], remove: [{ id: '183', name: 'Ada' }] },
         labels: {
           add: [
@@ -606,7 +606,7 @@ describe('the tracker', () => {
         markdown_content: 'New *body*',
         status: 'in review',
         priority: 4,
-        due_date: Date.parse('2026-12-24T12:00:00.000Z'),
+        due_date: Date.parse('2025-12-24T12:00:00.000Z'),
         due_date_time: false,
         assignees: { add: [184], rem: [183] },
       })
