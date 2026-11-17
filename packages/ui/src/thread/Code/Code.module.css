@@ -193,6 +193,15 @@
   white-space: pre;
 }
 
+/* a long file's lines, a chunk at a time (lib/chunks.ts): one away from the screen isn't laid out or painted, and holds
+   the size its lines take, a line's height each and as wide as its longest with its number and margins, so the scrollbar,
+   and where the lines named are, are right before it is drawn; once drawn, the size it was */
+.chunk {
+  display: block;
+  content-visibility: auto;
+  contain-intrinsic-size: auto calc(var(--cols) * 1ch + 84px) auto calc(var(--rows) * 20px);
+}
+
 .n {
   position: sticky;
   left: 0;
@@ -218,6 +227,11 @@
 .wrap .n {
   flex: none;
   align-self: stretch;
+}
+
+/* prose wraps at the width it is read in, so a chunk of it holds no width of its own, and at least a line's height a line */
+.wrap .chunk {
+  contain-intrinsic-size: auto none auto calc(var(--rows) * 20px);
 }
 
 .wrap .text {

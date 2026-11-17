@@ -1,9 +1,20 @@
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { desktopScheme, FIRST_SCHEME_WAIT, firstScheme, type Scheme, themeSourceFor } from '../src/main/colorScheme'
+import {
+  desktopScheme,
+  FIRST_SCHEME_WAIT,
+  firstScheme,
+  type KeptScheme,
+  keptSchemeIn,
+  openingScheme,
+  SCHEME_CACHE,
+  type Scheme,
+  themeSourceFor,
+} from '../src/main/colorScheme'
 import { PAGE, RAISED, windowOptions } from '../src/main/windowOptions'
 import { followScheme } from '../src/renderer/shared/scheme'
 
@@ -181,5 +192,53 @@ describe('the first window on a Linux desktop matched', () => {
     const { follow, left } = desktop(2, 0)
     expect(await firstScheme(follow, FIRST_SCHEME_WAIT)).toBe(2)
     expect(left).toHaveBeenCalledOnce()
+  })
+
+  /** A scheme kept as the test says, and what is kept after. */
+  const keeping = (last: Scheme | undefined) => {
+    const written: Array<Scheme> = []
+    const kept: KeptScheme = { read: () => Promise.resolve(last), write: (scheme) => Promise.resolve(void written.push(scheme)) }
+    return { kept, written }
+  }
+
+  it('opens at once in the scheme the desktop said last time, where a portal is slow to say now, and keeps what it says then', async () => {
+    // The desktop says dark only once the test has looked.
+    let say: (scheme: Scheme | undefined) => void = () => undefined
+    const follow = (listener: (scheme: Scheme | undefined) => void) => {
+      const before = say
+      say = (scheme) => {
+        before(scheme)
+        listener(scheme)
+      }
+      return () => undefined
+    }
+    const { kept, written } = keeping(2)
+    // Given all the time there is: it opens with the portal still silent.
+    expect(await openingScheme(follow, 60_000, kept)).toBe(2)
+    say(2)
+    expect(written).toEqual([])
+    say(1)
+    say(undefined)
+    expect(written).toEqual([1])
+  })
+
+  it('on a first launch, waits for the desktop’s first word as before, and keeps it', async () => {
+    const { follow } = desktop(1, 0)
+    const { kept, written } = keeping(undefined)
+    expect(await openingScheme(follow, FIRST_SCHEME_WAIT, kept)).toBe(1)
+    expect(written).toEqual([1])
+  })
+
+  it('keeps the scheme in the profile, and reads back only a scheme', async () => {
+    const profile = join(mkdtempSync(join(tmpdir(), 'althar-scheme-')), 'profile')
+    const kept = keptSchemeIn(profile)
+    expect(await kept.read()).toBeUndefined()
+    await kept.write(1)
+    expect(JSON.parse(readFileSync(join(profile, SCHEME_CACHE), 'utf8'))).toEqual({ scheme: 1 })
+    expect(await kept.read()).toBe(1)
+    for (const text of ['{"scheme": 3}', '{"scheme": "1"}', 'not json']) {
+      writeFileSync(join(profile, SCHEME_CACHE), text)
+      expect(await kept.read()).toBeUndefined()
+    }
   })
 })

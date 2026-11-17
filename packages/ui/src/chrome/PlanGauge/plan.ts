@@ -17,6 +17,17 @@ export interface PlanWindow {
   left: number
   /** When it resets, as the consumer words a time: 14:00, Mon 09:00. */
   until: string | null
+  /**
+   * The end of the window's row, short: the time left ("in 2h 10m"), the time it reset where it has and no one has read it
+   * since, or that the provider gave no time. Absent: `until`.
+   */
+  resets?: string
+  /** The same in full, for hover: "Resets Fri 09:00 · in 2h 10m", "Reset at 14:00 · not read since". */
+  resetsTitle?: string
+  /** What stands where the bar would, for a window that has reset: "not read since". */
+  note?: string
+  /** It has reset since it was read: how much of it is used no one has said yet, so no figure or bar, and never an empty limit. */
+  unread?: boolean
 }
 
 export interface PlanAccount {

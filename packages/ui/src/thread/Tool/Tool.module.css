@@ -194,7 +194,8 @@ button.toggle::after {
 .sheetable .out > [data-diff] {
   padding: 0;
 }
-.sheetable .out > [data-diff] > :first-child {
+.sheetable .out > [data-diff] > :first-child,
+.sheetable .out > [data-diff] > :first-child > :first-child {
   border-radius: 0;
 }
 

@@ -1,6 +1,8 @@
-import { Fragment, type KeyboardEvent, memo, type MouseEvent, type ReactNode, useMemo, useState } from 'react'
+import { Fragment, type KeyboardEvent, memo, type MouseEvent, type ReactNode, useCallback, useMemo, useRef, useState } from 'react'
 
 import { DiffLineKind, unreachable } from '../../foundations/vocabulary'
+import { CHUNK, chunkOf, useNear, widthOf } from '../../lib/chunks'
+import { cssVars } from '../../lib/cssVars'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { inked, type Token, type TokenLines, useTokens } from '../../lib/syntax'
@@ -281,6 +283,115 @@ const Line = memo(function Line({
   )
 })
 
+/** Where a row is in the diff's lines: the line it shows, the first it folds, or the hunk that marks its gap. */
+const placeOf = (row: Row) => ('gap' in row ? row.gap : 'fold' in row ? row.fold : row.at)
+
+interface RowsProps {
+  rows: readonly Row[]
+  sides: Sides | null
+  old: TokenLines | null
+  next: TokenLines | null
+  under: ReadonlyMap<number, readonly DiffNote[]>
+  oldNumbers: boolean
+  /** Its line numbers pick their lines; the lines picked, and the one whose number is in the tab order. */
+  pickable: boolean
+  picked: { readonly from: number; readonly to: number } | null | undefined
+  tabAt: number | undefined
+  t: DiffText
+  onOpen: (fold: number) => void
+}
+
+/** A line's tokens, where it has any: from its side's colours, none for a hunk's header. */
+const lineTokens = (line: DiffLine, at: number, sides: Sides | null, old: TokenLines | null, next: TokenLines | null) =>
+  sides === null || line.kind === DiffLineKind.Hunk ? undefined : tokensOf(line, at, sides, old, next)
+
+/** The same rows, with the same notes and words, each line in the same colours: as a side's colours come, only rows that took them are drawn again. */
+const sameRows = (a: RowsProps, b: RowsProps) => {
+  if (a.rows !== b.rows || a.sides !== b.sides || a.under !== b.under || a.oldNumbers !== b.oldNumbers || a.t !== b.t) return false
+  if (a.pickable !== b.pickable || a.tabAt !== b.tabAt || a.picked?.from !== b.picked?.from || a.picked?.to !== b.picked?.to) return false
+  if (a.old === b.old && a.next === b.next) return true
+  return a.rows.every(
+    (row) =>
+      !('line' in row) || lineTokens(row.line, row.at, a.sides, a.old, a.next) === lineTokens(row.line, row.at, b.sides, b.old, b.next),
+  )
+}
+
+/** Rows of a diff: its lines, in their colours where they have them, with the notes under them; its folds and its gaps. */
+const Rows = memo(function Rows({ rows, sides, old, next, under, oldNumbers, pickable, picked, tabAt, t, onOpen }: RowsProps) {
+  return rows.map((row) => {
+    if ('gap' in row)
+      return (
+        <div key={`gap-${row.gap}`} className={cx(s.line, s.hunk)}>
+          <span className={s.n} />
+          {oldNumbers && <span className={s.n} />}
+          <span className={s.sign}>⋯</span>
+          <span>{row.where}</span>
+        </div>
+      )
+    if ('fold' in row)
+      return (
+        <button key={`fold-${row.fold}`} type="button" className={s.fold} onClick={() => onOpen(row.fold)}>
+          {t.unchanged(row.count)}
+        </button>
+      )
+    const { line, at } = row
+    const said = under.get(at)
+    const one = (
+      <Line
+        key={at}
+        line={line}
+        at={at}
+        tokens={lineTokens(line, at, sides, old, next)}
+        oldNumbers={oldNumbers}
+        pickable={pickable}
+        picked={picked != null && at >= picked.from && at <= picked.to}
+        focusable={at === tabAt}
+        t={t}
+      />
+    )
+    if (said === undefined) return one
+    return (
+      <Fragment key={at}>
+        {one}
+        {said.map((note) => (
+          <div key={note.key} className={s.under}>
+            {note.node}
+          </div>
+        ))}
+      </Fragment>
+    )
+  })
+}, sameRows)
+
+/**
+ * A chunk of a long diff's rows: laid out and painted only near the screen, held until then at the size its rows take
+ * (Diff.module.css), and in its colours once near (lib/chunks.ts).
+ */
+function Chunk({ initially, ...drawn }: RowsProps & { initially: boolean }) {
+  const box = useRef<HTMLDivElement>(null)
+  const near = useNear(box, initially)
+  const { rows, under } = drawn
+  // What it holds, for the size it is held at until drawn: its lines and widest, its folds, and the notes under them.
+  const size = useMemo(() => {
+    let widest = 0
+    let folds = 0
+    let notes = 0
+    for (const row of rows) {
+      if ('fold' in row) folds += 1
+      else if ('line' in row) {
+        widest = Math.max(widest, widthOf(row.line.text))
+        notes += under.get(row.at)?.length ?? 0
+      }
+    }
+    return cssVars({ '--rows': rows.length - folds, '--folds': folds, '--notes': notes, '--cols': widest })
+  }, [rows, under])
+  return (
+    <div ref={box} className={s.chunk} style={size}>
+      <Rows {...drawn} old={near ? drawn.old : null} next={near ? drawn.next : null} />
+    </div>
+  )
+}
+
 /** The file's own lines in their colours, with the changed words inside a line marked more strongly, so the eye lands on what moved. */
 export function Diff({ lines, label, path, oldNumbers = false, fold, notes, onPick, picked, text, className, ...rest }: DiffProps) {
   // the same words while the text given is, so the lines needn't be drawn again for them
@@ -337,12 +448,26 @@ export function Diff({ lines, label, path, oldNumbers = false, fold, notes, onPi
     () => (fold === undefined ? lines.map((line, at) => ({ line, at })) : folded(lines, fold, opened, kept)),
     [lines, fold, opened, kept],
   )
+  // A long diff's rows in chunks, by where each is in the lines, so opening a fold adds its lines to the chunks they are in.
+  const chunks = useMemo(() => {
+    if (rows.length <= CHUNK) return null
+    const made = new Map<number, Row[]>()
+    for (const row of rows) {
+      const k = chunkOf(placeOf(row))
+      const chunk = made.get(k)
+      if (chunk === undefined) made.set(k, [row])
+      else chunk.push(row)
+    }
+    return [...made]
+  }, [rows])
   // Of the lines shown, the one whose number is in the tab order: the last gone to, else the last picked, else the first.
   const shownAt = rows.flatMap((row) => ('line' in row && row.line.kind !== DiffLineKind.Hunk ? [row.at] : []))
   const tabAt = [focusAt, picked?.to].find((at) => at != null && shownAt.includes(at)) ?? shownAt[0]
   const sides = useMemo(() => (path === undefined ? null : sidesOf(lines)), [lines, path])
   const old = useTokens(sides === null || sides.old === '' ? null : sides.old, path ?? '')
   const next = useTokens(sides === null || sides.new === '' ? null : sides.new, path ?? '')
+  const open = useCallback((at: number) => setOpened((now) => new Set(now).add(at)), [])
+  const drawn = { sides, old, next, under, oldNumbers, pickable, picked, tabAt, t, onOpen: open }
   return (
     <div
       className={cx(s.diff, oldNumbers && s.both, className)}
@@ -352,56 +477,12 @@ export function Diff({ lines, label, path, oldNumbers = false, fold, notes, onPi
       {...(pickable ? { onClick, onKeyDown } : {})}
       {...rest}
     >
-      {rows.map((row) => {
-        if ('gap' in row)
-          return (
-            <div key={`gap-${row.gap}`} className={cx(s.line, s.hunk)}>
-              <span className={s.n} />
-              {oldNumbers && <span className={s.n} />}
-              <span className={s.sign}>⋯</span>
-              <span>{row.where}</span>
-            </div>
-          )
-        if ('fold' in row)
-          return (
-            <button
-              key={`fold-${row.fold}`}
-              type="button"
-              className={s.fold}
-              onClick={() => setOpened((now) => new Set(now).add(row.fold))}
-            >
-              {t.unchanged(row.count)}
-            </button>
-          )
-        const { line, at } = row
-        const tokens = sides === null || line.kind === DiffLineKind.Hunk ? undefined : tokensOf(line, at, sides, old, next)
-        const said = under.get(at)
-        const drawn = (
-          <Line
-            key={at}
-            line={line}
-            at={at}
-            tokens={tokens}
-            oldNumbers={oldNumbers}
-            pickable={pickable}
-            picked={picked != null && at >= picked.from && at <= picked.to}
-            focusable={at === tabAt}
-            t={t}
-          />
-        )
-        return said === undefined ? (
-          drawn
-        ) : (
-          <Fragment key={at}>
-            {drawn}
-            {said.map((note) => (
-              <div key={note.key} className={s.under}>
-                {note.node}
-              </div>
-            ))}
-          </Fragment>
-        )
-      })}
+      {chunks === null ? (
+        <Rows rows={rows} {...drawn} />
+      ) : (
+        // The first chunks are near from the start, so a diff that opens on screen is in its colours from its first frame.
+        chunks.map(([k, chunk], i) => <Chunk key={k} rows={chunk} {...drawn} initially={i < 2} />)
+      )}
     </div>
   )
 }

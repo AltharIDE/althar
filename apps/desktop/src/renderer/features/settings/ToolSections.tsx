@@ -152,6 +152,7 @@ export function ServersSection({ start }: { start: StartModel }) {
           taken={servers.filter((one) => one.repository === null).map((one) => one.name)}
           busy={model.busy}
           error={addError}
+          // oxlint-disable-next-line althar/press-at-once -- A dialog the runtime checks (a server's name, what it starts): it stays open, busy, so a refusal lands at its field.
           onAdd={(server: NewServerView, agents) => {
             setAddError(null)
             void model.add(server, agents as ReadonlyArray<SyncedAgent>).then((failed) => {
