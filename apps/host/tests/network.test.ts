@@ -148,6 +148,7 @@ describe('opt-in HTTPS home configuration', () => {
     Effect.gen(function* () {
       const { options, certificate } = fixture()
       copyFileSync(new URL('../../../packages/transport-node/tests/fixtures/tls/oversized-certificate.pem', import.meta.url), certificate)
+      chmodSync(certificate, 0o600)
       const failure = yield* Effect.flip(configureNetwork(options))
       assert.include(failure.message, 'leaf certificate of at most 4 KiB')
       assert.isUndefined(yield* readNetworkConfiguration(options.profile))
