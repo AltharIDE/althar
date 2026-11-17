@@ -1,4 +1,4 @@
-import { createReadStream, realpathSync } from 'node:fs'
+import { createReadStream, existsSync, realpathSync } from 'node:fs'
 import { open, readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -215,8 +215,16 @@ export const claudeSessions = async (places: Places, folders: ReadonlyArray<stri
   return found
 }
 
+/**
+ * Where a rollout is now: Codex compresses one a week old to `.jsonl.zst` beside where it was, and its state database
+ * still names the `.jsonl`.
+ */
+export const rolloutAt = (file: string) =>
+  existsSync(file) ? file : !file.endsWith('.zst') && existsSync(`${file}.zst`) ? `${file}.zst` : file
+
 /** Every line of a file, read as it streams: a `.zst` one decompressed on the way. */
-const linesOf = (file: string) => {
+const linesOf = (named: string) => {
+  const file = rolloutAt(named)
   const raw = createReadStream(file)
   const stream: Readable = file.endsWith('.zst') ? raw.pipe(createZstdDecompress()) : raw
   return createInterface({ input: stream, crlfDelay: Infinity })

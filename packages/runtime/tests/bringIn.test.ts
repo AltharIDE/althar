@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
@@ -199,6 +199,29 @@ describe('bringing in other tools’ work', () => {
         }),
       ),
     { timeout: 120_000 },
+  )
+
+  it.live('says a conversation with nothing said in it didn’t come in, and brings in the rest', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, machine } = yield* connectedTo()
+        const id = '019a0000-0000-7000-8000-0000000000ff'
+        writeFileSync(
+          join(machine.home, '.codex', 'sessions', '2026', '11', '12', `rollout-2026-11-12T13-00-00-${id}.jsonl`),
+          `${JSON.stringify({ timestamp: '2026-11-12T13:00:00.000Z', type: 'session_meta', payload: { id, timestamp: '2026-11-12T13:00:00.000Z', cwd: machine.repository, source: 'cli' } })}\n`,
+        )
+        const brought = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [],
+          setups: [],
+          conversations: [`codex:${id}`, `codex:${sessionIds.codexLegacy}`],
+          steps,
+        })
+        assert.deepStrictEqual(brought.failed, [{ key: `codex:${id}`, why: 'Nothing was said in it.' }])
+        assert.strictEqual(brought.asides.length, 1)
+      }),
+    ),
   )
 
   it.live('never removes, rewinds or switches a folder another tool made', () =>

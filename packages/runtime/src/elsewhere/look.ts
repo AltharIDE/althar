@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import type { OtherTool } from '@althar/domain'
 import { Effect } from 'effect'
 
-import { git, untouched } from '../git'
+import { git, looking } from '../git'
 import { type Agent, claudeSessions, codexThreads, type Conversation } from './conversations'
 import { madeBy, type Places, within } from './places'
 import { type FoundSetup, setupsIn } from './setups'
@@ -21,9 +21,9 @@ import { type Recorded, readStores } from './stores'
  * list` names every one, whoever made it, and each tool's records only say
  * whose it is and what it's called. So a worktree a tool Althar doesn't know
  * made, or one a person made by hand, is found too. Reading changes nothing:
- * git reads a worktree's state on a copy of its index with its optional
- * locks off, as it does for another task's folder, so the tool that has the
- * folder open never sees its index rewritten.
+ * git reads a worktree's state with its optional locks off, so it neither
+ * takes the index's lock nor writes a refreshed index back, and the tool that
+ * has the folder open never sees its index rewritten.
  */
 
 export interface Repository {
@@ -149,36 +149,88 @@ export const statusCount = (out: string) => {
   return n
 }
 
-/** What a worktree holds, read without touching its index: changes not committed, commits no remote has, commits past its default branch. */
-const stateOf = (listed: Listed, defaultBranch: string | null) =>
+/** What a worktree holds, read without touching its index (`looking`): changes not committed, commits no remote has, commits past its default branch. */
+/** What git says of a repository's branches at once: how far each is past its upstream and its default branch, and when it was last committed to. */
+export interface BranchFacts {
+  /** Commits past its upstream; null with no upstream, or one gone from the remote. */
+  readonly pastUpstream: number | null
+  /** Commits its default branch doesn't have; null where git couldn't say. */
+  readonly ahead: number | null
+  readonly at: string | null
+}
+
+/** `%(upstream:track,nobracket)`: "ahead 2, behind 1", "gone", or nothing where the branch is level with it. */
+const pastOf = (upstream: string, track: string): number | null => {
+  if (upstream === '' || track === 'gone') return null
+  return Number(/ahead (\d+)/.exec(track)?.[1] ?? 0)
+}
+
+/**
+ * Every local branch's facts in one git command, as many worktrees as a repository has: each worktree's own commands are
+ * then only what can't be read for all at once. A git older than `ahead-behind` (2.41) says the rest without how far
+ * past the default branch each is.
+ */
+export const branchFactsOf = (root: string, defaultBranch: string | null) =>
   Effect.gen(function* () {
-    const uncommitted = yield* untouched(listed.path, git(listed.path, 'status', '--porcelain=v1', '-z', '--untracked-files=normal')).pipe(
+    const read = (against: string | null) =>
+      git(
+        root,
+        'for-each-ref',
+        `--format=%(refname:short)%00%(upstream)%00%(upstream:track,nobracket)%00%(committerdate:iso-strict)${against === null ? '' : `%00%(ahead-behind:${against})`}`,
+        'refs/heads',
+      )
+    const out =
+      defaultBranch === null
+        ? yield* read(null)
+        : yield* read(`origin/${defaultBranch}`).pipe(
+            Effect.catch(() => read(defaultBranch)),
+            Effect.catch(() => read(null)),
+          )
+    const facts = new Map<string, BranchFacts>()
+    for (const line of out.split('\n')) {
+      const [name, upstream = '', track = '', at = '', aheadBehind] = line.split('\0')
+      if (name === undefined || name === '') continue
+      const ahead = aheadBehind === undefined ? null : count(aheadBehind.split(' ')[0] ?? '')
+      facts.set(name, { pastUpstream: pastOf(upstream, track), ahead, at: at === '' ? null : new Date(at).toISOString() })
+    }
+    return facts
+  })
+
+/** What a worktree holds, read without touching its index (`looking`): changes not committed, commits no remote has, commits past its default branch. */
+const stateOf = (listed: Listed, defaultBranch: string | null, branches: ReadonlyMap<string, BranchFacts>, remotes: boolean) =>
+  Effect.gen(function* () {
+    const uncommitted = yield* git(listed.path, 'status', '--porcelain=v1', '-z', '--untracked-files=normal').pipe(
       Effect.map(statusCount),
       Effect.orElseSucceed(() => 0),
     )
+    const branch = listed.branch === null ? undefined : branches.get(listed.branch)
     // Past its upstream; else on no remote at all; with no remote to push to, nothing is said.
-    const unpushed = yield* git(listed.path, 'rev-list', '--count', '@{upstream}..HEAD').pipe(
-      Effect.catch(() =>
-        Effect.flatMap(git(listed.path, 'remote'), (remotes) =>
-          remotes === '' ? Effect.succeed('') : git(listed.path, 'rev-list', '--count', 'HEAD', '--not', '--remotes'),
-        ),
-      ),
-      Effect.map(count),
-      Effect.orElseSucceed(() => null),
-    )
-    const base = defaultBranch === null ? null : `origin/${defaultBranch}`
+    const unpushed =
+      branch?.pastUpstream != null
+        ? branch.pastUpstream
+        : !remotes
+          ? null
+          : yield* git(listed.path, 'rev-list', '--count', 'HEAD', '--not', '--remotes').pipe(
+              Effect.map(count),
+              Effect.orElseSucceed(() => null),
+            )
     const ahead =
-      base === null
-        ? null
-        : yield* git(listed.path, 'rev-list', '--count', `${base}..HEAD`).pipe(
-            Effect.catch(() => git(listed.path, 'rev-list', '--count', `${defaultBranch ?? 'main'}..HEAD`)),
-            Effect.map(count),
+      branch?.ahead != null
+        ? branch.ahead
+        : defaultBranch === null
+          ? null
+          : yield* git(listed.path, 'rev-list', '--count', `origin/${defaultBranch}..HEAD`).pipe(
+              Effect.catch(() => git(listed.path, 'rev-list', '--count', `${defaultBranch}..HEAD`)),
+              Effect.map(count),
+              Effect.orElseSucceed(() => null),
+            )
+    const lastAt =
+      branch !== undefined
+        ? branch.at
+        : yield* git(listed.path, 'log', '-1', '--format=%cI', 'HEAD').pipe(
+            Effect.map((out) => (out === '' ? null : new Date(out).toISOString())),
             Effect.orElseSucceed(() => null),
           )
-    const lastAt = yield* git(listed.path, 'log', '-1', '--format=%cI', 'HEAD').pipe(
-      Effect.map((out) => (out === '' ? null : new Date(out).toISOString())),
-      Effect.orElseSucceed(() => null),
-    )
     return { uncommitted, unpushed, ahead, lastAt }
   })
 
@@ -205,28 +257,65 @@ export const lookAt = (repositories: ReadonlyArray<Repository>, given: Places, o
       conductor: real(given.conductor),
       cursor: real(given.cursor),
     }
-    const read = yield* Effect.promise(() => readStores(places).catch(() => ({ worktrees: [], roots: { orca: [], t3: [], paradev: [] } })))
-    const stores = {
-      ...read,
-      roots: { orca: read.roots.orca.map(real), t3: read.roots.t3.map(real), paradev: read.roots.paradev.map(real) },
-    }
-    const recorded = new Map<string, Recorded>(stores.worktrees.map((one) => [real(one.path), one]))
-    const worktrees: Array<FoundWorktree> = []
-    const setups: Array<FoundSetupItem> = []
-    for (const repository of repositories) {
+    // Each repository's worktrees first, which takes a moment: then, side by side, what each holds, the tools' stores, their
+    // setups and the conversations in them, none of which waits on another.
+    const lists = yield* Effect.forEach(repositories, (repository) => {
       const root = real(repository.path)
-      const listed = yield* listWorktrees(root).pipe(Effect.orElseSucceed((): ReadonlyArray<Listed> => []))
-      const theirs = listed
-        .map((one) => ({ ...one, path: real(one.path) }))
-        .filter((one) => one.path !== root && !options.ours(one.path) && one.branch !== repository.defaultBranch)
-      const read = yield* Effect.forEach(theirs, (one) => Effect.map(stateOf(one, repository.defaultBranch), (state) => ({ one, state })), {
-        concurrency: 8,
-      })
-      for (const { one, state } of read) {
+      return Effect.map(
+        Effect.all([
+          listWorktrees(root).pipe(Effect.orElseSucceed((): ReadonlyArray<Listed> => [])),
+          branchFactsOf(root, repository.defaultBranch).pipe(Effect.orElseSucceed((): ReadonlyMap<string, BranchFacts> => new Map())),
+          git(root, 'remote').pipe(
+            Effect.map((out) => out !== ''),
+            Effect.orElseSucceed(() => false),
+          ),
+        ]),
+        ([listed, branches, remotes]) => ({
+          repository,
+          root,
+          branches,
+          remotes,
+          theirs: listed
+            .map((one) => ({ ...one, path: real(one.path) }))
+            .filter((one) => one.path !== root && !options.ours(one.path) && one.branch !== repository.defaultBranch),
+        }),
+      )
+    })
+    // Where conversations are looked for: each checkout, and each worktree found.
+    const folders = [...lists.map((one) => one.root), ...lists.flatMap((one) => one.theirs.map((worktree) => worktree.path))]
+    const [read, states, kept, said] = yield* Effect.all(
+      [
+        Effect.promise(() => readStores(places).catch(() => ({ worktrees: [], roots: { orca: [], t3: [], paradev: [] } }))),
+        Effect.forEach(
+          lists.flatMap(({ repository, theirs, branches, remotes }) => theirs.map((one) => ({ repository, one, branches, remotes }))),
+          ({ repository, one, branches, remotes }) => looking(stateOf(one, repository.defaultBranch, branches, remotes)),
+          { concurrency: 12 },
+        ),
+        Effect.forEach(lists, ({ repository, root }) =>
+          Effect.promise(() => setupsIn(root, repository.defaultBranch ?? 'main').catch(() => [])),
+        ),
+        Effect.promise(async () => {
+          const [claude, codex] = await Promise.all([
+            claudeSessions(places, folders).catch(() => []),
+            codexThreads(places, folders).catch(() => []),
+          ])
+          return [...claude, ...codex]
+        }),
+      ],
+      { concurrency: 'unbounded' },
+    )
+    const roots = { orca: read.roots.orca.map(real), t3: read.roots.t3.map(real), paradev: read.roots.paradev.map(real) }
+    const recorded = new Map<string, Recorded>(read.worktrees.map((one) => [real(one.path), one]))
+    const worktrees: Array<FoundWorktree> = []
+    let at = 0
+    for (const { repository, root, theirs } of lists)
+      for (const one of theirs) {
+        const state = states[at++]
+        if (state === undefined) continue
         const record = recorded.get(one.path)
         const gitDir = gitDirOf(one.path)
         const codexMarked = gitDir !== null && existsSync(join(gitDir, 'codex-thread.json'))
-        const tool = record?.tool ?? madeBy({ path: one.path, repository: root, codexMarked }, places, stores.roots)
+        const tool = record?.tool ?? madeBy({ path: one.path, repository: root, codexMarked }, places, roots)
         worktrees.push({
           key: worktreeKey(one.path),
           tool,
@@ -245,24 +334,14 @@ export const lookAt = (repositories: ReadonlyArray<Repository>, given: Places, o
           lastAt: state.lastAt ?? record?.createdAt ?? null,
         })
       }
-      const kept = yield* Effect.promise(() => setupsIn(root, repository.defaultBranch ?? 'main').catch(() => []))
-      for (const setup of kept)
-        setups.push({
-          ...setup,
-          key: setupKey(setup.tool, root),
-          bindingId: repository.bindingId,
-          repository: repository.name,
-        })
-    }
-    // Where conversations are looked for: each checkout, and each worktree found, longest first so one inside another is its own.
-    const folders = [...repositories.map((one) => real(one.path)), ...worktrees.map((one) => one.path)]
-    const said = yield* Effect.promise(async () => {
-      const [claude, codex] = await Promise.all([
-        claudeSessions(places, folders).catch(() => []),
-        codexThreads(places, folders).catch(() => []),
-      ])
-      return [...claude, ...codex]
-    })
+    const setups = lists.flatMap(({ repository, root }, index): ReadonlyArray<FoundSetupItem> =>
+      (kept[index] ?? []).map((setup) => ({
+        ...setup,
+        key: setupKey(setup.tool, root),
+        bindingId: repository.bindingId,
+        repository: repository.name,
+      })),
+    )
     const byLength = worktrees.toSorted((a, b) => b.path.length - a.path.length)
     const conversations = said
       .filter((one) => !options.sessions.has(one.id) && !options.ours(real(one.cwd)))

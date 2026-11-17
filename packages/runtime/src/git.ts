@@ -326,6 +326,15 @@ const indexCopy = (cwd: string, args: ReadonlyArray<string>) =>
   })
 
 /**
+ * Runs an effect's git commands, where they only look, with git's optional
+ * locks off: `git status` then neither takes the index's lock nor writes a
+ * refreshed index back, so a folder another tool has open reads as it is,
+ * with no copy of its index to make, as reading many does (`elsewhere/look.ts`).
+ */
+export const looking = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.provideService(effect, Untouched, { GIT_OPTIONAL_LOCKS: '0' })
+
+/**
  * Runs an effect's git commands in a folder someone else is working in,
  * another task's worktree or the person's checkout, without touching it:
  * on a copy of its index, which `git diff` would otherwise refresh and write

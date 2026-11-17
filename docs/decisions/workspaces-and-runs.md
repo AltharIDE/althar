@@ -463,8 +463,8 @@ behind the window, which moves on at once.
 **Read only, to the byte.** Nothing of another tool's is written: its
 stores are copied, with their write-ahead logs, into a folder of Althar's
 own and read there, so not even SQLite's shared-memory index of their files
-is touched, and git reads a worktree's state on a copy of its index with
-its optional locks off, as it does for another task's folder.
+is touched, and git reads a worktree's state with its optional locks off,
+so it neither takes the index's lock nor writes a refreshed index back.
 
 **Found through git, named by the tools.** `git worktree list` names every
 worktree of a repository, whoever made it, so one made by a tool Althar

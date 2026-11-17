@@ -299,14 +299,22 @@ export class Elsewhere extends Context.Service<
         })
 
       /** A conversation, whole, into a task's thread, after a line saying where it came from; recorded as brought in. */
+      /** A conversation's messages as they come in: read whole, the agent's replies in a turn joined. */
+      const messagesOf = (conversation: FoundConversation) =>
+        Effect.map(
+          Effect.tryPromise(() => transcriptOf(conversation)),
+          compacted,
+        )
+
       const bringHistory = (
         conversation: FoundConversation,
         into: { readonly projectId: ProjectId; readonly taskId: string; readonly threadId: string },
         actorId: ActorId,
+        read?: ReadonlyArray<Message>,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const all = compacted(yield* Effect.tryPromise(() => transcriptOf(conversation)))
+          const all = read ?? (yield* messagesOf(conversation))
           const left = Math.max(0, all.length - MOST)
           const messages = all.slice(left)
           const now = yield* timestamp
@@ -317,25 +325,27 @@ export class Elsewhere extends Context.Service<
                 SELECT count(*) AS n FROM brought_in WHERE project_id = ${into.projectId} AND key = ${conversation.key}`
               if ((taken?.n ?? 0) > 0) return
               const place = { projectId: into.projectId, threadId: into.threadId }
-              yield* addAt(
-                place,
-                'notice',
-                {
-                  source: 'runtime',
-                  severity: 'info',
-                  title: `From ${agentName(conversation.agent)}: “${conversation.title}”`,
-                  description: [
-                    dateWords(conversation.startedAt),
-                    plural(messages.filter((one) => one.role === 'person').length, 'prompt'),
-                    left === 0 ? null : `the ${left} earliest left out`,
-                  ]
-                    .filter((one) => one !== null)
-                    .join(' · '),
-                  role: 'brought',
-                  brought: { agent: conversation.agent, id: conversation.id, cwd: conversation.cwd },
-                },
-                first,
-              )
+              // One with nothing said in it is kept as brought in, so it isn't offered again, with nothing in the thread.
+              if (messages.length > 0)
+                yield* addAt(
+                  place,
+                  'notice',
+                  {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: `From ${agentName(conversation.agent)}: “${conversation.title}”`,
+                    description: [
+                      dateWords(conversation.startedAt),
+                      plural(messages.filter((one) => one.role === 'person').length, 'prompt'),
+                      left === 0 ? null : `the ${left} earliest left out`,
+                    ]
+                      .filter((one) => one !== null)
+                      .join(' · '),
+                    role: 'brought',
+                    brought: { agent: conversation.agent, id: conversation.id, cwd: conversation.cwd },
+                  },
+                  first,
+                )
               let at = first
               for (const message of messages) {
                 // Each at its own time, never before the one before it: the thread reads in the order it was said.
@@ -713,6 +723,13 @@ export class Elsewhere extends Context.Service<
             }
             const binding = bindings.find((one) => conversation.cwd === one.path || within(conversation.cwd, real(one.path))) ?? bindings[0]
             if (binding === undefined) continue
+            // Nothing said in it, as a session left at its first prompt's tool call: no aside of nothing.
+            const said = yield* kept(key, messagesOf(conversation))
+            if (said === undefined) continue
+            if (said.length === 0) {
+              failed.push({ key, why: 'Nothing was said in it.' })
+              continue
+            }
             const made = yield* kept(
               key,
               Effect.gen(function* () {
@@ -753,7 +770,7 @@ export class Elsewhere extends Context.Service<
                       })
                     }),
                 })
-                yield* bringHistory(conversation, { projectId: project.id, ...created }, actorId)
+                yield* bringHistory(conversation, { projectId: project.id, ...created }, actorId, said)
                 return created
               }),
             )

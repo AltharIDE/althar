@@ -1,4 +1,5 @@
-import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { zstdCompressSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -110,6 +111,15 @@ describe('looking elsewhere', () => {
       )
       assert.strictEqual(codex[0]?.title, 'Rename to compass')
       assert.strictEqual(codex[0]?.startedAt, new Date(1_794_477_600_000).toISOString())
+      // A week on, Codex compresses it beside where its database still says it is: read from there all the same.
+      const file = codex[0]?.file ?? ''
+      writeFileSync(`${file}.zst`, zstdCompressSync(readFileSync(file)))
+      rmSync(file)
+      const messages = yield* Effect.promise(() => codexTranscript(file))
+      assert.deepStrictEqual(
+        messages.map((one) => one.text),
+        ['Rename the meridian module', 'Renamed it to compass.'],
+      )
     }),
   )
 
