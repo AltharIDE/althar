@@ -1,282 +1,248 @@
-/* the tiles: three across, each a home's face and how it stands */
-.tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(164px, 1fr));
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* Manage 1 · Drawing: cards on dotted paper, this computer at the head and its homes tied to it */
+
+/* the drawings' ground: the dialog's sheet, dotted, edge to edge */
+.paper {
+  margin: 2px -22px 0;
+  padding: 14px 22px 20px;
+  border-block: 1px solid var(--line);
+  background-image: radial-gradient(circle at 1px 1px, var(--line-3) 1px, transparent 1.4px);
+  background-size: 16px 16px;
+  background-position: 7px 7px;
 }
-.cell {
+
+/* a card, as the drawings draw one: where it is, its name, its facts */
+.card {
   position: relative;
-  min-width: 0;
-}
-.tile {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
+  gap: 0;
   width: 100%;
-  min-height: 150px;
-  padding: 14px 14px 12px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
+  min-width: 0;
+  padding: 11px 14px 12px;
+  border-radius: 12px;
   background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
   text-align: left;
-  transition:
-    transform var(--enter) var(--ease-out),
-    border-color var(--fast) var(--ease);
+  transition: box-shadow var(--fast) var(--ease);
 }
-.tile:hover {
-  border-color: color-mix(in oklab, var(--ink, var(--t-3)) 45%, var(--line-2));
-  transform: translateY(-2px);
+button.card:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-2);
 }
-.tile:active {
-  transform: scale(var(--scale-press));
+/* a home whose window is connected: its edge in cobalt, as live work is */
+.card[data-live] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--live) 38%, var(--line-2)),
+    var(--lift-card);
 }
-/* this window's home: its colour round it */
-.tile[data-here] {
-  border-color: color-mix(in oklab, var(--ink) 70%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 70%, transparent);
+.me {
+  width: min(100%, 360px);
 }
-.face {
-  margin-bottom: auto;
-  transition: transform var(--enter) var(--ease-slide);
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font: 400 11.5px/1.3 var(--mono);
+  color: var(--t-3);
+  text-align: left;
 }
-.tile:hover .face {
-  transform: rotate(-6deg) scale(1.06);
+button.eyebrow {
+  margin: -4px -6px;
+  padding: 4px 6px;
+  border-radius: 6px;
 }
-.name {
-  max-width: 100%;
-  margin-top: 14px;
+button.eyebrow:hover {
+  background: var(--hover-paper);
+}
+.where {
+  min-width: 0;
   overflow: hidden;
-  font-size: 13.5px;
-  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.key {
+  flex: none;
+  margin-left: auto;
+  padding-left: 12px;
+}
+.caret {
+  flex: none;
+  color: var(--t-3);
+}
+
+.title {
+  margin: 7px 0 8px;
+  overflow: hidden;
+  font: 600 16px/1.3 var(--font-display);
+  letter-spacing: -0.01em;
   color: var(--t-1);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.when {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--t-3);
-}
-.when[data-down] {
-  color: var(--danger);
-}
-.open {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  opacity: 0;
-  transition: opacity var(--fast) var(--ease);
-}
-.cell:hover .open,
-.cell:focus-within .open {
-  opacity: 1;
-}
-.add {
-  border-style: dashed;
+/* the name, changed where it stands: the title at rest, a field once it's pointed at */
+.card .titleField {
+  width: calc(100% + 14px);
+  height: 30px;
+  margin: 3px -7px 4px;
+  padding: 0 6px;
   background: none;
-  color: var(--t-3);
-}
-.add .name {
-  color: var(--t-2);
-}
-.add:hover {
-  border-color: var(--line-3);
-}
-.undo {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  font-size: 12.5px;
-  color: var(--t-2);
-}
-
-/* the passport: the tile, grown */
-.passport {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.head {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-.headWords {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-.headWords .when {
-  margin-top: 4px;
-}
-.nameWrap {
-  display: block;
-  margin: 0 0 2px -8px;
-}
-.passport .bigName {
   box-shadow: none;
-  width: 100%;
-  height: 34px;
-  border-color: transparent;
-  background: none;
-  font-size: 19px;
-  font-weight: 600;
-  color: var(--t-1);
+  font: 600 16px/1.3 var(--font-display);
+  letter-spacing: -0.01em;
 }
-.passport .bigName:hover {
+.card .titleField:hover {
   box-shadow: inset 0 0 0 1px var(--field-edge);
 }
-.passport .bigName:focus {
+.card .titleField:focus {
   background: var(--paper);
   box-shadow: inset 0 0 0 1.5px var(--signal);
 }
-.section {
+
+.facts {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--t-2);
+}
+.status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+  color: var(--t-2);
+}
+.status[data-down] {
+  color: var(--danger);
+}
+
+/* the homes, hanging off this computer: a trunk under its glyph, a tie into each card */
+.tree {
+  --trunk: 20px;
+  --indent: 46px;
+  --gap: 12px;
+  --at: 22px;
+  position: relative;
+  display: grid;
+  gap: var(--gap);
+  margin: 0;
+  padding: var(--gap) 0 0 var(--indent);
+  list-style: none;
+}
+.branch {
+  --tie: var(--line-3);
+  --tie-style: solid;
+  position: relative;
+}
+.branch[data-tie='live'] {
+  --tie: var(--live);
+}
+.branch[data-tie='connecting'] {
+  --tie: var(--live);
+  --tie-style: dashed;
+}
+.branch[data-tie='down'] {
+  --tie: var(--danger);
+  --tie-style: dashed;
+}
+.branch[data-tie='add'] {
+  --tie-style: dashed;
+}
+/* the tie: down from the trunk, round the corner and into the card, in the colour its connection stands in */
+.branch::before {
+  position: absolute;
+  z-index: 1;
+  top: calc(var(--gap) * -1);
+  left: calc(var(--trunk) - var(--indent));
+  width: calc(var(--indent) - var(--trunk));
+  height: calc(var(--gap) + var(--at));
+  border-bottom: 1.5px var(--tie-style) var(--tie);
+  border-left: 1.5px var(--tie-style) var(--tie);
+  border-bottom-left-radius: 12px;
+  content: '';
+  pointer-events: none;
+}
+/* the trunk going on past a card, to the homes below it */
+.branch:not(:last-child)::after {
+  position: absolute;
+  top: var(--at);
+  bottom: calc(var(--gap) * -1);
+  left: calc(var(--trunk) - var(--indent));
+  border-left: 1.5px solid var(--line-3);
+  content: '';
+  pointer-events: none;
+}
+
+/* Connect a home: the next card, not drawn yet */
+.add {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-3);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-2);
+  border: 1.5px dashed var(--line-3);
+  box-shadow: none;
+}
+.add:hover {
+  background: var(--paper);
+  color: var(--t-1);
+}
+.branch[data-tie='add'] {
+  --at: 20px;
+}
+
+/* an open card's rest: label beside what it labels, Forget apart at the foot */
+.details {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-top: 16px;
+  gap: 14px;
+  margin-top: 12px;
+  padding-top: 14px;
   border-top: 1px solid var(--line);
+}
+.row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
 }
 .label {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--t-1);
-}
-
-/* the home's identity, and what a checked host has, side by side */
-.likeness {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  min-height: 56px;
-}
-.pair {
-  position: relative;
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 10px;
-}
-.not {
-  font-size: 18px;
-  color: var(--danger);
-  animation: fade var(--enter) var(--ease-out) both;
-}
-.asking {
-  animation: asking 1.1s var(--ease) infinite alternate;
-}
-.arrive {
-  animation: arrive var(--move) var(--ease-slide) both;
-}
-/* the same home: its sigil slides onto the saved one and settles there */
-.land {
-  position: absolute;
-  left: 0;
-  animation: land var(--move) var(--ease-slide) both;
-}
-.likeWords {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-.id {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.id code {
-  min-width: 0;
-  overflow: hidden;
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--t-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.verdict {
-  overflow: hidden;
-  font-size: 13px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  animation: fade var(--enter) var(--ease-out) both;
-}
-.verdict[data-tone='same'] {
-  color: var(--ok-ink);
-}
-.verdict[data-tone='other'] {
-  color: var(--danger);
-}
-.sub {
-  overflow: hidden;
-  font-size: 12px;
+  padding-top: 8px;
+  font: 500 10.5px/1.2 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--t-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.forget {
+.row:has(code) .label {
+  padding-top: 3px;
+}
+.foot {
   display: flex;
-  padding-top: 16px;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
-@keyframes fade {
-  from {
-    opacity: 0;
-  }
-}
-@keyframes asking {
-  from {
-    opacity: 0.35;
-  }
-}
-@keyframes arrive {
-  from {
-    opacity: 0;
-    transform: translateX(24px) rotate(8deg);
-  }
-}
-@keyframes land {
-  from {
-    opacity: 0;
-    transform: translateX(58px) rotate(12deg) scale(1.1);
-  }
-  70% {
-    opacity: 1;
-  }
-}
-
-/* the sigil and the name travel between the tile and the passport */
-::view-transition-group(*) {
-  animation-duration: var(--move);
-  animation-timing-function: var(--ease-slide);
+.undo {
+  margin-top: 10px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tile,
-  .face,
-  .tile:hover,
-  .tile:hover .face {
-    transform: none;
+  .card {
     transition: none;
-  }
-  .arrive,
-  .land,
-  .asking {
-    animation: fade var(--enter) var(--ease-out) both;
   }
 }

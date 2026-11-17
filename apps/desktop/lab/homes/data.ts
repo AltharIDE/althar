@@ -107,6 +107,17 @@ const projectsOf = (windowId: string): ReadonlyArray<WorldProject> => {
   return PROJECTS[windowId] ?? [{ id: `p_${windowId}_tools`, name: 'tools', ink: 'ochre', tasks: [], talk: [] }]
 }
 
+/** The projects on a home, as its window lists them, with how much runs and how much waits on you: Manage knows a home by them. */
+export const projectsOn = (windowId: string) =>
+  projectsOf(windowId).map((project) => ({
+    id: project.id,
+    name: project.name,
+    ink: project.ink,
+    running: project.tasks.filter((task) => task.phase === 'running').length,
+    ready: project.tasks.filter((task) => task.phase === 'ready').length,
+  }))
+export type OnHome = ReturnType<typeof projectsOn>[number]
+
 const summaryOf = (windowId: string, project: WorldProject): ProjectSummary => ({
   id: project.id,
   name: project.name,

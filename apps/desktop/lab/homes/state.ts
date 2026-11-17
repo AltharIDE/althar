@@ -22,9 +22,9 @@ export type Direction = (typeof DIRECTIONS)[number]['key']
 
 /** The chip's Manage homes dialog, three ways. */
 export const MANAGES = [
-  { key: '1', kbd: '1', label: 'Sigils' },
-  { key: '2', kbd: '2', label: 'Orbit' },
-  { key: '3', kbd: '3', label: 'Keycards' },
+  { key: '1', kbd: '1', label: 'Drawing' },
+  { key: '2', kbd: '2', label: 'Title blocks' },
+  { key: '3', kbd: '3', label: 'Projects' },
 ] as const
 export type Manage = (typeof MANAGES)[number]['key']
 

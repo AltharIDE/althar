@@ -1,319 +1,211 @@
-/* the map: this computer in the middle, its homes round it */
-.map {
-  position: relative;
-  margin: -4px -4px 0;
+/* Manage 2 · Title blocks: each home the ruled corner of a drawing sheet */
+
+.sheets {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* the block: hairlines between its cells, a firmer one round it, as a drawing's title block is ruled */
+.block {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 0.95fr);
+  gap: 1px;
   overflow: hidden;
-  border-radius: var(--r-lg);
-  background: var(--n-2);
+  border-radius: 8px;
+  background: var(--line-2);
+  box-shadow:
+    0 0 0 1px var(--line-3),
+    var(--lift-card);
 }
-.links {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-/* a tie, as its connection stands */
-.link line {
-  stroke: var(--t-4);
-  stroke-width: 1.2;
-  stroke-dasharray: 1 5;
-  stroke-linecap: round;
-  transition: opacity var(--enter) var(--ease);
-}
-.link[data-state='live'] line {
-  stroke: color-mix(in oklab, var(--ink) 70%, var(--t-3));
-  stroke-width: 1.6;
-  stroke-dasharray: none;
-}
-.link[data-state='connecting'] line {
-  stroke: var(--signal);
-  stroke-width: 1.6;
-  stroke-dasharray: 5 5;
-  animation: march 0.8s linear infinite;
-}
-.link[data-state='down'] line {
-  stroke: var(--danger);
-  stroke-width: 1.6;
-  stroke-dasharray: 4 4;
-}
-.link .cut line {
-  stroke-dasharray: none;
-  stroke-width: 1.8;
-}
-.link:not([data-lit]) {
-  opacity: 0.3;
-}
-.packet {
-  fill: var(--ink);
-}
-.addLink {
-  stroke: var(--line-3);
-  stroke-width: 1;
-  stroke-dasharray: 2 5;
-}
-.map[data-picked] .addLink {
-  opacity: 0.3;
+/* a home whose window is connected: its rule in cobalt, as live work is */
+.block[data-live] {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--live) 45%, var(--line-3)),
+    var(--lift-card);
 }
 
-/* a place on the orbit: a point, its disc centred on it and its words beneath */
-.place {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
-}
-.node {
-  position: absolute;
-  top: -23px;
-  left: 0;
+.cell {
+  position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  width: 112px;
-  transform: translateX(-50%);
-  text-align: center;
-  transition: opacity var(--enter) var(--ease);
-}
-.node[data-dim] {
-  opacity: 0.45;
-}
-.node[data-dim]:hover {
-  opacity: 0.8;
-}
-.disc {
-  position: relative;
-  display: grid;
-  width: 46px;
-  height: 46px;
-  margin-bottom: 4px;
-  place-items: center;
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--ink, var(--t-3)) 15%, var(--paper));
-  color: var(--ink, var(--t-3));
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ink, var(--t-3)) 30%, transparent);
-  transition:
-    transform var(--enter) var(--ease-slide),
-    box-shadow var(--fast) var(--ease);
-}
-.node:hover .disc {
-  transform: scale(1.08);
-}
-.node:active .disc {
-  transform: scale(var(--scale-press));
-}
-.node[aria-pressed='true'] .disc {
-  box-shadow:
-    0 0 0 2px var(--n-2),
-    0 0 0 4px var(--ink);
-  transform: scale(1.12);
-}
-.node[data-here] .disc {
-  background: var(--ink);
-  color: var(--on-signal);
-}
-.nodeDot {
-  position: absolute;
-  right: 1px;
-  bottom: 1px;
-  box-shadow: 0 0 0 2px var(--n-2);
-}
-.nodeDot[data-state='rest'] {
-  display: none;
-}
-.nodeName {
-  max-width: 100%;
-  overflow: hidden;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 11px 9px;
+  background: var(--paper);
   font-size: 12.5px;
-  font-weight: 600;
-  color: var(--t-1);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.nodeWhen {
-  font-size: 11.5px;
-  color: var(--t-3);
-  white-space: nowrap;
+.home {
+  grid-column: span 2;
 }
-.nodeWhen[data-down] {
-  color: var(--danger);
-}
-.addNode .disc {
-  background: none;
-  color: var(--t-3);
-  box-shadow: none;
-  border: 1.5px dashed var(--line-3);
-}
-.addNode .nodeName {
-  font-weight: 500;
-  color: var(--t-3);
-}
-.map[data-picked] .addNode {
-  opacity: 0.45;
+.wide {
+  grid-column: 1 / -1;
 }
 
-/* this computer, at the centre */
-.me {
-  position: absolute;
-  top: -29px;
-  left: 0;
+.label {
+  font: 500 9.5px/1.2 var(--font-label);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.labelRow {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  width: 112px;
-  transform: translateX(-50%);
-  text-align: center;
+  justify-content: space-between;
+  gap: 8px;
 }
-.meDisc {
-  display: grid;
-  width: 58px;
-  height: 58px;
-  margin-bottom: 4px;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--paper);
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: -3px -4px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font: 500 9.5px/1.2 var(--font-label);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.toggle:hover {
+  background: var(--hover-paper);
   color: var(--t-1);
-  box-shadow:
-    0 0 0 1px var(--line-2),
-    0 0 0 9px color-mix(in oklab, var(--paper) 60%, transparent);
-}
-.me[data-here] .meDisc {
-  background: var(--t-1);
-  color: var(--n-1);
 }
 
-/* the picked home's card, grown from its side of the orbit */
-.card {
-  position: absolute;
-  top: 50%;
-  right: 14px;
-  left: 304px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: calc(100% - 28px);
-  padding: 12px 14px 10px;
-  overflow: hidden auto;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
-  background: var(--paper);
-  translate: 0 -50%;
-  transform-origin: left center;
-  animation: grow var(--enter) var(--ease-out) both;
-}
-.card .cardName {
-  box-shadow: none;
-  width: calc(100% + 8px);
-  height: 30px;
-  margin-left: -8px;
-  border-color: transparent;
+/* a value that changes where it is: text at rest, a field once it's pointed at */
+.cell .name,
+.cell .host {
+  width: calc(100% + 10px);
+  margin: -2px -5px -3px;
+  padding: 0 5px;
   background: none;
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--t-1);
+  box-shadow: none;
 }
-.card .cardName:hover {
+.cell .name {
+  height: 30px;
+  font: 600 17px/1.2 var(--font-display);
+  letter-spacing: -0.01em;
+}
+.cell .host {
+  height: 24px;
+  font: 400 12.5px/1.2 var(--mono);
+}
+.cell .name:hover,
+.cell .host:hover {
   box-shadow: inset 0 0 0 1px var(--field-edge);
 }
-.card .cardName:focus {
+.cell .name:focus,
+.cell .host:focus {
   background: var(--paper);
   box-shadow: inset 0 0 0 1.5px var(--signal);
 }
-.cardId {
-  display: flex;
+
+.stands {
+  justify-content: flex-start;
+}
+.status {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-  margin-top: 10px;
-  padding: 6px 6px 6px 10px;
-  border-radius: 8px;
-  background: color-mix(in oklab, var(--ink) 8%, var(--n-2));
+  gap: 7px;
+  min-height: 24px;
+  font-size: 12.5px;
+  color: var(--t-2);
 }
-.cardId code {
-  min-width: 0;
-  overflow: hidden;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: color-mix(in oklab, var(--ink) 55%, var(--t-1));
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cardActions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 10px;
-}
-.cardEdit {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
-}
-.done {
-  align-self: flex-end;
-}
-.forget {
-  align-self: flex-start;
-  margin: 8px 0 0 -8px;
+.status[data-down] {
   color: var(--danger);
 }
-.undo {
+/* Open and Forget, in the block's corner as it's pointed at */
+.corner {
+  position: absolute;
+  top: 4px;
+  right: 4px;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.block:hover .corner,
+.block:focus-within .corner {
+  opacity: 1;
+}
+
+.projects {
+  min-height: 20px;
   font-size: 12.5px;
   color: var(--t-2);
 }
 
-@keyframes grow {
-  from {
-    opacity: 0;
-    transform: translateX(-12px) scale(var(--scale-pop));
-  }
+.id {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 20px;
 }
-@keyframes march {
-  to {
-    stroke-dashoffset: -10;
-  }
+.id code,
+.answer code {
+  font: 400 12px/1.2 var(--mono);
+  color: var(--t-1);
 }
-@media (prefers-reduced-motion: reduce) {
-  .card {
-    animation-name: fade;
-  }
-  .link[data-state='connecting'] line {
-    animation: none;
-  }
-  .packet {
-    display: none;
-  }
-}
-@keyframes fade {
-  from {
-    opacity: 0;
-  }
-}
-
-/* with a home picked, the others are discs only: their words would crowd the drawn-in orbit */
-.nodeName,
-.nodeWhen {
-  transition: opacity var(--enter) var(--ease);
-}
-.map[data-picked] .node[data-dim] :is(.nodeName, .nodeWhen),
-.map[data-picked] .addNode .nodeName,
-.map[data-picked] .me .nodeName {
+.copy {
   opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.cell:hover .copy,
+.copy:focus-visible {
+  opacity: 1;
+}
+.answer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.answer[data-tone='other'] {
+  color: var(--t-1);
 }
 
-/* a home above this computer has its words above it, clear of its tie */
-.node[data-above] {
-  top: auto;
-  bottom: -23px;
+.options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
 }
-.node[data-above] .disc {
-  order: 2;
-  margin: 4px 0 0;
+.foot {
+  gap: 8px;
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Connect a home: the next sheet, blank */
+.blank {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px dashed var(--line-3);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.blank:hover {
+  background: var(--hover-paper);
+  color: var(--t-1);
+}
+
+.undo {
+  margin-top: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .corner,
+  .copy {
+    transition: none;
+  }
 }

@@ -1,7 +1,21 @@
-import { type CSSProperties, useEffect, useId, useRef, useState } from 'react'
-import { Button, Caret, CopyButton, Disclosure, DisclosureTrigger, Field, Fold, Icon, Problem } from '@althar/ui'
+import { type RefObject, useEffect, useId, useRef, useState } from 'react'
+import {
+  Button,
+  Caret,
+  CopyButton,
+  Disclosure,
+  DisclosureTrigger,
+  Field,
+  Fold,
+  Icon,
+  LiveDot,
+  Problem,
+  ProjectMark,
+  type ProjectInk,
+} from '@althar/ui'
 
 import type { HomesHost, SshHomeTarget } from '../../../../src/homes'
+import { projectsOn } from '../../data'
 import { type LabHome, stateOf, useWorld, world } from '../../world'
 import { homeProblem, isOpen, lastOpened, nameFrom, OptionFields, type Options, Refusal, useConnect, Working } from '../parts'
 import p from '../parts.module.css'
@@ -15,75 +29,80 @@ import s from './shared.module.css'
  * say where each home stands.
  */
 
-const MARKS = ['teal', 'clay', 'indigo', 'moss', 'ochre', 'plum', 'rose', 'slate', 'olive', 'brick'] as const
-const nibbles = (homeId: string) => [...homeId.replace(/^home_/, '')].map((char) => Number.parseInt(char, 16) || 0)
-
-/** A home's colour, from its identity: the same home is the same colour, whichever host reaches it. */
-export const inkOf = (homeId: string) => {
-  const [a = 0, b = 0] = nibbles(homeId).slice(25, 27)
-  return `var(--mark-${MARKS[(a * 16 + b) % MARKS.length]})`
-}
-export const inked = (homeId: string) => ({ '--ink': inkOf(homeId) }) as CSSProperties
-
-/**
- * A home's sigil: its identity drawn, a mirrored four-by-four of quarter
- * circles, dots and squares read off the home's id. The same home draws the
- * same sigil from any host; another home draws another, so checking a host
- * is a picture to compare, not 32 letters.
- */
-export function Sigil({
-  homeId,
-  size = 40,
-  className,
-  style: more,
-}: {
-  homeId: string | null
-  size?: number
-  className?: string
-  style?: CSSProperties
-}) {
-  const style = { ...(homeId === null ? {} : inked(homeId)), width: size, height: size, ...more }
-  if (homeId === null) return <span className={`${s.sigil} ${s.sigilEmpty} ${className ?? ''}`} style={style} aria-hidden="true" />
-  const n = nibbles(homeId)
-  const cell = 24
-  const shapes = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
-    const v = n[i] ?? 0
-    const x = (i % 2) * cell
-    const y = Math.floor(i / 2) * cell
-    if (v < 7) {
-      // a quarter circle, its square corner in one of the cell's four
-      const corner = v % 4
-      const cx = corner === 1 || corner === 2 ? x + cell : x
-      const cy = corner >= 2 ? y + cell : y
-      const dx = cx === x ? cell : -cell
-      const dy = cy === y ? cell : -cell
-      const sweep = dx * dy > 0 ? 1 : 0
-      return <path key={i} d={`M${cx} ${cy}h${dx}A${cell} ${cell} 0 0 ${sweep} ${cx} ${cy + dy}Z`} />
-    }
-    if (v < 9) return <circle key={i} cx={x + cell / 2} cy={y + cell / 2} r={cell * 0.3} />
-    if (v < 10) return <rect key={i} x={x + 3} y={y + 3} width={cell - 6} height={cell - 6} rx={3} />
-    return null
-  })
-  return (
-    <span className={`${s.sigil} ${className ?? ''}`} style={style} aria-hidden="true">
-      <svg viewBox="-14 -14 124 124">
-        <g>{shapes}</g>
-        <g transform="translate(96 0) scale(-1 1)">{shapes}</g>
-      </svg>
-    </span>
-  )
-}
-
-/** How a home's connection stands, as a dot: live (breathing), dropped, on its way, or resting. */
+/** How a home's connection stands: live while its window is connected, dropped, on its way, or resting (no window open). */
 export type Liveness = 'live' | 'down' | 'connecting' | 'rest'
-export const useLiveness = (home: LabHome): Liveness => {
+export const useLiveness = (home: { readonly id: string }): Liveness => {
   useWorld()
+  if (home.id === 'local') return 'live'
   if (!isOpen(home.id)) return 'rest'
   const { connection } = stateOf(home.id)
   return connection === 'disconnected' ? 'down' : connection === 'connecting' ? 'connecting' : 'live'
 }
-export function LiveDot({ state, className }: { state: Liveness; className?: string }) {
-  return <span className={`${s.dot} ${className ?? ''}`} data-state={state} aria-hidden="true" />
+
+/** The kit's live dot (cobalt) while a home's window is connected, ringing while it connects; a still red one where it dropped; nothing at rest. */
+export function HomeDot({ state }: { state: Liveness }) {
+  if (state === 'live') return <LiveDot />
+  if (state === 'connecting') return <LiveDot ping />
+  if (state === 'down') return <span className={s.down} aria-hidden="true" />
+  return null
+}
+
+/**
+ * The projects on a home, as their marks and names: alive while its window is
+ * connected (a cobalt arc round a project where work runs, a violet dot where
+ * something waits on you), quiet at rest, when what runs there isn't known.
+ */
+export function Projects({
+  on,
+  live,
+  size = 15,
+  max = 3,
+  className,
+}: {
+  on: string
+  live: boolean
+  size?: number
+  max?: number
+  className?: string
+}) {
+  const projects = projectsOn(on)
+  if (projects.length === 0) return <span className={s.none}>No projects yet</span>
+  const first = projects.slice(0, max)
+  return (
+    <span className={`${s.projects} ${className ?? ''}`}>
+      {first.map((project) => (
+        <span key={project.id} className={s.project}>
+          <ProjectMark
+            seed={project.id}
+            ink={project.ink as ProjectInk}
+            size={size}
+            running={live && project.running > 0}
+            yours={live && project.ready > 0}
+            quiet={!live}
+          />
+          {project.name}
+        </span>
+      ))}
+      {projects.length > first.length && <span className={s.none}>{`and ${projects.length - first.length} more`}</span>}
+    </span>
+  )
+}
+
+/** A home's identity, short: enough to tell two apart at a glance; the whole of it is a copy away. */
+export const shortId = (homeId: string) => {
+  const hex = homeId.replace(/^home_/, '')
+  return `${hex.slice(0, 4)}…${hex.slice(-4)}`
+}
+
+/** The dialog itself takes focus as it opens, not its first field or card: opening Manage mustn't put a home's name under the keys. */
+export const useQuietFocus = (inside: RefObject<HTMLElement | null>) => {
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const dialog = inside.current?.closest('[role=dialog]')
+      if (dialog instanceof HTMLElement) dialog.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [inside])
 }
 
 /** What each Manage dialog is given: the window's homes, which window it is, and the ways out. */
@@ -303,6 +322,8 @@ export function ConnectionFields({
   optionsOpen,
   actions = true,
   results = true,
+  label = true,
+  autoFocus,
 }: {
   edit: Editing
   home: LabHome
@@ -311,6 +332,9 @@ export function ConnectionFields({
   actions?: boolean
   /** What the check found (another home, or the same one kept), here; or the dialog's own way of showing it. */
   results?: boolean
+  /** Its "SSH host" over the field; or none, where what holds it names it. */
+  label?: boolean
+  autoFocus?: boolean
 }) {
   const id = useId()
   const { form } = edit
@@ -319,9 +343,11 @@ export function ConnectionFields({
   return (
     <div className={s.connection}>
       <label className={s.field} htmlFor={`${id}-host`}>
-        <span>SSH host</span>
+        {label && <span>SSH host</span>}
         <Field
           id={`${id}-host`}
+          aria-label={label ? undefined : 'SSH host'}
+          autoFocus={autoFocus}
           value={form.target}
           invalid={form.phase === 'refused'}
           spellCheck={false}

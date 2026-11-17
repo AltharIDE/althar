@@ -1,233 +1,226 @@
-/* the deck: a row of cards, more than fit sliding along */
-.deck {
-  display: flex;
-  gap: 14px;
-  margin: -10px -22px 0;
-  padding: 12px 22px 18px;
-  overflow: auto hidden;
-  scroll-snap-type: x mandatory;
-  scroll-padding: 0 22px;
-  scrollbar-width: none;
+/* Manage 3 · By their projects: each home, and the projects on it by their marks */
+
+.homes {
+  margin: 0;
+  padding: 0;
   list-style: none;
-  mask-image: linear-gradient(to right, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
 }
-.slot {
-  flex: none;
-  width: 212px;
-  scroll-snap-align: start;
+.home {
+  padding: 14px 0;
 }
-
-/* the pointer's lean, quick; separate from the turn, which is slow */
-.lean {
-  height: 100%;
-  perspective: 900px;
-  transform: rotateX(calc(var(--ly) * -5deg)) rotateY(calc(var(--lx) * 6deg));
-  transition:
-    transform 160ms var(--ease-out),
-    opacity var(--exit) var(--ease);
+.home + .home {
+  border-top: 1px solid var(--line);
 }
-/* Forget: the card drops out of the deck */
-.lean[data-leaving] {
-  opacity: 0;
-  transform: translateY(46px) rotate(-9deg) scale(0.94);
-  transition:
-    transform 260ms var(--ease-out),
-    opacity 220ms var(--ease) 40ms;
+.home:first-child {
+  padding-top: 4px;
 }
 
-.card {
-  position: relative;
-  height: 316px;
-  transform-style: preserve-3d;
-  transition: transform var(--move) var(--ease-slide);
+.head {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto 24px;
+  gap: 12px;
+  align-items: center;
+  min-height: 34px;
 }
-.card[data-turned] {
-  transform: rotateY(180deg);
+.glyph {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--well);
+  color: var(--t-2);
 }
-.front,
-.back {
-  position: absolute;
-  inset: 0;
+.glyph[data-down] {
+  color: var(--danger);
+}
+.words {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--line-2);
-  border-radius: 12px;
-  background: var(--paper);
-  backface-visibility: hidden;
-}
-.back {
-  transform: rotateY(180deg);
-}
-.card[data-here] .front {
-  border-color: color-mix(in oklab, var(--ink) 60%, transparent);
-}
-.lean:hover .front {
-  border-color: color-mix(in oklab, var(--ink) 45%, var(--line-2));
-}
-
-/* the band: the home's colour, striped its own way */
-.band {
-  position: relative;
-  display: flex;
-  align-items: flex-end;
-  height: 148px;
-  flex: none;
-  padding: 12px 14px;
-  background:
-    repeating-linear-gradient(
-      var(--angle),
-      transparent 0 var(--stripe),
-      color-mix(in oklab, var(--on-signal) 13%, transparent) var(--stripe) calc(var(--stripe) * 2)
-    ),
-    linear-gradient(160deg, color-mix(in oklab, var(--ink) 82%, var(--on-signal)), var(--ink));
-}
-.initials {
-  font-size: 34px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1;
-  color: var(--on-signal);
-}
-.bandDot {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--on-signal) 85%, transparent);
-}
-.bandDot[data-state='rest'] {
-  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--on-signal) 70%, transparent);
-}
-.facts {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
-  flex: 1;
-  padding: 12px 14px 0;
 }
 .name {
   overflow: hidden;
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 18px;
   color: var(--t-1);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.when {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--t-3);
-}
-.when[data-down] {
-  color: var(--danger);
-}
-.strip {
-  display: flex;
-  flex: none;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 8px 10px;
-  border-top: 1px solid var(--line);
-}
-.strip > :only-child {
-  margin-left: auto;
-}
-
-/* its back: a thin band, then what it is and how it's reached */
-.backBand {
-  height: 8px;
-  flex: none;
-  background: var(--ink);
-}
-.backBody {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  flex: 1;
-  padding: 8px 12px 10px;
-  overflow: hidden auto;
-}
-.back .backName {
-  box-shadow: none;
+.words .nameField {
   width: calc(100% + 12px);
-  height: 30px;
-  margin-left: -6px;
-  border-color: transparent;
-  background: none;
-  font-size: 14.5px;
+  height: 26px;
+  margin: -4px -6px -2px;
+  padding: 0 6px;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--t-1);
 }
-.back .backName:hover {
-  box-shadow: inset 0 0 0 1px var(--field-edge);
-}
-.back .backName:focus {
-  background: var(--paper);
-  box-shadow: inset 0 0 0 1.5px var(--signal);
-}
-.backId {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--t-2);
-}
-.backId code {
-  font-size: 11px;
-}
-.forget {
-  margin-left: -4px;
-  color: var(--danger);
-}
-
-/* the blank card: where the next home goes */
-.blank {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  width: 100%;
-  height: 316px;
-  border: 1.5px dashed var(--line-3);
-  border-radius: 12px;
-  font-size: 13px;
-  font-weight: 500;
+.host {
+  overflow: hidden;
+  font: 400 11.5px/15px var(--mono);
   color: var(--t-3);
-  transition:
-    color var(--fast) var(--ease),
-    border-color var(--fast) var(--ease);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.blank:hover {
-  border-color: var(--t-4);
-  color: var(--t-1);
-}
-.blankMark {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--n-4);
-}
-.undo {
-  display: flex;
+.status {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 4px;
+  gap: 7px;
   font-size: 12.5px;
   color: var(--t-2);
+  white-space: nowrap;
+}
+.status[data-down] {
+  color: var(--danger);
+}
+/* the ⋯ menu: shown as the home is pointed at, or while it's open */
+.more {
+  grid-column: 4;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.home:hover .more,
+.home:focus-within .more,
+.more[data-state='open'] {
+  opacity: 1;
+}
+
+/* the projects on it, under its name */
+.shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0 0 0 42px;
+  list-style: none;
+}
+.project {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  text-align: left;
+  transition: box-shadow var(--fast) var(--ease);
+}
+.project:hover {
+  box-shadow:
+    inset 0 0 0 1px var(--line-3),
+    var(--lift-2);
+}
+.mark {
+  grid-row: span 2;
+}
+.projectName {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doing {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project:has(.doing) .projectName {
+  align-self: end;
+}
+.doing {
+  align-self: start;
+}
+/* at rest, what runs there isn't known: the projects only, quieter */
+.shelf[data-rest] .project {
+  min-height: 44px;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.shelf[data-rest] .project:hover {
+  background: var(--paper);
+}
+.shelf[data-rest] .mark {
+  grid-row: auto;
+}
+.shelf[data-rest] .projectName {
+  color: var(--t-2);
+}
+
+.empty {
+  margin: 8px 0 0 42px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+
+/* the connection, changed where the projects were */
+.edit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0 0 42px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.done {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Connect a home: a home not here yet */
+.add {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-2);
+}
+.add .glyph {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--line-3);
+}
+.add:hover {
+  color: var(--t-1);
+}
+.add:hover .glyph {
+  background: var(--hover-paper);
+}
+
+.undo {
+  margin-top: 4px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lean,
-  .lean[data-leaving] {
-    transform: none;
-  }
-  .card {
+  .more,
+  .project {
     transition: none;
   }
 }

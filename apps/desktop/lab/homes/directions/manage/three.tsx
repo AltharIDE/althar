@@ -1,83 +1,90 @@
-import { type CSSProperties, type PointerEvent, useEffect, useRef, useState } from 'react'
-import { Button, Dialog, Icon, ListMotion } from '@althar/ui'
+import { useEffect, useRef, useState } from 'react'
+import { Button, Dialog, Icon, IconButton, ListMotion, Menu, MenuItem, MenuSeparator, ProjectMark, type ProjectInk } from '@althar/ui'
 
 import type { HomesHost } from '../../../../src/homes'
+import { projectsOn } from '../../data'
 import { opening } from '../../state'
 import type { LabHome } from '../../world'
-import { Target, useHomes } from '../parts'
+import { Glyph, useHomes } from '../parts'
+import s from './three.module.css'
 import {
   ConnectionFields,
   Forgotten,
+  HomeDot,
   Identity,
-  inkOf,
-  LiveDot,
+  type Liveness,
   type ManageProps,
   NameField,
   openFrom,
   useEdit,
   useForget,
   useLiveness,
+  useQuietFocus,
   useStatus,
 } from './shared'
-import s from './three.module.css'
 
 /*
- * Manage 3 · Keycards. Each home is a card in a deck: a band in its colour,
- * striped its own way, with its initials; its name, host and how it stands
- * beneath; Edit and Open along its foot. A card leans toward the pointer.
- * Edit turns it over: its back is the name, the connection and the identity,
- * with Forget; Done turns it back. Forget lets the card drop out of the
- * deck, and the rest close up behind it, with Undo. A blank card at the end
- * is where the next home goes.
+ * Manage 3 · By their projects. A home is known by what's on it, so each
+ * shows its projects as the app shows projects everywhere: by their marks,
+ * a cobalt arc round one where work runs and a violet dot where something
+ * waits on you, while its window is connected; quiet while it rests, when
+ * what runs there isn't known. Pressing a project opens it on its home.
+ * This computer is one of the homes, first. What changes a home (rename,
+ * its connection, its identity, Forget) is in its ⋯ menu, shown as it's
+ * pointed at, and acts in place.
  */
 
-export function CardsManage({ homes, windowId, onClose, onConnect }: ManageProps) {
+type Editing = { readonly id: string; readonly what: 'name' | 'connection' } | null
+
+export function ProjectsManage({ homes, windowId, onClose, onConnect }: ManageProps) {
   const saved = useHomes()
   const forgetting = useForget(homes)
-  const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set())
   const shown = saved.filter((home) => !forgetting.hidden.has(home.id))
-  const [turned, setTurned] = useState<string | null>(opening.pick)
-  const deck = useRef<HTMLUListElement>(null)
-  const timers = useRef(new Set<ReturnType<typeof setTimeout>>())
-  useEffect(() => () => timers.current.forEach(clearTimeout), [])
-  // The card drops as it's pressed; once it's out of sight it's forgotten, and the deck closes up.
-  const forget = (home: LabHome) => {
-    setTurned(null)
-    setLeaving((was) => new Set(was).add(home.id))
-    const timer = setTimeout(() => {
-      timers.current.delete(timer)
-      forgetting.forget(home, saved.indexOf(home))
-      setLeaving((was) => {
-        const next = new Set(was)
-        next.delete(home.id)
-        return next
-      })
-    }, 260)
-    timers.current.add(timer)
-  }
+  const [editing, setEditing] = useState<Editing>(opening.pick === null ? null : { id: opening.pick, what: 'connection' })
+  const list = useRef<HTMLUListElement>(null)
+  useQuietFocus(list)
   return (
-    <Dialog title="Homes" width={720} onClose={onClose} actions={<Button onClick={onClose}>Done</Button>}>
-      <ListMotion within={deck}>
-        <ul className={s.deck} ref={deck}>
+    <Dialog title="Homes" width={600} tall onClose={onClose} actions={<Button onClick={onClose}>Done</Button>}>
+      <ListMotion within={list} enter="grow">
+        <ul className={s.homes} ref={list}>
+          <li data-move="local" className={s.home}>
+            <div className={s.head}>
+              <span className={s.glyph}>
+                <Glyph kind="local" size={15} />
+              </span>
+              <span className={s.words}>
+                <span className={s.name}>This computer</span>
+              </span>
+              {windowId === 'local' && (
+                <span className={s.status}>
+                  <HomeDot state="live" />
+                  This window
+                </span>
+              )}
+            </div>
+            <Shelf on="local" live="live" onOpen={() => openFrom(homes, 'local', onClose)} />
+          </li>
           {shown.map((home) => (
-            <Keycard
+            <Home
               key={home.id}
               home={home}
               homes={homes}
               windowId={windowId}
-              turned={turned === home.id}
-              leaving={leaving.has(home.id)}
-              onTurn={(on) => setTurned(on ? home.id : null)}
-              onForget={() => forget(home)}
+              editing={editing?.id === home.id ? editing.what : null}
+              onEdit={(what) => setEditing(what === null ? null : { id: home.id, what })}
               onClose={onClose}
+              onForget={() => {
+                setEditing(null)
+                forgetting.forget(home, saved.indexOf(home))
+              }}
             />
           ))}
-          <li data-move="add" className={s.slot}>
-            <button type="button" className={s.blank} onClick={onConnect}>
-              <span className={s.blankMark}>
-                <Icon name="plus" size={18} />
+          <li data-move="add" className={s.home}>
+            <button type="button" className={s.add} onClick={onConnect}>
+              <span className={s.glyph}>
+                <Icon name="plus" size={15} />
               </span>
-              <span>Connect a home</span>
+              Connect a home
             </button>
           </li>
         </ul>
@@ -87,108 +94,143 @@ export function CardsManage({ homes, windowId, onClose, onConnect }: ManageProps
   )
 }
 
-/** A card's initials: the first letters of its first two words, or a one-word name's first two. */
-const initials = (name: string) => {
-  const words = name.split(/[\s\-_.]+/).filter((word) => /^\p{L}/u.test(word))
-  if (words.length >= 2) return `${words[0]?.[0] ?? ''}${words[1]?.[0] ?? ''}`.toUpperCase()
-  const one = words[0] ?? name
-  return `${one.slice(0, 1).toUpperCase()}${one.slice(1, 2)}`
-}
-
-/** The band's stripes, read off the home's id: their angle and spacing are the home's own. */
-const band = (homeId: string): CSSProperties => {
-  const digits = [...homeId.replace(/^home_/, '')].map((char) => Number.parseInt(char, 16) || 0)
-  const angle = 15 + (digits[7] ?? 0) * 10
-  const width = 4 + (digits[11] ?? 0) / 1.6
-  return { '--ink': inkOf(homeId), '--angle': `${angle}deg`, '--stripe': `${width}px` } as CSSProperties
-}
-
-function Keycard({
+function Home({
   home,
   homes,
   windowId,
-  turned,
-  leaving,
-  onTurn,
-  onForget,
+  editing,
+  onEdit,
   onClose,
+  onForget,
 }: {
   home: LabHome
   homes: HomesHost
   windowId: string
-  turned: boolean
-  leaving: boolean
-  onTurn: (on: boolean) => void
-  onForget: () => void
+  editing: 'name' | 'connection' | null
+  onEdit: (what: 'name' | 'connection' | null) => void
   onClose: () => void
+  onForget: () => void
 }) {
-  const status = useStatus(home, windowId)
   const live = useLiveness(home)
-  const edit = useEdit(homes, home)
+  const status = useStatus(home, windowId)
   const here = home.id === windowId
-  const [lean, setLean] = useState({ x: 0, y: 0 })
-  const still = typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const follow = (event: PointerEvent<HTMLDivElement>) => {
-    if (still || turned) return
-    const box = event.currentTarget.getBoundingClientRect()
-    setLean({ x: ((event.clientX - box.left) / box.width - 0.5) * 2, y: ((event.clientY - box.top) / box.height - 0.5) * 2 })
-  }
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const timer = setTimeout(() => setCopied(false), 1600)
+    return () => clearTimeout(timer)
+  }, [copied])
   return (
-    <li data-move={home.id} className={s.slot}>
-      <div
-        className={s.lean}
-        data-leaving={leaving || undefined}
-        style={{ '--lx': turned ? 0 : lean.x, '--ly': turned ? 0 : lean.y } as CSSProperties}
-        onPointerMove={follow}
-        onPointerLeave={() => setLean({ x: 0, y: 0 })}
-      >
-        <div className={s.card} data-turned={turned || undefined} data-here={here || undefined} style={band(home.homeId)}>
-          <div className={s.front} inert={turned}>
-            <div className={s.band}>
-              <span className={s.initials}>{initials(home.name)}</span>
-              <LiveDot state={live} className={s.bandDot} />
-            </div>
-            <div className={s.facts}>
-              <span className={s.name} title={home.name}>
-                {home.name}
-              </span>
-              <Target home={home} />
-              <span className={s.when} data-down={status.down || undefined}>
-                {status.words}
-              </span>
-            </div>
-            <div className={s.strip}>
-              <Button size="small" variant="quiet" icon="pencil" onClick={() => onTurn(true)}>
-                Edit
-              </Button>
-              {!here && (
-                <Button size="small" onClick={() => openFrom(homes, home.id, onClose)}>
-                  Open
-                </Button>
-              )}
-            </div>
-          </div>
-          <div className={s.back} inert={!turned}>
-            <div className={s.backBand} />
-            <div className={s.backBody}>
-              <NameField home={home} className={s.backName} />
-              <ConnectionFields edit={edit} home={home} optionsOpen={false} />
-              <div className={s.backId}>
-                <span>Home</span>
-                <Identity homeId={home.homeId} />
-              </div>
-            </div>
-            <div className={s.strip}>
-              <Button size="small" variant="quiet" icon="remove" className={s.forget} onClick={onForget}>
-                Forget
-              </Button>
-              <Button size="small" onClick={() => onTurn(false)} disabled={edit.checking}>
-                Done
-              </Button>
-            </div>
-          </div>
-        </div>
+    <li data-move={home.id} className={s.home} data-editing={editing ?? undefined}>
+      <div className={s.head}>
+        <span className={s.glyph} data-down={live === 'down' || undefined}>
+          <Glyph kind={live === 'down' ? 'down' : 'home'} size={15} />
+        </span>
+        <span className={s.words}>
+          {editing === 'name' ? (
+            <NameField key={home.id} home={home} className={s.nameField} autoFocus onDone={() => onEdit(null)} />
+          ) : (
+            <span className={s.name}>{home.name}</span>
+          )}
+          <span className={s.host} role={copied ? 'status' : undefined}>
+            {copied ? 'Identity copied' : home.ssh.target}
+          </span>
+        </span>
+        <span className={s.status} data-down={status.down || undefined}>
+          <HomeDot state={live} />
+          {status.words}
+        </span>
+        <Menu
+          label={home.name}
+          align="end"
+          trigger={<IconButton icon="more" label={`${home.name}, more`} size="small" className={s.more} />}
+        >
+          {!here && (
+            <MenuItem icon="external" onSelect={() => openFrom(homes, home.id, onClose)}>
+              Open
+            </MenuItem>
+          )}
+          <MenuItem icon="pencil" onSelect={() => onEdit('name')}>
+            Rename
+          </MenuItem>
+          <MenuItem icon="plug" onSelect={() => onEdit('connection')}>
+            Edit connection
+          </MenuItem>
+          <MenuItem
+            icon="copy"
+            onSelect={() => {
+              void navigator.clipboard?.writeText(home.homeId)
+              setCopied(true)
+            }}
+          >
+            Copy identity
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem icon="remove" tone="danger" onSelect={onForget}>
+            Forget
+          </MenuItem>
+        </Menu>
       </div>
+      {editing === 'connection' ? (
+        <Connection home={home} homes={homes} onDone={() => onEdit(null)} />
+      ) : (
+        <Shelf on={home.id} live={live} onOpen={() => openFrom(homes, home.id, onClose)} />
+      )}
     </li>
+  )
+}
+
+/** What a project is doing, in a few words; known only while its home's window is connected. */
+const doing = (running: number, ready: number) => {
+  const parts = [running > 0 ? `${running} running` : null, ready > 0 ? `${ready} ready` : null].filter(Boolean)
+  return parts.length === 0 ? 'Nothing running' : parts.join(', ')
+}
+
+/** The projects on a home, each a press away from being opened there. */
+function Shelf({ on, live, onOpen }: { on: string; live: Liveness; onOpen: () => void }) {
+  const projects = projectsOn(on)
+  const alive = live === 'live'
+  if (projects.length === 0) return <p className={s.empty}>Add a project on the host and it shows here.</p>
+  return (
+    <ul className={s.shelf} data-rest={!alive || undefined}>
+      {projects.map((project) => (
+        <li key={project.id}>
+          <button type="button" className={s.project} onClick={onOpen}>
+            <ProjectMark
+              seed={project.id}
+              ink={project.ink as ProjectInk}
+              size={28}
+              running={alive && project.running > 0}
+              yours={alive && project.ready > 0}
+              quiet={!alive}
+              className={s.mark}
+            />
+            <span className={s.projectName}>{project.name}</span>
+            {alive && <span className={s.doing}>{doing(project.running, project.ready)}</span>}
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** A home's connection, changed in place of its projects: checked before it's kept, with its identity beneath. */
+function Connection({ home, homes, onDone }: { home: LabHome; homes: HomesHost; onDone: () => void }) {
+  const edit = useEdit(homes, home)
+  return (
+    <div className={s.edit}>
+      <ConnectionFields edit={edit} home={home} autoFocus />
+      <div className={s.identity}>
+        <span className={s.label}>Identity</span>
+        <Identity homeId={home.homeId} />
+      </div>
+      {!edit.dirty && !edit.checking && (
+        <span className={s.done}>
+          <Button size="small" variant="quiet" onClick={onDone}>
+            Close
+          </Button>
+        </span>
+      )}
+    </div>
   )
 }
