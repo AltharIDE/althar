@@ -184,9 +184,12 @@ export const issueOf = (task: Task, known: Known = {}): Issue => {
   const type =
     known.types === undefined
       ? undefined
-      : task.custom_item_id == null || task.custom_item_id === 0
-        ? DEFAULT_TYPE
-        : known.types.get(task.custom_item_id)
+      : // A workspace's task list doesn't say a task's type, so one read there has none to tell.
+        task.custom_item_id === undefined
+        ? undefined
+        : task.custom_item_id === null || task.custom_item_id === 0
+          ? DEFAULT_TYPE
+          : known.types.get(task.custom_item_id)
   const parent = task.parent === undefined ? undefined : task.parent === null ? null : known.parents?.get(task.parent)
   return {
     ...base(task),
@@ -473,10 +476,10 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
       return yield* choicesOn(yield* listOf(container), field)
     })
 
-  /** A type's choice as ClickUp takes it: null for its own Task, else the workspace's id for it. */
+  /** A type's choice as ClickUp takes it: 0 for its own Task, as its docs say, else the workspace's id for it. */
   const typeId = (choice: Choice) =>
     choice.id === DEFAULT_TYPE_ID
-      ? Effect.succeed(null)
+      ? Effect.succeed(0)
       : /^\d+$/.test(choice.id)
         ? Effect.succeed(Number(choice.id))
         : Effect.fail(notFound('task type', choice.id))
@@ -666,8 +669,11 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
                     Schema.Struct({
                       folders: Schema.Array(
                         Schema.Struct({
+                          id: Schema.optional(Schema.String),
                           name: Schema.String,
                           hidden: Schema.optional(Schema.NullOr(Schema.Boolean)),
+                          // A subfolder comes in the same list as the folders, with the one it is in.
+                          parent_folder: Schema.optional(Schema.NullOr(Schema.String)),
                           lists: Schema.optional(Schema.NullOr(Schema.Array(NamedList))),
                         }),
                       ),
@@ -681,11 +687,24 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
                     `${api}/space/${id}/list?archived=false`,
                   )
                   const where = teams.length > 1 ? [team.name, space.name] : [space.name]
+                  // A folder's path from its space: its parents' names, outermost first, a hidden one's left out; a loop stops where it began.
+                  const byId = new Map(folders.flatMap((folder) => (folder.id === undefined ? [] : [[folder.id, folder] as const])))
+                  const pathOf = (folder: (typeof folders)[number]): ReadonlyArray<string> => {
+                    const names: Array<string> = []
+                    const seen = new Set<string>()
+                    for (let at: (typeof folders)[number] | undefined = folder; at !== undefined;) {
+                      if (at.id !== undefined) {
+                        if (seen.has(at.id)) break
+                        seen.add(at.id)
+                      }
+                      if (at.hidden !== true) names.unshift(at.name)
+                      at = at.parent_folder == null ? undefined : byId.get(at.parent_folder)
+                    }
+                    return names
+                  }
                   return [
                     ...lists.map((list) => ({ list, at: where })),
-                    ...folders.flatMap((folder) =>
-                      (folder.lists ?? []).map((list) => ({ list, at: folder.hidden === true ? where : [...where, folder.name] })),
-                    ),
+                    ...folders.flatMap((folder) => (folder.lists ?? []).map((list) => ({ list, at: [...where, ...pathOf(folder)] }))),
                   ]
                     .filter(({ list }) => list.archived !== true)
                     .map(({ list, at }): Container => ({ id: list.id, key: null, name: joined([...at, list.name]) }))
@@ -771,8 +790,21 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
             : new ConnectorFailed({ product, reason: 'rejected', message: `ClickUp files a task without its ${refused}: it is set after` })
         const assignees = yield* Effect.forEach(fields.assignee?.add ?? [], (person) => userId(person.id))
         const due = fields.due == null ? undefined : yield* dueAt(fields.due)
-        // A subtask is filed with its parent; ClickUp puts it beside its parent wherever it is filed.
+        // A subtask is filed with its parent, on its parent's list: ClickUp's docs say the parent must be on the list it is filed on.
         const parent = fields.parent == null ? undefined : yield* named(fields.parent.id, 'task')
+        if (parent !== undefined) {
+          const { list: on } = yield* call(
+            Schema.Struct({ list: Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.NullOr(Schema.String)) }) }),
+            'GET',
+            `${api}/task/${parent}`,
+          )
+          if (on.id !== list)
+            return yield* new ConnectorFailed({
+              product,
+              reason: 'rejected',
+              message: `A ClickUp subtask is filed on its parent’s list${on.name == null ? '' : `, ${on.name}`}: file it there`,
+            })
+        }
         // A tag is its space's: only those the space has are put on, read only when some are asked for.
         const wanted = draft.labels.map((label) => label.trim()).filter((label) => label !== '')
         const tags =

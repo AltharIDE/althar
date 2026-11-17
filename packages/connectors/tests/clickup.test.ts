@@ -763,6 +763,7 @@ describe('task types, sprint points and subtasks', () => {
     assert.notProperty(bare, 'estimate')
     assert.strictEqual(issueOf(task({ custom_item_id: null }), { types: new Map() }).type, 'Task')
     assert.strictEqual(issueOf(task({ custom_item_id: 0 }), { types: new Map() }).type, 'Task')
+    assert.notProperty(issueOf(task(), { types: new Map() }), 'type')
     assert.notProperty(issueOf(task({ custom_item_id: 7 }), { types: new Map() }), 'type')
     assert.isNull(issueOf(task({ points: null })).estimate)
   })
@@ -798,7 +799,7 @@ describe('task types, sprint points and subtasks', () => {
           {
             json: {
               tasks: [
-                task({ id: 'p1', custom_id: 'DEV-1', name: 'Refunds' }),
+                task({ id: 'p1', custom_id: 'DEV-1', name: 'Refunds', custom_item_id: 1001 }),
                 task({ id: 'sub1', parent: 'p1' }),
                 task({ id: 'sub2', parent: 'elsewhere' }),
               ],
@@ -811,7 +812,9 @@ describe('task types, sprint points and subtasks', () => {
       const byId = new Map(page.issues.map((issue) => [issue.id, issue]))
       assert.deepStrictEqual(byId.get('sub1')?.parent, { key: 'DEV-1', title: 'Refunds' })
       assert.notProperty(byId.get('sub2') ?? {}, 'parent')
-      assert.strictEqual(byId.get('p1')?.type, 'Task')
+      // A workspace's task list doesn't say a task's type: one it does say is read by its name, one it doesn't is left unsaid.
+      assert.strictEqual(byId.get('p1')?.type, 'Bug')
+      assert.notProperty(byId.get('sub1') ?? {}, 'type')
       yield* tracker.find({ state: 'all', limit: 10 })
       assert.lengthOf(
         sent.filter((one) => one.url.endsWith('/custom_item')),
@@ -833,14 +836,14 @@ describe('task types, sprint points and subtasks', () => {
       })
       const puts = sent.filter((one) => one.method === 'PUT').map((one) => one.body)
       assert.deepStrictEqual(puts, [{ parent: 'p1', custom_item_id: 1001 }, { points: 5 }])
-      // ClickUp's own Task is no type of the workspace's.
+      // ClickUp's own Task is 0, as its docs say.
       yield* tracker.update(issueOf(task()), { type: { id: 'task', name: 'Task' }, estimate: null })
       assert.deepStrictEqual(
         sent
           .filter((one) => one.method === 'PUT')
           .slice(2)
           .map((one) => one.body),
-        [{ custom_item_id: null }, { points: null }],
+        [{ custom_item_id: 0 }, { points: null }],
       )
     }),
   )
@@ -909,6 +912,7 @@ describe('task types, sprint points and subtasks', () => {
   it.effect('files a subtask with its parent, and a task without one where none is given', () =>
     Effect.gen(function* () {
       const { tracker, sent } = clickup([
+        ['GET', `${API}/task/p1`, { json: { list: { id: '901', name: 'Sprint backlog' } } }],
         ['POST', `${API}/list/901/task`, { json: task({ id: 'new3' }) }],
         ['GET', `${API}/task/new3?include_markdown_description=true`, { json: task({ id: 'new3' }) }],
       ])
@@ -916,6 +920,54 @@ describe('task types, sprint points and subtasks', () => {
       assert.deepInclude(sent.find((one) => one.method === 'POST')?.body as object, { parent: 'p1' })
       yield* tracker.create('901', { title: 'T', body: '', labels: [], fields: { parent: null } })
       assert.notProperty(sent.filter((one) => one.method === 'POST')[1]?.body as object, 'parent')
+    }),
+  )
+
+  it.effect('refuses to file a subtask on a list other than its parent’s, before filing it', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = clickup([['GET', `${API}/task/p1`, { json: { list: { id: '902', name: 'Roadmap' } } }]])
+      const error = yield* Effect.flip(
+        tracker.create('901', { title: 'T', body: '', labels: [], fields: { parent: { id: 'p1', ref: 'p1', key: 'DEV-1' } } }),
+      )
+      assert.strictEqual(error.reason, 'rejected')
+      assert.include(error.message, 'its parent’s list, Roadmap')
+      assert.isFalse(sent.some((one) => one.method === 'POST'))
+      const unnamed = clickup([['GET', `${API}/task/p1`, { json: { list: { id: '902' } } }]])
+      assert.notInclude(
+        (yield* Effect.flip(
+          unnamed.tracker.create('901', { title: 'T', body: '', labels: [], fields: { parent: { id: 'p1', ref: 'p1', key: 'DEV-1' } } }),
+        )).message,
+        ',',
+      )
+    }),
+  )
+
+  it.effect('names a subfolder’s lists by every folder they’re in, outermost first', () =>
+    Effect.gen(function* () {
+      const { tracker } = clickup([
+        ['GET', `${API}/team`, { json: teams }],
+        ['GET', `${API}/team/9011223344/space?archived=false`, { json: { spaces: [{ id: '701', name: 'Engineering' }] } }],
+        [
+          'GET',
+          `${API}/space/701/folder?archived=false`,
+          {
+            json: {
+              folders: [
+                { id: '801', name: 'Payments', lists: [] },
+                { id: '806', name: 'Refunds', parent_folder: '801', lists: [{ id: '907', name: 'Q4' }] },
+                { id: '807', name: 'Loop', parent_folder: '808', lists: [{ id: '908', name: 'Odd' }] },
+                { id: '808', name: 'Back', parent_folder: '807', lists: [] },
+                { name: 'No id', lists: [{ id: '909', name: 'Plain' }] },
+              ],
+            },
+          },
+        ],
+        ['GET', `${API}/space/701/list?archived=false`, { json: { lists: [] } }],
+      ])
+      assert.deepStrictEqual(
+        (yield* tracker.containers()).map((one) => one.name),
+        ['Engineering / Payments / Refunds / Q4', 'Engineering / Back / Loop / Odd', 'Engineering / No id / Plain'],
+      )
     }),
   )
 })
