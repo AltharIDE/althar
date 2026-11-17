@@ -4,6 +4,7 @@ import { SqlClient } from 'effect/sql'
 import { Connections } from './Connections'
 import { BranchRefused, NotFound } from './errors'
 import { branchOn, fetchBranch, fetchInto, git, gitOutcome, namedRemotes, PUSHED, pushTo } from './git'
+import { redacted } from './gitSaid'
 import { Instance } from './Instance'
 import { startOf } from './Projects'
 
@@ -63,7 +64,7 @@ export const makeBranch = (input: { readonly projectId: string; readonly reposit
     if (there === null) {
       const failed = yield* pushTo(clone, target, branch, start, '').pipe(
         Effect.as(null),
-        Effect.catch((error) => Effect.succeed(error.stderr.trim() || error.message)),
+        Effect.catch((error) => Effect.succeed(redacted(error.stderr.trim() || error.message))),
       )
       if (failed === null) yield* Effect.ignore(git(clone, 'update-ref', '-d', `${PUSHED}${branch}`))
       else {

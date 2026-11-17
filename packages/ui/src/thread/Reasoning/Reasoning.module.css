@@ -23,20 +23,53 @@
   margin-right: 8px;
   color: var(--t-4);
 }
+/*
+ * Words at work: a light passes over them, left to right, every 2.2s. The light is a copy of the words in full ink (the
+ * sheen's ::before, from its data-words), seen through a window half their width with soft edges, which glides across them
+ * while the copy inside moves back as far, so the words stand still. Only transforms run, which the compositor draws: the
+ * words aren't painted again each frame. Clipped, so the window's travel past them adds nothing to scroll.
+ */
 .shimmer {
-  background: linear-gradient(90deg, var(--t-3) 0%, var(--t-3) 40%, var(--t-1) 50%, var(--t-3) 60%, var(--t-3) 100%);
-  background-size: 250% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: shimmer 2.2s linear infinite;
+  position: relative;
+  overflow: clip;
+  color: var(--t-3);
 }
-@keyframes shimmer {
+.sheen {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 50%;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 50%, transparent);
+  pointer-events: none;
+  user-select: none;
+  animation: sweep 2.2s linear infinite;
+}
+.sheen::before {
+  content: attr(data-words);
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 200%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--t-1);
+  animation: stay 2.2s linear infinite;
+}
+/* the light's middle from 0.625 of the words' width before them to 3.125 after their start, as the gradient it replaces moved */
+@keyframes sweep {
   from {
-    background-position: 125% 0;
+    transform: translateX(-175%);
   }
   to {
-    background-position: -125% 0;
+    transform: translateX(575%);
+  }
+}
+@keyframes stay {
+  from {
+    transform: translateX(87.5%);
+  }
+  to {
+    transform: translateX(-287.5%);
   }
 }
 
@@ -72,11 +105,6 @@
 }
 .shimmer.label {
   flex: 0 1 auto;
-}
-.shimmer.relabelled {
-  animation:
-    relabel var(--enter) var(--ease-out),
-    shimmer 2.2s linear infinite;
 }
 .about {
   min-width: 0;
@@ -121,11 +149,9 @@
   .thinking {
     animation-duration: 1ms;
   }
-  .shimmer,
-  .shimmer.relabelled {
-    animation: none;
-    color: var(--t-3);
-    background: none;
+  /* the words still, in their own ink */
+  .sheen {
+    display: none;
   }
   .relabelled {
     animation: none;

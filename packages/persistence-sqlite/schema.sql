@@ -1711,3 +1711,7 @@ CREATE INDEX task_waits_on ON task_waits(on_task_id);
 CREATE TRIGGER task_waits_cleared AFTER UPDATE OF state ON tasks WHEN NEW.state = 'done' BEGIN
     UPDATE task_waits SET cleared_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE on_task_id = NEW.id AND cleared_at IS NULL;
   END;
+
+CREATE INDEX turn_deliveries_by_thread_time ON turn_deliveries (thread_id, requested_at);
+
+CREATE INDEX thread_items_tool_calls ON thread_items (thread_id, sequence) WHERE kind = 'tool_call';

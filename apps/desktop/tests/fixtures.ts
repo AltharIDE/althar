@@ -1083,7 +1083,7 @@ export const agentTools: AgentTools = {
 
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
-  const watching: Array<number | undefined> = []
+  const watching: Array<number | import('@althar/contracts').FeedPosition | undefined> = []
   const starts = new Set<() => void>()
   const client: Client = {
     status: vi.fn(async () => status),
@@ -1122,6 +1122,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
+    // Each as `getThreadItem` reads it, whatever a test makes that do.
+    getThreadItems: vi.fn(async (threadId: string, itemIds: Iterable<string>) => {
+      const ids = [...itemIds]
+      const read = await Promise.all(ids.map((id) => client.getThreadItem(threadId, id)))
+      return new Map(ids.map((id, at) => [id, read[at] ?? null]))
+    }),
+    behind: (start) => start(),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
     readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readLaunchOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
@@ -1540,6 +1547,7 @@ export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}):
   observedAt: '2026-10-15T10:00:00.000Z',
   plan: 'pro',
   windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
+  resetWindows: [],
   fault: null,
   noReading: null,
   resetSince: false,

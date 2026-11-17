@@ -1,5 +1,7 @@
+import type { HomeState } from '../../homes'
 import { API_VERSION_MISMATCH, ApiError, type DomMessagePort } from '@althar/contracts'
 
+import { checkedPosition } from './checkedWatch'
 import { tabsStoreOf } from '../features/tabs/store'
 import { makeRouter } from '../router'
 import { connect } from './client'
@@ -18,7 +20,7 @@ import type { Host, Services } from './services'
  * for either; each model's room is read again whenever they are.
  */
 
-export const openWindow = async (port: DomMessagePort, host: Host) => {
+export const openWindow = async (port: DomMessagePort, host: Host, home?: HomeState) => {
   host.startup?.('open-window-start')
   const began = performance.now()
   const timed = async <A>(stage: string, read: () => Promise<A>): Promise<A> => {
@@ -30,18 +32,19 @@ export const openWindow = async (port: DomMessagePort, host: Host) => {
       host.startup?.(stage, Math.round(performance.now() - at))
     }
   }
-  const client = await timed('client-created', () => connect(port))
+  const client = await timed('client-created', () => connect(port, home?.identity))
   const cache = makeQueryClient()
   const read = reads(client)
   // Watched from where the projects were read: nothing after is missed. Unread, from now.
   const listed = await timed('first-projects', () =>
     cache.fetchQuery(read.projects()).catch((failure: unknown) => {
       // A runtime of another API version answers every call the same; the window never half-opens over it.
-      if (failure instanceof ApiError && failure.reason === API_VERSION_MISMATCH) throw failure
+      if (home?.current.kind === 'ssh' || (failure instanceof ApiError && failure.reason === API_VERSION_MISMATCH)) throw failure
       return null
     }),
   )
-  const feed = follow(client, cache, listed?.cursor)
+  const position = home?.current.kind === 'ssh' ? checkedPosition(listed?.position, home.current.home.homeId) : listed?.cursor
+  const feed = follow(client, cache, position)
   const services: Services = { client, host, cache, feed }
   const router = makeRouter({ client, cache })
   // Each model's room follows from which agents are signed in and which models are offered.

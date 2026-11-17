@@ -1,7 +1,8 @@
-import { Clock, Duration, Effect } from 'effect'
+import { Duration, Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
+import { nowFor } from './standsOn'
 
 /**
  * A recorded push's checks may still be registering. This belongs to the
@@ -23,5 +24,6 @@ export const checksAppearing = (taskId: string, url: string, head: string, known
       FROM external_links l WHERE l.task_id = ${taskId} AND l.url = ${url} AND l.kind = 'change' LIMIT 1`
     if (row?.pushedAt == null || row.unreadable === 1 || (!knownChecks && row.hasChecks !== 1)) return false
     const within = Duration.toMillis(wait ?? (yield* RuntimeConfig).checksAppear ?? Duration.minutes(1))
-    return (yield* Clock.currentTimeMillis) - Date.parse(row.pushedAt) < within
+    // A card kept from this is worked out again once the wait is over (standsOn.ts).
+    return (yield* nowFor(row.pushedAt, within)) - Date.parse(row.pushedAt) < within
   })

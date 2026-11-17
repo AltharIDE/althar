@@ -21,6 +21,7 @@ import { record } from '../src/renderer/shared/dictation/recorder'
 import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { cancelIn, pressDictationShortcut, useDictation } from '../src/renderer/shared/dictation/useDictation'
 import { draftKey, draftOf, forgetDrafts, setDraftDictated, setDraftText, useDraft } from '../src/renderer/shared/drafts'
+import { entriesOf, type EntryChanges, nothingHeld, withChanges } from '../src/renderer/features/finder/held'
 import { fakeClient, fakeHost, project } from './fixtures'
 import { withServices } from './render'
 
@@ -61,14 +62,15 @@ vi.mock('../src/renderer/shared/dictation/recorder', () => ({
   }),
 }))
 
+// The finder's worker, in place: it holds the entries as the window sends them, only what changed each time (held.ts).
 class RankWorker {
-  entries: ReadonlyArray<unknown> = []
+  held = nothingHeld
   onmessage: ((event: MessageEvent) => void) | null = null
-  postMessage(message: { type: string; entries: ReadonlyArray<unknown>; id: number; query: string; context: unknown; ask: unknown }) {
-    if (message.type === 'entries') this.entries = message.entries
+  postMessage(message: { type: string; changes: EntryChanges; id: number; query: string; context: unknown; ask: unknown }) {
+    if (message.type === 'entries') this.held = withChanges(this.held, message.changes)
     else {
       void import('../src/renderer/features/finder/model').then(({ search }) => {
-        const results = search(this.entries as never, message.query, message.context as never, message.ask as never)
+        const results = search(entriesOf(this.held), message.query, message.context as never, message.ask as never)
         this.onmessage?.({ data: { id: message.id, results } } as MessageEvent)
       })
     }

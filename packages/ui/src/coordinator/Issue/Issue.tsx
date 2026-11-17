@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -7,7 +7,7 @@ import type { IssuePriority, IssueStatus } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
-import { Switch } from '../../primitives/Switch/Switch'
+import { Segmented } from '../../primitives/Segmented/Segmented'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { PriorityGlyph, StatusGlyph } from './glyphs'
 import s from './Issue.module.css'
@@ -154,31 +154,41 @@ export interface IssueRefProps {
   id: string
   /** Draw the mark in Linear's colour. */
   linear?: boolean
+  /** The other issues it came from, after this one, each on its own tracker. */
+  also?: ReadonlyArray<Omit<IssueRefProps, 'also'>>
 }
 
-/** Where a task came from, inline: the tracker's mark and the issue's key. */
-export function IssueRef({ mark, id, linear }: IssueRefProps) {
+/** Where a task came from, inline: the tracker's mark and the issue's key; for several, each. */
+export function IssueRef({ mark, id, linear, also = [] }: IssueRefProps) {
+  const one = (ref: Omit<IssueRefProps, 'also'>) => (
+    <span key={ref.id} className={s.from}>
+      {ref.mark && <BrandMark brand={ref.mark} size={11} className={ref.linear ? s.fromLinear : undefined} />}
+      <span className={s.fromId}>{ref.id}</span>
+    </span>
+  )
+  const first = one({ id, ...(mark === undefined ? {} : { mark }), ...(linear === undefined ? {} : { linear }) })
+  if (also.length === 0) return first
   return (
-    <span className={s.from}>
-      {mark && <BrandMark brand={mark} size={11} className={linear ? s.fromLinear : undefined} />}
-      <span className={s.fromId}>{id}</span>
+    <span className={s.froms}>
+      {first}
+      {also.map(one)}
     </span>
   )
 }
 
 export interface IssuePartText {
-  /** The switch's name, for the issue's key: Only part of MER-231. */
+  /** The choice's name, for the issue's key: What merging does to MER-231. */
   label: (id: string) => string
-  /** What its merge does, on: says what landed and leaves the issue open. */
-  on: string
-  /** What its merge does, off: closes it, as a task that did all of it. */
-  off: string
+  /** The task does all of it: its merge closes the issue. */
+  closes: string
+  /** The task does part of it: its merge says what landed and leaves the issue open. */
+  part: string
 }
 
 export const issuePartText: IssuePartText = {
-  label: (id) => `Only part of ${id}`,
-  on: 'When its pull request merges, Althar says on the issue what landed and leaves it open.',
-  off: 'Its pull request’s merge closes the issue, where issues move along with their tasks.',
+  label: (id) => `What merging does to ${id}`,
+  closes: 'Closes it',
+  part: 'Part of it',
 }
 
 export interface IssuePartProps {
@@ -187,28 +197,31 @@ export interface IssuePartProps {
   /** The task does only part of the issue. */
   partOf: boolean
   onChange: (partOf: boolean) => void
+  /** The issue's card, drawn in the same frame above the choice. */
+  children: ReactNode
   text?: Partial<IssuePartText>
 }
 
 /**
- * Under a task's issue: whether the task does all of it, so its merge closes
- * it, or only part, so its merge says what landed and leaves it open.
+ * A task's issue with its foot: whether the task does all of it, so its merge
+ * closes it, or only part, so its merge says what landed and leaves it open.
  */
-export function IssuePart({ id, partOf, onChange, text }: IssuePartProps) {
+export function IssuePart({ id, partOf, onChange, children, text }: IssuePartProps) {
   const t = { ...issuePartText, ...text }
-  const labelId = useId()
-  const noteId = useId()
   return (
-    <span className={s.part}>
-      <Switch checked={partOf} onChange={onChange} labelledBy={labelId} describedBy={noteId} />
-      <span className={s.partWords}>
-        <span id={labelId} className={s.partLabel}>
-          {t.label(id)}
-        </span>
-        <span id={noteId} className={s.partNote}>
-          {partOf ? t.on : t.off}
-        </span>
-      </span>
-    </span>
+    <div className={s.tray}>
+      {children}
+      <div className={s.foot}>
+        <Segmented
+          label={t.label(id)}
+          options={[
+            { value: 'closes', label: t.closes },
+            { value: 'part', label: t.part },
+          ]}
+          value={partOf ? 'part' : 'closes'}
+          onChange={(value) => onChange(value === 'part')}
+        />
+      </div>
+    </div>
   )
 }

@@ -1,10 +1,10 @@
-import type { PlanUsage as PlanUsageView } from '@althar/contracts'
+import type { PlanUsage as PlanUsageView, WatchEvent } from '@althar/contracts'
 import type { SessionEvent } from '@althar/provider-adapters'
 
 import type { Draft } from './drafts'
 import type { ShownLaunch } from './Launches'
 import type { ShownLeftRunning } from './leftRunning'
-import { Context, Effect, Layer, PubSub, type Scope, Stream } from 'effect'
+import { Context, Effect, Layer, PubSub, Queue, type Scope, Stream } from 'effect'
 
 /*
  * What is happening now, for clients that watch: every event an agent
@@ -81,6 +81,118 @@ export type LiveEvent =
       readonly setAside?: { readonly title: string; readonly decision: 'allow' | 'reject' }
     }
 
+/** What a watch is sent of what happens now, beside the store's changes, which come by their cursor. */
+export type Watched = Exclude<WatchEvent, { readonly _tag: 'Changed' }>
+
+/**
+ * What a client watching is sent of an event: an agent's message or thought
+ * as far as it has streamed, a command's output, how full an agent's context
+ * is, and what the runtime sends whole as it changes. Nothing of the rest,
+ * which is the runtime's own.
+ */
+export const watchedOf = (event: LiveEvent): Watched | undefined => {
+  switch (event._tag) {
+    case 'Streaming':
+      return {
+        _tag: 'Streaming',
+        threadId: event.threadId,
+        itemId: event.itemId,
+        sequence: event.sequence,
+        kind: event.kind,
+        agentId: event.agentId,
+        text: event.text,
+      }
+    case 'Output':
+      return { _tag: 'Output', threadId: event.threadId, itemId: event.itemId, text: event.text, dropped: event.dropped }
+    case 'Agent':
+      return event.event._tag === 'ContextUsage'
+        ? { _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size }
+        : undefined
+    case 'Background':
+      return { _tag: 'Background', threadId: event.threadId, background: event.background }
+    case 'Launches':
+      return { _tag: 'Launches', projectId: event.projectId, launches: event.launches }
+    case 'PlanUsage':
+      return { _tag: 'PlanUsage', usage: event.usage }
+    case 'Drafting':
+      return { _tag: 'Drafting', threadId: event.threadId, drafts: event.drafts }
+    default:
+      return undefined
+  }
+}
+
+/** What a watched event is of: a newer one of the same thing says all it said, whole. */
+export const watchedKey = (event: Watched): string => {
+  switch (event._tag) {
+    case 'Streaming':
+    case 'Output':
+      return `${event._tag}:${event.itemId}`
+    case 'Launches':
+      return `${event._tag}:${event.projectId}`
+    case 'PlanUsage':
+      return event._tag
+    default:
+      return `${event._tag}:${event.threadId}`
+  }
+}
+
+/**
+ * What a client is sent of events that are each whole, as fast as it takes
+ * them: while it is behind, a newer event of the same thing (`keyOf`) takes
+ * the place of the one before it. What waits for a client that stalled is
+ * at most one of each thing, never every event since, and what it gets when
+ * it catches up is each thing as it is now. The events are taken as they
+ * come, whether the client takes them or not, until the scope closes.
+ */
+export const newestOf = <A>(events: Stream.Stream<A>, keyOf: (event: A) => string): Effect.Effect<Stream.Stream<A>, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    // In the order each thing last changed: what changed longest ago goes first.
+    const held = new Map<string, A>()
+    const arrived = yield* Queue.sliding<void>(1)
+    yield* Effect.forkScoped(
+      Stream.runForEach(events, (event) =>
+        Effect.sync(() => {
+          const key = keyOf(event)
+          held.delete(key)
+          held.set(key, event)
+          Queue.offerUnsafe(arrived, undefined)
+        }),
+      ),
+    )
+    // Everything held goes at once, as one message to the client: what changed longest ago first.
+    const next: Effect.Effect<readonly [A, ...Array<A>]> = Effect.suspend(() => {
+      const [first, ...rest] = held.values()
+      if (first === undefined) return Effect.andThen(Queue.take(arrived), next)
+      held.clear()
+      return Effect.succeed([first, ...rest] as const)
+    })
+    return Stream.flattenArray(Stream.fromEffectRepeat(next))
+  })
+
+/** How many messages a watch remembers how much of it sent, the latest: one streamed again after them is sent whole, as the first time. */
+export const SENT_KEPT = 64
+
+/**
+ * A message as it streams, for one watch that asked for deltas: what came
+ * after what this watch sent of it, from its `offset`; whole the first time.
+ * Nothing, where nothing came since. A message's text only grows, so what was
+ * sent of it is how long it was.
+ */
+export const deltasFor = () => {
+  const sent = new Map<string, number>()
+  return (event: WatchEvent): WatchEvent | undefined => {
+    if (event._tag !== 'Streaming') return event
+    const before = sent.get(event.itemId)
+    sent.delete(event.itemId)
+    sent.set(event.itemId, event.text.length)
+    const oldest = sent.keys().next()
+    if (sent.size > SENT_KEPT && oldest.done !== true) sent.delete(oldest.value)
+    if (before === event.text.length) return undefined
+    const offset = before !== undefined && before < event.text.length ? before : 0
+    return { ...event, text: event.text.slice(offset), offset }
+  }
+}
+
 export class Live extends Context.Service<
   Live,
   {
@@ -94,6 +206,9 @@ export class Live extends Context.Service<
   static readonly layer: Layer.Layer<Live> = Layer.effect(
     Live,
     Effect.gen(function* () {
+      // Unbounded: the runtime's own subscribers must never miss a turn's end or a call for the person, and each takes what
+      // comes as it comes. A client's watch, which may stall, takes from it as events come too, and holds the newest of each
+      // thing for the client (`newestOf`), so a window that stops reading doesn't make this grow.
       const pubsub = yield* PubSub.unbounded<LiveEvent>()
       return Live.of({
         publish: (event) => Effect.asVoid(PubSub.publish(pubsub, event)),

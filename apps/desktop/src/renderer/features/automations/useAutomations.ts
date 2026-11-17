@@ -12,6 +12,7 @@ import type {
 import { AUTOMATION_DEFAULTS } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
+import { useGoneAtOnce } from '../../data/goneAtOnce'
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { FIRST_SCHEDULE, needsYou, type Starter } from './words'
@@ -29,6 +30,12 @@ import { FIRST_SCHEDULE, needsYou, type Starter } from './words'
 /** What went wrong, said where it was done. */
 const failed = (failure: unknown) => messageOf(failure)
 
+/** What turning one on, or off, shows of it at once, on its page and its card in a thread alike, until it is read again. */
+export const shownAs = {
+  on: { state: 'on' },
+  paused: { state: 'paused', nextAt: null },
+} as const
+
 export interface AutomationsModel {
   /** Null until it is read. */
   readonly snapshot: AutomationsSnapshot | null
@@ -37,6 +44,8 @@ export interface AutomationsModel {
   readonly needsYou: boolean
   /** Pauses every automation, or lets them run again. */
   readonly setAllPaused: (paused: boolean) => void
+  /** Deletes one: gone from the tab at once, and back on it, saying why, where the runtime kept it. */
+  readonly remove: (automationId: string) => void
 }
 
 export const useAutomations = (projectId: string): AutomationsModel => {
@@ -44,7 +53,25 @@ export const useAutomations = (projectId: string): AutomationsModel => {
   // A project not known yet has none to read.
   const read = useQuery({ ...reads(client).automations(projectId), enabled: projectId !== '' })
   const [error, setError] = useState<string | null>(null)
-  const snapshot = read.data ?? null
+  // Those deleted here, gone from the press until a read without them lands.
+  const gone = useGoneAtOnce(read.data?.automations, (one) => one.id)
+  const snapshot =
+    read.data === undefined ? null : gone.shown === read.data.automations ? read.data : { ...read.data, automations: gone.shown ?? [] }
+  const { hide, back } = gone
+  const remove = useCallback(
+    (automationId: string) => {
+      setError(null)
+      hide([automationId])
+      client.deleteAutomation(automationId).then(
+        () => void cache.invalidateQueries({ queryKey: keys.automations(projectId) }),
+        (failure: unknown) => {
+          back(automationId)
+          setError(failed(failure))
+        },
+      )
+    },
+    [cache, client, projectId, hide, back],
+  )
   const setAllPaused = useCallback(
     (paused: boolean) => {
       setError(null)
@@ -68,6 +95,7 @@ export const useAutomations = (projectId: string): AutomationsModel => {
     error: error ?? (read.error === null ? null : failed(read.error)),
     needsYou: snapshot !== null && needsYou(snapshot.automations),
     setAllPaused,
+    remove,
   }
 }
 
@@ -82,8 +110,6 @@ export interface AutomationModel {
   readonly turnOn: () => void
   readonly pause: () => void
   readonly runNow: () => void
-  /** Deleted: whether it went. */
-  readonly remove: () => Promise<boolean>
   readonly setPostsReviews: (on: boolean) => void
 }
 
@@ -149,15 +175,14 @@ export const useAutomation = (automationId: string): AutomationModel => {
       void send(() => client.changeAutomation(automationId, definition))
     },
     turnOn: () => {
-      shown((was) => ({ ...was, state: 'on', pausedBy: null, pauseReason: null }))
+      shown((was) => ({ ...was, ...shownAs.on, pausedBy: null, pauseReason: null }))
       void send(() => client.turnOnAutomation(automationId))
     },
     pause: () => {
-      shown((was) => ({ ...was, state: 'paused', pausedBy: 'person', pauseReason: null, nextAt: null }))
+      shown((was) => ({ ...was, ...shownAs.paused, pausedBy: 'person', pauseReason: null }))
       void send(() => client.pauseAutomation(automationId))
     },
     runNow: () => void send(() => client.runAutomationNow(automationId)),
-    remove: () => send(() => client.deleteAutomation(automationId)),
     setPostsReviews: (on) => {
       shown((was) => ({ ...was, postsReviews: on }))
       void send(() => client.setAutomationPostsReviews(automationId, on))

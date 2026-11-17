@@ -128,7 +128,8 @@ export const startEdge = (host: EdgeHost): Edge => {
   const markSteps = process.platform === 'darwin'
 
   const load = (window: BrowserWindow, query: Record<string, string>) => {
-    window.webContents.on('did-finish-load', () => host.connect(window))
+    // As its document is parsed, its script run and listening for the port (edge.tsx), not once all it loads is in.
+    window.webContents.on('dom-ready', () => host.connect(window))
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', (event) => event.preventDefault())
     void window.loadFile(host.page, { query })

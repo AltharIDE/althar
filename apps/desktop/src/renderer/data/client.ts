@@ -1,4 +1,12 @@
-import type { SearchDocuments } from '@althar/contracts'
+import {
+  API_VERSION,
+  socketCanCall,
+  type ClientIdentity,
+  type ConnectionInfo,
+  type FeedPosition,
+  type SearchDocuments,
+} from '@althar/contracts'
+import { checkedPosition, checkedWatch } from './checkedWatch'
 import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
 
 import {
@@ -43,9 +51,12 @@ import {
   type SealStyle,
   Api,
   ApiError,
+  BACKGROUND,
   type BoardSnapshot,
   type HomeSnapshot,
   clientProtocol,
+  LANE_HEADER,
+  THREAD_ITEMS_AT_ONCE,
   type ConnectGuide,
   type ConnectionCheck,
   type ConnectionList,
@@ -59,6 +70,7 @@ import {
   type DocumentText,
   type DomMessagePort,
   domPort,
+  untraced,
   type FileDiff,
   type TaskFindings,
   type TaskLineComments,
@@ -121,11 +133,11 @@ import { RpcClient } from 'effect/rpc'
  * Effect inside; what it hands the view models is plain promises and a
  * subscription, so they stay ordinary React hooks.
  *
- * Every command gets an id here. When a command's answer doesn't come back
+ * Every command gets an id here. On a local connection, when its answer doesn't come back
  * (the runtime didn't answer, rather than said no), it is tried once more
  * with the same id, and the runtime answers the retry from the first one's
- * receipt instead of doing it twice. `watch` picks up from the last change it
- * heard when its stream breaks.
+ * receipt instead of doing it twice. Remote commands are sent once and never replayed automatically.
+ * A local `watch` picks up after a broken stream; remote watches use checked home positions.
  */
 
 /** What may change of a project's rules at once: any of it. */
@@ -142,6 +154,7 @@ export type OnePress =
   | { readonly attentionId: string; readonly action: OnePressAction }
 
 export interface Client {
+  readonly connection?: ConnectionInfo
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
   readonly listProjects: () => Promise<ProjectList>
@@ -205,6 +218,17 @@ export interface Client {
   ) => Promise<ThreadSnapshot>
   /** One item of a thread; null for one it keeps for Althar and never shows. */
   readonly getThreadItem: (threadId: string, itemId: string) => Promise<ThreadItem | null>
+  /**
+   * Several items of a thread in one call, as `getThreadItem` reads each: by id, null for one it keeps for Althar and
+   * never shows, or that has gone. Asked of more than one call takes, it reads in as many.
+   */
+  readonly getThreadItems: (threadId: string, itemIds: Iterable<string>) => Promise<ReadonlyMap<string, ThreadItem | null>>
+  /**
+   * Runs `start`, and every read it starts goes behind (`BACKGROUND`): a read nobody waits on, as the change feed starts
+   * them to keep what a screen holds current, which the runtime answers a few at a time, after a press. What `start`
+   * returns, as it returned it.
+   */
+  readonly behind: <A>(start: () => A) => A
   /** What a command in a thread printed, as kept once it ended. */
   readonly readOutput: (threadId: string, itemId: string) => Promise<OutputText>
   /** What a command a thread's session left running has printed so far. */
@@ -545,7 +569,8 @@ export interface Client {
   /** Says to the coordinator, as the person, that issues are filed and changed at once from now on, or wait on a card first: from an issue card in a thread. */
   readonly preferIssueCards: (threadId: string, atOnce: boolean) => Promise<void>
   /** Whether a task does only part of its issue, so its merge comments on it and leaves it open. */
-  readonly setTaskIssuePart: (taskId: string, partOf: boolean) => Promise<void>
+  /** Whether a task does only part of an issue it came from: the one named by its ref, or its first. */
+  readonly setTaskIssuePart: (taskId: string, partOf: boolean, issue?: string) => Promise<void>
   /** Changes a review the lead drafted, before it is posted: its verdict, its summary, which comments are kept and what they say. */
   readonly changeReviewDraft: (
     draftId: string,
@@ -789,7 +814,12 @@ export interface Client {
    * listening, at first and again after it broke, when what streams only to
    * those listening (an agent's words, a command's output) may have been missed.
    */
-  readonly watch: (listener: (event: WatchEvent) => void, since?: number, onWatching?: () => void) => () => void
+  readonly watch: (
+    listener: (event: WatchEvent) => void,
+    since?: number | FeedPosition,
+    onWatching?: () => void,
+    onReset?: () => void,
+  ) => () => void
   readonly close: () => Promise<void>
 }
 
@@ -844,12 +874,51 @@ const uuidV7 = (now: number) => {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
+/**
+ * How deep the window is in `behind`: a read started meanwhile goes behind. It is said as the call is made, which is
+ * synchronous, so only what `behind`'s `start` starts is behind, never a call made after it returns.
+ */
+let behindNow = 0
+
+/** The header a read nobody waits on carries. */
+const laneHeaders = { [LANE_HEADER]: BACKGROUND }
+
+/**
+ * Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it, or stops it with
+ * `signal`. One made while `behind` runs says so; the runtime puts a read so marked behind, and answers a command as it
+ * comes either way.
+ */
 const settle = <A>(effect: Effect.Effect<A, unknown>, signal?: AbortSignal): Promise<A> =>
-  Effect.runPromiseExit(effect, signal === undefined ? undefined : { signal }).then((exit) => {
+  Effect.runPromiseExit(
+    behindNow > 0 ? RpcClient.withHeaders(effect, laneHeaders) : effect,
+    signal === undefined ? undefined : { signal },
+  ).then((exit) => {
     if (Exit.isSuccess(exit)) return exit.value
     throw Cause.squash(exit.cause)
   })
+
+/**
+ * A message as it streams, whole again, from what a watch that asked for deltas sends: each item's text as far as it
+ * came, by id, for this run of the watch, the latest few more than the runtime keeps for it (`SENT_KEPT`), so any it
+ * sends what was added to is here.
+ */
+const STREAMED_KEPT = 256
+const wholeAgain = () => {
+  const texts = new Map<string, string>()
+  return (event: WatchEvent): WatchEvent | undefined => {
+    if (event._tag !== 'Streaming' || event.offset === undefined) return event
+    const { offset, ...rest } = event
+    const before = offset === 0 ? '' : texts.get(event.itemId)
+    // What came before it never came on this watch: nothing to add it to. The runtime sends each item whole first.
+    if (before === undefined || before.length !== offset) return undefined
+    const text = before + event.text
+    texts.delete(event.itemId)
+    texts.set(event.itemId, text)
+    const oldest = texts.keys().next()
+    if (texts.size > STREAMED_KEPT && oldest.done !== true) texts.delete(oldest.value)
+    return { ...rest, text }
+  }
+}
 
 /** How long before a command with no answer is tried again, once. */
 const RETRY_AFTER = Duration.millis(300)
@@ -858,7 +927,7 @@ const RETRY_AFTER = Duration.millis(300)
 const REWATCH_AFTER = Duration.seconds(1)
 
 /** A command, under one id however often it is tried: once more when the runtime didn't answer, never when it said no. */
-const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Promise<A> => {
+const retryingCommand = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Promise<A> => {
   const commandId = newCommandId()
   return settle(
     Effect.catchCause(run(commandId), (cause) => {
@@ -869,15 +938,59 @@ const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Prom
 }
 
 /** Connects to the runtime over a port, and keeps the connection until `close`. */
-export const connect = async (port: DomMessagePort): Promise<Client> => {
+export const connect = async (port: DomMessagePort, expected?: ClientIdentity): Promise<Client> => {
   const scope = await Effect.runPromise(Scope.make())
-  const api = await Effect.runPromise(
+  const rawApi = await Effect.runPromise(
     Effect.gen(function* () {
       const protocol = yield* Layer.build(clientProtocol(domPort(port)))
-      return yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
-    }).pipe(Scope.provide(scope)),
+      return yield* RpcClient.make(Api, untraced).pipe(Effect.provideContext(protocol))
+    }).pipe(
+      Scope.provide(scope),
+      Effect.onError(() => Scope.close(scope, Exit.void)),
+    ),
   )
+  let connection: ConnectionInfo | undefined
+  try {
+    if (expected !== undefined) {
+      connection = await settle(rawApi.GetConnectionInfo({}).pipe(Effect.timeout('10 seconds')))
+      if (connection.apiVersion !== API_VERSION)
+        throw new ApiError({
+          reason: 'ApiVersionMismatch',
+          message: 'This home and app use different API versions.',
+          clientVersion: API_VERSION,
+          runtimeVersion: connection.apiVersion,
+        })
+      if (
+        expected.role !== 'socket' ||
+        connection.identity.role !== 'socket' ||
+        connection.identity.homeId !== expected.homeId ||
+        connection.identity.actorId !== expected.actorId ||
+        connection.identity.deviceId !== expected.deviceId
+      )
+        throw new ApiError({ reason: 'AuthenticationFailed', message: 'This connection changed its expected home or authority.' })
+      checkedPosition(connection.position, expected.homeId)
+    }
+  } catch (error) {
+    await Effect.runPromise(Scope.close(scope, Exit.void))
+    throw error
+  }
+  const command =
+    expected === undefined ? retryingCommand : <A>(run: (id: string) => Effect.Effect<A, unknown>) => settle(run(newCommandId()))
+  const api =
+    expected === undefined
+      ? rawApi
+      : new Proxy(rawApi, {
+          get(target, tag, receiver): unknown {
+            if (typeof tag === 'string' && tag in target && !socketCanCall(tag))
+              return () =>
+                Effect.fail(
+                  new ApiError({ reason: 'PersonRequired', message: 'This connection cannot do that. Use a trusted person client.' }),
+                )
+            return Reflect.get(target, tag, receiver)
+          },
+        })
   return {
+    ...(connection === undefined ? {} : { connection }),
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
@@ -907,6 +1020,25 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
+    getThreadItems: (threadId, itemIds) => {
+      const asked = [...new Set(itemIds)]
+      const calls = Array.from({ length: Math.ceil(asked.length / THREAD_ITEMS_AT_ONCE) }, (_, at) =>
+        settle(api.GetThreadItems({ threadId, itemIds: asked.slice(at * THREAD_ITEMS_AT_ONCE, (at + 1) * THREAD_ITEMS_AT_ONCE) })),
+      )
+      return Promise.all(calls).then((read) => {
+        const found = new Map<string, ThreadItem | null>(asked.map((id) => [id, null]))
+        for (const item of read.flat()) found.set(item.id, item)
+        return found
+      })
+    },
+    behind: (start) => {
+      behindNow += 1
+      try {
+        return start()
+      } finally {
+        behindNow -= 1
+      }
+    },
     readOutput: (threadId, itemId) => settle(api.ReadOutput({ threadId, itemId })),
     readBackgroundOutput: (threadId, id) => settle(api.ReadBackgroundOutput({ threadId, id })),
     readLaunchOutput: (id) => settle(api.ReadLaunchOutput({ id })),
@@ -1070,7 +1202,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     applyIssueChanges: (changesId) => command((commandId) => api.ApplyIssueChanges({ commandId, changesId })),
     discardIssueChanges: (changesId) => command((commandId) => api.DiscardIssueChanges({ commandId, changesId })),
     preferIssueCards: (threadId, atOnce) => command((commandId) => api.PreferIssueCards({ commandId, threadId, atOnce })),
-    setTaskIssuePart: (taskId, partOf) => command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf })),
+    setTaskIssuePart: (taskId, partOf, issue) =>
+      command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf, ...(issue === undefined ? {} : { issue }) })),
     changeReviewDraft: (draftId, edit) => command((commandId) => api.ChangeReviewDraft({ commandId, draftId, ...edit })),
     postReviewDraft: (draftId) => command((commandId) => api.PostReviewDraft({ commandId, draftId })),
     discardReviewDraft: (draftId) => command((commandId) => api.DiscardReviewDraft({ commandId, draftId })),
@@ -1195,19 +1328,37 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
     workToward: (taskId, toward) => command((commandId) => api.WorkToward({ commandId, taskId, toward })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
-    watch: (listener, since, onWatching) => {
-      let cursor = since
+    watch: (listener, since, onWatching, onReset) => {
+      if (expected !== undefined) {
+        const position = checkedPosition(since, expected.homeId)
+        const watching = checkedWatch(
+          { watch: (position) => api.WatchFrom({ position }), snapshot: () => api.ListProjects() },
+          expected.homeId,
+          position,
+          listener,
+          onWatching,
+          onReset,
+        )
+        const fiber = Effect.runFork(Effect.catchCause(watching, () => Scope.close(scope, Exit.void)))
+        return () => void Effect.runFork(Fiber.interrupt(fiber))
+      }
+      let cursor = typeof since === 'number' ? since : since?.cursor
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.
       // Said once the watch's request has gone, a moment after it starts, so a read made then comes after it on the port.
       const started = Effect.sync(() => void setTimeout(() => onWatching?.(), 0))
-      const heard = Effect.suspend(() =>
-        Stream.runForEach(Stream.onStart(api.Watch(cursor === undefined ? {} : { since: cursor }), started), (event) =>
-          Effect.sync(() => {
-            if (event._tag === 'Changed') cursor = event.cursor
-            listener(event)
-          }),
-        ),
-      )
+      // An agent's message comes as what was added since this run of the watch last sent it, and goes to listeners whole.
+      const heard = Effect.suspend(() => {
+        const whole = wholeAgain()
+        return Stream.runForEach(
+          Stream.onStart(api.Watch(cursor === undefined ? { deltas: true } : { since: cursor, deltas: true }), started),
+          (event) =>
+            Effect.sync(() => {
+              if (event._tag === 'Changed') cursor = event.cursor
+              const shown = whole(event)
+              if (shown !== undefined) listener(shown)
+            }),
+        )
+      })
       const fiber = Effect.runFork(Effect.forever(Effect.andThen(Effect.ignore(heard), Effect.sleep(REWATCH_AFTER))))
       return () => void Effect.runFork(Fiber.interrupt(fiber))
     },
@@ -1216,13 +1367,26 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
 }
 
 /** The port the preload hands the page, once the main process has made it. */
-export const receivePort = (target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window): Promise<DomMessagePort> =>
-  new Promise((resolve) => {
+export const receivePort = (
+  target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window,
+  signal?: AbortSignal,
+): Promise<DomMessagePort> =>
+  new Promise((resolve, reject) => {
+    const aborted = () => {
+      target.removeEventListener('message', onMessage)
+      reject(new Error('The connection was cancelled.'))
+    }
+    if (signal?.aborted === true) {
+      reject(new Error('The connection was cancelled.'))
+      return
+    }
     const onMessage = (event: MessageEvent) => {
       const port = event.ports[0]
       if (event.data !== 'althar:port' || port === undefined) return
       target.removeEventListener('message', onMessage)
+      signal?.removeEventListener('abort', aborted)
       resolve(port)
     }
     target.addEventListener('message', onMessage)
+    signal?.addEventListener('abort', aborted, { once: true })
   })

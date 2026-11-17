@@ -199,6 +199,7 @@ export function StuckCall({ onAnswer, ...props }: StuckCallProps) {
     void Promise.resolve(onAnswer(attentionId, answer)).then((through) => {
       if (through === false) setRound((now) => now + 1)
     })
+  // oxlint-disable-next-line althar/press-at-once -- The kit's card shows the answer from the press; the answer only starts it afresh where it didn't go through.
   return <StuckCard key={round} {...props} onAnswer={send} />
 }
 
