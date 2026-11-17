@@ -161,12 +161,19 @@ it('keeps a newer connection event when an older initial read arrives, and unsub
   expect(at.listeners.size).toBe(0)
 })
 
-it('draws no chip in this computer’s window before a home is saved, a plug once one is, and the home’s name in its own', async () => {
+it('connects the first home from a visible chip, and names a remote home in its own window', async () => {
   const at = fixture()
   at.homes.overview.mockResolvedValue({ ...overview, homes: [] })
-  const view = render(<Chip homes={at.homes} />)
-  await act(async () => {})
-  expect(screen.queryByRole('button')).toBeNull()
+  const view = render(
+    <>
+      <Chip homes={at.homes} />
+      <HomeConnections host={{ ...fakeHost(), homes: at.homes }} />
+    </>,
+  )
+  await userEvent.click(await screen.findByRole('button', { name: 'Homes' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect a home…' }))
+  expect(await screen.findByRole('dialog', { name: 'Connect a home' })).not.toBeNull()
+  await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
   act(() => at.tell(overview))
   expect(await screen.findByRole('button', { name: /Homes/ })).not.toBeNull()
   view.unmount()
@@ -193,7 +200,9 @@ it('opens the chip’s menu from File › Homes… where there is a chip, and Co
   at.homes.overview.mockResolvedValue({ ...overview, homes: [] })
   render(<HomeConnections host={{ ...fakeHost(), homes: at.homes }} />)
   await act(async () => {})
-  act(() => window.dispatchEvent(new Event('althar:show-homes')))
+  act(() => {
+    window.dispatchEvent(new Event('althar:show-homes'))
+  })
   expect(await screen.findByRole('dialog', { name: 'Connect a home' })).not.toBeNull()
   act(() => homesUi.set({ dialog: null }))
 })

@@ -10,9 +10,9 @@ import { homesUi, livenessOf, openedAgo, useHomesOverview, useHomeState, useHome
 import s from './Homes.module.css'
 
 /*
- * The window's home is one chip at the end of its bar, and only where there
- * is a home to speak of: in a home's window, its name; in this computer's, a
- * plug once a home is saved. Its menu is the chooser: this computer and each
+ * The window's home is one chip at the end of its bar: in a home's window,
+ * its name; in this computer's, a plug, including before the first connection.
+ * Its menu is the chooser: this computer and each
  * home, Connect a home…, Manage homes…. A dropped connection shows in the
  * chip itself, with Reconnect beside it: the window stays as it was,
  * readable, and nothing covers it.
@@ -94,7 +94,7 @@ function HomesMenu({
   )
 }
 
-/** At the bar's end: the home's name in its window; a plug in this computer's once a home is saved; nothing before. */
+/** At the bar's end: the home's name in its window; a plug in this computer's, including for its first connection. */
 export function HomeButton() {
   const { host } = useServices()
   return host.homes === undefined ? null : <Chip homes={host.homes} />
@@ -103,7 +103,7 @@ export function HomeButton() {
 export function Chip({ homes }: { homes: HomesHost }) {
   const here = useHomeState(homes)
   const overview = useHomesOverview(homes)
-  const drawn = here !== null && (here.current.kind === 'ssh' || (overview?.homes.length ?? 0) > 0)
+  const drawn = here !== null
   useEffect(() => {
     if (!drawn) return
     homesUi.set({ chips: homesUi.get().chips + 1 })
