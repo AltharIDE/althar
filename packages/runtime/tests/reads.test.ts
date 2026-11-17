@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { commitsOf, indexStamp } from '../src/git'
@@ -25,7 +25,8 @@ import { repository, runtime, until } from './support'
  * leaves the screens.
  */
 
-const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
+// Cards kept between reads, as Althar keeps them: what git says by hand shows on the board all the same.
+const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { keptFor: Duration.hours(1) })))
 
 const git = (cwd: string, ...args: Array<string>) =>
   execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd })
@@ -151,6 +152,45 @@ describe('what screens read from git', () => {
       writeFileSync(join(worktree, 'more.md'), 'more\n')
       yield* updateItem(place.projectId, id, { ...call, status: 'completed' })
       assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'more.md', 'notes.md'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('reads it again as a call starts and ends, never as it goes on', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId, worktree } = yield* ready
+      quiet(worktree)
+      const place = { projectId: projectId as ProjectId, threadId }
+      const call = { title: 'Run the tests', kind: 'execute' }
+      const id = yield* addItem(place, 'tool_call', { ...call, status: 'in_progress' }, { toolCallId: 'run-tests' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+      // What it writes as it goes on waits for it to end: its progress moves its item with every line, and git isn't asked each time.
+      writeFileSync(join(worktree, 'report.md'), 'report\n')
+      yield* updateItem(place.projectId, id, { ...call, title: 'Run the tests, 3 of 9', status: 'in_progress' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+      // Another call starts: what was written shows. And one that ends after a later one began is read as it ends.
+      yield* addItem(place, 'tool_call', { ...call, status: 'in_progress' }, { toolCallId: 'run-more' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'report.md'])
+      writeFileSync(join(worktree, 'notes.md'), 'notes\n')
+      yield* updateItem(place.projectId, id, { ...call, status: 'completed' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'notes.md', 'report.md'])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('reads it again as an older call ends after many newer ones have', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId, worktree } = yield* ready
+      quiet(worktree)
+      const place = { projectId: projectId as ProjectId, threadId }
+      const edit = { title: 'Edit the router', kind: 'edit' }
+      const id = yield* addItem(place, 'tool_call', { ...edit, status: 'in_progress' }, { toolCallId: 'long-edit' })
+      // Many calls start and end while it goes on, more than any count of the latest would see.
+      for (let at = 0; at < 25; at += 1)
+        yield* addItem(place, 'tool_call', { title: `Read ${at}`, kind: 'read', status: 'completed' }, { toolCallId: `read-${at}` })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt'])
+      writeFileSync(join(worktree, 'router.ts'), 'export {}\n')
+      // The old call ends: what it wrote shows, though no newer call moved.
+      yield* updateItem(place.projectId, id, { ...edit, status: 'completed' })
+      assert.deepStrictEqual(yield* filesIn(threadId), ['change.txt', 'router.ts'])
     }).pipe(Effect.provide(withQueries())),
   )
 

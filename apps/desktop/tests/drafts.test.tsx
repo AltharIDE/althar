@@ -13,7 +13,7 @@ import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { record } from '../src/renderer/shared/dictation/recorder'
 import { changeSession, listeningIn } from '../src/renderer/shared/dictation/sessions'
-import { forgetDrafts } from '../src/renderer/shared/drafts'
+import { draftKey, draftOf, forgetDrafts, setDraftText } from '../src/renderer/shared/drafts'
 import { fakeClient, fakeHost, items, snapshot } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
@@ -144,7 +144,8 @@ describe('a draft', () => {
     const view = withServices(<Project />, client)
     await userEvent.type(await coordinatorBox(), 'Before you go')
     view.unmount()
-    // A new window: nothing held but what storage kept.
+    // The window goes, writing what it held; a new one has nothing held but what storage kept.
+    window.dispatchEvent(new Event('pagehide'))
     forgetDrafts()
     withServices(<Project />, client)
     expect((await coordinatorBox()).value).toBe('Before you go')
@@ -190,6 +191,38 @@ describe('a draft', () => {
     view.unmount()
     withServices(<Project />, client)
     expect((await coordinatorBox()).value).toBe('For the coordinator')
+  })
+})
+
+describe('a draft’s words in storage', () => {
+  const kept = () => JSON.parse(window.localStorage.getItem('althar.drafts') ?? '{}') as Record<string, string>
+
+  it('are written behind the person typing, once they pause, not on each key', async () => {
+    const writes = vi.spyOn(Storage.prototype, 'setItem')
+    const key = draftKey.task('th1')
+    for (const typed of ['B', 'Be', 'Bef', 'Befo', 'Befor', 'Before']) setDraftText(key, typed)
+    // The window has them at once.
+    expect(draftOf(key).text).toBe('Before')
+    expect(writes).not.toHaveBeenCalled()
+    await waitFor(() => expect(kept()).toEqual({ [key]: 'Before' }))
+    expect(writes).toHaveBeenCalledTimes(1)
+  })
+
+  it('are written over what another window kept for other threads, and gone once the draft is', async () => {
+    const key = draftKey.task('th1')
+    setDraftText(key, 'Mine')
+    window.localStorage.setItem('althar.drafts', JSON.stringify({ 'thread:other': 'Theirs' }))
+    await waitFor(() => expect(kept()).toEqual({ 'thread:other': 'Theirs', [key]: 'Mine' }))
+    setDraftText(key, '')
+    await waitFor(() => expect(kept()).toEqual({ 'thread:other': 'Theirs' }))
+  })
+
+  it('are written at once as the window goes', () => {
+    const key = draftKey.coordinator('p1')
+    setDraftText(key, 'Before you go')
+    expect(window.localStorage.getItem('althar.drafts')).toBeNull()
+    window.dispatchEvent(new Event('pagehide'))
+    expect(kept()).toEqual({ [key]: 'Before you go' })
   })
 })
 

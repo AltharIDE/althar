@@ -26,26 +26,36 @@ import type { AnsweredCall } from '../home/needs'
 
 /** How long a call that just came in is said beside the notch. */
 export const SAY_FOR = 4_200
-/** How long changes are gathered before the edge reads again. */
-const GATHER = 120
+/**
+ * How long changes are gathered before the edge reads again. It reads the
+ * whole home, on the runtime's one thread, as the window does: an agent at
+ * work moves cards many times a second, so the edge reads at most once a
+ * second, and a call that comes in is said within one.
+ */
+export const EDGE_GATHER = 1_000
 
 export const edgeKey = ['edge'] as const
 export const edgeRead = (client: Client) => queryOptions({ queryKey: edgeKey, queryFn: () => client.getHome() })
+
+/** Whether the edge is seen: the menu bar's sheet is kept hidden between clicks. */
+const seen = () => typeof document === 'undefined' || document.visibilityState !== 'hidden'
 
 /**
  * Reads the edge again when what it shows changes, a burst of changes once:
  * not a permission the rules answered, which comes with every edit an agent
  * makes and changes nothing here. Listened from the moment the feed starts,
- * before anything is drawn, so a change heard on the way isn't missed.
+ * before anything is drawn, so a change heard on the way isn't missed. While
+ * it is hidden it is only marked, and read as it shows (`edge.tsx`); it is
+ * read behind (`behind`, the client's), as nobody waits on it.
  */
-export const followEdge = (feed: Feed, cache: QueryClient) => {
+export const followEdge = (feed: Feed, cache: QueryClient, behind: <A>(start: () => A) => A = (start) => start()) => {
   let gathering: ReturnType<typeof setTimeout> | undefined
   return feed.listen((event) => {
     if (event._tag !== 'Changed' || !HOME.has(event.aggregateType) || HOME_SHOWN.has(event.aggregateType)) return
     gathering ??= setTimeout(() => {
       gathering = undefined
-      void cache.invalidateQueries({ queryKey: edgeKey })
-    }, GATHER)
+      behind(() => void cache.invalidateQueries(seen() ? { queryKey: edgeKey } : { queryKey: edgeKey, refetchType: 'none' }))
+    }, EDGE_GATHER)
   })
 }
 

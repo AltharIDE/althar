@@ -5,7 +5,7 @@ import { Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from 'effect'
 import { Rpc, RpcClient, RpcGroup, RpcServer } from 'effect/rpc'
 import { until } from '@althar/testing/effect'
 
-import { clientProtocol, type DomMessagePort, domPort, emitterPort, type PortLike, serverProtocol } from '../src/transport'
+import { clientProtocol, type DomMessagePort, domPort, emitterPort, type PortLike, serverProtocol, untraced } from '../src/transport'
 
 class Nope extends Schema.TaggedError<Nope>()('Nope', { why: Schema.String }) {}
 
@@ -165,6 +165,32 @@ describe('the transport', () => {
         second.port2.close()
         yield* Fiber.await(abandoned)
         assert.deepStrictEqual(gone.seen, { listening: 0, watchingClose: 0 })
+      }),
+    ),
+  )
+
+  it.live('makes no span of the client’s own for a call, while the server’s call keeps one by its name', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const Spans = RpcGroup.make(Rpc.make('Named', { success: Schema.String }))
+        const named = Spans.toLayer({
+          Named: () => Effect.map(Effect.currentSpan, (span) => span.name).pipe(Effect.orElseSucceed(() => 'none')),
+        })
+        const channel = new MessageChannel()
+        yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+        yield* Effect.forkScoped(
+          Layer.launch(RpcServer.layer(Spans).pipe(Layer.provide(named), Layer.provide(serverProtocol(emitterPort(channel.port1))))),
+        )
+        // What the client posts, as it goes.
+        const sent: Array<unknown> = []
+        const port = emitterPort(channel.port2)
+        const protocol = yield* Layer.build(clientProtocol({ ...port, post: (message) => (sent.push(message), port.post(message)) }))
+        const calls = yield* RpcClient.make(Spans, untraced).pipe(Effect.provideContext(protocol))
+        assert.strictEqual(yield* calls.Named(), 'Named')
+        const [, request] = (sent.find((message) => Array.isArray(message) && message[0] === 0) ?? []) as [number, Record<string, unknown>]
+        assert.strictEqual(request?._tag, 'Request')
+        assert.isUndefined(request?.spanId)
+        assert.isUndefined(request?.traceId)
       }),
     ),
   )

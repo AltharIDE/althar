@@ -3,14 +3,16 @@ import { arch, release } from 'node:os'
 import { app, ipcMain, type UtilityProcess } from 'electron'
 
 import { type Fields, type LogFile, openLogFile } from '../logs/logFile'
+import { framesIn } from './lag'
 
 /*
  * The app's logs, as the main process keeps them (DEV-61), in the folder the
  * system keeps logs in (~/Library/Logs/Althar on a Mac), or in the profile's
  * own logs folder where a profile of its own was given, as the end-to-end
  * tests and a throwaway profile do. main.log has the app's lifecycle and its
- * errors, the window's uncaught errors and rejections among them;
- * runtime.log has what the runtime's process writes, stamped as it arrives,
+ * errors, the window's uncaught errors and rejections among them, and what
+ * was slow: its own thread running late (lag.ts), and the window's long
+ * frames and slow presses; runtime.log has what the runtime's process writes, stamped as it arrives,
  * its crash included. agents.log is the runtime's to write. In development
  * what the runtime writes is passed on to the terminal too, as before.
  * Quiet: lifecycle and errors, never what anyone wrote.
@@ -70,6 +72,23 @@ export const startLogs = ({ dir, passOn }: { readonly dir: string; readonly pass
     }),
   )
   app.on('before-quit', () => info('Althar quitting'))
+
+  // What made a window's page slow: its long frames and slow presses, a few at a time (renderer/shared/frames.ts).
+  ipcMain.on('althar:window-frames', (event, said: unknown) => {
+    const batch = framesIn(said)
+    if (batch === null) return
+    for (const { kind, ms, blockingMs, event: pressed, on, script } of batch.frames)
+      warn(kind === 'press' ? 'Slow press in the window' : 'Long frame in the window', {
+        kind,
+        ms,
+        blocking_ms: blockingMs,
+        event: pressed,
+        on,
+        script,
+        window_id: event.sender.id,
+      })
+    if (batch.more > 0) warn('More long frames in the window', { more: batch.more, window_id: event.sender.id })
+  })
 
   // What the window couldn't handle: its uncaught errors and rejections, as it sends them.
   ipcMain.on('althar:window-error', (_event, report: unknown) => {

@@ -49,7 +49,7 @@ import {
   Wait,
   Problem,
 } from '@althar/ui'
-import { type ComponentProps, Fragment, type ReactNode, useEffect, useState } from 'react'
+import { type ComponentProps, Fragment, type ReactNode, useEffect, useMemo, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { abandonedBlocker, blockerText, blockerWords } from '../../shared/blockers'
@@ -1156,7 +1156,8 @@ export function BoardView({
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set())
   // While the person points at Up next or Running, or drags in the line, what would move between them stays where it was.
   const [held, setHeld] = useState<Held | null>(null)
-  const shown = held === null ? lanes : holding(lanes, held)
+  // The same lanes as long as neither changes, so the board's cards are measured only where they can have moved.
+  const shown = useMemo(() => (held === null ? lanes : holding(lanes, held)), [lanes, held])
   const { continuing, free, paused } = shown
   // What waits for an agent's place, what continues and the line in the one order places are given in; then the plans.
   const waitingRows = shown.next.slice(0, continuing + free)
@@ -1267,6 +1268,23 @@ export function BoardView({
       {...(folds === undefined ? {} : { folds })}
       {...(onFoldsChange === undefined ? {} : { onFoldsChange })}
       onPointerLane={pointed}
+      // What moves its cards: the lanes as shown, the shelf Settled shows, and what grows or shrinks a card (a press under
+      // way, what failed); not the clock, nor anything drawn again around it.
+      version={[
+        shown,
+        shelf,
+        starting,
+        closing?.busy,
+        closing?.failed,
+        actions?.failed,
+        actions?.merging,
+        actions?.pushing,
+        actions?.settling,
+        actions?.resolving,
+        actions?.sending,
+        actions?.shipping,
+        actions?.answeringAfterMerge,
+      ]}
     >
       <BoardColumn
         lane={BoardLane.Next}

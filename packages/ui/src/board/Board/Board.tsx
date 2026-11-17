@@ -212,6 +212,11 @@ export interface BoardProps {
   onFoldsChange?: (folds: BoardFolds) => void
   /** Each time the pointer goes into a lane, or out of the board (null); while a row is dragged, it stays in the lane the drag began in. */
   onPointerLane?: (lane: BoardLane | null) => void
+  /**
+   * What its cards' places stand on, such as the lanes they are drawn from (ListMotion's `version`): a board drawn again
+   * with it as it was moves nothing and reads nothing of the page. Without it, any update may move a card.
+   */
+  version?: unknown
   className?: string
 }
 
@@ -223,7 +228,7 @@ const laneUnder = (target: EventTarget | null): BoardLane | null => {
   return lane != null && LANES.has(lane) ? (lane as BoardLane) : null
 }
 
-export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFoldsChange, onPointerLane, className }: BoardProps) {
+export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFoldsChange, onPointerLane, version, className }: BoardProps) {
   const [chosen, setChosen] = useControlled(folds, defaultFolds, onFoldsChange)
   const ref = useRef<HTMLElement>(null)
   // The lane last said, so each crossing is said once.
@@ -267,7 +272,14 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
       <FoldingContext.Provider
         value={{ rail: (lane) => rails.has(lane), fold: (lane, collapse) => setChosen(chose(chosen, lane, collapse)) }}
       >
-        <ListMotion within={ref} steady>
+        {/* A lane folding or opening moves what is beside it, whatever drew the board again. */}
+        {/* One flat run of entries, its own and the rails': ListMotion compares a version entry by entry, so an array kept
+            whole inside another would be new on every draw, and the page read each time. */}
+        <ListMotion
+          within={ref}
+          steady
+          {...(version === undefined ? {} : { version: [...(Array.isArray(version) ? version : [version]), railsKey(rails)] })}
+        >
           {children}
         </ListMotion>
       </FoldingContext.Provider>

@@ -1,10 +1,10 @@
 import { type QueryClient, useQuery } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { BoardSnapshot, BoardTask } from '@althar/contracts'
 
 import { type Client, messageOf } from '../../data/client'
-import { reads } from '../../data/reads'
+import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { markArrived } from './arrived'
 import { type WorkActions, useWorkActions } from './useWorkActions'
@@ -66,7 +66,15 @@ const recentFirst = (a: BoardTask, b: BoardTask) => (b.settledAt ?? '').localeCo
 export const useBoard = (projectId: string): BoardModel => {
   const { client, cache } = useServices()
   const read = useQuery(reads(client).board(projectId))
-  const actions = useWorkActions(read.data?.tasks ?? null)
+  // A press's card stays busy until the board is read again after its answer: begun then, whatever was under way.
+  const readAgain = useCallback(
+    () =>
+      cache
+        .refetchQueries({ queryKey: keys.board(projectId), exact: true })
+        .then(() => cache.getQueryData<BoardSnapshot>(keys.board(projectId))?.tasks),
+    [cache, projectId],
+  )
+  const actions = useWorkActions(read.data?.tasks ?? null, readAgain)
   // Every settled task this project's board has shown, by id: settled work doesn't change, so what was shown stays as the snapshot moves on.
   const kept = useRef<{ projectId: string; tasks: Map<string, BoardTask> }>({ projectId, tasks: new Map() })
   const [loaded, setLoaded] = useState(0)
@@ -81,7 +89,7 @@ export const useBoard = (projectId: string): BoardModel => {
     })
   }
   const snapshot = read.data ?? null
-  const board = useMemo(() => {
+  const readBoard = useMemo(() => {
     if (snapshot === null) return null
     if (kept.current.projectId !== projectId) kept.current = { projectId, tasks: new Map() }
     const have = new Set(snapshot.tasks.map((task) => task.taskId))
@@ -91,7 +99,10 @@ export const useBoard = (projectId: string): BoardModel => {
     return more.length === 0 ? snapshot : { ...snapshot, tasks: [...snapshot.tasks, ...more] }
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- `loaded` says pages were added to `kept`
   }, [snapshot, projectId, loaded])
-  const settled = board?.tasks.filter((task) => task.phase === 'settled').toSorted(recentFirst) ?? []
+  // The board as the person's presses left it: a card Done or kept for later moved at once. Older pages go by the board as read.
+  const { over } = actions
+  const board = useMemo(() => (readBoard === null ? null : { ...readBoard, tasks: over(readBoard.tasks) }), [readBoard, over])
+  const settled = readBoard?.tasks.filter((task) => task.phase === 'settled').toSorted(recentFirst) ?? []
   const oldest = settled.at(-1)
   const showOlder = () => {
     if (oldest?.settledAt == null || loading.current) return
@@ -116,7 +127,7 @@ export const useBoard = (projectId: string): BoardModel => {
   return {
     ...actions,
     board,
-    moreSettled: board !== null && settled.length < board.settledTotal,
+    moreSettled: readBoard !== null && settled.length < readBoard.settledTotal,
     showOlder,
     olderError,
     line: {

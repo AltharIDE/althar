@@ -5,6 +5,7 @@ import { makeFollowing } from './Follow'
 import { thisDevice } from './device'
 import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
+import { noteUnsure, nowFor, nowUntil, there, unnoted } from './standsOn'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { relative, sep } from 'node:path'
@@ -39,6 +40,7 @@ import {
   Option,
   Queue,
   Ref,
+  Result,
   Schema,
   Scope,
   Semaphore,
@@ -101,12 +103,16 @@ import {
   commitOf,
   commitsAhead,
   commitsOf,
+  countBetween,
   git,
+  fetchedInto,
   fetchInto,
   gitOutcome,
   patchIdsOf,
   gitWithin,
   namedRemotes,
+  isUnder,
+  logBetween,
   onHead,
   pushTo,
   branchRemoteIn,
@@ -175,7 +181,8 @@ import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
 import { RECENT, refreshRemotes } from './recordedRemotes'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
-import { summarize, words } from './words'
+import { type GitFailure, gitFailureOf, gitLine, gitSummary, redacted } from './gitSaid'
+import { sentence, summarize, words } from './words'
 import { BETWEEN_AGENTS_MS, betweenAgents } from './needsYou'
 
 /*
@@ -699,13 +706,21 @@ const RoundWaiting = Schema.Struct({
 })
 type RoundWaiting = typeof RoundWaiting.Type
 
-/** Why reading a repository failed, in a sentence: git's first line, before any usage it adds, or what went wrong otherwise. */
-const gitSaid = (cause: Cause.Cause<unknown>) => {
-  const failed = Option.getOrUndefined(Cause.findErrorOption(cause))
-  if (!(failed instanceof GitFailed)) return summarize(cause)
-  const said = failed.stderr.trim().split('\n')[0]?.trim() ?? ''
-  return /[.!?]$/.test(said) ? said : `${said}.`
+/** Why something failed, after a sentence that already names what was tried: git's most telling line, or what went wrong otherwise. */
+const gitSaidOf = (cause: Cause.Cause<unknown>) => {
+  const failed = gitFailureOf(cause)
+  return failed === undefined ? summarize(cause) : sentence(gitLineOf(failed))
 }
+
+/** A branch that couldn't be fetched to merge with a task's, for its card: with what git said. */
+const couldntFetch = (target: string, failed: GitFailed) =>
+  `Althar couldn’t fetch ${target} to merge it with the branch here: ${sentence(gitLineOf(failed))}`
+
+/** A task's branch that couldn't be read here, for its card: with what git said. */
+const couldntRead = (failed: GitFailed) => `Althar couldn’t read the branch here: ${sentence(gitLineOf(failed))}`
+
+/** What git said of a failure, in a line, or how it ended where it said nothing. */
+const gitLineOf = (failed: GitFailure) => gitLine(failed.stderr) || gitSummary(failed)
 
 /** One of a task's repositories here: its worktree and branch, the default branch it merges into, and whether it has a pull request. */
 interface HereRow {
@@ -1662,9 +1677,8 @@ export class Changes extends Context.Service<
           let start: string | null = leftOut ? next.shipped : null
           if (next.change.state === 'merged') {
             // The default branch as its host has it now, with what merged: as this Mac last saw it, it may not have that yet.
-            const tip = yield* fetchInto(task.path, baseTarget, target, `refs/althar/base/${target}`)
-            if (tip === null)
-              return yield* new GitFailed({ args: ['fetch', target], cwd: task.path, stderr: `Couldn't fetch ${target} from the host.` })
+            // Where it can't be fetched, git's own words say why.
+            const tip = yield* fetchedInto(task.path, baseTarget, target, `refs/althar/base/${target}`)
             base = tip
             start = leftOut || !(yield* onHead(task.path, tip)) ? tip : null
           }
@@ -3154,13 +3168,6 @@ export class Changes extends Context.Service<
           return [commit, ...rows.map((row) => row.original).filter((original) => original !== commit)]
         }).pipe(Effect.orElseSucceed(() => [commit]))
 
-      /** The first of `commits` the branch has. */
-      const firstOnHead = (path: string, commits: ReadonlyArray<string>) =>
-        Effect.gen(function* () {
-          for (const commit of commits) if (yield* onHead(path, commit)) return commit
-          return undefined
-        })
-
       /**
        * What a task's branch has that its pull request doesn't, as a push the
        * lead asks for shows it: from what the pull request has to the branch's
@@ -3176,17 +3183,25 @@ export class Changes extends Context.Service<
        */
       const aheadOf = (path: string, tip: string | null, known: ReadonlyArray<string | null>) =>
         Effect.gen(function* () {
-          const head = yield* commitOf(path, 'HEAD')
+          // Its head as the refs stamp it, so a card standing on it is kept while they don't move; asked of git where they can't say.
+          const [stamped] = yield* commitsOf(path, ['HEAD'])
+          const head = stamped ?? (yield* commitOf(path, 'HEAD'))
           const [latest] = (yield* commitsOf(
             path,
             [tip, ...known].filter((commit) => commit !== null),
           )).filter((commit) => commit !== null)
           if (tip !== null && latest !== tip) return { kind: 'behind', head } as const
           if (latest === undefined) return { kind: 'unknown', head } as const
-          const from = yield* firstOnHead(path, yield* madeFrom(latest))
+          // From here every question is of commits by their ids, whose answers never change and are kept (git.ts `isUnder`).
+          let from: string | undefined
+          for (const commit of yield* madeFrom(latest))
+            if (yield* isUnder(path, commit, head)) {
+              from = commit
+              break
+            }
           if (from === undefined) return { kind: 'rewritten', from: latest, head } as const
-          const count = yield* commitsAhead(path, from, head)
-          const listed = count === 0 ? '' : yield* git(path, 'log', '--reverse', '--format=%h%x1f%s', `${from}..${head}`)
+          const count = yield* countBetween(path, from, head)
+          const listed = count === 0 ? '' : yield* logBetween(path, from, head, '%h%x1f%s')
           const commits = listed
             .split('\n')
             .filter((line) => line !== '')
@@ -3450,13 +3465,8 @@ export class Changes extends Context.Service<
           const { snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
           const onto = sourceOf(snapshot, workspace.branch)
           const ref = `refs/althar/pull-request/${onto}`
-          const head = yield* fetchInto(workspace.path, pushTarget, onto, ref)
-          if (head === null)
-            return yield* new GitFailed({
-              args: ['fetch', onto],
-              cwd: workspace.path,
-              stderr: `Couldn't fetch ${onto} from the host.`,
-            })
+          // Where it can't be fetched, git's own words say why.
+          const head = yield* fetchedInto(workspace.path, pushTarget, onto, ref)
           const where = nameOf(snapshot)
           const short = head.slice(0, 12)
           const rewritten = head === sent && !(yield* onHead(workspace.path, head))
@@ -4335,7 +4345,7 @@ export class Changes extends Context.Service<
                           : refused.why === 'refused'
                             ? `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`
                             : refused.why === 'failed'
-                              ? `Pushing ${tag} failed: ${failed.stderr.trim().split('\n').at(-1) ?? ''}`
+                              ? `Pushing ${tag} failed: ${redacted(failed.stderr.trim().split('\n').at(-1) ?? '')}`
                               : `${tag} wasn't pushed. ${words(refused, String).message} Tell the person.`,
                       ),
                     ),
@@ -4897,7 +4907,10 @@ export class Changes extends Context.Service<
               AND NOT EXISTS (SELECT 1 FROM observations o WHERE o.subject_type = 'external_link' AND o.subject_id = l.id
                 AND o.kind = 'taken' AND o.observed_at >= r.ended_at)`
           if (rows.length === 0) return null
-          const now = yield* Clock.currentTimeMillis
+          // A card kept from this is worked out again once its checks have had their moment to show (standsOn.ts).
+          const now = yield* nowUntil(
+            ...rows.map((row) => Math.max(Date.parse(row.endedAt), row.pushedAt === null ? 0 : Date.parse(row.pushedAt)) + checksAppear),
+          )
           const failed = Math.max(...rows.map((row) => row.failed))
           const running = rows.some(
             (row) =>
@@ -4945,7 +4958,14 @@ export class Changes extends Context.Service<
                 WHERE h.task_id = k.id AND a.kind = 'person') AS spoken_at
             FROM tasks k JOIN external_links l ON l.task_id = k.id AND l.kind = 'change'
             WHERE k.id = ${taskId} AND k.state = 'open' AND json_extract(l.snapshot, '$.state') = 'open' AND l.listening = 1`
-          const now = yield* Clock.currentTimeMillis
+          // A card kept from this is worked out again once each one's checks have had their moment to show (standsOn.ts).
+          const now = yield* nowUntil(
+            ...links.map(
+              (link) =>
+                Math.max(link.endedAt === null ? 0 : Date.parse(link.endedAt), link.pushedAt === null ? 0 : Date.parse(link.pushedAt)) +
+                checksAppear,
+            ),
+          )
           return yield* Effect.forEach(links, (link) =>
             Effect.gen(function* () {
               const snapshot = yield* decodeSnapshot(link.snapshot)
@@ -5853,15 +5873,26 @@ export class Changes extends Context.Service<
           if (found?.key === key) return found.value
           const under = unshippedGoing.get(repository.workspaceId)
           // Asked again while it is being answered: that answer; a read of another key, as its refs moved, is its own.
-          if (under !== undefined && under.key === key) return yield* Deferred.await(under.answer)
+          if (under !== undefined && under.key === key)
+            return yield* Deferred.await(under.answer).pipe(
+              // What its asker couldn't keep, a card made of it doesn't keep either.
+              Effect.tapCause(() => noteUnsure('what is unshipped')),
+              Effect.tap(() => (unshippedKept.get(repository.workspaceId)?.key === key ? Effect.void : noteUnsure('what is unshipped'))),
+            )
           const answer = Deferred.makeUnsafe<Unshipped | undefined, unknown>()
           unshippedGoing.set(repository.workspaceId, { key, answer })
           const answered = { sure: true }
-          return yield* unshippedIn(repository, answered).pipe(
+          // Its answer stands on its key, which is noted as it is read (standsOn.ts): what git says as it works it out isn't,
+          // but where git couldn't answer in full, a card made of it isn't kept either.
+          return yield* unnoted(unshippedIn(repository, answered)).pipe(
+            Effect.tapCause(() => noteUnsure('what is unshipped')),
             Effect.tap((value) =>
-              Effect.sync(() => {
+              Effect.gen(function* () {
                 if (answered.sure && commits[0] !== null) unshippedKept.set(repository.workspaceId, { key, value })
-                else unshippedKept.delete(repository.workspaceId)
+                else {
+                  unshippedKept.delete(repository.workspaceId)
+                  yield* noteUnsure('what is unshipped')
+                }
               }),
             ),
             Effect.onExit((exit) =>
@@ -5903,7 +5934,7 @@ export class Changes extends Context.Service<
             ORDER BY b.created_at, b.rowid`
           const found: Array<Unshipped> = []
           for (const repository of repositories) {
-            if (!existsSync(repository.path)) continue
+            if (!(yield* there(repository.path))) continue
             const one = yield* kept ? keptIn(repository) : unshippedIn(repository)
             if (one !== undefined) found.push(one)
           }
@@ -5931,7 +5962,7 @@ export class Changes extends Context.Service<
           if (worktrees.length === 0) return false
           const pictures = yield* evidencePaths(taskId)
           for (const worktree of worktrees) {
-            if (!existsSync(worktree.path)) return false
+            if (!(yield* there(worktree.path))) return false
             const base = worktree.baseCommit ?? worktree.baseRef
             // Where git can't say what it started from, it isn't known to be empty.
             if (base === null) return false
@@ -6615,7 +6646,7 @@ export class Changes extends Context.Service<
                 ? { why: 'Its worktree is gone.', uncommitted: false }
                 : yield* unresolved(worktree, conflict).pipe(
                     contained('Changes.settleRound', (cause) => ({
-                      why: `Althar couldn’t read its worktree: ${gitSaid(cause)}`,
+                      why: `Althar couldn’t read its worktree: ${gitSaidOf(cause)}`,
                       uncommitted: false,
                     })),
                   )
@@ -6778,7 +6809,8 @@ export class Changes extends Context.Service<
       /**
        * Where a pull request's target branch is, fetched into the task's
        * workspace at most every few turns, unless `fresh`: the worktrees of a
-       * repository share what one fetched. Null where it couldn't be fetched.
+       * repository share what one fetched. Where it couldn't be fetched, git's
+       * failure, which its caller puts in words.
        */
       const baseOf = (
         workspace: { readonly path: string; readonly binding: string },
@@ -6793,8 +6825,8 @@ export class Changes extends Context.Service<
           const at = yield* Clock.currentTimeMillis
           const known = fetchedAt.get(key)
           if (!fresh && known !== undefined && at - known.at < baseEvery) return known.tip
-          const tip = yield* fetchInto(workspace.path, yield* host.pushTarget(repository), branch, `refs/remotes/${ref}`)
-          if (tip !== null) fetchedAt.set(key, { at, tip })
+          const tip = yield* fetchedInto(workspace.path, yield* host.pushTarget(repository), branch, `refs/remotes/${ref}`)
+          fetchedAt.set(key, { at, tip })
           return tip
         })
 
@@ -6861,17 +6893,22 @@ export class Changes extends Context.Service<
           const remote =
             fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase() ? 'upstream' : 'origin'
           const ref = `${remote}/${now.target}`
-          const target = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says)
-          const from = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
-          if (target === null || from === null)
-            return yield* Effect.as(
-              couldnt(
-                target === null
-                  ? `Althar couldn’t fetch ${now.target} to merge it with the branch here.`
-                  : 'Althar couldn’t read the branch here.',
-              ),
-              false,
-            )
+          // Where either can't be had, the card says what git said, and the log keeps all of it.
+          const fetched = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says).pipe(
+            Effect.map((tip) => ({ tip })),
+            Effect.catchTag('GitFailed', (failed) => Effect.succeed({ failed })),
+          )
+          if ('failed' in fetched) {
+            yield* Effect.logWarning('Could not fetch the branch a pull request goes into', Cause.fail(fetched.failed))
+            return yield* Effect.as(couldnt(couldntFetch(now.target, fetched.failed)), false)
+          }
+          const target = fetched.tip
+          const read = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.result)
+          if (Result.isFailure(read)) {
+            yield* Effect.logWarning('Could not read the branch a pull request comes from', Cause.fail(read.failure))
+            return yield* Effect.as(couldnt(couldntRead(read.failure)), false)
+          }
+          const from = read.success
           const merged = yield* gitOutcome(workspace.path, 'merge-tree', '--write-tree', '--name-only', '--no-messages', target, from)
           if (merged.code === 0) {
             const was = cleanHere.get(link.id)
@@ -7582,7 +7619,7 @@ export class Changes extends Context.Service<
           return failed.why === 'failed'
             ? `Althar couldn't push: ${(failed.detail ?? '').trim().split('\n')[0]?.replace(/\.$/, '') ?? ''}`
             : words(failed, String).message.replace(/\.$/, '')
-        return `Althar couldn't push: ${gitSaid(cause).replace(/\.$/, '')}`
+        return `Althar couldn't push: ${gitSaidOf(cause).replace(/\.$/, '')}`
       }
 
       /**
@@ -7772,10 +7809,9 @@ export class Changes extends Context.Service<
             const pinned = heads?.[workspace.id]
             const head = pinned === undefined ? here.head : yield* acceptedHead(taskId, workspace.path, pinned)
             // Already sent by an earlier try, or from elsewhere: a retry never replaces it with a later local head.
-            if ((yield* gitOutcome(workspace.path, 'merge-base', '--is-ancestor', head, here.from)).code === 0) continue
-            if ((yield* gitOutcome(workspace.path, 'merge-base', '--is-ancestor', here.from, head)).code !== 0)
-              return yield* new ChangedSinceSeen({ taskId, what: 'branch' })
-            const count = yield* commitsAhead(workspace.path, here.from, head)
+            if (yield* isUnder(workspace.path, head, here.from)) continue
+            if (!(yield* isUnder(workspace.path, here.from, head))) return yield* new ChangedSinceSeen({ taskId, what: 'branch' })
+            const count = yield* countBetween(workspace.path, here.from, head)
             if (count === 0) continue
             if (send) yield* push(taskId, head, seen.url, 'ship')
             const sql = yield* SqlClient.SqlClient
@@ -8303,7 +8339,8 @@ export class Changes extends Context.Service<
             atWork || thread === undefined
               ? []
               : yield* sql<{ ended: string | null }>`SELECT max(ended_at) AS ended FROM turn_deliveries WHERE thread_id = ${thread.id}`
-          const going = atWork || betweenAgents(turn?.ended ?? null, yield* Clock.currentTimeMillis, goingFor)
+          // A card kept from this is worked out again once that moment is over (standsOn.ts).
+          const going = atWork || betweenAgents(turn?.ended ?? null, yield* nowFor(turn?.ended ?? null, goingFor), goingFor)
           const shown = new Map<string, { readonly held: string | null; readonly ship?: boolean }>(forShip)
           for (const link of yield* linksOf(taskId)) {
             const snapshot = yield* decodeSnapshot(link.snapshot)
@@ -8491,13 +8528,16 @@ export class Changes extends Context.Service<
             let couldnt: string | null = null
             for (const repository of yield* repositoriesHere(task.taskId)) {
               if (repository.opened !== 0) continue
-              const head = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.orElseSucceed(() => null))
-              if (head === null) {
+              const read = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.result)
+              if (Result.isFailure(read)) {
+                if (existsSync(repository.worktree))
+                  yield* Effect.logWarning('Could not read the branch a task works on', Cause.fail(read.failure))
                 couldnt ??= existsSync(repository.worktree)
-                  ? 'Althar couldn’t read the branch here.'
+                  ? couldntRead(read.failure)
                   : `Its folder isn’t on this computer, so Althar can’t merge ${repository.base} into it here.`
                 continue
               }
+              const head = read.success
               const files = yield* conflictsOf(repository.root, repository.base, head)
               if (files === null) couldnt ??= `Git couldn’t merge ${repository.base} with the branch here.`
               else if (files.length > 0) found.push(yield* conflictHere(repository, files))
@@ -9525,16 +9565,24 @@ export class Changes extends Context.Service<
           ),
         stopListening: (taskId, url) => provide(locked(taskId)(stopListening(taskId, url))),
         attach: (input) => provide(locked(input.taskId)(attaching.withPermits(1)(attach(input)))),
+        // Behind the press: it waits for the task's lock, which the pull request's own work (its checks, a push) can hold for
+        // seconds while agents are at work, and Stop and Interrupt answer once their lead is told. What it records, that the
+        // person took the task, only a turn's end reads, and a turn the person interrupted is theirs anyway (`look`).
         leadStopped: (where, how = 'stopped') =>
-          provide(
-            Effect.gen(function* () {
-              const sql = yield* SqlClient.SqlClient
-              const [task] =
-                'taskId' in where
-                  ? [{ taskId: where.taskId }]
-                  : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId} AND task_id IS NOT NULL`
-              if (task !== undefined) yield* locked(task.taskId)(leadStopped(task.taskId, how))
-            }),
+          Effect.asVoid(
+            Effect.forkIn(
+              provide(
+                Effect.gen(function* () {
+                  const sql = yield* SqlClient.SqlClient
+                  const [task] =
+                    'taskId' in where
+                      ? [{ taskId: where.taskId }]
+                      : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId} AND task_id IS NOT NULL`
+                  if (task !== undefined) yield* locked(task.taskId)(leadStopped(task.taskId, how))
+                }),
+              ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the lead stopped', cause))),
+              scope,
+            ),
           ),
         resolveNow: (where, force) => Effect.asVoid(Effect.forkIn(provide(resolveNow(where, force)), scope)),
         setResolveConflicts: (input) => provide(setResolveConflicts(input)),
