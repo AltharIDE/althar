@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -818,7 +819,7 @@ describe('issue drafts', () => {
     const cardOf = (projectId: string, title: string) =>
       Effect.map(cardsOf(projectId), (cards) => cards.find((one) => one.title === title) ?? assert.fail(`no card ${title}`))
     const cardWhen = (projectId: string, title: string, check: (card: IssueDraftCard) => boolean) =>
-      until(cardOf(projectId, title), check, title)
+      until(cardOf(projectId, title), check, `the card of ${title}`)
     /** Drafts each title on Linear, as a card, filing none. */
     const drafted = (access: ToolAccess, projectId: string, ...titles: ReadonlyArray<string>) =>
       Effect.forEach(titles, (title) =>
@@ -989,7 +990,7 @@ describe('issue drafts', () => {
           yield* callTool(access, 'draft_issue', { title: 'Queued' })
           const sql = yield* SqlClient.SqlClient
           // As if Althar closed while it waited for Linear's reset.
-          yield* sql`UPDATE issue_drafts SET state = 'waiting', waiting_until = '2030-01-01T00:00:00.000Z'`
+          yield* sql`UPDATE issue_drafts SET state = 'waiting', waiting_until = ${isoAfter(60 * 60_000)}`
           return projectId
         }).pipe(Effect.provide(paced({ linear }, database)))
         yield* Effect.gen(function* () {
