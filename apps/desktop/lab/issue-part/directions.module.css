@@ -1,0 +1,111 @@
+/* the issues a task came from, heading its thread: each card with what its merge does to it */
+.issues {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.one {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.card {
+  position: relative;
+  align-self: stretch;
+}
+
+/* A: the card and its foot in one frame, the foot holding the two words at the kit's segmented control's own size */
+.tray {
+  align-self: stretch;
+  border-radius: 12px;
+  background: var(--paper);
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.tray :is(a, span)[class*='Issue-module__issue__'],
+.tray :is(a, span)[class*='Issue-module__issue__']:hover {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.foot {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px 7px;
+  border-top: 1px solid var(--line);
+}
+.two {
+  flex: none;
+}
+
+/* B: a tag on the card's top line, before the way out to the tracker */
+.corner {
+  position: absolute;
+  top: 9px;
+  right: 32px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 6px 0 5px;
+  border-radius: 6px;
+  background: var(--paper);
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-2);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.tag svg {
+  color: var(--t-3);
+}
+.tag:hover,
+.tag[data-state='open'] {
+  background: var(--n-2);
+  color: var(--t-1);
+}
+
+/* C: one line, its verb the choice */
+.sentence {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding-left: 2px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.verb {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-weight: 550;
+  color: var(--t-1);
+  transition: background var(--fast) var(--ease);
+}
+.verb svg {
+  color: var(--t-3);
+}
+.verb:hover,
+.verb[data-state='open'] {
+  background: var(--line);
+}
+
+/* D: among the issue's part's facts, at its own size, though the facts' list draws its divs as their contents */
+.inPart {
+  display: flex;
+  margin: -4px 0 -2px -2px;
+}
+.inPart [role='radiogroup'] {
+  display: flex;
+}
