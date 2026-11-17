@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -6,11 +6,23 @@ import { join, resolve } from 'node:path'
 
 import { Schema } from 'effect'
 import { ClientDeviceId, HomeId } from '@althar/contracts'
-import { expect, test } from '@playwright/test'
+import { budget } from '@althar/testing/budget'
+import { expect, test, type ElectronApplication } from '@playwright/test'
 
 import { launch, openFirstProject, still } from './support'
 
 const progress = (message: string) => process.stdout.write(`${message}\n`)
+/** A blocked native keychain dialog must produce a failed test, rather than leave its Electron worker hanging. */
+const closeDesktop = async (app: ElectronApplication, child: ChildProcess) => {
+  const deadline = AbortSignal.timeout(budget.medium)
+  const force = () => child.kill('SIGKILL')
+  deadline.addEventListener('abort', force, { once: true })
+  try {
+    await app.close()
+  } finally {
+    deadline.removeEventListener('abort', force)
+  }
+}
 
 const repo = (root: string, name: string) => {
   const path = join(root, name)
@@ -82,7 +94,11 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
   progress('Native pairing: standalone host ready')
   const clientRoot = mkdtempSync(join(tmpdir(), 'althar-pairing-client-'))
   const clientEnvironment = { ALTHAR_API_SOCKET: '1', ALTHAR_NATIVE_KEYRING: '1' }
-  let { electronApp, page } = await launch(clientRoot, clientEnvironment).catch(async (error: unknown) => {
+  let {
+    electronApp,
+    page,
+    child: desktopChild,
+  } = await launch(clientRoot, clientEnvironment).catch(async (error: unknown) => {
     host.child.kill('SIGTERM')
     await host.closed
     throw error
@@ -167,9 +183,9 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     await expect(remote.getByRole('heading', { name: 'remote-project', exact: true })).toBeVisible()
     const saved = await page.evaluate(async () => (await window.althar.homes!.list())[0])
     if (saved?.https === undefined) throw new Error('No saved paired home')
-    await electronApp.close()
+    await closeDesktop(electronApp, desktopChild)
     progress('Native pairing: desktop closed for relaunch')
-    ;({ electronApp, page } = await launch(clientRoot, clientEnvironment))
+    ;({ electronApp, page, child: desktopChild } = await launch(clientRoot, clientEnvironment))
     progress('Native pairing: desktop relaunched')
     await expect(page.getByRole('button', { name: 'Homes', exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Homes', exact: true }).click()
@@ -196,7 +212,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     expect(readFileSync(join(clientRoot, 'profile/homes.json'), 'utf8')).not.toContain(invitation.code)
   } finally {
     if (!page.isClosed()) await page.screenshot({ path: 'test-results/pairing-flow-outcome.png', scale: 'css' }).catch(() => undefined)
-    await electronApp.close()
+    await closeDesktop(electronApp, desktopChild)
     host.child.kill('SIGTERM')
     await host.closed
     rmSync(root, { recursive: true, force: true })
