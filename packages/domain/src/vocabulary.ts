@@ -61,6 +61,18 @@ export type WorksIn = typeof WorksIn.Type
 export const WorkspaceKind = Schema.Literals(['worktree', 'checkout', 'copy'])
 export type WorkspaceKind = typeof WorkspaceKind.Type
 
+/**
+ * Another tool, whose work a project brings in (docs/decisions/workspaces-and-runs.md, "Bringing in other tools' work"): one
+ * that makes worktrees and keeps a setup for them, an agent whose conversations are on this computer, or `hand`, a
+ * worktree nobody's tool claims, made by the person.
+ */
+export const OtherTool = Schema.Literals(['conductor', 'orca', 't_three_code', 'paradev', 'cursor', 'codex', 'claude_code', 'hand'])
+export type OtherTool = typeof OtherTool.Type
+
+/** What is brought in from another tool: a worktree, as a task in place; its setup, as a repository's; a conversation. */
+export const BroughtKind = Schema.Literals(['worktree', 'setup', 'conversation'])
+export type BroughtKind = typeof BroughtKind.Type
+
 export const ExecutionState = Schema.Literals(['running', 'succeeded', 'failed', 'cancelled'])
 export type ExecutionState = typeof ExecutionState.Type
 

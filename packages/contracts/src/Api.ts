@@ -14,6 +14,7 @@ import {
 } from './identities'
 
 import { CanvasDetail, CanvasKind, CanvasSummary, CanvasText, SentCanvasComment } from './canvases'
+import { BroughtIn, Elsewhere } from './elsewhere'
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
@@ -4844,6 +4845,33 @@ const ProjectApi = RpcGroup.make(
    * root inside the folder chosen, where it is one of several found there.
    */
   command('PrepareFolder', { grant: Schema.String, path: Schema.optional(Schema.String) }, PreparedFolder),
+  /**
+   * What other tools left for a project's repositories on this computer
+   * (docs/decisions/workspaces-and-runs.md, "Bringing in other tools' work"):
+   * their worktrees, the setups they keep, and Claude Code's and Codex's
+   * conversations there, each with what it became where it was brought in
+   * already. Read only: nothing of another tool's changes.
+   */
+  call('LookElsewhere', { projectId: Schema.String }, Elsewhere),
+  /**
+   * Brings in what the person picked, by the keys LookElsewhere gave: each
+   * worktree as a task in place, its plan held on `steps` until they start
+   * it, with the conversations that ran in it as its history; each setup as
+   * its repository's; each other conversation as an aside. What was brought
+   * in before is found, never made twice; one that can't come in says why,
+   * and the rest come in all the same.
+   */
+  command(
+    'BringIn',
+    {
+      projectId: Schema.String,
+      worktrees: Schema.Array(Schema.String),
+      setups: Schema.Array(Schema.String),
+      conversations: Schema.Array(Schema.String),
+      steps: Schema.Array(PlanStep),
+    },
+    BroughtIn,
+  ),
   /** Every repository a code host's connection reaches, last pushed to first. */
   call('ListHostRepositories', { connectionId: Schema.String }, Schema.Array(HostRepository)),
   /** Where a code host's connection can make a repository: its account first, then its organizations, groups or workspaces. */

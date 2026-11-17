@@ -1,5 +1,6 @@
 export * from './Api'
 export * from './canvases'
+export * from './elsewhere'
 export * from './files'
 export * from './automations'
 export * from './schedules'

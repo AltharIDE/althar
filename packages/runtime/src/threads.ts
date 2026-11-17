@@ -821,7 +821,13 @@ export const transcript = (
       if (options.kinds !== undefined && !options.kinds.includes(item.kind)) return []
       const content = JSON.parse(item.content) as Record<string, unknown>
       const text = (key: string) => (typeof content[key] === 'string' ? (content[key] as string) : '')
-      const agent = options.agent ?? item.agentId ?? 'agent'
+      // A message brought in from another tool (Elsewhere.ts) was said by the agent there, in no session of Althar's.
+      const agent =
+        content['brought'] === 'claude_code'
+          ? 'claude-code'
+          : content['brought'] === 'codex'
+            ? 'codex'
+            : (options.agent ?? item.agentId ?? 'agent')
       switch (item.kind) {
         case 'user_message': {
           // Images the person sent are said, though only the agent they went to saw them.

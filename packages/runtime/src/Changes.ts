@@ -2626,13 +2626,15 @@ export class Changes extends Context.Service<
         readonly toward: string | null
         readonly state: string
         readonly kind: string | null
+        /** The tool that made its folder, where Althar didn't (Elsewhere.ts): never removed, committed in or switched by Althar. */
+        readonly madeBy: string | null
       }
       const changesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<ChangeRow>`
             SELECT w.id, w.project_id, (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id,
-              w.binding_id, w.name, w.path, w.branch, w.base_commit, w.toward, w.state, w.kind
+              w.binding_id, w.name, w.path, w.branch, w.base_commit, w.toward, w.state, w.kind, w.made_by
             FROM workspaces w WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
               AND w.reviewing IS NULL AND w.state IN ('ready', 'away')
             ORDER BY w.created_at, w.rowid`
@@ -2642,6 +2644,10 @@ export class Changes extends Context.Service<
         return all.find((one) => (one.name ?? '').toLowerCase() === wanted || one.branch.toLowerCase() === wanted)
       }
       const changeWords = (one: Pick<ChangeRow, 'name' | 'branch'>) => (one.name === null ? 'the task’s first change' : `“${one.name}”`)
+      const madeElsewhere = (one: Pick<ChangeRow, 'name' | 'branch'>) =>
+        new ToolRefused({
+          message: `${changeWords(one)} is in a folder another tool made, which Althar leaves where it is: its branch stays the task's, and the folder is that tool's to remove.`,
+        })
       const commitLeftIn = (path: string, message: string) =>
         Effect.gen(function* () {
           if ((yield* uncommittedFiles(path)).length === 0) return false
@@ -2717,6 +2723,8 @@ export class Changes extends Context.Service<
             return yield* new ToolRefused({
               message: `Name the change of the task's to keep ${changeWords(from)} together with: one in the same repository.`,
             })
+          // Joining takes the folder of the change joined away.
+          if (from.madeBy !== null) return yield* madeElsewhere(from)
           for (const one of [from, into])
             if ((yield* pulledOf(one.id)).length > 0)
               return yield* new ToolRefused({
@@ -2781,6 +2789,7 @@ export class Changes extends Context.Service<
             return yield* new ToolRefused({ message: `The task has no change “${asked}” here.` })
           if (row.kind === 'checkout')
             return yield* new ToolRefused({ message: `${changeWords(row)} works Local: move it to a worktree first.` })
+          if (row.madeBy !== null) return yield* madeElsewhere(row)
           const others = all.filter((one) => one.id !== row.id && one.state === 'ready')
           // The folder another change left, as the lead made this branch there: it goes back to that change, clean or not at all.
           const left = all.find((one) => one.id !== row.id && one.state === 'away' && one.path === row.path)
@@ -2849,6 +2858,7 @@ export class Changes extends Context.Service<
           if (row === undefined) return yield* new ToolRefused({ message: 'The task has no worktree here to remove.' })
           if (all.length > 1) return yield* new ToolRefused({ message: 'The task has several changes: name the one to drop.' })
           if (row.kind === 'checkout') return yield* new ToolRefused({ message: 'The task works Local: move it to a worktree first.' })
+          if (row.madeBy !== null) return yield* madeElsewhere(row)
           const committed = yield* commitLeftIn(row.path, 'Work in progress, as the task’s worktree was removed')
           const base = row.baseCommit ?? (yield* commitOf(row.path, 'HEAD'))
           yield* git(row.path, 'switch', '--quiet', '--detach', base)

@@ -162,6 +162,7 @@ import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolR
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
+import { Elsewhere } from './Elsewhere'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
@@ -296,6 +297,7 @@ export const handlers = apiLayer(
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const canvases = yield* Canvases
+    const elsewhere = yield* Elsewhere
     const instance = yield* Instance
     const identity = (yield* CurrentClient) ?? {
       homeId: instance.homeId,
@@ -901,6 +903,25 @@ export const handlers = apiLayer(
           }),
         ),
       ListProjects: () => api(queries.projects),
+      LookElsewhere: ({ projectId }) =>
+        api(
+          Effect.map(elsewhere.look(projectId), (found) => ({
+            worktrees: [...found.worktrees],
+            setups: [...found.setups],
+            conversations: [...found.conversations],
+          })),
+        ),
+      BringIn: ({ commandId, projectId, worktrees, setups, conversations, steps }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.bring_in', { projectId, worktrees, setups, conversations }, commandId)
+              const brought = yield* elsewhere.bringIn({ envelope: said, projectId, worktrees, setups, conversations, steps })
+              return { ...brought, tasks: [...brought.tasks], asides: [...brought.asides], failed: [...brought.failed] }
+            }),
+          ),
+        ),
       ReadFolder: ({ grant }) =>
         api(
           Effect.gen(function* () {
