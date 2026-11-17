@@ -58,7 +58,7 @@ function HomesMenu({
           <MenuItem
             icon="reload"
             {...(here.problem === undefined ? {} : { description: here.problem })}
-            onSelect={() => void homes.reconnect()}
+            onSelect={() => void homes.reconnect().catch(() => undefined)}
           >
             Reconnect
           </MenuItem>
@@ -66,7 +66,7 @@ function HomesMenu({
         </>
       )}
       <MenuGroup label="Homes">
-        <MenuItem lead={<Icon name="computer" />} hint={hint('local')} onSelect={() => void homes.open('local')}>
+        <MenuItem lead={<Icon name="computer" />} hint={hint('local')} onSelect={() => void homes.open('local').catch(() => undefined)}>
           This computer
         </MenuItem>
         {listed.map((home) => (
@@ -75,7 +75,7 @@ function HomesMenu({
             lead={<Icon name="home" />}
             hint={hint(home)}
             description={<span className={s.target}>{home.ssh?.target ?? home.https?.origin ?? ''}</span>}
-            onSelect={() => void homes.open(home.id)}
+            onSelect={() => void homes.open(home.id).catch(() => undefined)}
           >
             {home.name}
           </MenuItem>

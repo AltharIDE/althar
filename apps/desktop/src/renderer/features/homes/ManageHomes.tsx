@@ -124,12 +124,14 @@ const useSaved = (homes: HomesHost, overview: HomesOverview | null) => {
       setProblem(null)
       clearTimeout(timer.current)
       timer.current = setTimeout(() => setLast(null), UNDO_FOR)
-      pending.current = homes.forget(home.id).catch((error: unknown) => {
-        if (!live.current) return
-        unhide(home.id)
-        setLast(null)
-        setProblem(homeProblem(error))
-      })
+      pending.current = pending.current
+        .then(() => homes.forget(home.id))
+        .catch((error: unknown) => {
+          if (!live.current) return
+          unhide(home.id)
+          setLast(null)
+          setProblem(homeProblem(error))
+        })
     },
     undo: () => {
       if (last === null) return
@@ -163,7 +165,18 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
       .catch(() => undefined)
   }
   return (
-    <Dialog title="Homes" width={600} tall onClose={onClose} actions={<Button onClick={onClose}>Done</Button>}>
+    <Dialog
+      title="Homes"
+      width={600}
+      tall
+      onClose={onClose}
+      onEscapeKeyDown={(event) => {
+        if (editing === null) return
+        event.preventDefault()
+        setEditing(null)
+      }}
+      actions={<Button onClick={onClose}>Done</Button>}
+    >
       <ListMotion within={list} enter="grow">
         <ul className={s.homes} ref={list}>
           <li data-move="local" className={s.home}>
@@ -340,6 +353,7 @@ function NameField({ name, onDone }: { name: string; onDone: (name: string | nul
       value={value}
       maxLength={120}
       aria-label="Name"
+      data-own-escape
       spellCheck={false}
       // oxlint-disable-next-line jsx-a11y/no-autofocus -- Rename was pressed to type the name; the field takes the keys.
       autoFocus

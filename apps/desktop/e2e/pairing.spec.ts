@@ -211,6 +211,13 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     await expect.poll(() => readFileSync(join(clientRoot, 'profile/connection-keys/devices.json'), 'utf8').includes(saved.id)).toBe(false)
     await manage.getByRole('button', { name: 'Undo', exact: true }).click()
     await expect(manage.getByText('My VPS', { exact: true })).toBeVisible()
+    // Changing one's mind while Undo is saving must leave the final Forget in force, including its sealed key.
+    await manage.getByRole('button', { name: 'My VPS, more', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'Forget', exact: true }).click()
+    await expect.poll(() => readFileSync(join(clientRoot, 'profile/connection-keys/devices.json'), 'utf8').includes(saved.id)).toBe(false)
+    await expect.poll(() => page.evaluate(async () => (await window.althar.homes!.list()).length)).toBe(0)
+    await manage.getByRole('button', { name: 'Undo', exact: true }).click()
+    await expect(manage.getByText('My VPS', { exact: true })).toBeVisible()
     const reopened = electronApp.waitForEvent('window', { predicate: (candidate) => candidate !== page })
     await manage.getByRole('button', { name: /^remote-project/ }).click()
     remote = await reopened

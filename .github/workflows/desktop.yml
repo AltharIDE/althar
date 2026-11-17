@@ -209,6 +209,39 @@ jobs:
       - if: always() && runner.os == 'macOS'
         run: security delete-keychain "$RUNNER_TEMP/althar-native.keychain-db"
 
+  home-coverage:
+    name: home connection coverage
+    needs: plan
+    if: needs.plan.outputs.native-homes == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: ./.github/actions/flaky/quarantine
+      - run: bun run test:coverage
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: home-coverage-${{ github.run_attempt }}
+          path: apps/desktop/coverage/coverage-final.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - if: always()
+        uses: ./.github/actions/flaky
+
   # The app's whole end-to-end run, in four parts, when the change reaches the app: on the pull request, so a change
   # that breaks a spec it didn't touch fails where it was made, and again in the merge queue, on main as it will be.
   e2e:

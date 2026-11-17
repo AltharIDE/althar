@@ -39,7 +39,7 @@ export const useEdit = (homes: HomesHost, home: SshRemoteHome) => {
     setKept(next)
     setSame(true)
     void homes.change(home.id, checked.checkId).catch((error: unknown) => {
-      setKept(previous)
+      setKept((current) => (current === next ? previous : current))
       setSame(false)
       setProblem(homeProblem(error))
     })

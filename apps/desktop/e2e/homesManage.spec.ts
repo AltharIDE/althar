@@ -64,6 +64,16 @@ test('draws the chip once a home is saved, and Manage homes by each home’s pro
     await page.emulateMedia({ colorScheme: 'light' })
 
     await manage.getByRole('button', { name: 'hetzner-01, more' }).click()
+    await page.getByRole('menuitem', { name: 'Rename' }).click()
+    await manage.getByLabel('Name', { exact: true }).fill('Discard this name')
+    await still(page)
+    await manage.screenshot({ path: 'test-results/homes-manage-rename.png', scale: 'css' })
+    await manage.getByLabel('Name', { exact: true }).press('Escape')
+    await expect(manage).toBeVisible()
+    await expect(manage.getByText('hetzner-01', { exact: true })).toBeVisible()
+    expect(await page.evaluate(async () => (await window.althar.homes!.list())[0]?.name)).toBe('hetzner-01')
+
+    await manage.getByRole('button', { name: 'hetzner-01, more' }).click()
     await page.getByRole('menuitem', { name: 'Edit connection' }).click()
     await expect(manage.getByLabel('SSH host', { exact: true })).toBeFocused()
     await manage.getByLabel('SSH host', { exact: true }).fill('me@hetzner-02.invalid')
