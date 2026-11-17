@@ -782,6 +782,21 @@ export const StartedByALead: Story = {
   },
 }
 
+/** A long parent title never makes the foot run to two lines: "Started by" stays whole and the title is cut with "…". */
+export const StartedByALongTitle: Story = {
+  args: {
+    ...StartedByALead.args,
+    title: "Prototype: redesign the issue switch under a task's issue",
+    startedBy: 'Only-part-of switch sits under the issue, not beside it',
+    onOpenStartedBy: fn(),
+  },
+  decorators: [(Story) => <div style={{ width: 300 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const link = within(canvasElement).getByRole('button', { name: /Only-part-of/ })
+    await expect(link.parentElement!.getBoundingClientRect().height).toBeLessThan(18)
+  },
+}
+
 /** Where the parent's title opens the parent, apart from the card's own press: it is a link, not part of the card's button. */
 export const StartedByALeadOpensIt: Story = {
   args: { ...StartedByALead.args, onOpen: fn(), onOpenStartedBy: fn() },

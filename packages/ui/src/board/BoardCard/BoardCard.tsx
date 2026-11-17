@@ -182,13 +182,16 @@ export function StartedBy({
 }) {
   const t = { ...boardCardText, ...text }
   return (
-    <p className={s.from}>
+    <p className={s.from} title={t.startedBy(task)}>
       <Icon name="corner" size={11} />
       {onOpen === undefined ? (
-        t.startedBy(task)
+        <span className={s.fromTask}>{t.startedBy(task)}</span>
       ) : (
         <>
-          {t.startedByLead} <LinkButton onClick={onOpen}>{task}</LinkButton>
+          <span className={s.fromLead}>{t.startedByLead}</span>
+          <LinkButton className={s.fromTask} onClick={onOpen}>
+            {task}
+          </LinkButton>
         </>
       )}
     </p>

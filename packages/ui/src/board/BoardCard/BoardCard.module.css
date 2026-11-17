@@ -109,6 +109,22 @@
 .from svg {
   flex: none;
 }
+/* One line at any width: the label stays whole, the task's title is cut with "…", its whole on hover. */
+.from {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+.fromLead {
+  flex: none;
+}
+.fromTask {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* What its work goes into, where it isn't the default branch (ADR-093): quiet, the branch in mono, cut short with its whole on hover. */
 .toward {
   display: flex;
@@ -166,6 +182,8 @@
   line-height: 16px;
   color: var(--t-3);
   font-variant-numeric: tabular-nums;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 /* a change's mark: a small dot in the colour of what it means */
