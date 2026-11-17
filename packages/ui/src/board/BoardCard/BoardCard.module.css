@@ -118,6 +118,10 @@
 .fromLead {
   flex: none;
 }
+.count {
+  flex: none;
+  white-space: nowrap;
+}
 .fromTask {
   min-width: 0;
   overflow: hidden;
@@ -188,11 +192,14 @@
 
 /* a change's mark: a small dot in the colour of what it means */
 .marks {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   display: inline-flex;
   gap: 3px;
 }
 .mark {
+  flex: none;
   width: 6px;
   height: 6px;
   border-radius: 50%;
