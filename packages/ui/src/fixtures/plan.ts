@@ -119,8 +119,8 @@ export const CLAUDE_TWO: PlanAgent = {
       age: null,
       fault: null,
       windows: [
-        { id: 'five_hour', label: '5 hours', left: 52, until: '17:00' },
-        { id: 'weekly', label: 'Week', left: 0, until: 'Mon 09:00' },
+        { id: 'five_hour', label: '5 hours', left: 52, until: '17:00', resets: 'in 2h 10m', resetsTitle: 'Resets 17:00 · in 2h 10m' },
+        { id: 'weekly', label: 'Week', left: 0, until: 'Mon 09:00', resets: 'in 3d 18h', resetsTitle: 'Resets Mon 09:00 · in 3d 18h' },
       ],
     },
     {
@@ -129,8 +129,48 @@ export const CLAUDE_TWO: PlanAgent = {
       age: 'read 2 hours ago',
       fault: 'Claude Code didn’t answer when it was last asked; these are its last numbers.',
       windows: [
-        { id: 'five_hour', label: '5 hours', left: 80, until: '15:40' },
-        { id: 'weekly', label: 'Week', left: 41, until: 'Fri 09:00' },
+        { id: 'five_hour', label: '5 hours', left: 80, until: '15:40', resets: 'in 50m', resetsTitle: 'Resets 15:40 · in 50m' },
+        { id: 'weekly', label: 'Week', left: 41, until: 'Fri 09:00', resets: 'in 1d 18h', resetsTitle: 'Resets Fri 09:00 · in 1d 18h' },
+      ],
+    },
+  ],
+}
+
+/**
+ * Claude Code's detail in each state a reset can be in: a window with time left, one that reset since it was read (no figure,
+ * never an empty limit), and one the provider gave no reset time for.
+ */
+export const CLAUDE_RESETS: PlanAgent = {
+  ...CLAUDE_PLENTY,
+  left: 45,
+  limit: 'weekly limit',
+  until: 'Fri 09:00',
+  accounts: [
+    {
+      id: 'claude-personal',
+      name: null,
+      age: null,
+      fault: null,
+      windows: [
+        {
+          id: 'five_hour',
+          label: '5 hours',
+          left: 0,
+          until: '14:00',
+          resets: 'reset 14:00',
+          resetsTitle: 'Reset at 14:00 · not read since',
+          note: 'not read since',
+          unread: true,
+        },
+        { id: 'weekly', label: 'Week', left: 45, until: 'Fri 09:00', resets: 'in 1d 18h', resetsTitle: 'Resets Fri 09:00 · in 1d 18h' },
+        {
+          id: 'weekly:Opus',
+          label: 'Opus week',
+          left: 70,
+          until: null,
+          resets: 'no reset time',
+          resetsTitle: 'The provider gave no reset time for this window.',
+        },
       ],
     },
   ],

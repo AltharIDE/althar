@@ -1,12 +1,13 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { BoardTask } from '@althar/contracts'
+import { ApiError, type BoardTask } from '@althar/contracts'
 
+import { ServicesProvider } from '../src/renderer/data/services'
 import { ReviewOfferOf } from '../src/renderer/features/team/ReviewOfferOf'
 import { card, change, fakeClient } from './fixtures'
-import { withServices } from './render'
+import { servicesFor, withServices } from './render'
 
 /*
  * A review a lead or the coordinator offered a task (`offer_review`), as the person asked to harden a prototype: a quiet line of the
@@ -87,5 +88,41 @@ describe('a review offered in the thread', () => {
     shown(offered({ reviewOffer: undefined }))
     expect(await screen.findByText('No review.')).toBeTruthy()
     expect(screen.queryByRole('button')).toBeNull()
+  })
+})
+
+describe('a review offer answered', () => {
+  it('says what came of it from the press, though the card is read again with the offer before the runtime answers', async () => {
+    let answer: () => void = () => undefined
+    const { client } = fakeClient({ declineReview: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))) })
+    vi.mocked(client.getBoard).mockResolvedValue({ cursor: 1, tasks: [offered()], calls: [], settledTotal: 0 })
+    const services = servicesFor(client)
+    render(
+      <ServicesProvider value={services}>
+        <ReviewOfferOf offer={OFFER} />
+      </ServicesProvider>,
+    )
+    await userEvent.click(await screen.findByRole('button', { name: 'No thanks' }))
+    expect(client.declineReview).toHaveBeenCalledWith('r')
+    expect(screen.getByText('No review.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'No thanks' })).toBeNull()
+    // Read again before the answer, the card still offers it: the line stays as answered.
+    vi.mocked(client.getBoard).mockClear()
+    await act(() => services.cache.refetchQueries({ queryKey: ['board'] }))
+    expect(client.getBoard).toHaveBeenCalled()
+    expect(screen.getByText('No review.')).toBeTruthy()
+    await act(async () => answer())
+  })
+
+  it('offers it again, saying why, where the answer didn’t go through', async () => {
+    const { client } = fakeClient({
+      changeTeam: vi.fn(async () => {
+        throw new ApiError({ reason: 'Refused', message: 'The task merged meanwhile.' })
+      }),
+    })
+    shown(offered(), client)
+    await userEvent.click(await screen.findByRole('button', { name: /^Add / }))
+    expect(await screen.findByText('The task merged meanwhile.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Add / })).toBeTruthy()
   })
 })

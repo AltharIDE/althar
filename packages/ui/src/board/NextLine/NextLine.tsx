@@ -202,7 +202,8 @@ export function NextLine({ rows, render, onMove, place, heads, more, text }: Nex
   }
 
   return (
-    <ListMotion within={list} still={dragging !== null}>
+    // Its rows move as its order does: drawn again with the same order, nothing reads where they stand.
+    <ListMotion within={list} still={dragging !== null} version={line}>
       <ol ref={list} className={cx(b.list, s.list, dragging !== null && s.sorting)}>
         {shown.map((id, index) => {
           const row = byId.get(id)

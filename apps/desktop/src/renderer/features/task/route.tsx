@@ -1,5 +1,6 @@
 import { createRoute, redirect } from '@tanstack/react-router'
 
+import type { ProjectList } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
 import { held, keys, readFirst, reads, threadReads } from '../../data/reads'
@@ -25,10 +26,11 @@ export const taskRoute = createRoute({
   component: Task,
   pendingComponent: ThreadPending,
   // A coordinator's thread, as a question it asks opens from the home, a notification or the edge, is its project's conversation.
-  // One the window holds as a task's is none, and goes on at once.
+  // One the window holds as a task's is none, and goes on at once. Which project's it is, is read from the projects held: a
+  // project's coordinator keeps its thread for good. Only with none held yet does the window wait for them first.
   beforeLoad: async ({ context: { client, cache }, params: { threadId } }) => {
     if (cache.getQueryData(keys.thread(threadId)) !== undefined) return
-    const listed = await cache.fetchQuery(reads(client).projects()).catch(() => null)
+    const listed = cache.getQueryData<ProjectList>(keys.projects) ?? (await cache.fetchQuery(reads(client).projects()).catch(() => null))
     const project = listed?.projects.find((one) => one.coordinatorThreadId === threadId)
     if (project !== undefined)
       throw redirect({ to: '/projects/$projectId', params: { projectId: project.id }, search: { room: Room.Talk } })

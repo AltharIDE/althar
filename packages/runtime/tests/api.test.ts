@@ -2391,7 +2391,8 @@ describe('the coordinator, through the API', () => {
         )
         // The window's interrupt: the conflict is the person's, as the lead left it, and the lead isn't asked again.
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
-        const [interrupted] = yield* rounds()
+        // Recorded behind the press, which answers once the lead is told: the round is the person's as that is done.
+        const [interrupted] = yield* until(rounds(), ([one]) => one?.state !== 'resolving')
         assert.strictEqual(interrupted?.state, 'failed')
         assert.match(interrupted?.failure ?? '', /^You interrupted the lead\. /)
         const thread = yield* until(client.GetThread({ threadId: task.threadId }), (one) => one.session?.turnRunning !== true)
@@ -2424,7 +2425,8 @@ describe('the coordinator, through the API', () => {
         )
         // Whether or not a lead is there to interrupt.
         yield* Effect.exit(client.Interrupt({ commandId: commandId(), threadId: task.threadId }))
-        assert.deepStrictEqual((yield* rounds()).find((round) => round.id === checking)?.state, 'resolved')
+        const handed = yield* until(rounds(), (all) => all.find((round) => round.id === checking)?.state !== 'checking')
+        assert.deepStrictEqual(handed.find((round) => round.id === checking)?.state, 'resolved')
       }),
     ),
   )
@@ -2504,7 +2506,7 @@ describe('the coordinator, through the API', () => {
         // So does stopping its lead alone.
         const checkingAgain = yield* waiting()
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
-        assert.deepStrictEqual(yield* stateOf(checkingAgain), [{ state: 'resolved' }])
+        assert.deepStrictEqual(yield* until(stateOf(checkingAgain), ([one]) => one?.state !== 'checking'), [{ state: 'resolved' }])
         // On an agent picked with no model or effort of its own, as the window sends one: its own.
         yield* client.StopTask({ commandId: commandId(), taskId: task.id })
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'claude-code', model: null, effort: null })
@@ -2728,6 +2730,8 @@ describe('code hosts and trackers, through the API', () => {
           description: '[lead:finish] [lead:edit]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
           issue: 'MER-231',
+          // The same issue again, in another case, is tied once.
+          issues: ['mer-231', ' '],
         })
         assert.strictEqual(started.branch, 'althar/mer-231-rate-limit-refunds')
         const thread = yield* until(client.GetThread({ threadId: started.threadId }), (snapshot) => snapshot.task.changes.length === 1)
@@ -2748,6 +2752,18 @@ describe('code hosts and trackers, through the API', () => {
         assert.strictEqual(refused._tag, 'ApiError')
         yield* client.MarkReady({ commandId: commandId(), taskId: started.id })
         assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.draft)
+        // Its issue switched to only part of, its first where none is named: its pull request says so in the words trackers read.
+        yield* client.SetTaskIssuePart({ commandId: commandId(), taskId: started.id, partOf: true })
+        yield* until(
+          Effect.sync(() => github.changes[0]?.body ?? ''),
+          (body) => body.includes('Part of [MER-231]('),
+        )
+        const tie = (yield* client.GetThread({ threadId: started.threadId })).task.fromIssues?.[0]?.link ?? ''
+        yield* client.SetTaskIssuePart({ commandId: commandId(), taskId: started.id, partOf: false, issue: tie })
+        yield* until(
+          Effect.sync(() => github.changes[0]?.body ?? ''),
+          (body) => body.includes('Issue: [MER-231]('),
+        )
         // On the board it is ready to accept, its pull request with it.
         const ready = (yield* client.GetBoard({ projectId: project.id })).tasks.find((task) => task.taskId === started.id)
         assert.deepInclude(ready, { phase: 'ready', changed: null })
@@ -2898,7 +2914,7 @@ describe('words', () => {
     assert.strictEqual(said({ _tag: 'AttentionClosed' }), 'That call is closed.')
     assert.strictEqual(
       said(new GitFailed({ args: ['worktree', 'add'], cwd: '/r', stderr: 'fatal: a branch named x already exists\n' })),
-      "git worktree didn't work: fatal: a branch named x already exists.",
+      "git worktree didn't work: a branch named x already exists.",
     )
     assert.strictEqual(said(new GitFailed({ args: ['fetch'], cwd: '/r', stderr: '' })), "git fetch didn't work.")
     assert.strictEqual(said({ _tag: 'CommandIdReused' }), 'Something went wrong. Try again.')

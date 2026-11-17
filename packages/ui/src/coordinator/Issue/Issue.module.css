@@ -129,6 +129,12 @@ a.issue:hover .pixels {
   gap: 4px;
   vertical-align: -1px;
 }
+.froms {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  vertical-align: -1px;
+}
 .fromLinear {
   color: var(--linear);
 }

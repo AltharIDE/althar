@@ -45,10 +45,11 @@ export function RunningSection({
   /** Where its tasks' worktrees are; null before it has had a task. */
   worktrees: string | null
 }) {
-  const dialogs = useRunDialogs(projectId)
+  const dialogs = useRunDialogs(projectId, runnables)
   const setups = useSetups(projectId)
   const { runs } = dialogs
-  const kept = runnables ?? []
+  // As the person left it: one removed gone at once.
+  const kept = runs.shown ?? []
   const ids = kept.map((one) => one.id)
   return (
     <>
@@ -67,7 +68,7 @@ export function RunningSection({
           onOrder={(next) => void runs.order(next)}
           onDefault={(id) => void runs.order([id, ...ids.filter((one) => one !== id)])}
           onEdit={(id) => dialogs.show({ kind: 'edit', id })}
-          onRemove={(id) => void runs.drop(id)}
+          onRemove={(id) => runs.drop(id)}
           // What went wrong in a dialog is said in it; here, only what went wrong in the list.
           {...(dialogs.showing === null && runs.error !== null ? { error: runs.error } : {})}
         />

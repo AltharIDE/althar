@@ -81,7 +81,8 @@ test('a task’s change shows in its file’s colours, light and dark', async ()
     await page.getByRole('button', { name: 'Open the diff of src/refunds/limits.ts' }).click()
     const diff = page.locator('[data-diff]')
     await expect(diff).toBeVisible()
-    if ((process.env.ALTHAR_SHOTS ?? 'after') === 'after') await expect(diff.locator('span[style]').first()).toBeVisible()
+    // A word in a syntax ink, not any styled span: the words read out for added and removed lines are styled too.
+    if ((process.env.ALTHAR_SHOTS ?? 'after') === 'after') await expect(diff.locator('span[style*="--syn-"]').first()).toBeVisible()
     for (const scheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: scheme })
       await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
