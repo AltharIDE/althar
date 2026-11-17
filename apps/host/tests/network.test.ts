@@ -144,6 +144,16 @@ describe('opt-in HTTPS home configuration', () => {
     }),
   )
 
+  it.live('rejects a matching TLS certificate too large for a bounded pairing code', () =>
+    Effect.gen(function* () {
+      const { options, certificate } = fixture()
+      copyFileSync(new URL('../../../packages/transport-node/tests/fixtures/tls/oversized-certificate.pem', import.meta.url), certificate)
+      const failure = yield* Effect.flip(configureNetwork(options))
+      assert.include(failure.message, 'leaf certificate of at most 4 KiB')
+      assert.isUndefined(yield* readNetworkConfiguration(options.profile))
+    }),
+  )
+
   it('validates command-specific network and device controls before any files are opened', () => {
     for (const args of [
       ['configure-network'],
