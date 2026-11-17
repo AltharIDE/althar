@@ -1540,7 +1540,9 @@ export function TaskView({
                     {snapshot.task.state !== 'done' &&
                     snapshot.task.state !== 'abandoned' &&
                     snapshot.task.kind !== 'plain' &&
-                    snapshot.task.kind !== 'review' ? (
+                    snapshot.task.kind !== 'review' &&
+                    // A task that ends with its branch alone merges nothing, unless a pull request is open for it already.
+                    (snapshot.task.end !== 'none' || snapshot.task.changes.some((one) => one.state === 'open')) ? (
                       <IssuePart
                         id={issue.key}
                         partOf={snapshot.task.issuePartOf === true}
