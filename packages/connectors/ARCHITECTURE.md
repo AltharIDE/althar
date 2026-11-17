@@ -23,6 +23,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | `jira.ts` | Jira Cloud and Jira Data Center, a tracker each, over REST: version 3 on Cloud, version 2 on Data Center |
 | `jiraText.ts` | Jira's text to Markdown and back: Cloud's Atlassian Document Format, Data Center's wiki markup |
 | `trello.ts` | Trello, a tracker, over REST: a card by its short link, its list as its status |
+| `clickup.ts` | ClickUp, a tracker, over REST (v2): a task by its id or custom id, a list's statuses read by type, a pull request linked by a comment |
 | `releases.ts`, `*Releases.ts` | Releases on each code host: tags, a release published as the host does, the runs on a tag with what each waits on, approving them, running failed jobs again. [RELEASES.md](RELEASES.md) says what each host can and can't do, and the docs relied on |
 | `http.ts` | Calls to a service's API: signed in per call, bounded in time, answers checked, failures classified, GETs cached by ETag |
 | `api.ts` | Authenticated API fallbacks: relative paths, Jira core/Agile/service-desk namespaces, GraphQL operation parsing, protected families, bounded responses and explicit continuation; no credential-bearing redirects |
@@ -36,7 +37,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 
 ## Principles
 
-- **The models come before the adapters.** Both were laid against all six products before the first adapter. A field only one product fills is a capability, or that product's own business.
+- **The models come before the adapters.** Both were laid against all six products before the first adapter; ClickUp, added later, fit them unchanged. A field only one product fills is a capability, or that product's own business.
 - **A service's own words reach the screen; its shapes don't.** Changes, checks, reviews, comments and issues are the model's; the adapter converts, including text to Markdown.
 - **Every answer is read through a schema.** An answer that doesn't fit fails as `invalid_response`, never as a wrong value downstream.
 - **Cheap "anything new?".** A GET can be cached by its ETag, so polling an unchanged pull request costs GitHub's rate limit nothing; activity reads from a cursor.
@@ -76,3 +77,9 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 - **Filing an issue isn't checked before it is asked for.** A Jira account's Create Issues permission, a fine-grained GitHub token's Issues permission, and the GitHub App's Issues: Read and write (set on the app, not here) are found out when an issue is filed, and a refusal reaches the card in the service's words. Labels a tracker has no name for are left off, except where the host makes them itself (GitHub, GitLab).
 - **Trello's tokens** are read together by their name, Althar: where several differ in what they may write, which is this one isn't said, and writing reads as unknown.
 - **Jira's permissions** are the account's in any project, not in the one Althar works in.
+- **ClickUp's answers** follow its API reference (v2): the adapter hasn't run against a real account yet. Its comments are plain text, so Markdown goes as it is written; a description is read and written as Markdown.
+- **ClickUp has no search by words** in its v2 API: a list's or each workspace's tasks are read newest change first, ten pages of a hundred, and Althar narrows by words, status, assignee and priority after. A task changed longer ago than that is found by its key.
+- **ClickUp links a pull request by a comment,** since a task has no link to attach: one already among its hundred latest comments is left as it is. A project's "Link pull requests on their issues" turns it off.
+- **ClickUp's subtasks, sprints, time estimates, sprint points, task types and custom fields** aren't read or set yet. A custom task id is read by asking each of the account's workspaces in turn, where its link doesn't say which.
+- **A ClickUp personal token** acts as its person in every workspace they're in, and ClickUp doesn't say what they may do: commenting and moving tasks read as unknown.
+- **ClickUp's rate limit** is a hundred calls a minute a token on most plans, so a batch of changes waits 600 ms between tasks.

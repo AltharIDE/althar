@@ -12,7 +12,7 @@ Decided with the user on 1 October 2026.
 
 From the desktop app:
 
-1. Connect GitHub and Linear (later GitLab, Jira, Bitbucket and Trello).
+1. Connect GitHub and Linear (later GitLab, Jira, Bitbucket, Trello and ClickUp).
 2. Paste an issue's link to the coordinator: it unfurls, and the task the
    coordinator drafts comes from it. Or start a task from one of your issues.
 3. The plan ends with a draft pull request. Althar pushes the branch and
@@ -75,11 +75,22 @@ One pull request each:
      bitbucket.org; Data Center has no public instance, so its answers follow
      its reference.
 
+5. **ClickUp.**
+   - The tracker over ClickUp's v2 API, with a personal token pasted: its
+     OAuth needs a client secret, which a desktop app can't keep. A task by
+     its id or its workspace's custom id; a list is where a task is filed,
+     its statuses read by type, then name. A pull request is linked by a
+     comment on the task, which the project's "Link pull requests on their
+     issues" turns off.
+   - Not yet run against a real account: its answers follow ClickUp's API
+     reference, and `bun run test:real` takes `ALTHAR_CLICKUP_TOKEN` and
+     `ALTHAR_CLICKUP_TASK`.
+
 ## For now
 
 - **One status move.** The key goes in the branch and the pull request's
   title; the issue moves to In Progress as its task's first step starts, on
-  Linear, Jira and Trello, unless the project's rules say not to. In review
+  Linear, Jira, Trello and ClickUp, unless the project's rules say not to. In review
   and done are left alone ([open question](../open-questions.md)).
 - **Polling** every 30 seconds while a task listens, and on demand; no
   webhooks.
