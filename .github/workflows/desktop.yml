@@ -162,6 +162,8 @@ jobs:
     name: native pairing (${{ matrix.os }})
     needs: plan
     if: needs.plan.outputs.native-homes == 'true'
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:

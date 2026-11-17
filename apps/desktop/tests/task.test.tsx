@@ -499,8 +499,9 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
-    const part = await screen.findByRole('switch', { name: 'Only part of MER-231' })
-    expect(part.getAttribute('aria-checked')).toBe('false')
+    await screen.findByRole('radiogroup', { name: 'What merging does to MER-231' })
+    expect(screen.getByRole('radio', { name: 'Closes it' }).getAttribute('aria-checked')).toBe('true')
+    const part = screen.getByRole('radio', { name: 'Part of it' })
     await userEvent.click(part)
     await waitFor(() => expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true, 'MER-231'))
   })
@@ -531,8 +532,9 @@ describe('a task', () => {
       setTaskIssuePart: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))),
     })
     withServices(<Task />, client)
-    const first = await screen.findByRole('switch', { name: 'Only part of DEV-211' })
-    const second = screen.getByRole('switch', { name: 'Only part of #37' })
+    const part = (group: HTMLElement) => within(group).getByRole('radio', { name: 'Part of it' })
+    const first = part(await screen.findByRole('radiogroup', { name: 'What merging does to DEV-211' }))
+    const second = part(screen.getByRole('radiogroup', { name: 'What merging does to #37' }))
     expect(first.getAttribute('aria-checked')).toBe('false')
     expect(second.getAttribute('aria-checked')).toBe('true')
     await userEvent.click(first)
@@ -569,12 +571,42 @@ describe('a task', () => {
       setTaskIssuePart: vi.fn(() => new Promise<void>(() => {})),
     })
     withServices(<Task />, client)
-    await screen.findAllByRole('switch', { name: 'Only part of DEV-37' })
-    const [linear, jira] = screen.getAllByRole('switch', { name: 'Only part of DEV-37' })
+    await screen.findAllByRole('radiogroup', { name: 'What merging does to DEV-37' })
+    const [linear, jira] = screen
+      .getAllByRole('radiogroup', { name: 'What merging does to DEV-37' })
+      .map((group) => within(group).getByRole('radio', { name: 'Part of it' }))
     await userEvent.click(jira as HTMLElement)
     expect(jira?.getAttribute('aria-checked')).toBe('true')
     expect(linear?.getAttribute('aria-checked')).toBe('false')
     expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true, 'xlink_jira')
+  })
+
+  it('says nothing of its issue’s merge where it ends with no pull request', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          task: {
+            ...base.task,
+            end: 'none',
+            changes: [],
+            issue: {
+              product: 'linear',
+              ref: 'MER-231',
+              key: 'MER-231',
+              title: 'Rate-limit refunds',
+              url: 'https://linear.app/m/issue/MER-231',
+              status: { name: 'Todo', category: 'todo' },
+              priority: null,
+              container: 'Meridian',
+            },
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await screen.findByText('Rate-limit refunds')
+    expect(screen.queryByRole('radiogroup', { name: 'What merging does to MER-231' })).toBeNull()
   })
 
   it('shows the issues its lead drafted as cards in the thread, files them one by one or all at once, and waits on the person', async () => {

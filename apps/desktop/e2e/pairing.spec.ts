@@ -15,10 +15,15 @@ const progress = (message: string) => process.stdout.write(`${message}\n`)
 /** A blocked native keychain dialog must produce a failed test, rather than leave its Electron worker hanging. */
 const closeDesktop = async (app: ElectronApplication, child: ChildProcess) => {
   const deadline = AbortSignal.timeout(budget.medium)
-  const force = () => child.kill('SIGKILL')
+  let forced = false
+  const force = () => {
+    forced = true
+    child.kill('SIGKILL')
+  }
   deadline.addEventListener('abort', force, { once: true })
   try {
     await app.close()
+    if (forced) throw new Error('The desktop did not close within its shutdown budget.')
   } finally {
     deadline.removeEventListener('abort', force)
   }

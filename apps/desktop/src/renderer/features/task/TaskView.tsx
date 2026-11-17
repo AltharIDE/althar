@@ -1431,6 +1431,13 @@ export function TaskView({
   )
 
   // What opens the thread, over its rounds, and what closes it, under them: drawn by the task, not again as its rounds are.
+  // Whether its work ends in a merge: a task that ends with its branch alone merges nothing, unless a pull request is open for it already.
+  const merges =
+    snapshot.task.state !== 'done' &&
+    snapshot.task.state !== 'abandoned' &&
+    snapshot.task.kind !== 'plain' &&
+    snapshot.task.kind !== 'review' &&
+    (snapshot.task.end !== 'none' || snapshot.task.changes.some((one) => one.state === 'open'))
   const opening = (
     <>
       {fromIssues.length > 0 && !snapshot.earlier && (
@@ -1440,25 +1447,40 @@ export function TaskView({
             const tie = issue.link ?? `${issue.product}:${issue.ref}`
             return (
               <div key={tie} className={s.issue}>
-                <Issue
-                  mark={productBrand(issue.product)}
-                  source={productName(issue.product)}
-                  id={issue.key}
-                  tone={issue.product === 'linear' ? 'linear' : 'plain'}
-                  title={issue.title}
-                  href={issue.url}
-                  status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
-                  {...(issue.priority === null || issue.priority.level === 'none'
-                    ? {}
-                    : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
-                  {...(issue.container === null ? {} : { meta: issue.container })}
-                />
-                {/* Whether the task does all of its issue, so its merge closes it, or only part, so its merge leaves it open. */}
-                {snapshot.task.state !== 'done' && snapshot.task.state !== 'abandoned' && (
+                {/* A task with a merge says at its issue's foot whether that closes it or leaves it open. */}
+                {merges ? (
                   <IssuePart
                     id={issue.key}
                     partOf={issue.partOf === true}
                     onChange={(partOf) => void model.setIssuePart(partOf, issue.link ?? issue.ref)}
+                  >
+                    <Issue
+                      mark={productBrand(issue.product)}
+                      source={productName(issue.product)}
+                      id={issue.key}
+                      tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                      title={issue.title}
+                      href={issue.url}
+                      status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                      {...(issue.priority === null || issue.priority.level === 'none'
+                        ? {}
+                        : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                      {...(issue.container === null ? {} : { meta: issue.container })}
+                    />
+                  </IssuePart>
+                ) : (
+                  <Issue
+                    mark={productBrand(issue.product)}
+                    source={productName(issue.product)}
+                    id={issue.key}
+                    tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                    title={issue.title}
+                    href={issue.url}
+                    status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                    {...(issue.priority === null || issue.priority.level === 'none'
+                      ? {}
+                      : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                    {...(issue.container === null ? {} : { meta: issue.container })}
                   />
                 )}
               </div>
