@@ -40,6 +40,8 @@
   align-items: center;
   gap: 2px;
   padding: 6px 10px;
+  overflow-x: auto;
+  scrollbar-width: none;
   border-top: 1px solid var(--line-2);
   background: var(--n-1);
   font-size: 12px;
@@ -48,9 +50,9 @@
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   height: 26px;
-  padding: 0 10px;
+  padding: 0 7px;
   border-radius: 7px;
   color: var(--t-2);
 }

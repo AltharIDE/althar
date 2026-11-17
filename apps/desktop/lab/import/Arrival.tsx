@@ -4,6 +4,7 @@ import { Brand, Icon, ProjectInk, RuntimeState } from '@althar/ui'
 import { NewProject, Welcome } from '@althar/ui/screens'
 
 import { ByKind, ByPlace, type Picks, usePicks } from './Found'
+import { ByTool, Choose, WithShortcuts } from './Shortcuts'
 import { opening, useLab } from './state'
 import { world } from './world'
 import s from './arrival.module.css'
@@ -13,7 +14,9 @@ import s from './arrival.module.css'
  * other tools left in its folders. A and B give the welcome a step of its
  * own after the project is made, and the New project tab a list beside its
  * folder: A by kind, B by place. C changes neither: what was found waits on
- * the board.
+ * the board. D–F are the same step with shortcuts, for someone who wants
+ * all of one tool, or all of it, in a press: one question (D), a row a tool
+ * (E), or A's list under a row of shortcuts (F).
  */
 
 const RUNTIMES = [
@@ -29,11 +32,15 @@ const REPOSITORIES = [
 ]
 
 const bring = (picks: Picks) =>
-  world.bring({ worktrees: [...picks.worktrees], conversations: [...picks.conversations], setup: picks.setup })
+  world.bring({ worktrees: [...picks.worktrees], conversations: [...picks.conversations], setup: picks.setup, older: picks.olderAgents })
 
 const Picker = ({ picks }: { picks: Picks }) => {
   const { d } = useLab()
-  return d === 'b' ? <ByPlace picks={picks} /> : <ByKind picks={picks} />
+  if (d === 'b') return <ByPlace picks={picks} />
+  if (d === 'd') return <Choose picks={picks} />
+  if (d === 'e') return <ByTool picks={picks} />
+  if (d === 'f') return <WithShortcuts picks={picks} />
+  return <ByKind picks={picks} />
 }
 
 /** The first run's welcome, on the project's step. */

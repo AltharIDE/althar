@@ -13,7 +13,7 @@ import {
   repositories,
   snapshot,
 } from '../../tests/fixtures'
-import { AGENTS, type Conversation, CONVERSATIONS, type Worktree, WORKTREES, world } from './world'
+import { type Agent, AGENTS, type Conversation, CONVERSATIONS, type Worktree, WORKTREES, world } from './world'
 
 /*
  * What the lab's fake runtime says. Arriving, althar is the one project,
@@ -116,7 +116,7 @@ const worktreeCard = (one: Worktree): BoardTask => {
   }
 }
 
-/** A conversation of the project's own folder, brought in: a chat on Scratch, at its own date. */
+/** A conversation of the project's own folder, or one whose worktree stayed out, brought in: a chat on Scratch, at its own date. */
 const conversationCard = (one: Conversation): BoardTask => {
   const last = one.said?.at(-1)
   return {
@@ -211,7 +211,7 @@ const boardOf = (projectId: string): BoardSnapshot => {
   const tasks = [
     ...(world.era() === 'later' ? OWN.map(ownCard) : []),
     ...WORKTREES.filter((one) => b.worktrees.has(one.id)).map(worktreeCard),
-    ...CONVERSATIONS.filter((one) => one.in === null && b.conversations.has(one.id)).map(conversationCard),
+    ...CONVERSATIONS.filter((one) => (one.in === null || !b.worktrees.has(one.in)) && b.conversations.has(one.id)).map(conversationCard),
   ]
   return { cursor, tasks, calls: [], settledTotal: world.era() === 'later' ? 41 : 0 }
 }
@@ -263,11 +263,37 @@ const threadOf = (threadId: string): ThreadSnapshot => {
 /** The coordinator's first word, arriving: what came in, and the one thing that needs a look. */
 const coordinatorItems = (): ThreadItem[] => {
   const b = world.brought()
-  if (world.era() === 'later' || b.worktrees.size === 0) return []
+  if (world.era() === 'later' || b.worktrees.size + b.conversations.size === 0) return []
+  // What came in, counted with the older ones, and from whom where it was one agent's alone.
+  const older = Object.values(b.older).reduce((n, one) => n + (one ?? 0), 0)
+  const agents = new Set([
+    ...CONVERSATIONS.filter((one) => b.conversations.has(one.id)).map((one) => one.agent),
+    ...(Object.keys(b.older) as Agent[]),
+  ])
+  const from = agents.size === 1 ? AGENTS[[...agents][0] as Agent].name : 'other tools'
+  if (b.worktrees.size === 0)
+    return [
+      {
+        ...items.says(
+          `${b.conversations.size + older} conversations came in from ${from}, as chats on Scratch at their own dates. Any of them goes on where it stopped.`,
+          'claude-code',
+        ),
+        createdAt: minutesAgo(0.2),
+      } as ThreadItem,
+    ]
   return [
     {
       ...items.says(
-        `${b.worktrees.size} tasks came in from other tools, each in its own folder where it was, with ${b.conversations.size} conversations as their history and on Scratch.${b.worktrees.has('lima') ? '\n\n**Reset the usage meter at the window’s edge** has a failing macOS e2e on #941 and two commits not pushed. Want me to pick it up?' : ''}`,
+        `${b.conversations.size} conversations came in from other tools, as chats on Scratch at their own dates. Any of them goes on where it stopped.`,
+        'claude-code',
+      ),
+      createdAt: minutesAgo(0.2),
+    } as ThreadItem,
+  ]
+  return [
+    {
+      ...items.says(
+        `${b.worktrees.size} tasks came in from other tools, each in its own folder where it was, with ${b.conversations.size + older} conversations as their history and on Scratch.${b.worktrees.has('lima') ? '\n\n**Reset the usage meter at the window’s edge** has a failing macOS e2e on #941 and two commits not pushed. Want me to pick it up?' : ''}`,
         'claude-code',
       ),
       createdAt: minutesAgo(0.2),

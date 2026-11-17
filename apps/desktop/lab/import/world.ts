@@ -353,6 +353,28 @@ export type Era = 'arriving' | 'later'
 export const worktreesOf = (era: Era) => WORKTREES.filter((one) => era === 'later' || one.later !== true)
 export const conversationsOf = (era: Era) => CONVERSATIONS.filter((one) => era === 'later' || one.later !== true)
 
+/** Where things come from, as the shortcuts name them: the agents first, then the tools whose worktrees they are. */
+export type Source = Agent | Tool
+export const SOURCES: readonly Source[] = ['claude-code', 'codex', 'conductor', 'orca', 't3', 'cursor', 'paradev', 'git']
+export const nameOf = (who: Source) => (who in AGENTS ? AGENTS[who as Agent].name : TOOLS[who as Tool].name)
+export const isAgent = (who: Source): who is Agent => who in AGENTS
+
+/**
+ * Everything of one source: an agent's conversations, wherever they ran, and its older ones; a tool's worktrees, the
+ * conversations that ran in them, and its setup.
+ */
+export const thingsOf = (who: Source, era: Era) => {
+  if (isAgent(who))
+    return { worktrees: [], conversations: conversationsOf(era).filter((one) => one.agent === who), older: OLDER[who], setup: undefined }
+  const worktrees = worktreesOf(era).filter((one) => one.tool === who)
+  return {
+    worktrees,
+    conversations: conversationsOf(era).filter((one) => worktrees.some((w) => w.id === one.in)),
+    older: 0,
+    setup: SETUPS.find((one) => one.tool === who),
+  }
+}
+
 /** Picked by default: work not finished (no merged PR, not someone else's), and conversations of the last month. */
 export const pickedByDefault = (one: Worktree) => one.pr?.state !== 'merged' && one.pr?.theirs === undefined
 export const recent = (one: Conversation) => now - Date.parse(one.at) < 30 * DAY
@@ -376,9 +398,11 @@ export interface Brought {
   readonly left: ReadonlySet<string>
   /** Settings' third: other tools' new work comes in as it's made. */
   readonly follow: ReadonlySet<Tool | Agent>
+  /** The older conversations brought in, counted by agent, as the lists count them. */
+  readonly older: Readonly<Partial<Record<Agent, number>>>
 }
 
-const empty: Brought = { worktrees: new Set(), conversations: new Set(), setup: null, left: new Set(), follow: new Set() }
+const empty: Brought = { worktrees: new Set(), conversations: new Set(), setup: null, left: new Set(), follow: new Set(), older: {} }
 
 /** Later, what came in on the way: everything picked by default, Conductor's setup. */
 const already = (): Brought => ({
@@ -395,6 +419,7 @@ const already = (): Brought => ({
   setup: 'conductor',
   left: new Set(),
   follow: new Set(),
+  older: {},
 })
 
 let era = 'arriving' as Era
@@ -413,9 +438,15 @@ export const world = {
     brought = to === 'later' ? already() : empty
     tell()
   },
-  bring: (what: { readonly worktrees?: readonly string[]; readonly conversations?: readonly string[]; readonly setup?: string | null }) => {
+  bring: (what: {
+    readonly worktrees?: readonly string[]
+    readonly conversations?: readonly string[]
+    readonly setup?: string | null
+    readonly older?: readonly Agent[]
+  }) => {
     brought = {
       ...brought,
+      older: { ...brought.older, ...Object.fromEntries((what.older ?? []).map((who) => [who, OLDER[who]])) },
       worktrees: new Set([...brought.worktrees, ...(what.worktrees ?? [])]),
       conversations: new Set([...brought.conversations, ...(what.conversations ?? [])]),
       setup: what.setup === undefined ? brought.setup : what.setup,

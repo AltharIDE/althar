@@ -20,7 +20,7 @@ import s from './lab.module.css'
 
 /*
  * The import lab (README.md): the desktop app's window, whole, in the
- * browser, on made-up data, with the page's bar under it. Arriving (A–C):
+ * browser, on made-up data, with the page's bar under it. Arriving (A–F):
  * the first run's welcome (W) or a New project tab (P), then the project's
  * board. Later (1–3): weeks on, from Settings. R starts again, T the dark
  * appearance.
@@ -105,7 +105,7 @@ function Bar() {
     <div className={s.bar} role="toolbar" aria-label="Directions">
       <span className={s.round}>Arriving</span>
       {set('arriving')}
-      <span className={s.round}>Later, from Settings</span>
+      <span className={s.round}>Later</span>
       {set('later')}
       <span className={s.gap} />
       <button type="button" aria-pressed={arriving && place === 'welcome'} onClick={() => restart(arriving ? d : 'a', 'welcome')}>

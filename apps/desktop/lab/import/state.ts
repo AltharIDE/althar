@@ -4,7 +4,7 @@ import type { Era } from './world'
 
 /*
  * What the lab's bar picks: the direction, two sets of them, and where the
- * person is. Arriving (A–C), the project is being added: on the first run's
+ * person is. Arriving (A–F), the project is being added: on the first run's
  * welcome (W) or in a New project tab (P), then its board. Later (1–3),
  * weeks on, from Settings. Kept in the address, so a reload or a screenshot
  * opens on the same.
@@ -14,6 +14,9 @@ export const DIRECTIONS = [
   { key: 'a', kbd: 'A', label: 'A step', set: 'arriving' },
   { key: 'b', kbd: 'B', label: 'By place', set: 'arriving' },
   { key: 'c', kbd: 'C', label: 'On the board', set: 'arriving' },
+  { key: 'd', kbd: 'D', label: 'One question', set: 'arriving' },
+  { key: 'e', kbd: 'E', label: 'By tool', set: 'arriving' },
+  { key: 'f', kbd: 'F', label: 'Shortcuts', set: 'arriving' },
   { key: '1', kbd: '1', label: 'Project settings', set: 'later' },
   { key: '2', kbd: '2', label: 'Althar’s settings', set: 'later' },
   { key: '3', kbd: '3', label: 'Keep in step', set: 'later' },
