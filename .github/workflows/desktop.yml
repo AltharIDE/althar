@@ -191,6 +191,9 @@ jobs:
           security unlock-keychain -p "$password" "$keychain"
           security list-keychains -d user -s "$keychain"
           security default-keychain -d user -s "$keychain"
+          # Grant this test's real Electron binary access to its own fixture secret, avoiding an unattended consent dialog.
+          electron="$(node -p 'require("electron")')"
+          security add-generic-password -a Althar -s 'Althar Safe Storage' -w "$(openssl rand -base64 24)" -T "$electron" "$keychain"
       - run: bun run test:e2e e2e/pairing.spec.ts
       - uses: actions/upload-artifact@v6
         if: failure()

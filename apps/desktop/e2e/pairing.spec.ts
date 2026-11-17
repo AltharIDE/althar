@@ -10,6 +10,8 @@ import { expect, test } from '@playwright/test'
 
 import { launch, openFirstProject, still } from './support'
 
+const progress = (message: string) => process.stdout.write(`${message}\n`)
+
 const repo = (root: string, name: string) => {
   const path = join(root, name)
   execFileSync('git', ['init', '-q', '-b', 'main', path])
@@ -77,6 +79,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     }
   }
   let host = await start()
+  progress('Native pairing: standalone host ready')
   const clientRoot = mkdtempSync(join(tmpdir(), 'althar-pairing-client-'))
   const clientEnvironment = { ALTHAR_API_SOCKET: '1', ALTHAR_NATIVE_KEYRING: '1' }
   let { electronApp, page } = await launch(clientRoot, clientEnvironment).catch(async (error: unknown) => {
@@ -85,7 +88,9 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     throw error
   })
   try {
+    progress('Native pairing: desktop opened')
     await openFirstProject(electronApp, page, repo(clientRoot, 'local-project'))
+    progress('Native pairing: local project opened')
     const storage = await electronApp.evaluate(({ app, safeStorage }) => ({
       available: safeStorage.isEncryptionAvailable(),
       backend: process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'OS keychain',
@@ -97,6 +102,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     expect(storage.backend).not.toBe('unknown')
     expect(storage.mocked).toBe(false)
     expect(storage.passwordStore).not.toBe('basic')
+    progress('Native pairing: real OS keyring available')
     const invitation = Schema.decodeUnknownSync(Schema.Struct({ code: Schema.String }))(
       JSON.parse(execFileSync(process.execPath, [entry, 'pair', root], { encoding: 'utf8' })),
     )
@@ -126,6 +132,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
         }),
     ])
     await expect(remote.getByRole('button', { name: 'My VPS, connected. Homes', exact: true })).toBeVisible()
+    progress('Native pairing: paired remote window connected')
     await remote
       .getByRole('complementary', { name: 'Projects' })
       .getByRole('button', { name: /^remote-project/ })
@@ -156,11 +163,14 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     expect(host.ready).toEqual(before)
     await remote.getByRole('button', { name: 'Reconnect', exact: true }).click()
     await expect(remote.getByRole('button', { name: 'My VPS, connected. Homes', exact: true })).toBeVisible()
+    progress('Native pairing: connected after host restart')
     await expect(remote.getByRole('heading', { name: 'remote-project', exact: true })).toBeVisible()
     const saved = await page.evaluate(async () => (await window.althar.homes!.list())[0])
     if (saved?.https === undefined) throw new Error('No saved paired home')
     await electronApp.close()
+    progress('Native pairing: desktop closed for relaunch')
     ;({ electronApp, page } = await launch(clientRoot, clientEnvironment))
+    progress('Native pairing: desktop relaunched')
     await expect(page.getByRole('button', { name: 'Homes', exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Homes', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Manage homes…', exact: true }).click()
@@ -177,10 +187,12 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     remote = await reopened
     await expect(remote.getByRole('heading', { name: 'remote-project', exact: true })).toBeVisible()
     expect(await remote.evaluate(async () => (await window.althar.homes!.state()).identity?.deviceId)).toBe(saved.https.deviceId)
+    progress('Native pairing: restored home connected with its saved device')
     const deviceId = saved.https.deviceId
     if (deviceId === undefined) throw new Error('No saved paired device')
     execFileSync(process.execPath, [entry, 'revoke', root, deviceId])
     await expect(remote.getByRole('button', { name: 'My VPS, disconnected. Homes', exact: true })).toBeVisible()
+    progress('Native pairing: revocation disconnected the client')
     expect(readFileSync(join(clientRoot, 'profile/homes.json'), 'utf8')).not.toContain(invitation.code)
   } finally {
     if (!page.isClosed()) await page.screenshot({ path: 'test-results/pairing-flow-outcome.png', scale: 'css' }).catch(() => undefined)
