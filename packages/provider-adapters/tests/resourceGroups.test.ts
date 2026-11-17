@@ -44,6 +44,33 @@ const filesystem = (options: { denied?: boolean; controllers?: string; member?: 
 }
 
 describe('work-conserving resource groups', () => {
+  it.each([false, true])('rechecks teardown during a pending acquisition (yield before release: %s)', async (pause) => {
+    const fs = filesystem()
+    const write = fs.files.write.bind(fs.files)
+    let unblock: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      unblock = resolve
+    })
+    fs.files.write = async (path, value) => {
+      if (path.endsWith('/worker/cgroup.kill')) await held
+      await write(path, value)
+    }
+    const groups = linuxGroups({ parent: '/delegated', files: fs.files })
+    const first = await groups.acquire('worker')
+    // The acquisition yields before the old command begins teardown.
+    const next = groups.acquire('worker')
+    if (pause) await Promise.resolve()
+    const closing = first?.release()
+    const other = await groups.acquire('another-worker')
+    unblock()
+    await closing
+    const replacement = await next
+    assert.isDefined(replacement)
+    assert.isTrue(fs.dirs.has(replacement?.path ?? ''))
+    await replacement?.release()
+    await other?.release()
+    assert.deepStrictEqual([...fs.dirs], ['/delegated'])
+  })
   it('waits for teardown before reacquiring the same worker and protects other pending acquisitions', async () => {
     const fs = filesystem()
     const write = fs.files.write.bind(fs.files)

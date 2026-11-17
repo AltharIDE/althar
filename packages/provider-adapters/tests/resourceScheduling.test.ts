@@ -97,8 +97,9 @@ describe('native worker resource scheduling', () => {
                 return JSON.parse(
                   execFileSync(path, ['resources', workerOwner(a)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
                 ) as { weight: number; processes: number }
-              } catch {
-                return null
+              } catch (error) {
+                if (error !== null && typeof error === 'object' && 'status' in error && error.status === 3) return null
+                throw error
               }
             }
             const current = query()

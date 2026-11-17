@@ -107,32 +107,44 @@ export const linuxGroups = (
       let handedOff = false
       let parent: string | undefined
       try {
-        await generation.retiring.get(owner)
         parent = await generation.ready
         if (parent === undefined) {
           unavailable = true
           return undefined
         }
         const base = parent
-        let pending = generation.workers.get(owner)
-        if (pending === undefined) {
-          pending = (async () => {
-            const path = join(base, owner)
-            try {
-              await files.make(path)
-              await files.write(join(path, 'cpu.weight'), '100')
-              return { path, refs: 0 }
-            } catch {
-              await remove(path)
-              return undefined
-            }
-          })()
+        let pending: Promise<Worker | undefined>
+        let group: Worker
+        while (true) {
+          const retiring = generation.retiring.get(owner)
+          if (retiring !== undefined) {
+            await retiring
+            continue
+          }
+          pending =
+            generation.workers.get(owner) ??
+            (async () => {
+              const path = join(base, owner)
+              try {
+                await files.make(path)
+                await files.write(join(path, 'cpu.weight'), '100')
+                return { path, refs: 0 }
+              } catch {
+                await remove(path)
+                return undefined
+              }
+            })()
           generation.workers.set(owner, pending)
-        }
-        const group = await pending
-        if (group === undefined) {
-          if (generation.workers.get(owner) === pending) generation.workers.delete(owner)
-          return undefined
+          const ready = await pending
+          if (ready === undefined) {
+            if (generation.workers.get(owner) === pending) generation.workers.delete(owner)
+            return undefined
+          }
+          // The last old command may have released while this acquisition awaited either IO or an already-ready promise.
+          // Claim a reference only while this is still the live worker; otherwise wait for its teardown and try again.
+          if (generation.workers.get(owner) !== pending) continue
+          group = ready
+          break
         }
         group.refs++
         handedOff = true
