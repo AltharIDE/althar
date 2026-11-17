@@ -8,8 +8,9 @@ import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { migrations } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Clock, Deferred, Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { TestClock } from 'effect/testing'
 
 import { Connectors } from '../src/Config'
 import { Connections } from '../src/Connections'
@@ -18,6 +19,7 @@ import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { DraftClosed, DraftUntitled, IssueDrafts, labelsLeftOff, refusedDraft } from '../src/IssueDrafts'
+import { issuePace, IssuePacing } from '../src/issuePace'
 import { Issues } from '../src/Issues'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -25,7 +27,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { transcript } from '../src/threads'
 import { type ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, items, listTools, repository, runtime, turns, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, listTools, onTestClock, repository, runtime, turns, until } from './support'
 
 /*
  * Issues the coordinator drafts (docs/architecture/06, "Drafting issues"):
@@ -35,8 +37,14 @@ import { callTool, fakeConnectors, HOST, hosted, items, listTools, repository, r
 
 type Services = { readonly github?: FakeService; readonly linear?: FakeService; readonly trello?: FakeService }
 
-const withQueries = (services: Services, database = ':memory:') =>
-  Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { connectors: fakeConnectors(services) })))
+/** Filings unpaced, each asked of its tracker at once and never again, but where a test paces them as Althar does. */
+const unpaced = { gap: 0, longest: 0, tries: 1, backoff: 0 }
+
+const withQueries = (services: Services, database = ':memory:', pacing = unpaced) =>
+  Queries.layer.pipe(
+    Layer.provideMerge(runtime(database, {}, { connectors: fakeConnectors(services) })),
+    Layer.provide(Layer.succeed(IssuePacing, pacing)),
+  )
 
 const connect = (product: 'github' | 'linear' | 'trello', webUrl?: string) =>
   Effect.gen(function* () {
@@ -212,6 +220,7 @@ describe('issue drafts', () => {
         fields: [],
         direct: false,
         leftOff: [],
+        waitingUntil: null,
       })
       // Asked again with the same title, unsure the first worked, it is the same draft.
       yield* callTool(access, 'draft_issue', { title: 'refunds skip the rate limiter' })
@@ -686,8 +695,9 @@ describe('issue drafts', () => {
         [drafts.file(card?.draftId ?? '', instance.personId), drafts.file(card?.draftId ?? '', instance.personId)],
         { concurrency: 'unbounded' },
       )
+      // The one pressed second sees the first under way: waiting its turn, or being filed.
       assert.sameMembers(
-        both.map((one) => one.state),
+        both.map((one) => (one.state === 'waiting' ? 'filing' : one.state)),
         ['filing', 'filed'],
       )
       assert.lengthOf(fake.created, 1)
@@ -800,6 +810,198 @@ describe('issue drafts', () => {
         assert.strictEqual(card?.error, 'Althar closed while filing this. Look on Linear for it before you file it again.')
         assert.lengthOf(linear.created, 0)
       }).pipe(Effect.provide(withQueries({ linear }, database)))
+    })
+  })
+
+  describe('paced on their tracker', () => {
+    const paced = (services: Services, database?: string) => withQueries(services, database, issuePace)
+    const cardOf = (projectId: string, title: string) =>
+      Effect.map(cardsOf(projectId), (cards) => cards.find((one) => one.title === title) ?? assert.fail(`no card ${title}`))
+    const cardWhen = (projectId: string, title: string, check: (card: IssueDraftCard) => boolean) =>
+      until(cardOf(projectId, title), check, title)
+    /** Drafts each title on Linear, as a card, filing none. */
+    const drafted = (access: ToolAccess, projectId: string, ...titles: ReadonlyArray<string>) =>
+      Effect.forEach(titles, (title) =>
+        Effect.andThen(
+          callTool(access, 'draft_issue', { title, tracker: 'linear' }),
+          Effect.map(cardOf(projectId, title), (card) => card.draftId),
+        ),
+      )
+
+    it.effect('wait their turn on the account, and for the reset its tracker says, saying until when, then are each filed once', () => {
+      const linear = linearWith(MERIDIAN)
+      return onTestClock(
+        Effect.gen(function* () {
+          yield* connect('linear')
+          const { projectId, access } = yield* project()
+          const drafts = yield* IssueDrafts
+          const instance = yield* Instance
+          const [first = '', second = ''] = yield* drafted(access, projectId, 'First', 'Second')
+          const reset = new Date((yield* Clock.currentTimeMillis) + 20_000).toISOString()
+          linear.failNext('create', 'rate_limited', reset, 429)
+          const filing = yield* Effect.forkChild(drafts.file(first, instance.personId))
+          // Refused for too many calls, it waits for the reset Linear said, and its card says so.
+          assert.strictEqual((yield* cardWhen(projectId, 'First', (card) => card.waitingUntil != null)).waitingUntil, reset)
+          const next = yield* Effect.forkChild(drafts.file(second, instance.personId))
+          // The second waits its turn behind it, with no time of its own to say.
+          assert.deepInclude(yield* cardWhen(projectId, 'Second', (card) => card.state === 'waiting'), { waitingUntil: null })
+          assert.lengthOf(linear.created, 0)
+          yield* TestClock.adjust('20 seconds')
+          assert.strictEqual((yield* Fiber.join(filing)).state, 'filed')
+          // A second after the first was asked again, the next on the account is asked.
+          yield* TestClock.adjust('1 second')
+          assert.strictEqual((yield* Fiber.join(next)).state, 'filed')
+          assert.deepStrictEqual(
+            linear.created.map((issue) => issue.title),
+            ['First', 'Second'],
+          )
+          assert.deepInclude(yield* cardOf(projectId, 'First'), { state: 'filed', waitingUntil: null, error: null })
+        }).pipe(Effect.provide(paced({ linear }))),
+      )
+    })
+
+    it.effect('say a reset further off than Althar waits, ask nothing more of the account until it, and leave other accounts be', () => {
+      const linear = linearWith(MERIDIAN)
+      const trello = makeFakeService({ product: 'trello' })
+      trello.addContainer({ id: 'board-1', name: 'Roadmap' })
+      return onTestClock(
+        Effect.gen(function* () {
+          yield* connect('linear')
+          yield* connect('trello')
+          const { projectId, access } = yield* project()
+          const drafts = yield* IssueDrafts
+          const instance = yield* Instance
+          const [first = '', second = ''] = yield* drafted(access, projectId, 'First', 'Second')
+          linear.failNext('create', 'rate_limited', new Date((yield* Clock.currentTimeMillis) + 60 * 60_000).toISOString(), 429)
+          const refused = yield* drafts.file(first, instance.personId)
+          assert.deepInclude(refused, {
+            state: 'failed',
+            error: 'Linear asks Althar to wait about 60 minutes before it files more, so nothing was filed. File it again then.',
+          })
+          // Linear isn't asked again while it said to wait: a call now would be refused as this one says.
+          linear.failNext('create', 'rejected', undefined, 400, { message: 'Asked while held' })
+          assert.match((yield* drafts.file(second, instance.personId)).error ?? '', /^Linear asks Althar to wait about 60 minutes/)
+          // Another account is not held by it.
+          yield* callTool(access, 'draft_issue', { title: 'On the roadmap', tracker: 'trello', container: 'Roadmap' })
+          assert.strictEqual((yield* drafts.file((yield* cardOf(projectId, 'On the roadmap')).draftId, instance.personId)).state, 'filed')
+          assert.lengthOf(linear.created, 0)
+          // Once the reset is past, Linear is asked again.
+          yield* TestClock.adjust('1 hour')
+          assert.strictEqual((yield* drafts.file(second, instance.personId)).error, 'Asked while held')
+          const again = yield* Effect.forkChild(drafts.file(first, instance.personId))
+          yield* TestClock.adjust('1 second')
+          assert.strictEqual((yield* Fiber.join(again)).state, 'filed')
+          assert.deepStrictEqual(
+            linear.created.map((issue) => issue.title),
+            ['First'],
+          )
+        }).pipe(Effect.provide(paced({ linear, trello }))),
+      )
+    })
+
+    it.effect('take a usage limit Linear refuses with as its refusal, not a wait, and never ask again for it', () => {
+      const linear = linearWith(MERIDIAN)
+      return onTestClock(
+        Effect.gen(function* () {
+          yield* connect('linear')
+          const { projectId, access } = yield* project()
+          const drafts = yield* IssueDrafts
+          const instance = yield* Instance
+          const [first = '', second = ''] = yield* drafted(access, projectId, 'First', 'Second')
+          linear.failNext('create', 'rejected', undefined, 400, { message: 'Usage limit exceeded' })
+          assert.deepInclude(yield* drafts.file(first, instance.personId), { state: 'failed', error: 'Usage limit exceeded' })
+          assert.lengthOf(linear.created, 0)
+          // Nothing to wait for but the account's pace: the next is asked a second on.
+          const next = yield* Effect.forkChild(drafts.file(second, instance.personId))
+          yield* TestClock.adjust('1 second')
+          assert.strictEqual((yield* Fiber.join(next)).state, 'filed')
+          assert.deepStrictEqual(
+            linear.created.map((issue) => issue.title),
+            ['Second'],
+          )
+        }).pipe(Effect.provide(paced({ linear }))),
+      )
+    })
+
+    it.effect('are never sent once discarded while they wait, nor when their filing stops while they do', () => {
+      const linear = linearWith(MERIDIAN)
+      return onTestClock(
+        Effect.gen(function* () {
+          yield* connect('linear')
+          const { projectId, access } = yield* project()
+          const drafts = yield* IssueDrafts
+          const instance = yield* Instance
+          const [first = '', second = ''] = yield* drafted(access, projectId, 'First', 'Second')
+          linear.failNext('create', 'rate_limited', new Date((yield* Clock.currentTimeMillis) + 20_000).toISOString(), 429)
+          const filing = yield* Effect.forkChild(drafts.file(first, instance.personId))
+          yield* cardWhen(projectId, 'First', (card) => card.waitingUntil != null)
+          // Waiting, it can't change, only be discarded.
+          const changed = yield* Effect.flip(drafts.change(first, { title: 'First', body: 'More', labels: [] }, instance.personId))
+          assert.instanceOf(changed, DraftClosed)
+          yield* drafts.discard(first, instance.personId)
+          yield* TestClock.adjust('20 seconds')
+          assert.strictEqual((yield* Fiber.join(filing)).state, 'discarded')
+
+          linear.failNext('create', 'rate_limited', new Date((yield* Clock.currentTimeMillis) + 20_000).toISOString(), 429)
+          const stopped = yield* Effect.forkChild(drafts.file(second, instance.personId))
+          yield* cardWhen(projectId, 'Second', (card) => card.waitingUntil != null)
+          yield* Fiber.interrupt(stopped)
+          assert.deepInclude(yield* cardOf(projectId, 'Second'), {
+            state: 'failed',
+            error: 'Althar stopped before it asked Linear, so nothing was filed. File it again.',
+            waitingUntil: null,
+          })
+          yield* TestClock.adjust('20 seconds')
+          assert.lengthOf(linear.created, 0)
+        }).pipe(Effect.provide(paced({ linear }))),
+      )
+    })
+
+    it.effect('stopped while the tracker is asked, are perhaps filed, not filed again', () => {
+      const fake = linearWith(MERIDIAN)
+      const asked = Deferred.makeUnsafe<void>()
+      const linear: FakeService = { ...fake, create: () => Effect.andThen(Deferred.succeed(asked, undefined), Effect.never) }
+      return onTestClock(
+        Effect.gen(function* () {
+          yield* connect('linear')
+          const { projectId, access } = yield* project()
+          const drafts = yield* IssueDrafts
+          const instance = yield* Instance
+          const [first = ''] = yield* drafted(access, projectId, 'First')
+          const filing = yield* Effect.forkChild(drafts.file(first, instance.personId))
+          yield* Deferred.await(asked)
+          yield* Fiber.interrupt(filing)
+          assert.deepInclude(yield* cardOf(projectId, 'First'), {
+            state: 'uncertain',
+            error: 'Althar stopped while filing this. Look on Linear for it before you file it again.',
+          })
+        }).pipe(Effect.provide(paced({ linear }))),
+      )
+    })
+
+    it.live('left waiting when Althar closed were never sent: not filed, to file again', () => {
+      const linear = linearWith(MERIDIAN)
+      const database = join(mkdtempSync(join(tmpdir(), 'althar-drafts-')), 'althar.sqlite')
+      return Effect.gen(function* () {
+        const projectId = yield* Effect.gen(function* () {
+          yield* connect('linear')
+          const { projectId, access } = yield* project()
+          yield* callTool(access, 'draft_issue', { title: 'Queued' })
+          const sql = yield* SqlClient.SqlClient
+          // As if Althar closed while it waited for Linear's reset.
+          yield* sql`UPDATE issue_drafts SET state = 'waiting', waiting_until = '2030-01-01T00:00:00.000Z'`
+          return projectId
+        }).pipe(Effect.provide(paced({ linear }, database)))
+        yield* Effect.gen(function* () {
+          const [card] = yield* cardsOf(projectId)
+          assert.deepInclude(card, {
+            state: 'failed',
+            error: 'Althar closed before it asked Linear, so nothing was filed. File it again.',
+            waitingUntil: null,
+          })
+          assert.lengthOf(linear.created, 0)
+        }).pipe(Effect.provide(paced({ linear }, database)))
+      })
     })
   })
 

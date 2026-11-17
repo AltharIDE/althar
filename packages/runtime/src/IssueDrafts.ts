@@ -14,7 +14,7 @@ import {
 import type { IssueChangeLine } from '@althar/contracts'
 import { type ActorId, Ids, type IssueDraftState, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
+import { Clock, Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
@@ -22,6 +22,7 @@ import { envelope } from './envelope'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
 import { linesOf } from './issueChangeWords'
+import { IssuePacing, makeIssuePace } from './issuePace'
 import { anything, readFields, type Wanted } from './issueFields'
 import { projectRepository } from './Issues'
 import { projectTracker } from './projectTracker'
@@ -50,7 +51,12 @@ import { ToolRefused } from './ToolServer'
  * The draft's row is what it is; its card's item carries the same, written
  * in the same transaction as each change, so a thread reads it as it reads
  * any item. Filing calls the tracker outside any transaction: the draft is
- * marked as being filed first, so a second press files nothing more. Where
+ * marked as waiting first, so a second press files nothing more, and waits
+ * its turn on the tracker's account, paced as the tracker asks (issuePace.ts):
+ * behind another filing there, or until the tracker's limit on calls resets,
+ * which its card says. It is marked as being filed just before the tracker
+ * is asked, so one left waiting was never sent. Discarded while it waits, it
+ * is never sent at all. Where
  * the tracker may have taken it without Althar hearing so (its answer lost
  * or unreadable, or Althar closed in the middle), the draft is uncertain,
  * not unfiled: the card says to look on the tracker before filing it again,
@@ -81,6 +87,8 @@ export interface DraftCard {
   readonly direct: boolean
   /** What its tracker left off once filed, a line each. */
   readonly leftOff: ReadonlyArray<string>
+  /** While it waits, when its tracker is asked again, as the tracker said; null while it waits its turn. */
+  readonly waitingUntil: string | null
 }
 
 /** A draft as its tool hears of it: its card, and what of what was asked was left off as it was drafted, and why. */
@@ -109,11 +117,14 @@ export class IssueTargetNeeded extends Schema.TaggedError<IssueTargetNeeded>()('
   choices: Schema.Array(Schema.String),
 }) {}
 
-/** A draft that can't take that turn now: it is filed, discarded, or being filed. */
+/** A draft that can't take that turn now: it is filed, discarded, waiting to be filed, or being filed. */
 export class DraftClosed extends Schema.TaggedError<DraftClosed>()('DraftClosed', {
   draftId: Schema.String,
   state: Schema.String,
 }) {}
+
+/** A filing stopped before it ended, as Althar closed or whoever filed it went: perhaps filed, if the tracker was being asked. */
+class FilingStopped extends Schema.TaggedError<FilingStopped>()('FilingStopped', {}) {}
 
 /** A title the draft can't be filed with: none at all. */
 export class DraftUntitled extends Schema.TaggedError<DraftUntitled>()('DraftUntitled', { draftId: Schema.NullOr(Schema.String) }) {}
@@ -184,6 +195,7 @@ interface Row {
   readonly fields: string
   readonly direct: number
   readonly leftOff: string
+  readonly waitingUntil: string | null
 }
 
 const Labels = Schema.fromJsonString(Schema.Array(Schema.String))
@@ -208,6 +220,7 @@ export const cardOf = (row: Row): DraftCard => ({
   fields: linesOf({ change: JSON.parse(row.fields) as IssueChange, assignees: assigneesOf(row.product) }),
   direct: row.direct === 1,
   leftOff: Schema.decodeUnknownSync(Labels)(row.leftOff),
+  waitingUntil: row.state === 'waiting' ? row.waitingUntil : null,
 })
 
 /** Labels as a person means them: trimmed, without blanks, each once. */
@@ -329,6 +342,8 @@ export class IssueDrafts extends Context.Service<
       const instance = yield* Instance
       const connections = yield* Connections
       const sessions = yield* Sessions
+      // One filing at a time on a tracker's account, as long as Althar runs.
+      const pace = makeIssuePace(yield* IssuePacing)
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
       const load = (draftId: string) =>
@@ -336,7 +351,7 @@ export class IssueDrafts extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<Row>`
             SELECT id, project_id, thread_id, connection_id, product, tracker_name, container, container_name, title, body, labels, priority,
-              state, error, issue_key, issue_url, fields, direct, left_off
+              state, error, issue_key, issue_url, fields, direct, left_off, waiting_until
             FROM issue_drafts WHERE id = ${draftId} AND project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
           return row === undefined ? yield* new NotFound({ kind: 'issue draft', id: draftId }) : row
         })
@@ -361,7 +376,7 @@ export class IssueDrafts extends Context.Service<
         draftId: string,
         when: (row: Row) => boolean,
         set: (row: Row, at: string) => Readonly<Record<string, unknown>>,
-        type: string,
+        type: string | ((row: Row) => string),
         actorId: ActorId,
         payload?: (row: Row) => unknown,
       ) =>
@@ -379,7 +394,7 @@ export class IssueDrafts extends Context.Service<
                 aggregateType: 'issue_draft',
                 aggregateId: draftId,
                 revision,
-                type,
+                type: typeof type === 'string' ? type : type(row),
                 ...(payload === undefined ? {} : { payload: payload(after) }),
                 actorId,
               })
@@ -706,6 +721,8 @@ export class IssueDrafts extends Context.Service<
 
       /** Whether a draft can still change, or be filed: waiting on the person, not filed the last time, or perhaps filed, for the person to look. */
       const open = (row: Row) => row.state === 'pending' || row.state === 'failed' || row.state === 'uncertain'
+      /** Whether a draft can be discarded: while it can change, and while it waits to be filed, which then sends nothing. */
+      const discardable = (row: Row) => open(row) || row.state === 'waiting'
       const closed = (row: Row) => new DraftClosed({ draftId: row.id, state: row.state })
 
       const changeDraft: IssueDrafts['Service']['change'] = (draftId, next, actorId) =>
@@ -746,21 +763,42 @@ export class IssueDrafts extends Context.Service<
           ? error.reason === 'unreachable' || error.reason === 'invalid_response'
           : !(error instanceof NotFound)
 
-      const failureWords = (error: unknown, tracker: string) => {
-        if (uncertain(error))
+      /** How long a wait is, in a few words: 40 seconds, about 20 minutes, about 3 hours. */
+      const waitWords = (ms: number) => {
+        const seconds = Math.ceil(ms / 1000)
+        if (seconds <= 1) return 'a second'
+        if (seconds < 90) return `${seconds} seconds`
+        if (seconds < 90 * 60) return `about ${Math.round(seconds / 60)} minutes`
+        return `about ${Math.round(seconds / 3600)} hours`
+      }
+
+      /**
+       * Why filing failed, in words the card shows. `sent` says whether the
+       * tracker was being asked as it failed: one that wasn't filed nothing,
+       * whatever stopped it.
+       */
+      const failureWords = (error: unknown, tracker: string, sent: boolean, now: number) => {
+        if (sent && error instanceof FilingStopped)
+          return `Althar stopped while filing this. Look on ${tracker} for it before you file it again.`
+        if (sent && uncertain(error))
           return `Its answer was lost, so Althar can’t tell whether ${tracker} filed it. Look on ${tracker} before you file it again.`
-        if (error instanceof ConnectorFailed)
-          switch (error.reason) {
-            case 'unauthorized':
-              return `${tracker} didn’t take Althar’s sign-in. Sign in again in Settings, then try again.`
-            case 'forbidden':
-              return `${tracker} says this account may not file issues there${error.message === '' ? '' : `: ${error.message}`}`
-            case 'rate_limited':
-              return `${tracker} asks Althar to wait before trying again.`
-            default:
-              return error.message === '' ? `${tracker} refused it.` : error.message
+        if (error instanceof NotFound) return `The connection to ${tracker} is gone. Connect it again, then try again.`
+        if (!(error instanceof ConnectorFailed) || error.reason === 'unreachable' || error.reason === 'invalid_response')
+          return `Althar stopped before it asked ${tracker}, so nothing was filed. File it again.`
+        switch (error.reason) {
+          case 'unauthorized':
+            return `${tracker} didn’t take Althar’s sign-in. Sign in again in Settings, then try again.`
+          case 'forbidden':
+            return `${tracker} says this account may not file issues there${error.message === '' ? '' : `: ${error.message}`}`
+          case 'rate_limited': {
+            const until = error.retryAt === undefined ? Number.NaN : Date.parse(error.retryAt)
+            return Number.isFinite(until) && until > now
+              ? `${tracker} asks Althar to wait ${waitWords(until - now)} before it files more, so nothing was filed. File it again then.`
+              : `${tracker} asks Althar to wait before trying again, so nothing was filed.`
           }
-        return `The connection to ${tracker} is gone. Connect it again, then try again.`
+          default:
+            return error.message === '' ? `${tracker} refused it.` : error.message
+        }
       }
 
       /**
@@ -826,41 +864,124 @@ export class IssueDrafts extends Context.Service<
           return { issue: now, leftOff }
         })
 
+      /**
+       * The account a connection's calls count against, for pacing its
+       * filings: its tracker, its site, and who it signs in as. Two
+       * connections of one account share its limits; others are paced apart.
+       */
+      const accountOf = (row: Row, info: { readonly webUrl: string; readonly account: { readonly id: string; readonly login: string } }) =>
+        [row.product, hostOf(info.webUrl), info.account.id || info.account.login || row.connectionId].join(' ')
+
+      /**
+       * Settles a filing that ended or was stopped: filed, not filed, or
+       * perhaps filed. Only a draft being filed as it ended may have reached
+       * its tracker; one still waiting was never sent.
+       */
+      const settle = (
+        draftId: string,
+        made:
+          | { readonly _tag: 'Success'; readonly success: { readonly issue: Issue; readonly leftOff: ReadonlyArray<string> } }
+          | { readonly _tag: 'Failure'; readonly failure: unknown },
+        actorId: ActorId,
+      ) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const unsure = (row: Row) => made._tag === 'Failure' && row.state === 'filing' && uncertain(made.failure)
+          return yield* transition(
+            draftId,
+            (row) => row.state === 'filing' || (row.state === 'waiting' && made._tag === 'Failure'),
+            (row, at) =>
+              made._tag === 'Success'
+                ? {
+                    state: 'filed',
+                    issueRef: made.success.issue.ref,
+                    issueKey: made.success.issue.key,
+                    issueUrl: made.success.issue.url,
+                    leftOff: JSON.stringify(made.success.leftOff),
+                    waitingUntil: null,
+                    decidedAt: at,
+                  }
+                : {
+                    state: unsure(row) ? 'uncertain' : 'failed',
+                    error: failureWords(made.failure, row.trackerName, row.state === 'filing', now),
+                    waitingUntil: null,
+                  },
+            (row) => (made._tag === 'Success' ? 'issue_draft.filed' : unsure(row) ? 'issue_draft.uncertain' : 'issue_draft.failed'),
+            actorId,
+            (row) => (row.state === 'filed' ? { key: row.issueKey, url: row.issueUrl } : { error: row.error }),
+          )
+        })
+
       const file: IssueDrafts['Service']['file'] = (draftId, actorId) =>
         provide(
           Effect.gen(function* () {
-            const marked = yield* transition(draftId, open, () => ({ state: 'filing', error: null }), 'issue_draft.filing', actorId)
-            if (!marked.changed) return marked.row.state === 'filing' ? cardOf(marked.row) : yield* closed(marked.row)
+            const marked = yield* transition(
+              draftId,
+              open,
+              () => ({ state: 'waiting', error: null, waitingUntil: null }),
+              'issue_draft.waiting',
+              actorId,
+            )
+            if (!marked.changed)
+              return marked.row.state === 'filing' || marked.row.state === 'waiting' ? cardOf(marked.row) : yield* closed(marked.row)
             const row = marked.row
             const tracker = row.trackerName
-            const made = yield* connections.adapters(row.connectionId).pipe(
-              Effect.flatMap((adapters): Effect.Effect<{ readonly issue: Issue; readonly leftOff: ReadonlyArray<string> }, unknown> =>
-                adapters.tracker === undefined
+            const filing = connections.adapters(row.connectionId).pipe(
+              Effect.flatMap((adapters) => {
+                const made = adapters.tracker
+                return made === undefined
                   ? Effect.fail(new NotFound({ kind: 'connection', id: row.connectionId }))
                   : // Wanting its sign-in again, the tracker isn't asked: it would refuse.
                     adapters.info.state !== 'ready'
                     ? Effect.fail(new ConnectorFailed({ product: row.product, reason: 'unauthorized', message: '' }))
-                    : fileOn(adapters.tracker, row),
-              ),
-              Effect.result,
+                    : pace.run<{ readonly issue: Issue; readonly leftOff: ReadonlyArray<string> }, unknown, Store>(
+                        accountOf(row, adapters.info),
+                        {
+                          // The tracker said to wait: its card says until when.
+                          waiting: (until) =>
+                            Effect.asVoid(
+                              transition(
+                                draftId,
+                                (now) => now.state === 'waiting' || now.state === 'filing',
+                                () => ({ state: 'waiting', waitingUntil: new Date(until).toISOString() }),
+                                'issue_draft.waiting',
+                                actorId,
+                                (now) => ({ until: now.waitingUntil }),
+                              ),
+                            ),
+                          // Discarded while it waited, it stops here, and the tracker is never asked.
+                          start: Effect.map(
+                            transition(
+                              draftId,
+                              (now) => now.state === 'waiting',
+                              () => ({ state: 'filing', waitingUntil: null }),
+                              'issue_draft.filing',
+                              actorId,
+                            ),
+                            (result) => result.changed,
+                          ),
+                          attempt: fileOn(made, row),
+                        },
+                      )
+              }),
             )
-            const ended = yield* transition(
+            // Stopped while it waits or files, it is settled as it stands: never sent, or perhaps filed.
+            const made = yield* Effect.result(filing).pipe(
+              Effect.onInterrupt(() =>
+                settle(draftId, { _tag: 'Failure', failure: new FilingStopped() }, actorId).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not settle an issue draft whose filing stopped', cause)),
+                ),
+              ),
+            )
+            if (made._tag === 'Success' && made.success.stopped) return cardOf(yield* load(draftId))
+            const ended = yield* settle(
               draftId,
-              (now) => now.state === 'filing',
-              (_, at) =>
-                made._tag === 'Success'
-                  ? {
-                      state: 'filed',
-                      issueRef: made.success.issue.ref,
-                      issueKey: made.success.issue.key,
-                      issueUrl: made.success.issue.url,
-                      leftOff: JSON.stringify(made.success.leftOff),
-                      decidedAt: at,
-                    }
-                  : { state: uncertain(made.failure) ? 'uncertain' : 'failed', error: failureWords(made.failure, tracker) },
-              made._tag === 'Success' ? 'issue_draft.filed' : uncertain(made.failure) ? 'issue_draft.uncertain' : 'issue_draft.failed',
+              made._tag === 'Failure'
+                ? { _tag: 'Failure', failure: made.failure }
+                : made.success.stopped
+                  ? { _tag: 'Failure', failure: new FilingStopped() }
+                  : { _tag: 'Success', success: made.success.value },
               actorId,
-              (now) => (now.state === 'filed' ? { key: now.issueKey, url: now.issueUrl } : { error: now.error }),
             )
             if (made._tag === 'Failure') yield* Effect.logWarning('An issue draft could not be filed', made.failure)
             // Filed at once by its lead, it heard so from its tool already; filed by the person, it hears it here.
@@ -881,8 +1002,8 @@ export class IssueDrafts extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const result = yield* transition(
               draftId,
-              open,
-              (_, at) => ({ state: 'discarded', error: null, decidedAt: at }),
+              discardable,
+              (_, at) => ({ state: 'discarded', error: null, waitingUntil: null, decidedAt: at }),
               'issue_draft.discarded',
               actorId,
             )
@@ -901,19 +1022,28 @@ export class IssueDrafts extends Context.Service<
         )
 
       // A draft Althar closed while filing may or may not be on its tracker: said so, for the person to look before filing it again.
+      // One it closed while it waited was never sent: not filed, to file again.
       yield* provide(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const stuck = yield* sql<{ id: string; trackerName: string }>`SELECT id, tracker_name FROM issue_drafts WHERE state = 'filing'`
+          const stuck = yield* sql<{ id: string; trackerName: string; state: IssueDraftState }>`
+            SELECT id, tracker_name, state FROM issue_drafts WHERE state IN ('filing', 'waiting')`
           for (const draft of stuck)
             yield* transition(
               draft.id,
-              (row) => row.state === 'filing',
-              () => ({
-                state: 'uncertain',
-                error: `Althar closed while filing this. Look on ${draft.trackerName} for it before you file it again.`,
-              }),
-              'issue_draft.uncertain',
+              (row) => row.state === draft.state,
+              () =>
+                draft.state === 'filing'
+                  ? {
+                      state: 'uncertain',
+                      error: `Althar closed while filing this. Look on ${draft.trackerName} for it before you file it again.`,
+                    }
+                  : {
+                      state: 'failed',
+                      error: `Althar closed before it asked ${draft.trackerName}, so nothing was filed. File it again.`,
+                      waitingUntil: null,
+                    },
+              draft.state === 'filing' ? 'issue_draft.uncertain' : 'issue_draft.failed',
               instance.systemId,
               (row) => ({ error: row.error }),
             )
