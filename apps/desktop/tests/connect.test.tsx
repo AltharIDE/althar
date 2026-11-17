@@ -190,7 +190,7 @@ describe('connecting GitLab', () => {
                 ['checks', 'ok'],
                 ['issues', 'ok'],
               ],
-              { expiresAt: '2026-12-31T00:00:00.000Z' },
+              { expiresAt: '2025-12-31T00:00:00.000Z' },
             ),
           ),
       },
@@ -239,7 +239,7 @@ describe('connecting GitLab', () => {
     await press('Use it')
     expect(client.connectToken).toHaveBeenCalledWith({ product: 'gitlab', token: 'glpat-new1234567890xyz', webUrl: halyard })
     expect(await heading('Connected as balazs.k')).toBeTruthy()
-    expect(within(panel).getByText('The token runs out on 31 December 2026.')).toBeTruthy()
+    expect(within(panel).getByText('The token runs out on 31 December 2025.')).toBeTruthy()
     // The same token isn't offered again.
     await comeBack()
     expect(within(panel).queryByText('A GitLab token is on your clipboard')).toBeNull()

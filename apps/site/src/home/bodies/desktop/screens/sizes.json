@@ -1,0 +1,9 @@
+{
+  "project-home": { "card": [3808, 2500], "whole": [3360, 2020] },
+  "graph": { "card": [3328, 1680], "whole": [2880, 1200] },
+  "review-code": { "card": [3328, 2280], "whole": [2880, 1800] },
+  "browser": { "card": [3328, 2280], "whole": [2880, 1800] },
+  "canvas": { "card": [3328, 2280], "whole": [2880, 1800] },
+  "automations": { "card": [3008, 2200], "whole": [2560, 1720] },
+  "home": { "card": [3328, 2280], "whole": [2880, 1800] }
+}

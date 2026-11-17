@@ -7,7 +7,7 @@ import { CLI_SIGN_INS, SANDBOX_SECRETS, SECRET_PLACES, secretReadRules } from '.
 
 describe('the agent registry', () => {
   it('ships every bundled adapter where it says', () => {
-    for (const agent of Object.values(agents).filter((entry) => entry.source === 'bundled')) {
+    for (const agent of Object.values(agents).filter((entry) => entry.source === 'bundled' && entry.native === undefined)) {
       const spec = agent.launch('/usr/bin/node')
       assert.strictEqual(spec.command, '/usr/bin/node')
       assert.isTrue(existsSync(spec.args[0] ?? ''), `${agent.id}: ${spec.args[0]}`)
@@ -47,6 +47,7 @@ describe('the agent registry', () => {
     assert.deepInclude(copilot.launch('/usr/bin/node').env ?? {}, { COPILOT_DISABLE_LOGIN_SHELL_ENV: '1' })
     // A GHE.com tenant's Copilot is named by GH_HOST, which crosses the allowlist to it.
     assert.include(copilot.launch('/usr/bin/node').inheritEnv ?? [], 'GH_HOST')
+    assert.include(copilot.launch('/usr/bin/node').inheritEnv ?? [], 'COPILOT_GH_HOST')
     assert.deepInclude(junie.launch('/usr/bin/node').env ?? {}, { JUNIE_CONFIG_DEFAULT_LOCATIONS: 'false' })
     // Node's fetch takes the proxy a Claude Code sandbox names, so a Node tool's download reaches a host it allows.
     assert.deepInclude(agents['claude-code'].launch('/usr/bin/node').env ?? {}, { NODE_USE_ENV_PROXY: '1' })
@@ -157,6 +158,7 @@ describe('the agent registry', () => {
         'claude-code': ['claude-plugin', 'meta'],
         codex: ['agents', 'directory'],
         opencode: ['plain', 'env'],
+        'copilot-direct': ['plain', 'env'],
         copilot: 'none',
         junie: 'none',
         grok: 'none',

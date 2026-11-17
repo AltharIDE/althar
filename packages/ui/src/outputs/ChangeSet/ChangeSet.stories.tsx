@@ -18,11 +18,23 @@ import {
 import { States, statesParameters } from '../../storybook/States'
 import { ChangeState, CheckState } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
+import { MergeButton } from '../../primitives/MergeButton/MergeButton'
+import { visiblePath } from '../../primitives/Path/Path'
 import { ChangeSet, foldersOf, groupsOf } from './ChangeSet'
 
 const accept = fn()
 const push = fn()
 const open = fn()
+
+/** One repository's change: one to accept, not both. */
+const ONE_REPO = {
+  ...CHANGE_ONE_REPO,
+  actions: (
+    <Button variant="signal" onClick={accept}>
+      Accept and merge
+    </Button>
+  ),
+}
 
 /** As wide as it is beside what a task made; `alone`, as wide as the page gives it with nothing beside it. */
 const SIDE = 360
@@ -51,6 +63,31 @@ type Story = StoryObj<typeof meta>
 export const Ready: Story = {}
 /** Alone on the page: the button beside what it acts on, at its own width. */
 export const ReadyAlone: Story = { parameters: { width: ALONE } }
+/** One repository, Accept and merge with its chevron: the split button spans the card like a lone button. */
+export const MergeAlone: Story = {
+  args: {
+    ...ONE_REPO,
+    actions: (
+      <MergeButton variant="signal" onMerge={accept} onBypassQueue={accept}>
+        Accept and merge
+      </MergeButton>
+    ),
+  },
+}
+/** Two actions, the split one beside another: each takes half. */
+export const MergeBesideAnother: Story = {
+  args: {
+    ...ONE_REPO,
+    actions: (
+      <>
+        <Button onClick={open}>Send back</Button>
+        <MergeButton variant="signal" onMerge={accept} onBypassQueue={accept}>
+          Accept and merge
+        </MergeButton>
+      </>
+    ),
+  },
+}
 /** Two reviewers, as a list: GPT-5.2 Codex and Claude Opus 5, each mark beside its own name. */
 export const TwoReviewers: Story = {
   args: { ...CHANGE_READY, review: { state: CheckState.Passed, by: [CODEX, OPUS] } },
@@ -71,6 +108,23 @@ export const ThreeReviewers: Story = {
 export const NarrowReviewers: Story = {
   parameters: { width: 240 },
   args: { ...CHANGE_READY, review: { state: CheckState.Passed, by: [CODEX, OPUS, GEMINI_PRO] } },
+}
+/** Two files on a narrow card: a path gives up whole leading folders, "…/tests/coordinatorTools.test.ts", never part of a name. */
+export const PathsInANarrowCard: Story = {
+  args: {
+    ...CHANGE_READY,
+    prs: [
+      {
+        repo: 'althar',
+        number: 928,
+        url: 'https://github.com/althar/althar/pull/928',
+        files: [
+          { path: 'packages/runtime/src/Coordinator.ts', add: 25, del: 7 },
+          { path: 'packages/runtime/tests/coordinatorTools.test.ts', add: 45, del: 0 },
+        ],
+      },
+    ],
+  },
 }
 /** A draft: its checks still running, said in a line. */
 export const Draft: Story = { args: { ...CHANGE_DRAFT, actions: <Button>Mark ready for review</Button> } }
@@ -119,9 +173,17 @@ export const Queued: Story = {
     await expect(within(canvasElement).queryByRole('button', { name: /Accept/ })).not.toBeInTheDocument()
   },
 }
+/** Accept and merge just pressed: Merging in its place at once, until the runtime says queued or merged. */
+export const Merging: Story = {
+  args: { ...ONE_REPO, actions: <MergeButton variant="signal" standing="merging" /> },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('status')).toHaveTextContent('Merging')
+    await expect(within(canvasElement).queryByRole('button', { name: /Accept/ })).not.toBeInTheDocument()
+  },
+}
 /** One pull request: its number is the one link to its host. */
 export const OneRepository: Story = {
-  args: CHANGE_ONE_REPO,
+  args: ONE_REPO,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('link', { name: 'Open stripe-internal/meridian-api #1191 on GitHub' })).toHaveTextContent('PR #1191')
@@ -312,13 +374,13 @@ export const RefusedHere: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('alert')).toHaveTextContent('Your main checkout has uncommitted changes to middleware.ts.')
-    // Each file's name whole, apart from its folder, which keeps its slash and gives way first; the whole path on hover. Where
-    // there is layout (Storybook, not jsdom), the name isn't cut either.
-    const name = c.getByText('middleware.test.js')
-    await expect(name.previousElementSibling).toHaveTextContent(/^tests\/unit\/$/)
-    await expect(name.closest('[title]')).toHaveAttribute('title', 'tests/unit/middleware.test.js')
-    await expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth)
-    await expect(c.getByText('middleware.ts').previousElementSibling).toBeNull()
+    // Each file's path as folders, from the left, that fit: the folders go whole, never part of a name; the whole path on hover. Where
+    // there is layout (Storybook, not jsdom), it fits its room.
+    const path = c.getByTitle('tests/unit/middleware.test.js')
+    await expect(visiblePath(path)).toMatch(/^(…\/)?(tests\/)?(unit\/)?middleware\.test\.js$/)
+    const shown = path.firstElementChild as HTMLElement
+    await expect(shown.scrollWidth).toBeLessThanOrEqual(shown.clientWidth)
+    await expect(visiblePath(c.getByTitle('middleware.ts'))).toBe('middleware.ts')
   },
 }
 
@@ -415,7 +477,7 @@ const GROUPED = [
 
 /** A few files, several to a folder: each folder a quiet heading over its files, the top of the repository under its name. */
 export const GroupedFiles: Story = {
-  args: { ...CHANGE_ONE_REPO, prs: [{ ...PR_416[0]!, files: GROUPED }] },
+  args: { ...ONE_REPO, prs: [{ ...PR_416[0]!, files: GROUPED }] },
   parameters: { width: ALONE },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
@@ -446,7 +508,7 @@ const MANY = [
 
 /** A change of 116 files stays short: its folders, the most first, each with how much changed in it, six and the rest a press away. */
 export const ManyFiles: Story = {
-  args: { ...CHANGE_ONE_REPO, prs: [{ ...PR_416[0]!, files: MANY }] },
+  args: { ...ONE_REPO, prs: [{ ...PR_416[0]!, files: MANY }] },
   parameters: { width: ALONE },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -484,7 +546,7 @@ export const AllStates: Story = {
         { state: 'a check failed', node: <ChangeSet {...args} {...Failed.args} /> },
         { state: 'merged', node: <ChangeSet {...args} {...Merged.args} /> },
         { state: 'in the merge queue', node: <ChangeSet {...args} {...Queued.args} /> },
-        { state: 'one repository', node: <ChangeSet {...args} {...CHANGE_ONE_REPO} /> },
+        { state: 'one repository', node: <ChangeSet {...args} {...ONE_REPO} /> },
         { state: 'on its branch', node: <ChangeSet {...args} {...OnItsBranch.args} /> },
         { state: 'on its branch, commits not pushed', node: <ChangeSet {...args} {...NightlyCheck.args} /> },
         { state: 'on its branch, not connected', node: <ChangeSet {...args} {...NotConnected.args} /> },

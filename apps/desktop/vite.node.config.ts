@@ -26,6 +26,13 @@ export default defineConfig(({ mode }) => ({
     // Where reports go (src/main/report): the Worker's address and the mail's, as the build is given them; the environment can say otherwise at run time.
     __ALTHAR_REPORT_URL__: JSON.stringify(process.env.ALTHAR_REPORT_URL ?? ''),
     __ALTHAR_REPORT_EMAIL__: JSON.stringify(process.env.ALTHAR_REPORT_EMAIL ?? 'reports@althar.ai'),
+    // Public application identity travels with the app; people signing in never have to configure an environment variable.
+    __ALTHAR_COPILOT_CLIENT_ID__: JSON.stringify(
+      (() => {
+        const env = loadEnv(mode, import.meta.dirname, 'ALTHAR_')
+        return env.ALTHAR_COPILOT_CLIENT_ID || env.ALTHAR_GITHUB_CLIENT_ID || 'Ov23liI3MfkqFXCKYuNh'
+      })(),
+    ),
   },
   build: {
     ssr: true,
@@ -35,7 +42,14 @@ export default defineConfig(({ mode }) => ({
     sourcemap: true,
     rollupOptions: {
       input: { 'main/main': 'src/main/main.ts', 'runtime/runtime': 'src/runtime/runtime.ts', 'speech/speech': 'src/speech/speech.ts' },
-      external: ['electron', 'sherpa-onnx-node', 'electron-updater', ...builtinModules, ...builtinModules.map((name) => `node:${name}`)],
+      external: [
+        'sharp',
+        'electron',
+        'sherpa-onnx-node',
+        'electron-updater',
+        ...builtinModules,
+        ...builtinModules.map((name) => `node:${name}`),
+      ],
       output: {
         format: 'es',
         entryFileNames: '[name].js',

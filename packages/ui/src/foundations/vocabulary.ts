@@ -229,6 +229,21 @@ export enum TaskStatus {
 }
 
 /**
+ * How a task another waits for stands (tasks wait for their blockers): not
+ * started yet, at work, stuck on you or stopped, in review, merged (its work
+ * in, so it holds nothing up), or abandoned, when what waits for it waits on
+ * you instead.
+ */
+export enum BlockerStands {
+  Planned = 'planned',
+  Working = 'working',
+  Stuck = 'stuck',
+  Review = 'review',
+  Merged = 'merged',
+  Abandoned = 'abandoned',
+}
+
+/**
  * What a task makes, read from what it has (DEV-96): a change ends in a pull
  * request of its own, or has commits; a review reads someone else's; any
  * other task is plain, and has no word on its card.
@@ -563,6 +578,7 @@ export enum Room {
 export enum AutomationRunState {
   Starting = 'starting',
   Running = 'running',
+  NeedsYou = 'needs-you',
   Made = 'made',
   Nothing = 'nothing',
   Failed = 'failed',
@@ -705,4 +721,26 @@ export enum MemoryPressure {
   Warning = 'warning',
   /** It moves memory to disk, and everything runs slower. */
   Critical = 'critical',
+}
+
+/** A stop on a Ship's route, in the order it takes them. */
+export enum ShipStop {
+  /** Its reviewer reads what waits, and the lead settles what it finds. */
+  Review = 'review',
+  /** What waits goes up to its pull request, or opens one. */
+  Push = 'push',
+  /** Its pull request is marked ready for review. */
+  Ready = 'ready',
+  /** Its pull request merges, once the checks main requires pass. */
+  Merge = 'merge',
+}
+
+/** How far a Ship goes: the last stop it takes. */
+export enum ShipFar {
+  /** As far as a push: a draft stays one. */
+  Push = 'push',
+  /** Ready for review. */
+  Ready = 'ready',
+  /** Merged. */
+  Merge = 'merge',
 }

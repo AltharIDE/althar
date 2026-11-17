@@ -8,19 +8,19 @@ import { repository } from '../tests/repository'
 import { launch, openFirstProject, projectSettings } from './support'
 
 /*
- * What a small change's review after it merges brings back, in a real window: the project's Tasks settings show it under How
+ * What an explicitly configured review after a merge brings back, in a real window: the project's Tasks settings show it under How
  * they go, Major only to start with, and keep another choice; Althar's Settings › Tasks show what new projects start with. In
  * light and dark. The screenshots it takes are this change's own evidence (test-results/after-merge-*.png).
  */
 
-const ROW = 'Review after a small change merges'
+const ROW = 'When a review is set after merge'
 
 const shoot = (page: Page, region: string, name: string) =>
   page
     .getByRole('region', { name: region })
     .screenshot({ path: `test-results/after-merge-${name}.png`, scale: 'css', animations: 'disabled' })
 
-test('the review after a small change merges is a project rule with a default for new projects, in light and dark', async () => {
+test('an explicit review after merge follows a project rule with a default for new projects, in light and dark', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   mkdirSync(join(home, 'profile'), { recursive: true })
   writeFileSync(join(home, 'profile', 'desktop.json'), JSON.stringify({ appearance: 'light' }))
@@ -37,7 +37,7 @@ test('the review after a small change merges is a project rule with a default fo
     // Another choice holds, and says what it means under its line.
     await select.click()
     await page.getByRole('option', { name: 'Don’t review it' }).click()
-    await expect(go.getByText('Make it a full task to have it reviewed before it merges.')).toBeVisible()
+    await expect(go.getByText('A review configured before Ship is unaffected.')).toBeVisible()
     await page.getByRole('option').first().waitFor({ state: 'detached' })
     await shoot(page, 'How they go', 'project-none-light')
 

@@ -61,7 +61,8 @@
 .station::before { content: ''; position: absolute; left: calc(var(--rail) + 5px); top: 14px; bottom: calc(-1 * var(--between) + 2px); width: 1px; background: var(--hair-2); }
 /* The rail's light, down from where you are reading. */
 .station[data-on]::before { background: linear-gradient(var(--lit), rgba(120, 132, 255, 0.4) 30%, var(--hair-2) 70%); }
-.notch::before { -webkit-mask: linear-gradient(#000 60%, transparent); mask: linear-gradient(#000 60%, transparent); }
+/* The last station's rail fades out before the last window. */
+.station:has(+ .endStation)::before { -webkit-mask: linear-gradient(#000 60%, transparent); mask: linear-gradient(#000 60%, transparent); }
 
 /* The stamp: the node on the rail, its number and name, a rule, the height it stands at. */
 .stamp {

@@ -83,7 +83,17 @@
   flex-wrap: wrap;
 }
 
-/* reporting it is no answer to the step: quiet, at the far end of the answers, on one line */
+/*
+ * reporting it is no answer to the step: quiet, at the far end of the answers, on one line. It travels with the last
+ * way on, which fills what is left of the row, so where the row wraps the two go down together and Report this is
+ * never alone on a row of its own.
+ */
+.tail {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  gap: 6px;
+}
 .report {
   flex-shrink: 0;
   margin-left: auto;

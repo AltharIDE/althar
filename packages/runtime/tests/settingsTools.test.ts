@@ -21,6 +21,7 @@ import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { SCREEN_CHANGES, SettingsTools } from '../src/SettingsTools'
+import { shipRouteSetting } from '../src/shipRoute'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, listTools, repository, runtime } from './support'
 
@@ -126,7 +127,7 @@ const screensChanges = () => {
     const source = readFileSync(file, 'utf8')
     const where = relative(renderer, file)
     // What the screens call: anything that isn't only a read.
-    for (const [, call] of source.matchAll(/client\.([a-zA-Z]+)\(/g))
+    for (const [, call] of source.matchAll(/client\s*\.([a-zA-Z]+)\(/g))
       if (call !== undefined && !/^(get|list|read|find|search|watch|status|check|look)/.test(call)) made.set(call, where)
     // The window's own preferences, set by name, and those a map names.
     for (const [, key] of source.matchAll(/\bset\('([a-zA-Z]+)'/g)) if (key !== undefined) made.set(key, where)
@@ -194,6 +195,17 @@ describe('settings, for the coordinator and leads', () => {
       const ink = ProjectInk.literals.find((one) => !before.includes(`- ink (Colour): "${one}"`)) ?? 'moss'
       assert.match(yield* callTool(coordinator, 'change_settings', { section: 'project/general', change: { ink } }), /^Changed General/)
       assert.include(yield* callTool(coordinator, 'read_settings', { section: 'project/general' }), `- ink (Colour): "${ink}"`)
+      // What sending does mid-turn queues until it is set to steer, and goes back.
+      assert.include(
+        yield* callTool(coordinator, 'read_settings', { section: 'althar/tasks' }),
+        '- sendMidTurn (What sending does while an agent is mid-turn): "queue"',
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/tasks', change: { sendMidTurn: 'steer' } }),
+        /sending does while an agent is mid-turn: queue → steer/,
+      )
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/tasks' }), 'mid-turn): "steer"')
+      yield* callTool(coordinator, 'change_settings', { section: 'althar/tasks', change: { sendMidTurn: 'queue' } })
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -674,6 +686,35 @@ describe('each section of the settings, as agents change it', () => {
       })
       assert.include(seal, 'The review seal: on → off')
       assert.include(seal, 'The seal’s look: ring → wax')
+      // Ship's default route: one that still reviews and goes no further than ready goes at once; merging, or no review first,
+      // loosens what asks; back to each task's own goes at once too.
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'althar/pull-requests',
+          change: { shipRoute: { review: true, far: 'push' } },
+        }),
+        /^Changed Pull requests: Ship’s default route: /,
+      )
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/pull-requests' }), '"far":"push"')
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'althar/pull-requests',
+          change: { shipRoute: { review: true, far: 'merge' } },
+        }),
+        /loosens what asks \(Ship’s default route\)/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', {
+          section: 'althar/pull-requests',
+          change: { shipRoute: { review: false, far: 'push' } },
+        }),
+        /loosens what asks \(Ship’s default route\)/,
+      )
+      assert.match(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/pull-requests', change: { shipRoute: null } }),
+        /^Changed Pull requests: Ship’s default route: /,
+      )
+      assert.isUndefined(yield* shipRouteSetting)
       // Althar's own changes show in Settings with no project, the coordinator's by its name.
       const changed = yield* (yield* SettingsTools).changed(null)
       assert.includeMembers(

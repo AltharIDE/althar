@@ -42,6 +42,8 @@ export interface PullRequestFacts {
    * them, and the task isn't done while there are any.
    */
   readonly unshipped?: number
+  /** A Ship of the task is under way: what waits for it goes up as it ends, after its review where the plan has one. */
+  readonly shipping?: boolean
 }
 
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
@@ -75,13 +77,21 @@ const staleWords = (seen: SeenChange) => {
   return null
 }
 
-/** Who pushes the commits not on it yet: Althar as its lead's turn ends, where the project says so and nothing held them (ADR-072). */
-const pushedWords = (change: SeenChange['change']): string =>
-  change.pushing === undefined
-    ? 'the person pushes them.'
-    : change.pushing.held === null
-      ? "Althar pushes them as the lead's turn ends."
-      : `the person pushes them, since they didn't go up by themselves: ${change.pushing.held}.`
+/**
+ * Who pushes the commits not on it yet: Ship, where they wait for it (a task
+ * is a conversation plus parts); Althar as its lead's turn ends, where the
+ * project says so and nothing held them (ADR-072); else the person.
+ */
+const pushedWords = (change: SeenChange['change'], shipping: boolean): string =>
+  change.pushing?.ship === true
+    ? shipping
+      ? "they wait for Ship, which is under way: they go up as it ends. Nothing else pushes them, the person's Push included."
+      : "they wait for Ship, which sends them up after its review where the plan has one. Nothing else pushes them, the person's Push included."
+    : change.pushing === undefined
+      ? 'the person pushes them.'
+      : change.pushing.held === null
+        ? "Althar pushes them as the lead's turn ends."
+        : `the person pushes them, since they didn't go up by themselves: ${change.pushing.held}.`
 
 /** One pull request in a few words: `PR #113 draft, checks passing, 2 unpushed`. */
 export const changeWords = (seen: SeenChange, several: boolean): string => {
@@ -90,7 +100,9 @@ export const changeWords = (seen: SeenChange, several: boolean): string => {
   const parts = [
     change.state === 'open' ? (change.draft ? 'draft' : 'ready for review') : change.state,
     checksWords(change),
-    change.state === 'open' && change.unpushed > 0 ? `${change.unpushed} unpushed` : null,
+    change.state === 'open' && change.unpushed > 0
+      ? `${change.unpushed} ${change.pushing?.ship === true ? 'waiting for Ship' : 'unpushed'}`
+      : null,
     change.state === 'open' && change.diverged !== null ? `diverged from ${change.short}` : null,
     stale === null ? null : `as last seen (${stale})`,
   ].filter((part): part is string => part !== null)
@@ -188,7 +200,16 @@ const divergedWords = (change: ChangeSummary): string | null => {
   return `The ${change.noun} has commits pushed from elsewhere that the task's branch doesn't, so it takes no plain push. The person has the lead merge them in, from the task's outputs.`
 }
 
-const changeSection = (seen: SeenChange, several: boolean): string => {
+/** Whether it conflicts with the branch it merges into, as its host last said; not known where the host hasn't worked it out, or doesn't say. */
+const conflictWords = (change: ChangeSummary): string => {
+  const target = change.target ?? 'the base'
+  if (change.conflicts === true)
+    return `Conflicts with ${target}, as its host says: it can't merge until ${target} is merged into its branch and the conflict settled.`
+  if (change.conflicts === false) return `Conflicts with ${target}: none, as its host says.`
+  return `Conflicts with ${target}: not known (its host hasn't said).`
+}
+
+const changeSection = (seen: SeenChange, several: boolean, shipping: boolean): string => {
   const { change } = seen
   const stale = staleWords(seen)
   const when = seen.seenAt === null ? '' : `; last updated ${seen.seenAt}`
@@ -201,11 +222,10 @@ const changeSection = (seen: SeenChange, several: boolean): string => {
       : null,
     checkSection(change),
     change.state === 'open' && change.unpushed > 0
-      ? `${plural(change.unpushed, 'commit')} on the task's branch ${change.unpushed === 1 ? 'is' : 'are'} not on the ${change.noun} yet; ${pushedWords(change)}`
+      ? `${plural(change.unpushed, 'commit')} on the task's branch ${change.unpushed === 1 ? 'is' : 'are'} not on the ${change.noun} yet; ${pushedWords(change, shipping)}`
       : null,
     change.state === 'open' ? divergedWords(change) : null,
-    // The host snapshot doesn't carry whether it merges cleanly: Althar finds out only when it merges the task here.
-    change.state === 'open' ? 'Conflicts with the base: not known (Althar does not ask the host).' : null,
+    change.state === 'open' ? conflictWords(change) : null,
     stale === null ? null : `Possibly out of date: ${stale}, so this is as last seen.`,
   ]
     .filter((line): line is string => line !== null)
@@ -217,7 +237,9 @@ export const sectionWords = (facts: PullRequestFacts): string => {
   const repositories = new Set(facts.changes.map(({ change }) => repositoryOf(change))).size + facts.merged.length
   const several = repositories > 1
   const sections = [
-    ...inOrder(facts.changes).map(({ seen, earlier }) => `${earlier ? 'Earlier: ' : ''}${changeSection(seen, several)}`),
+    ...inOrder(facts.changes).map(
+      ({ seen, earlier }) => `${earlier ? 'Earlier: ' : ''}${changeSection(seen, several, facts.shipping === true)}`,
+    ),
     ...facts.merged.map((merged) => mergedWords(merged, several)),
   ]
   if (sections.length === 0) return ''

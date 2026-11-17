@@ -33,6 +33,14 @@ const task = (overrides: Partial<HomeTask>): HomeTask => ({
   ...overrides,
 })
 
+const blocker = (stands: 'working' | 'abandoned' | 'merged') => ({
+  taskId: 'seal',
+  slug: 'seal-secrets',
+  title: 'Seal secrets',
+  threadId: 'thseal',
+  stands,
+})
+
 const passed = { outcome: 'passed' as const, passed: 2, failed: 0, running: 0, total: 2, failing: [], list: [] }
 
 /** Each case the person can meet, and whether it waits on them. */
@@ -115,6 +123,16 @@ const cases: ReadonlyArray<{ readonly why: string; readonly needs: boolean; read
     needs: false,
     task: task({ taskId: 'i', threadId: 'thi', title: 'Still going', phase: 'running' }),
   },
+  {
+    why: 'a plan that waits for a task that was abandoned',
+    needs: true,
+    task: task({ taskId: 'w1', threadId: 'thw1', title: 'Set a host up over SSH', phase: 'planned', waitsFor: [blocker('abandoned')] }),
+  },
+  {
+    why: 'a plan that waits for a task still at work',
+    needs: false,
+    task: task({ taskId: 'w2', threadId: 'thw2', title: 'Reconnect on wake', phase: 'planned', waitsFor: [blocker('working')] }),
+  },
 ]
 
 const permission = {
@@ -163,7 +181,9 @@ describe('what needs the person', () => {
 
     withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
     // The board: what needs them, and a call once, as its task's card is; a task that finished and isn't a change among it.
-    const board = onBoard('Needs you').map((title) => (title === 'Waits on a call' ? 'Run npm publish' : title))
+    const board = onBoard('Needs you')
+      .map((title) => (title === 'Waits on a call' ? 'Run npm publish' : title))
+      .toSorted()
     expect(board).toEqual(wanted)
     expect(yoursOf(lanes)).toBe(wanted.length)
     // What was kept for later is out of it, behind Settled's tab.
@@ -192,8 +212,10 @@ describe('what needs the person', () => {
     expect(line('Merged, then more').getByText('Ready for a new pull request')).toBeTruthy()
     expect(line('Merged, then more').getByText('3 commits in no pull request · +40 −2')).toBeTruthy()
     expect(line('Merged, then more').getByRole('button', { name: 'Open' })).toBeTruthy()
-    expect(line('Conflict handed back').getByText('Stuck')).toBeTruthy()
+    // What its lead handed back says so, as its card does, and opens its task, where it is settled.
+    expect(line('Conflict handed back').getByText('Merge conflict')).toBeTruthy()
     expect(line('Conflict handed back').getByText('It conflicts in README.md.')).toBeTruthy()
+    expect(line('Conflict handed back').getByRole('button', { name: 'Open' })).toBeTruthy()
     expect(line('Review #1199').getByRole('button', { name: 'Review' })).toBeTruthy()
     // A task that finished and isn't a change says so, and what its lead said.
     expect(line('Which partners call v1?').getByText('Finished')).toBeTruthy()
@@ -217,6 +239,29 @@ describe('what needs the person', () => {
  * cards: the tabs, the switcher and Elsewhere take it from the home
  * (`yoursByProject`), never a second reading of what waits.
  */
+describe('a plan that waits for a task that was abandoned', () => {
+  it('is in Needs you, saying which, until that one is reopened or let go, when it is Up next again', async () => {
+    const waits = task({
+      taskId: 'w',
+      threadId: 'thw',
+      title: 'Set a host up over SSH',
+      phase: 'planned',
+      waitsFor: [blocker('abandoned')],
+    })
+    const lanes = lanesOf({ cursor: 1, tasks: [waits as BoardTask], calls: [], settledTotal: 0 })
+    expect({ yours: yoursOf(lanes), upNext: lanes.next.length }).toEqual({ yours: 1, upNext: 0 })
+    expect(yoursByProject(home({ tasks: [waits], projects: [project] })).get('p1')).toBe(1)
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    expect(within(screen.getByRole('region', { name: /^Needs you/ })).getByText('Seal secrets was abandoned')).toBeTruthy()
+    cleanup()
+    // Reopened, it waits for that one at work again: Up next, nothing of it the person's.
+    for (const stands of ['working', 'merged'] as const) {
+      const back = lanesOf({ cursor: 1, tasks: [{ ...waits, waitsFor: [blocker(stands)] } as BoardTask], calls: [], settledTotal: 0 })
+      expect({ yours: yoursOf(back), upNext: back.next.length }).toEqual({ yours: 0, upNext: 1 })
+    }
+  })
+})
+
 describe('a project’s dot', () => {
   /** What its board counts in Needs you, and what its dot says, from the same cards. */
   const alike = (tasks: ReadonlyArray<HomeTask>, calls: ReadonlyArray<HomeCall> = []) => [
@@ -245,6 +290,6 @@ describe('a project’s dot', () => {
       ]),
     ).toEqual([0, 0])
     // A lead stopped with no agent on it waits for the person to carry on or abandon it, as its board says.
-    expect(alike([task({ taskId: 'stop', threadId: 'thp', title: 'Stopped', phase: 'stopped' })])).toEqual([1, 1])
+    expect(alike([task({ taskId: 'stop', threadId: 'thp', title: 'Stopped', phase: 'stopped' })])).toEqual([0, 0])
   })
 })

@@ -10,6 +10,7 @@ import { catalogOf, defaultPins, handOnChoice, handOnModels, infoOf, useModelPre
 import { useModelNames, useProviderNames } from '../../shared/modelNames'
 import { device } from '../../shared/device'
 import { clock } from '../../shared/time'
+import { saysMore } from '../../shared/WayOut'
 import { LimitCall, limitText } from './LimitCall'
 
 /*
@@ -284,7 +285,7 @@ function StuckCard({
       ? providerName(stuck.agentId, stuck.model, stuck.provider)
       : undefined
   // The agent's own words under it, where they say more than the headline.
-  const said = stuck.why === 'signed_out' && stuck.detail !== null && !/signed out/i.test(stuck.detail) ? stuck.detail : undefined
+  const said = stuck.why === 'signed_out' && saysMore('signed_out', stuck.detail) ? stuck.detail : undefined
   const { handOn, browser } = useHandOn(request.id, stuck, agents, onAnswer)
   // A usage limit that says who could take over asks with them; one raised before it did asks as any stuck step.
   if (stuck.why === 'usage_limit' && stuck.limit !== undefined)

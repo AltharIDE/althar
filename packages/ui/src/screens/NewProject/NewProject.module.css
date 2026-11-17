@@ -92,12 +92,6 @@
   font-size: 12px;
   line-height: 1.45;
 }
-.missing {
-  margin: 0;
-  color: var(--danger);
-  font-size: 12px;
-  line-height: 1.45;
-}
 .made {
   display: flex;
   flex-wrap: wrap;
@@ -183,7 +177,7 @@
   gap: 8px;
 }
 .zone .note,
-.zone .missing {
+.zoneProblem {
   max-width: 380px;
 }
 
@@ -344,6 +338,14 @@
   font-size: 13px;
   font-weight: 520;
 }
+/* the repositories on connected hosts: each by its host's mark */
+.hostedMark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: var(--t-2);
+}
 .in {
   color: var(--t-3);
   font-size: 12px;
@@ -363,12 +365,16 @@
   padding: 14px 24px;
   border-top: 1px solid var(--line);
 }
-.error {
+/* what Create will do, before it */
+.footNote {
   min-width: 0;
   margin-right: auto;
-  color: var(--danger);
+  color: var(--t-3);
   font-size: 12px;
   line-height: 1.45;
+}
+.error {
+  margin-right: auto;
 }
 
 @media (max-width: 760px) {

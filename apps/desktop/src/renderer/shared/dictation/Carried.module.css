@@ -9,3 +9,20 @@
   width: min(440px, calc(100vw - 32px));
   transform: translateX(-50%);
 }
+
+/* The tray of a window with no composer to carry it: where the pill will be, whole rather than joined to a composer's top. */
+.dock {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  z-index: var(--z-float);
+  width: min(440px, calc(100vw - 32px));
+  transform: translateX(-50%);
+}
+
+.dock > div.tray {
+  border-bottom: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: var(--lift-card);
+}

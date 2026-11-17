@@ -1,75 +1,261 @@
+/*
+ * The heading over the conversation, set as the board heads its lanes (13px, 600, on their line), with no hairline under
+ * it, as a lane has none: what scrolls under it fades into it instead.
+ */
 .strip {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 44px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--line);
+  padding: 14px 12px 6px 14px;
+}
+.strip::after {
+  content: '';
+  position: absolute;
+  inset: 100% 0 auto;
+  height: 14px;
+  background: linear-gradient(var(--face-surface, var(--paper)), transparent);
+  pointer-events: none;
 }
 .tabs {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  mask-image: linear-gradient(to right, black calc(100% - 24px), transparent);
 }
-.rule {
-  flex-shrink: 0;
-  width: 1px;
-  height: 16px;
-  margin: 0 4px;
-  background: var(--line-2);
-}
-.pill {
+/* The open conversation's name: it keeps its room, and opens the search. */
+.heading {
+  flex: none;
+  max-width: 60%;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px 0 6px;
+  border-radius: 7px;
+  color: var(--t-1);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  transition: background var(--fast) var(--ease);
+}
+.heading:hover {
+  background: var(--line);
+}
+.heading > svg {
+  flex: none;
+  color: var(--t-3);
+}
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/*
+ * A new aside, not named yet: its words a placeholder's, quiet and leaning a little. The app loads Inter's upright face
+ * only, so italic would be the browser's own slant, steep at this size; a slight skew leans half as far.
+ */
+.heading[data-new] .name {
+  color: var(--t-3);
+  font-weight: 500;
+  transform: skewX(-6deg);
+}
+.chev {
+  transition: transform var(--fast) var(--ease);
+}
+.heading[aria-expanded='true'] > .chev {
+  transform: rotate(180deg);
+}
+/* the latest few after the heading: quiet words, one press each, giving way first */
+.recents {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  overflow: hidden;
+}
+.recent {
   flex-shrink: 0;
-  max-width: 160px;
-  padding: 4px 10px;
-  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 170px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 7px;
   color: var(--t-3);
   font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
 }
-.pill:hover {
+.recent:hover {
   color: var(--t-1);
-  background: var(--n-2);
-}
-.pill[aria-selected='true'] {
-  color: var(--t-1);
-  background: var(--n-0);
-  box-shadow: 0 0 0 1px var(--line-2);
-}
-.coordinator {
-  max-width: none;
-  font-weight: 600;
+  background: var(--line);
 }
 .title {
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.older {
-  flex-shrink: 0;
-  padding: 4px 8px;
-  border-radius: 6px;
-  color: var(--t-3);
-  font-size: 12px;
+
+/* ---------- The search: the finder's field and rows at a menu's size, the words that matched darker ---------- */
+.pop {
+  overflow: hidden;
 }
-.older:hover,
-.older[aria-expanded='true'] {
+.field {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--t-3);
+}
+.field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 13px;
   color: var(--t-1);
-  background: var(--n-2);
+}
+.field input::placeholder {
+  color: var(--t-3);
+}
+.field:focus-within {
+  box-shadow: inset 0 -1.5px 0 var(--signal);
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  max-height: 380px;
+  padding: 5px;
+  overflow-y: auto;
+}
+.list > * {
+  flex-shrink: 0;
+}
+.group {
+  display: flex;
+  align-items: center;
+  padding: 10px 9px 5px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.group button {
+  margin-left: auto;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--t-3);
+}
+.group button:hover {
+  color: var(--t-1);
+}
+.rule {
+  height: 1px;
+  margin: 4px -5px;
+  background: var(--line);
+}
+.none {
+  margin: 0;
+  padding: 10px 9px 8px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  color: var(--t-1);
+  cursor: default;
+  user-select: none;
+}
+.row:has(.said) {
+  padding-block: 6px;
+}
+.row[aria-selected='true'] {
+  background: var(--hover-paper);
+}
+.row:active {
+  background: var(--pressed-paper);
+}
+.row[data-current] .rowName {
+  font-weight: 550;
+}
+.lead {
+  flex: none;
+  display: inline-flex;
+  justify-content: center;
+  width: 14px;
+  color: var(--t-3);
+}
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rowName,
+.said {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rowName[data-new] {
+  color: var(--t-3);
+  transform: skewX(-6deg);
+}
+.said {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.hit {
+  background: none;
+  color: var(--t-1);
+  font-weight: 600;
+}
+.ago {
+  flex: none;
+  font-size: 11px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+.check {
+  flex: none;
+  display: inline-flex;
+  width: 12px;
+  color: var(--t-1);
 }
 
+/* It floats over the conversation's end, as the run chips beside it do: on paper of its own, so what scrolls under it never shows through. */
 .moves {
   display: flex;
   align-items: center;
   gap: 2px;
   min-width: 0;
+  max-width: 100%;
+  padding: 2px 10px 2px 2px;
+  border-radius: 99px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
 }
 .note {
   margin-left: auto;
@@ -78,5 +264,5 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 11.5px;
-  color: var(--t-4);
+  color: var(--t-3);
 }

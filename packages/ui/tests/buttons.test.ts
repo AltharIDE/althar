@@ -19,7 +19,9 @@ const PLAIN: Readonly<Record<string, string>> = {
     'the line of its checks among its needs, which folds their list; its met needs’ line, which folds them',
   'outputs/WhatItMade/WhatItMade.tsx': 'a picture, which opens full size',
   'thread/External/External.tsx': 'the row of an external call',
+  'thread/NoteDetails/NoteDetails.tsx': 'the Details row of a note, which folds the raw answer under it',
   'thread/FileArtifact/FileArtifact.tsx': 'the preview, which opens the file',
+  'thread/Markdown/Markdown.tsx': 'a link in a document to a file, set in its prose as a link, which opens that file',
   'thread/StartedTask/StartedTask.tsx': 'a started task’s chip, the whole of which opens that task',
   'thread/Canvas/CanvasLine.tsx': 'a canvas’s title and version in its line, which opens it beside the conversation',
   'screens/Artifacts/Artifacts.tsx': 'an artifact’s row, the whole of which opens it',
@@ -41,6 +43,7 @@ const PLAIN: Readonly<Record<string, string>> = {
     'the disk’s legend, the whole of which opens the list of folders; a folder’s row, which opens its task',
   'thread/Reviewer/Reviewer.tsx': 'a finding’s row, which opens it under its line in the code',
   'thread/Reviewer/FindingNote.tsx': 'a finding’s title, which opens it under its line in the code',
+  'outputs/LineComments/LineComments.tsx': 'a sent comment’s file and lines, heading its excerpt, which open the diff at its line',
   'chrome/TaskParts/TaskParts.tsx':
     'the parts’ marks in the bar, the whole of which opens them; a part’s row or chip, which opens it in place; Add and Back, a popover’s own head',
   'setup/ToolTiles/ToolParts.tsx':
@@ -64,12 +67,17 @@ const PLAIN: Readonly<Record<string, string>> = {
   'screens/Home/Home.tsx': 'the line that folds what the loop did since you looked',
   'chrome/PlanGauge/PlanPeek.tsx': 'an agent’s row, which folds its accounts; the line of agents with no reading, which folds why',
   /* an option in a list or a rail */
+  'thread/ThreadNavigator/ThreadNavigator.tsx': 'a message’s navigation mark, drawn as a compact tick rather than a labelled action',
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',
   'outputs/ChangeView/ChangeView.tsx': 'a file in the list of what changed',
   'setup/ConnectCard/ConnectCard.tsx': 'the ways in to a service, as large options',
+  'setup/ProjectSetup/ProjectSetup.tsx':
+    'a new project’s ways in, and where its code lives, as large options; a repository’s row, the whole of which chooses it',
   'setup/SettingsNav/SettingsNav.tsx': 'a section in the list down the side of Settings',
   /* a shape of its own */
+  'outputs/ShipButton/ShipButton.tsx':
+    'a stop’s round mark on How Ship works’ path, joined to the next by its line, which turns that stop on or off',
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
   'chrome/PlanGauge/PlanGauge.tsx': 'the plan gauge, drawn in steps as the load meters are',
@@ -84,6 +92,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',
   'coordinator/AutomationCard/AutomationCard.tsx': 'a day of the week, toggled in a row of seven',
   'thread/Furniture/Furniture.tsx': 'the floating jump to the latest',
+  'thread/RunCard/RunCard.tsx': 'the line that says why a run failed, in the card’s own words, which opens its console',
   'composer/Behind/Behind.tsx': 'the chip over a task’s composer, its parts parted by hairlines, which opens all of it',
   'composer/DictationPill/DictationPill.tsx': 'the words carried in the pill, stretched across it, which open it',
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',
@@ -91,10 +100,15 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   'board/NextRow/NextRow.tsx': 'Start, in a held row’s line, in the line’s own place, words and colour while the row is pointed at',
   'board/SettleWays/SettleWays.tsx': 'Done and the pin in a task’s header, segments of the chip that says where it stands',
+  'chrome/TaskHeader/TaskHeader.tsx':
+    'the words of the chip that says where a task stands, which open what it waits for, a segment of that chip',
+  'chrome/TaskWaits/TaskWaits.tsx':
+    'a task’s row in what one waits for, the whole of which opens it; what waits for a task, a segment of its header’s chip',
   'board/ScratchShelf/ScratchShelf.tsx': 'a chat on Scratch, the whole of its row, its title, last words and when, which opens it',
   'thread/Asides/Asides.tsx':
-    'a pill over the coordinator’s conversation, a tab with its mark or a live dot, and the older ones’ pill, which opens their menu',
+    'a pill over the coordinator’s conversation, a tab with its mark or a live dot, the × inside an aside’s pill that clears it, and the older ones’ pill, which opens their menu',
   'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
+  'chrome/ProjectHeader/ProjectHeader.tsx': 'the project’s mark and name, the whole of which goes to its board',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }

@@ -7,6 +7,7 @@ import { HoverCard, Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
 import { TaskGlyph } from '../../primitives/TaskGlyph/TaskGlyph'
+import { TaskWaitsPopover, taskWaitsText, type TaskWaitsProps } from '../TaskWaits/TaskWaits'
 import s from './TaskHeader.module.css'
 
 /*
@@ -27,6 +28,10 @@ import s from './TaskHeader.module.css'
  * composer names. Where its word has a why the chip has no room for, as what
  * stopped it, pointing or focusing says that. Anywhere else the chip's words
  * say it all.
+ *
+ * A task that waits for other tasks (`waits`, tasks wait for their blockers)
+ * says when it starts, and its words are a button: they open what it waits
+ * for, each with how it stands, and what waits for it (TaskWaits).
  */
 
 export interface TaskHeaderText {
@@ -64,6 +69,8 @@ export interface TaskHeaderProps<F extends string> {
   faces?: readonly SegmentedOption<F>[]
   face?: F
   onFace?: (face: F) => void
+  /** What it waits for and what waits for it: its words open them, while it waits. */
+  waits?: TaskWaitsProps
   /** What the person does to it next, inside where it stands: a finished task's Done and Keep for later (SettleWays, place="header"). */
   beside?: ReactNode
   /** Its parts (TaskParts), just before the faces: the faces, Run and the menu never move. */
@@ -86,6 +93,7 @@ export function TaskHeader<F extends string>({
   face,
   onFace,
   beside,
+  waits,
   parts,
   actions,
   className,
@@ -94,12 +102,25 @@ export function TaskHeader<F extends string>({
   const t = { ...taskHeaderText, ...text }
   // Its plan under way: the only time there is more to say than the chip's words.
   const plan = status === TaskStatus.Running && steps !== undefined && steps.length > 1 ? steps : null
-  const said = (
-    <span className={s.state} {...(plan === null && why === undefined ? {} : { tabIndex: 0 })}>
-      <TaskGlyph status={status} />
-      <span>{state}</span>
-    </span>
-  )
+  const said =
+    waits !== undefined && plan === null ? (
+      <TaskWaitsPopover
+        {...waits}
+        label={waits.text?.title ?? taskWaitsText.title}
+        trigger={
+          <button type="button" className={cx(s.state, s.opens)}>
+            <TaskGlyph status={status} />
+            <span>{state}</span>
+            <Icon name="chevronD" size={9} className={s.chev} />
+          </button>
+        }
+      />
+    ) : (
+      <span className={s.state} {...(plan === null && why === undefined ? {} : { tabIndex: 0 })}>
+        <TaskGlyph status={status} />
+        <span>{state}</span>
+      </span>
+    )
   return (
     <header className={cx(s.header, className)} aria-label={title}>
       {state != null && (
@@ -113,7 +134,11 @@ export function TaskHeader<F extends string>({
               </Tooltip>
             )
           ) : (
-            <HoverCard placement="below" width={280} card={<Plan steps={plan} status={status} took={took} elapsed={elapsed} text={t} />}>
+            <HoverCard
+              placement="below"
+              width={280}
+              card={<Plan steps={plan} status={status} why={why} took={took} elapsed={elapsed} text={t} />}
+            >
               {said}
             </HoverCard>
           )}
@@ -134,18 +159,21 @@ export function TaskHeader<F extends string>({
 function Plan({
   steps,
   status,
+  why,
   took,
   elapsed,
   text,
 }: {
   steps: readonly TaskHeaderStep[]
   status: TaskStatus
+  why: string | undefined
   took: string | undefined
   elapsed: string | undefined
   text: TaskHeaderText
 }) {
   return (
     <span className={s.plan}>
+      {why !== undefined && <span>{why}</span>}
       <span className={s.steps}>
         {steps.map((step, at) => (
           <span key={`${step.label}${at}`} className={s.step} data-state={step.state}>

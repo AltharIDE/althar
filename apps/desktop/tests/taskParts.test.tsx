@@ -1,11 +1,14 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { change, fakeClient, items, snapshot } from './fixtures'
-import { withServices } from './render'
+import type { ChangeSummary } from '@althar/contracts'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { useMerge } from '../src/renderer/data/merges'
+import { servicesFor, withServices } from './render'
 
 /*
  * A task's parts in its bar (ADR-097): what waits on the person acts from
@@ -297,5 +300,262 @@ describe('a task’s parts', () => {
     await waitFor(() =>
       expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: "Review #641 and draft what you find; don't post it." })),
     )
+  })
+
+  describe('a merge under way, by its pull request', () => {
+    /** What a part says of itself: not the pressed Merge's own words, which say Merging too, in its place. */
+    const said = { ignore: '[role="status"] *, script, style' }
+    const PASSED = { outcome: 'passed' as const, passed: 3, failed: 0, running: 0, total: 3, failing: [], list: [] }
+    const first = change({ draft: false, head: 'aaa111', checks: PASSED, number: 714, short: 'PR #714' })
+    const second = change({
+      draft: false,
+      head: 'bbb222',
+      checks: PASSED,
+      number: 715,
+      short: 'PR #715',
+      url: 'https://github.com/meridian/api/pull/715',
+    })
+    /** The task's two pull requests as the runtime reads them now: each open, unless said otherwise. */
+    const reading = (read: (one: ChangeSummary) => ChangeSummary = (one) => one) =>
+      vi.fn(async () => snapshot({ task: { ...base.task, changes: [read(first), read(second)] } }))
+    /** A merge the runtime holds until the test answers it. */
+    const held = () => {
+      const answers: Array<{ resolve: () => void; reject: (failure: unknown) => void }> = []
+      const merge = vi.fn(() => new Promise<void>((resolve, reject) => answers.push({ resolve, reject })))
+      return { merge, answers }
+    }
+    it('keeps the second pull request Merging, not the first, across leaving the task and coming back, and after the call', async () => {
+      const { merge, answers } = held()
+      const getThread = reading()
+      const { client } = fakeClient({ getThread, merge })
+      const services = servicesFor(client)
+      const view = (shown: boolean) => <ServicesProvider value={services}>{shown ? <Task /> : null}</ServicesProvider>
+      const { rerender } = render(view(true))
+      let popover = await parts()
+      await userEvent.click(popover.getAllByRole('button', { name: 'Merge' })[1]!)
+      await waitFor(() => expect(merge).toHaveBeenCalledWith(base.task.id, 'bbb222', second.url))
+      // Away and back while the host takes it: the window, not the screen, keeps it.
+      rerender(view(false))
+      rerender(view(true))
+      popover = await parts()
+      expect(await popover.findByText('Merging', said)).toBeTruthy()
+      expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1)
+      // Gone through, though the read after it still says open: still Merging, never merged again.
+      act(() => answers[0]!.resolve())
+      await waitFor(() => expect(getThread.mock.calls.length).toBeGreaterThan(2))
+      expect(popover.getByText('Merging', said)).toBeTruthy()
+      expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1)
+      expect(merge).toHaveBeenCalledOnce()
+    })
+
+    /** Outputs of the same task, pressing through the model its header reads. */
+    function TaskWith({ press }: { press: (model: ReturnType<typeof useTask>) => void }) {
+      const model = useTask('th1')
+      return (
+        <>
+          <TaskView model={model} onBack={vi.fn()} />
+          <button onClick={() => press(model)}>Accept both</button>
+        </>
+      )
+    }
+
+    it('says only the first of several is Merging while it is, the next waiting, and stops there where it goes in its queue', async () => {
+      const { merge, answers } = held()
+      let queued = false
+      const { client } = fakeClient({
+        getThread: reading((one) => (queued && one.url === first.url ? { ...one, queued: true } : one)),
+        merge,
+      })
+      withServices(
+        <TaskWith
+          press={(model) =>
+            void model.accept([
+              { head: 'aaa111', url: first.url },
+              { head: 'bbb222', url: second.url },
+            ])
+          }
+        />,
+        client,
+      )
+      // Once its head is read, as a press can only come after.
+      await screen.findByRole('button', { name: /^Parts, \d+/ })
+      await userEvent.click(screen.getByRole('button', { name: 'Accept both' }))
+      await waitFor(() => expect(merge).toHaveBeenCalledOnce())
+      const popover = await parts()
+      // The first Merging; the second neither Merging nor to merge on its own while it waits for the first.
+      expect(popover.getAllByText('Merging', said)).toHaveLength(1)
+      expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
+      act(() => {
+        queued = true
+        answers[0]!.resolve()
+      })
+      // The first in its queue holds the rest: the press ends there, and the second is the person's again.
+      expect(await popover.findByText('In the merge queue')).toBeTruthy()
+      await waitFor(() => expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1))
+      expect(merge).toHaveBeenCalledOnce()
+    })
+
+    it('holds the second of Accept both across leaving the task and coming back, until the first lands', async () => {
+      const { merge, answers } = held()
+      let queued = false
+      const { client } = fakeClient({
+        getThread: reading((one) => (queued && one.url === first.url ? { ...one, queued: true } : one)),
+        merge,
+      })
+      const services = servicesFor(client)
+      const both = (model: ReturnType<typeof useTask>) =>
+        void model.accept([
+          { head: 'aaa111', url: first.url },
+          { head: 'bbb222', url: second.url },
+        ])
+      const view = (shown: boolean) => <ServicesProvider value={services}>{shown ? <TaskWith press={both} /> : null}</ServicesProvider>
+      const { rerender } = render(view(true))
+      await screen.findByRole('button', { name: /^Parts, \d+/ })
+      await userEvent.click(screen.getByRole('button', { name: 'Accept both' }))
+      await waitFor(() => expect(merge).toHaveBeenCalledOnce())
+      // Away and back before the first lands: the second is still held, nothing to merge on its own.
+      rerender(view(false))
+      rerender(view(true))
+      const popover = await parts()
+      expect(await popover.findByText('Merging', said)).toBeTruthy()
+      expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
+      // The first goes in its queue: the press ends there, and the second is the person's again.
+      act(() => {
+        queued = true
+        answers[0]!.resolve()
+      })
+      await waitFor(() => expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1))
+      expect(merge).toHaveBeenCalledOnce()
+    })
+
+    it('stops saying the first is Merging once its landed read finds it merged, while the second merges, though the head shown is older', async () => {
+      const { merge, answers } = held()
+      let landed = false
+      // Only the read that asks whether it landed is fresh: the head shown stays as it was until the press ends.
+      const getThread = vi.fn(async (_threadId: string, page?: { limit?: number }) =>
+        snapshot({
+          task: { ...base.task, changes: [landed && page?.limit === 0 ? { ...first, state: 'merged' as const } : first, second] },
+        }),
+      )
+      const { client } = fakeClient({ getThread, merge })
+      withServices(
+        <TaskWith
+          press={(model) =>
+            void model.accept([
+              { head: 'aaa111', url: first.url },
+              { head: 'bbb222', url: second.url },
+            ])
+          }
+        />,
+        client,
+      )
+      await screen.findByRole('button', { name: /^Parts, \d+/ })
+      await userEvent.click(screen.getByRole('button', { name: 'Accept both' }))
+      await waitFor(() => expect(merge).toHaveBeenCalledOnce())
+      act(() => {
+        landed = true
+        answers[0]!.resolve()
+      })
+      await waitFor(() => expect(merge).toHaveBeenCalledTimes(2))
+      const popover = await parts()
+      // Only the second, the one under way: the first's row no longer says Merging, from the read that found it merged.
+      expect(popover.getAllByText('Merging', said)).toHaveLength(1)
+      expect(popover.getByRole('button', { name: /PR #715/ }).textContent).toContain('Merging')
+    })
+  })
+
+  describe('Outputs, as a merge pressed anywhere stands', () => {
+    const QUEUED = { queued: true, canBypassQueue: true, draft: false } as const
+    const PASSED = { outcome: 'passed' as const, passed: 1, failed: 0, running: 0, total: 1, failing: [], list: [] }
+    const one = change({ ...QUEUED, head: 'aaa111', checks: PASSED, repository: 'meridian/api', slug: 'api' })
+    const other = change({
+      draft: false,
+      head: 'bbb222',
+      checks: PASSED,
+      number: 27,
+      repository: 'meridian/web',
+      slug: 'web',
+      url: 'https://github.com/meridian/web/pull/27',
+    })
+    /** The Dock's Merge without queue, pressed in the same window. */
+    function Dock() {
+      const merge = useMerge()
+      return (
+        <button onClick={() => void merge({ taskId: base.task.id, head: 'aaa111', url: one.url, bypassQueue: true })}>
+          Bypass from the Dock
+        </button>
+      )
+    }
+
+    it.each([
+      ['one pull request', [one]],
+      ['several', [one, other]],
+    ] as const)('says Merging, not the bypass again, while a bypass from the Dock is under way (%s)', async (_, changes) => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => snapshot({ task: { ...base.task, phase: 'ready', changes: [...changes] } })),
+        merge: vi.fn(() => new Promise<void>(() => {})),
+      })
+      const services = servicesFor(client)
+      const view = (task: boolean) => (
+        <ServicesProvider value={services}>
+          <Dock />
+          {task ? <Task /> : null}
+        </ServicesProvider>
+      )
+      const { rerender } = render(view(false))
+      await userEvent.click(screen.getByRole('button', { name: 'Bypass from the Dock' }))
+      rerender(view(true))
+      await waitFor(() => expect(screen.getAllByRole('status').some((status) => status.textContent?.includes('Merging'))).toBe(true))
+      expect(screen.queryByRole('button', { name: 'Other ways to merge' })).toBeNull()
+      expect(client.merge).toHaveBeenCalledOnce()
+    })
+
+    it('shows Ship under way at once, pressed on its card, before the runtime answers', async () => {
+      const waiting = change({ draft: false, head: 'aaa111', checks: PASSED, localHead: 'def456', unpushed: 2 })
+      const ship = vi.fn(() => new Promise<void>(() => {}))
+      const { client } = fakeClient({
+        getThread: vi.fn(async () =>
+          snapshot({
+            task: {
+              ...base.task,
+              phase: 'ready',
+              changes: [waiting],
+              held: { since: '2026-11-10T09:00:00.000Z', commits: 2 },
+              shipRoute: { route: { review: true, far: 'merge' }, reviewable: true, bent: null },
+            },
+          }),
+        ),
+        ship,
+      })
+      withServices(<Task />, client)
+      await userEvent.click(await screen.findByRole('button', { name: 'Ship review, then push, then ready, then merge' }))
+      expect(screen.getByRole('button', { name: /^Reviewing/ }).getAttribute('aria-disabled')).toBe('true')
+      expect(screen.queryByRole('button', { name: 'Ship review, then push, then ready, then merge' })).toBeNull()
+      expect(ship).toHaveBeenCalledWith(base.task.id, undefined, undefined)
+    })
+  })
+})
+
+describe('Merge, pressed from a part’s row', () => {
+  it('answers in its place, the row staying where it was while its host takes it', async () => {
+    const ready = change({
+      draft: false,
+      head: 'abc123',
+      checks: { outcome: 'passed', passed: 3, failed: 0, running: 0, total: 3, failing: [], list: [] },
+    })
+    const merge = vi.fn(() => new Promise<void>(() => undefined))
+    const { client } = fakeClient({ merge, getThread: vi.fn(async () => snapshot({ task: { ...base.task, changes: [ready] } })) })
+    withServices(<Task />, client)
+    const popover = await parts()
+    const pressed = popover.getByRole('button', { name: 'Merge' })
+    const row = pressed.parentElement as HTMLElement
+    await userEvent.click(pressed)
+    // Merging, in Merge's place, in the same row: nothing moved under the pointer, nothing to press again.
+    expect(row.isConnected).toBe(true)
+    expect(within(row).getByRole('status').textContent).toContain('Merging')
+    expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
+    // Opened, it says so in its actions too.
+    await userEvent.click(within(row).getByRole('button', { name: /PR/ }))
+    expect(popover.getByRole('status').textContent).toContain('Merging')
   })
 })

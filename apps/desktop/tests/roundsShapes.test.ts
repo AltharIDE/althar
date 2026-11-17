@@ -69,6 +69,13 @@ describe('a task’s rounds', () => {
     expect(round?.work?.steps.at(-1)).toMatchObject({ text: 'Installed dependencies in meridian' })
   })
 
+  it('stands a setup that exited 0 but couldn’t copy a file it names apart from the round, as failed', () => {
+    const missed = { at: at(2), code: 0, timedOut: false, stopped: false, last: 'Not in the checkout: .env', missing: ['.env'] }
+    const blocks = read([items.you('Go'), when(items.tool({}), 1), when(items.setup({ ended: missed }), 2), when(items.says('Done.'), 3)])
+    expect(blocks.map((block) => block.kind)).toEqual(['you', 'round', 'setup', 'round'])
+    expect(rounds(blocks).flatMap((round) => round.work?.steps.map((step) => step.kind) ?? [])).not.toContain('aside')
+  })
+
   it('reads streamed text the store holds already from the store, not from when it streamed', () => {
     const said = when(items.says('Done.'), 5)
     const streaming = new Map([[said.id, { kind: 'agent_message' as const, agentId: 'claude-code', text: 'Do', sequence: 1, at: at(1) }]])

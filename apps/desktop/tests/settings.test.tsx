@@ -398,6 +398,24 @@ describe('the Settings tab', () => {
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
   })
 
+  it('looks again at once for an agent the person installed themselves', async () => {
+    let installed = false
+    const status = vi.fn(async () => ({
+      apiVersion: 1,
+      appVersion: '0.0.0',
+      agents: installed ? agents : withoutOpenCode,
+    }))
+    const { client } = fakeClient({ status })
+    withServices(<Settings />, client, fakeHost())
+    await userEvent.click(await screen.findByRole('tab', { name: /OpenCode/ }))
+    const install = screen.getByRole('region', { name: 'OpenCode isn’t on this Mac' })
+    // Installed in Terminal meanwhile: Check again finds it without the window going away and back.
+    installed = true
+    await userEvent.click(within(install).getByRole('button', { name: 'Check again' }))
+    expect(status).toHaveBeenLastCalledWith({ recheck: true })
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'OpenCode isn’t on this Mac' })).toBeNull())
+  })
+
   it('downloads an agent in its tab, says why a download stopped, and opens the page of one only its maker installs', async () => {
     let installing = false
     let finish: () => void = () => {}
@@ -747,6 +765,31 @@ describe('the Settings tab', () => {
     withServices(<Settings at="about" />, fakeClient().client)
     expect(await within(screen.getByRole('main')).findByText('Althar 0.0.0')).toBeTruthy()
     expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Report a problem' })).toBeNull()
+  })
+
+  it('shows where Althar keeps its data under About Althar, with sizes, and opens a place in the file manager', async () => {
+    const host = fakeHost()
+    const { client } = fakeClient()
+    withServices(<Settings at="about" />, client, host)
+    const main = screen.getByRole('main')
+    expect(await within(main).findByText('/home/me/Althar')).toBeTruthy()
+    expect(within(main).getByText('/home/me/.local/share/althar/logs')).toBeTruthy()
+    expect((await within(main).findAllByText('3.0 GB')).length).toBe(3)
+    await userEvent.click(within(main).getByRole('button', { name: /^Show in (Finder|Explorer|Files), Task folders$/ }))
+    expect(host.storage.show).toHaveBeenCalledWith('worktrees')
+    await userEvent.click(within(main).getByRole('button', { name: 'Measure again' }))
+    await waitFor(() => expect(client.getStorageSize).toHaveBeenCalledWith('profile', true, expect.anything()))
+  })
+
+  it('says why a place could not be opened in the file manager, at its row', async () => {
+    const host = fakeHost()
+    vi.mocked(host.storage.show).mockRejectedValueOnce(
+      new Error("Error invoking remote method 'althar:storage-show': Error: No application can open folders"),
+    )
+    withServices(<Settings at="about" />, fakeClient().client, host)
+    const main = screen.getByRole('main')
+    await userEvent.click(await within(main).findByRole('button', { name: /^Show in (Finder|Explorer|Files), Logs$/ }))
+    expect((await within(main).findByRole('alert')).textContent).toBe('Couldn’t open it: No application can open folders')
   })
 
   it('sends anonymous usage data until the person turns it off under About Althar, with one line on what it sends', async () => {

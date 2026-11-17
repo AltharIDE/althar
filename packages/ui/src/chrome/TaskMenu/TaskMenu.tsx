@@ -6,8 +6,8 @@ import s from './TaskMenu.module.css'
 
 /*
  * What you can do with a task as a whole, from its bar, by intent. First what
- * moves it on where it stands (start its plan now or change who does it, mark its draft pull
- * request ready, skip the review under way, resume it, reopen it) and what
+ * moves it on where it stands (start its plan now or change who does it, make a
+ * prototype or a chat a change, mark its draft pull request ready, resume it, reopen it) and what
  * you do with it (rename it, open its folder in an editor, attach a pull
  * request it didn't open). Then its own two settings, changed in place:
  * whether its lead resolves a conflict with the default branch on its own,
@@ -43,6 +43,9 @@ export interface TaskMenuText {
   /** Takes its plan out of the line, or stops its countdown, until it is started. */
   hold: string
   changeTeam: string
+  /** Makes it a change in one move: a reviewer on, and a pull request to end in; and what that does, at the menu's foot. */
+  makeChange: string
+  makeChangeAbout: string
   markReady: string
   attach: string
   /** Its parts kept as a preset of the person's own (a task is a conversation plus parts). */
@@ -50,7 +53,6 @@ export interface TaskMenuText {
   /** A chat moved off Scratch to the board, or a task to Scratch. */
   toBoard: string
   toScratch: string
-  skipReview: string
   stop: string
   resume: string
   abandon: string
@@ -81,12 +83,13 @@ export const taskMenuText: TaskMenuText = {
   startNow: 'Start now',
   hold: 'Hold',
   changeTeam: 'Change the team…',
+  makeChange: 'Make it a change',
+  makeChangeAbout: 'Adds a reviewer and a pull request. Ship reviews it, then opens the pull request.',
   markReady: 'Mark ready for review',
   attach: 'Attach a pull request…',
   savePreset: 'Save as preset',
   toBoard: 'Move to the board',
   toScratch: 'Move to Scratch',
-  skipReview: 'Skip the review',
   stop: 'Stop the task',
   resume: 'Resume',
   abandon: 'Abandon',
@@ -119,6 +122,8 @@ export interface TaskMenuProps {
   onHold?: () => void
   /** Changes who does its plan's steps, while nothing of it has begun: the consumer opens the team. */
   onChangeTeam?: () => void
+  /** Makes a prototype, a chat or a quick task a change: a reviewer on, and a pull request to end in. */
+  onMakeChange?: () => void
   /** Marks its draft pull request ready for review. */
   onMarkReady?: () => void
   /** Attaches it to an open pull request it didn't open; the consumer asks which. */
@@ -127,8 +132,6 @@ export interface TaskMenuProps {
   onSavePreset?: () => void
   /** Moves it between Scratch and the board: `to` says which way. */
   shelf?: { readonly to: 'scratch' | 'board'; readonly onMove: () => void }
-  /** Skips the review of the work under way, while it still has one to come or under way. */
-  onSkipReview?: () => void
   onStop?: () => void
   onResume?: () => void
   /** Abandons it; the consumer asks first, since it settles the task. */
@@ -168,11 +171,11 @@ export function TaskMenu({
   onStartNow,
   onHold,
   onChangeTeam,
+  onMakeChange,
   onMarkReady,
   onAttach,
   onSavePreset,
   shelf,
-  onSkipReview,
   onStop,
   onResume,
   onAbandon,
@@ -215,14 +218,14 @@ export function TaskMenu({
         {t.changeTeam}
       </MenuItem>
     ),
+    onMakeChange && (
+      <MenuItem key="make-change" icon="pr" description={t.makeChangeAbout} onSelect={onMakeChange}>
+        {t.makeChange}
+      </MenuItem>
+    ),
     onMarkReady && (
       <MenuItem key="ready" icon="pr" onSelect={onMarkReady}>
         {t.markReady}
-      </MenuItem>
-    ),
-    onSkipReview && (
-      <MenuItem key="skip-review" icon="after" onSelect={onSkipReview}>
-        {t.skipReview}
       </MenuItem>
     ),
     onResume && (

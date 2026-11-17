@@ -20,6 +20,8 @@ export interface ApiVersionMismatchText {
   versions: (window: number | null, runtime: number) => string
   /** What to do, after the versions. */
   later: string
+  /** Quits Althar, runtime and all, so the next open starts both from the same version. */
+  quit: string
   retry: string
 }
 
@@ -30,6 +32,7 @@ export const apiVersionMismatchText: ApiVersionMismatchText = {
       ? `The window didn’t say which API version it speaks; the runtime serves version ${runtime}.`
       : `The window speaks API version ${window}; the runtime serves version ${runtime}.`,
   later: 'Quit Althar and open it again. If this stays, reinstall it so both come from the same version.',
+  quit: 'Quit Althar',
   retry: 'Try again',
 }
 
@@ -40,6 +43,8 @@ export interface ApiVersionMismatchProps {
   runtimeVersion: number
   /** Opens the window again. */
   onTryAgain: () => void
+  /** Quits Althar, its runtime too: what puts it right, since the window opened again meets the same runtime. With it, Quit comes first. */
+  onQuit?: () => void
   /** Off a Mac, draw the window's own controls; on macOS the system draws its lights. */
   lights?: 'space' | 'drawn' | 'none'
   window?: TitleBarWindow
@@ -52,6 +57,7 @@ export function ApiVersionMismatch({
   windowVersion,
   runtimeVersion,
   onTryAgain,
+  onQuit,
   lights = 'space',
   window,
   controls,
@@ -74,7 +80,12 @@ export function ApiVersionMismatch({
             <p className={s.text}>{t.versions(windowVersion, runtimeVersion)}</p>
             <p className={s.text}>{t.later}</p>
           </div>
-          <Button onClick={onTryAgain}>{t.retry}</Button>
+          <div className={s.actions}>
+            {onQuit && <Button onClick={onQuit}>{t.quit}</Button>}
+            <Button variant={onQuit ? 'quiet' : 'default'} onClick={onTryAgain}>
+              {t.retry}
+            </Button>
+          </div>
         </div>
       </main>
     </div>

@@ -7,8 +7,9 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { ApprovalsAnswer, ApprovalStateAnswer, gitlabRulesOf, ProjectRules, RequestRules, ReviewersAnswer } from './gitlabRules'
-import { makeHttp, paged } from './http'
+import { makeHttp, paged, withoutTrailingSlashes } from './http'
 import { makeGitLabReleases } from './gitlabReleases'
+import { postHostReview } from './hostReviews'
 import { pageOfCursor, tail } from './github'
 import type {
   Account,
@@ -29,6 +30,7 @@ import type {
   IssuePage,
   IssueQuery,
   ListedChange,
+  ListedRepository,
   MergeMethod,
   Person,
   Repository,
@@ -46,7 +48,6 @@ import {
   lacking,
   leftAsItIs,
   mergedForGood,
-  noReviews,
   pageAt,
   stillOpen,
   unchangeable,
@@ -118,6 +119,8 @@ const StatusAnswer = Schema.Struct({
 type StatusAnswer = typeof StatusAnswer.Type
 
 const MergeAnswer = Schema.Struct({
+  merge_commit_sha: Schema.optional(Schema.NullOr(Schema.String)),
+  squash_commit_sha: Schema.optional(Schema.NullOr(Schema.String)),
   id: Schema.Number,
   iid: Schema.Number,
   title: Schema.String,
@@ -129,7 +132,7 @@ const MergeAnswer = Schema.Struct({
   source_branch: Schema.String,
   target_branch: Schema.String,
   /** The project the branch is on: a fork's, for a merge request from one. */
-  source_project_id: Schema.optional(Schema.Number),
+  source_project_id: Schema.optional(Schema.NullOr(Schema.Number)),
   /** The project it goes into. */
   target_project_id: Schema.optional(Schema.Number),
   sha: Schema.optional(Schema.NullOr(Schema.String)),
@@ -142,6 +145,7 @@ const MergeAnswer = Schema.Struct({
   merge_when_pipeline_succeeds: Schema.optional(Schema.NullOr(Schema.Boolean)),
   head_pipeline: Schema.optional(Schema.NullOr(Pipeline)),
   updated_at: Schema.String,
+  diff_refs: Schema.optional(Schema.NullOr(Schema.Struct({ base_sha: Schema.String, head_sha: Schema.String, start_sha: Schema.String }))),
 })
 type MergeAnswer = typeof MergeAnswer.Type
 
@@ -283,6 +287,7 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
   source: request.source_branch,
   target: request.target_branch,
   headSha: request.sha ?? null,
+  ...(request.state === 'merged' ? { mergeCommit: request.merge_commit_sha ?? request.squash_commit_sha ?? request.sha ?? null } : {}),
   author: request.author == null ? null : personOf(request.author),
   // GitLab counts files, not lines, unless the whole diff is read.
   additions: null,
@@ -341,6 +346,64 @@ export const mergesOf = (method: string | null | undefined, squash: string | nul
       return [own]
   }
 }
+
+/** A project as GitLab answers for one: read, or just made. An empty one has no default branch yet: `main`, as GitLab's own is. */
+const repositoryOf = (answer: typeof ProjectAnswer.Type): Repository => ({
+  id: String(answer.id),
+  path: answer.path_with_namespace.split('/'),
+  defaultBranch: answer.default_branch ?? 'main',
+  webUrl: answer.web_url,
+  canPush:
+    Math.max(answer.permissions?.project_access?.access_level ?? 0, answer.permissions?.group_access?.access_level ?? 0) >= DEVELOPER,
+  merges: mergesOf(answer.merge_method, answer.squash_option),
+})
+
+/** A project the account is a member of, as a list of them says it, for choosing one to clone. */
+const ReachedProject = Schema.Struct({
+  path_with_namespace: Schema.String,
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  // Internal is seen by everyone signed in to the server, not the world: private, as far as cloning it goes.
+  visibility: Schema.optional(Schema.String),
+  last_activity_at: Schema.optional(Schema.NullOr(Schema.String)),
+  web_url: Schema.String,
+  archived: Schema.optional(Schema.Boolean),
+  // A project can turn its repository off, keeping only its issues or wiki: nothing to clone.
+  repository_access_level: Schema.optional(Schema.NullOr(Schema.String)),
+})
+
+/** Whether the account may make projects of its own, as GitLab says of the one signed in. */
+const Creator = Schema.Struct({
+  username: Schema.String,
+  name: Schema.optional(Schema.NullOr(Schema.String)),
+  can_create_project: Schema.optional(Schema.Boolean),
+})
+
+/**
+ * The groups the account may make a project in, as GitLab itself decides
+ * it: by the account's role there, the group's own setting for who makes
+ * projects, and an administrator's reach.
+ */
+const CREATABLE = `query($after: String) {
+  currentUser {
+    groups(permissionScope: CREATE_PROJECTS, first: 100, after: $after) {
+      nodes { fullPath fullName }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`
+
+const CreatableAnswer = Schema.Struct({
+  currentUser: Schema.NullOr(
+    Schema.Struct({
+      groups: Schema.NullOr(
+        Schema.Struct({
+          nodes: Schema.Array(Schema.NullOr(Schema.Struct({ fullPath: Schema.String, fullName: Schema.String }))),
+          pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean, endCursor: Schema.optional(Schema.NullOr(Schema.String)) }),
+        }),
+      ),
+    }),
+  ),
+})
 
 /** A job's state. A failure the pipeline allows doesn't hold the merge request up. */
 export const jobState = (status: string, allowFailure: boolean): CheckState => {
@@ -598,8 +661,8 @@ const SIZES_KEPT = 1_000
 
 export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'gitlab' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
-  const web = options.webUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
+  const web = withoutTrailingSlashes(options.webUrl)
   const http = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
   const graphqlUrl = `${api.replace(/\/v4$/, '')}/graphql`
   const project = (repository: Repository | ReadonlyArray<string>) =>
@@ -854,15 +917,17 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
 
   /** The fork a merge request's branch is on, by its path; none where it is gone, and undefined where it is the project's own. */
   const forkOf = (request: MergeAnswer) =>
-    request.source_project_id === undefined || request.source_project_id === request.target_project_id
-      ? Effect.succeed(undefined)
-      : http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
-          Effect.map((answer) => answer.path_with_namespace.split('/')),
-          Effect.catchIf(
-            (error) => error.reason === 'not_found',
-            () => Effect.succeed([]),
-          ),
-        )
+    request.source_project_id === null
+      ? Effect.succeed([])
+      : request.source_project_id === undefined || request.source_project_id === request.target_project_id
+        ? Effect.succeed(undefined)
+        : http.cached(ProjectAnswer, `${api}/projects/${request.source_project_id}`).pipe(
+            Effect.map((answer) => answer.path_with_namespace.split('/')),
+            Effect.catchIf(
+              (error) => error.reason === 'not_found',
+              () => Effect.succeed([]),
+            ),
+          )
 
   const pushTarget = (repository: Repository) =>
     Effect.map(options.credential, (credential) => ({
@@ -957,26 +1022,18 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     ...makeGitLabReleases({ http, project, mayNot }),
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
     capabilities: {
+      pictureLimit: 100 * 1024 * 1024,
       drafts: true,
       checkLogs: true,
       threads: true,
-      reviews: false,
+      reviews: true,
       pictures: true,
       reopen: true,
       rerun: true,
       ...TRACKING,
     },
     account,
-    repository: (path) =>
-      Effect.map(http.json(ProjectAnswer, 'GET', project(path)), (answer) => ({
-        id: String(answer.id),
-        path: answer.path_with_namespace.split('/'),
-        defaultBranch: answer.default_branch ?? 'main',
-        webUrl: answer.web_url,
-        canPush:
-          Math.max(answer.permissions?.project_access?.access_level ?? 0, answer.permissions?.group_access?.access_level ?? 0) >= DEVELOPER,
-        merges: mergesOf(answer.merge_method, answer.squash_option),
-      })),
+    repository: (path) => Effect.map(http.json(ProjectAnswer, 'GET', project(path)), repositoryOf),
     findChange,
     openChange: (repository, change) =>
       http
@@ -1220,6 +1277,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       Effect.gen(function* () {
         const now = yield* read(repository, change.number)
         if (now.state === 'opened') return yield* stillOpen(product, { noun: 'merge request', short: 'MR', prefix: '!' }, change.number)
+        if (now.source_project_id === null) return
         // Its branch is in the project it came from: a fork's, for one from a fork.
         const on = now.source_project_id === undefined ? project(repository) : `${api}/projects/${now.source_project_id}`
         yield* mayNot(http.json(Schema.Unknown, 'DELETE', `${on}/repository/branches/${encodeURIComponent(now.source_branch)}`)).pipe(
@@ -1393,10 +1451,111 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         http.json(NoteAnswer, 'PUT', `${project(repository)}/merge_requests/${number}/notes/${encodeURIComponent(commentId)}`, { body }),
         (note) => commentOf(repository, number, note, null, true),
       ),
-    // Reviews of a change Althar didn't open are GitHub's alone, for now.
-    changeToReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
-    postReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
+    changeToReview: (repository, number) =>
+      Effect.gen(function* () {
+        const one = yield* http.json(MergeAnswer, 'GET', `${project(repository)}/merge_requests/${number}`)
+        const fork = yield* forkOf(one)
+        return {
+          ...changeOf(one),
+          fork: fork ?? null,
+          baseSha: one.diff_refs?.start_sha ?? null,
+          member: one.author == null || one.source_project_id == null ? false : yield* memberOf(repository, one.author),
+        }
+      }),
+    postReview: (repository, number, review) =>
+      postHostReview(product, http, `${project(repository)}/merge_requests/${number}`, review, account, {
+        url: graphqlUrl,
+        project: repository.path.join('/'),
+        number,
+      }),
     pushTarget,
+    /*
+     * The projects the account is a member of, archived ones too, last active
+     * first: GitLab keeps no time of the last push, and its last activity is
+     * the nearest it says. One whose repository is turned off has nothing to clone.
+     */
+    repositories: () =>
+      paged(1, (page) =>
+        Effect.map(
+          http.json(
+            Schema.Array(ReachedProject),
+            'GET',
+            `${api}/projects?membership=true&order_by=last_activity_at&sort=desc&per_page=100&page=${page}`,
+          ),
+          // A page short of a hundred is the last.
+          (projects) => ({ items: projects, next: projects.length < 100 ? undefined : page + 1 }),
+        ),
+      ).pipe(
+        Effect.map((projects) =>
+          projects
+            .filter((found) => found.repository_access_level !== 'disabled')
+            .map((found): ListedRepository => ({
+              path: found.path_with_namespace.split('/'),
+              description: found.description == null || found.description === '' ? null : found.description,
+              private: found.visibility !== 'public',
+              pushedAt: found.last_activity_at ?? null,
+              webUrl: found.web_url,
+              archived: found.archived === true,
+            })),
+        ),
+      ),
+    /*
+     * The account, where it may make projects of its own, then each group it
+     * may make one in, by its full path: a subgroup by its parents' too.
+     */
+    owners: () =>
+      Effect.gen(function* () {
+        const [me, groups] = yield* Effect.all(
+          [
+            http.json(Creator, 'GET', `${api}/user`),
+            paged(null as string | null, (after) =>
+              Effect.map(http.graphql(CreatableAnswer, graphqlUrl, CREATABLE, { after }), (answer) => {
+                const found = answer.currentUser?.groups
+                return {
+                  items: (found?.nodes ?? []).filter((group) => group !== null),
+                  next: found?.pageInfo.hasNextPage === true && found.pageInfo.endCursor != null ? found.pageInfo.endCursor : undefined,
+                }
+              }),
+            ),
+          ],
+          { concurrency: 2 },
+        )
+        return [
+          ...(me.can_create_project === false ? [] : [{ id: me.username, name: me.name ?? me.username, kind: 'user' as const }]),
+          ...groups.map((group) => ({ id: group.fullPath, name: group.fullName, kind: 'group' as const })),
+        ]
+      }),
+    // Empty: no README, so the project's own first commit is pushed as it is. GitLab makes its path from its name.
+    createRepository: (made) =>
+      Effect.gen(function* () {
+        // A group goes by its id here, found by its full path; a project of the account's own needs none.
+        const namespace =
+          made.owner.kind === 'user'
+            ? undefined
+            : yield* http.json(Schema.Struct({ id: Schema.Number }), 'GET', `${api}/namespaces/${encodeURIComponent(made.owner.id)}`).pipe(
+                Effect.mapError((error) =>
+                  error.reason === 'not_found'
+                    ? new ConnectorFailed({
+                        product,
+                        reason: 'forbidden',
+                        ...(error.status === undefined ? {} : { status: error.status }),
+                        message: `The account may not make a project in ${made.owner.name}`,
+                      })
+                    : error,
+                ),
+              )
+        const answer = yield* mayNot(
+          http.json(ProjectAnswer, 'POST', `${api}/projects`, {
+            name: made.name,
+            ...(namespace === undefined ? {} : { namespace_id: namespace.id }),
+            visibility: made.private ? 'private' : 'public',
+            ...(made.description === undefined || made.description === '' ? {} : { description: made.description }),
+            initialize_with_readme: false,
+          }),
+        )
+        // The account made it, so it may push to it, whatever the answer says.
+        return { ...repositoryOf(answer), canPush: true }
+      }),
     issue: (ref) =>
       Effect.gen(function* () {
         const { path, number } = yield* parseRef(ref)
@@ -1512,8 +1671,8 @@ const dayOf = (day: string | null | undefined): string | null => {
 
 export const accessGitLab: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
-    const web = input.webUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
+    const web = withoutTrailingSlashes(input.webUrl)
     const ask = (url: string) => probe(input, url)
     const scope = (name: string): AccessReason => ({ kind: 'scope', scope: name, url: `${web}/-/user_settings/personal_access_tokens` })
     const lines: Array<AccessLine> = []

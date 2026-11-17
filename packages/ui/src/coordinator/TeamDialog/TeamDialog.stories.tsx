@@ -46,6 +46,9 @@ interface AtWork {
   done?: string
   /** Its review was skipped: it starts with none, and can be added back. */
   skipped?: boolean
+  /** It can't change any more, and why: no Save. */
+  settled?: string
+  /** The last save failed, and why: Save tries again. */
   error?: string
 }
 
@@ -85,7 +88,8 @@ function Team({
         },
       ]}
       {...(ends && atWork === undefined ? { end: { value: end, onChange: setEnd } } : {})}
-      {...(atWork?.error === undefined ? { onSave: rest.onSave } : { error: atWork.error })}
+      {...(atWork?.settled === undefined ? { onSave: rest.onSave } : { settled: atWork.settled })}
+      {...(atWork?.error === undefined ? {} : { error: atWork.error })}
       {...(held && atWork === undefined ? { onStart: rest.onStart } : {})}
       onClose={() => {}}
     />
@@ -147,15 +151,46 @@ export const SkippedReviewAddedBack: Story = {
   },
 }
 
-export const ReviewDoneDark: Story = { ...ReviewDone, globals: { theme: 'dark' } }
-
-/** Merged: nothing changes, and it says why. */
+/** Merged: nothing changes, and it says why, quietly: nothing failed. */
 export const Merged: Story = {
-  args: { held: false, atWork: { ...AT_WORK, error: 'It’s merged, so its team stays.' } },
+  args: { held: false, atWork: { ...AT_WORK, settled: 'It’s merged, so its team stays.' } },
+}
+
+/** The last save didn't go: why, under the steps, and Save to try again. */
+export const SaveFailed: Story = {
+  args: { held: false, atWork: { ...AT_WORK, error: 'Couldn’t save the team: the runtime didn’t answer.' } },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getByRole('alert')).toHaveTextContent('Couldn’t save the team: the runtime didn’t answer.')
+    await expect(page.getByRole('button', { name: 'Save' })).toBeEnabled()
+  },
 }
 
 /** Started, waiting for a free agent: it starts by itself, so only Save. */
 export const Waiting: Story = { args: { held: false } }
+
+/** Starting holds the form, with progress only on the action pressed. */
+export const Starting: Story = {
+  render: () => (
+    <TeamDialog
+      task="Bring a PR’s branch up to date with main"
+      steps={[
+        { id: 'implement', label: 'Implement', picker: <Pick owner="Lead" value={CODEX} onChange={() => {}} /> },
+        { id: 'review', label: 'Review', picker: <Pick owner="Review" value={OPUS} onChange={() => {}} /> },
+      ]}
+      onSave={() => {}}
+      onStart={() => {}}
+      onClose={() => {}}
+      busy="start"
+    />
+  ),
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getByRole('button', { name: 'Start' })).toHaveAttribute('aria-busy', 'true')
+    await expect(page.getByRole('button', { name: 'Save' })).not.toHaveAttribute('aria-busy')
+    await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled()
+  },
+}
 
 /** Where the repository's host isn't connected, the task ends on its branch, with no ending to pick. */
 export const OnItsBranch: Story = { args: { ends: false } }

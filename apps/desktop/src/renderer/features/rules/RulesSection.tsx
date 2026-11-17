@@ -8,6 +8,7 @@ import {
   hostOf,
   type ProjectRulesView,
   runsOutside,
+  rotatesAccounts,
   type SandboxEdits,
   type TallyKind,
 } from '@althar/contracts'
@@ -22,6 +23,7 @@ import {
   SettingSwitch,
   TaskEnd,
   unreachable,
+  Problem,
 } from '@althar/ui'
 import {
   type CommandPlace,
@@ -353,11 +355,7 @@ export function RulesSection({ model }: { model: RulesModel }) {
   const project = model.project ?? ''
   return (
     <>
-      {model.error !== null && (
-        <p className={s.error} role="alert">
-          {model.error}
-        </p>
-      )}
+      {model.error !== null && <Problem className={s.error}>{model.error}</Problem>}
       {rules === null ? (
         <PartPending label={pendingText.page} />
       ) : (
@@ -493,6 +491,8 @@ export function TaskRules({
       agentAccounts={agentAccountsOf(model.agents)}
       rotate={rules.rotateAccounts}
       onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
+      accountStrategy={rules.accountStrategy}
+      onAccountStrategyChange={(accountStrategy) => model.change({ accountStrategy, rotateAccounts: rotatesAccounts(accountStrategy) })}
       allowed={rules.onlyAccounts ?? {}}
       onAllowedChange={(agentId, ids) => {
         const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0

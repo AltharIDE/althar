@@ -26,6 +26,7 @@ export const PostedShot = Schema.Struct({
   caption: Schema.String,
   digest: Schema.String,
   url: Schema.String,
+  note: Schema.optional(Schema.String),
   /** The pull request's head when it was posted; null where it wasn't known. */
   head: Schema.NullOr(Schema.String),
 })
@@ -62,7 +63,11 @@ export const postingOf = (now: ReadonlyArray<ScreenshotNow>, leftOut: ReadonlyAr
       : [
           {
             key: shot.key,
-            caption: shot.caption,
+            caption: [
+              shot.caption,
+              ...(shot.needsRefresh ? ['Needs a new capture'] : []),
+              ...(shot.reportedAt === undefined ? [] : [`Reported ${shot.reportedAt}`]),
+            ].join(' · '),
             digest: shot.picture.digest,
             name: shot.picture.name ?? `${shot.key.replace(/[^\w.-]+/g, '-')}${extensionOf(shot.picture.mediaType)}`,
             mediaType: shot.picture.mediaType,
@@ -78,10 +83,18 @@ const extensionOf = (mediaType: string) =>
  * shows: a view taken again, one new, or one gone. Its order alone isn't a
  * change.
  */
-export const changedBetween = (posting: ReadonlyArray<Pick<Posting, 'key' | 'digest'>>, shown: ReadonlyArray<PostedShot>): number => {
-  const before = new Map(shown.map((shot) => [shot.key, shot.digest]))
+export const changedBetween = (
+  posting: ReadonlyArray<Pick<Posting, 'key' | 'digest'> & { readonly caption?: string }>,
+  shown: ReadonlyArray<PostedShot>,
+): number => {
+  const before = new Map(shown.map((shot) => [shot.key, shot]))
   const now = new Set(posting.map((shot) => shot.key))
-  const differ = posting.filter((shot) => before.get(shot.key) !== shot.digest).length
+  const differ = posting.filter(
+    (shot) =>
+      before.get(shot.key)?.url === '' ||
+      before.get(shot.key)?.digest !== shot.digest ||
+      (shot.caption !== undefined && before.get(shot.key)?.caption !== shot.caption),
+  ).length
   const gone = shown.filter((shot) => !now.has(shot.key)).length
   return differ + gone
 }
@@ -102,7 +115,13 @@ export const standingOf = (now: ReadonlyArray<ScreenshotNow>, kept: Kept | undef
     // Only the views Outputs still shows: one gone is nothing to leave out.
     leftOut: leftOut.filter((key) => now.some((shot) => shot.key === key)),
     commentUrl: kept?.commentUrl ?? null,
-    failed: kept?.failed ?? null,
+    failed:
+      kept?.failed ??
+      (kept?.shown
+        .filter((shot) => shot.url === '' && posting.some((now) => now.key === shot.key && now.digest === shot.digest))
+        .map((shot) => shot.note ?? `Left out: ${shot.caption}`)
+        .join(' ') ||
+        null),
   }
 }
 
@@ -146,7 +165,9 @@ const short = (head: string | null) => (head === null ? null : head.slice(0, 7))
 const SHOWN_WIDTH = 720
 
 const pictureOf = (shot: PostedShot, width = SHOWN_WIDTH) =>
-  `<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${width}">`
+  shot.url === ''
+    ? plain(shot.note ?? 'Left out: this picture could not be uploaded.')
+    : `${shot.note ? `${plain(shot.note)}<br>` : ''}<img src="${attribute(shot.url)}" alt="${attribute(shot.caption)}" width="${width}">`
 
 /** How wide each picture of a Before | After table shows, so the two fit side by side. */
 const PAIRED_WIDTH = 356
@@ -207,7 +228,7 @@ export const commentBody = (input: {
   readonly head: string | null
 }): string => {
   const of = short(input.head)
-  const parts: Array<string> = [SCREENSHOTS_MARK, of === null ? '**Screenshots**' : `**Screenshots** as of \`${of}\``]
+  const parts: Array<string> = [SCREENSHOTS_MARK, of === null ? '**Screenshots**' : `**Screenshots** · PR head \`${of}\``]
   if (input.shown.length > 0) parts.push(joined(blocksOf(input.shown, () => '')))
   // The views it showed no longer say anything of the change: it says so, rather than keep them.
   else parts.push(NONE_NOW)

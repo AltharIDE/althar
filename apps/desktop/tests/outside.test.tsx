@@ -34,7 +34,7 @@ import {
   runnables,
   snapshot,
 } from './fixtures'
-import { useSettingsOf, withServices } from './render'
+import { pickLayout, useSettingsOf, withServices } from './render'
 
 /*
  * What reaches outside, in the window: connecting code hosts and trackers,
@@ -111,7 +111,8 @@ describe('connections', () => {
     const can = screen.getByRole('list', { name: 'What GitHub lets Althar do' })
     expect(within(can).getByText('Reaches meridian-api').closest('li')?.textContent).toContain('northwind')
     expect(within(can).getByText('Open, update and merge pull requests')).toBeTruthy()
-    expect(screen.getByText('The token runs out on 8 January 2027.')).toBeTruthy()
+    const expiry = new Date(githubCheck.expiresAt ?? '').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    expect(screen.getByText(`The token runs out on ${expiry}.`)).toBeTruthy()
     expect(screen.getByText('Connected')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(await screen.findByText('Not connected · meridian’s code is here')).toBeTruthy()
@@ -816,6 +817,13 @@ describe('running what a task built, with no agent', () => {
     await userEvent.click(shown.getByRole('button', { name: 'Stop bun run dev' }))
     expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
     expect(shown.queryByRole('button', { name: 'Run bun run dev again' })).toBeNull()
+    // Its console reads what it printed only once it is opened, and shows it under the command.
+    expect(client.readLaunchOutput).not.toHaveBeenCalled()
+    await userEvent.click(shown.getByRole('button', { name: 'Output' }))
+    expect(client.readLaunchOutput).toHaveBeenCalledWith('proc_1')
+    const output = await screen.findByRole('dialog', { name: 'Output of bun run dev' })
+    expect(await within(output).findByText('VITE ready in 312 ms')).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
     // It ended by itself: it says how, with its last line, and runs again here.
     const ended = {
       ...card,
@@ -1456,7 +1464,7 @@ describe('a project, reaching outside', () => {
     await userEvent.click(dialog.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     // From the board too: the settings are a view of their own, whichever the project was on.
-    await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
+    await pickLayout('Conversation')
     await connectFromSettings()
     expect(await screen.findByRole('dialog', { name: 'GitHub' })).toBeTruthy()
   })
@@ -1552,7 +1560,9 @@ describe('a project, reaching outside', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
     await waitFor(() => expect(merge).toHaveBeenCalledTimes(1))
     expect(merge).toHaveBeenLastCalledWith('t1', 'abc123', 'https://github.com/meridian/api/pull/12')
-    expect(screen.getByRole('button', { name: 'Accept and merge both' }).getAttribute('aria-busy')).toBe('true')
+    // Merging in Accept's place at once, never Accept again meanwhile.
+    expect(screen.queryByRole('button', { name: 'Accept and merge both' })).toBeNull()
+    expect(screen.getAllByRole('status').some((status) => status.textContent?.includes('Merging'))).toBe(true)
     // api merges now, web after it.
     const order = within(screen.getByRole('list', { name: 'In the order they merge' })).getAllByRole('listitem')
     expect(order[0]?.textContent).toMatch(/Merging into main/)
@@ -1561,12 +1571,23 @@ describe('a project, reaching outside', () => {
     await waitFor(() => expect(merge).toHaveBeenLastCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
     view.unmount()
 
-    // Taken by its host but not landed yet, as in its merge queue, the first holds the second back: pressed again, it goes.
-    const queued = vi.fn(async () => undefined)
-    const held = fakeClient({ merge: queued, getThread: vi.fn(async () => snapshot({ task: ready })) })
+    // Taken by its host into its merge queue but not landed, the first holds the second back: nothing to press until it lands.
+    let inQueue = false
+    const queued = vi.fn(async () => {
+      inQueue = true
+    })
+    const held = fakeClient({
+      merge: queued,
+      getThread: vi.fn(async () => snapshot({ task: inQueue ? { ...ready, changes: [{ ...api, queued: true }, web] } : ready })),
+    })
     const again = withServices(<Task />, held.client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge both' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Accept and merge both' }).getAttribute('aria-busy')).toBeNull())
+    await waitFor(() =>
+      expect(within(screen.getByRole('list', { name: 'In the order they merge' })).getAllByRole('listitem')[0]?.textContent).toMatch(
+        /merge queue/i,
+      ),
+    )
+    expect(screen.queryByRole('button', { name: 'Accept and merge both' })).toBeNull()
     expect(queued).toHaveBeenCalledTimes(1)
     again.unmount()
 

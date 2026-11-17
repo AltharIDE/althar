@@ -22,6 +22,15 @@ export interface TurnTimings {
   readonly work: number
   /** The tools it ran, counted once where several ran at once. */
   readonly tools: number
+  /**
+   * Getting the turn ready, from its input being taken to its prompt going out: the coordinator's copies brought up to date,
+   * its news read, the turn recorded. Absent for a turn from before Althar kept it.
+   */
+  readonly ready?: number
+  /** Of `ready`, bringing the coordinator's copies of the repositories up to date; absent for a lead's turn. */
+  readonly copies?: number
+  /** From the prompt going out to the agent's first word, thought or call: the model's own wait. Absent where it said nothing. */
+  readonly first?: number
   /** In a task of several changes, how many commits the turn made in each that it committed to, by name; absent otherwise. */
   readonly changes?: ReadonlyArray<{ readonly name: string; readonly commits: number }>
 }
@@ -82,6 +91,9 @@ export const timingsFrom = (json: string | null): TurnTimings | null => {
     work,
     tools: Math.min(work, whole(record.tools)),
     ...(Array.isArray(record.changes) ? { changes: changesFrom(record.changes) } : {}),
+    ...(typeof record.ready === 'number' ? { ready: whole(record.ready) } : {}),
+    ...(typeof record.copies === 'number' ? { copies: whole(record.copies) } : {}),
+    ...(typeof record.first === 'number' ? { first: Math.min(work, whole(record.first)) } : {}),
   }
 }
 

@@ -13,6 +13,7 @@ import { Button } from '../../primitives/Button/Button'
 import { Field } from '../../primitives/Field/Field'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Skeleton } from '../../primitives/Skeleton/Skeleton'
 import { StepTrack, trackOf } from '../../primitives/StepTrack/StepTrack'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
@@ -94,6 +95,8 @@ export interface WelcomeText {
     noneHere: string
     /** None at all: none here, and none offered. */
     noneAtAll: string
+    /** Asks the agents again, after their list couldn't be read. */
+    retry: string
     go: string
     without: string
   }
@@ -153,6 +156,7 @@ export const welcomeText: WelcomeText = {
     asking: 'Asking the agents',
     noneHere: 'None yet: download one below, or install one yourself.',
     noneAtAll: 'None found.',
+    retry: 'Check again',
     go: 'Continue',
     without: 'Continue without one',
   },
@@ -208,6 +212,14 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   /** Folders dropped on the window, on the project's step. Without it, a drop does nothing. */
   onDrop?: (files: readonly File[]) => void
   repositoryText?: Partial<RepositoryPickText>
+  /**
+   * In place of the repositories found: the consumer's own way of choosing
+   * where the first project's code comes from, such as a clone. Make still
+   * waits on something picked, and the name shows once it is.
+   */
+  project?: ReactNode
+  /** The name shows before anything is picked: for a way the project is named first, such as a new repository named after it. */
+  naming?: boolean
   /** The project's name as it stands. */
   name: string
   onNameChange: (name: string) => void
@@ -218,8 +230,11 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   made?: boolean
   /** What went wrong, said on the step it belongs to: the agents', or the project's. */
   error?: { readonly step: 'agents' | 'project'; readonly said: ReactNode }
+  /** Asks the agents again, after their list couldn't be read: beside the agents' error. */
+  onRecheck?: () => void
   /** The code hosts, to connect one: the consumer's list, and its walk in. */
-  hosts: ReactNode
+  /** Where its code is. Without it, as for a clone that came from its host, the step is left out. */
+  hosts?: ReactNode
   /** A code host is connected: the code's step goes on with Continue, not Not now. */
   hostConnected?: boolean
   /** The trackers, to connect one, the same way. Without them, where none can be connected, there is no step for issues. */
@@ -246,16 +261,19 @@ export function Welcome({
   awayText,
   repositories,
   picked,
+  naming = false,
   onPick,
   onAdd,
   onDrop,
   repositoryText,
+  project,
   name,
   onNameChange,
   onCreate,
   creating = false,
   made = false,
   error,
+  onRecheck,
   hosts,
   hostConnected = false,
   trackers,
@@ -267,7 +285,7 @@ export function Welcome({
   ...rows
 }: WelcomeProps) {
   const t = { ...welcomeText, ...text }
-  const setup = trackers === undefined ? SETUP.filter((one) => one !== 'issues') : SETUP
+  const setup = SETUP.filter((one) => (one !== 'issues' || trackers !== undefined) && (one !== 'code' || hosts !== undefined))
   const steps: readonly WelcomeStep[] = toured ? setup : [...TOUR, ...setup]
   const [chosen, setStep] = useControlled<WelcomeStep>(stepProp, defaultStep ?? steps[0] ?? 'agents', onStepChange)
   const step: WelcomeStep = steps.includes(chosen) ? chosen : (steps[0] ?? 'agents')
@@ -296,10 +314,11 @@ export function Welcome({
   // Once the project is made, the steps up to it are done with.
   const canGoBack = previous !== undefined && !(made && (previous === 'project' || steps.indexOf(previous) < steps.indexOf('project')))
 
-  // Made, the welcome goes on to where its code is.
+  // Made, the welcome goes on to where its code is, or to its issues where it came from its host.
+  const after = steps[at + 1]
   useEffect(() => {
-    if (made && step === 'project') setStep('code')
-  }, [made, step, setStep])
+    if (made && step === 'project' && after !== undefined) setStep(after)
+  }, [made, step, after, setStep])
 
   // Each step's main button takes the focus as the step arrives, so Return goes on; the project's step is about finding a
   // repository, so its field takes it, where there are any to find.
@@ -330,12 +349,32 @@ export function Welcome({
   const isAway = (r: RuntimeEntry) => r.state === RuntimeState.Missing || r.state === RuntimeState.Installing
   const here = runtimes?.filter((r) => !isAway(r)) ?? []
   const away = runtimes?.filter(isAway) ?? []
+  const said = error !== undefined && error.step === step ? error.said : null
+  // With none here and an error, it isn't that none were found: the error stands where they would be, with the way to ask again.
+  const unread = said !== null && step === 'agents' && runtimes !== null && here.length === 0
+  const problem = (banner: boolean) => (
+    <Problem
+      as="div"
+      banner={banner}
+      {...(step === 'agents' && onRecheck !== undefined
+        ? {
+            action: (
+              <Button size="small" onClick={onRecheck}>
+                {t.agents.retry}
+              </Button>
+            ),
+          }
+        : {})}
+    >
+      {said}
+    </Problem>
+  )
   const make = () => {
     if (picked.length === 0) return setNothing(true)
     setNothing(false)
     onCreate()
   }
-  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating, last: at === steps.length - 1 })
+  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating, last: at === steps.length - 1, made })
   const title = isTour(step) ? t.tour[step].title : step === 'project' && over ? t.project.over : t[step].title
 
   return (
@@ -394,6 +433,8 @@ export function Welcome({
                       {...rows}
                       {...(runtimesText === undefined ? {} : { text: runtimesText })}
                     />
+                  ) : unread ? (
+                    problem(true)
                   ) : (
                     <p className={s.none}>{away.length > 0 ? t.agents.noneHere : t.agents.noneAtAll}</p>
                   )}
@@ -408,22 +449,20 @@ export function Welcome({
             ))}
           {step === 'project' && (
             <>
-              <RepositoryPick
-                repositories={repositories}
-                picked={picked}
-                onPick={(id) => {
-                  setNothing(false)
-                  onPick(id)
-                }}
-                onAdd={onAdd}
-                {...(repositoryText === undefined ? {} : { text: repositoryText })}
-              />
-              {nothing && (
-                <p className={s.error} role="alert">
-                  {t.project.nothing}
-                </p>
+              {project ?? (
+                <RepositoryPick
+                  repositories={repositories}
+                  picked={picked}
+                  onPick={(id) => {
+                    setNothing(false)
+                    onPick(id)
+                  }}
+                  onAdd={onAdd}
+                  {...(repositoryText === undefined ? {} : { text: repositoryText })}
+                />
               )}
-              {picked.length > 0 && (
+              {nothing && <Problem>{t.project.nothing}</Problem>}
+              {(picked.length > 0 || naming) && (
                 <div className={s.named}>
                   <label htmlFor={nameId} className={s.namedLabel}>
                     {t.project.name}
@@ -435,11 +474,7 @@ export function Welcome({
           )}
           {step === 'code' && hosts}
           {step === 'issues' && trackers}
-          {error !== undefined && error.step === step && (
-            <div className={s.error} role="alert">
-              {error.said}
-            </div>
-          )}
+          {said !== null && !unread && problem(false)}
         </div>
 
         <footer className={s.foot}>
@@ -489,6 +524,7 @@ function mainOf(
     readonly creating: boolean
     /** The last step: it opens the project. */
     readonly last: boolean
+    readonly made: boolean
   },
 ): Main {
   const open = { label: w.t.issues.open(w.name.trim() === '' ? w.t.issues.theProject : w.name.trim()), act: w.onOpen }
@@ -502,6 +538,8 @@ function mainOf(
     case 'agents':
       return w.ready > 0 ? { label: w.t.agents.go, act: w.next } : { label: w.t.agents.without, act: w.next, quiet: true }
     case 'project':
+      // Made, with no step after it, as a clone with no tracker to connect: it opens.
+      if (w.made && w.last) return open
       return { label: w.t.project.make, act: w.make, busy: w.creating, kbd: w.t.project.makeKbd }
     case 'code':
       if (w.last) return open

@@ -1,6 +1,9 @@
-import type { DictationSettingsText, DictationTrayText } from '@althar/ui'
+import { chord, type DictationSettingsText, type DictationTrayText, keys } from '@althar/ui'
 
 import { device } from '../device'
+
+/** The shortcut that starts and stops dictation anywhere in the window, as this system writes it. It clashes with no default of macOS, Windows or Linux, nor with any of Althar's own (⌘D is a task's diff, ⌘⇧C comments on a page). */
+export const SHORTCUT = chord(keys.mod, keys.shift, 'D')
 
 /*
  * Dictation's words for each system. The kit's own are the Mac's; Windows

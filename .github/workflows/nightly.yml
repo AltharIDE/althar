@@ -46,7 +46,7 @@ jobs:
             packages: packages/runtime
             shard: 4/4
           - part: packages
-            packages: apps/desktop packages/ui packages/provider-adapters packages/connectors packages/contracts packages/domain packages/persistence-sqlite apps/cli apps/site apps/report
+            packages: apps/desktop packages/ui packages/provider-adapters packages/connectors packages/contracts packages/transport-node packages/domain packages/persistence-sqlite apps/cli apps/site apps/report
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -104,7 +104,7 @@ jobs:
             packages: packages/runtime
             shard: 4/4
           - part: packages
-            packages: packages/provider-adapters packages/connectors packages/contracts packages/domain packages/persistence-sqlite packages/ui
+            packages: packages/provider-adapters packages/connectors packages/contracts packages/transport-node packages/domain packages/persistence-sqlite packages/ui
     defaults:
       run:
         shell: bash
@@ -125,11 +125,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - uses: ./.github/actions/electron
       - env:
           PACKAGES: ${{ matrix.packages }}
@@ -187,12 +182,6 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - if: steps.plan.outputs.any-windows == 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/.bun/install/cache
-          key: windows-bun-${{ hashFiles('bun.lock') }}
-          restore-keys: windows-bun-
       - if: steps.plan.outputs.any-windows == 'true'
         uses: ./.github/actions/electron
       - if: steps.plan.outputs.any-windows == 'true'

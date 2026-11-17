@@ -12,7 +12,7 @@ import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Kbd } from '../../primitives/Kbd/Kbd'
 import { Select } from '../../primitives/Select/Select'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
-import { type ModelRoom, type ModelRoomText, RoomNote } from '../ModelPick/room'
+import type { ModelRoom, ModelRoomText } from '../ModelPick/room'
 import s from './ModelBrowser.module.css'
 
 /** An agent runtime on this machine. Its name is what a row shows; `how` only where something is off. */
@@ -97,7 +97,7 @@ export interface ModelBrowserProps {
   /** Switches a model off, or on again. Without it, there is no such control. */
   onToggleBlocked?: (id: string) => void
   onSetDefaultEffort: (id: string, level: string) => void
-  /** How much room a model has where work on it would start, in a column of its own; shown only where there is a reading (null or undefined has none). */
+  /** @deprecated Account usage belongs in Plan usage and is never displayed by the model browser. */
   room?: (model: ModelInfo) => ModelRoom | null | undefined
   roomText?: Partial<ModelRoomText>
   /** Add a runtime. Without it, there is no such row. */
@@ -156,8 +156,6 @@ export function ModelBrowser({
   onTogglePin,
   blocked = [],
   onToggleBlocked,
-  room,
-  roomText,
   onSetDefaultEffort,
   onConnect,
   text,
@@ -196,9 +194,9 @@ export function ModelBrowser({
     )
   }, [q, filter, pins, blocked, models, runtimes])
 
+  /* where some models have a mark, one without keeps its name in line with theirs */
+  const marked = rows.some((m) => m.mark !== undefined)
   /* a column shows only where a row has something in it */
-  const readings = useMemo(() => new Map(rows.map((m) => [m.id, room?.(m) ?? null])), [rows, room])
-  const hasRoom = rows.some((m) => readings.get(m.id) != null)
   const hasContext = rows.some((m) => m.context !== undefined)
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -318,11 +316,10 @@ export function ModelBrowser({
               )}
             </div>
 
-            <div className={s.results} data-room={hasRoom || undefined} data-context={hasContext || undefined}>
+            <div className={s.results} data-context={hasContext || undefined}>
               <div className={s.cols} aria-hidden="true">
                 <span>{t.columns.model}</span>
                 <span className={s.colAgent}>{t.columns.runtime}</span>
-                {hasRoom && <span className={s.colRoom}>{t.columns.room}</span>}
                 {hasContext && <span className={s.colContext}>{t.columns.context}</span>}
                 <span>{t.columns.effort}</span>
                 <span />
@@ -336,7 +333,6 @@ export function ModelBrowser({
                   const off = blocked.includes(m.id)
                   const inUse = m.id === value
                   const level = defaultEffort(m)
-                  const left = readings.get(m.id) ?? null
                   const via = `${ids}-${m.id}-via`
                   const ctx = `${ids}-${m.id}-ctx`
                   return (
@@ -345,7 +341,7 @@ export function ModelBrowser({
                         <button
                           type="button"
                           data-use
-                          className={s.use}
+                          className={cx(s.use, marked && m.mark === undefined && s.unmarked)}
                           disabled={off}
                           onClick={() => onPick(m.id)}
                           aria-label={t.use(m.name, inUse)}
@@ -366,7 +362,6 @@ export function ModelBrowser({
                           m.runtime
                         )}
                       </span>
-                      {hasRoom && <span className={s.room}>{left == null ? null : <RoomNote room={left} compact text={roomText} />}</span>}
                       {hasContext && (
                         <span className={s.ctx} id={ctx}>
                           {m.context === undefined ? t.noContext : t.context(m.context)}

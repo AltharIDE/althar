@@ -70,6 +70,7 @@ describe('every agent’s plan', () => {
     const unread = usagePairs.filter((pair) => pair.pays === 'plan' && pair.sources.every((source) => source.kind === 'none'))
     expect(unread.map((pair) => `${pair.agent}/${pair.provider}`).sort()).toEqual([
       'antigravity/google',
+      'copilot-direct/github',
       'copilot/github',
       'junie/jetbrains',
       'mistral-vibe/mistral',
@@ -193,10 +194,27 @@ const reader = (
     keychain: async () => null,
     ...policy,
   })
-  return { read: (sourceId: string, account: UsageAccount) => built.read(sourceId, account, now) }
+  return { read: (sourceId: string, account: UsageAccount, afterLimit = false) => built.read(sourceId, account, now, afterLimit) }
 }
 
 describe('the usage reader', () => {
+  it('refreshes a successful cache after a limit error, while keeping provider backoff', async () => {
+    const home = fakeHome()
+    let reply: Reply = {}
+    const { seen, fetch } = server(() => reply)
+    const r = reader({ fetch })
+    await r.read('codex-chatgpt', codex(home))
+    expect(await r.read('codex-chatgpt', codex(home))).toMatchObject({ kind: 'usage', stale: true })
+    expect(seen).toHaveLength(1)
+    expect(await r.read('codex-chatgpt', codex(home), true)).toMatchObject({ kind: 'usage', stale: false })
+    expect(seen).toHaveLength(2)
+    reply = { status: 429, retryAfter: '3600' }
+    expect(await r.read('codex-chatgpt', codex(home), true)).toMatchObject({ kind: 'fault', waiting: { retryAfter: '3600' } })
+    expect(seen).toHaveLength(3)
+    expect(await r.read('codex-chatgpt', codex(home), true)).toMatchObject({ kind: 'usage', stale: true })
+    expect(seen).toHaveLength(3)
+  })
+
   it('makes one GET to the allowlisted host and path, carrying the token and the account it is for, and reads the windows', async () => {
     const home = fakeHome()
     const { seen, fetch } = server({})
@@ -849,7 +867,7 @@ describe('OpenCode Go’s usage, from OpenCode’s own server', () => {
       answer({
         rolling: { percent: 12, limited: false, resetsAt: Date.parse('2026-11-03T22:54:00Z') },
         weekly: { percent: 40, limited: false, resetsAt: Date.parse('2026-11-09T00:00:00Z') },
-        monthly: { percent: 3, limited: false, resetsAt: '2026-12-03T10:19:39.000Z' },
+        monthly: { percent: 3, limited: false, resetsAt: '2025-12-03T10:19:39.000Z' },
       }),
       now,
     )
@@ -862,7 +880,7 @@ describe('OpenCode Go’s usage, from OpenCode’s own server', () => {
         windows: [
           { kind: 'five_hour', minutes: 300, usedPercent: 12, resetsAt: '2026-11-03T22:54:00.000Z' },
           { kind: 'weekly', usedPercent: 40, resetsAt: '2026-11-09T00:00:00.000Z' },
-          { kind: 'monthly', usedPercent: 3, resetsAt: '2026-12-03T10:19:39.000Z' },
+          { kind: 'monthly', usedPercent: 3, resetsAt: '2025-12-03T10:19:39.000Z' },
         ],
       },
     })

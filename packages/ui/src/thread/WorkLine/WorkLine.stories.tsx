@@ -74,7 +74,6 @@ export const AllStates: Story = {
         { state: 'hover', node: <WorkLine {...args} /> },
         { state: 'focus', node: <WorkLine {...args} /> },
         { state: 'pressed', node: <WorkLine {...args} /> },
-        { state: 'dark', node: <WorkLine {...args} defaultOpen />, dark: true },
       ]}
     />
   ),

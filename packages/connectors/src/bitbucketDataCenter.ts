@@ -5,8 +5,9 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { updateInCopy } from './branchUpdate'
 import { ConnectorFailed } from './errors'
 import { DataCenterMerge, dataCenterRulesOf } from './bitbucketRules'
-import { type Http, makeHttp } from './http'
+import { type Http, makeHttp, paged, withoutTrailingSlashes } from './http'
 import { makeBitbucketDataCenterReleases } from './bitbucketDataCenterReleases'
+import { postHostReview } from './hostReviews'
 import type {
   Account,
   Activity,
@@ -18,13 +19,14 @@ import type {
   CodeHost,
   Comment,
   ListedChange,
+  ListedRepository,
   MergeMethod,
   Person,
   Repository,
   Review,
   Verdict,
 } from './model'
-import { lacking, mergedForGood, noReviews, notOurBuild, stillOpen } from './model'
+import { lacking, mergedForGood, notOurBuild, stillOpen } from './model'
 import {
   answered,
   failedOf,
@@ -64,6 +66,27 @@ const RepositoryAnswer = Schema.Struct({
   name: Schema.String,
   project: Schema.Struct({ key: Schema.String }),
   links: Schema.optional(Schema.Struct({ self: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
+})
+
+/** A repository the account can read, as a list of them says it, for choosing one to clone. */
+const ReachedRepository = Schema.Struct({
+  slug: Schema.String,
+  project: Schema.Struct({ key: Schema.String }),
+  description: Schema.optional(Schema.NullOr(Schema.String)),
+  public: Schema.optional(Schema.Boolean),
+  // Absent from a server older than 8.0, which archived none.
+  archived: Schema.optional(Schema.Boolean),
+  links: Schema.optional(Schema.Struct({ self: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
+})
+
+/** A project the account administers, which is what making a repository in it takes. */
+const ProjectAnswer = Schema.Struct({ key: Schema.String, name: Schema.String })
+
+/** The account as its server lists it: its slug names its own project. */
+const Owner = Schema.Struct({
+  name: Schema.String,
+  slug: Schema.optional(Schema.String),
+  displayName: Schema.optional(Schema.NullOr(Schema.String)),
 })
 
 const Strategy = Schema.Struct({ id: Schema.String, enabled: Schema.optional(Schema.Boolean) })
@@ -111,6 +134,7 @@ const PullAnswer = Schema.Struct({
   // Whether it would merge cleanly, as Data Center last worked it out: `current` false is from before a branch moved.
   properties: Schema.optional(
     Schema.Struct({
+      mergeCommit: Schema.optional(Schema.Struct({ id: Schema.String })),
       mergeResult: Schema.optional(Schema.Struct({ outcome: Schema.String, current: Schema.optional(Schema.Boolean) })),
     }),
   ),
@@ -280,8 +304,8 @@ const iso = (at: number) => new Date(at).toISOString()
 
 export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   const product = 'bitbucket_dc' as const
-  const api = options.apiUrl.replace(/\/+$/, '')
-  const web = options.webUrl.replace(/\/+$/, '')
+  const api = withoutTrailingSlashes(options.apiUrl)
+  const web = withoutTrailingSlashes(options.webUrl)
   // Build statuses have their own API, beside the main one.
   const rest = api.replace(/\/api\/[^/]+$/, '')
   const raw = makeHttp({ product, fetch: options.fetch, authorization: Effect.map(options.credential, authorizationOf) })
@@ -310,6 +334,12 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   }
 
   const repo = (project: string, slug: string) => `${api}/projects/${encodeURIComponent(project)}/repos/${encodeURIComponent(slug)}`
+  /** A repository's page: its own link without `/browse`, or else under its project, a person's (`~user`) too. */
+  const webOf = (answer: {
+    readonly slug: string
+    readonly project: { readonly key: string }
+    readonly links?: typeof ReachedRepository.Type.links
+  }) => answer.links?.self?.[0]?.href.replace(/\/browse\/?$/, '') ?? `${web}/projects/${answer.project.key}/repos/${answer.slug}`
   const base = (repository: Repository) => repo(repository.path[0] ?? '', repository.path[1] ?? '')
   const pull = (repository: Repository, number: number) => `${base(repository)}/pull-requests/${number}`
 
@@ -383,6 +413,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     source: answer.fromRef.displayId,
     target: answer.toRef.displayId,
     headSha: answer.fromRef.latestCommit ?? null,
+    ...(answer.state === 'MERGED' && answer.properties?.mergeCommit !== undefined ? { mergeCommit: answer.properties.mergeCommit.id } : {}),
     author: answer.author == null ? null : personOf(answer.author.user),
     // Data Center counts neither lines nor files on a pull request.
     additions: null,
@@ -531,7 +562,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false, pictures: false, reopen: true, rerun: false },
+    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: true, pictures: false, reopen: true, rerun: false },
     ...makeBitbucketDataCenterReleases({
       http,
       base,
@@ -557,7 +588,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           id: String(answer.id),
           path: [answer.project.key, answer.slug],
           defaultBranch: branch.displayId,
-          webUrl: answer.links?.self?.[0]?.href.replace(/\/browse\/?$/, '') ?? `${web}/projects/${answer.project.key}/repos/${answer.slug}`,
+          webUrl: webOf(answer),
           canPush: writable.values.some((found) => found.id === answer.id),
           merges: mergesOf(enabled, chosen),
         }
@@ -856,10 +887,109 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(repository, number, comment, { id: reply.threadId ?? String(comment.id), path: null, line: null }, true),
       ),
-    // Reviews of a change Althar didn't open are GitHub's alone, for now.
-    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
-    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    changeToReview: (repository, number) =>
+      Effect.gen(function* () {
+        const one = yield* http.json(PullAnswer, 'GET', pull(repository, number))
+        const source = [one.fromRef.repository.project.key, one.fromRef.repository.slug]
+        return {
+          ...changeOf(repository, one),
+          fork: source.join('/').toLowerCase() === repository.path.join('/').toLowerCase() ? null : source,
+          baseSha: one.toRef.latestCommit ?? null,
+          member: one.author == null ? false : yield* memberOf(repository, one.author.user),
+        }
+      }),
+    postReview: (repository, number, review) => postHostReview(product, http, pull(repository, number), review, account),
     pushTarget,
+    // Every repository the account can read, as far as `paged` follows: Data Center keeps no time of the last push to list them by.
+    repositories: () =>
+      paged(0, (start) =>
+        Effect.map(http.json(Page(ReachedRepository), 'GET', `${api}/repos?permission=REPO_READ&limit=100&start=${start}`), (page) => ({
+          items: page.values.map((found): ListedRepository => ({
+            path: [found.project.key, found.slug],
+            description: found.description == null || found.description === '' ? null : found.description,
+            private: found.public !== true,
+            pushedAt: null,
+            webUrl: webOf(found),
+            archived: found.archived === true,
+          })),
+          next: page.isLastPage === false && page.nextPageStart != null ? page.nextPageStart : undefined,
+        })),
+      ),
+    /*
+     * The account's own project (`~user`), then each project it administers:
+     * Data Center makes a repository in a project only for its admins. One
+     * of the account's own may be turned off on the server: refused then.
+     */
+    owners: () =>
+      Effect.gen(function* () {
+        const me = yield* whoami
+        const [users, projects] = yield* Effect.all(
+          [
+            http
+              .json(Page(Owner), 'GET', `${api}/users?filter=${encodeURIComponent(me.name)}&limit=100`)
+              .pipe(Effect.orElseSucceed(() => ({ values: [] }))),
+            paged(0, (start) =>
+              Effect.map(
+                http.json(Page(ProjectAnswer), 'GET', `${api}/projects?permission=PROJECT_ADMIN&limit=100&start=${start}`),
+                (page) => ({
+                  items: page.values,
+                  next: page.isLastPage === false && page.nextPageStart != null ? page.nextPageStart : undefined,
+                }),
+              ),
+            ),
+          ],
+          { concurrency: 2 },
+        )
+        const user = users.values.find((found) => found.name.toLowerCase() === me.name.toLowerCase())
+        // Its own project's key is `~` and its slug, in upper case: the slug is its name, but for what an address can't hold.
+        const own = `~${(user?.slug ?? me.name).toUpperCase()}`
+        return [
+          { id: own, name: user?.displayName ?? me.name, kind: 'user' as const },
+          ...projects
+            .filter((project) => project.key.toUpperCase() !== own)
+            .map((project) => ({ id: project.key, name: project.name, kind: 'project' as const })),
+        ]
+      }),
+    // Empty: Data Center makes none other, and takes its first push as it is.
+    createRepository: (made) =>
+      Effect.gen(function* () {
+        const answer = yield* http
+          .json(RepositoryAnswer, 'POST', `${api}/projects/${encodeURIComponent(made.owner.id)}/repos`, {
+            name: made.name,
+            scmId: 'git',
+            public: !made.private,
+            ...(made.description === undefined || made.description === '' ? {} : { description: made.description }),
+          })
+          .pipe(
+            // A project Data Center hides from the account is one it may not make a repository in.
+            Effect.mapError((error) =>
+              error.reason === 'not_found'
+                ? new ConnectorFailed({
+                    product,
+                    reason: 'forbidden',
+                    ...(error.status === undefined ? {} : { status: error.status }),
+                    message: `The account may not make a repository in ${made.owner.name}`,
+                  })
+                : error,
+            ),
+          )
+        const here = repo(answer.project.key, answer.slug)
+        // Made, it stays made: what is read after is read as `repository` reads it, and taken as a new one is where the server won't say.
+        const branch = yield* http
+          .cached(Schema.Struct({ displayId: Schema.String }), `${here}/default-branch`)
+          .pipe(Effect.orElseSucceed(() => ({ displayId: 'main' })))
+        const settings = yield* http.cached(Settings, `${here}/settings/pull-requests`).pipe(Effect.orElseSucceed(() => ({})))
+        const { enabled, chosen } = strategiesOf(settings)
+        return {
+          id: String(answer.id),
+          path: [answer.project.key, answer.slug],
+          defaultBranch: branch.displayId,
+          webUrl: webOf(answer),
+          // The account made it, so it may push to it.
+          canPush: true,
+          merges: mergesOf(enabled, chosen),
+        } satisfies Repository
+      }),
   }
 }
 
@@ -872,7 +1002,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
 
 export const accessBitbucketDataCenter: Access = (input) =>
   Effect.gen(function* () {
-    const api = input.apiUrl.replace(/\/+$/, '')
+    const api = withoutTrailingSlashes(input.apiUrl)
     const ask = (url: string) => probe(input, url)
 
     const properties = yield* ask(`${api}/application-properties`)

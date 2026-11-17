@@ -16,6 +16,14 @@ import { type Route, type Sent, stubFetch, variablesOf } from './stub'
 
 const API = 'https://api.github.com'
 const REPO = `${API}/repos/meridian/api`
+const queueAnswer = (pull: Record<string, unknown> = {}) => ({
+  json: {
+    data: {
+      repository: { pullRequest: { isMergeQueueEnabled: false, isInMergeQueue: false, timelineItems: { nodes: [] }, ...pull } },
+    },
+  },
+})
+const noQueue: Route = ['POST', `${API}/graphql`, queueAnswer()]
 const repository: Repository = {
   id: '7',
   path: ['meridian', 'api'],
@@ -115,6 +123,7 @@ describe('GitHub as a code host', () => {
     Effect.gen(function* () {
       const { host, sent } = github([
         ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true, sha: 'merge-sha' } }],
+        noQueue,
         // GitHub's replica can still say open just after: what the merge answered is what counts.
         ['GET', `${REPO}/pulls/12`, { json: pull() }],
       ])
@@ -128,12 +137,14 @@ describe('GitHub as a code host', () => {
       // Where GitHub doesn't say it merged, it is read back.
       const unsaid = github([
         ['PUT', `${REPO}/pulls/12/merge`, { json: {} }],
+        noQueue,
         ['GET', `${REPO}/pulls/12`, { json: pull({ merged_at: '2026-10-01T12:00:00Z', state: 'closed' }) }],
       ])
       assert.strictEqual((yield* unsaid.host.merge(repository, open)).state, 'merged')
       assert.strictEqual(unsaid.sent.filter((request) => request.method === 'GET').length, 1)
       const refusing = github([
         ['PUT', `${REPO}/pulls/12/merge`, { status: 405, json: { message: 'Pull Request is not mergeable' } }],
+        noQueue,
         ['GET', `${REPO}/pulls/12`, { json: pull() }],
       ])
       const refused = yield* Effect.flip(refusing.host.merge({ ...repository, merges: [] }, yield* refusing.host.change(repository, 12)))
@@ -147,6 +158,7 @@ describe('GitHub as a code host', () => {
 
   it.effect('merges in the way asked, says whether a branch has a merge queue, and enters and leaves it at the head read', () =>
     Effect.gen(function* () {
+      let enabled = false
       const { host, sent } = github([
         ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
         ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
@@ -161,7 +173,9 @@ describe('GitHub as a code host', () => {
             if (query.includes('dequeuePullRequest')) return { json: { data: { dequeuePullRequest: { mergeQueueEntry: { id: 'E' } } } } }
             return {
               json: {
-                data: { repository: { pullRequest: { isMergeQueueEnabled: true, isInMergeQueue: false, timelineItems: { nodes: [] } } } },
+                data: {
+                  repository: { pullRequest: { isMergeQueueEnabled: enabled, isInMergeQueue: false, timelineItems: { nodes: [] } } },
+                },
               },
             }
           },
@@ -172,6 +186,7 @@ describe('GitHub as a code host', () => {
       assert.deepStrictEqual(sent.find((request) => request.method === 'PUT')?.body, { merge_method: 'merge', sha: 'abc' })
       // GitHub's own auto-merge isn't how Althar merges.
       assert.strictEqual((yield* Effect.flip(host.merge(repository, open, { auto: true }))).reason, 'rejected')
+      enabled = true
       assert.deepStrictEqual(yield* host.mergeWays(repository, 'main'), { queue: 'merge_queue', autoMerge: false, server: null })
       assert.deepStrictEqual(variablesOf(sent.at(-1)), { owner: 'meridian', name: 'api', branch: 'main' })
       assert.deepInclude(yield* host.enqueue(repository, open), { state: 'open', queued: true })
@@ -196,6 +211,13 @@ describe('GitHub as a code host', () => {
         ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
         ['GET', `${REPO}/commits/made`, { json: { parents: [{ sha: 'abc' }, { sha: 'tip' }] } }],
         ['GET', `${REPO}/commits/theirs`, { json: { parents: [{ sha: 'made' }] } }],
+        ['GET', `${REPO}/commits/later`, { json: { parents: [{ sha: 'abc' }, { sha: 'newer' }] } }],
+        ['GET', `${REPO}/commits/other`, { json: { parents: [{ sha: 'abc' }, { sha: 'branch' }] } }],
+        ['GET', `${REPO}/compare/elsewhere...tip`, { json: { behind_by: 1, ahead_by: 1 } }],
+        ['GET', `${REPO}/compare/tip...newer`, { json: { behind_by: 0, ahead_by: 1 } }],
+        ['GET', `${REPO}/compare/newer...main`, { json: { behind_by: 0, ahead_by: 0 } }],
+        ['GET', `${REPO}/compare/tip...branch`, { json: { behind_by: 0, ahead_by: 2 } }],
+        ['GET', `${REPO}/compare/branch...main`, { json: { behind_by: 2, ahead_by: 1 } }],
       ])
       assert.strictEqual(yield* host.branchHead(repository, 'release/1.0'), 'tip')
       const open = yield* host.change(repository, 12)
@@ -204,10 +226,175 @@ describe('GitHub as a code host', () => {
       // Update-branch lands in the background: the head read later is its own only where it is a merge whose first parent is the head it had.
       assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc'))
       assert.isFalse(yield* host.madeFrom!(repository, { ...open, headSha: 'theirs' }, 'abc'))
+      // Given the target's head it merged in, that is its second parent: someone's merge of another branch at that head isn't it.
+      assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc', 'tip'))
+      assert.isFalse(yield* host.madeFrom!(repository, { ...open, headSha: 'made' }, 'abc', 'elsewhere'))
+      // The target moved on before the merge landed: a later head of it, still on it, is Althar's merge too; a branch off it isn't.
+      assert.isTrue(yield* host.madeFrom!(repository, { ...open, headSha: 'later' }, 'abc', 'tip'))
+      assert.isFalse(yield* host.madeFrom!(repository, { ...open, headSha: 'other' }, 'abc', 'tip'))
     }),
   )
 
-  it.effect('puts a pull request in its branch’s merge queue where GitHub refuses a merge for one, and reads it there when asked', () =>
+  it.effect('merges without the queue only on the explicit action and fresh bypass permission, at the head shown', () =>
+    Effect.gen(function* () {
+      let allowed = true
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['POST', `${API}/graphql`, () => ({ json: { data: { repository: { pullRequest: { viewerCanMergeAsAdmin: allowed } } } } })],
+        ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
+      ])
+      const open = yield* host.change(repository, 12)
+      assert.deepInclude(yield* host.mergeWithoutQueue!(repository, { ...open, queued: true }), { state: 'merged', queued: false })
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PUT')?.body, { merge_method: 'squash', sha: 'abc' })
+      assert.isFalse(sent.some((request) => (JSON.stringify(request.body) ?? '').includes('enqueuePullRequest')))
+      allowed = false
+      assert.strictEqual((yield* Effect.flip(host.mergeWithoutQueue!(repository, open))).reason, 'forbidden')
+      assert.lengthOf(
+        sent.filter((request) => request.method === 'PUT'),
+        1,
+      )
+    }),
+  )
+
+  it.effect('never merges on an unknown bypass permission or queues a refused direct merge instead', () =>
+    Effect.gen(function* () {
+      const reading = github([['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }]])
+      const open = yield* reading.host.change(repository, 12)
+      for (const answer of [
+        { json: { data: { repository: { pullRequest: null } } } },
+        { json: { data: { repository: { pullRequest: {} } } } },
+        { status: 403, json: { message: 'Not allowed' } },
+        { status: 502, json: {} },
+      ]) {
+        const { host, sent } = github([['POST', `${API}/graphql`, answer]])
+        yield* Effect.flip(host.mergeWithoutQueue!(repository, open))
+        assert.isFalse(sent.some((request) => request.method === 'PUT'))
+      }
+      for (const status of [405, 409]) {
+        const { host, sent } = github([
+          ['POST', `${API}/graphql`, { json: { data: { repository: { pullRequest: { viewerCanMergeAsAdmin: true } } } } }],
+          ['PUT', `${REPO}/pulls/12/merge`, { status, json: { message: 'Merge refused' } }],
+        ])
+        assert.strictEqual((yield* Effect.flip(host.mergeWithoutQueue!(repository, open))).status, status)
+        assert.lengthOf(sent, 2)
+      }
+    }),
+  )
+
+  it.effect('uses the merge queue even when the account could merge directly', () =>
+    Effect.gen(function* () {
+      let enabled = false
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        // An admin allowed to bypass the queue would succeed here: it must never be tried.
+        ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
+        [
+          'POST',
+          `${API}/graphql`,
+          (request) =>
+            JSON.stringify(request.body).includes('enqueuePullRequest')
+              ? { json: { data: { enqueuePullRequest: { mergeQueueEntry: { position: 1 } } } } }
+              : queueAnswer({ isMergeQueueEnabled: enabled }),
+        ],
+      ])
+      // A previous listening turn saw no queue. Turning it on before Merge must be heard immediately.
+      const open = yield* host.change(repository, 12, { queue: true })
+      assert.isFalse(open.queued)
+      enabled = true
+      assert.deepInclude(yield* host.merge(repository, open), { state: 'open', queued: true, number: 12, headSha: 'abc' })
+      assert.isFalse(sent.some((request) => request.method === 'PUT'))
+      assert.deepStrictEqual(variablesOf(sent.at(-1)), { id: 'PR_1', head: 'abc' })
+    }),
+  )
+
+  it.effect('never tries a direct merge when reading or entering the queue fails', () =>
+    Effect.gen(function* () {
+      for (const api of [API, 'https://git.meridian.test/api/v3']) {
+        const graphql = api === API ? `${api}/graphql` : 'https://git.meridian.test/api/graphql'
+        for (const answer of [
+          { status: 403, json: { message: 'Not allowed to read the queue' } },
+          { status: 502, json: {} },
+          { json: { data: {} } },
+          { json: { errors: [{ message: 'Queue lookup refused' }] } },
+        ]) {
+          const { host, sent } = github(
+            [
+              ['GET', `${api}/repos/meridian/api/pulls/12`, { json: pull({ draft: false }) }],
+              ['PUT', `${api}/repos/meridian/api/pulls/12/merge`, { json: { merged: true } }],
+              ['POST', graphql, answer],
+            ],
+            api,
+          )
+          const open = yield* host.change(repository, 12)
+          yield* Effect.flip(host.merge(repository, open))
+          assert.isFalse(sent.some((request) => request.method === 'PUT'))
+        }
+      }
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        ['PUT', `${REPO}/pulls/12/merge`, { json: { merged: true } }],
+        [
+          'POST',
+          `${API}/graphql`,
+          (request) =>
+            JSON.stringify(request.body).includes('enqueuePullRequest')
+              ? { json: { errors: [{ message: 'The head has changed' }] } }
+              : queueAnswer({ isMergeQueueEnabled: true }),
+        ],
+      ])
+      assert.strictEqual((yield* Effect.flip(host.merge(repository, yield* host.change(repository, 12)))).message, 'The head has changed')
+      assert.isFalse(sent.some((request) => request.method === 'PUT'))
+    }),
+  )
+
+  it.effect('still merges on an older Enterprise Server without merge-queue fields', () =>
+    Effect.gen(function* () {
+      const api = 'https://git.meridian.test/api/v3'
+      const { host, sent } = github(
+        [
+          ['GET', `${api}/repos/meridian/api/pulls/12`, { json: pull({ draft: false }) }],
+          ['PUT', `${api}/repos/meridian/api/pulls/12/merge`, { json: { merged: true } }],
+          [
+            'POST',
+            'https://git.meridian.test/api/graphql',
+            { json: { errors: [{ message: "Field 'isMergeQueueEnabled' doesn't exist on type 'PullRequest'" }] } },
+          ],
+        ],
+        api,
+      )
+      assert.strictEqual((yield* host.merge(repository, yield* host.change(repository, 12))).state, 'merged')
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PUT')?.body, { merge_method: 'squash', sha: 'abc' })
+    }),
+  )
+
+  it.effect('uses a queue turned on between its read and GitHub refusing the direct merge', () =>
+    Effect.gen(function* () {
+      let enabled = false
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ draft: false }) }],
+        [
+          'PUT',
+          `${REPO}/pulls/12/merge`,
+          () => {
+            enabled = true
+            return { status: 405, json: { message: 'Changes must be made through the merge queue' } }
+          },
+        ],
+        [
+          'POST',
+          `${API}/graphql`,
+          (request) =>
+            JSON.stringify(request.body).includes('enqueuePullRequest')
+              ? { json: { data: { enqueuePullRequest: { mergeQueueEntry: { position: 1 } } } } }
+              : queueAnswer({ isMergeQueueEnabled: enabled }),
+        ],
+      ])
+      assert.deepInclude(yield* host.merge(repository, yield* host.change(repository, 12)), { state: 'open', queued: true })
+      assert.deepStrictEqual(variablesOf(sent.at(-1)), { id: 'PR_1', head: 'abc' })
+    }),
+  )
+
+  it.effect('puts a pull request in its branch’s merge queue, and reads it there when asked', () =>
     Effect.gen(function* () {
       const queue = (pull: Record<string, unknown> = {}) => ({
         json: {
@@ -228,7 +415,7 @@ describe('GitHub as a code host', () => {
         ],
       ])
       const open = yield* host.change(repository, 12)
-      // Refused for its queue, it goes in, at the head Althar saw, and is open still: GitHub merges it later.
+      // It goes in at the head Althar saw, and is open still: GitHub merges it later.
       assert.deepInclude(yield* host.merge(repository, open), { state: 'open', queued: true, number: 12, headSha: 'abc' })
       const [asked, enqueued] = sent.filter((request) => request.method === 'POST')
       assert.deepStrictEqual(variablesOf(asked), { owner: 'meridian', name: 'api', number: 12 })
@@ -240,18 +427,7 @@ describe('GitHub as a code host', () => {
       ])
       assert.deepInclude(yield* already.host.merge(repository, open), { state: 'open', queued: true })
       assert.lengthOf(already.sent.filter(enqueuing), 0)
-      // Refused on a branch with no queue, or where GitHub won't say, it is the refusal it was.
-      for (const answer of [queue({ isMergeQueueEnabled: false }), { status: 502, json: {} }]) {
-        const plain = github([
-          ['PUT', `${REPO}/pulls/12/merge`, { status: 405, json: { message: 'Pull Request is not mergeable' } }],
-          ['POST', `${API}/graphql`, answer],
-        ])
-        assert.deepInclude(yield* Effect.flip(plain.host.merge(repository, open)), {
-          reason: 'rejected',
-          message: 'Pull Request is not mergeable',
-        })
-        assert.lengthOf(plain.sent.filter(enqueuing), 0)
-      }
+      assert.isFalse(already.sent.some((request) => request.method === 'PUT'))
       // Read, it says where it stands with the queue only when asked: out of it, why the queue took it out, and the merge-group commit it judged.
       const groupRun = (head_sha: string, number = 12) => ({
         head_sha,
@@ -1654,7 +1830,7 @@ describe('GitHub as a tracker', () => {
         const { host, sent } = github([])
         const refused = (change: IssueChange) =>
           Effect.map(Effect.flip(host.update(open, change)), (error) => [error.reason, error.message])
-        assert.deepStrictEqual(yield* refused({ due: '2026-11-30' }), [
+        assert.deepStrictEqual(yield* refused({ due: '2025-11-30' }), [
           'rejected',
           'Althar can’t change an issue’s due here: GitHub’s issues have no due date; a project board’s date field is the board’s own',
         ])
@@ -2340,6 +2516,35 @@ describe('GitHub’s pictures', () => {
   const picture = { bytes: Uint8Array.of(137, 80, 78, 71), name: 'empty state.png', mediaType: 'image/png' }
   const UPLOADS = /^https:\/\/uploads\.github\.com\/user-attachments\/assets\?/
 
+  it.effect('keeps an upload size rejection distinct from a response size failure', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        [
+          'POST',
+          UPLOADS,
+          {
+            status: 422,
+            json: {
+              message: 'Validation Failed',
+              errors: [
+                {
+                  message: `Yowza that's a big file. <span class="drag-and-drop-error-info"><span class="btn-link">Try again</span> with a file size less than 10MB.</span>`,
+                },
+              ],
+            },
+          },
+        ],
+      ])
+      const error = yield* Effect.flip(host.uploadPicture!(repository, picture))
+      assert.strictEqual(error.reason, 'rejected')
+      assert.strictEqual(error.status, 422)
+      assert.strictEqual(error.uploadLimit, 10_000_000)
+      assert.isUndefined(error.sizeLimit)
+      assert.notInclude(error.message, '<span')
+      assert.include(error.message, 'less than 10MB')
+    }),
+  )
+
   it.effect('uploads one for the repository, by its number, as GitHub’s own CLI attaches one', () =>
     Effect.gen(function* () {
       const asset = 'https://github.com/user-attachments/assets/0c8e1a2b-3f4d-4e5f-9a6b-7c8d9e0f1a2b'
@@ -2624,6 +2829,200 @@ describe('GitHub bringing a pull request’s branch up to date', () => {
         ['PUT', UPDATE, { status: 403, json: { message: 'Resource not accessible by integration' } }],
       ])
       assert.deepInclude(yield* Effect.flip(own.host.updateBranch(repository, change, { expectedHead: 'abc' })), { reason: 'forbidden' })
+    }),
+  )
+})
+
+describe('GitHub’s repositories, for cloning one or making one', () => {
+  const LISTED = `${API}/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&page=`
+  const reached = (name: string, overrides: Record<string, unknown> = {}) => ({
+    id: 1,
+    full_name: `meridian/${name}`,
+    description: null,
+    private: false,
+    pushed_at: '2026-10-01T09:00:00Z',
+    html_url: `https://github.com/meridian/${name}`,
+    archived: false,
+    disabled: false,
+    ...overrides,
+  })
+  const made = (overrides: Record<string, unknown> = {}) => ({
+    id: 99,
+    full_name: 'meridian/atlas',
+    default_branch: 'main',
+    html_url: 'https://github.com/meridian/atlas',
+    permissions: { admin: true, push: true, pull: true },
+    allow_squash_merge: true,
+    allow_merge_commit: true,
+    allow_rebase_merge: true,
+    ...overrides,
+  })
+
+  it.effect('lists every repository the account reaches, last pushed first, page after page, as each says it is', () =>
+    Effect.gen(function* () {
+      const full = Array.from({ length: 100 }, (_, at) => reached(`repo-${at}`))
+      const { host, sent } = github([
+        ['GET', `${LISTED}1`, { json: full }],
+        [
+          'GET',
+          `${LISTED}2`,
+          {
+            json: [
+              reached('api', { description: 'The API', private: true }),
+              reached('old', { description: '', archived: true, pushed_at: null }),
+              reached('held', { disabled: true }),
+            ],
+          },
+        ],
+      ])
+      const found = yield* host.repositories()
+      assert.lengthOf(found, 103)
+      assert.deepStrictEqual(found.slice(-3), [
+        {
+          path: ['meridian', 'api'],
+          description: 'The API',
+          private: true,
+          pushedAt: '2026-10-01T09:00:00Z',
+          webUrl: 'https://github.com/meridian/api',
+          archived: false,
+        },
+        // An empty description is none; one archived, or disabled by GitHub, is never pushed to.
+        {
+          path: ['meridian', 'old'],
+          description: null,
+          private: false,
+          pushedAt: null,
+          webUrl: 'https://github.com/meridian/old',
+          archived: true,
+        },
+        {
+          path: ['meridian', 'held'],
+          description: null,
+          private: false,
+          pushedAt: '2026-10-01T09:00:00Z',
+          webUrl: 'https://github.com/meridian/held',
+          archived: true,
+        },
+      ])
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${LISTED}1`, `${LISTED}2`],
+      )
+    }),
+  )
+
+  it.effect('says the account first, then each organization it is in, every page of them', () =>
+    Effect.gen(function* () {
+      const many = Array.from({ length: 100 }, (_, at) => ({ login: `org-${at}`, id: at }))
+      const { host } = github([
+        ['GET', `${API}/user`, { json: { id: 5, login: 'you', name: 'You' } }],
+        ['GET', `${API}/user/orgs?per_page=100&page=1`, { json: many }],
+        ['GET', `${API}/user/orgs?per_page=100&page=2`, { json: [{ login: 'meridian', id: 7, description: 'Payments' }] }],
+      ])
+      const owners = yield* host.owners()
+      assert.lengthOf(owners, 102)
+      assert.deepStrictEqual(owners[0], { id: 'you', name: 'you', kind: 'user' })
+      assert.deepStrictEqual(owners.at(-1), { id: 'meridian', name: 'meridian', kind: 'organization' })
+    }),
+  )
+
+  it.effect('makes an empty repository of the account’s own, or an organization’s, as GitHub reads it back', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['POST', `${API}/user/repos`, { status: 201, json: made({ full_name: 'you/atlas', html_url: 'https://github.com/you/atlas' }) }],
+        ['POST', `${API}/orgs/meridian/repos`, { status: 201, json: made({ allow_merge_commit: false, allow_rebase_merge: false }) }],
+      ])
+      assert.deepStrictEqual(
+        yield* host.createRepository({
+          owner: { id: 'you', name: 'you', kind: 'user' },
+          name: 'atlas',
+          private: true,
+          description: 'Maps',
+        }),
+        {
+          id: '99',
+          path: ['you', 'atlas'],
+          defaultBranch: 'main',
+          webUrl: 'https://github.com/you/atlas',
+          canPush: true,
+          merges: ['squash', 'merge', 'rebase'],
+        },
+      )
+      assert.deepStrictEqual(sent[0]?.body, { name: 'atlas', private: true, description: 'Maps', auto_init: false })
+      const theirs = yield* host.createRepository({
+        owner: { id: 'meridian', name: 'meridian', kind: 'organization' },
+        name: 'atlas',
+        private: false,
+        description: '',
+      })
+      assert.deepStrictEqual(theirs, {
+        id: '99',
+        path: ['meridian', 'atlas'],
+        defaultBranch: 'main',
+        webUrl: 'https://github.com/meridian/atlas',
+        canPush: true,
+        merges: ['squash'],
+      })
+      // No description is sent where there is none.
+      assert.deepStrictEqual(sent[1]?.body, { name: 'atlas', private: false, auto_init: false })
+    }),
+  )
+
+  it.effect('refuses a name taken, in GitHub’s words, and an organization the account may not make one in', () =>
+    Effect.gen(function* () {
+      const meridian = { id: 'meridian', name: 'meridian', kind: 'organization' } as const
+      const { host } = github([
+        [
+          'POST',
+          `${API}/user/repos`,
+          {
+            status: 422,
+            json: {
+              message: 'Repository creation failed.',
+              errors: [{ resource: 'Repository', code: 'custom', field: 'name', message: 'name already exists on this account' }],
+            },
+          },
+        ],
+        [
+          'POST',
+          `${API}/orgs/meridian/repos`,
+          { status: 403, json: { message: 'You need admin access to the organization before adding a repository to it.' } },
+        ],
+        ['POST', `${API}/orgs/elsewhere/repos`, { status: 404, json: { message: 'Not Found' } }],
+      ])
+      const taken = yield* Effect.flip(
+        host.createRepository({ owner: { id: 'you', name: 'you', kind: 'user' }, name: 'api', private: true }),
+      )
+      assert.deepInclude(taken, { reason: 'rejected', status: 422 })
+      assert.match(taken.message, /name already exists on this account/)
+      assert.deepInclude(yield* Effect.flip(host.createRepository({ owner: meridian, name: 'atlas', private: true })), {
+        reason: 'forbidden',
+        message: 'You need admin access to the organization before adding a repository to it.',
+      })
+      assert.deepInclude(
+        yield* Effect.flip(
+          host.createRepository({ owner: { id: 'elsewhere', name: 'elsewhere', kind: 'organization' }, name: 'atlas', private: true }),
+        ),
+        { reason: 'forbidden', status: 404 },
+      )
+    }),
+  )
+
+  it.effect('asks Enterprise Server at its own API', () =>
+    Effect.gen(function* () {
+      const server = 'https://git.meridian.dev/api/v3'
+      const { host, sent } = github(
+        [
+          [
+            'GET',
+            `${server}/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member&page=1`,
+            { json: [reached('api')] },
+          ],
+        ],
+        server,
+      )
+      assert.lengthOf(yield* host.repositories(), 1)
+      assert.lengthOf(sent, 1)
     }),
   )
 })

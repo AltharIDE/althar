@@ -6,22 +6,21 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say, startTask, still, toBoard } from './support'
+import { connectGitHub, launch, openFirstProject, say, showPanes, startTask, still } from './support'
 
 /*
  * The line up next, in a real window with the fake agent and the fake
- * GitHub: with one agent at a time, held by a server a finished task left
- * running, three reviews of someone else's pull requests, each started from
- * its plan, and a quick task with none, moved off Scratch to the board, wait in Up next, not Running. The
- * person drags the quick task to the front, to the back, and to the front
+ * GitHub: with one agent at a time, held by a task whose lead is working,
+ * three reviews of someone else's pull requests, each started from its plan, and a task planned without a review, wait in Up next, not Running. The
+ * person drags the task to the front, to the back, and to the front
  * again let go outside the lane, starts a drag they cancel with Escape, and
- * moves the review last in line to the front from its own view; when the server stops, the line starts
+ * moves the review last in line to the front from its own view; when the running task stops, the line starts
  * in the person's order. Shots: test-results/line-*.png.
  */
 
 const PULLS = ['Retry checkout once', 'Cache the partner list', 'Log refunds by partner']
 
-test('lists reviews and a quick task waiting for an agent in Up next, and starts them in the order the person puts them', async () => {
+test('lists reviews and a task waiting for an agent in Up next, and starts them in the order the person puts them', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
@@ -61,33 +60,32 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await page.keyboard.press('Escape')
     await tabs.getByRole('button', { name: /^meridian/ }).click()
 
-    // A task whose server keeps the one place, then three reviews and a quick task, all waiting for it.
-    await startTask(page, 'Serve the prototype', '[lead:serve] [lead:finish]')
-    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+    // A live lead holds the place; three reviews and a task wait for it.
+    await startTask(page, 'Check checkout', '[lead:wait]')
+    await expect(page.getByRole('article', { name: 'Check checkout', exact: true })).toContainText('Running')
     for (const [index] of PULLS.entries()) {
       await say(page, `Review https://github.test/meridian/api/pull/${index + 1} [coordinator:review]`)
       // A review starts from a plan of its lead alone: started at once, not after its countdown.
       await page.getByRole('button', { name: 'Start now' }).last().click()
       await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(index + 1)
     }
-    // The quick task's lead keeps at it once it starts, so it keeps the place.
-    await say(page, 'Try the double jump. [coordinator:start] [lead:wait]')
+    // Planned work waits for a task place; an aside from start_task would start outside this line.
+    await startTask(page, 'Try the double jump', '[lead:wait]')
     await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(4)
 
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
-    // A chat starts on Scratch, off the lanes: the person moves it to the board, where it waits in line with the reviews.
-    await toBoard(page, 'Try the double jump')
     const next = work.getByRole('region', { name: 'Up next' })
     const running = work.getByRole('region', { name: 'Running' })
-    const rows = next.getByRole('listitem')
+    // The stopped holder stays on the board; these assertions follow only the tasks in the queue.
+    const rows = next.getByRole('listitem').filter({ hasNotText: 'Check checkout' })
     // Each waits up next, in the order it started, none of them in Running.
     await expect(rows).toHaveCount(4)
     for (const [index, title] of PULLS.entries()) await expect(rows.nth(index)).toContainText(title)
     await expect(rows.nth(3)).toContainText('Try the double jump')
     await expect(rows.nth(0)).toContainText('Next in line')
     await expect(rows.nth(3)).toContainText('4th in line')
-    await expect(running.getByRole('article')).toHaveCount(0)
+    await expect(running.getByRole('article')).toHaveCount(1)
     await expect(next.getByText('Drag to change the order')).toHaveCount(0)
     await page.mouse.move(1400, 880)
     await still(page)
@@ -107,7 +105,7 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
         .toEqual(titles)
     const JUMP = 'Try the double jump'
 
-    // The person drags the quick task by its grip to the front: the rows make room, and once let go it says it is next.
+    // The person drags the task by its grip to the front: the rows make room, and once let go it says it is next.
     await rows.nth(3).hover()
     const grip = next.getByRole('button', { name: /^Move Try the double jump.* in the line$/ })
     const from = await grip.boundingBox()
@@ -155,8 +153,8 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     await expect(rows.nth(3)).toContainText('4th in line')
 
     // Up again, let go outside the lane, above it at the window's edge: it goes where the row showed it, the front.
-    const above = await next.getByText('In your order').boundingBox()
-    if (above === null) throw new Error('The line has no divider')
+    const above = await rows.nth(0).boundingBox()
+    if (above === null) throw new Error('The line has no first row')
     const up = await grab(JUMP)
     await glide(up, { x: 4, y: above.y - 30 })
     await inOrder([JUMP, ...reviews])
@@ -194,16 +192,19 @@ test('lists reviews and a quick task waiting for an agent in Up next, and starts
     // First in the line before the place frees, or what was first starts in it.
     await expect(page.getByRole('button', { name: 'Waiting for a place, First in Up next' })).toBeVisible()
 
-    // The place frees: the line starts in the person's order, the review they put first (which reads in a turn), then the quick
+    // The place frees: the line starts in the person's order, the review they put first (which reads in a turn), then the
     // task, which keeps the place; the two older reviews wait on, oldest first.
-    await behind
-      .getByRole('button', { name: /^Stop what/ })
-      .first()
-      .click()
+    await page.keyboard.press('Escape')
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
+    await running.getByRole('button', { name: 'Check checkout', exact: true }).click()
+    await page.getByRole('button', { name: 'More for this task' }).click()
+    await page.getByRole('menuitem', { name: /Stop the task/ }).click()
+    await page.getByRole('button', { name: 'Back to meridian' }).click()
+    await showPanes(page, { conversation: false, board: true })
     await expect(running.getByRole('button', { name: `Review #3: ${PULLS[2] ?? ''}`, exact: true })).toBeVisible()
     await expect(running.getByRole('button', { name: /^Try the double jump/ })).toBeVisible()
+    await expect(next.getByText('Check checkout', { exact: true })).toBeVisible()
     await expect(rows).toHaveCount(2)
     await expect(rows.nth(0)).toContainText(PULLS[0] ?? '')
     await expect(rows.nth(0)).toContainText('Next in line')

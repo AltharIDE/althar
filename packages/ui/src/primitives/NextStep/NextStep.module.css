@@ -21,6 +21,15 @@
 .act {
   position: relative;
 }
+.split {
+  flex: 1;
+  min-width: 0;
+}
+.steps .split .more {
+  flex: 0 0 28px;
+  padding: 0;
+  box-shadow: inset 1px 0 0 var(--line);
+}
 
 /* its words, centred, the row's height: the same whether they are a button or the card's link */
 .words,

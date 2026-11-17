@@ -2,7 +2,7 @@ import { accessSync, constants, existsSync, mkdirSync, symlinkSync } from 'node:
 import { delimiter, dirname, join } from 'node:path'
 
 import { budget } from '@althar/testing/budget'
-import { _electron as electron, type ElectronApplication, expect, type Page } from '@playwright/test'
+import { _electron as electron, type ElectronApplication, expect, type Locator, type Page } from '@playwright/test'
 
 /* What the end-to-end tests share: the app launched on a profile of its own, with the fake agents, and the person's ways in. */
 
@@ -147,7 +147,9 @@ export const launch = async (
   // Playwright gives the config's times to the browsers it starts, not to an app it launches, whose actions would each have
   // 30 s on any machine: a click, or a wait for the window, takes the medium budget, as an assertion does (playwright.config.ts).
   electronApp.context().setDefaultTimeout(budget.medium)
-  return { electronApp, page: await mainWindow(electronApp) }
+  // Keep the process while the transport is live: process() itself is unavailable after the app quits.
+  const child = electronApp.process()
+  return { electronApp, child, page: await mainWindow(electronApp) }
 }
 
 /** Answers the folder picker with `path`, or several, as if the person chose them. */
@@ -205,6 +207,12 @@ export const shown = (page: Page, text: string | RegExp, options?: { readonly ex
   page.getByText(text, options).filter({ visible: true })
 
 /**
+ * Ship on a change's card, named by its route: its stops after Ship, as "Ship push" or "Ship review, then push, then
+ * ready". The header's and the board card's say how many commits instead.
+ */
+export const SHIP_ON_CARD = /^Ship (review|push)(, then (push|ready|merge))*$/
+
+/**
  * Once the window is still, for a screenshot: the launch has played over it,
  * and every animation and transition that ends (a fold opening, a dialog
  * fading in, lanes easing to their widths) has ended. One that loops, as a
@@ -217,17 +225,25 @@ export const still = (page: Page) =>
       document.getAnimations().every((one) => one.playState !== 'running' || one.effect?.getComputedTiming().endTime === Infinity),
   )
 
+/** Reveal the current node without waiting on one that a streamed update can replace while it settles. */
+export const reveal = async (page: Page, what: Locator) => {
+  await expect(what).toBeVisible()
+  await what.evaluate((element) => element.scrollIntoView({ block: 'center', behavior: 'instant' }))
+  await still(page)
+  await expect(what).toBeInViewport()
+}
+
 /** Sizes Althar's window, and waits until its page is laid out at the new width. */
 export const sizeWindow = async (electronApp: ElectronApplication, page: Page, width: number, height: number) => {
   const made = await electronApp.browserWindow(page)
-  const [inner] = await made.evaluate(
+  const inner = await made.evaluate(
     (one, [wide, high]) => {
       one.setSize(wide, high)
       return one.getContentSize()
     },
     [width, height] as const,
   )
-  await page.waitForFunction((wide) => window.innerWidth === wide, inner)
+  await page.waitForFunction(([wide, high]) => window.innerWidth === wide && window.innerHeight === high, inner)
 }
 
 /**
@@ -254,6 +270,52 @@ export const holdRuntime = async (page: Page) => {
     })
   })
   return () => page.evaluate(() => (window as unknown as { release: () => void }).release())
+}
+
+/** The header's ⋯, where the home's layout is: its panes, and which side the conversation is on. */
+const moreMenu = (page: Page) => page.getByRole('menu', { name: 'More' })
+export type LayoutItem = 'Conversation' | 'Board' | 'Conversation on the right'
+export const layoutItem = (page: Page, name: LayoutItem) => moreMenu(page).getByRole('menuitemcheckbox', { name, exact: true })
+
+/** Opens the header's ⋯ at its Layout. */
+export const openLayout = async (page: Page) => {
+  await page.getByRole('button', { name: 'More', exact: true }).click()
+  await expect(moreMenu(page)).toBeVisible()
+}
+
+/** Closes the header's ⋯ unpicked. */
+export const closeLayout = async (page: Page) => {
+  await page.keyboard.press('Escape')
+  await expect(moreMenu(page)).toHaveCount(0)
+}
+
+/** Picks one of the Layout checks in the header's ⋯: a pane, to show or hide it, or which side the conversation is on. */
+export const pickLayout = async (page: Page, name: LayoutItem) => {
+  await openLayout(page)
+  await layoutItem(page, name).click()
+  await expect(moreMenu(page)).toHaveCount(0)
+}
+
+/** The project's home with these of its panes showing, from ⋯: those wanted on first, so one always shows. */
+export const showPanes = async (page: Page, want: { conversation: boolean; board: boolean }) => {
+  const panes = [['Conversation', want.conversation] as const, ['Board', want.board] as const]
+  for (const [name, on] of [...panes.filter(([, on]) => on), ...panes.filter(([, on]) => !on)]) {
+    await openLayout(page)
+    const item = layoutItem(page, name)
+    if (((await item.getAttribute('aria-checked')) === 'true') !== on) {
+      await item.click()
+      await expect(moreMenu(page)).toHaveCount(0)
+    } else await closeLayout(page)
+  }
+  await expectPanes(page, want)
+}
+
+/** The home's panes showing are these, as ⋯ says. */
+export const expectPanes = async (page: Page, shown: { conversation: boolean; board: boolean }) => {
+  await openLayout(page)
+  await expect(layoutItem(page, 'Conversation')).toHaveAttribute('aria-checked', String(shown.conversation))
+  await expect(layoutItem(page, 'Board')).toHaveAttribute('aria-checked', String(shown.board))
+  await closeLayout(page)
 }
 
 export const say = async (page: Page, words: string) => {
@@ -322,13 +384,11 @@ export const projectSettings = async (page: Page, section: 'General' | 'Code and
     .click()
 }
 
-/** From the project's settings back to its work: the conversation with its coordinator. */
-export const backToWork = async (page: Page) => {
-  await page
-    .getByRole('radiogroup', { name: 'View' })
-    .getByRole('radio', { name: /^Conversation/ })
-    .click()
-}
+/**
+ * From the project's settings back to its work: home, its conversation with its coordinator alone, as from anywhere in the
+ * project; ⋯ picks only what isn't so already.
+ */
+export const backToWork = (page: Page) => showPanes(page, { conversation: true, board: false })
 
 /**
  * Has the project ask about more than what can't be undone, as it did before

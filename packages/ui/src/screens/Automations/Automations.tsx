@@ -7,6 +7,7 @@ import { Button } from '../../primitives/Button/Button'
 import { Heading, type HeadingLevel, below } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Menu, MenuItem } from '../../primitives/Menu/Menu'
 import { AutomationChip, type AutomationRunMark, type AutomationTone, RunMarks } from './marks'
 import s from './Automations.module.css'
@@ -290,11 +291,7 @@ export function Automations({
             </Menu>
           )}
         </header>
-        {error !== undefined && (
-          <p className={s.error} role="alert">
-            {error}
-          </p>
-        )}
+        {error !== undefined && <Problem className={s.error}>{error}</Problem>}
         {allPaused && <Paused t={t} {...(onPauseAll === undefined ? {} : { onResume: () => onPauseAll(false) })} />}
         {where && !none && (
           <p className={s.line}>

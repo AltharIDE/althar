@@ -1,4 +1,5 @@
 import { Schema } from 'effect'
+import { FeedPosition } from './identities'
 
 import { Schedule } from './schedules'
 
@@ -81,7 +82,15 @@ export const AutomationRun = Schema.Struct({
   at: Schema.String,
   subject: Schema.NullOr(Schema.String),
   reason: Schema.NullOr(Schema.String),
-  task: Schema.NullOr(Schema.Struct({ id: Schema.String, threadId: Schema.String, title: Schema.String })),
+  task: Schema.NullOr(
+    Schema.Struct({
+      id: Schema.String,
+      threadId: Schema.String,
+      title: Schema.String,
+      /** An open call on this task needs the person; its occurrence is still under way. */
+      needsYou: Schema.optional(Schema.Boolean),
+    }),
+  ),
 })
 export type AutomationRun = typeof AutomationRun.Type
 
@@ -107,6 +116,7 @@ export type AutomationSummary = typeof AutomationSummary.Type
 /** A project's automations, for the Automations tab. */
 export const AutomationsSnapshot = Schema.Struct({
   cursor: Schema.Int,
+  position: Schema.optional(FeedPosition),
   automations: Schema.Array(AutomationSummary),
   /** The person paused every automation: none starts until they resume them. */
   allPaused: Schema.Boolean,
@@ -125,7 +135,7 @@ export const AutomationView = Schema.Struct({
 })
 export type AutomationView = typeof AutomationView.Type
 
-export const AutomationSnapshot = Schema.Struct({ cursor: Schema.Int, automation: AutomationView })
+export const AutomationSnapshot = Schema.Struct({ cursor: Schema.Int, position: Schema.optional(FeedPosition), automation: AutomationView })
 export type AutomationSnapshot = typeof AutomationSnapshot.Type
 
 /**

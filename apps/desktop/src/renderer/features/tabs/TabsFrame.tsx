@@ -6,9 +6,11 @@ import { commandDown, LoadMeter, modKey, Offline, primaryDown, ProjectTabs, Room
 import { useServices } from '../../data/services'
 import { shownAddress } from '../../../main/browser/addresses'
 import { pages, usePageTabs } from '../browser/pages'
-import { FinderView } from '../finder/FinderView'
+import { SearchNotice } from '../finder/SearchNotice'
+import { FinderView, useWarmSearch } from '../finder/FinderView'
 import { QuickSettings } from '../settings/QuickSettings'
-import { CarriedAtFoot, CarriedBack } from '../../shared/dictation/Carried'
+import { CarriedAtFoot, CarriedBack, CarriedPlace } from '../../shared/dictation/Carried'
+import { LooseDictation, type Place, placeLoose } from '../../shared/dictation/Loose'
 import { PlanBar } from '../usage/PlanBar'
 import { SignInEnding } from '../usage/SignInEnding'
 import { useWindowChrome } from '../../shared/useWindowChrome'
@@ -190,8 +192,11 @@ function BareTitleBar({ className }: { className?: string }) {
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
+  useWarmSearch()
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
+  // Where dictation said from anywhere goes, chosen from its pill.
+  const [placing, setPlacing] = useState(false)
   // The plan gauge's peek, from any screen with the bar.
   const [usage, setUsage] = useState(false)
   // The quick settings, from the gear at the bar's end, and ⌘, on every screen.
@@ -205,14 +210,28 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const back = useCallback(
     (to: Destination['back']) =>
+      to !== null &&
       void (to.kind === 'coordinator'
         ? navigate({ to: '/projects/$projectId', params: { projectId: to.projectId }, search: { room: Room.Talk } })
         : navigate({ to: '/threads/$threadId', params: { threadId: to.threadId } })),
     [navigate],
   )
+  // Dictation said from anywhere goes into the coordinator's composer of a project, or a task's, which opens with it.
+  const place = useCallback(
+    (to: Place) => {
+      placeLoose(to)
+      setPlacing(false)
+      void (to.kind === 'coordinator'
+        ? navigate({ to: '/projects/$projectId', params: { projectId: to.projectId }, search: { room: Room.Talk } })
+        : navigate({ to: '/threads/$threadId', params: { threadId: to.threadId } }))
+    },
+    [navigate],
+  )
+  const openPlacing = useCallback(() => setPlacing(true), [])
   useEffect(() => {
     const ids = order === '' ? [] : order.split(' ')
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return
       const command = primaryDown(event)
       // ⌘, opens and closes the quick settings; ⌘⇧, goes to the settings' tab. Once there is a project, and its bar.
       if (command && !event.altKey && event.code === 'Comma' && !none) {
@@ -266,19 +285,25 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, tabs.home])
   return (
     <CarriedBack.Provider value={back}>
-      <VisitContext.Provider value={tabs.visit}>
-        <NewTabContext.Provider value={newTab}>
-          <TabBarContext.Provider value={!tabs.none}>
-            <div className={s.frame}>
-              {!tabs.none && <TabsBar tabs={tabs} usage={{ open: usage, set: setUsage }} quick={quick} onQuick={setQuick} />}
-              <div className={s.screen}>{children}</div>
-            </div>
-            {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
-            {/* Dictation carried from its composer, at the window's foot where no composer shows. */}
-            <CarriedAtFoot />
-          </TabBarContext.Provider>
-        </NewTabContext.Provider>
-      </VisitContext.Provider>
+      <CarriedPlace.Provider value={openPlacing}>
+        <VisitContext.Provider value={tabs.visit}>
+          <NewTabContext.Provider value={newTab}>
+            <TabBarContext.Provider value={!tabs.none}>
+              <div className={s.frame}>
+                {!tabs.none && <TabsBar tabs={tabs} usage={{ open: usage, set: setUsage }} quick={quick} onQuick={setQuick} />}
+                <div className={s.screen}>{children}</div>
+              </div>
+              {finding && <FinderView projectId={current} onClose={() => setFinding(false)} onUsage={() => setUsage(true)} />}
+              {placing && <FinderView projectId={current} onClose={() => setPlacing(false)} place={place} />}
+              <SearchNotice />
+              {/* Dictation carried from its composer, at the window's foot where no composer shows. */}
+              <CarriedAtFoot />
+              {/* Dictation from anywhere: it listens here where no composer shows. */}
+              <LooseDictation projectId={current} />
+            </TabBarContext.Provider>
+          </NewTabContext.Provider>
+        </VisitContext.Provider>
+      </CarriedPlace.Provider>
     </CarriedBack.Provider>
   )
 }

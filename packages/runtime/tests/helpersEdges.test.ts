@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
-import type { FakeAgentOptions } from '@althar/provider-adapters/testing'
+import { type FakeAgentOptions, holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -135,6 +135,7 @@ const start = (task: { readonly taskId: string }, more: Partial<Parameters<Helpe
 describe('starting a lead’s helper', () => {
   it.live('refuses one with no brief, on a change the task doesn’t have, beside one at work there, or with no copy to work in', () => {
     const { working, github } = onGitHub()
+    const held = holds()
     return Effect.gen(function* () {
       const task = yield* opened(working)
       assert.strictEqual(
@@ -147,7 +148,7 @@ describe('starting a lead’s helper', () => {
       )
       // Unnamed, it is a helper; it works until it is stopped.
       assert.match(
-        yield* callTool(task.access, 'start_helper', { name: ' ', brief: 'Look around. [lead:explore]' }),
+        yield* callTool(task.access, 'start_helper', { name: ' ', brief: 'Look around. [lead:slowly]' }),
         /^Started "Helper" on .+, in the worktree of the task’s change\./,
       )
       assert.strictEqual(
@@ -157,7 +158,7 @@ describe('starting a lead’s helper', () => {
       // Another change, named in any case, takes one of its own.
       yield* callTool(task.access, 'start_change', { name: 'Docs' })
       assert.match(
-        yield* callTool(task.access, 'start_helper', { name: 'On docs', brief: 'Look. [lead:explore]', change: 'docs' }),
+        yield* callTool(task.access, 'start_helper', { name: 'On docs', brief: 'Look. [lead:slowly]', change: 'docs' }),
         /^Started "On docs" on .+, in the worktree of “Docs”\./,
       )
       // A change whose folder went has nothing to copy.
@@ -188,15 +189,14 @@ describe('starting a lead’s helper', () => {
         yield* start({ taskId: later.taskId }, { name: 'Early' }),
         'This task has never run, so it has nothing to hand a helper yet.',
       )
-    }).pipe(Effect.provide(runtimeWith(github)))
+    }).pipe(Effect.provide(runtimeWith(github, { 'claude-code': { holds: held } })))
   })
 
   it.live('refuses one past how many may be at work or waiting, and past a task’s life', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
-      // Althar looks once, a moment after it starts, for helpers to carry on: one kept at work with no agent, in a project of
-      // its own, is failed then. What is kept after that stands as kept.
+      // A helper in a project of its own, failed as a restart leaves one: it counts for nothing here.
       const projects = yield* Projects
       const aside = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const early = yield* projects.createTask({
@@ -204,6 +204,7 @@ describe('starting a lead’s helper', () => {
         projectId: aside.projectId,
         title: 'Aside',
       })
+      const failedAt = new Date().toISOString()
       yield* sql`INSERT INTO helpers ${sql.insert({
         id: 'hlp_aside',
         taskId: early.taskId,
@@ -212,10 +213,11 @@ describe('starting a lead’s helper', () => {
         name: 'Aside',
         brief: 'Read it.',
         agentId: 'claude-code',
-        state: 'working',
-        startedAt: new Date().toISOString(),
+        state: 'failed',
+        result: 'Althar restarted, and its agent couldn’t start again.',
+        startedAt: failedAt,
+        endedAt: failedAt,
       })}`
-      yield* helperIn(early.taskId, 'Aside', 'failed')
       const task = yield* opened(working)
       const at = new Date().toISOString()
       const kept = (n: number, state: string) =>
@@ -416,6 +418,33 @@ describe('a helper that can’t go on', () => {
           task.threadId,
           'Helper "Orphan" (claude-code) couldn\'t go on: Althar restarted, and its agent couldn’t start again.',
         )
+      }).pipe(Effect.provide(runtimeWith(github, undefined, file)))
+    })
+  })
+
+  it.live('one that started after Althar did is not a restart’s to carry on', () => {
+    const { working, github } = onGitHub()
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-helpers-')), 'althar.sqlite')
+    return Effect.gen(function* () {
+      const task = yield* opened(working).pipe(Effect.provide(runtimeWith(github, undefined, file)))
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        // A second Althar starts: a helper's row is in before its session is, as one started just then.
+        yield* sql`INSERT INTO helpers ${sql.insert({
+          id: 'hlp_starting',
+          taskId: task.taskId,
+          projectId: task.projectId,
+          threadId: 'thr_starting',
+          name: 'Starting',
+          brief: 'Read it.',
+          agentId: 'claude-code',
+          state: 'working',
+          startedAt: new Date().toISOString(),
+        })}`
+        // Past the moment a restart's helpers are carried on: at work still, not failed for a restart it wasn't in.
+        yield* Effect.sleep(Duration.seconds(3))
+        const [helper] = yield* helperOf(task.taskId, 'Starting')
+        assert.strictEqual(helper?.state, 'working')
       }).pipe(Effect.provide(runtimeWith(github, undefined, file)))
     })
   })

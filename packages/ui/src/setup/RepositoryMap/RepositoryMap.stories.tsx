@@ -140,6 +140,14 @@ export const ForkPushingUpstreamAccessGone: Story = {
   },
 }
 
+/** A long folder being read: whole leading folders give way, the last kept, as where it is read. */
+export const ReadingALongFolder: Story = {
+  args: {
+    repositories: MAP_MERIDIAN.slice(0, 2),
+    reading: [{ id: 'reading', name: 'payments', where: '~/Projects/northwind/platform/services/payments-service' }],
+  },
+}
+
 /** A third folder being read, waiting under the others until its repositories are known. */
 export const Reading: Story = {
   args: {
@@ -284,8 +292,9 @@ export const AllStates: Story = {
     pressed: 'li:first-child button',
   }),
   render: (args) => (
+    // A whole map to a cell: a half-width cell is narrower than any page it is set on.
     <States
-      size="wide"
+      size="thread"
       cells={[
         { state: 'rest', node: <RepositoryMap {...args} /> },
         { state: 'hover', node: <RepositoryMap {...args} /> },

@@ -63,6 +63,19 @@ const permission: BoardCall = {
 }
 
 describe('where a started task stands, in the board’s words', () => {
+  it.each([
+    { phase: 'drafting', word: 'Drafting' },
+    { phase: 'planned', word: 'Planned' },
+    { phase: 'waiting', word: 'Needs you' },
+    { phase: 'ready', word: 'Ready to accept' },
+    { phase: 'kept', word: 'Kept for later' },
+    { phase: 'stopped', word: 'Stopped' },
+  ] as const)('says $phase even before its plan, call or pull request is available', ({ phase, word }) => {
+    const state = standsOf(child({ phase, plan: null, change: null }), undefined, NOW, name)
+    expect(state.word).toBe(word)
+    if (phase === 'planned') expect(state.detail).toBe('Starts when you say')
+    if (phase === 'waiting' || phase === 'ready') expect(state.detail).toBeUndefined()
+  })
   it('counts down while its plan waits to start, and says it is held when it does not', () => {
     const startsAt = new Date(Date.parse(NOW) + 18_000).toISOString()
     const planned = child({ phase: 'planned', plan: { ...card().plan!, startsAt } })

@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 import { DictationPill, type DictationPillPhase } from '@althar/ui'
 
@@ -7,7 +8,7 @@ import { draftOf, setDraftDictated, setDraftText, useDraftOf } from '../drafts'
 import s from './Carried.module.css'
 import { changeSession, type Destination, handlesOf, sessionOf, useCarrying, useSession } from './sessions'
 import { lengthOf } from './text'
-import { cancelIn, SHORTCUT, stopIn, writeIn } from './useDictation'
+import { cancelIn, keptAway, SHORTCUT, stopIn, writeIn } from './useDictation'
 
 /*
  * Dictation carried with the person once they leave its composer (ADR-017,
@@ -22,10 +23,15 @@ import { cancelIn, SHORTCUT, stopIn, writeIn } from './useDictation'
 
 export const carriedText = {
   didntSend: "Didn't send.",
+  /** Dictation said from anywhere, with no composer to say it to: where it goes is chosen once it is written. */
+  place: 'Place it in…',
 }
 
 /** Goes back to a thread's composer: the window's router, given by its frame. */
 export const CarriedBack = createContext<(back: Destination['back']) => void>(() => {})
+
+/** Opens the window's own chooser of where dictation said from anywhere goes: a project's coordinator, a task, an aside. */
+export const CarriedPlace = createContext<() => void>(() => {})
 
 /** Over the composer of `here`: dictation carried from another thread, if any. */
 export function CarriedOver({ here }: { here: string }) {
@@ -34,14 +40,18 @@ export function CarriedOver({ here }: { here: string }) {
   return <Carried thread={key} here={here} />
 }
 
-/** At the window's foot, where no composer shows. */
+/**
+ * At the window's foot, where no composer shows. Drawn at the body's end, outside the app's root, so a page in a tab
+ * (a native view laid over the window, ADR-100) steps aside for it as it does for any popover.
+ */
 export function CarriedAtFoot() {
   const { key, here } = useCarrying()
   if (key === null || here !== null) return null
-  return (
-    <div className={s.foot}>
+  return createPortal(
+    <div className={s.foot} data-state="open">
       <Carried thread={key} here={null} />
-    </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -50,6 +60,7 @@ const isShortcut = (event: KeyboardEvent) =>
 
 function Carried({ thread, here }: { thread: string; here: string | null }) {
   const goBack = useContext(CarriedBack)
+  const choosePlace = useContext(CarriedPlace)
   const { client } = useServices()
   const session = useSession(thread)
   const draft = useDraftOf(thread)
@@ -129,10 +140,24 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
       said={failed === null ? '' : lengthOf(failed.seconds)}
       kbd={SHORTCUT}
       onStop={() => stopIn(thread)}
-      onDiscard={() => (phase === 'failed' ? changeSession(thread, { failed: null, away: null }) : cancelIn(thread))}
-      onBack={() => goBack(to.back)}
-      // Kept, its composer still says it came while the person was away.
-      onKeep={() => changeSession(thread, { away: null })}
+      onDiscard={() =>
+        phase === 'failed' // Earlier words said from anywhere and not yet placed stay carried.
+          ? changeSession(thread, { failed: null, away: keptAway(thread) })
+          : cancelIn(thread)
+      }
+      {...(to.back === null
+        ? {
+            // No composer to say it to: it is placed, or thrown away.
+            onThrow: () => {
+              setDraftText(thread, '')
+              done()
+            },
+          }
+        : {
+            onBack: () => goBack(to.back!),
+            // Kept, its composer still says it came while the person was away.
+            onKeep: () => changeSession(thread, { away: null }),
+          })}
       onRetry={() => {
         if (failed === null) return
         changeSession(thread, { failed: null })
@@ -140,6 +165,9 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
       }}
       {...(target !== null && draft.images.length === 0 && draft.files.length === 0
         ? { send: { label: to.send, busy: sending !== null, onSend: () => send(target) } }
+        : {})}
+      {...(to.back === null && draft.images.length === 0 && draft.files.length === 0
+        ? { place: { label: carriedText.place, onPlace: choosePlace } }
         : {})}
       {...(there !== null && here !== null && sending === null ? { move: { label: there.take, onMove: move } } : {})}
       error={error}

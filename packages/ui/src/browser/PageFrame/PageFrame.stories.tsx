@@ -24,7 +24,6 @@ export const Fit: Story = { args: { still: PAGE } }
 
 /** At a phone's size: drawn whole in a well, smaller where the panel is shorter. */
 export const Device: Story = { args: { page: { x: 145, y: 16, width: 350, height: 668 }, still: PHONE_PAGE } }
-export const DeviceDark: Story = { ...Device, globals: { theme: 'dark' } }
 
 const banner = { x: 24, y: 124, width: 592, height: 56 }
 

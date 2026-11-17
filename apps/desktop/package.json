@@ -1,6 +1,6 @@
 {
   "name": "@althar/desktop",
-  "version": "0.7.0",
+  "version": "0.9.0",
   "private": true,
   "description": "Althar's desktop app: Electron, with the runtime in a utility process and the interface in the window.",
   "license": "Apache-2.0",
@@ -11,6 +11,7 @@
     "build:package": "vp build --config vite.node.config.ts --mode package && vp build --config vite.preload.config.ts && vp build --config vite.overlay.config.ts && vp build",
     "start": "electron .",
     "measure:startup": "bun run build && bun build scripts/measure-startup.ts --target=node --external=@playwright/test --external=electron --outfile=test-results/measure-startup.mjs && node test-results/measure-startup.mjs > test-results/startup-measurements.jsonl",
+    "measure:long-thread": "bun run build && bun build scripts/measure-long-thread.ts --target=node --external=@playwright/test --external=electron --outfile=test-results/measure-long-thread.mjs && node test-results/measure-long-thread.mjs",
     "dev": "bun run build && electron .",
     "check": "vp check",
     "fix": "vp check --fix",
@@ -23,7 +24,7 @@
     "release": "node scripts/release.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.106.0",
+    "@agentclientprotocol/claude-agent-acp": "0.107.1",
     "@agentclientprotocol/codex-acp": "2.6.0",
     "@althar/connectors": "workspace:*",
     "@althar/contracts": "workspace:*",
@@ -36,17 +37,18 @@
     "@tanstack/react-router": "^1.170.46",
     "effect": "4.0.7",
     "electron-updater": "6.8.11",
-    "posthog-node": "5.63.1",
+    "posthog-node": "5.73.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "sharp": "^0.35.5",
     "sherpa-onnx-node": "1.13.8"
   },
   "devDependencies": {
     "@althar/testing": "workspace:*",
     "@effect/vitest": "4.0.7",
-    "@playwright/test": "^1.65.0",
+    "@playwright/test": "^1.65.1",
     "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.9",
+    "@testing-library/user-event": "^14.6.10",
     "@types/node": "^24.0.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -56,8 +58,8 @@
     "electron-builder": "^26.15.3",
     "jsdom": "^30.1.3",
     "typescript": "^7.0.2",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0",
-    "vite-plus": "1.5.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
+    "vite-plus": "1.6.0",
     "vitest": "5.1.0"
   },
   "engines": {

@@ -1,5 +1,6 @@
+import { removeTreeSync } from '@althar/testing'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -480,7 +481,7 @@ describe('a task’s course', () => {
       writeFileSync(join(before.worktree ?? '', 'note.txt'), 'kept\n')
       git(before.worktree ?? '', 'add', '.')
       git(before.worktree ?? '', 'commit', '-q', '-m', 'Keep a note')
-      rmSync(before.worktree ?? '', { recursive: true, force: true })
+      removeTreeSync(before.worktree ?? '')
       yield* tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId })
       assert.strictEqual(git(before.worktree ?? '', 'rev-parse', '--abbrev-ref', 'HEAD'), before.branch)
       assert.isTrue(existsSync(join(before.worktree ?? '', 'note.txt')))
@@ -494,7 +495,7 @@ describe('a task’s course', () => {
 
       // Abandoned with its branch gone too, it can't be reopened on it, and stays as it was.
       yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
-      rmSync(before.worktree ?? '', { recursive: true, force: true })
+      removeTreeSync(before.worktree ?? '')
       git(root, 'worktree', 'prune')
       git(root, 'branch', '-D', before.branch ?? '')
       const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* command('task.reopen'), taskId: task.taskId }))
@@ -927,6 +928,29 @@ describe('renaming a task', () => {
           [actor, { title: 'Retry, later', was: 'Retry payments' }],
         ],
       )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('tells the feed who renamed a task: an agent or the person', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const queries = yield* Queries
+      const instance = yield* Instance
+      const { task } = yield* planned('Retry checkout')
+      const since = yield* queries.cursor
+      yield* tasks.rename({ envelope: yield* command('task.rename'), taskId: task.taskId, title: 'By the person' })
+      yield* tasks.rename({
+        envelope: yield* Runtime.envelope('task.rename', {}, undefined, instance.coordinatorId),
+        taskId: task.taskId,
+        title: 'By an agent',
+      })
+      const renames = (yield* queries.changesSince(since, 100))
+        .filter((change) => change.aggregateType === 'task' && change.renamedTo !== null)
+        .map((change) => [change.renamedTo, change.renamedByAgent])
+      assert.deepStrictEqual(renames, [
+        ['By the person', 0],
+        ['By an agent', 1],
+      ])
     }).pipe(Effect.provide(withQueries())),
   )
 

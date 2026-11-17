@@ -16,6 +16,7 @@ import { Button } from '../../primitives/Button/Button'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { InkSwatches, type InkSwatchesText } from '../../primitives/InkSwatches/InkSwatches'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { Spinner } from '../../primitives/Spinner/Spinner'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './NewProject.module.css'
@@ -31,7 +32,11 @@ import s from './NewProject.module.css'
  * said under them. Folders come from the system's picker, several at once,
  * or dropped anywhere on the page. A project that starts from nothing has
  * a new repository instead, or beside them: named after the project, in a
- * folder the person chooses, and made only as the project is.
+ * folder the person chooses, and made only as the project is. One whose code
+ * is on a host Althar is connected to, not on this computer, is cloned: those
+ * named like the project are one press away too, and the rest are a picker
+ * of the consumer's beside Choose a folder. A clone is a row as it comes in,
+ * and a folder like any other once it is read.
  */
 
 /** A folder added, as it was read: its repository, where it is, and where its remote is. */
@@ -41,6 +46,8 @@ export type NewProjectFolder =
       /** Still being read: its name, where it is known already. */
       readonly reading: true
       readonly name?: string
+      /** Being cloned: from which host and repository, and into where. */
+      readonly cloning?: { readonly host: CodeHost; readonly remote: string; readonly where: string }
     }
   | {
       readonly id: string
@@ -78,6 +85,23 @@ export interface NewProjectFound {
   readonly like: string | null
   readonly first: readonly NewProjectSuggestion[]
   readonly more: readonly NewProjectSuggestion[]
+}
+
+/** A repository on a host Althar is connected to, not on this computer: cloned in one press. */
+export interface NewProjectHostedRepo {
+  readonly id: string
+  readonly host: CodeHost
+  /** As its host names it: northwind-co/app. */
+  readonly remote: string
+  /** What else says which one it is: private, pushed yesterday. */
+  readonly facts?: string
+}
+
+/** The repositories on connected hosts named like the project. */
+export interface NewProjectHosted {
+  /** The project's name they are named like. */
+  readonly like: string
+  readonly repos: readonly NewProjectHostedRepo[]
 }
 
 /** Something reading the folders found beyond each one. */
@@ -134,6 +158,12 @@ export interface NewProjectText {
   addLabel: (name: string) => string
   inProject: (project: string) => string
   more: (count: number) => string
+  /** Over the repositories on connected hosts named like the project: the hosts, then its name. */
+  hostedLike: (hosts: string, name: string) => string
+  clone: string
+  cloneLabel: (remote: string) => string
+  /** Said in a row being cloned, where a read one says its remote. */
+  cloning: (host: string) => string
   read: string
   connected: (host: string, owners: ReactNode, account: string) => ReactNode
   unconnected: (remote: ReactNode, host: string, changes: string) => ReactNode
@@ -172,6 +202,10 @@ export const newProjectText: NewProjectText = {
   addLabel: (name) => `Add ${name}`,
   inProject: (project) => `in ${project}`,
   more: (count) => `${count} more on ${device.this}`,
+  hostedLike: (hosts, name) => `On ${hosts}, named like ${name}`,
+  clone: 'Clone',
+  cloneLabel: (remote) => `Clone ${remote}`,
+  cloning: (host) => `cloning from ${host}…`,
   read: 'What Althar read',
   connected: (host, owners, account) => (
     <>
@@ -218,6 +252,22 @@ export type NewProjectProps = RootProps<
      * or with one in the folders already, there is no way to from here.
      */
     onStartFresh?: () => void
+    /**
+     * Beside Choose a folder: a button that clones a repository from a host
+     * Althar is connected to, opening the consumer's own picker of them.
+     */
+    clone?: ReactNode
+    /** The repositories on connected hosts named like the project, each cloned in one press with onClone. */
+    hosted?: NewProjectHosted | null
+    onClone?: (id: string) => void
+    /**
+     * In place of its folders: the consumer's own way of choosing where the
+     * project's code comes from and how it is set up, given the side's room.
+     * The folders still say what it is made of, and Create still waits on them.
+     */
+    side?: ReactNode
+    /** In the foot, before Create: what Create will do. */
+    footNote?: ReactNode
     /** Folders dropped on the page. Without it, a drop does nothing. */
     onDrop?: (files: readonly File[]) => void
     /** What is on this computer to add; null while it is still being looked for. */
@@ -256,7 +306,7 @@ export const repositoryFolder = (name: string) =>
 type Missing = 'name' | 'folder' | null
 
 /** A list whose row went with the button focus was on: focus goes to the same place in it. */
-type Refocus = { readonly list: 'folders' | 'found'; readonly at: number }
+type Refocus = { readonly list: 'folders' | 'found' | 'hosted'; readonly at: number }
 
 /** Something is open over the page, positioned by Radix or a dialog, which Escape closes first. */
 const overlaid = () => document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"]') !== null
@@ -273,6 +323,11 @@ export function NewProject({
   onRemove,
   onChoose,
   onStartFresh,
+  clone,
+  hosted,
+  onClone,
+  side,
+  footNote,
   onDrop,
   found,
   onAdd,
@@ -293,12 +348,13 @@ export function NewProject({
   const chooseButton = useRef<HTMLButtonElement>(null)
   const [missing, setMissing] = useState<Missing>(null)
   const refocus = useRef<Refocus | null>(null)
-  const side = useRef<HTMLDivElement>(null)
+  const sideBox = useRef<HTMLDivElement>(null)
   const { over, handlers } = useDragOver(onDrop)
   const named = name.trim()
   const read = folders.flatMap((folder) => (folder.reading === true ? [] : [folder]))
   const reading = read.length < folders.length
   const fresh = onStartFresh !== undefined && !folders.some((folder) => folder.reading !== true && folder.fresh === true)
+  const cloneable = hosted !== undefined && hosted !== null && hosted.repos.length > 0 && onClone !== undefined ? { hosted, onClone } : null
 
   // A new repository is named after the project, so it asks for the name first.
   const startFresh = () => {
@@ -336,7 +392,7 @@ export function NewProject({
     if (was === null) return
     refocus.current = null
     if (document.activeElement !== null && document.activeElement !== document.body) return
-    const buttons = side.current?.querySelectorAll<HTMLButtonElement>(`[data-refocus="${was.list}"]`) ?? []
+    const buttons = sideBox.current?.querySelectorAll<HTMLButtonElement>(`[data-refocus="${was.list}"]`) ?? []
     ;(buttons[Math.min(was.at, buttons.length - 1)] ?? chooseButton.current)?.focus()
   })
 
@@ -401,9 +457,9 @@ export function NewProject({
             }}
           />
           {missing === 'name' && (
-            <p id={ids.missing} className={s.missing} role="alert">
+            <Problem id={ids.missing} size="small">
               {t.needsName}
-            </p>
+            </Problem>
           )}
           <p id={ids.note} className={s.note}>
             {t.nameNote}
@@ -432,83 +488,19 @@ export function NewProject({
       </section>
 
       <section className={s.side} aria-labelledby={ids.folders}>
-        <div className={s.sideInner} ref={side}>
-          <h2 id={ids.folders} className={s.title}>
-            {t.folders}
-          </h2>
-          {over && !empty && <div className={s.empty} aria-hidden="true" />}
-          {folders.length > 0 && (
-            <ul className={s.folders} aria-label={t.folders}>
-              {folders.map((folder, at) => (
-                <FolderRow
-                  key={folder.id}
-                  folder={folder}
-                  t={t}
-                  onRemove={(id) => {
-                    refocus.current = { list: 'folders', at }
-                    onRemove(id)
-                  }}
-                />
-              ))}
-            </ul>
-          )}
-          {empty ? (
-            // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
-            <div className={cx(s.zone, over && s.zoneOver)}>
-              <span className={s.zoneIcon} aria-hidden="true">
-                <Icon name="folder" size={18} />
-              </span>
-              <p className={s.zoneTitle}>{t.zone}</p>
-              <div className={s.zoneButtons}>
-                <Button
-                  ref={chooseButton}
-                  size="small"
-                  icon="folder"
-                  onClick={onChoose}
-                  aria-describedby={missing === 'folder' ? ids.missing : undefined}
-                >
-                  {t.choose}
-                </Button>
-                {fresh && (
-                  <Button size="small" icon="plus" onClick={startFresh}>
-                    {t.fresh}
-                  </Button>
-                )}
-              </div>
-              {missing === 'folder' ? (
-                <p id={ids.missing} className={s.missing} role="alert">
-                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                </p>
-              ) : (
-                fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
-              )}
-            </div>
+        <div className={s.sideInner} ref={sideBox}>
+          {side !== undefined ? (
+            <VisuallyHidden>
+              <h2 id={ids.folders}>{t.folders}</h2>
+            </VisuallyHidden>
           ) : (
-            <div className={s.chooseRow}>
-              <Button
-                ref={chooseButton}
-                size="small"
-                icon="folder"
-                onClick={onChoose}
-                aria-describedby={missing === 'folder' ? ids.missing : undefined}
-              >
-                {t.choose}
-              </Button>
-              {fresh && (
-                <Button size="small" icon="plus" onClick={startFresh}>
-                  {t.fresh}
-                </Button>
-              )}
-              {missing === 'folder' ? (
-                <span id={ids.missing} className={s.missing} role="alert">
-                  {fresh ? t.needsFolderOrFresh : t.needsFolder}
-                </span>
-              ) : (
-                <span className={s.note}>{t.chooseNote}</span>
-              )}
-            </div>
+            <h2 id={ids.folders} className={s.title}>
+              {t.folders}
+            </h2>
           )}
-          {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
+          {side}
+          {/* Beside a setup of the consumer's own, what reading its folders found, and what this computer has named like it, under it. */}
+          {side !== undefined && (findings.length > 0 || (found !== null && found.first.length + found.more.length > 0)) && (
             <div className={s.below}>
               {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
               {found !== null && (
@@ -523,12 +515,121 @@ export function NewProject({
               )}
             </div>
           )}
+          {side === undefined && (
+            <>
+              {over && !empty && <div className={s.empty} aria-hidden="true" />}
+              {folders.length > 0 && (
+                <ul className={s.folders} aria-label={t.folders}>
+                  {folders.map((folder, at) => (
+                    <FolderRow
+                      key={folder.id}
+                      folder={folder}
+                      t={t}
+                      onRemove={(id) => {
+                        refocus.current = { list: 'folders', at }
+                        onRemove(id)
+                      }}
+                    />
+                  ))}
+                </ul>
+              )}
+              {empty ? (
+                // Nothing added yet: where the folders will be, taking a drop, with the two ways to add one.
+                <div className={cx(s.zone, over && s.zoneOver)}>
+                  <span className={s.zoneIcon} aria-hidden="true">
+                    <Icon name="folder" size={18} />
+                  </span>
+                  <p className={s.zoneTitle}>{t.zone}</p>
+                  <div className={s.zoneButtons}>
+                    <Button
+                      ref={chooseButton}
+                      size="small"
+                      icon="folder"
+                      onClick={onChoose}
+                      aria-describedby={missing === 'folder' ? ids.missing : undefined}
+                    >
+                      {t.choose}
+                    </Button>
+                    {fresh && (
+                      <Button size="small" icon="plus" onClick={startFresh}>
+                        {t.fresh}
+                      </Button>
+                    )}
+                    {clone}
+                  </div>
+                  {missing === 'folder' ? (
+                    <Problem id={ids.missing} size="small" className={s.zoneProblem}>
+                      {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                    </Problem>
+                  ) : (
+                    fresh && <p className={s.note}>{t.freshNote(named === '' ? null : repositoryFolder(named))}</p>
+                  )}
+                </div>
+              ) : (
+                <div className={s.chooseRow}>
+                  <Button
+                    ref={chooseButton}
+                    size="small"
+                    icon="folder"
+                    onClick={onChoose}
+                    aria-describedby={missing === 'folder' ? ids.missing : undefined}
+                  >
+                    {t.choose}
+                  </Button>
+                  {fresh && (
+                    <Button size="small" icon="plus" onClick={startFresh}>
+                      {t.fresh}
+                    </Button>
+                  )}
+                  {clone}
+                  {missing === 'folder' ? (
+                    <Problem id={ids.missing} as="span" size="small">
+                      {fresh ? t.needsFolderOrFresh : t.needsFolder}
+                    </Problem>
+                  ) : (
+                    <span className={s.note}>{t.chooseNote}</span>
+                  )}
+                </div>
+              )}
+              {(findings.length > 0 || (found !== null && found.first.length + found.more.length > 0) || cloneable !== null) && (
+                <div className={s.below}>
+                  {findings.length > 0 && <Findings findings={findings} t={t} {...(onConnect === undefined ? {} : { onConnect })} />}
+                  {found !== null && (
+                    <Found
+                      found={found}
+                      t={t}
+                      onAdd={(id, at) => {
+                        refocus.current = { list: 'found', at }
+                        onAdd(id)
+                      }}
+                    />
+                  )}
+                  {cloneable !== null && (
+                    <Hosted
+                      hosted={cloneable.hosted}
+                      t={t}
+                      onClone={(id, at) => {
+                        refocus.current = { list: 'hosted', at }
+                        cloneable.onClone(id)
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </div>
         <footer className={s.foot}>
-          {error !== undefined && error !== null && (
-            <span className={s.error} role="alert">
+          {error !== undefined && error !== null ? (
+            <Problem as="span" size="small" className={s.error}>
               {error}
-            </span>
+            </Problem>
+          ) : side !== undefined && missing === 'folder' ? (
+            <Problem as="span" size="small" className={s.error}>
+              {t.needsFolder}
+            </Problem>
+          ) : (
+            footNote !== undefined && <span className={s.footNote}>{footNote}</span>
           )}
           <Button kbd={t.createKbd} variant={read.length === 0 ? 'quiet' : 'default'} busy={creating || reading} onClick={create}>
             {named === '' ? t.createUnnamed : t.create(named)}
@@ -553,7 +654,18 @@ function FolderRow({ folder, t, onRemove }: { folder: NewProjectFolder; t: NewPr
         <span className={s.folderIcon}>
           <Spinner size="small" />
         </span>
-        <span className={s.folderMain}>{folder.name !== undefined && <span className={s.folderName}>{folder.name}</span>}</span>
+        <span className={s.folderMain}>
+          {folder.name !== undefined && <span className={s.folderName}>{folder.name}</span>}
+          {folder.cloning !== undefined && (
+            <span className={s.facts}>
+              <span className={s.mono}>{folder.cloning.where}</span>
+              <span className={s.fact}>
+                <HostMark host={folder.cloning.host} size={11} />
+                {t.cloning(folder.cloning.host.name)}
+              </span>
+            </span>
+          )}
+        </span>
       </li>
     )
   if (folder.fresh === true)
@@ -702,6 +814,41 @@ function Found({ found, t, onAdd }: { found: NewProjectFound; t: NewProjectText;
           <LinkButton onClick={() => setAll(true)}>{t.more(found.more.length)}</LinkButton>
         </p>
       )}
+    </section>
+  )
+}
+
+/** The repositories on connected hosts named like the project, not on this computer: each cloned in one press. */
+function Hosted({ hosted, t, onClone }: { hosted: NewProjectHosted; t: NewProjectText; onClone: (id: string, at: number) => void }) {
+  const titleId = useId()
+  const hosts = [...new Set(hosted.repos.map((repo) => repo.host.name))]
+  return (
+    <section className={s.found} aria-labelledby={titleId}>
+      <h3 id={titleId} className={s.sub}>
+        {t.hostedLike(hosts.join(' and '), hosted.like)}
+      </h3>
+      <ul className={s.foundRows}>
+        {hosted.repos.map((repo, at) => (
+          <li key={repo.id} className={s.foundRow}>
+            <span className={s.hostedMark}>
+              <HostMark host={repo.host} size={14} />
+            </span>
+            <span className={s.foundMain}>
+              <span className={s.foundName}>{repo.remote}</span>
+              {repo.facts !== undefined && <span className={s.facts}>{repo.facts}</span>}
+            </span>
+            <Button
+              size="small"
+              icon="download"
+              aria-label={t.cloneLabel(repo.remote)}
+              data-refocus="hosted"
+              onClick={() => onClone(repo.id, at)}
+            >
+              {t.clone}
+            </Button>
+          </li>
+        ))}
+      </ul>
     </section>
   )
 }

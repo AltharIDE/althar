@@ -1,7 +1,16 @@
-import type { AgentStatus, BoardCall, BoardTask, ChangeSummary, HeldForShip, PlanStep, ReviewBrief } from '@althar/contracts'
+import {
+  type AgentStatus,
+  type BoardCall,
+  type BoardTask,
+  type ChangeSummary,
+  type HeldForShip,
+  issuesWordOf,
+  type PlanStep,
+  type ReviewBrief,
+} from '@althar/contracts'
 import {
   Board,
-  BoardCard,
+  BoardCard as KitBoardCard,
   boardCardText,
   type BoardCardProps,
   BoardColumn,
@@ -18,15 +27,16 @@ import {
   FactLine,
   FileChips,
   Findings,
-  KeptRow,
+  KeptRow as KitKeptRow,
   LinkButton,
   MenuItem,
+  MergeButton,
   NextLine,
-  NextRow,
+  NextRow as KitNextRow,
   NextStep,
   Outcome,
   PullChip,
-  SettledRow,
+  SettledRow as KitSettledRow,
   ScratchShelf,
   SettleWays,
   StartedBy,
@@ -37,12 +47,15 @@ import {
   type ChangeMarkTone,
   unreachable,
   Wait,
+  Problem,
 } from '@althar/ui'
-import { Fragment, type ReactNode, useEffect, useState } from 'react'
+import { type ComponentProps, Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
+import { abandonedBlocker, blockerText, blockerWords } from '../../shared/blockers'
+import { MERGING_STEP } from '../../data/merges'
 import { taskStatusOf } from '../../shared/taskStatus'
-import { busyWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
 import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
@@ -60,13 +73,14 @@ import {
   standingOf,
   standingText,
 } from '../../shared/standing'
-import { afterSteps, isAutomatedStep, stepText } from '../../shared/steps'
-import { ago, clock, running } from '../../shared/time'
+import { afterSteps, isAutomatedStep, stepNow, stepText } from '../../shared/steps'
+import { useTaskTitle } from '../../shared/taskTitle'
+import { ago, clock, runningCalmly } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import { arrivesQuietly, markArrived, watch } from './arrived'
 import s from './Board.module.css'
-import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting } from './lanes'
+import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting, yoursOf } from './lanes'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
@@ -122,7 +136,7 @@ export const text = {
   } satisfies Record<TaskStatus, string>,
   /** Why a stopped task's lead stopped, in a card's words, where something says; else the card says nothing more. */
   stoppedBy: stepText.stoppedBy,
-  carryOn: 'Carry on',
+  carryOn: 'Resume',
   carryingOn: 'Telling the lead',
   /** What the lead is told to carry on. */
   carryOnNote: 'Carry on.',
@@ -163,6 +177,8 @@ export const text = {
   deny: 'Don’t allow',
   /** What a question's card offers: to answer it, in its task. */
   answer: 'Answer',
+  /** A stuck step whose agent is signed out, from its card: Settings, at its sign-in, started. */
+  signIn: 'Sign in again',
   merged: (name: string) => `${name} merged`,
   closed: (name: string) => `${name} closed`,
   /** Settled with its pull request open on its host, as the host last said: an abandoned task's, left open. */
@@ -380,7 +396,7 @@ const empty = (size: { readonly add: number; readonly del: number } | null | und
 
 /** The step a change is on, in its word: its step's name on its track, or what it does once its steps are done. */
 const stepWordOf = (work: BoardTask): string => {
-  if (work.step === 'publish' || afterSteps(work.step)) return stepText.now[work.step ?? ''] ?? ''
+  if (work.step === 'publish' || afterSteps(work.step)) return stepNow(work.step, work.shipAt) ?? ''
   const { steps, at } = trackOf(work)
   return steps[at] ?? text.status[TaskStatus.Running]
 }
@@ -395,6 +411,25 @@ const findingsOf = (reviewing: ReviewBrief) => {
 }
 
 /** The card's own props, without how it opens. */
+/** The kit's card, its title typed in where an agent renames the task (the person's own rename shows at once). */
+function BoardCard({ taskId, ...props }: BoardCardProps & { taskId: string }) {
+  return <KitBoardCard {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+/** The kit's settled and kept rows, typed in the same way. */
+function SettledRow({ taskId, ...props }: ComponentProps<typeof KitSettledRow> & { taskId: string }) {
+  return <KitSettledRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+function KeptRow({ taskId, ...props }: ComponentProps<typeof KitKeptRow> & { taskId: string }) {
+  return <KitKeptRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
+/** The kit's queue row, typed in the same way. */
+function NextRow({ taskId, ...props }: ComponentProps<typeof KitNextRow> & { taskId: string }) {
+  return <KitNextRow {...props} title={useTaskTitle(taskId, props.title)} />
+}
+
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
 /** What a task handed back, as its card shows it: a row of pictures, or else a few files; nothing where it handed back none. */
@@ -445,7 +480,9 @@ const parentOf = (work: BoardTask, open: (threadId: string) => void): Pick<Board
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
-  const card = withHanded(work, runningCard(work, now, name))
+  const base = withHanded(work, runningCard(work, now, name))
+  // Merge pressed on its strip in Needs you, it is here at once, merging: it answers that press as it comes (MergeFeel).
+  const card = work.step === MERGING_STEP && actions?.merging.has(work.taskId) === true ? { ...base, merge: 'merging' as const } : base
   // Stopped, or its lead not yet started, with a conflict not asked of it: why, in place of its foot, and Resolve now.
   if (work.conflictUnsent != null) return { ...card, ...unsentOf(work, work.conflictUnsent, actions) }
   if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }
@@ -457,22 +494,24 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
   // stands is its card's, as its header and the home say it (`taskStatusOf`).
   const status = taskStatusOf(work)
   const still: Pick<Card, 'status' | 'word' | 'why'> | null =
-    status === TaskStatus.Paused && work.waits !== null
-      ? {
-          status,
-          word: text.status[status],
-          why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left),
-        }
-      : status === TaskStatus.Paused && work.reconnects != null
-        ? { status, word: text.status[status], why: reconnectsWords(work.reconnects, clock) }
-        : status === TaskStatus.Queued
-          ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
-          : status === TaskStatus.Stopped
-            ? { status, word: text.status[status], ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }) }
-            : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
-              work.settingUp != null
-              ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
-              : null
+    status === TaskStatus.Running && work.externalWait !== undefined
+      ? { status, word: 'Waiting', why: externalWaitWords(work.externalWait, clock) }
+      : status === TaskStatus.Paused && work.waits !== null
+        ? {
+            status,
+            word: text.status[status],
+            why: waitsWords(name(work.waits.agentId), clock(work.waits.until), undefined, work.waits.left),
+          }
+        : status === TaskStatus.Paused && work.reconnects != null
+          ? { status, word: text.status[status], why: reconnectsWords(work.reconnects, clock) }
+          : status === TaskStatus.Queued
+            ? { status, word: text.status[status], ...(work.queued === null ? {} : { why: busyWords(work.queued) }) }
+            : status === TaskStatus.Stopped
+              ? { status, word: text.status[status], ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }) }
+              : // Its folder set up before its lead starts: what holds it, in place of the step its lead hasn't begun.
+                work.settingUp != null
+                ? { status: TaskStatus.Running, word: text.settingUp[work.settingUp] }
+                : null
   const beforeWork = work.queued !== null && work.inLine === true
   const base = {
     kind: kindOf(work),
@@ -481,7 +520,7 @@ const runningCard = (work: BoardTask, now: string, name: (id: string | null) => 
     title: work.title,
     ...fromOf(work),
     // Waiting before its first step has had an agent, nothing has run: no clock.
-    ...(work.startedAt === null || beforeWork ? {} : { at: running(work.startedAt, now) }),
+    ...(work.startedAt === null || beforeWork || work.externalWait !== undefined ? {} : { at: runningCalmly(work.startedAt, now) }),
   }
   switch (work.kind) {
     case 'plain':
@@ -569,18 +608,22 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
           ...(sendBack === undefined && !merges
             ? {}
             : {
+                // Its strip is Merge: pressed, the whole card answers.
+                ...(merges ? { merge: actions?.merging?.has(work.taskId) === true ? ('merging' as const) : ('ready' as const) } : {}),
                 next: (
                   <>
                     {merges && (
-                      <NextStep
-                        signal
+                      <MergeButton
+                        strip
                         busy={actions?.merging?.has(work.taskId) ?? false}
-                        doing={doingWords({ kind: 'merge' })}
-                        label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
-                        onPress={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                        aria-label={labelWords({ kind: 'merge' }, `${work.change?.prefix ?? ''}${work.change?.number ?? ''}`)}
+                        onMerge={() => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url)}
+                        {...(work.change?.canBypassQueue === true && work.change.unpushed === 0 && work.held === undefined
+                          ? { onBypassQueue: () => void actions?.merge(work.taskId, work.change?.head ?? '', work.change?.url, true) }
+                          : {})}
                       >
                         {nextWords({ kind: 'merge' })}
-                      </NextStep>
+                      </MergeButton>
                     )}
                     {sendBack !== undefined && (
                       <NextStep
@@ -599,8 +642,26 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
   }
 }
 
-/** A task that waits on a call of the person's: the call's kind, and why, under its title; a permission's command under that. */
-export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null) => string): Card => {
+/** Why a step stuck, where it failed rather than waits: said on its card as a problem. */
+const FAILED: ReadonlySet<string> = new Set([
+  'signed_out',
+  'sign_in_ended',
+  'not_installed',
+  'failed_to_start',
+  'not_connected',
+  'transient',
+])
+
+/** A stuck step that signing its agent in again puts right: whose agent, by id; null for any other. */
+const signInFor = (stuck: BoardCall['stuck']): string | null =>
+  stuck !== null && (stuck.why === 'signed_out' || stuck.why === 'sign_in_ended') ? stuck.agentId : null
+
+/**
+ * A task that waits on a call of the person's: the call's kind, and why, under its title; a permission's command under that.
+ * A step stuck because something failed says so as a problem, and where signing its agent in again puts it right, its strip
+ * does that, in place (`onSignIn`); once signed in, its task's Try again picks up where it stopped.
+ */
+export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null) => string, onSignIn?: (agentId: string) => void): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(task), ...localOf(task), ...towardOf(task), title: task.title, ...fromOf(task) }
   // What it asks, or what it wants to do; for a step that needs the person, what stopped it.
   const why =
@@ -614,17 +675,57 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
       : call.stuck.step === 'publish' && call.stuck.why !== 'not_connected'
         ? stuckText.publishing(call.stuck)
         : stuckText.what(call.stuck, name(call.stuck.agentId) || 'The agent')
+  const failed = call.stuck !== null && FAILED.has(call.stuck.why)
+  const signIn = signInFor(call.stuck)
   return withHanded(task, {
     ...base,
     word: callKindOf(call),
     at: ago(call.createdAt),
-    why,
+    ...(failed ? { problem: why } : { why }),
+    ...(signIn !== null && onSignIn !== undefined
+      ? {
+          next: (
+            <NextStep signal onPress={() => onSignIn(signIn)}>
+              {text.signIn}
+            </NextStep>
+          ),
+        }
+      : {}),
     ...(call.kind === 'permission' && call.command !== null
       ? { object: <CommandChip title={call.command}>{call.label ?? call.command}</CommandChip> }
       : {}),
     // A question's one step is to answer it, in its task.
     ...(call.kind === 'question' ? { next: <NextStep signal>{text.answer}</NextStep> } : {}),
   })
+}
+
+/** A task that waits on issues its lead drafted, or changes it proposed to its issue: what to do, in its task, where they are. */
+export const issuesCardOf = (work: BoardTask): Card => ({
+  status: TaskStatus.Yours,
+  kind: kindOf(work),
+  ...localOf(work),
+  ...towardOf(work),
+  title: work.title,
+  ...fromOf(work),
+  word: issuesWordOf(work.issues),
+})
+
+/**
+ * A plan that waits for a task that was abandoned (tasks wait for their blockers): the person's, in Needs you, saying which;
+ * its page and its plan card start it anyway, reopen that one, or stop waiting for it.
+ */
+export const abandonedCardOf = (work: BoardTask): Card => {
+  const gone = abandonedBlocker(work)
+  return {
+    status: TaskStatus.Yours,
+    kind: kindOf(work),
+    ...localOf(work),
+    ...towardOf(work),
+    title: work.title,
+    ...fromOf(work),
+    word: kindWords.abandoned,
+    ...(gone === undefined ? {} : { why: blockerText.abandoned(gone.title) }),
+  }
 }
 
 /**
@@ -700,7 +801,7 @@ const readyCard = (work: BoardTask, actions?: CardActions): Card => {
       return {
         ...base,
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet; as its header says.
-        word: readyWordOf(work, work.change),
+        word: readyWordOf(work),
         ...(object === null ? {} : { object }),
         // Nothing built: no accept to press; what its lead leaves to the person, and Done, which settles it where it is, in its corner.
         ...(work.nothingBuilt === true ? { ...(ask === null ? {} : { why: ask }), corner: settleWaysOf(work, actions) } : {}),
@@ -930,6 +1031,18 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   const step =
     next === null || (next.kind === 'fix' && work.checksBack != null) ? null : here === null || actions === undefined ? (
       <NextStep>{nextWords(next)}</NextStep>
+    ) : here.kind === 'merge' ? (
+      <MergeButton
+        strip
+        busy={actions.merging.has(work.taskId)}
+        aria-label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
+        onMerge={() => void actions.merge(work.taskId, change.head ?? '', change.url)}
+        {...(change.canBypassQueue === true
+          ? { onBypassQueue: () => void actions.merge(work.taskId, change.head ?? '', change.url, true) }
+          : {})}
+      >
+        {actions.merging.has(work.taskId) ? doingWords(here) : failed === null ? nextWords(here) : standingText.nextFailed.again}
+      </MergeButton>
     ) : (
       <NextStep
         signal
@@ -980,6 +1093,7 @@ export function BoardView({
   onFoldsChange,
   onTalk,
   team,
+  onSignIn,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -1006,6 +1120,8 @@ export function BoardView({
    * Without it, a row only opens its task.
    */
   team?: TeamActions
+  /** Opens Settings at an agent's sign-in, started: a step stuck on it offers that from its card. Without it, the card only opens its task. */
+  onSignIn?: (agentId: string) => void
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   // Clearing a chat off Scratch settles it, as Done does a task.
@@ -1025,6 +1141,7 @@ export function BoardView({
         ...lanes.waiting.map(({ task }) => task),
         ...lanes.stopped,
         ...lanes.ready,
+        ...lanes.abandoned,
         ...lanes.kept,
       ].map((work) => work.taskId),
     )
@@ -1079,9 +1196,13 @@ export function BoardView({
         : startsAt === null
           ? text.held
           : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
+    // A plan that waits for other tasks says what for, in place of its countdown: "Starts when Pairing merges"; and that it
+    // waits on the person once one of them was abandoned, or it is held.
+    const after = waits || pausedRow ? null : blockerWords(work)
     return (
       <NextRow
         key={work.taskId}
+        taskId={work.taskId}
         data-move={work.taskId}
         place={index + 1}
         task={work.slug}
@@ -1089,8 +1210,16 @@ export function BoardView({
         {...(goesOn ? { continues: work.kind === 'change' ? stepWordOf(work) : '' } : {})}
         {...(parent === undefined ? {} : { foot: <StartedBy task={parent.title} onOpen={() => onOpen(parent.threadId)} /> })}
         title={work.title}
-        wait={waits || pausedRow || startsAt !== null ? Wait.Workers : Wait.You}
-        reason={reason}
+        wait={
+          after !== null
+            ? abandonedBlocker(work) !== undefined || startsAt === null
+              ? Wait.You
+              : Wait.After
+            : waits || pausedRow || startsAt !== null
+              ? Wait.Workers
+              : Wait.You
+        }
+        reason={after ?? reason}
         onOpen={() => onOpen(work.threadId)}
         {...teamOf(work)}
         text={{ task: unnamed }}
@@ -1142,7 +1271,7 @@ export function BoardView({
       <BoardColumn
         lane={BoardLane.Next}
         count={shown.upNext}
-        filled={shown.next.length > 0}
+        filled={shown.next.length > 0 || lanes.stopped.length > 0}
         // Chats on Scratch, off the lanes: one chip, opened in place, by their latest exchange; Clear settles one. It heads
         // Up next whether anything waits there or not.
         lead={
@@ -1163,7 +1292,7 @@ export function BoardView({
           />
         }
         // Whenever nothing is in Up next, it says where work comes from.
-        {...(shown.next.length === 0
+        {...(shown.next.length === 0 && lanes.stopped.length === 0
           ? {
               empty: (
                 <BoardEmpty
@@ -1176,11 +1305,7 @@ export function BoardView({
             }
           : {})}
       >
-        {line?.failed != null && (
-          <p className={s.failure} role="alert">
-            {line.failed}
-          </p>
-        )}
+        {line?.failed != null && <Problem className={s.failure}>{line.failed}</Problem>}
         {line !== undefined && shown.reordered && waitingRows.length > 1 && (
           <BoardDivider end={<LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>}>{text.yourOrder}</BoardDivider>
         )}
@@ -1223,6 +1348,21 @@ export function BoardView({
                 })}
           />
         )}
+        {lanes.stopped.length > 0 && (
+          <BoardList>
+            {lanes.stopped.map((work) => (
+              <BoardCard
+                taskId={work.taskId}
+                key={work.taskId}
+                data-move={work.taskId}
+                {...stoppedCardOf(work, now, actions)}
+                {...parentOf(work, onOpen)}
+                errands={work.errands}
+                onOpen={() => onOpen(work.threadId)}
+              />
+            ))}
+          </BoardList>
+        )}
         {[halted, forLocal].map(
           (rows, at) =>
             rows.length > 0 && (
@@ -1237,6 +1377,7 @@ export function BoardView({
       <BoardColumn lane={BoardLane.Running} count={shown.atWork} filled={shown.running.length > 0}>
         {shown.running.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...runningCardOf(work, now, name, actions)}
@@ -1247,25 +1388,44 @@ export function BoardView({
         ))}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Yours} count={asks.length + lanes.stopped.length + lanes.ready.length}>
+      <BoardColumn lane={BoardLane.Yours} count={yoursOf(lanes)}>
         {asks.map((ask) =>
           ask.waiting !== null ? (
             <BoardCard
+              taskId={ask.waiting.task.taskId}
               key={ask.waiting.task.taskId}
               data-move={ask.waiting.task.taskId}
-              {...waitingCardOf(ask.waiting, name)}
+              {...waitingCardOf(ask.waiting, name, onSignIn)}
               {...parentOf(ask.waiting.task, onOpen)}
               errands={ask.waiting.task.errands}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
           ) : (
-            <CallCard key={ask.call.id} data-move={ask.call.id} {...callCardOf(ask.call, name)} onOpen={() => onOpen(ask.call.threadId)} />
+            <CallCard
+              key={ask.call.id}
+              data-move={ask.call.id}
+              {...callCardOf(ask.call, name, onSignIn)}
+              onOpen={() => onOpen(ask.call.threadId)}
+            />
           ),
         )}
-        {lanes.stopped.map((work) => (
+        {lanes.issues.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
-            {...stoppedCardOf(work, now, actions)}
+            data-move={work.taskId}
+            {...issuesCardOf(work)}
+            {...parentOf(work, onOpen)}
+            errands={work.errands}
+            onOpen={() => onOpen(work.threadId)}
+          />
+        ))}
+        {lanes.abandoned.map((work) => (
+          <BoardCard
+            taskId={work.taskId}
+            key={work.taskId}
+            data-move={work.taskId}
+            {...abandonedCardOf(work)}
             {...parentOf(work, onOpen)}
             errands={work.errands}
             onOpen={() => onOpen(work.threadId)}
@@ -1273,6 +1433,7 @@ export function BoardView({
         ))}
         {lanes.ready.map((work) => (
           <BoardCard
+            taskId={work.taskId}
             key={work.taskId}
             data-move={work.taskId}
             {...readyCardOf(work, actions)}
@@ -1320,6 +1481,7 @@ export function BoardView({
                 return (
                   <SettledRow
                     key={work.taskId}
+                    taskId={work.taskId}
                     data-move={work.taskId}
                     // Moved into Settled before, or settled before this window looked: drawn there without moving or coming in.
                     {...(arrivesQuietly(work.taskId) ? { 'data-move-seen': '' } : {})}
@@ -1379,6 +1541,7 @@ function Kept({ work, now, onOpen, actions }: { work: BoardTask; now: string; on
   const failed = actions?.failed[work.taskId]
   return (
     <KeptRow
+      taskId={work.taskId}
       data-move={work.taskId}
       title={work.title}
       at={work.keptAt == null ? '' : text.keptAt(ago(work.keptAt, new Date(now)))}
@@ -1392,7 +1555,7 @@ function Kept({ work, now, onOpen, actions }: { work: BoardTask; now: string; on
 }
 
 /** A call no task on the board waits on, as its card says it: the coordinator's question, with its options; or a held plan's call. */
-export const callCardOf = (waiting: BoardCall, name: (id: string | null) => string) => {
+export const callCardOf = (waiting: BoardCall, name: (id: string | null) => string, onSignIn?: (agentId: string) => void) => {
   // An agent's question, with its options where it asks one thing: answered where it was asked.
   if (waiting.kind === 'question') {
     const question = waiting.question ?? { fields: [] }
@@ -1409,15 +1572,28 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
   }
   if (waiting.stuck !== null) {
     const stuck = waiting.stuck
+    const what =
+      stuck.step === 'publish' && stuck.why !== 'not_connected'
+        ? stuckText.publishing(stuck)
+        : stuckText.what(stuck, name(stuck.agentId) || 'The agent')
+    const signIn = signInFor(stuck)
+    // A step stuck because something failed: what went wrong as a problem under where it is, and what fixes it in its strip.
     return {
       kind: callKindOf(waiting),
-      title:
-        stuck.step === 'publish' && stuck.why !== 'not_connected'
-          ? stuckText.publishing(stuck)
-          : stuckText.what(stuck, name(stuck.agentId) || 'The agent'),
+      title: FAILED.has(stuck.why) ? (waiting.taskTitle ?? what) : what,
+      ...(FAILED.has(stuck.why) && waiting.taskTitle !== null ? { problem: what } : {}),
       options: [],
       from: whereOf(waiting),
       at: ago(waiting.createdAt),
+      ...(signIn !== null && onSignIn !== undefined
+        ? {
+            next: (
+              <NextStep signal onPress={() => onSignIn(signIn)}>
+                {text.signIn}
+              </NextStep>
+            ),
+          }
+        : {}),
     }
   }
   return {

@@ -1,18 +1,12 @@
+/* what stays, its pull requests and why it didn't go, one under another */
+.body {
+  display: grid;
+  gap: 14px;
+}
 .list {
   display: grid;
   gap: 6px;
   margin: 0;
   padding-left: 18px;
   overflow-wrap: anywhere;
-}
-.error {
-  margin: 12px 0 0;
-  color: var(--danger);
-}
-.changes {
-  margin-top: 14px;
-}
-/* first under the description, whose own space is enough */
-.changes:first-child {
-  margin-top: 0;
 }

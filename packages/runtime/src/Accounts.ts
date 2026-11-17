@@ -3,12 +3,14 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
+import { signInHost } from '@althar/contracts'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
 import { adapterNode, type AgentDefinition, agentVersion, majorOf, removeFully, signOut } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents, RuntimeConfig } from './Config'
+import { Copilot } from './Copilot'
 import { NotFound, UnknownAgent } from './errors'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
@@ -34,6 +36,8 @@ export interface Account {
   readonly position: number
   /** What made its home, when Althar didn't. */
   readonly adoptedFrom: string | null
+  /** Copilot CLI's selected authentication host, kept independently of shell environment variables. */
+  readonly signInHost?: string
 }
 
 /** A folder a known switcher keeps an account in, not yet an account here. */
@@ -51,7 +55,7 @@ export const USUAL = 'main'
 export class SignOutFailed extends Schema.TaggedError<SignOutFailed>()('SignOutFailed', { line: Schema.String }) {}
 
 export class AccountRefused extends Schema.TaggedError<AccountRefused>()('AccountRefused', {
-  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name', 'one', 'no_terminal']),
+  reason: Schema.Literals(['no_room', 'not_a_folder', 'usual', 'taken', 'no_name', 'one', 'no_terminal', 'host']),
 }) {}
 
 /**
@@ -89,7 +93,13 @@ const NOT_HOMES = new Set(['.claude-code-router'])
 /** A word quoted for a POSIX shell. */
 const quoted = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`
 
-type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | RuntimeConfig
+const hostKey = (accountId: string) => `copilot.cli.host:${accountId}`
+const withHost = ({ host, ...account }: Account & { readonly host: string | null }): Account => {
+  const selected = account.agentId === 'copilot' ? (host ?? (process.env.COPILOT_GH_HOST || process.env.GH_HOST || undefined)) : undefined
+  return selected === undefined ? account : { ...account, signInHost: selected }
+}
+
+type Store = SqlClient.SqlClient | Ledger | Crypto.Crypto | Instance | Agents | RuntimeConfig | Copilot
 type Failure = SqlError.SqlError | Schema.SchemaError | RowNotFound | RevisionConflict
 
 export class Accounts extends Context.Service<
@@ -123,7 +133,7 @@ export class Accounts extends Context.Service<
     /** Folders known switchers keep the agent's accounts in that aren't accounts here yet. */
     found(agentId: string): Effect.Effect<ReadonlyArray<Found>, SqlError.SqlError>
     /** The line that signs the account in with the agent's own tool, in its home. */
-    login(accountId: string): Effect.Effect<string, AccountRefused | NotFound | UnknownAgent | SqlError.SqlError>
+    login(accountId: string, host?: string): Effect.Effect<string, AccountRefused | NotFound | UnknownAgent | SqlError.SqlError>
   }
 >()('@althar/runtime/Accounts') {
   static readonly layer: Layer.Layer<Accounts, never, Store> = Layer.effect(
@@ -133,6 +143,7 @@ export class Accounts extends Context.Service<
       const instance = yield* Instance
       const agents = yield* Agents
       const config = yield* RuntimeConfig
+      const copilot = yield* Copilot
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
       const definitionOf = (agentId: string): AgentDefinition | undefined =>
@@ -150,10 +161,12 @@ export class Accounts extends Context.Service<
       const rows = (agentId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql<Account>`
-            SELECT id, agent_id, name, home, position, adopted_from FROM agent_accounts
-            WHERE device_id = ${instance.deviceId} AND agent_id = ${agentId} AND removed_at IS NULL
-            ORDER BY position, created_at`
+          const accounts = yield* sql<Account & { host: string | null }>`
+            SELECT a.id, a.agent_id, a.name, a.home, a.position, a.adopted_from, h.value AS host
+            FROM agent_accounts a LEFT JOIN settings h ON h.key = 'copilot.cli.host:' || a.id
+            WHERE a.device_id = ${instance.deviceId} AND a.agent_id = ${agentId} AND a.removed_at IS NULL
+            ORDER BY a.position, a.created_at`
+          return accounts.map(withHost)
         })
 
       const record = (account: Account, type: string, revision: number, payload: unknown) =>
@@ -183,6 +196,25 @@ export class Accounts extends Context.Service<
       const of = (agentId: string) =>
         Effect.gen(function* () {
           const known = yield* rows(agentId)
+          const definition = definitionOf(agentId)
+          if (definition?.native === 'copilot') {
+            if (!known.some((account) => account.home === null)) return known
+            // Native accounts have no external default sign-in. Keep existing IDs and names from the retired engine,
+            // but make that account removable like every account Althar owns; never import the engine's credentials.
+            const sql = yield* SqlClient.SqlClient
+            return yield* sql
+              .withTransaction(
+                Effect.gen(function* () {
+                  for (const account of known.filter((account) => account.home === null)) {
+                    const home = config.accountsRoot === undefined ? usualOf(definition) : join(config.accountsRoot, `${agentId}-usual`)
+                    const revision = yield* change('agent_accounts', account.id, { home })
+                    yield* record(account, 'agent_account.native_owned', revision, { home })
+                  }
+                  return yield* rows(agentId)
+                }),
+              )
+              .pipe(Effect.catchTags({ SchemaError: Effect.die, RowNotFound: Effect.die, RevisionConflict: Effect.die }))
+          }
           if (known.some((account) => account.home === null)) return known
           const sql = yield* SqlClient.SqlClient
           // The agent's usual folder is its first account; who it was seen as before accounts were kept goes with it.
@@ -199,10 +231,11 @@ export class Accounts extends Context.Service<
       const get = (accountId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [account] = yield* sql<Account>`
-            SELECT id, agent_id, name, home, position, adopted_from FROM agent_accounts
-            WHERE id = ${accountId} AND device_id = ${instance.deviceId} AND removed_at IS NULL`
-          return account === undefined ? yield* new NotFound({ kind: 'account', id: accountId }) : account
+          const [account] = yield* sql<Account & { host: string | null }>`
+            SELECT a.id, a.agent_id, a.name, a.home, a.position, a.adopted_from, h.value AS host
+            FROM agent_accounts a LEFT JOIN settings h ON h.key = 'copilot.cli.host:' || a.id
+            WHERE a.id = ${accountId} AND a.device_id = ${instance.deviceId} AND a.removed_at IS NULL`
+          return account === undefined ? yield* new NotFound({ kind: 'account', id: accountId }) : withHost(account)
         })
 
       /** The folder of an account Althar made, where it is still under the runtime's own: never one another tool made. */
@@ -239,6 +272,16 @@ export class Accounts extends Context.Service<
       const env = (account: Account): Readonly<Record<string, string>> => {
         const definition = definitionOf(account.agentId)
         if (definition === undefined) return {}
+        if (definition.native === 'copilot') return { ALTHAR_COPILOT_ACCOUNT: account.id }
+        const host = account.agentId === 'copilot' && account.signInHost !== undefined ? signInHost(account.signInHost) : null
+        const hostEnv = host === null ? {} : { GH_HOST: host, COPILOT_GH_HOST: host }
+        if (account.home === null && definition.home.managed === true) {
+          const home =
+            config.accountsRoot === undefined
+              ? definition.home.usual(process.env, homedir())
+              : join(config.accountsRoot, `${account.agentId}-usual`)
+          return { ...hostEnv, [definition.home.variable]: home }
+        }
         // The host Claude CLI cannot see the Flatpak's fresh home. Keep its
         // usual account in Althar's persistent profile and point both the
         // host CLI and bundled ACP at that same config directory.
@@ -249,7 +292,7 @@ export class Accounts extends Context.Service<
           config.accountsRoot !== undefined
         )
           return { [definition.home.variable]: join(config.accountsRoot, 'claude-usual') }
-        return account.home === null ? {} : { [definition.home.variable]: account.home }
+        return account.home === null ? hostEnv : { ...hostEnv, [definition.home.variable]: account.home }
       }
 
       const found = (agentId: string) =>
@@ -330,6 +373,10 @@ export class Accounts extends Context.Service<
           Effect.sync(() => {
             const definition = definitionOf(account.agentId)
             const made = madeHere(account)
+            if (definition?.home.managed === true && account.home === null) {
+              const home = env(account)[definition.home.variable]
+              if (home !== undefined) mkdirSync(home, { recursive: true, mode: 0o700 })
+            }
             if (definition !== undefined && made !== undefined) link(definition, made)
             else if (
               definition !== undefined &&
@@ -363,8 +410,16 @@ export class Accounts extends Context.Service<
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
-              const account = yield* get(accountId)
+              let account = yield* get(accountId)
+              if (account.home === null && definitionOf(account.agentId)?.native === 'copilot') {
+                yield* of(account.agentId)
+                account = yield* get(accountId)
+              }
               if (account.home === null) return yield* new AccountRefused({ reason: 'usual' })
+              if (definitionOf(account.agentId)?.native === 'copilot')
+                yield* copilot
+                  .forget(account.id)
+                  .pipe(Effect.mapError(() => new SignOutFailed({ line: 'Remove this account again in Althar.' })))
               // A folder Althar made is signed out with the agent's own tool, then goes; one another tool made stays its.
               const made = madeHere(account)
               // Anyway, as when the agent's tool is gone: the folder goes even where its sign-out didn't happen.
@@ -378,6 +433,7 @@ export class Accounts extends Context.Service<
                   yield* record(account, 'agent_account.removed', revision, { signedOutAndDeleted: made !== undefined })
                   // What was kept of its sign-in's warning goes with it (DEV-196).
                   yield* sql`DELETE FROM settings WHERE key = ${warnedKey(account.id)}`
+                  yield* sql`DELETE FROM settings WHERE key = ${hostKey(account.id)}`
                 }),
               )
             }),
@@ -404,7 +460,7 @@ export class Accounts extends Context.Service<
             }),
           ),
         found: (agentId) => provide(found(agentId)),
-        login: (accountId) =>
+        login: (accountId, inputHost) =>
           provide(
             Effect.gen(function* () {
               const account = yield* get(accountId)
@@ -412,6 +468,15 @@ export class Accounts extends Context.Service<
               if (definition === undefined) return yield* new UnknownAgent({ agentId: account.agentId })
               // One that signs in only inside Althar (Antigravity, over ACP) has nothing to run in a terminal.
               if (definition.signIn.login === '') return yield* new AccountRefused({ reason: 'no_terminal' })
+              if (inputHost !== undefined && account.agentId !== 'copilot') return yield* new AccountRefused({ reason: 'host' })
+              const selected = inputHost ?? account.signInHost
+              const host = account.agentId === 'copilot' && selected !== undefined ? signInHost(selected) : undefined
+              if (host === null) return yield* new AccountRefused({ reason: 'host' })
+              if (host !== undefined) {
+                const sql = yield* SqlClient.SqlClient
+                yield* sql`INSERT INTO settings (key, value, updated_at) VALUES (${hostKey(account.id)}, ${host}, ${yield* timestamp})
+                  ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+              }
               // The home a session gets (`env`), not the folder: the usual
               // Claude account in a Flatpak signs in where its sessions read.
               const home = env(account)[definition.home.variable]
@@ -419,7 +484,8 @@ export class Accounts extends Context.Service<
               const before = definition.signIn.loginBefore
               const version = before === undefined ? null : yield* agentVersion(definition, adapterNode())
               const major = version === null ? null : majorOf(version)
-              const line = before !== undefined && major !== null && major < before.major ? before.line : definition.signIn.login
+              const base = before !== undefined && major !== null && major < before.major ? before.line : definition.signIn.login
+              const line = host === undefined ? base : `${base} --host ${quoted(`https://${host}`)}`
               return home === undefined ? line : `${definition.home.variable}=${quoted(home)} ${line}`
             }),
           ),
@@ -434,6 +500,7 @@ export class Accounts extends Context.Service<
  * yet: the person's settings, or other tools' data. Never a sign-in.
  */
 const link = (definition: AgentDefinition, home: string) => {
+  if (definition.native !== undefined) return
   const usual = definition.home.usual(process.env, homedir())
   const names = listing(usual).map((entry) => entry.name)
   for (const name of definition.home.shared(names)) {

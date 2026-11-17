@@ -60,9 +60,6 @@ export const UndoingAChange: Story = {
   },
 }
 
-/** Past the time to undo, opened to what changed and who changed it. */
-export const SettledOpen: Story = { args: { settled: true, defaultOpen: true } }
-
 /** Added by one of the project's rules. */
 export const ByRule: Story = {
   args: {
@@ -73,8 +70,6 @@ export const ByRule: Story = {
     cause: { by: AllowedBy.Rule, rule: 'a security review whenever authentication files change' },
   },
 }
-
-export const Strip: Story = { render: () => <GraphStrip nodes={REPLACED} /> }
 
 const PROPOSAL = {
   by: CODEX,

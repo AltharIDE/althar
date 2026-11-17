@@ -32,6 +32,7 @@ describe('the app’s preferences kept in the profile', () => {
       appearance: 'light',
       accent: 'althar',
       openAtLogin: false,
+      keepWorkingOnClose: false,
       browserLinks: 'beside',
       browserCookies: 'task',
     })
@@ -70,6 +71,15 @@ describe('the app’s preferences kept in the profile', () => {
     await writeAppPreference(at, 'sound', 'Glass')
     expect(await readAppPreferences(at)).toEqual({ ...DEFAULT_PREFERENCES, keepAwake: false, editor: 'cursor', sound: 'Glass' })
     expect(JSON.parse(readFileSync(join(at, 'desktop.json'), 'utf8'))).toMatchObject({ icon: 'ink', keepAwake: false })
+  })
+
+  it('remember the background close choice across reopening the profile, until an explicit Quit clears it', async () => {
+    const at = profile()
+    await writeAppPreference(at, 'keepWorkingOnClose', true)
+    expect((await readAppPreferences(at)).keepWorkingOnClose).toBe(true)
+    await writeAppPreference(at, 'keepWorkingOnClose', false)
+    expect((await readAppPreferences(at)).keepWorkingOnClose).toBe(false)
+    expect(holds('keepWorkingOnClose', 'true')).toBe(false)
   })
 
   it('keep usage data and crash reports off, and say so in the file, when the file is there but can’t be read', async () => {

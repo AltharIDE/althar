@@ -120,7 +120,8 @@ test('forgets the conversation from the context ring, and the next message start
     const conversation = await talked(page, { ring: true })
 
     const ring = page.getByRole('button', { name: /^Context \d+% used$/ })
-    await ring.hover()
+    // Pin the detail open while the context reading and composer settle; this spec tests Clear, not hover dismissal.
+    await ring.click()
     const panel = page.getByRole('dialog', { name: 'Context' })
     await expect(panel.getByRole('button', { name: 'Clear chat…' })).toBeVisible()
     await expect(panel.getByRole('button', { name: 'Compact' })).toBeVisible()

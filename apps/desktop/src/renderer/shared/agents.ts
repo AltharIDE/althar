@@ -1,7 +1,11 @@
-import type { AgentStatus, HeldForConnection, Queued } from '@althar/contracts'
+import type { AgentStatus, HeldForConnection, HeldForExternal, Queued } from '@althar/contracts'
 import { Brand, type PinnedDownload } from '@althar/ui'
 
 import { device } from './device'
+
+/** A quiet wait names the condition and when it will next be checked, without an idle work clock. */
+export const externalWaitWords = (wait: HeldForExternal, clock: (at: string) => string) =>
+  `Waiting: ${wait.reason}. ${wait.lastCheck === null ? 'Not checked yet' : `Last checked ${clock(wait.lastCheck)}`}; next check ${clock(wait.nextCheck)}.${wait.error === null ? '' : ` ${wait.error}`}`
 
 /*
  * How an agent is drawn: its mark, and its words. Who works is named by
@@ -16,6 +20,7 @@ const BRANDS: Readonly<Record<string, Brand>> = {
   codex: Brand.OpenAI,
   opencode: Brand.OpenCode,
   copilot: Brand.GitHubCopilot,
+  'copilot-direct': Brand.GitHubCopilot,
   junie: Brand.Junie,
   grok: Brand.XAI,
   kimi: Brand.Moonshot,
@@ -74,8 +79,17 @@ export const inLineWords = (place: number) => `${ordinal(place)} in line`
 export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal(place)} in Up next`
 
 /** How busy this computer's agents are, as work that waits for one says it. */
-export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
-  busy > atOnce ? `${busy} agents busy on ${where}, ${atOnce} at a time` : `${busy} of ${atOnce} agents busy on ${where}`
+export const busyWords = ({ busy, atOnce, holders }: Queued, where: string = device.this) => {
+  const count = busy > atOnce ? `${busy} agents busy on ${where}, ${atOnce} at a time` : `${busy} of ${atOnce} agents busy on ${where}`
+  const tasks = new Map<string, { title: string; count: number }>()
+  for (const holder of holders ?? []) {
+    const task = tasks.get(holder.taskId)
+    if (task === undefined) tasks.set(holder.taskId, { title: holder.title, count: 1 })
+    else task.count += 1
+  }
+  const names = [...tasks.values()].map((task) => (task.count > 1 ? `${task.title} (${task.count})` : task.title))
+  return names.length ? `${count}: ${names.join('; ')}` : count
+}
 
 /**
  * The same, short, for a project's tasks on the home, which is this
@@ -89,6 +103,7 @@ export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {
   'claude-code': { plan: 'Claude', host: 'claude.ai' },
   codex: { plan: 'ChatGPT', host: 'chatgpt.com' },
+  'copilot-direct': { plan: 'GitHub', host: 'github.com' },
   antigravity: { plan: 'Google', host: 'accounts.google.com' },
 }
 
@@ -104,6 +119,7 @@ export const signInCautionOf = (agentId: string): string | undefined => CAUTIONS
 
 /** Who makes an agent, as Settings says it under its name; none for one that runs anyone's models. */
 const MAKERS: Readonly<Record<string, string>> = {
+  'copilot-direct': 'Althar',
   'claude-code': 'Anthropic',
   codex: 'OpenAI',
   grok: 'xAI',

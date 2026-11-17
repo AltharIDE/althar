@@ -128,13 +128,14 @@ export const SignedOut: Story = {
 
 /**
  * One provider within its agent refused its sign-in, not the agent: the card names the provider and the model, and the agent's
- * own words stay under it. Signing in to that provider is the card's own button.
+ * own words stay under it where they say more than the card does (the app leaves out a bare "Authentication required").
+ * Signing in to that provider is the card's own button.
  */
 export const ProviderRefused: Story = {
   args: {
     step: 'Review',
     what: 'OpenCode Go refused the sign-in for DeepSeek V4.1 Flash.',
-    said: 'Authentication required: provider authentication required',
+    said: 'deepseek: the API key expired on 12 November',
     tried: [],
     read: undefined,
     output: undefined,
@@ -153,7 +154,7 @@ export const ProviderRefused: Story = {
   },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('Authentication required: provider authentication required')).toBeInTheDocument()
+    await expect(c.getByText('deepseek: the API key expired on 12 November')).toBeInTheDocument()
     const [first] = c.getAllByRole('button')
     await expect(first).toHaveAccessibleName('Sign in to OpenCode Go')
     await userEvent.click(first!)

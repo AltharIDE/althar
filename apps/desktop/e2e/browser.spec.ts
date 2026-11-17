@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, shown, startTask, still, toConversation } from './support'
+import { launch, openFirstProject, say, shown, startTask, still, toConversation, expectPanes, showPanes } from './support'
 
 /*
  * The browser beside the conversation (ADR-100), in a real window: a task's
@@ -451,7 +451,7 @@ test('from the coordinator, the project’s run opens beside its conversation, t
     // The project goes to its conversation, and the page opens beside it, in the project's own session.
     const panel = page.getByRole('complementary', { name: 'Page' })
     await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
-    await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()
+    await expectPanes(page, { conversation: true, board: false })
     await expect.poll(() => inPage<string>(electronApp, 'document.title')).toBe('Refunds')
     await expect.poll(() => onItsPlace(electronApp, panel)).toBe(true)
     await still(page)
@@ -466,11 +466,11 @@ test('from the coordinator, the project’s run opens beside its conversation, t
     // A window reloaded that doesn't know where the page showed has none drawn over it: main hid it as the document went.
     await page.evaluate(() => window.localStorage.removeItem('althar.pages'))
     await reloading(page, () => reloadWindow(electronApp))
-    await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()
+    await expectPanes(page, { conversation: true, board: false })
     await expect(panel).toHaveCount(0)
     await expect.poll(async () => (await drawn(electronApp)).length).toBe(0)
     // Opened again, it is where it was.
-    await page.getByRole('radio', { name: 'Home' }).click()
+    await showPanes(page, { conversation: true, board: true })
     await open.click()
     await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
     await expect.poll(() => onItsPlace(electronApp, panel)).toBe(true)
@@ -480,7 +480,7 @@ test('from the coordinator, the project’s run opens beside its conversation, t
     expect(stopped).not.toBeNull()
     await reloading(page, () => electronApp.evaluate((_electron, pid) => process.kill(pid, 'SIGKILL'), stopped ?? 0))
     await expect.poll(() => runtimePid(electronApp)).not.toBe(stopped)
-    await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()
+    await expectPanes(page, { conversation: true, board: false })
     await expect(panel.getByRole('textbox', { name: 'Address' })).toHaveValue(address)
     await expect.poll(() => onItsPlace(electronApp, panel)).toBe(true)
     await expect.poll(async () => (await drawn(electronApp)).length).toBe(1)
@@ -495,7 +495,7 @@ test('from the coordinator, the project’s run opens beside its conversation, t
     await expect.poll(() => onItsPlace(electronApp, panel)).toBe(true)
     await page.getByRole('complementary', { name: 'Page' }).getByRole('button', { name: 'Close' }).click()
     await expect(page.getByRole('list', { name: 'Pages' })).toHaveCount(0)
-    await expect(page.getByRole('radio', { name: 'Conversation', checked: true })).toBeVisible()
+    await expectPanes(page, { conversation: true, board: false })
     await expect(page.getByRole('complementary', { name: 'Page' })).toHaveCount(0)
     await expect.poll(async () => (await drawn(electronApp)).length).toBe(0)
   } finally {

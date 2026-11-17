@@ -1,5 +1,5 @@
 import { ConnectorFailed } from '@althar/connectors'
-import { type PictureReport, type ScreenshotNow, type ScreenshotsOnChange, screenshotsNow } from '@althar/contracts'
+import { type ScreenshotNow, type ScreenshotsOnChange } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Scope } from 'effect'
@@ -11,8 +11,9 @@ import { type ChangeSummary, Changes, type OnHost } from './Changes'
 import { RuntimeConfig } from './Config'
 import { Connections } from './Connections'
 import { ScreenshotsRefused } from './errors'
-import { evidenceOf, keptViewsIn } from './evidence'
+import { evidenceGallery } from './evidenceGallery'
 import { contained } from './Failures'
+import { fitPicture } from './fitPicture'
 import { Instance } from './Instance'
 import { Policies, postsScreenshots } from './Policies'
 import { timestamp } from './records'
@@ -88,22 +89,8 @@ export class PullRequestScreenshots extends Context.Service<
       const nowOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ id: string; sequence: number; createdAt: string; content: string }>`
-            SELECT i.id, i.sequence, i.created_at, i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task'
-            WHERE t.task_id = ${taskId} AND i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('implement', 'settle')
-            ORDER BY i.sequence`
-          const [made] = yield* sql<{ at: string | null }>`
-            SELECT e.occurred_at AS at FROM record_events e WHERE e.aggregate_type = 'task' AND e.aggregate_id = ${taskId}
-              AND e.type = 'task.made_change' ORDER BY e.sequence DESC LIMIT 1`
-          const reports = rows.map((row): PictureReport => ({
-            id: row.id,
-            sequence: row.sequence,
-            createdAt: row.createdAt,
-            evidence: evidenceOf(parsed(row.content).evidence),
-            ...keptViewsIn(parsed(row.content).keptViews),
-          }))
-          // A task with a pull request is a change: its screenshots are those since it became one.
-          return screenshotsNow(reports, { change: true, since: made?.at ?? null })
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+          return thread === undefined ? [] : (yield* evidenceGallery(thread.id)).shots
         })
 
       /** What Althar keeps of a pull request's screenshots, by its link: nothing before they were first posted. */
@@ -201,18 +188,61 @@ export class PullRequestScreenshots extends Context.Service<
           const upload = on.host.uploadPicture?.bind(on.host)
           if (upload === undefined) return yield* refuse('no_pictures', on.change)
           const uploads: Record<string, string> = { ...kept?.uploads }
+          const notes: Record<string, string> = {}
           for (const shot of posting) {
-            if (uploads[shot.digest] !== undefined) continue
+            if (uploads[shot.digest] !== undefined) {
+              const note = kept?.shown.find((was) => was.digest === shot.digest)?.note
+              if (note !== undefined) notes[shot.digest] = note
+              continue
+            }
             const bytes = yield* artifacts.read(shot.digest)
             if (bytes === null)
               return yield* new ScreenshotsRefused({
                 why: 'unkept',
                 message: `Althar no longer keeps the picture for “${shot.caption}”. Ask the lead to take it again, or leave it out.`,
               })
-            uploads[shot.digest] = yield* upload(on.repository, { bytes, name: shot.name, mediaType: shot.mediaType })
+            const original = { bytes, name: shot.name, mediaType: shot.mediaType }
+            const limit = on.host.capabilities.pictureLimit ?? 10_000_000
+            let preparationFailed = false
+            const prepare = (ceiling: number) =>
+              fitPicture(original, ceiling).pipe(
+                Effect.catch((error) =>
+                  Effect.gen(function* () {
+                    preparationFailed = true
+                    yield* Effect.logWarning(`Could not prepare PR picture ${shot.name}`, error)
+                    return null
+                  }),
+                ),
+              )
+            let fitted = yield* prepare(limit)
+            if (fitted !== null) {
+              const result = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
+              if (result._tag === 'Success') uploads[shot.digest] = result.success
+              else if (
+                (result.failure.reason === 'rejected' && result.failure.uploadLimit !== undefined) ||
+                result.failure.status === 413
+              ) {
+                const smaller = Math.min(result.failure.uploadLimit ?? limit / 2, fitted.picture.bytes.byteLength)
+                fitted = yield* prepare(smaller)
+                if (fitted !== null) {
+                  const retried = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
+                  if (retried._tag === 'Success') uploads[shot.digest] = retried.success
+                  else if (
+                    (retried.failure.reason !== 'rejected' || retried.failure.uploadLimit === undefined) &&
+                    retried.failure.status !== 413
+                  )
+                    return yield* retried.failure
+                }
+              } else return yield* result.failure
+            }
+            if (uploads[shot.digest] === undefined)
+              notes[shot.digest] = preparationFailed
+                ? `Left out: ${shot.name}. The image processor could not prepare it. Try again.`
+                : `Left out: ${shot.name} could not fit the host's upload limit.`
+            else if (fitted?.note) notes[shot.digest] = fitted.note
             yield* keep(on.linkId, on.projectId, { uploads })
           }
-          return uploads
+          return { uploads, notes }
         })
 
       /**
@@ -253,13 +283,14 @@ export class PullRequestScreenshots extends Context.Service<
               })
             // What is left out is kept first: it holds whatever happens to the rest.
             if (input.leftOut !== undefined) yield* keep(on.linkId, on.projectId, { leftOut })
-            const uploads = yield* uploaded(on, posting, kept)
+            const { uploads, notes } = yield* uploaded(on, posting, kept)
             const head = on.change.headSha
             const shown = posting.map((shot): PostedShot => ({
               key: shot.key,
               caption: shot.caption,
               digest: shot.digest,
               url: uploads[shot.digest] ?? '',
+              ...(notes[shot.digest] === undefined ? {} : { note: notes[shot.digest] }),
               head,
             }))
             // A view shown again as it was keeps the commit it was taken of.
@@ -305,7 +336,11 @@ export class PullRequestScreenshots extends Context.Service<
               leftOut,
               uploads,
               postedAt: new Date(comment.at).toISOString(),
-              failed: null,
+              failed:
+                posted
+                  .filter((shot) => shot.url === '')
+                  .map((shot) => shot.note ?? `Left out: ${shot.caption}`)
+                  .join(' ') || null,
             })
             yield* touchTask(input.taskId)
           }).pipe(
@@ -391,15 +426,6 @@ export class PullRequestScreenshots extends Context.Service<
       })
     }),
   )
-}
-
-const parsed = (content: string): { readonly evidence?: unknown; readonly keptViews?: unknown } => {
-  try {
-    const value: unknown = JSON.parse(content)
-    return typeof value === 'object' && value !== null ? value : {}
-  } catch {
-    return {}
-  }
 }
 
 const refuse = (why: 'no_pictures', change: ChangeSummary) =>

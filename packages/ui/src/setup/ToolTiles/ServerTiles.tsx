@@ -9,6 +9,7 @@ import { below, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Problem } from '../../primitives/Problem/Problem'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ControlDetail, ControlLine, ControlModule, ControlToggle } from '../ControlCenter/ControlCenter'
 import { SERVER_STARTERS } from './starters'
@@ -245,7 +246,7 @@ export function ServerTiles({
   const sorted = (list: readonly ServerTileModel[]) =>
     list
       .map((server, at) => ({ server, at, rank: rank(serverWaits(server, agents, sync.on, t)) }))
-      .sort((a, b) => a.rank - b.rank || a.at - b.at)
+      .sort((a, b) => a.rank - b.rank || a.server.name.localeCompare(b.server.name))
       .map((one) => one.server)
 
   let body: ReactNode
@@ -382,11 +383,7 @@ function SyncTiles({
           </ControlModule>
         )}
       </TileGrid>
-      {errors.length > 0 && (
-        <p className={s.errors} role="alert">
-          {errors.join(' ')}
-        </p>
-      )}
+      {errors.length > 0 && <Problem>{errors.join(' ')}</Problem>}
       {asking === 'on' && (
         <Dialog
           title={t.keepTitle}

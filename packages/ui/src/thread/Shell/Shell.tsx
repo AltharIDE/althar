@@ -25,6 +25,10 @@ export interface DocRef {
 
 export interface ImageRef {
   name: string
+  /** An animated image, played only on request in the lightbox. thumb is its still poster. */
+  animated?: boolean
+  /** A known still poster; otherwise the browser makes one from the first frame. */
+  poster?: string
   meta?: string
   /** What the picture shows, in words: its alternative text. Without it, its name. */
   alt?: string
@@ -72,6 +76,8 @@ export interface CodeShell {
   peek: (found: FoundCode, from: HTMLElement | null) => ReactNode
   /** Opens it beside the thread; `from` is the name pressed, which stepping through the thread's names goes on from. */
   open: (found: FoundCode, from: HTMLElement | null) => void
+  /** Opens the file a path names, as it is found where the thread's agent works: from a document's link; `from` is where it was pressed. */
+  openByName?: (name: string, from: HTMLElement | null) => void
   /** Opens it in the person's editor, as ⌘-click on its name does. */
   openInEditor?: (found: FoundCode) => void
   /** The reference open beside the thread, as its `codeKey`: its chips show it open, and pressing one again closes it. */

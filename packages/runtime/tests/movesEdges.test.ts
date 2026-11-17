@@ -6,6 +6,7 @@ import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
+import { vi } from 'vitest'
 
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
@@ -15,6 +16,7 @@ import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import * as spawner from '../src/spawner'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
@@ -127,6 +129,43 @@ const waitsKept = (taskId: string) =>
   )
 
 describe('moving one of a task’s changes', () => {
+  it.live('moves to Local after git partially removes a busy worktree, preserving its commits', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const task = yield* opened(working)
+      const before = yield* changeOf(task.taskId, null)
+      const head = git(before.path, 'rev-parse', 'HEAD')
+      const spawn = spawner.startApart
+      let attempts = 0
+      const mocked = vi.spyOn(spawner, 'startApart').mockImplementation((...args) => {
+        const [command] = args
+        if (command.command === 'git' && command.args.includes('remove') && command.args.includes(before.path)) {
+          attempts++
+          return {
+            result: Promise.resolve({
+              code: 128,
+              signal: null,
+              error: null,
+              over: false,
+              stdout: '',
+              stderr: attempts === 1 ? 'Permission denied' : `'${before.path}' is not a working tree`,
+            }),
+            stop: () => undefined,
+          }
+        }
+        return spawn(...args)
+      })
+      const moved = yield* move(task.taskId, 'checkout').pipe(Effect.ensuring(Effect.sync(() => mocked.mockRestore())))
+      assert.deepStrictEqual(moved, { kind: 'moved' })
+      assert.strictEqual(attempts, 2)
+      assert.isFalse(existsSync(before.path))
+      assert.strictEqual((yield* changeOf(task.taskId, null)).kind, 'checkout')
+      assert.strictEqual(git(working, 'rev-parse', 'HEAD'), head)
+      assert.strictEqual(git(working, 'rev-parse', '--abbrev-ref', 'HEAD'), before.branch)
+      assert.notInclude(git(working, 'worktree', 'list', '--porcelain'), before.path.replaceAll('\\', '/'))
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('moves one change at a time, refuses to drop it while it is Local, and frees a checkout moved on meanwhile', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {

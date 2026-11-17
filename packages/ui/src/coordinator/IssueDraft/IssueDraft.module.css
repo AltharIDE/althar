@@ -52,15 +52,16 @@
   font-size: 12px;
   color: var(--t-3);
 }
-.error {
+/* what went wrong, under the draft it was about */
+.problem {
+  padding: 0 16px 10px;
+}
+/* not a failure: it may have worked, and the person looks */
+.unsure {
   margin: 0;
   padding: 0 16px 10px;
   font-size: 12.5px;
   line-height: 1.5;
-  color: var(--danger);
-}
-/* not a failure: it may have worked, and the person looks */
-.unsure {
   color: var(--t-1);
 }
 

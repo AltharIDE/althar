@@ -121,9 +121,23 @@ describe('what runs, and what waits', () => {
         startedAt: '2026-10-10T09:00:00.000Z',
         ended: null,
       },
-      NOW,
+      't2',
     )
-    expect(card).toEqual({ where: 'main', command: 'bun test', since: '5m' })
+    expect(card).toEqual({ where: 'main', command: 'bun test' })
+  })
+
+  it('leaves out where a run runs in its own task’s thread, whose header says it', () => {
+    const run = {
+      launchId: 'proc_1',
+      taskId: 't1',
+      where: 'Fix the login timeout',
+      command: 'bun run dev',
+      url: null,
+      startedAt: NOW,
+      ended: null,
+    }
+    expect(runCardOf(run, 't1')).toMatchObject({ where: 'Fix the login timeout', ownThread: true })
+    expect(runCardOf(run)).not.toHaveProperty('ownThread')
   })
 
   it('says how many of a project’s tasks wait, and for how many agents', () => {
@@ -134,6 +148,41 @@ describe('what runs, and what waits', () => {
   it('says why a task waits in plain words, over the number too', () => {
     expect(queuedWords({ busy: 6, atOnce: 6 }, 'this Mac')).toBe('Waiting: 6 of 6 agents busy on this Mac')
     expect(queuedWords({ busy: 7, atOnce: 6 }, 'this Mac')).toBe('Waiting: 7 agents busy on this Mac, 6 at a time')
+  })
+
+  it('names every slot holder in the waiting line', () => {
+    expect(
+      queuedWords(
+        {
+          busy: 2,
+          atOnce: 2,
+          holders: [
+            { taskId: 'a', title: 'Fix checkout', threadId: 'lead', kept: false, running: [] },
+            { taskId: 'b', title: 'Review login', threadId: 'review', kept: false, running: [] },
+          ],
+        },
+        'this computer',
+      ),
+    ).toBe('Waiting: 2 of 2 agents busy on this computer: Fix checkout; Review login')
+  })
+
+  it('groups places of the same task, keeping distinct tasks with the same title apart', () => {
+    const holder = { title: 'Fix checkout', threadId: null, kept: false, running: [] }
+    expect(
+      queuedWords(
+        {
+          busy: 4,
+          atOnce: 4,
+          holders: [
+            { ...holder, taskId: 'a' },
+            { ...holder, taskId: 'a' },
+            { ...holder, taskId: 'a' },
+            { ...holder, taskId: 'b' },
+          ],
+        },
+        'this Mac',
+      ),
+    ).toBe('Waiting: 4 of 4 agents busy on this Mac: Fix checkout (3); Fix checkout')
   })
 
   it('merges here only the repositories whose branch could be read', () => {

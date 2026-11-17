@@ -10,6 +10,7 @@ import type { PageLine as Line, Pointed } from '../../../main/browser/page'
 import { useServices } from '../../data/services'
 import { cropOf, gather, type GatheredComment, rewrite, drop, useComments } from '../../shared/comments'
 import { usePreferences } from '../../shared/usePreferences'
+import { pressDictationShortcut } from '../../shared/dictation/useDictation'
 import { useCovered } from './cover'
 import { pages, usePage, type Where } from './pages'
 
@@ -249,6 +250,7 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
         if (from !== owner) return
         if (key === 'comment') void point()
         if (key === 'address') address.current?.focus()
+        if (key === 'dictate') pressDictationShortcut()
       }),
     [browser, owner, point],
   )
@@ -279,6 +281,7 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
       onForward={() => void browser.move(owner, 'forward')}
       onReload={() => void browser.move(owner, 'reload')}
       onStop={() => void browser.move(owner, 'stop')}
+      // oxlint-disable-next-line althar/press-at-once -- Notes the page once it opened; the page itself shows from the press.
       onNavigate={(typed) => void browser.open(owner, typed).then((opened) => opened !== null && pages.known(opened))}
       addressRef={address}
       keep={kind === 'project' && keep === 'task' ? text.keepsProject : text.keeps[keep]}

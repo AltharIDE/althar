@@ -1,3 +1,4 @@
+import { isoAfter } from '@althar/testing'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Activity } from 'react'
@@ -778,7 +779,7 @@ describe('a task', () => {
     expect(screen.queryByRole('complementary', { name: 'Connect GitHub' })).toBeNull()
   })
 
-  it('says there is no code host where Althar can tell none, rather than leave merging here as all there is', async () => {
+  it('says nothing is missing with no remote at all, and there is no code host where its remote is on none Althar knows', async () => {
     const file: ChangedFile = { path: 'src/checkout.ts', from: null, status: 'modified', add: 4, del: 1, binary: false, uncommitted: false }
     const at = (remote: { name: string; newPullRequest: null; pushed: boolean; ahead: number } | null) => {
       const base = thread({ session: null })
@@ -806,7 +807,8 @@ describe('a task', () => {
     const none = withServices(<Task />, fakeClient({ getThread: vi.fn(async () => at(null)) }).client)
     await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
     const alone = within(await screen.findByRole('article', { name: 'Add a retry' }))
-    expect(alone.getByText('No code host: this repository has no remote Althar can open a pull request on.')).toBeTruthy()
+    // Only on this computer, as its project is: merged here, with no line on what it lacks.
+    expect(alone.queryByText(/No code host/)).toBeNull()
     expect(alone.getByRole('button', { name: 'Merge into main on this Mac' })).toBeTruthy()
     expect(alone.queryByRole('button', { name: /Connect|pull request/ })).toBeNull()
     none.unmount()
@@ -1324,6 +1326,159 @@ describe('a task', () => {
     expect(client.push).toHaveBeenCalledTimes(1)
   })
 
+  it.each([false, true, null])('keeps a mid-turn send queued while the runtime accepts it (turnRunning=%s)', async (turnRunning) => {
+    let accept: () => void = () => undefined
+    const sent = new Promise<void>((resolve) => (accept = resolve))
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => {
+        const value = running()
+        return {
+          ...value,
+          accepting: 'queued' as const,
+          session: turnRunning === null ? null : { ...value.session!, accepting: 'queued' as const, turnRunning },
+        }
+      }),
+      send: vi.fn(async () => sent),
+    })
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox')
+    await userEvent.type(box, 'Then the changelog.{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalled())
+    const queue = screen.getByRole('region', { name: /queued/i })
+    expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+    expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+    await act(async () => accept())
+  })
+
+  it('draws a message whose turn is claimed but not started in the thread, not the queue', async () => {
+    const base = thread()
+    const queued = {
+      ...items.you('Then the changelog.', { state: 'queued', interrupting: false }),
+      sequence: (base.items.at(-1)?.sequence ?? 0) + 1,
+    }
+    // The runtime has claimed its turn but not begun reading it, which is what `accepting` says mid-turn.
+    const claimed: ThreadSnapshot = {
+      ...base,
+      accepting: 'queued',
+      session: base.session === null ? null : { ...base.session, turnRunning: false, accepting: 'queued' },
+      items: [...base.items, queued],
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => claimed) })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Then the changelog.')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: /queued/i })).toBeNull()
+    expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+  })
+
+  it('draws a send while the agent starts in the thread, not the queue: nothing is ahead of it', async () => {
+    const base = thread()
+    const queued = {
+      ...items.you('While it starts.', { state: 'queued', interrupting: false }),
+      sequence: (base.items.at(-1)?.sequence ?? 0) + 1,
+    }
+    const starting: ThreadSnapshot = {
+      ...base,
+      accepting: 'now',
+      session: base.session === null ? null : { ...base.session, state: 'starting', turnRunning: false, accepting: 'now' },
+      items: [...base.items, queued],
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => starting) })
+    withServices(<Task />, client)
+    expect(await screen.findByText('While it starts.')).toBeTruthy()
+    expect(screen.queryByRole('region', { name: /queued/i })).toBeNull()
+    expect(screen.getAllByText('While it starts.')).toHaveLength(1)
+  })
+
+  it('corrects a stale now-prediction into the queue without a second copy', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const base = thread()
+      const idle: ThreadSnapshot = {
+        ...base,
+        accepting: 'now',
+        session: base.session === null ? null : { ...base.session, turnRunning: false, accepting: 'now' },
+      }
+      const stored = {
+        ...items.you('Then the changelog.', { state: 'queued', interrupting: false }),
+        sequence: (idle.items.at(-1)?.sequence ?? 0) + 1,
+      }
+      let head: ThreadSnapshot = idle
+      const { client, emit } = fakeClient({
+        getThread: vi.fn(async () => head),
+        getThreadItem: vi.fn(async () => stored),
+        send: vi.fn(async () => undefined),
+      })
+      withServices(<Task />, client)
+      const box = await screen.findByRole('textbox')
+      await userEvent.type(box, 'Then the changelog.{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalled())
+      expect(screen.queryByRole('region', { name: /queued/i })).toBeNull()
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      const move = screen.getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')
+      expect(move).toMatch(/^message:sending:/)
+      head = {
+        ...idle,
+        accepting: 'queued',
+        session: idle.session === null ? null : { ...idle.session, turnRunning: true, accepting: 'queued' },
+      }
+      act(() => {
+        emit(changed('thread_item', stored.id))
+        emit(changed('turn_delivery', 'd1'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      const queue = await screen.findByRole('region', { name: /queued/i })
+      expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      expect(within(queue).getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')).toBe(move)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('corrects a stale queued-prediction into the thread without a second copy', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const busy: ThreadSnapshot = running({ accepting: 'queued' })
+      const stored = {
+        ...items.you('Then the changelog.', { state: 'delivered', interrupting: false }),
+        sequence: (busy.items.at(-1)?.sequence ?? 0) + 1,
+      }
+      let head: ThreadSnapshot = busy
+      const { client, emit } = fakeClient({
+        getThread: vi.fn(async () => head),
+        getThreadItem: vi.fn(async () => stored),
+        send: vi.fn(async () => undefined),
+      })
+      withServices(<Task />, client)
+      const box = await screen.findByRole('textbox')
+      await userEvent.type(box, 'Then the changelog.{Enter}')
+      await waitFor(() => expect(client.send).toHaveBeenCalled())
+      const queue = screen.getByRole('region', { name: /queued/i })
+      expect(within(queue).getByText('Then the changelog.')).toBeTruthy()
+      const move = within(queue).getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')
+      expect(move).toMatch(/^message:sending:/)
+      head = {
+        ...busy,
+        accepting: 'now',
+        session: busy.session === null ? null : { ...busy.session, turnRunning: false, accepting: 'now' },
+      }
+      act(() => {
+        emit(changed('thread_item', stored.id))
+        emit(changed('turn_delivery', 'd1'))
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      await waitFor(() => expect(screen.queryByRole('region', { name: /queued/i })).toBeNull())
+      expect(screen.getAllByText('Then the changelog.')).toHaveLength(1)
+      expect(screen.getByText('Then the changelog.').closest('[data-move]')?.getAttribute('data-move')).toBe(move)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('talks to its lead: sends, queues while it works, sends now, and interrupts', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     const view = withServices(<Task />, client)
@@ -1558,6 +1713,29 @@ describe('a task', () => {
     )
   })
 
+  it('drops another agent picked to take over once the lead it was to take over from stops', async () => {
+    const base = thread()
+    let current = base
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => current) })
+    withServices(<Task />, client)
+    await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    await screen.findByRole('textbox', { name: 'Tell Codex something' })
+    // The lead stops before the person says anything; later a lead is on it again, on Claude Code, as it was.
+    const lead = { agentId: 'claude-code', model: 'opus', account: null }
+    current = { ...base, session: null, task: { ...base.task, phase: 'stopped', actions: ['resume', 'abandon'], lead } }
+    act(() => emit(changed('provider_session', 's1')))
+    await screen.findByText('Stopped')
+    current = base
+    act(() => emit(changed('provider_session', 's1')))
+    // What the person says goes to it: Codex taking over was for the lead that stopped.
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Tell Claude Code something' }), 'Go on{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Go on', disposition: 'after_current' }))
+    expect(client.switchAgent).not.toHaveBeenCalled()
+  })
+
   it('puts a queued message back in the composer with its images, which go again by their digests', async () => {
     const picture = { digest: 'f'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }
     const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])
@@ -1565,7 +1743,7 @@ describe('a task', () => {
     withServices(<Task />, client)
     const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
     // The queue says what went with it.
-    expect(screen.getByText('1 image')).toBeTruthy()
+    expect(screen.getByText(/1 image$/)).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     expect(await screen.findByRole('img', { name: 'shot.png' })).toHaveProperty('src', `althar-picture://shot/${'f'.repeat(64)}?w=1120`)
     await userEvent.type(busy, ' too{Enter}')
@@ -1962,7 +2140,7 @@ describe('a task', () => {
     expect(screen.queryByRole('menuitem', { name: /Change the team…/ })).toBeNull()
   })
 
-  it('changes the team of a task at work from its menu, saving through the task', async () => {
+  it('opens the team of a task at work from its menu, and saves no change when nothing was edited', async () => {
     const running = {
       ...card({ taskId: 't1', threadId: 'th1', phase: 'running', step: 'implement', reviewerChange: 'now' }),
       state: 'open',
@@ -1982,7 +2160,8 @@ describe('a task', () => {
     expect(dialog.getByText('From its next turn.')).toBeTruthy()
     expect(dialog.queryByRole('button', { name: 'Start' })).toBeNull()
     await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
-    await waitFor(() => expect(client.changeTeam).toHaveBeenCalledWith('t1', running.plan!.steps))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Team' })).toBeNull())
+    expect(client.changeTeam).not.toHaveBeenCalled()
     expect(client.changePlan).not.toHaveBeenCalled()
   })
 
@@ -2935,7 +3114,7 @@ describe('a task', () => {
             ...agent,
             accounts: [
               usual('acc_claude', 'signed_in'),
-              { ...usual('acc_work', 'signed_in'), name: 'work', outUntil: '2099-01-01T10:00:00.000Z' },
+              { ...usual('acc_work', 'signed_in'), name: 'work', outUntil: isoAfter(20 * 3_600_000) },
             ],
           }
         : agent.id === 'codex'
@@ -2992,7 +3171,7 @@ describe('a task', () => {
   })
 
   it('offers the models that could carry on a step held for a usage limit, with why it waits, without asking', async () => {
-    const back = '2099-01-01T14:00:00.000Z'
+    const back = isoAfter(24 * 3_600_000)
     const held = (step: 'implement' | 'review', why: 'nothing_free' | 'waits') =>
       thread({
         task: {

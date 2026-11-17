@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import type { AgentStatus, AutomationDefinition } from '@althar/contracts'
-import { AutomationAsk, AutomationNote } from '@althar/ui'
+import { AutomationAsk, AutomationNote, Problem } from '@althar/ui'
 
 import { messageOf } from '../../data/client'
 import type { AutomationCardContent } from '../../shared/thread'
@@ -63,12 +63,7 @@ export function AutomationInThread({
       },
     )
   }
-  const said =
-    error === null ? null : (
-      <p className={s.cardFailure} role="alert">
-        {text.failed(error)}
-      </p>
-    )
+  const said = error === null ? null : <Problem className={s.cardFailure}>{text.failed(error)}</Problem>
   const next = card.nextAt === null ? undefined : nextWords(card.nextAt)
 
   if (card.ask !== null) {

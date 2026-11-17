@@ -47,14 +47,8 @@ function Live(args: SourceMapProps) {
  */
 export const Meridian: Story = { render: (args) => <Live {...args} /> }
 
-/** Being read; its role is suggested once reading finishes. */
-export const Reading: Story = { args: { sources: READING_MAP } }
-
 /** A repository with no remote, and one kept for later on this Mac. */
 export const Edges: Story = { render: (args) => <Live {...args} sources={EDGE_MAP} /> }
-
-/** No repositories: a project for planning, research or writing. */
-export const Empty: Story = { args: { sources: [] } }
 
 /** A URL typed in place: Add (or Enter) adds it, Escape puts the field away. */
 export const AddingAUrl: Story = {
@@ -90,6 +84,7 @@ export const Removing: Story = {
 /** Without ways to add, the map is only read. */
 export const Fixed: Story = { args: { onChooseFolders: undefined, onAddUrl: undefined } }
 
+/** Every state: as read, being read (its role suggested once reading finishes), the edges, none (a project for planning, research or writing), and narrow. */
 export const AllStates: Story = {
   render: (args) => (
     <States

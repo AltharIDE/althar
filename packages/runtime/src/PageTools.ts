@@ -21,6 +21,10 @@ import { POOL, type Tool, type ToolAccess, ToolRefused, type ToolPicture, ToolSe
  * so a lead can reach no page but the one beside its task.
  */
 
+/** The lead and coordinator leave the person's page as they found it after inspecting it. */
+export const PAGE_VIEW_BRIEF =
+  'If you temporarily zoom the page or change its viewport to inspect or interact with it, remember the previous settings and restore them as soon as that browser work is done, before replying or finishing a step, even after a failed attempt. Undo temporary zoom styles you applied through page_evaluate too. Keep a view the person explicitly chose or asked you to leave in place.'
+
 type Input = Readonly<Record<string, unknown>>
 
 /** Why an input is no call, thrown inside the parsing below and said whole to the agent. */
@@ -255,7 +259,8 @@ const definitions: Readonly<
   },
   page_viewport: {
     description:
-      "Sets the page's viewport as the bar's Viewport menu does: fit (the panel's own size), desktop (1440×900), laptop (1280×800), tablet (820×1180) or phone (390×844). A tablet and a phone are touch screens with a mobile browser's user agent, and the page reloads when that changes.",
+      "Sets the page's viewport as the bar's Viewport menu does: fit (the panel's own size), desktop (1440×900), laptop (1280×800), tablet (820×1180) or phone (390×844). A tablet and a phone are touch screens with a mobile browser's user agent, and the page reloads when that changes. " +
+      PAGE_VIEW_BRIEF,
     properties: { viewport: { type: 'string', enum: VIEWPORTS } },
     required: ['viewport'],
   },
@@ -327,7 +332,7 @@ const definitions: Readonly<
     },
   },
   page_evaluate: {
-    description: `Runs a script in an isolated world of the page: its DOM and what the browser gives every script, not the page's own variables, and nothing of Althar's. Give an expression, or statements that return a value; it comes back as JSON, cut at 20,000 characters. The guards hold for anything it does.`,
+    description: `Runs a script in an isolated world of the page: its DOM and what the browser gives every script, not the page's own variables, and nothing of Althar's. Give an expression, or statements that return a value; it comes back as JSON, cut at 20,000 characters. The guards hold for anything it does. ${PAGE_VIEW_BRIEF}`,
     properties: { script: { type: 'string', description: `At most ${LONGEST_SCRIPT.toLocaleString('en')} characters.` } },
     required: ['script'],
   },

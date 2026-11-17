@@ -3,6 +3,7 @@ import { useId } from 'react'
 import { Light } from '../../foundations/Light/Light'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
+import { Path } from '../../primitives/Path/Path'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import s from './NoOutputs.module.css'
@@ -70,7 +71,7 @@ export function NoOutputs({ title, note, working = false, looked = [], headingLe
                   // The latest brightest, the earlier fading as they go down.
                   <li key={path} className={s.file} style={{ opacity: Math.max(0.28, 1 - i * 0.1) }} title={path}>
                     <span className={s.name}>{name}</span>
-                    <span className={s.dir}>{dir}</span>
+                    {dir !== '' && <Path path={dir} className={s.dir} />}
                   </li>
                 )
               })}

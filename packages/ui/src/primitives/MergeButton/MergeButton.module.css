@@ -1,0 +1,106 @@
+/* Where a pressed merge stands, in the button's place and of its size: words, not a control. */
+.standing {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 100%;
+  color: var(--t-1);
+  background: var(--live-dim);
+  animation: arrive var(--fast) var(--ease-out);
+}
+.small {
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.standing[data-standing='merged'] {
+  color: var(--ok-ink);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
+}
+.pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+@keyframes arrive {
+  from {
+    transform: scale(0.96);
+    opacity: 0.6;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .standing {
+    animation: none;
+  }
+}
+
+/*
+ * Merge pressed: still where it was and as wide, in its own colour, with a check where its words were. It gives, a ring
+ * spreads from it and the check draws in, as the press is answered (MergeFeel's feel.ts); words for whoever reads.
+ */
+.pressed {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.pressedSmall {
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.onSignal {
+  background: var(--signal-fill);
+  color: var(--on-signal);
+}
+.onPaper {
+  background: var(--paper);
+  color: var(--t-1);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift);
+}
+/* its words, out of sight, keep its width where it wasn't pressed here */
+.room {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+.check {
+  grid-area: 1 / 1;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ring {
+  position: absolute;
+  inset: -9px;
+  border: 1.5px solid var(--signal);
+  border-radius: 16px;
+  opacity: 0;
+  pointer-events: none;
+}
+.pressedSmall .ring {
+  border-radius: 15px;
+}

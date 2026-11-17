@@ -216,9 +216,15 @@ export const OneUnchecked: Story = {
   },
 }
 
-/** The runtime didn't answer: the agents' step says so. */
+/** The runtime didn't answer: not that none were found, so the agents' step says so where they would be, with the way to ask again. */
 export const AgentsFailed: Story = {
-  args: { toured: true, runtimes: [], error: { step: 'agents', said: 'Althar’s runtime didn’t answer.' } },
+  args: { toured: true, runtimes: [], error: { step: 'agents', said: 'Althar’s runtime didn’t answer.' }, onRecheck: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.queryByText('None found.')).toBeNull()
+    await userEvent.click(c.getByRole('button', { name: 'Check again' }))
+    await expect(args.onRecheck).toHaveBeenCalledOnce()
+  },
 }
 
 /** The first project: Make the project with nothing ticked says what is missing; ticking one names the project after it, and makes it. */

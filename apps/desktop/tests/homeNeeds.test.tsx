@@ -52,6 +52,24 @@ const refs = new Map([['p1', refOf(project)]])
 const agentName = () => ''
 
 describe('a ready task’s line', () => {
+  it('offers queue bypass only as the explicit secondary action', async () => {
+    const work = task({
+      kind: 'change',
+      change: change({
+        draft: false,
+        canBypassQueue: true,
+        checks: { outcome: 'passed', passed: 1, failed: 0, running: 0, total: 1, failing: [], list: [] },
+      }),
+    })
+    const [need] = needsOf({ calls: [], ready: [work], refs, agentName })
+    const next = vi.fn()
+    render(<>{needLineOf(need!, { onOpen: vi.fn(), onAnswer: vi.fn(), onNext: next })}</>)
+    await userEvent.click(screen.getByRole('button', { name: 'Other ways to merge' }))
+    expect(next).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Merge without queue' }))
+    expect(next).toHaveBeenCalledWith(work, { kind: 'merge' }, true)
+  })
+
   it('says its commits in no pull request, one or more', () => {
     const merged = change({ state: 'merged' })
     expect(briefOf(task({ change: merged, unshipped: { commits: 1, add: 5, del: 1 } }))).toBe('1 commit in no pull request · +5 −1')
@@ -128,6 +146,33 @@ describe('calls answered here', () => {
   })
 })
 
+describe('a stuck step’s line', () => {
+  const stuck = (why: 'signed_out' | 'stalled') =>
+    call('s', '2026-10-07T09:10:00.000Z', {
+      kind: 'stuck',
+      stuck: { step: 'implement', why, detail: null, agentId: 'claude-code', round: 0, open: 0 },
+    })
+
+  it('signs its agent in again where it is signed out, as its task’s card does first', async () => {
+    const [need] = needsOf({ calls: [stuck('signed_out')], answered: [], ready: [], refs, agentName })
+    const onSignIn = vi.fn()
+    const onOpen = vi.fn()
+    render(<>{needLineOf(need!, { onOpen, onAnswer: vi.fn(), onSignIn })}</>)
+    await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
+    expect(onSignIn).toHaveBeenCalledWith('claude-code')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('opens its task for any other reason, or where the place can’t sign in', () => {
+    const [stalled] = needsOf({ calls: [stuck('stalled')], answered: [], ready: [], refs, agentName })
+    render(<>{needLineOf(stalled!, { onOpen: vi.fn(), onAnswer: vi.fn(), onSignIn: vi.fn() })}</>)
+    expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy()
+    const [signedOut] = needsOf({ calls: [stuck('signed_out')], answered: [], ready: [], refs, agentName })
+    render(<>{needLineOf(signedOut!, { onOpen: vi.fn(), onAnswer: vi.fn() })}</>)
+    expect(screen.getAllByRole('button', { name: 'Open' })).toHaveLength(2)
+  })
+})
+
 function Home({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
   return <HomeView model={useHome()} start={useStart()} onProject={vi.fn()} onTalk={vi.fn()} onTask={onTask} />
 }
@@ -177,16 +222,18 @@ describe('the home', () => {
     await waitFor(() => expect(client.fixAfterMerge).toHaveBeenCalledWith('t7'))
   })
 
-  it('takes a change out of what waits on the person while it merges, and puts it back with why where it didn’t', async () => {
+  it('keeps a change merged from its line where it was, Merging and waiting on nobody, and says why where it didn’t', async () => {
     const ready = task({ taskId: 't5', threadId: 'th5', title: 'Name it better', change: change({ draft: false, checks: null }) })
     let refuse = (_: unknown) => undefined as void
     const merge = vi.fn(() => new Promise<void>((_, reject) => (refuse = reject)))
     const { client } = fakeClient({ merge, getHome: vi.fn(async () => home({ tasks: [ready] })) })
     withServices(<Home />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Accept and merge #12' }))
-    // Merging, it waits on nobody, until it settles.
+    // Merging, it waits on nobody, until it settles; its line stays under the pointer, Merge answering the press in its place.
     await waitFor(() => expect(screen.queryByRole('button', { name: /Accept and merge/ })).toBeNull())
-    expect(screen.queryByRole('article', { name: 'Name it better' })).toBeNull()
+    const merging = screen.getByRole('article', { name: 'Name it better' })
+    expect(within(merging).getByRole('status').textContent).toContain('Merging')
+    expect(screen.queryByRole('heading', { name: '1 thing needs you' })).toBeNull()
     await act(async () => refuse(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub says: Pull Request is not mergeable' })))
     // On its line, with a way to merge it again.
     const line = await screen.findByRole('article', { name: 'Name it better' })

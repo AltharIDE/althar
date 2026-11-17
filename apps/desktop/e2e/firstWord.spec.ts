@@ -1,11 +1,12 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { fileHolds } from '@althar/provider-adapters/testing'
 import { expect, type Locator, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, still, toConversation } from './support'
+import { holdRuntime, launch, openFirstProject, say, startTask, still, toConversation } from './support'
 
 /*
  * Between sending and the first word back, in a real window with the fake
@@ -56,6 +57,11 @@ const shoot = async (page: Page, thread: Locator, name: string) => {
   await page.screenshot({ path: `test-results/first-word-${name}.png`, clip, scale: 'css', animations: 'disabled' })
 }
 
+/* The place is read to the pixel, and layout may round an element either way between two reads: a pixel apart is still
+ * the place it stood in, where Thinking's own place is taken by what comes next. */
+const samePlace = (now: { readonly name: number; readonly first: number }, before: { readonly name: number; readonly first: number }) =>
+  Math.abs(now.name - before.name) <= 1 && Math.abs(now.first - before.first) <= 1
+
 /** From now on, frame by frame, whatever the window shows saying Queued: when, where, and what. */
 const watchQueued = (page: Page) =>
   page.evaluate(() => {
@@ -100,7 +106,17 @@ const ANSWER = 'Looked into it: the payment call has no retry'
  * shows, which must take its place: its words, or a thought or a call ahead
  * of them, under the name that stood there, starting where Thinking did.
  */
-const handedOff = async (page: Page, thread: Locator, words: string, name: string, first: 'words' | 'other' = 'words') => {
+const handedOff = async (
+  page: Page,
+  thread: Locator,
+  words: string,
+  name: string,
+  gates: ReturnType<typeof fileHolds>,
+  first: 'words' | 'other' = 'words',
+) => {
+  const marker = /\[(?:answers|thinks|reads)-after:\d+s\]/.exec(words)?.[0]
+  if (marker === undefined) throw new Error('No answer marker to hold')
+  gates.close(marker)
   await watchQueued(page)
   await say(page, words)
   const thinking = thinkingIn(thread)
@@ -109,16 +125,18 @@ const handedOff = async (page: Page, thread: Locator, words: string, name: strin
   await still(page)
   await shoot(page, thread, `${name}-thinking`)
   // How long, once that's worth saying.
-  await expect(thinking).toContainText(/Thinking\s*[3-5]s/)
+  await expect(thinking).toContainText(/Thinking\s*(?:[3-9]|\d{2,})s/)
   await shoot(page, thread, `${name}-counted`)
   const before = await placeOf(thread)
+  gates.open(marker)
   await expect(thinking).toHaveCount(0)
   // The name stays where it stood, and what it shows first starts where Thinking was: its words, or a thought or a call.
-  expect(await placeOf(thread)).toEqual(before)
+  expect(samePlace(await placeOf(thread), before)).toBe(true)
   if (first === 'words') await expect(thread.getByRole('article').last().locator('header + *')).toContainText(ANSWER)
   await still(page)
   await shoot(page, thread, `${name}-${first === 'words' ? 'words' : 'first'}`)
   expect(await queuedSeen(page)).toEqual([])
+  await expect(thread).not.toHaveAttribute('aria-busy')
 }
 
 /**
@@ -128,7 +146,7 @@ const handedOff = async (page: Page, thread: Locator, words: string, name: strin
  * thread is no longer busy, which it is while the runtime says a turn runs:
  * nothing after that could bring it back.
  */
-const endsQuietly = async (page: Page, thread: Locator, name: string) => {
+const endsQuietly = async (page: Page, thread: Locator, name: string, gates: ReturnType<typeof fileHolds>) => {
   const thinking = thinkingIn(thread)
   const idle = page.getByRole('textbox', { name: /^Tell .* something/ })
   await say(page, 'Why is checkout slow? [answers-after:20s]')
@@ -141,8 +159,10 @@ const endsQuietly = async (page: Page, thread: Locator, name: string) => {
   await expect(thread).not.toHaveAttribute('aria-busy')
   await expect(thinking).toHaveCount(0)
   await shoot(page, thread, `${name}-interrupted`)
+  gates.close('[ends-after:3s]')
   await say(page, 'And refunds? [ends-after:3s]')
   await expect(thinking).toBeVisible()
+  gates.open('[ends-after:3s]')
   await expect(thinking).toHaveCount(0)
   await expect(idle).toBeVisible()
   await expect(thread).not.toHaveAttribute('aria-busy')
@@ -163,25 +183,50 @@ const opened = async (env: Record<string, string> = {}) => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
-  const launched = await launch(home, env)
+  const markers = [
+    '[answers-after:6s]',
+    '[thinks-after:4s]',
+    '[reads-after:4s]',
+    '[fails-after:4s]',
+    '[answers-after:5s]',
+    '[answers-after:1s]',
+    '[answers-after:20s]',
+    '[ends-after:3s]',
+    '[answers-after:45s]',
+    '[answers-after:36s]',
+  ]
+  const files = Object.fromEntries(markers.map((marker, index) => [marker, join(home, `agent-${index}`)]))
+  const gates = fileHolds(files)
+  const launched = await launch(home, { ALTHAR_FAKE_AGENT_HELD: JSON.stringify(files), ...env })
   await openFirstProject(launched.electronApp, launched.page, repository(projects))
-  return launched
+  return { ...launched, home, gates }
+}
+
+/** How many turns the runtime has ended, from its own log: a signal the window hasn't heard, while its line is held. */
+const turnsEnded = (home: string) => {
+  try {
+    return (readFileSync(join(home, 'profile', 'logs', 'runtime.log'), 'utf8').match(/Turn ended/g) ?? []).length
+  } catch {
+    return 0
+  }
 }
 
 test('holds the reply’s place, thinking, until its first words take it: in the coordinator’s thread and a task’s', async () => {
-  const { electronApp, page } = await opened()
+  const { electronApp, page, gates } = await opened()
   try {
     const conversation = page.getByRole('region', { name: 'Conversation' })
-    await handedOff(page, conversation, 'Why is checkout slow? [answers-after:6s]', 'coordinator')
+    await handedOff(page, conversation, 'Why is checkout slow? [answers-after:6s]', 'coordinator', gates)
     // A thought ahead of its words takes Thinking's place the same way.
-    await handedOff(page, conversation, 'What does it do on a timeout? [thinks-after:4s]', 'coordinator-thought', 'other')
+    await handedOff(page, conversation, 'What does it do on a timeout? [thinks-after:4s]', 'coordinator-thought', gates, 'other')
     await expect(conversation.getByRole('article').last()).toContainText(ANSWER)
 
     // Where the agent gives up, what it said takes Thinking's place, under the same name.
     await say(page, 'And refunds? [fails-after:4s]')
     await expect(thinkingIn(conversation)).toBeVisible()
+    gates.open('[fails-after:4s]')
     await expect(conversation.getByText(/couldn't answer/)).toBeVisible()
     await expect(thinkingIn(conversation)).toHaveCount(0)
+    await expect(conversation).not.toHaveAttribute('aria-busy')
     await still(page)
     await shoot(page, conversation, 'coordinator-failed')
 
@@ -190,6 +235,9 @@ test('holds the reply’s place, thinking, until its first words take it: in the
     await say(page, 'And the docs? [answers-after:5s]')
     const thinking = thinkingIn(conversation)
     await expect(thinking).toBeVisible()
+    // Thinking also appears while the turn starts. Queue behind an agent that
+    // has actually received the first message, rather than sending both in it.
+    await expect.poll(() => gates.waiting('[answers-after:5s]')).toBe(true)
     await say(page, 'Then the changelog. [answers-after:1s]')
     const queue = page.getByRole('region', { name: 'Queued' })
     await expect(queue).toBeVisible()
@@ -201,14 +249,20 @@ test('holds the reply’s place, thinking, until its first words take it: in the
     if (from === null || to === null) throw new Error('Nothing to shoot')
     const clip = { x: to.x - 20, y: from.y - 16, width: to.width + 40, height: to.y + to.height + 16 - (from.y - 16) }
     await page.screenshot({ path: 'test-results/first-word-coordinator-queued.png', clip, scale: 'css', animations: 'disabled' })
+    gates.open('[answers-after:5s]')
     await expect(queue).toHaveCount(0)
+    await expect.poll(() => gates.waiting('[answers-after:1s]')).toBe(true)
     await expect(conversation.getByRole('article', { name: /^You/ }).last()).toContainText('Then the changelog.')
-    await expect(conversation.getByText(ANSWER)).toHaveCount(3)
+    gates.open('[answers-after:1s]')
+    // Four turns answered: the first, the thought, the docs and the queued
+    // changelog. Three counted only the docs, while the next turn was starting.
+    await expect(conversation.getByText(ANSWER)).toHaveCount(4)
+    await expect(conversation).not.toHaveAttribute('aria-busy')
 
     // A task's lead, asked again once it's done; and with a call ahead of its words.
     const thread = await readyTask(page)
-    await handedOff(page, thread, 'Why does the retry wait a second? [answers-after:6s]', 'task')
-    await handedOff(page, thread, 'Where does it give up? [reads-after:4s]', 'task-call', 'other')
+    await handedOff(page, thread, 'Why does the retry wait a second? [answers-after:6s]', 'task', gates)
+    await handedOff(page, thread, 'Where does it give up? [reads-after:4s]', 'task-call', gates, 'other')
     await expect(thread.getByRole('article').last()).toContainText(ANSWER)
   } finally {
     await electronApp.close()
@@ -217,10 +271,10 @@ test('holds the reply’s place, thinking, until its first words take it: in the
 
 test('thinks while the agent starts for what was said: the coordinator’s first, and a stopped task’s lead asked again', async () => {
   // Each agent takes four seconds to start a session, then a second to answer: the start is most of the wait.
-  const { electronApp, page } = await opened({ ALTHAR_FAKE_SLOW_START: '4000' })
+  const { electronApp, page, gates } = await opened({ ALTHAR_FAKE_SLOW_START: '4000' })
   try {
     const conversation = page.getByRole('region', { name: 'Conversation' })
-    await handedOff(page, conversation, 'Why is checkout slow? [answers-after:1s]', 'start-coordinator')
+    await handedOff(page, conversation, 'Why is checkout slow? [answers-after:1s]', 'start-coordinator', gates)
 
     await startTask(page, 'Keep the session alive', '[lead:wait]')
     await page.getByRole('button', { name: /Open task/ }).click()
@@ -232,7 +286,14 @@ test('thinks while the agent starts for what was said: the coordinator’s first
       .click()
     await expect(page.getByText('Stopped', { exact: true }).first()).toBeVisible()
     // Asked again, the stopped lead starts afresh to read it, and thinks all the while; its step goes on, its work first.
-    await handedOff(page, page.getByRole('region', { name: 'Thread' }), 'Why does it wait? [answers-after:1s]', 'start-task', 'other')
+    await handedOff(
+      page,
+      page.getByRole('region', { name: 'Thread' }),
+      'Why does it wait? [answers-after:1s]',
+      'start-task',
+      gates,
+      'other',
+    )
   } finally {
     await electronApp.close()
   }
@@ -273,10 +334,90 @@ test('says it’s longer than usual after 30 seconds, and keeps still where moti
 })
 
 test('lets go of Thinking when the turn ends with nothing said, interrupted or done: in the coordinator’s thread and a task’s', async () => {
+  const { electronApp, page, gates } = await opened()
+  try {
+    await endsQuietly(page, page.getByRole('region', { name: 'Conversation' }), 'coordinator', gates)
+    await endsQuietly(page, await readyTask(page), 'task', gates)
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('sends mid-turn straight to the queue before the runtime answers, in both chats', async () => {
   const { electronApp, page } = await opened()
   try {
-    await endsQuietly(page, page.getByRole('region', { name: 'Conversation' }), 'coordinator')
-    await endsQuietly(page, await readyTask(page), 'task')
+    const check = async (thread: Locator, name: string) => {
+      await say(page, 'Keep thinking. [answers-after:20s]')
+      await expect(thinkingIn(thread)).toBeVisible()
+      await expect(page.getByRole('textbox', { name: /^Add to the queue/ })).toBeVisible()
+      const release = await holdRuntime(page)
+      try {
+        await say(page, 'Then the changelog.')
+        const queue = page.getByRole('region', { name: /queued/i })
+        await expect(queue).toContainText('Then the changelog.')
+        await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(0)
+        await still(page)
+        await queue.screenshot({ path: `test-results/mid-turn-${name}-pending.png`, scale: 'css' })
+      } finally {
+        await release()
+      }
+      await expect(page.getByRole('region', { name: /queued/i })).toContainText('Then the changelog.')
+      await expect(page.locator('[data-item^="sending:"]')).toHaveCount(0)
+      await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(0)
+      await still(page)
+      await page.getByRole('region', { name: /queued/i }).screenshot({ path: `test-results/mid-turn-${name}-accepted.png`, scale: 'css' })
+      await page.getByRole('button', { name: /^Interrupt the/ }).click()
+      await expect(page.getByRole('region', { name: /queued/i })).toHaveCount(0)
+    }
+    await check(page.getByRole('region', { name: 'Conversation' }), 'coordinator')
+    await check(await readyTask(page), 'task')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('corrects a queued guess into the thread without a jump when the turn ended unseen, in both chats', async () => {
+  const { electronApp, page, home } = await opened()
+  try {
+    const check = async (thread: Locator, name: string) => {
+      await say(page, 'Nearly done. [answers-after:8s]')
+      const thinking = thinkingIn(thread)
+      await expect(thinking).toBeVisible()
+      // Its countdown says a turn of its own runs, so the first send has reached the runtime before the line is held.
+      await expect(thinking).toContainText(/Thinking\s*(?:[3-9]|\d{2,})s/)
+      const ended = turnsEnded(home)
+      const release = await holdRuntime(page)
+      try {
+        // The runtime ends the turn while its line to the window is held: the cached snapshot still says mid-turn.
+        await expect.poll(() => turnsEnded(home)).toBeGreaterThan(ended)
+        await say(page, 'Then the changelog.')
+        const queue = page.getByRole('region', { name: /queued/i })
+        await expect(queue).toContainText('Then the changelog.')
+        await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(0)
+        const move = await queue.locator('li[data-move]').last().getAttribute('data-move')
+        await still(page)
+        await queue.screenshot({ path: `test-results/mid-turn-${name}-corrected-before.png`, scale: 'css' })
+        await release()
+        // Taken now: it moves into the thread, one copy, under the same motion identity, so nothing jumps.
+        await expect(page.getByRole('region', { name: /queued/i })).toHaveCount(0)
+        await expect(thread.getByText('Then the changelog.', { exact: true })).toHaveCount(1)
+        const said = thread.getByRole('article', { name: /^You/ }).last()
+        await expect(said).toHaveAttribute('data-move', move ?? '')
+        await still(page)
+        const box = await said.boundingBox()
+        if (box === null) throw new Error('Nothing to shoot')
+        await page.screenshot({
+          path: `test-results/mid-turn-${name}-corrected-after.png`,
+          clip: { x: box.x - 20, y: box.y - 16, width: box.width + 40, height: box.height + 32 },
+          scale: 'css',
+          animations: 'disabled',
+        })
+      } finally {
+        await release()
+      }
+    }
+    await check(page.getByRole('region', { name: 'Conversation' }), 'coordinator')
+    await check(await readyTask(page), 'task')
   } finally {
     await electronApp.close()
   }

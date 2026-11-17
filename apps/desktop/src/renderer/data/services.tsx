@@ -169,6 +169,16 @@ export interface WindowError {
   readonly source?: string
 }
 
+/** A place Althar keeps data, by id. */
+export type StoragePlace = 'profile' | 'logs' | 'worktrees'
+
+export interface StorageHost {
+  /** The path of each place. */
+  readonly places: () => Promise<Record<StoragePlace, string>>
+  /** Opens it in the system's file manager. */
+  readonly show: (place: StoragePlace) => Promise<void>
+}
+
 export interface Host {
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
@@ -202,6 +212,16 @@ export interface Host {
   readonly findRepositories: () => Promise<FoundRepositories>
   /** A grant for a repository it found, by its id; null for one it didn't. */
   readonly grantFound: (id: string) => Promise<string | null>
+  /**
+   * Where a repository cloned for a new project goes, unless the person
+   * chooses: the folder most of their repositories are in, as they know the
+   * place, and a grant for it; null where there's nowhere usual.
+   */
+  readonly clonePlace: () => Promise<{ readonly grant: string; readonly where: string } | null>
+  /** Opens where the system lets Althar into folders it keeps closed; false where there's no such place, off a Mac. */
+  readonly openFolderAccess: () => Promise<boolean>
+  /** Asks the person where to clone it; as above, or null when they cancel. */
+  readonly pickClonePlace: () => Promise<{ readonly grant: string; readonly where: string } | null>
   /** The icon the person gave the app, by name (see `shared/appIcons`), or null where there is no Dock to show one. */
   readonly appIcon: () => Promise<string | null>
   /** Gives the app another icon, kept and shown on the Dock at once. */
@@ -220,6 +240,8 @@ export interface Host {
   readonly onStoreFailed: (listener: (failure: StoreFailure) => void) => () => void
   /** Shows the copy from before that update in the system's file manager. */
   readonly showBackup: () => Promise<void>
+  /** Where Althar keeps its data and where each is and a way to open it (About › Storage); the sizes are the runtime's (`getStorageSize`). */
+  readonly storage: StorageHost
   /** Starts the runtime again on a profile that was open elsewhere, once the person has closed that; the window reloads. */
   readonly tryAgain: () => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */

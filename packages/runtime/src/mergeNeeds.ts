@@ -1,6 +1,8 @@
 import type { HostNeed, MergeRules } from '@althar/connectors'
 import type { ChangeSummary, MergeNeed } from '@althar/contracts'
 
+import { commitsWord } from './pullRequestWords'
+
 /*
  * What merging a change needs, each as it stands (DEV-204): its host's
  * requirements as last read (`MergeRules`), and what Althar knows of it
@@ -70,13 +72,20 @@ export const checksNeedOf = (checks: Seen['checks'], required: MergeRules['requi
 /**
  * What of its lead's is left to push: nothing; commits, waiting where they go
  * up on their own as its lead's turn ends (ADR-072), else the person's to
- * push; or, where its branch and it have parted, a push that would be refused.
+ * push, or to ship where they wait for Ship (`said` so); or, where its branch
+ * and it have parted, a push that would be refused.
  */
 export const pushedNeedOf = (change: Pick<Seen, 'localHead' | 'unpushed' | 'diverged' | 'pushing'>): MergeNeed =>
   change.diverged !== null
     ? { kind: 'pushed', state: 'unmet' }
     : change.localHead !== null && change.unpushed > 0
-      ? { kind: 'pushed', state: change.pushing !== undefined && change.pushing.held === null ? 'waiting' : 'unmet', have: change.unpushed }
+      ? change.pushing?.ship === true
+        ? { kind: 'pushed', state: 'unmet', have: change.unpushed, said: `${commitsWord(change.unpushed)} not shipped` }
+        : {
+            kind: 'pushed',
+            state: change.pushing !== undefined && change.pushing.held === null ? 'waiting' : 'unmet',
+            have: change.unpushed,
+          }
       : { kind: 'pushed', state: 'met' }
 
 const host = (one: HostNeed): MergeNeed => one

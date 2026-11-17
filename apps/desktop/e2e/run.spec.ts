@@ -72,7 +72,7 @@ test('runs the default branch from the project’s front, leaves its card in the
     await list.getByRole('button', { name: 'Run npm run dev' }).click()
     await page.keyboard.press('Escape')
 
-    // Its card, in the coordinator's thread: where it runs, the command, and where it answers once it says.
+    // Its card, in the coordinator's thread: what runs, where it runs, and where it answers once it says.
     const card = page.getByRole('article', { name: 'Run of main' })
     const open = card.getByRole('button', { name: /^Open localhost:\d+$/ })
     await expect(open).toBeVisible()
@@ -83,14 +83,35 @@ test('runs the default branch from the project’s front, leaves its card in the
     await expect(page.getByRole('button', { name: /^Running/ })).toHaveCount(0)
     await page.mouse.move(1400, 300)
     await page.screenshot({ path: 'test-results/run-card.png', animations: 'disabled' })
+    await card.screenshot({ path: 'test-results/run-card-alone.png', animations: 'disabled', scale: 'css' })
     await page.getByRole('button', { name: /^Run\s*1 running$/ }).click()
     await expect(list.getByRole('button', { name: address })).toBeVisible()
     await shoot(page, 'run-list-running')
     await page.keyboard.press('Escape')
 
+    // Its console, a press away: the command at its head, what the server printed under it.
+    await card.getByRole('button', { name: 'Output' }).click()
+    const output = page.getByRole('dialog', { name: 'Output of npm run dev' })
+    await expect(output).toContainText(`http://${address}/`)
+    // Measured once it has grown from the button to its size.
+    await output.evaluate((panel) => Promise.all(panel.getAnimations().map((animation) => animation.finished)))
+    const [over, under] = [await card.boundingBox(), await output.boundingBox()]
+    if (over !== null && under !== null) {
+      const [left, top] = [Math.min(over.x, under.x) - 8, over.y - 8]
+      const right = Math.max(over.x + over.width, under.x + under.width) + 8
+      await page.screenshot({
+        path: 'test-results/run-console.png',
+        animations: 'disabled',
+        scale: 'css',
+        clip: { x: left, y: top, width: right - left, height: under.y + under.height + 8 - top },
+      })
+    }
+    await page.keyboard.press('Escape')
+    await expect(output).toBeHidden()
+
     // Stopped from its card, it says so and runs again; the new run leaves a card of its own.
     await card.getByRole('button', { name: 'Stop npm run dev' }).click()
-    await expect(card).toContainText('stopped')
+    await expect(card).toContainText('Stopped')
     await expect(fetch(`http://${address}`)).rejects.toThrow()
     await page.screenshot({ path: 'test-results/run-stopped.png', animations: 'disabled' })
     await card.getByRole('button', { name: 'Run npm run dev again' }).click()

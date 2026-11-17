@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { connectGitHub, launch, openFirstProject, say } from './support'
+import { connectGitHub, launch, openFirstProject, say, showPanes } from './support'
 
 /*
  * Abandoning a task with its pull request open, in a real window with the
@@ -51,7 +51,7 @@ test('offers to close an abandoned task’s pull request, says it is still open 
     await asked.getByRole('button', { name: 'Abandon task' }).click()
     await expect(asked).toHaveCount(0)
     await page.getByRole('button', { name: 'Back to meridian' }).click()
-    await page.getByRole('radio', { name: /^Board/ }).click()
+    await showPanes(page, { conversation: false, board: true })
     const work = page.getByRole('region', { name: 'The project’s work' })
     await expect(work.getByText('PR #1 still open')).toBeVisible()
     await expect(work.getByText('PR #1 closed')).toHaveCount(0)

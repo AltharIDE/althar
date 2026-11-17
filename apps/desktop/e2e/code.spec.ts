@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { appPath, launch, openFirstProject, say, startTask, still, toConversation } from './support'
+import { appPath, launch, openFirstProject, say, startTask, still, toConversation, showPanes } from './support'
 
 /*
  * The code an agent names, in a real window with the fake agents, which say
@@ -46,7 +46,7 @@ test('opens the code an agent names: a peek at its lines, the file beside the co
   try {
     const checkout = repository(projects)
     await openFirstProject(electronApp, page, checkout)
-    await page.getByRole('radio', { name: 'Conversation' }).click()
+    await showPanes(page, { conversation: true, board: false })
 
     // The coordinator's names, read on main: a file and its line, a path that isn't there, and a command, which stays code.
     await say(page, 'The title is in `README.md:1`. The plan was `docs/plan.md`; `npm test` checks it.')
@@ -96,14 +96,14 @@ test('opens the code an agent names: a peek at its lines, the file beside the co
     await expect(page.getByRole('complementary')).toHaveCount(0)
 
     // Beside the board, where the conversation has no room to share, the file opens over the board against it.
-    await page.getByRole('radio', { name: 'Home' }).click()
+    await showPanes(page, { conversation: true, board: true })
     await page.getByRole('button', { name: 'Open README.md:1' }).last().click()
     await expect(page.getByRole('complementary', { name: 'README.md' })).toBeVisible()
     await page.mouse.move(10, 400)
     await still(page)
     await page.screenshot({ path: 'test-results/code-beside-board.png', scale: 'css' })
     await page.keyboard.press('Escape')
-    await page.getByRole('radio', { name: 'Conversation' }).click()
+    await showPanes(page, { conversation: true, board: false })
 
     // A lead's names, in its task's worktree: the file it committed, with what the task changed in it.
     await startTask(page, 'Add a retry to checkout', '[lead:finish] [lead:edit]')

@@ -38,7 +38,7 @@ function Project({ settingsWays }: { settingsWays: SettingsWays }) {
 const signedOut = items.notice({
   severity: 'error',
   title: 'Claude Code is signed out.',
-  description: 'Authentication required',
+  description: 'The key for the work account was revoked.',
   failure: 'auth_required',
 })
 
@@ -52,8 +52,8 @@ describe('a signed-out coordinator, in its thread', () => {
     })
     withServices(<Project settingsWays={settingsWays} />, client)
     expect(await screen.findByText('Claude Code is signed out.')).toBeTruthy()
-    // Not the agent's raw words as the headline: they stand under it.
-    expect(screen.getByText('Authentication required')).toBeTruthy()
+    // Not the agent's raw words as the headline: they stand under it, where they say more.
+    expect(screen.getByText('The key for the work account was revoked.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Sign in again' }))
     expect(settingsWays.signIn).toHaveBeenCalledWith('claude-code')
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))

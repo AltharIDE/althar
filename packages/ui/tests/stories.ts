@@ -1,4 +1,5 @@
 import { composeStories } from '@storybook/react-vite'
+import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 /*
@@ -9,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 export type StoryFile = Parameters<typeof composeStories>[0]
 /* What composeStories gives back, as far as this suite uses it; its own type is lost to Object.entries. */
 interface Runnable {
-  run: () => Promise<void>
+  run: (context: { testingLibraryRender: typeof render }) => Promise<void>
 }
 
 /*
@@ -20,6 +21,9 @@ interface Runnable {
  * And jsdom lays nothing out, so a play that measures a size reads 0, as a drag along the tabs does.
  */
 const BROWSER_ONLY = new Set<string>([
+  'thread/ThreadNavigator/ThreadNavigator.stories.tsx#WithScreenshot',
+  'thread/ThreadNavigator/ThreadNavigator.stories.tsx#WithScreenshots',
+  'thread/ThreadNavigator/ThreadNavigator.stories.tsx#WithScreenshotsInNarrowPane',
   'thread/TaskFace/TaskFace.stories.tsx#ScrolledUp',
   'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpDark',
   'thread/TaskFace/TaskFace.stories.tsx#ScrolledUpWithOnePill',
@@ -35,6 +39,7 @@ const BROWSER_ONLY = new Set<string>([
   'primitives/CheckList/CheckList.stories.tsx#Default',
   'composer/Composer/Composer.stories.tsx#EnterEndsDictationAtItsSize',
   'composer/Composer/Composer.stories.tsx#LongDictation',
+  'composer/ModelPick/ModelPick.stories.tsx#CrowdedRow',
   'chrome/ProjectTabs/ProjectTabs.stories.tsx#Reordering',
   'chrome/ProjectTabs/ProjectTabs.stories.tsx#MissedRelease',
   'board/NextLine/NextLine.stories.tsx#Dragging',
@@ -55,7 +60,7 @@ export const runStories = (files: Record<string, StoryFile>) => {
       for (const [name, Story] of Object.entries<Runnable>(composeStories(file))) {
         const id = `${rel}#${name}`
         it.skipIf(BROWSER_ONLY.has(id))(name, async () => {
-          await Story.run()
+          await Story.run({ testingLibraryRender: render })
           expect(document.body.childElementCount).toBeGreaterThan(0)
         })
       }

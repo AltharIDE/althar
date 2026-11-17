@@ -24,19 +24,19 @@ import type { Host } from '../src/renderer/data/services'
 import { card, changed, fakeClient, fakeHost, home, load, project } from './fixtures'
 import { withServices } from './render'
 
-const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, waiting: 0, ready: 0 }
-const tessera: ProjectSummary = { ...project, id: 'p3', name: 'tessera', slug: 'tessera', running: 0, working: 0, waiting: 1, ready: 1 }
+const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, yours: 0 }
+const tessera: ProjectSummary = { ...project, id: 'p3', name: 'tessera', slug: 'tessera', running: 0, working: 0, yours: 2 }
 
 /**
  * The home's cards for what the projects list counts: a coordinator's call for
- * each waiting, a ready task for each ready. A tab's dot counts these as its
- * board does; a test that says the dot differs gives its own home.
+ * each thing waiting. A tab's dot counts these as its board does; a test that
+ * says the dot differs gives its own home.
  */
 const homeOf = (projects: ReadonlyArray<ProjectSummary>): HomeSnapshot =>
   home({
     projects: [...projects],
     calls: projects.flatMap((one) =>
-      Array.from({ length: one.waiting }, (_, at): HomeCall => ({
+      Array.from({ length: one.yours }, (_, at): HomeCall => ({
         id: `${one.id}-call-${at}`,
         kind: 'question',
         title: `${one.name} asks`,
@@ -48,21 +48,6 @@ const homeOf = (projects: ReadonlyArray<ProjectSummary>): HomeSnapshot =>
         threadId: `${one.id}-coordinator`,
         taskTitle: null,
         taskSlug: null,
-        projectId: one.id,
-      })),
-    ),
-    tasks: projects.flatMap((one) =>
-      Array.from({ length: one.ready }, (_, at): HomeTask => ({
-        ...card(),
-        taskId: `${one.id}-ready-${at}`,
-        threadId: `${one.id}-ready-thread-${at}`,
-        title: `${one.name} ready`,
-        phase: 'ready',
-        state: 'open',
-        createdAt: '2026-10-14T09:00:00.000Z',
-        settledAt: null,
-        changed: null,
-        here: [],
         projectId: one.id,
       })),
     ),
@@ -244,7 +229,7 @@ describe('the window’s tabs', () => {
     go('/threads/th9')
     await waitFor(() => expect(tab('halyard').getAttribute('aria-current')).toBe('page'))
 
-    const asked = [project, { ...halyard, waiting: 3 }]
+    const asked = [project, { ...halyard, yours: 3 }]
     vi.mocked(client.listProjects).mockResolvedValue({ cursor: 4, projects: asked })
     vi.mocked(client.getHome).mockResolvedValue(homeOf(asked))
     emit(changed('card', 't9'))
@@ -257,7 +242,7 @@ describe('the window’s tabs', () => {
   it('keep a project’s dot dark while its work is running, though the projects list counts it ready', async () => {
     // fnt: three tasks whose last runs passed, but whose pull requests' checks run now. Its board shows them in Running; the
     // projects list counted them ready, and lit the dot with nothing in Needs you.
-    const fnt: ProjectSummary = { ...project, id: 'p4', name: 'fnt', slug: 'fnt', running: 3, working: 3, waiting: 0, ready: 3 }
+    const fnt: ProjectSummary = { ...project, id: 'p4', name: 'fnt', slug: 'fnt', running: 3, working: 3, yours: 3 }
     const running = Array.from({ length: 3 }, (_, at): HomeTask => ({
       ...card(),
       taskId: `t${at}`,

@@ -16,6 +16,42 @@ import { runtimeWith, connect, ask, cards, tipOf } from './changesSupport'
  */
 
 describe('what the host says merging a pull request needs', () => {
+  it.live('keeps a normal queued merge separate from an explicit bypass, checks the viewed head, and settles after bypass', () => {
+    const { working, bare } = hosted()
+    let allowed = false
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      canBypassQueue: () => allowed,
+      rulesOf: () => ({ requiredChecks: [], needs: [{ kind: 'merge_queue', state: 'met' }], canBypassQueue: allowed }),
+    })
+    github.addRepository(['meridian', 'api'])
+    github.mergeQueue()
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready')
+      const taskId = ready?.taskId ?? ''
+      const head = ready?.change?.head ?? ''
+      const changes = yield* Changes
+      yield* changes.merge(taskId, head)
+      assert.deepInclude((yield* cards(projectId))[0]?.change, { queued: true, state: 'open' })
+      yield* Effect.flip(changes.merge(taskId, head, undefined, true))
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      assert.deepInclude((yield* cards(projectId))[0]?.change, { queued: true, state: 'open' })
+      allowed = true
+      const moved = yield* Effect.flip(changes.merge(taskId, 'unseen-head', undefined, true))
+      assert.strictEqual((moved as { readonly _tag: string })._tag, 'ChangedSinceSeen')
+      yield* changes.merge(taskId, head, undefined, true)
+      const [settled] = yield* until(cards(projectId), (all) => all[0]?.phase === 'settled')
+      assert.strictEqual(settled?.change?.state, 'merged')
+      assert.deepStrictEqual(
+        github.merged.map((one) => one.how),
+        ['queue', 'merge'],
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('reaches the board as one list, read again only as something happens on it', () => {
     const { working, bare } = hosted()
     let rules: MergeRules = {

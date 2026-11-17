@@ -65,8 +65,8 @@ export interface PagePin {
   readonly address: string
 }
 
-/** What the person pressed in the page that the window acts on: Comment, the address field. */
-export type PageKey = 'comment' | 'address'
+/** What the person pressed in the page that the window acts on: Comment, the address field, dictating. */
+export type PageKey = 'comment' | 'address' | 'dictate'
 
 /** Where a page is told to go: back, forward, again, or stop loading. */
 export type PageMove = 'back' | 'forward' | 'reload' | 'stop'
