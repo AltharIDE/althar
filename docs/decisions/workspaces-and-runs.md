@@ -493,7 +493,10 @@ copies and its agents' sessions are never offered.
 switches it, and never removes it: finished, it isn't cleaned up; a change
 in one can't be dropped or joined into another; it can't move to Local. Where
 its tool removed it, the work comes back from its branch in a folder of
-Althar's own, never in the tool's place, and is Althar's from then on.
+Althar's own, never in the tool's place, and is Althar's from then on. A
+detached one, on no branch, has its commit kept as it comes in, under
+`refs/althar/kept/<workspace>` as a removed folder's last commit is, so it
+comes back at that commit rather than where it branched off.
 
 **Carrying a conversation on** is how any thread carries on: the next
 session's brief has the thread so far, the conversation brought in with it,
@@ -504,8 +507,11 @@ brief carries any conversation to any agent.
 **Twice is once.** What came in is kept by its key (a worktree's folder, a
 setup's tool and checkout, a conversation's agent and id, in `brought_in`),
 so bringing it in again finds it, and listing again says what it became.
-Each thing comes in in a transaction of its own: one that can't come in says
-why, and the rest come in.
+Each thing comes in in a transaction of its own (an aside together with its
+history): one that can't come in says why, and the rest come in. The window
+has moved on by then, so what didn't come in, or a bringing in that failed as
+a whole, is said in the project's conversation, where it stays: each by name
+and why, with Try again for what another try could bring in.
 
 Not built yet: offering what's new since from a project's settings, for a
 project made before this, or one still worked on in another tool; the board

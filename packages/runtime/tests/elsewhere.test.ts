@@ -120,6 +120,23 @@ describe('looking elsewhere', () => {
         messages.map((one) => one.text),
         ['Rename the meridian module', 'Renamed it to compass.'],
       )
+      // Gone between being found and being read, or not zstd at all: the read fails, and nothing is left unhandled.
+      rmSync(`${file}.zst`)
+      const gone = yield* Effect.promise(() =>
+        codexTranscript(file).then(
+          () => 'read',
+          (error: NodeJS.ErrnoException) => error.code,
+        ),
+      )
+      assert.strictEqual(gone, 'ENOENT')
+      writeFileSync(`${file}.zst`, 'not zstd')
+      const garbled = yield* Effect.promise(() =>
+        codexTranscript(file).then(
+          () => 'read',
+          () => 'failed',
+        ),
+      )
+      assert.strictEqual(garbled, 'failed')
     }),
   )
 

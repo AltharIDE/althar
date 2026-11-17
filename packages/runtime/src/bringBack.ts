@@ -24,7 +24,9 @@ import { addItem } from './threads'
  * again. Each is set up again, as a new one is, and the thread says the
  * folder is back, as a line across it. A worktree of Althar's the person
  * deleted by hand comes back the same way, from its branch or where it
- * started; a Local task's folder, the person's own checkout, never does. This
+ * started; one brought in detached from another tool, which that tool
+ * removed, from its last commit, kept as it was brought in (Elsewhere.ts),
+ * in a folder of Althar's own; a Local task's folder, the person's own checkout, never does. This
  * is a module, not a service, so a session can bring its task's folder back
  * before its agent starts in it.
  */
@@ -119,7 +121,11 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
           if (review === null) return yield* new TaskRefused({ taskId, why: 'branch_gone' })
           yield* copyReviewed(one.repository, one.path, review)
         } else {
-          const kept = one.cleaned === 1 ? yield* commitOf(one.repository, `${KEPT}${one.id}`).pipe(Effect.orElseSucceed(() => null)) : null
+          // Removed by Althar, or detached in a folder another tool made and has since removed: its last commit was kept.
+          const kept =
+            one.cleaned === 1 || found.madeBy !== null
+              ? yield* commitOf(one.repository, `${KEPT}${one.id}`).pipe(Effect.orElseSucceed(() => null))
+              : null
           if (one.branched === 1 && (yield* branchExists(one.repository, one.branch)))
             yield* restoreWorktree(one.repository, one.path, one.branch)
           // Deleted by hand, nothing kept its last commit: with its branch gone too, its work is.

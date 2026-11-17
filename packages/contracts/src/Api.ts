@@ -2089,18 +2089,31 @@ export const NoticeItem = Schema.Struct({
     ),
     /**
      * What the line offers: a review a lead or the coordinator offered a task whose work turned real with none
-     * (`offer_review`), by its reviewer, which Add puts on and No thanks turns down for good. (A preset is offered on its
-     * task's card, `presetOffer`, not here.)
+     * (`offer_review`), by its reviewer, which Add puts on and No thanks turns down for good; or, in the project's
+     * conversation, what was picked to bring in from other tools and didn't come in, each by name and why, with what
+     * Try again brings in again (`BringIn`, twice as once). (A preset is offered on its task's card, `presetOffer`, not here.)
      */
     offer: Schema.optional(
-      Schema.Struct({
-        kind: Schema.Literal('review'),
-        projectId: Schema.String,
-        taskId: Schema.String,
-        agentId: Schema.String,
-        model: Schema.NullOr(Schema.String),
-        effort: Schema.optional(Schema.NullOr(Schema.String)),
-      }),
+      Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal('review'),
+          projectId: Schema.String,
+          taskId: Schema.String,
+          agentId: Schema.String,
+          model: Schema.NullOr(Schema.String),
+          effort: Schema.optional(Schema.NullOr(Schema.String)),
+        }),
+        Schema.Struct({
+          kind: Schema.Literal('bring_in'),
+          projectId: Schema.String,
+          /** What didn't come in, by name, and why. */
+          missed: Schema.Array(Schema.Struct({ name: Schema.String, why: Schema.String })),
+          /** What trying again would bring in: empty where nothing that failed could come in on another try. */
+          worktrees: Schema.Array(Schema.String),
+          setups: Schema.Array(Schema.String),
+          conversations: Schema.Array(Schema.String),
+        }),
+      ]),
     ),
     /**
      * For an agent's turn that failed: why, as the runtime classes it

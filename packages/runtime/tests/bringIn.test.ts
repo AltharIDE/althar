@@ -69,6 +69,31 @@ const connectedTo = () =>
     return { client, store, project, machine, sql }
   })
 
+/** What the project's conversation says didn't come in from other tools, and what Try again would bring: its lines, oldest first. */
+const missedIn = (sql: Effect.Success<ReturnType<typeof connectedTo>>['sql'], projectId: string) =>
+  Effect.map(
+    sql(
+      (sql) => sql<{ content: string }>`
+        SELECT i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id
+        WHERE t.project_id = ${projectId} AND t.kind = 'coordinator' AND i.kind = 'notice' ORDER BY i.rowid`,
+    ),
+    (rows) =>
+      rows.flatMap((row) => {
+        const content = JSON.parse(row.content) as {
+          title: string
+          severity: string
+          offer?: {
+            kind: string
+            missed: ReadonlyArray<unknown>
+            worktrees: ReadonlyArray<string>
+            setups: ReadonlyArray<string>
+            conversations: ReadonlyArray<string>
+          }
+        }
+        return content.offer?.kind === 'bring_in' ? [{ title: content.title, severity: content.severity, ...content.offer }] : []
+      }),
+  )
+
 describe('bringing in other tools’ work', () => {
   it.live(
     'brings each worktree in as a held task in place with its conversations, a setup as the repository’s, the rest as asides, and twice as once',
@@ -204,7 +229,7 @@ describe('bringing in other tools’ work', () => {
   it.live('says a conversation with nothing said in it didn’t come in, and brings in the rest', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { client, project, machine } = yield* connectedTo()
+        const { client, project, machine, sql } = yield* connectedTo()
         const id = '019a0000-0000-7000-8000-0000000000ff'
         writeFileSync(
           join(machine.home, '.codex', 'sessions', '2026', '11', '12', `rollout-2026-11-12T13-00-00-${id}.jsonl`),
@@ -220,6 +245,81 @@ describe('bringing in other tools’ work', () => {
         })
         assert.deepStrictEqual(brought.failed, [{ key: `codex:${id}`, why: 'Nothing was said in it.' }])
         assert.strictEqual(brought.asides.length, 1)
+        // Said where it stays, by name and why; another try wouldn't bring it, so there is nothing to try again.
+        const [said, ...more] = yield* missedIn(sql, project.id)
+        assert.deepStrictEqual(more, [])
+        assert.strictEqual(said?.title, 'Not everything picked from other tools came in')
+        assert.strictEqual(said?.severity, 'warning')
+        assert.deepStrictEqual(said?.missed, [{ name: '“Codex conversation”', why: 'Nothing was said in it.' }])
+        assert.deepStrictEqual([...(said?.conversations ?? []), ...(said?.worktrees ?? []), ...(said?.setups ?? [])], [])
+      }),
+    ),
+  )
+
+  it.live('makes nothing of a chat whose history couldn’t go in, so trying again makes it once', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, sql } = yield* connectedTo()
+        const key = `claude_code:${sessionIds.inRoot}`
+        const bring = client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [],
+          setups: [],
+          conversations: [key],
+          steps,
+        })
+        // Its history fails as it goes in, after the chat is made.
+        yield* sql(
+          (sql) =>
+            sql`CREATE TRIGGER no_history BEFORE INSERT ON brought_in WHEN NEW.kind = 'conversation' BEGIN SELECT RAISE(ABORT, 'no'); END`,
+        )
+        const first = yield* bring
+        assert.deepStrictEqual(first.asides, [])
+        assert.deepStrictEqual(
+          first.failed.map((one) => one.key),
+          [key],
+        )
+        const chats = () => sql((sql) => sql<{ id: string }>`SELECT id FROM tasks WHERE project_id = ${project.id} AND shelf = 'scratch'`)
+        assert.strictEqual((yield* chats()).length, 0)
+        // Said in the project's conversation, with it to try again.
+        const [said] = yield* missedIn(sql, project.id)
+        assert.strictEqual(said?.title, 'Nothing picked from other tools came in')
+        assert.deepStrictEqual(said?.conversations, [key])
+        yield* sql((sql) => sql`DROP TRIGGER no_history`)
+        const again = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [],
+          setups: [],
+          conversations: [key],
+          steps,
+        })
+        assert.strictEqual(again.asides.length, 1)
+        assert.deepStrictEqual(
+          (yield* chats()).map((one) => one.id),
+          [...again.asides],
+        )
+      }),
+    ),
+  )
+
+  it.live('says so where it stays when bringing in fails as a whole, with all of it to try again', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, sql } = yield* connectedTo()
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const worktrees = found.worktrees.slice(0, 2).map((one) => one.key)
+        const conversations = [`codex:${sessionIds.codexLegacy}`]
+        yield* sql((sql) => sql`ALTER TABLE brought_in RENAME TO brought_in_gone`)
+        const failed = yield* Effect.flip(
+          client.BringIn({ commandId: commandId(), projectId: project.id, worktrees, setups: [], conversations, steps }),
+        )
+        assert.isDefined(failed)
+        const [said] = yield* missedIn(sql, project.id)
+        assert.strictEqual(said?.title, 'Nothing picked from other tools came in')
+        assert.deepStrictEqual(said?.worktrees, worktrees)
+        assert.deepStrictEqual(said?.conversations, conversations)
       }),
     ),
   )
@@ -284,6 +384,43 @@ describe('bringing in other tools’ work', () => {
         assert.isTrue(workspace?.path.startsWith(join(machine.home, 'Althar')))
         assert.strictEqual(gitIn(workspace?.path ?? '', 'branch', '--show-current'), 't3/1a2b3c4d')
         assert.isFalse(existsSync(machine.worktrees.t3))
+      }),
+    ),
+  )
+
+  it.live('brings a detached worktree its tool removed back at its own last commit, not where it branched off', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, machine, sql } = yield* connectedTo()
+        // Codex's worktree is detached; a commit made there is on no branch, and only its folder knows it.
+        gitIn(machine.worktrees.codex, 'commit', '-q', '--allow-empty', '-m', 'Only in the detached worktree')
+        const head = gitIn(machine.worktrees.codex, 'rev-parse', 'HEAD')
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const key = found.worktrees.find((one) => one.path === machine.worktrees.codex)?.key ?? ''
+        const brought = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [key],
+          setups: [],
+          conversations: [],
+          steps,
+        })
+        const taskId = brought.tasks[0] ?? ''
+        assert.notStrictEqual(taskId, '')
+        rmSync(machine.worktrees.codex, { recursive: true, force: true })
+        // As Codex removes one: git forgets the folder, and the commit is left to whatever still names it.
+        gitIn(machine.repository, 'worktree', 'prune')
+        const [thread] = yield* sql((sql) => sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`)
+        yield* client.Send({ commandId: commandId(), threadId: thread?.id ?? '', body: 'Carry on', disposition: 'after_current' })
+        yield* client.StartSession({ commandId: commandId(), threadId: thread?.id ?? '', agentId: 'codex' })
+        yield* until(
+          sql((sql) => sql<{ id: string }>`SELECT id FROM turn_deliveries WHERE thread_id = ${thread?.id ?? ''}`),
+          (rows) => rows.length > 0,
+        )
+        const [workspace] = yield* sql((sql) => sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${taskId}`)
+        assert.isTrue(workspace?.path.startsWith(join(machine.home, 'Althar')))
+        assert.strictEqual(gitIn(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
+        assert.strictEqual(gitIn(workspace?.path ?? '', 'log', '-1', '--format=%s'), 'Only in the detached worktree')
       }),
     ),
   )

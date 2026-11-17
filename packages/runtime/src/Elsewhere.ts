@@ -6,9 +6,10 @@ import { join } from 'node:path'
 import type { BroughtIn, Elsewhere as Found, ElsewhereConversation, ElsewhereWorktree, PlanStep } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, newId, type OtherTool, type ProjectId } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer } from 'effect'
+import { Cause, Context, type Crypto, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { KEPT } from './bringBack'
 import { Changes } from './Changes'
 import { Agents, RuntimeConfig } from './Config'
 import { suggestedCoordinator } from './coordinatorChoice'
@@ -24,6 +25,7 @@ import { freeSlug, Projects, slugify } from './Projects'
 import { fact, timestamp } from './records'
 import { indexTask } from './Search'
 import { SignIns } from './SignIns'
+import { addItem } from './threads'
 
 /*
  * Bringing in other tools' work (docs/decisions/workspaces-and-runs.md,
@@ -82,6 +84,9 @@ const dateWords = (at: string | null) =>
   at === null ? null : new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** Said in the project's conversation where nothing picked from other tools came in. */
+const NOTHING_CAME = 'Nothing picked from other tools came in'
 
 /** What a worktree brought in says to its lead, as the task's description. */
 export const describeWorktree = (
@@ -415,7 +420,7 @@ export class Elsewhere extends Context.Service<
           /** Set up already, by the tool that made it: Althar never sets it up. */
           readonly setUp: boolean
         }
-        readonly within: (taskId: string, threadId: string) => Effect.Effect<void, unknown, Store>
+        readonly within: (taskId: string, threadId: string, workspaceId: string) => Effect.Effect<void, unknown, Store>
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -488,14 +493,14 @@ export class Elsewhere extends Context.Service<
                   payload: { shelf: input.shelf },
                   actorId: input.actorId,
                 })
-              yield* input.within(taskId, threadId)
+              yield* input.within(taskId, threadId, workspaceId)
               yield* indexTask(taskId)
             }),
           )
           return { taskId, threadId }
         })
 
-      const bringIn = (input: {
+      const bringing = (input: {
         readonly envelope: CommandEnvelope
         readonly projectId: string
         readonly worktrees: ReadonlyArray<string>
@@ -526,6 +531,8 @@ export class Elsewhere extends Context.Service<
               ([row]) => row?.taskId ?? null,
             )
           const failed: Array<{ key: string; why: string }> = []
+          /** What failed that another try could bring in: one that couldn't be read, or whose branch another task has. */
+          const again = new Set<string>()
           const tasks: Array<string> = []
           const asides: Array<string> = []
           let histories = 0
@@ -538,6 +545,7 @@ export class Elsewhere extends Context.Service<
                   Effect.andThen(
                     Effect.sync((): A | undefined => {
                       failed.push({ key, why: 'It couldn’t be read, so it didn’t come in.' })
+                      again.add(key)
                       return undefined
                     }),
                   ),
@@ -599,6 +607,7 @@ export class Elsewhere extends Context.Service<
                       AND k.state IN ('draft', 'open') LIMIT 1`
             if (held !== undefined) {
               failed.push({ key, why: `Its branch is “${held.title}”’s already.` })
+              again.add(key)
               continue
             }
             const made = yield* kept(
@@ -632,8 +641,13 @@ export class Elsewhere extends Context.Service<
                     madeBy: worktree.tool,
                     setUp: true,
                   },
-                  within: (taskId, threadId) =>
+                  within: (taskId, threadId, workspaceId) =>
                     Effect.gen(function* () {
+                      // Detached, its work is only its folder's HEAD, which its tool may remove: kept under a ref of
+                      // Althar's own, as a removed folder's last commit is, so it comes back from there (bringBack.ts),
+                      // never from where it branched off.
+                      if (worktree.branch === null && /^[0-9a-f]{40,64}$/.test(worktree.head))
+                        yield* git(binding.path, 'update-ref', `${KEPT}${workspaceId}`, worktree.head)
                       yield* sql`INSERT INTO brought_in ${sql.insert({
                         projectId: project.id,
                         key,
@@ -730,54 +744,123 @@ export class Elsewhere extends Context.Service<
               failed.push({ key, why: 'Nothing was said in it.' })
               continue
             }
+            const base = binding.base ?? 'main'
+            const baseCommit = yield* git(binding.path, 'rev-parse', '--verify', `origin/${base}^{commit}`).pipe(
+              Effect.catch(() => git(binding.path, 'rev-parse', '--verify', `${base}^{commit}`)),
+              Effect.orElseSucceed(() => null),
+            )
+            // The chat and its history in one transaction: one whose history can't go in isn't made at all, so trying
+            // again finds nothing of it and makes it once.
             const made = yield* kept(
               key,
-              Effect.gen(function* () {
-                const base = binding.base ?? 'main'
-                const baseCommit = yield* git(binding.path, 'rev-parse', '--verify', `origin/${base}^{commit}`).pipe(
-                  Effect.catch(() => git(binding.path, 'rev-parse', '--verify', `${base}^{commit}`)),
-                  Effect.orElseSucceed(() => null),
-                )
-                const created = yield* makeTask({
-                  projectId: project.id,
-                  projectSlug: project.slug,
-                  binding: { id: binding.id, slug: binding.slug, base: binding.base },
-                  title: conversation.title.slice(0, 120),
-                  description: `A conversation brought in from ${agentName(conversation.agent)}, had in ${conversation.cwd}.`,
-                  request: null,
-                  actorId,
-                  shelf: 'scratch',
-                  workspace: {
-                    // A copy of the default branch, as an aside has, made only once the person writes to it (bringBack.ts).
-                    path: (slug) => join(config.worktreeRoot, project.slug, slug, binding.slug),
-                    branch: (slug) => branchFor(null, { key: null, slug }),
-                    branched: false,
-                    baseCommit: baseCommit !== null && /^[0-9a-f]{40,64}$/.test(baseCommit) ? baseCommit : null,
-                    madeBy: null,
-                    setUp: false,
-                  },
-                  within: (taskId) =>
-                    Effect.gen(function* () {
-                      // An aside, as + makes one: its plan its first step, answered as its lead's turn ends, with nothing going outside.
-                      yield* fact({
-                        projectId: project.id,
-                        aggregateType: 'task',
-                        aggregateId: taskId,
-                        revision: 1,
-                        type: 'task.brought_in',
-                        payload: { agent: conversation.agent, id: conversation.id },
-                        actorId,
-                      })
-                    }),
-                })
-                yield* bringHistory(conversation, { projectId: project.id, ...created }, actorId, said)
-                return created
-              }),
+              sql.withTransaction(
+                Effect.gen(function* () {
+                  const created = yield* makeTask({
+                    projectId: project.id,
+                    projectSlug: project.slug,
+                    binding: { id: binding.id, slug: binding.slug, base: binding.base },
+                    title: conversation.title.slice(0, 120),
+                    description: `A conversation brought in from ${agentName(conversation.agent)}, had in ${conversation.cwd}.`,
+                    request: null,
+                    actorId,
+                    shelf: 'scratch',
+                    workspace: {
+                      // A copy of the default branch, as an aside has, made only once the person writes to it (bringBack.ts).
+                      path: (slug) => join(config.worktreeRoot, project.slug, slug, binding.slug),
+                      branch: (slug) => branchFor(null, { key: null, slug }),
+                      branched: false,
+                      baseCommit: baseCommit !== null && /^[0-9a-f]{40,64}$/.test(baseCommit) ? baseCommit : null,
+                      madeBy: null,
+                      setUp: false,
+                    },
+                    within: (taskId) =>
+                      Effect.gen(function* () {
+                        // An aside, as + makes one: its plan its first step, answered as its lead's turn ends, with nothing going outside.
+                        yield* fact({
+                          projectId: project.id,
+                          aggregateType: 'task',
+                          aggregateId: taskId,
+                          revision: 1,
+                          type: 'task.brought_in',
+                          payload: { agent: conversation.agent, id: conversation.id },
+                          actorId,
+                        })
+                      }),
+                  })
+                  yield* bringHistory(conversation, { projectId: project.id, ...created }, actorId, said)
+                  return created
+                }),
+              ),
             )
             if (made !== undefined) asides.push(made.taskId)
           }
+          if (failed.length > 0) {
+            const nameOf = (key: string) => {
+              const worktree = found.worktrees.find((one) => one.key === key)
+              if (worktree !== undefined) return worktree.name
+              const setup = found.setups.find((one) => one.key === key)
+              if (setup !== undefined) return `${toolNames[setup.tool]}’s setup for ${setup.repository}`
+              const conversation = found.conversations.find((one) => one.key === key)
+              return conversation === undefined ? 'Something picked' : `“${conversation.title}”`
+            }
+            const retried = (keys: ReadonlyArray<string>) => keys.filter((key) => again.has(key))
+            yield* sayMissed(project.id, {
+              title:
+                tasks.length + asides.length + setups + histories === 0 ? NOTHING_CAME : 'Not everything picked from other tools came in',
+              missed: failed.map((one) => ({ name: nameOf(one.key), why: one.why })),
+              worktrees: retried(input.worktrees),
+              setups: retried(input.setups),
+              // A worktree's own conversation that didn't come with it is tried again on its own, into its task.
+              conversations: [...again].filter((key) => !input.worktrees.includes(key) && !input.setups.includes(key)),
+            })
+          }
           return { tasks, asides, setups, histories, failed } satisfies BroughtIn
         })
+
+      /**
+       * What was picked and didn't come in, said in the project's conversation, where it stays: each by name and why, with
+       * Try again where another try could bring it in (the window moves on as it brings in, so it says nothing of it).
+       */
+      const sayMissed = (
+        projectId: ProjectId,
+        said: {
+          readonly title: string
+          readonly missed: ReadonlyArray<{ readonly name: string; readonly why: string }>
+          readonly worktrees: ReadonlyArray<string>
+          readonly setups: ReadonlyArray<string>
+          readonly conversations: ReadonlyArray<string>
+        },
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{
+            id: string
+          }>`SELECT id FROM threads WHERE project_id = ${projectId} AND kind = 'coordinator' LIMIT 1`
+          if (thread === undefined) return
+          yield* addItem({ projectId, threadId: thread.id }, 'notice', {
+            source: 'runtime',
+            severity: 'warning',
+            title: said.title,
+            description: said.missed.map((one) => `${one.name}: ${one.why}`).join('\n') || null,
+            offer: { kind: 'bring_in', projectId, ...said },
+          })
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not say what didn’t come in from other tools', cause)))
+
+      const bringIn = (input: Parameters<typeof bringing>[0]) =>
+        bringing(input).pipe(
+          // Failed as a whole, after the window moved on: said where it stays, with all of it to try again.
+          Effect.tapCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.void
+              : sayMissed(input.projectId as ProjectId, {
+                  title: NOTHING_CAME,
+                  missed: [],
+                  worktrees: input.worktrees,
+                  setups: input.setups,
+                  conversations: input.conversations,
+                }),
+          ),
+        )
 
       /** A repository's default branch as this computer knows it, without the network: origin's, else main or master. */
       const localDefault = (path: string) =>

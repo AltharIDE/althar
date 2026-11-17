@@ -2,9 +2,10 @@ import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { Elsewhere, FolderReading } from '@althar/contracts'
+import type { BroughtIn, Elsewhere, FolderReading } from '@althar/contracts'
 
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
+import { NotBroughtInOf } from '../src/renderer/features/elsewhere/NotBroughtInOf'
 import { picked, picksOf, tilesOf, words } from '../src/renderer/features/elsewhere/tiles'
 import { merged } from '../src/renderer/features/elsewhere/useElsewhere'
 import { StartView } from '../src/renderer/features/start/StartView'
@@ -236,6 +237,38 @@ describe('the welcome’s step for what other tools left', () => {
     await waitFor(() => expect(screen.queryByRole('heading', { name: 'Already under way' })).toBeNull())
   })
 
+  it('goes on at once though bringing in is refused, leaving the project’s conversation to say so', async () => {
+    const unhandled: Array<unknown> = []
+    const note = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', note)
+    let asked = 0
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => reading),
+      lookElsewhere: vi.fn(async () => FOUND),
+      // Not a mock, which would handle what it returns itself: refused, as the runtime gone would.
+      bringIn: () => {
+        asked++
+        return Promise.reject(new Error('The runtime went away.'))
+      },
+    })
+    seenTheTour()
+    withServices(<Start />, client, fakeHost())
+    await toTheProject()
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
+    await screen.findByRole('list', { name: 'Repositories for the project' })
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    await screen.findByRole('heading', { name: 'Already under way' })
+    await userEvent.click(screen.getByRole('button', { name: /^Conductor/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Bring in 1 worktree and 1 setup' }))
+    // Refused, and caught: nothing is left unhandled, and the welcome has gone on.
+    await waitFor(() => expect(asked).toBe(1))
+    await new Promise((settled) => setTimeout(settled, 50))
+    process.off('unhandledRejection', note)
+    expect(unhandled).toEqual([])
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Already under way' })).toBeNull())
+  })
+
   it('isn’t a step where other tools left nothing', async () => {
     const { client } = fakeClient({
       listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
@@ -251,5 +284,53 @@ describe('the welcome’s step for what other tools left', () => {
     // Straight on to where its code is.
     expect(await screen.findByRole('heading', { name: 'Pull requests' })).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Already under way' })).toBeNull()
+  })
+})
+
+describe('what didn’t come in, in the project’s conversation', () => {
+  const offer = {
+    kind: 'bring_in' as const,
+    projectId: 'p1',
+    missed: [
+      { name: 'lima', why: 'Its branch is “Checkout retry”’s already.' },
+      { name: '“Codex conversation”', why: 'Nothing was said in it.' },
+    ],
+    worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+    setups: [],
+    conversations: [],
+  }
+  const title = 'Not everything picked from other tools came in'
+
+  it('says each by name and why, and Try again brings in again what another try could, said under way at once', async () => {
+    let answer: (value: BroughtIn) => void = () => {}
+    const { client } = fakeClient({ bringIn: vi.fn(() => new Promise<BroughtIn>((resolve) => (answer = resolve))) })
+    withServices(<NotBroughtInOf offer={offer} title={title} />, client, fakeHost())
+    expect(screen.getByText(title)).toBeTruthy()
+    expect(screen.getByText('Nothing was said in it.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(screen.getByText('Trying again…')).toBeTruthy()
+    expect(client.bringIn).toHaveBeenCalledWith({
+      projectId: 'p1',
+      worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+      setups: [],
+      conversations: [],
+      steps: [],
+    })
+    answer({ tasks: ['t1'], asides: [], setups: 0, histories: 0, failed: [] })
+    expect(await screen.findByText('Tried again.')).toBeTruthy()
+  })
+
+  it('stands again, with why, where trying again was refused', async () => {
+    const { client } = fakeClient({ bringIn: vi.fn(async () => Promise.reject(new Error('gone'))) })
+    withServices(<NotBroughtInOf offer={offer} title={title} />, client, fakeHost())
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText(/runtime didn't answer/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+
+  it('offers nothing to try again where no other try could bring it in', () => {
+    const { client } = fakeClient()
+    withServices(<NotBroughtInOf offer={{ ...offer, worktrees: [] }} title={title} />, client, fakeHost())
+    expect(screen.queryByRole('button')).toBeNull()
   })
 })

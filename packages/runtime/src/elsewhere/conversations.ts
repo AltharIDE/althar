@@ -2,7 +2,7 @@ import { createReadStream, existsSync, realpathSync } from 'node:fs'
 import { open, readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { Readable } from 'node:stream'
+import { pipeline, type Readable } from 'node:stream'
 import { createZstdDecompress } from 'node:zlib'
 
 import { columnsOf, isoOf, readCopy } from './stores'
@@ -222,12 +222,21 @@ export const claudeSessions = async (places: Places, folders: ReadonlyArray<stri
 export const rolloutAt = (file: string) =>
   existsSync(file) ? file : !file.endsWith('.zst') && existsSync(`${file}.zst`) ? `${file}.zst` : file
 
-/** Every line of a file, read as it streams: a `.zst` one decompressed on the way. */
+/**
+ * Every line of a file, read as it streams: a `.zst` one decompressed on the way. A file gone or unreadable, or one that
+ * isn't zstd, fails the read rather than the process: `pipeline` passes the file's error on to what is read, where `pipe`
+ * would leave it unhandled. Closed early, as a head is read, it leaves nothing open.
+ */
 const linesOf = (named: string) => {
   const file = rolloutAt(named)
   const raw = createReadStream(file)
-  const stream: Readable = file.endsWith('.zst') ? raw.pipe(createZstdDecompress()) : raw
-  return createInterface({ input: stream, crlfDelay: Infinity })
+  const stream: Readable = file.endsWith('.zst') ? pipeline(raw, createZstdDecompress(), () => {}) : raw
+  const lines = createInterface({ input: stream, crlfDelay: Infinity })
+  lines.on('close', () => {
+    raw.destroy()
+    stream.destroy()
+  })
+  return lines
 }
 
 /** A Claude Code session whole, as the conversation it was: the person's prompts and the agent's replies, in order. */

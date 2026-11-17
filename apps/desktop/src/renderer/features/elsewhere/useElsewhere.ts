@@ -8,7 +8,7 @@ import { picked, picksOf, tilesOf, words } from './tiles'
  * What other tools left, for a project's welcome step or a new project's tab: read once as it opens (by the project, or
  * by the folders chosen before it is made), picked on the tiles, and brought in by the project once it is made. Nothing
  * is taken at first: a press takes a whole tool. Bringing in goes out at once and the window moves on; the board shows
- * what came in as it comes (the UI is instant).
+ * what came in as it comes (the UI is instant), and the project's conversation what didn't, with Try again.
  */
 
 export interface ElsewhereModel {
@@ -19,7 +19,11 @@ export interface ElsewhereModel {
   readonly onPick: (keys: ReadonlyArray<string>, on: boolean) => void
   /** What the main button says: what bringing in would bring, counted; null with nothing picked. */
   readonly go: string | null
-  /** Brings in what was picked, into the project; nothing where nothing was. */
+  /**
+   * Brings in what was picked, into the project; nothing where nothing was. It never fails: the window has moved on by
+   * then, so what didn't come in, or a bringing in that failed as a whole, is said in the project's conversation, with
+   * Try again (Elsewhere.ts); null then, as where nothing was picked.
+   */
   readonly bring: (projectId: string, steps?: ReadonlyArray<PlanStep>) => Promise<BroughtIn | null>
   /** Reads a project now, as it is made, for a step that must know before it shows whether anything was found. */
   readonly load: (projectId: string) => Promise<Elsewhere>
@@ -85,6 +89,9 @@ export const useElsewhere = (
     bring: (projectId, steps = []) =>
       chosen === null || chosen.worktrees.length + chosen.setups.length + chosen.conversations.length === 0
         ? Promise.resolve(null)
-        : client.bringIn({ projectId, ...chosen, steps }),
+        : client.bringIn({ projectId, ...chosen, steps }).catch((failure: unknown) => {
+            console.warn('Bringing in from other tools failed', failure)
+            return null
+          }),
   }
 }
