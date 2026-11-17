@@ -12,6 +12,7 @@ import {
   type Container,
   fieldsOf,
   type Issue,
+  type IssueChange,
   type IssueComment,
   type IssueField,
   issueMatches,
@@ -74,8 +75,22 @@ const Task = Schema.Struct({
   url: Schema.String,
   list: Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.NullOr(Schema.String)) }),
   team_id: Schema.optional(Schema.NullOr(Schema.String)),
+  /** The task it is a subtask of, by its id. */
+  parent: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Its sprint points, where its space has them on. */
+  points: Schema.optional(Schema.NullOr(Schema.Number)),
+  /** Its task type, by the workspace's id for it; none (or 0) is ClickUp's own Task. */
+  custom_item_id: Schema.optional(Schema.NullOr(Schema.Number)),
 })
 type Task = typeof Task.Type
+
+/** A workspace's task types, beside ClickUp's own Task. */
+const TaskTypes = Schema.Struct({ custom_items: Schema.Array(Schema.Struct({ id: Schema.Number, name: Schema.String })) })
+
+/** ClickUp's own type, which a task without one of the workspace's is. */
+const DEFAULT_TYPE = 'Task'
+/** The choice that puts a task back to ClickUp's own type. */
+const DEFAULT_TYPE_ID = 'task'
 
 const Tasks = Schema.Struct({ tasks: Schema.Array(Task), last_page: Schema.optional(Schema.NullOr(Schema.Boolean)) })
 
@@ -154,8 +169,34 @@ const momentOf = (ms: string | null | undefined): string | null => {
 /** The day a task is due, in UTC; null where it has none. */
 const dayOf = (due: string | null | undefined): string | null => momentOf(due)?.slice(0, 10) ?? null
 
-/** A task. */
-export const issueOf = (task: Task): Issue => ({
+/** What else is known of a task as it is read: its workspace's types by id, and other tasks by id, for its parent's key and title. */
+export interface Known {
+  readonly types?: ReadonlyMap<number, string>
+  readonly parents?: ReadonlyMap<string, { readonly key: string; readonly title: string }>
+}
+
+/**
+ * A task. Its type is said where its workspace's types were read; its parent
+ * where the parent was read too; its estimate (sprint points) where its
+ * space has them. What wasn't read is left out, not said to be none.
+ */
+export const issueOf = (task: Task, known: Known = {}): Issue => {
+  const type =
+    known.types === undefined
+      ? undefined
+      : task.custom_item_id == null || task.custom_item_id === 0
+        ? DEFAULT_TYPE
+        : known.types.get(task.custom_item_id)
+  const parent = task.parent === undefined ? undefined : task.parent === null ? null : known.parents?.get(task.parent)
+  return {
+    ...base(task),
+    ...(task.points === undefined ? {} : { estimate: task.points }),
+    ...(type === undefined ? {} : { type }),
+    ...(parent === undefined ? {} : { parent }),
+  }
+}
+
+const base = (task: Task): Issue => ({
   id: task.id,
   ref: task.id,
   key: task.custom_id ?? task.id,
@@ -181,6 +222,9 @@ const CHANGES = [
   'due',
   'title',
   'description',
+  'parent',
+  'estimate',
+  'type',
 ] as const satisfies ReadonlyArray<IssueField>
 type Unchanged = Exclude<IssueField, (typeof CHANGES)[number]>
 
@@ -188,22 +232,23 @@ type Unchanged = Exclude<IssueField, (typeof CHANGES)[number]>
 const HASNT: Record<Unchanged, string> = {
   project: 'a ClickUp task’s project is its list',
   milestone: 'a ClickUp task has no milestone',
-  cycle: 'Althar doesn’t reach ClickUp’s sprints yet',
-  parent: 'Althar doesn’t reach a ClickUp task’s parent yet',
-  estimate: 'Althar doesn’t reach a ClickUp task’s estimate yet',
-  type: 'Althar doesn’t reach a ClickUp task’s type yet',
+  cycle: 'ClickUp’s sprints are lists of their own: Althar can’t set one yet',
   components: 'a ClickUp task has no components',
 }
 
 const unchanged = (field: IssueField): field is Unchanged => field in HASNT
 
-/** ClickUp files a task with its people, due day and status as well as its name, description, tags and priority. */
+/**
+ * ClickUp files a task with its people, due day, status and parent as well as
+ * its name, description, tags and priority; its type and sprint points are set
+ * right after. Its estimate is its sprint points.
+ */
 export const CLICKUP_TRACKING: TrackerCapabilities = {
   // By a comment on the task: ClickUp has no link to attach.
   links: true,
   starts: true,
   changes: CHANGES,
-  creates: ['assignee', 'due', 'status'],
+  creates: ['assignee', 'due', 'status', 'parent'],
   assignees: 'many',
   // Its task lists take tags, the account's own and a moment since; words, statuses, people and priorities Althar narrows by after. Tasks by key are read one by one.
   finds: {
@@ -291,7 +336,76 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
       }
       return yield* Effect.fail(notFound('task', typed))
     })
-  const read = (ref: string) => Effect.map(readTask(ref), issueOf)
+  /** A workspace's task types by id, read at most every five minutes; none where they can't be read (a plan without them). */
+  const typeCache = new Map<string, { readonly at: number; readonly types: ReadonlyMap<number, string> | undefined }>()
+  const typesOf = (team: string) =>
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      const kept = typeCache.get(team)
+      if (kept !== undefined && now - kept.at < 5 * 60_000) return kept.types
+      const types = yield* call(TaskTypes, 'GET', `${api}/team/${yield* named(team, 'workspace')}/custom_item`).pipe(
+        Effect.map(
+          ({ custom_items }): ReadonlyMap<number, string> | undefined => new Map(custom_items.map((item) => [item.id, item.name])),
+        ),
+        Effect.orElseSucceed(() => undefined),
+      )
+      typeCache.set(team, { at: now, types })
+      return types
+    })
+
+  /** Tasks as issues, with their workspaces' types, and the parents among them. */
+  const issuesOf = (tasks: ReadonlyArray<Task>) =>
+    Effect.gen(function* () {
+      const teams = [...new Set(tasks.flatMap((task) => (task.team_id == null ? [] : [task.team_id])))]
+      const types = new Map(yield* Effect.forEach(teams, (team) => Effect.map(typesOf(team), (found) => [team, found] as const)))
+      const parents = new Map(tasks.map((task) => [task.id, { key: task.custom_id ?? task.id, title: task.name }]))
+      return tasks.map((task) => {
+        const kept = task.team_id == null ? undefined : types.get(task.team_id)
+        return issueOf(task, { ...(kept === undefined ? {} : { types: kept }), parents })
+      })
+    })
+
+  /** A task as an issue, with its type and, where it is a subtask, its parent's key and title, read for it. */
+  const read = (ref: string) =>
+    Effect.gen(function* () {
+      const task = yield* readTask(ref)
+      const parent =
+        task.parent == null
+          ? undefined
+          : yield* readTask(task.parent).pipe(
+              Effect.map((found) => [task.parent ?? '', { key: found.custom_id ?? found.id, title: found.name }] as const),
+              Effect.orElseSucceed(() => undefined),
+            )
+      const types = task.team_id == null ? undefined : yield* typesOf(task.team_id)
+      return issueOf(task, { ...(types === undefined ? {} : { types }), ...(parent === undefined ? {} : { parents: new Map([parent]) }) })
+    })
+
+  /** The workspace a list is in: the only one, or the one whose spaces have the list's. */
+  const teamOfList = (list: typeof ListOf.Type) =>
+    Effect.gen(function* () {
+      const teams = yield* workspaces
+      if (teams.length === 1 && teams[0] !== undefined) return teams[0].id
+      const space = list.space?.id
+      for (const team of teams) {
+        const { spaces } = yield* call(
+          Schema.Struct({ spaces: Schema.Array(Schema.Struct({ id: Schema.String })) }),
+          'GET',
+          `${api}/team/${yield* named(team.id, 'workspace')}/space?archived=false`,
+        )
+        if (spaces.some((one) => one.id === space)) return team.id
+      }
+      return yield* Effect.fail(notFound('list’s workspace', list.id))
+    })
+
+  /** A workspace's task types as choices, ClickUp's own Task first. */
+  const typeChoices = (team: string) =>
+    Effect.gen(function* () {
+      const types = yield* typesOf(team)
+      return [
+        { id: DEFAULT_TYPE_ID, name: DEFAULT_TYPE } satisfies Choice,
+        ...[...(types ?? new Map<number, string>())].map(([id, name]): Choice => ({ id: String(id), name })),
+      ]
+    })
 
   /** A list, with its statuses and its space. */
   const listOf = (id: string) => Effect.flatMap(named(id, 'list'), (list) => call(ListOf, 'GET', `${api}/list/${list}`))
@@ -340,15 +454,40 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
 
   const choices: Tracker['choices'] = (issue, field) =>
     Effect.gen(function* () {
+      if (field === 'type') {
+        const { team_id } = yield* call(
+          Schema.Struct({ team_id: Schema.optional(Schema.NullOr(Schema.String)) }),
+          'GET',
+          `${api}/task/${yield* named(issue.id, 'task')}`,
+        )
+        return team_id == null ? yield* Effect.fail(notFound('task’s workspace', issue.id)) : yield* typeChoices(team_id)
+      }
       if (field !== 'status' && field !== 'labels' && field !== 'assignee') return yield* refuse(field)
       return yield* choicesOn(yield* listOfTask(issue), field)
     })
 
   const choicesIn: Tracker['choicesIn'] = (container, field) =>
     Effect.gen(function* () {
+      if (field === 'type') return yield* typeChoices(yield* teamOfList(yield* listOf(container)))
       if (field !== 'status' && field !== 'labels' && field !== 'assignee') return yield* refuse(field)
       return yield* choicesOn(yield* listOf(container), field)
     })
+
+  /** A type's choice as ClickUp takes it: null for its own Task, else the workspace's id for it. */
+  const typeId = (choice: Choice) =>
+    choice.id === DEFAULT_TYPE_ID
+      ? Effect.succeed(null)
+      : /^\d+$/.test(choice.id)
+        ? Effect.succeed(Number(choice.id))
+        : Effect.fail(notFound('task type', choice.id))
+
+  /** A parent as ClickUp takes it, by its id: never the task itself. */
+  const parentId = (task: string, parent: NonNullable<IssueChange['parent']>) =>
+    Effect.flatMap(named(parent.id, 'task'), (id) =>
+      id === task
+        ? Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: 'A task can’t be its own subtask' }))
+        : Effect.succeed(id),
+    )
 
   /** The status a task closes into: its list's closed one, else its last done one. */
   const closing = (list: typeof ListOf.Type) => {
@@ -368,9 +507,13 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
       const rem = yield* Effect.forEach(wanted.assignee === null ? issue.assignees : (wanted.assignee?.remove ?? []), (person) =>
         userId(person.id),
       )
+      // ClickUp's docs say a subtask can't be made a task again by taking its parent off.
+      if (wanted.parent === null) return yield* cantChange(product, 'parent', 'ClickUp can’t turn a subtask back into a task of its own')
       const due = wanted.due === undefined || wanted.due === null ? wanted.due : yield* dueAt(wanted.due)
       const status = wanted.close === true ? yield* closing(yield* listOfTask(issue)) : wanted.status?.id
-      // Its name, description, status, priority, due day and people, in one edit.
+      const parent = wanted.parent === undefined ? undefined : yield* parentId(task, wanted.parent)
+      const type = wanted.type === undefined ? undefined : yield* typeId(wanted.type)
+      // Its name, description, status, priority, due day, people, parent and type, in one edit; its points in their own, below.
       const edit = {
         ...(wanted.title === undefined ? {} : { name: wanted.title }),
         ...(wanted.description === undefined ? {} : { markdown_content: wanted.description }),
@@ -378,8 +521,24 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
         ...(wanted.priority === undefined ? {} : { priority: wanted.priority === 'none' ? null : NUMBERS[wanted.priority] }),
         ...(due === undefined ? {} : { due_date: due, due_date_time: false }),
         ...(add.length + rem.length === 0 ? {} : { assignees: { add, rem } }),
+        ...(parent === undefined ? {} : { parent }),
+        ...(type === undefined ? {} : { custom_item_id: type }),
       }
       if (Object.keys(edit).length > 0) yield* call(Schema.Unknown, 'PUT', `${api}/task/${task}`, edit)
+      // Sprint points on their own, so a refusal says what it was about: a value off the workspace's scale, or a space with them off.
+      if (wanted.estimate !== undefined)
+        yield* call(Schema.Unknown, 'PUT', `${api}/task/${task}`, { points: wanted.estimate }).pipe(
+          Effect.mapError((error) =>
+            error.reason === 'rejected'
+              ? new ConnectorFailed({
+                  product,
+                  reason: 'rejected',
+                  message: `ClickUp didn’t take ${String(wanted.estimate)} sprint points (${error.message}): its workspace’s Sprint Points scale may not have it, or its space has Sprint Points off`,
+                  ...(error.status === undefined ? {} : { status: error.status }),
+                })
+              : error,
+          ),
+        )
       // A tag is added and taken off by its name, leaving the others.
       for (const label of wanted.labels?.add ?? [])
         if (!issue.labels.some((had) => had.toLowerCase() === label.name.toLowerCase()))
@@ -419,7 +578,7 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
 
   /** The tasks keys name, each read by its key, on a list where one is asked: a key no task has is left out. */
   const keyedTasks = (keys: ReadonlyArray<string>, container: string | undefined) =>
-    Effect.map(
+    Effect.flatMap(
       Effect.forEach(
         [...new Set(keys.map((key) => key.trim()).filter((key) => key !== ''))],
         (key) =>
@@ -431,7 +590,7 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
         { concurrency: 4 },
       ),
       (found) =>
-        found.flatMap((task) => (task === undefined || (container !== undefined && task.list.id !== container) ? [] : [issueOf(task)])),
+        issuesOf(found.flatMap((task) => (task === undefined || (container !== undefined && task.list.id !== container) ? [] : [task]))),
     )
 
   /**
@@ -449,12 +608,14 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
       const issues = keyed
         ? yield* keyedTasks(query.keys ?? [], query.container)
         : query.container !== undefined
-          ? (yield* tasksAt(`/list/${yield* named(query.container, 'list')}/task`, query, me?.id)).map(issueOf)
-          : (yield* Effect.forEach(
-              yield* workspaces,
-              (team) => Effect.flatMap(named(team.id, 'workspace'), (id) => tasksAt(`/team/${id}/task`, query, me?.id)),
-              { concurrency: 2 },
-            )).flatMap((tasks) => tasks.map(issueOf))
+          ? yield* issuesOf(yield* tasksAt(`/list/${yield* named(query.container, 'list')}/task`, query, me?.id))
+          : yield* issuesOf(
+              (yield* Effect.forEach(
+                yield* workspaces,
+                (team) => Effect.flatMap(named(team.id, 'workspace'), (id) => tasksAt(`/team/${id}/task`, query, me?.id)),
+                { concurrency: 2 },
+              )).flat(),
+            )
       const byId = new Map(issues.map((issue) => [issue.id, issue]))
       return pageAt(
         [...byId.values()].filter((issue) => issueMatches(issue, query, me)),
@@ -547,9 +708,11 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
     mine: (options = {}) =>
       Effect.gen(function* () {
         const me = yield* account
-        const issues = (yield* Effect.forEach(yield* workspaces, (team) =>
-          Effect.flatMap(named(team.id, 'workspace'), (id) => tasksAt(`/team/${id}/task`, { state: 'open' }, me.id)),
-        )).flatMap((tasks) => tasks.map(issueOf))
+        const issues = yield* issuesOf(
+          (yield* Effect.forEach(yield* workspaces, (team) =>
+            Effect.flatMap(named(team.id, 'workspace'), (id) => tasksAt(`/team/${id}/task`, { state: 'open' }, me.id)),
+          )).flat(),
+        )
         return pageAt(
           issues.filter(
             (issue) =>
@@ -608,6 +771,8 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
             : new ConnectorFailed({ product, reason: 'rejected', message: `ClickUp files a task without its ${refused}: it is set after` })
         const assignees = yield* Effect.forEach(fields.assignee?.add ?? [], (person) => userId(person.id))
         const due = fields.due == null ? undefined : yield* dueAt(fields.due)
+        // A subtask is filed with its parent; ClickUp puts it beside its parent wherever it is filed.
+        const parent = fields.parent == null ? undefined : yield* named(fields.parent.id, 'task')
         // A tag is its space's: only those the space has are put on, read only when some are asked for.
         const wanted = draft.labels.map((label) => label.trim()).filter((label) => label !== '')
         const tags =
@@ -626,12 +791,13 @@ export const makeClickUp = (options: AdapterOptions): Tracker => {
           ...(assignees.length === 0 ? {} : { assignees }),
           ...(due === undefined ? {} : { due_date: due, due_date_time: false }),
           ...(fields.status === undefined ? {} : { status: fields.status.id }),
+          ...(parent === undefined ? {} : { parent }),
         })
         // Filed: a failed read of it now is no reason to file it again, so it is as ClickUp answered the filing.
         const now = yield* Clock.currentTimeMillis
         return yield* read(task.id).pipe(
           Effect.orElseSucceed(() => {
-            const issue = issueOf(task)
+            const issue = base(task)
             return {
               ...issue,
               body: issue.body === '' ? draft.body : issue.body,

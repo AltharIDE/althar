@@ -105,25 +105,19 @@ export const gapOf = (product: Product, field: IssueField): string => {
         ? 'GitLab’s epics are a group’s, on its paid tiers: Althar can’t set one yet'
         : product === 'trello'
           ? 'a Trello card has no parent'
-          : product === 'clickup'
-            ? 'Althar can’t make a ClickUp task a subtask yet'
-            : `${name}'s issues have no parent`
+          : `${name}'s issues have no parent`
     case 'estimate':
       return jira(product)
         ? 'Jira’s story points are a field each site names: Althar can’t set them yet'
         : product === 'trello'
           ? 'a Trello card has no estimate'
-          : product === 'clickup'
-            ? 'ClickUp’s time estimates and sprint points: Althar can’t set them yet'
-            : `${name}'s issues have no estimate`
+          : `${name}'s issues have no estimate`
     case 'type':
       return product === 'linear'
         ? 'Linear has no issue types: a label says what kind it is'
         : product === 'trello'
           ? 'a Trello card has no type'
-          : product === 'clickup'
-            ? 'ClickUp’s task types: Althar can’t set one yet'
-            : `${name}'s issues have no type`
+          : `${name}'s issues have no type`
     case 'components':
       return 'only Jira has components'
     case 'due':

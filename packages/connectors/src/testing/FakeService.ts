@@ -149,7 +149,7 @@ const CHANGES_OF = (product: Product): ReadonlyArray<IssueField> =>
       : product === 'trello'
         ? ['status', 'close', 'assignee', 'labels', 'due', 'title', 'description']
         : product === 'clickup'
-          ? ['status', 'close', 'priority', 'assignee', 'labels', 'due', 'title', 'description']
+          ? ['status', 'close', 'priority', 'assignee', 'labels', 'parent', 'estimate', 'type', 'due', 'title', 'description']
           : product === 'gitlab'
             ? ['status', 'close', 'assignee', 'labels', 'milestone', 'estimate', 'type', 'due', 'title', 'description']
             : ['status', 'close', 'assignee', 'labels', 'project', 'milestone', 'parent', 'type', 'title', 'description']
@@ -163,7 +163,7 @@ const CREATES_OF = (product: Product): ReadonlyArray<IssueField> =>
       : product === 'trello'
         ? ['assignee', 'due']
         : product === 'clickup'
-          ? ['assignee', 'due', 'status']
+          ? ['assignee', 'due', 'status', 'parent']
           : product === 'gitlab'
             ? ['assignee', 'milestone', 'estimate', 'type', 'due']
             : ['assignee', 'milestone', 'type']

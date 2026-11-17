@@ -111,6 +111,8 @@ describe('issueOf', () => {
       container: 'Sprint backlog',
       updatedAt: '2025-11-16T13:33:20.000Z',
       due: '2025-12-01',
+      // Read without its parent: none, as ClickUp says.
+      parent: null,
     })
   })
 
@@ -609,7 +611,7 @@ describe('the tracker', () => {
         assignees: { add: [184], rem: [183] },
       })
       assert.deepStrictEqual(
-        sent.slice(1, -1).map((one) => `${one.method} ${one.url}`),
+        sent.filter((one) => one.url.includes('/tag/')).map((one) => `${one.method} ${one.url}`),
         [`POST ${API}/task/86a1b2c3d/tag/Needs%20QA`, `DELETE ${API}/task/86a1b2c3d/tag/payments`],
       )
     }),
@@ -643,13 +645,10 @@ describe('the tracker', () => {
   it.effect('refuses a change to what a task hasn’t here, and asks nothing for an empty one but to read it', () =>
     Effect.gen(function* () {
       const { tracker, sent } = clickup([['GET', `${API}/task/86a1b2c3d?include_markdown_description=true`, { json: task() }]])
-      const error = yield* Effect.flip(tracker.update(issueOf(task()), { estimate: 3 }))
-      assert.include(error.message, 'estimate')
+      const error = yield* Effect.flip(tracker.update(issueOf(task()), { milestone: { id: '1', name: 'Q4' } }))
+      assert.include(error.message, 'milestone')
       yield* tracker.update(issueOf(task()), {})
-      assert.deepStrictEqual(
-        sent.map((one) => one.method),
-        ['GET'],
-      )
+      assert.isTrue(sent.every((one) => one.method === 'GET'))
     }),
   )
 
@@ -744,6 +743,179 @@ describe('accessClickUp', () => {
         ['GET', `${API}/team`, { json: { nothing: [] } }],
       ])
       assert.strictEqual(odd.lines[1]?.state, 'no')
+    }),
+  )
+})
+
+describe('task types, sprint points and subtasks', () => {
+  const types = { custom_items: [{ id: 1001, name: 'Bug', name_plural: 'Bugs', description: null }] }
+
+  it('reads a task’s type by its workspace’s names, its sprint points as its estimate, and its parent where it was read', () => {
+    const issue = issueOf(task({ points: 3, custom_item_id: 1001, parent: 'p1' }), {
+      types: new Map([[1001, 'Bug']]),
+      parents: new Map([['p1', { key: 'DEV-1', title: 'Refunds' }]]),
+    })
+    assert.deepInclude(issue, { estimate: 3, type: 'Bug', parent: { key: 'DEV-1', title: 'Refunds' } })
+    // Without its workspace's types or its parent read, neither is said; ClickUp's own type is a task with none.
+    const bare = issueOf(task({ custom_item_id: 1001, parent: 'p1' }))
+    assert.notProperty(bare, 'type')
+    assert.notProperty(bare, 'parent')
+    assert.notProperty(bare, 'estimate')
+    assert.strictEqual(issueOf(task({ custom_item_id: null }), { types: new Map() }).type, 'Task')
+    assert.strictEqual(issueOf(task({ custom_item_id: 0 }), { types: new Map() }).type, 'Task')
+    assert.notProperty(issueOf(task({ custom_item_id: 7 }), { types: new Map() }), 'type')
+    assert.isNull(issueOf(task({ points: null })).estimate)
+  })
+
+  it.effect('reads one task with its parent and its type; either left out where it can’t be read', () =>
+    Effect.gen(function* () {
+      const { tracker } = clickup([
+        [
+          'GET',
+          `${API}/task/sub1?include_markdown_description=true`,
+          { json: task({ id: 'sub1', custom_id: 'DEV-13', parent: 'p1', custom_item_id: 1001, points: 2 }) },
+        ],
+        ['GET', `${API}/task/p1?include_markdown_description=true`, { json: task({ id: 'p1', custom_id: 'DEV-1', name: 'Refunds' }) }],
+        ['GET', `${API}/task/orphan?include_markdown_description=true`, { json: task({ id: 'orphan', parent: 'gone', team_id: '55' }) }],
+        ['GET', `${API}/task/gone?include_markdown_description=true`, { status: 404, json: { err: 'Task not found' } }],
+        ['GET', `${API}/team/9011223344/custom_item`, { json: types }],
+        ['GET', `${API}/team/55/custom_item`, { status: 403, json: { err: 'Not on your plan' } }],
+      ])
+      assert.deepInclude(yield* tracker.issue('sub1'), { type: 'Bug', estimate: 2, parent: { key: 'DEV-1', title: 'Refunds' } })
+      const orphan = yield* tracker.issue('orphan')
+      assert.notProperty(orphan, 'parent')
+      assert.notProperty(orphan, 'type')
+    }),
+  )
+
+  it.effect('finds tasks with their parents among them, reading a workspace’s types once in five minutes', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = clickup([
+        ['GET', `${API}/team`, { json: teams }],
+        [
+          'GET',
+          /\/team\/9011223344\/task\?page=0&/,
+          {
+            json: {
+              tasks: [
+                task({ id: 'p1', custom_id: 'DEV-1', name: 'Refunds' }),
+                task({ id: 'sub1', parent: 'p1' }),
+                task({ id: 'sub2', parent: 'elsewhere' }),
+              ],
+            },
+          },
+        ],
+        ['GET', `${API}/team/9011223344/custom_item`, { json: types }],
+      ])
+      const page = yield* tracker.find({ state: 'all', limit: 10 })
+      const byId = new Map(page.issues.map((issue) => [issue.id, issue]))
+      assert.deepStrictEqual(byId.get('sub1')?.parent, { key: 'DEV-1', title: 'Refunds' })
+      assert.notProperty(byId.get('sub2') ?? {}, 'parent')
+      assert.strictEqual(byId.get('p1')?.type, 'Task')
+      yield* tracker.find({ state: 'all', limit: 10 })
+      assert.lengthOf(
+        sent.filter((one) => one.url.endsWith('/custom_item')),
+        1,
+      )
+    }),
+  )
+
+  it.effect('makes a task a subtask and gives it a type in one edit, and sets its sprint points in their own', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = clickup([
+        ['PUT', `${API}/task/86a1b2c3d`, { json: task() }],
+        ['GET', `${API}/task/86a1b2c3d?include_markdown_description=true`, { json: task() }],
+      ])
+      yield* tracker.update(issueOf(task()), {
+        parent: { id: 'p1', ref: 'p1', key: 'DEV-1' },
+        type: { id: '1001', name: 'Bug' },
+        estimate: 5,
+      })
+      const puts = sent.filter((one) => one.method === 'PUT').map((one) => one.body)
+      assert.deepStrictEqual(puts, [{ parent: 'p1', custom_item_id: 1001 }, { points: 5 }])
+      // ClickUp's own Task is no type of the workspace's.
+      yield* tracker.update(issueOf(task()), { type: { id: 'task', name: 'Task' }, estimate: null })
+      assert.deepStrictEqual(
+        sent
+          .filter((one) => one.method === 'PUT')
+          .slice(2)
+          .map((one) => one.body),
+        [{ custom_item_id: null }, { points: null }],
+      )
+    }),
+  )
+
+  it.effect('refuses to take a subtask out of its parent, to make a task its own subtask, or a type that isn’t one, before asking', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = clickup([])
+      const out = yield* Effect.flip(tracker.update(issueOf(task()), { parent: null }))
+      assert.include(out.message, 'subtask back into a task')
+      const self = yield* Effect.flip(tracker.update(issueOf(task()), { parent: { id: '86a1b2c3d', ref: '86a1b2c3d', key: 'DEV-12' } }))
+      assert.include(self.message, 'own subtask')
+      const odd = yield* Effect.flip(tracker.update(issueOf(task()), { type: { id: 'bug', name: 'Bug' } }))
+      assert.strictEqual(odd.reason, 'not_found')
+      assert.lengthOf(sent, 0)
+    }),
+  )
+
+  it.effect('says what a refusal of sprint points is about, and passes any other failure on as it is', () =>
+    Effect.gen(function* () {
+      const { tracker } = clickup([
+        ['PUT', `${API}/task/86a1b2c3d`, { status: 400, json: { err: 'Invalid points value', ECODE: 'ITEM_223' } }],
+      ])
+      const refused = yield* Effect.flip(tracker.update(issueOf(task()), { estimate: 4 }))
+      assert.strictEqual(refused.reason, 'rejected')
+      assert.include(refused.message, 'Sprint Points scale')
+      assert.include(refused.message, 'Invalid points value')
+      const down = clickup([['PUT', `${API}/task/86a1b2c3d`, { status: 503, json: { err: 'Down' } }]])
+      assert.notInclude((yield* Effect.flip(down.tracker.update(issueOf(task()), { estimate: 4 }))).message, 'Sprint Points')
+    }),
+  )
+
+  it.effect('lists a task’s types, ClickUp’s own Task first, by its workspace or its list’s', () =>
+    Effect.gen(function* () {
+      const { tracker } = clickup([
+        ['GET', `${API}/task/86a1b2c3d`, { json: { team_id: '9011223344' } }],
+        ['GET', `${API}/task/lost`, { json: { team_id: null } }],
+        ['GET', `${API}/team/9011223344/custom_item`, { json: types }],
+        ['GET', `${API}/list/901`, { json: list }],
+        ['GET', `${API}/team`, { json: teams }],
+      ])
+      const expected = [
+        { id: 'task', name: 'Task' },
+        { id: '1001', name: 'Bug' },
+      ]
+      assert.deepStrictEqual(yield* tracker.choices(issueOf(task()), 'type'), expected)
+      assert.deepStrictEqual(yield* tracker.choicesIn('901', 'type'), expected)
+      assert.strictEqual((yield* Effect.flip(tracker.choices(issueOf(task({ id: 'lost' })), 'type'))).reason, 'not_found')
+    }),
+  )
+
+  it.effect('finds a list’s workspace by its space where the account has several', () =>
+    Effect.gen(function* () {
+      const answers = (spaces: ReadonlyArray<{ id: string }>) =>
+        clickup([
+          ['GET', `${API}/list/901`, { json: list }],
+          ['GET', `${API}/team`, { json: { teams: [{ id: '55', name: 'Side' }, ...teams.teams] } }],
+          ['GET', `${API}/team/55/space?archived=false`, { json: { spaces: [] } }],
+          ['GET', `${API}/team/9011223344/space?archived=false`, { json: { spaces } }],
+          ['GET', `${API}/team/9011223344/custom_item`, { json: types }],
+        ])
+      assert.lengthOf(yield* answers([{ id: '701' }]).tracker.choicesIn('901', 'type'), 2)
+      assert.strictEqual((yield* Effect.flip(answers([]).tracker.choicesIn('901', 'type'))).reason, 'not_found')
+    }),
+  )
+
+  it.effect('files a subtask with its parent, and a task without one where none is given', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = clickup([
+        ['POST', `${API}/list/901/task`, { json: task({ id: 'new3' }) }],
+        ['GET', `${API}/task/new3?include_markdown_description=true`, { json: task({ id: 'new3' }) }],
+      ])
+      yield* tracker.create('901', { title: 'T', body: '', labels: [], fields: { parent: { id: 'p1', ref: 'p1', key: 'DEV-1' } } })
+      assert.deepInclude(sent.find((one) => one.method === 'POST')?.body as object, { parent: 'p1' })
+      yield* tracker.create('901', { title: 'T', body: '', labels: [], fields: { parent: null } })
+      assert.notProperty(sent.filter((one) => one.method === 'POST')[1]?.body as object, 'parent')
     }),
   )
 })

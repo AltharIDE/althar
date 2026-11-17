@@ -754,12 +754,12 @@ What each tracker changes:
 | Project | Its project | No: Jira's own Move | No: its board | No: its list | A Projects board | No: where it lives |
 | Milestone | Its project's milestone (of the project it goes in) | A fix version, added beside its others | No | No | Its milestone | Its milestone |
 | Cycle | Its cycle | No: sprints are a board's | No | No: sprints are lists of their own | No | No: iterations are a paid group's |
-| Parent | Its parent | Its parent | No | Not yet: subtasks | Its parent issue (set, not read or taken out) | No: epics are a paid group's |
-| Estimate | Points | No: story points are a site's own field | No | Not yet: time estimates and sprint points | No | Its weight |
-| Type | No: a label says | Its issue type | No | Not yet: task types | Its issue type (an organisation's) | Issue, incident, test case, task |
+| Parent | Its parent | Its parent | No | Its parent, as a subtask (not taken out: ClickUp can't) | Its parent issue (set, not read or taken out) | No: epics are a paid group's |
+| Estimate | Points | No: story points are a site's own field | No | Its sprint points, where its space has them on | No | Its weight |
+| Type | No: a label says | Its issue type | No | Its task type (a workspace's, or ClickUp's own Task) | Its issue type (an organisation's) | Issue, incident, test case, task |
 | Components | No | Yes | No | No | No | No |
 | Due date | Yes | Yes | Yes | Yes | No | Yes |
-| Set as it is filed | All but labels' names it hasn't | Assignee, fix version, parent, type, components, due | Members, due | Assignees, due, status | Assignees, milestone, type | Assignees, milestone, weight, type, due |
+| Set as it is filed | All but labels' names it hasn't | Assignee, fix version, parent, type, components, due | Members, due | Assignees, due, status, parent | Assignees, milestone, type | Assignees, milestone, weight, type, due |
 | Comment | Yes | Yes | Yes | Yes, as plain text | Yes | Yes |
 | Link a pull request | An attachment | A remote link | An attachment | A comment on the task | No: a PR that names the issue links it | No: as GitHub |
 

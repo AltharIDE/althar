@@ -81,7 +81,8 @@ One pull request each:
      its id or its workspace's custom id; a list is where a task is filed,
      its statuses read by type, then name. A pull request is linked by a
      comment on the task, which the project's "Link pull requests on their
-     issues" turns off.
+     issues" turns off. Its task types, sprint points (as the estimate) and
+     subtasks are read and set; a subtask is never taken out of its parent.
    - Not yet run against a real account: its answers follow ClickUp's API
      reference, and `bun run test:real` takes `ALTHAR_CLICKUP_TOKEN` and
      `ALTHAR_CLICKUP_TASK`.
