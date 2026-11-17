@@ -19,8 +19,8 @@ const allowed = /^Cpus_allowed_list:\s*(.*)$/m.exec(readFileSync('/proc/self/sta
 const cpu = allowed?.split(/[,-]/)[0]
 if (cpu === undefined) throw new Error('No allowed CPU for a bounded measurement')
 const cwd = mkdtempSync(join(tmpdir(), 'althar-resource-measure-'))
-const spin = 'let x=0;function work(){for(let i=0;i<1000000;i++)x+=Math.sqrt(i+x%10);setImmediate(work)}work()'
-const root = `const spawn=require('node:child_process').spawn;const pids=Array.from({length:Number(process.argv[1])},()=>spawn(process.execPath,['-e',${JSON.stringify(spin)}],{stdio:'ignore'}).pid);console.log(JSON.stringify(pids));setInterval(()=>{},1000)`
+const root =
+  "const spin='let x=0;function work(){for(let i=0;i<1000000;i++)x+=Math.sqrt(i+x%10);setImmediate(work)}work()';const spawn=require('node:child_process').spawn;const pids=Array.from({length:Number(process.argv[1])},()=>spawn(process.execPath,['-e',spin],{stdio:'ignore'}).pid);console.log(JSON.stringify(pids));setInterval(()=>{},1000)"
 const ticks = (pid: number) => {
   const fields = readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]?.split(' ') ?? []
   return Number(fields[11]) + Number(fields[12])
