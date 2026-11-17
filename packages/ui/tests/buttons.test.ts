@@ -108,6 +108,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Asides/Asides.tsx':
     'a pill over the coordinator’s conversation, a tab with its mark or a live dot, the × inside an aside’s pill that clears it, and the older ones’ pill, which opens their menu',
   'coordinator/TaskLaunch/TaskLaunch.tsx': 'the preset, the kicker’s first word in the kicker’s own type, which opens the others',
+  'chrome/ProjectHeader/ProjectHeader.tsx': 'the project’s mark and name, the whole of which goes to its board',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
 }
