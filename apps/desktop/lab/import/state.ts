@@ -4,7 +4,7 @@ import type { Era } from './world'
 
 /*
  * What the lab's bar picks: the direction, two sets of them, and where the
- * person is. Arriving (A–C, and D–J with shortcuts), the project is being added: on the first run's
+ * person is. Arriving (A–C, D–J with shortcuts, and H and K–M with tiles), the project is being added: on the first run's
  * welcome (W) or in a New project tab (P), then its board. Later (1–3),
  * weeks on, from Settings. Kept in the address, so a reload or a screenshot
  * opens on the same.
@@ -18,9 +18,12 @@ export const DIRECTIONS = [
   { key: 'e', kbd: 'E', label: 'By tool', set: 'arriving', group: 'Shortcuts' },
   { key: 'f', kbd: 'F', label: 'Chips', set: 'arriving', group: 'Shortcuts' },
   { key: 'g', kbd: 'G', label: 'One press', set: 'arriving', group: 'Shortcuts' },
-  { key: 'h', kbd: 'H', label: 'Tiles', set: 'arriving', group: 'Shortcuts' },
   { key: 'i', kbd: 'I', label: 'A sentence', set: 'arriving', group: 'Shortcuts' },
   { key: 'j', kbd: 'J', label: 'Filters', set: 'arriving', group: 'Shortcuts' },
+  { key: 'h', kbd: 'H', label: 'Tiles', set: 'arriving', group: 'Tiles' },
+  { key: 'k', kbd: 'K', label: 'That open', set: 'arriving', group: 'Tiles' },
+  { key: 'l', kbd: 'L', label: 'With a peek', set: 'arriving', group: 'Tiles' },
+  { key: 'm', kbd: 'M', label: 'Suggested', set: 'arriving', group: 'Tiles' },
   { key: '1', kbd: '1', label: 'Project settings', set: 'later', group: 'Later' },
   { key: '2', kbd: '2', label: 'Althar’s settings', set: 'later', group: 'Later' },
   { key: '3', kbd: '3', label: 'Keep in step', set: 'later', group: 'Later' },

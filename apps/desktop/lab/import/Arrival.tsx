@@ -5,6 +5,7 @@ import { NewProject, Welcome } from '@althar/ui/screens'
 
 import { ByKind, ByPlace, type Picks, type Sets, usePicks } from './Found'
 import { ByTool, Choose, WithShortcuts } from './Shortcuts'
+import { MeterTiles, OpeningTiles, PeekTiles } from './MoreTiles'
 import { Filtered, OnePress, Sentence, startOf, Tiles } from './Variants'
 import { opening, useLab } from './state'
 import { world } from './world'
@@ -19,7 +20,8 @@ import s from './arrival.module.css'
  * all of one tool, or all of it, in a press: one question (D), a row a tool
  * (E), or A's list under a row of shortcuts (F). G–J are more of it: ranked
  * actions that act in a press (G), a tile a tool (H), a sentence of menus
- * (I), filters where what's shown comes in (J).
+ * (I), filters where what's shown comes in (J). K–M are more of H's tiles:
+ * one opening in place (K), with a peek inside (L), suggested with a meter (M).
  */
 
 const RUNTIMES = [
@@ -73,6 +75,9 @@ const Picker = ({
   if (d === 'h') return <Tiles picks={picks} />
   if (d === 'i') return <Sentence picks={picks} />
   if (d === 'j') return <Filtered picks={picks} />
+  if (d === 'k') return <OpeningTiles picks={picks} />
+  if (d === 'l') return <PeekTiles picks={picks} />
+  if (d === 'm') return <MeterTiles picks={picks} />
   return <ByKind picks={picks} />
 }
 

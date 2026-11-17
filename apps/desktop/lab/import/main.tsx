@@ -20,7 +20,7 @@ import s from './lab.module.css'
 
 /*
  * The import lab (README.md): the desktop app's window, whole, in the
- * browser, on made-up data, with the page's bar under it. Arriving (A–J):
+ * browser, on made-up data, with the page's bar under it. Arriving (A–M):
  * the first run's welcome (W) or a New project tab (P), then the project's
  * board. Later (1–3): weeks on, from Settings. R starts again, T the dark
  * appearance.
@@ -103,7 +103,7 @@ function Bar() {
   const arriving = eraOf(d) === 'arriving'
   return (
     <div className={s.bar} role="toolbar" aria-label="Directions">
-      {(['Arriving', 'Shortcuts', 'Later'] as const).map((group) => (
+      {(['Arriving', 'Shortcuts', 'Tiles', 'Later'] as const).map((group) => (
         <span key={group} className={s.group}>
           <span className={s.round}>{group}</span>
           {set(group)}

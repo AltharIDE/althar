@@ -1,0 +1,285 @@
+/* K–M: more of H's tiles. The face is H's: mark and tick, name, how much, a fact. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.grow {
+  flex: 1;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+.tile:hover {
+  background: var(--hover-paper);
+}
+.tile[data-state='on'] {
+  box-shadow: inset 0 0 0 1.5px var(--ink-fill);
+}
+.tile[data-state='mixed'] {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.take {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  padding: 12px 12px 11px;
+  border-radius: inherit;
+  text-align: left;
+}
+
+.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  align-self: stretch;
+  margin-bottom: 6px;
+}
+.box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
+  color: var(--on-ink);
+}
+.box[data-state='on'],
+.box[data-state='mixed'] {
+  background: var(--ink-fill);
+  box-shadow: none;
+}
+.dash {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--on-ink);
+}
+.name {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.count {
+  font-size: 12px;
+  color: var(--t-2);
+}
+.some {
+  color: var(--t-3);
+}
+.fact {
+  min-height: 16px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.fact :global([class*='facts']) {
+  font-size: 11.5px;
+}
+
+.foot {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+.listUnder {
+  margin-top: 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+/* K: a chevron in the tile's corner opens a panel under its row */
+.open {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--t-3);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    transform var(--fast) var(--ease);
+}
+.open:hover {
+  background: var(--pressed-paper);
+  color: var(--t-1);
+}
+.open[aria-expanded='true'] {
+  color: var(--t-1);
+  transform: rotate(180deg);
+}
+/* the opened tile points at its panel */
+.tile[data-open]::after {
+  content: '';
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  width: 18px;
+  height: 9px;
+  transform: translateX(-50%);
+  background: var(--sunk);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.inside {
+  grid-column: 1 / -1;
+  padding: 14px 6px 6px;
+  border-radius: 12px;
+  background: var(--sunk);
+}
+.inside :global([class*='picker']) {
+  gap: 14px;
+}
+
+/* L: bigger tiles, the latest few things on each */
+.peekGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(256px, 1fr));
+  align-items: start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.peek {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  transition: box-shadow var(--fast) var(--ease);
+}
+.peek[data-state='on'] {
+  box-shadow: inset 0 0 0 1.5px var(--ink-fill);
+}
+.peek[data-state='mixed'] {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.peekHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px 10px;
+  border-radius: 12px 12px 0 0;
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.peekHead:hover {
+  background: var(--hover-paper);
+}
+.peekTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.peekList {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 2px 4px 4px;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+.peekItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.peekItem:hover {
+  background: var(--hover-paper);
+}
+.peekItem[data-off] .peekName {
+  color: var(--t-3);
+}
+.peekMain {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.peekLine {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.peekName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--t-1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.peekAt {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.peekFact {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.peekFact :global([class*='facts']) {
+  font-size: 11.5px;
+}
+.peekFoot {
+  padding: 0 12px 10px 38px;
+  font-size: 12px;
+}
+
+/* M: grouped by kind, a meter on each tile */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.meter {
+  position: relative;
+  align-self: stretch;
+  height: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line-2);
+}
+.meterFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink-fill);
+  transition: width var(--slow, 240ms) var(--ease);
+}

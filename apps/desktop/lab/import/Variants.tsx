@@ -40,9 +40,27 @@ export const text = {
   all: 'All',
 }
 
-/** Where a direction starts: H with nothing picked, J with all of it but finished work, the rest with what's under way. */
+/** Where a direction starts: H, K and L with nothing picked, J with all of it but finished work, the rest with what's under way. */
 export const startOf = (d: string, picks: Picks): Sets =>
-  d === 'h' ? picks.setsOf('none') : d === 'j' ? picks.select({ what: 'unfinished', from: 'all', since: 'any' }) : picks.setsOf('underway')
+  d === 'h' || d === 'k' || d === 'l'
+    ? picks.setsOf('none')
+    : d === 'j'
+      ? picks.select({ what: 'unfinished', from: 'all', since: 'any' })
+      : picks.setsOf('underway')
+
+/**
+ * A tile's state: an agent's by its conversations, a tool's by its worktrees. The conversations that ran in a tool's
+ * worktrees come with them, but count on their agent's tile, so taking Claude Code doesn't half-take Conductor.
+ */
+export const tileState = (
+  picks: Picks,
+  who: Source,
+): { readonly state: 'on' | 'mixed' | 'off'; readonly picked: number; readonly of: number } => {
+  if (isAgent(who)) return picks.stateOf(who)
+  const worktrees = picks.things(who).worktrees
+  const picked = worktrees.filter((one) => picks.worktrees.has(one.id)).length
+  return { state: picked === 0 ? 'off' : picked === worktrees.length ? 'on' : 'mixed', picked, of: worktrees.length }
+}
 
 /** The sources with the most here, first. */
 const ranked = (picks: Picks) => [...chipSources(picks)].sort((a, b) => picks.stateOf(b).of - picks.stateOf(a).of)
@@ -131,7 +149,7 @@ export function Tiles({ picks }: { picks: Picks }) {
       </SectionHead>
       <div className={s.tiles}>
         {sources.map((who) => {
-          const { state, picked, of } = picks.stateOf(who)
+          const { state, picked, of } = tileState(picks, who)
           const t = picks.things(who)
           const latest = [...t.worktrees.map((one) => one.touched), ...t.conversations.map((one) => one.at)].sort().at(-1)
           const newest = [...t.worktrees].sort((a, b) => b.touched.localeCompare(a.touched))[0]
@@ -152,7 +170,7 @@ export function Tiles({ picks }: { picks: Picks }) {
               </span>
               <span className={s.tileName}>{nameOf(who)}</span>
               <span className={s.tileCount}>
-                {isAgent(who) ? shortcut.conversations(of) : shortcut.worktrees(t.worktrees.length)}
+                {isAgent(who) ? shortcut.conversations(of) : shortcut.worktrees(of)}
                 {state === 'mixed' && <span className={s.tileSome}> · {shortcut.someOf(picked, of)}</span>}
               </span>
               <span className={s.tileFact}>
@@ -298,18 +316,8 @@ export function Sentence({ picks }: { picks: Picks }) {
   )
 }
 
-/** J: filters over the list; what's shown is what comes in, finished work shown but not ticked. */
-export function Filtered({ picks }: { picks: Picks }) {
-  const [from, setFrom] = useState<readonly Source[]>([])
-  const [since, setSince] = useState<Criteria['since']>('any')
-  const filter = (next: { from?: readonly Source[]; since?: Criteria['since'] }) => {
-    const f = next.from ?? from
-    const a = next.since ?? since
-    setFrom(f)
-    setSince(a)
-    picks.pickSets(picks.select({ what: 'unfinished', from: f.length === 0 ? 'all' : f, since: a }))
-  }
-  const shown = picks.select({ what: 'everything', from: from.length === 0 ? 'all' : from, since })
+/** The picks as A's list shows them, narrowed to what's shown; All and None act on what's shown only. */
+export const narrowed = (picks: Picks, shown: Sets): Picks => {
   const worktrees = picks.offeredWorktrees.filter((one) => shown.worktrees.has(one.id))
   const conversations = picks.offeredConversations.filter((one) => shown.conversations.has(one.id))
   const agents = [...shown.older]
@@ -321,7 +329,7 @@ export function Filtered({ picks }: { picks: Picks }) {
     'claude-code': shown.older.has('claude-code') ? picks.olderBy['claude-code'] : 0,
     codex: shown.older.has('codex') ? picks.olderBy.codex : 0,
   } as Record<Agent, number>
-  const view: Picks = {
+  return {
     ...picks,
     offeredWorktrees: worktrees,
     offeredConversations: conversations,
@@ -343,6 +351,21 @@ export function Filtered({ picks }: { picks: Picks }) {
       setOlder(on)
     },
   }
+}
+
+/** J: filters over the list; what's shown is what comes in, finished work shown but not ticked. */
+export function Filtered({ picks }: { picks: Picks }) {
+  const [from, setFrom] = useState<readonly Source[]>([])
+  const [since, setSince] = useState<Criteria['since']>('any')
+  const filter = (next: { from?: readonly Source[]; since?: Criteria['since'] }) => {
+    const f = next.from ?? from
+    const a = next.since ?? since
+    setFrom(f)
+    setSince(a)
+    picks.pickSets(picks.select({ what: 'unfinished', from: f.length === 0 ? 'all' : f, since: a }))
+  }
+  const shown = picks.select({ what: 'everything', from: from.length === 0 ? 'all' : from, since })
+  const view = narrowed(picks, shown)
   return (
     <div className={s.filteredWrap}>
       <div className={s.filters}>
@@ -379,7 +402,7 @@ export function Filtered({ picks }: { picks: Picks }) {
           />
         </div>
       </div>
-      <ByKind picks={view} setup={worktrees.length > 0} />
+      <ByKind picks={view} setup={view.offeredWorktrees.length > 0} />
     </div>
   )
 }
