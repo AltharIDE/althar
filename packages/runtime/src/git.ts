@@ -5,12 +5,12 @@ import { dirname, join, posix, resolve, sep } from 'node:path'
 
 import type { ChangeTarget } from '@althar/domain'
 import { cleanUp } from '@althar/provider-adapters'
-import { Cause, Clock, Context, Deferred, Duration, Effect } from 'effect'
+import { Cause, Context, Deferred, Duration, Effect } from 'effect'
 
 import { afterOpen, startup } from './startup'
 import { GitFailed } from './errors'
 import { refStamp, historyWhole } from './refStamps'
-import { noteLook, noteUnsure, unnoted } from './standsOn'
+import { noteLook, noteUnsure, timeAside, unnoted } from './standsOn'
 import { Foreground, reachesRemote, startApart } from './spawner'
 import { forkOf } from './forks'
 import { linkBroke } from './worktreeLinks'
@@ -326,7 +326,8 @@ const run = (
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
   // A worktree git can't open for its link to its repository is repaired, where Althar knows it, and the command runs once more.
-  Effect.flatMap(Clock.currentTimeMillis, (since) =>
+  // When it began is read aside: it says nothing of git's answer, and a card standing on that answer is kept as before.
+  Effect.flatMap(timeAside, (since) =>
     runOnce(timeout, cwd, args, env, trim, input).pipe(
       Effect.catchTag('GitFailed', (failed) =>
         linkBroke(failed.stderr)

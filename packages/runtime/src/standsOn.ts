@@ -98,6 +98,17 @@ const telling = (clock: Clock.Clock, read: () => void): Clock.Clock => ({
   sleep: (duration) => clock.sleep(duration),
 })
 
+/** The clock as it is, under the one that tells (`workedOut`): none outside an answer being worked out. */
+const Untold = Context.Reference<Clock.Clock | null>('@althar/runtime/standsOn/Untold', { defaultValue: () => null })
+
+/**
+ * The time, read for what isn't part of the answer, such as when a command began, to know whether something was mended
+ * since: an answer around it isn't made unsure by it, as one that reads the time to decide what it says is.
+ */
+export const timeAside: Effect.Effect<number> = Effect.flatMap(Untold, (clock) =>
+  clock === null ? Clock.currentTimeMillis : clock.currentTimeMillis,
+)
+
 /**
  * Works `effect` out, with what it stands on: each look it made, until when the time it read says the same, and whether
  * it read anything unsure, the time read other than through `nowFor` among them. What it stands on is noted, too, in
@@ -109,6 +120,7 @@ export const workedOut = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effec
     const clock = yield* Clock.Clock
     const value = yield* effect.pipe(
       Effect.provideService(StandsOn, on),
+      Effect.provideService(Untold, clock),
       Effect.provideService(
         Clock.Clock,
         telling(clock, () => {
