@@ -79,6 +79,19 @@ const toldReviewer = (taskId: string) =>
   })
 
 describe('checking a fix after a review', () => {
+  it.live('checks a fix that changes a named file as binary', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const card = yield* reviewed(working, '[review:findings] [lead:fix-tiny] [lead:fix-binary]')
+      const [round] = yield* graphOf(card.threadId)
+      assert.deepStrictEqual(shape(round === undefined ? [] : [round]), [
+        ['implement0:done', 'review0:done', 'settle0:done', 'review1:done', 'publish0:done'],
+      ])
+      assert.isTrue((yield* toldReviewer(card.taskId)).some((body) => body.startsWith('A check of the fixes')))
+      assert.notInclude(github.changes[0]?.body ?? '', 'too small to read again')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('checks a tiny fix that also leaves an untracked file', () => {
     const { working, github } = onGitHub()
     return Effect.gen(function* () {

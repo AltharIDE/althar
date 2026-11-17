@@ -698,6 +698,7 @@ const playStall = async (
  * `[review:slowly]` takes some seconds before it reports, long enough for what it reviews for to change meanwhile;
  * `[lead:settle-quietly]` settles without reporting; `[lead:fix-tiny]` settles with one line in README.md, the file
  * `[review:findings]` names, a fix too small to be checked again; `[lead:fix-untracked]` also leaves an untracked picture as evidence;
+ * `[lead:fix-binary]` changes that named file as binary;
  * `[lead:fix-elsewhere]` names a commit from before the round as its fix. `[lead:slowly]` takes some
  * seconds over what it was asked before it plays its part. Either takes until a test opens its hold instead, where
  * the test holds it (`FakeAgentOptions.holds`).
@@ -1226,6 +1227,7 @@ const playRole = async (
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
         // `[lead:fix-tiny]` fixes in a line of the file the finding named, README.md: a fix too small to check again.
+        if (session.markers.has('[lead:fix-binary]')) appendFileSync(join(session.cwd, 'README.md'), '\0')
         if (!aside) await commitIn(session.cwd, session.markers.has('[lead:fix-tiny]') ? 'README.md' : 'settled.txt', 'Settle the review')
         if (session.markers.has('[lead:fix-untracked]'))
           writeFileSync(join(session.cwd, 'untracked.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
