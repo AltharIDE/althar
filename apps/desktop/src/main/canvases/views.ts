@@ -51,8 +51,6 @@ interface View {
   readonly view: WebContentsView
   target: CanvasTarget
   shown: boolean
-  /** Whether something of the window's own is over its place, so the view is hidden (ADR-100). */
-  covered: boolean
 }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1', '0.0.0.0'])
@@ -88,6 +86,8 @@ export const canvasNavigation = (address: string, target: CanvasTarget): 'go' | 
 export const startCanvases = (options: CanvasesOptions) => {
   const views = new Map<string, View>()
   const prepared = new Set<string>()
+  /* The conversations whose canvas has something of the window's own over its place (ADR-100). Kept apart from the views, so a view made anew (another project's canvas) is still aside while it is. */
+  const covered = new Set<string>()
 
   /** The manifest a host's version is shown at, in any view: only what a window opened is served. */
   const opened = (host: string, version: number) => {
@@ -147,7 +147,8 @@ export const startCanvases = (options: CanvasesOptions) => {
       },
     })
     view.setBackgroundColor('#ffffff')
-    const one: View = { key, window, view, target, shown: false, covered: false }
+    view.setVisible(!covered.has(key))
+    const one: View = { key, window, view, target, shown: false }
     guard(one, view.webContents)
     views.set(key, one)
     void view.webContents.loadURL(canvasAddress(target.canvasId, target.version, '')).catch(() => undefined)
@@ -184,7 +185,7 @@ export const startCanvases = (options: CanvasesOptions) => {
       height: Math.round(panel.height * zoom),
     })
     if (!one.shown) window.contentView.addChildView(one.view)
-    one.view.setVisible(!one.covered)
+    one.view.setVisible(!covered.has(key))
     one.shown = true
   }
 
@@ -207,11 +208,11 @@ export const startCanvases = (options: CanvasesOptions) => {
   }
 
   /** Hides the view while something of the window's is over it, and shows it again after. */
-  const cover = (key: string, covered: boolean) => {
+  const cover = (key: string, over: boolean) => {
+    if (over) covered.add(key)
+    else covered.delete(key)
     const one = views.get(key)
-    if (one === undefined) return
-    one.covered = covered
-    one.view.setVisible(!covered && one.shown)
+    if (one !== undefined) one.view.setVisible(!over)
   }
 
   /** Loads the shown version again, as it was published: for a canvas that drew itself into a corner. */

@@ -382,6 +382,12 @@ describe('a page canvas', () => {
 
   const page = () => detail([version(1, { kind: 'html', title: 'Sign-in page', entry: 'index.html' })])
 
+  // Whatever a test leaves over the window must not cover the next one's canvas, as repeated runs would have it.
+  afterEach(() => {
+    for (const left of document.body.querySelectorAll(':scope > [role="dialog"]')) left.remove()
+    vi.restoreAllMocks()
+  })
+
   const views = (): CanvasesHost => ({
     show: vi.fn(),
     close: vi.fn(),
@@ -455,6 +461,7 @@ describe('a page canvas', () => {
 
     unmount()
     expect(canvases.cover).toHaveBeenLastCalledWith(THREAD, false)
+    lightbox.remove()
     measured.mockRestore()
   })
 
