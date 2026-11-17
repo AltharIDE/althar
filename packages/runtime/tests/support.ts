@@ -432,7 +432,7 @@ export const runtime = (
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     ...(more.page === undefined ? {} : { page: more.page }),
     ...(more.skills === undefined ? {} : { skills: more.skills }),
-    busy: { machine: ROOMY, ...more.busy },
+    busy: { machine: ROOMY, pressure: false, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
     // No test reaches a real service: one asked about answers, as it would online, unless the test says.

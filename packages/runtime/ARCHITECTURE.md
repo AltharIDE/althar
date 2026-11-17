@@ -17,6 +17,7 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `Projects.ts` | Opens folders as projects; creates tasks, their threads and their worktrees; renames projects, draws them in another ink and removes them, and adds, leaves out and sets the role of their repositories |
 | `firstWrite.ts` | A plain task's worktree (ADR-035): its scratch folder git ignores, and its branch, made where its lead first changes the repository, as its turn ends or as it reports, with that work on it |
 | `forks.ts` | A fork, as its clone's remotes say: an `upstream` beside `origin` on the same host |
+| `resourcePressure.ts` | Temporarily paces new work under sustained host pressure, with hysteresis and stale-reading fallback; never rewrites the configured agent cap |
 | `Sessions.ts` | Starts, supervises and stops agent sessions on a task's, the coordinator's or a step's thread; delivers the thread's input as turns and records them; writes each role's brief |
 | `Coordinator.ts` | The project's coordinator: its thread, the agent it starts on, and its tools (read the project, draft a task, propose its plan, pass a message to a lead) |
 | `IntegrationTools.ts`, `integrationHostTools.ts`, `integrationSupport.ts` | The lead and coordinator's full discussion pages, Linear resources/relations, uploads across trackers, review controls across code hosts and broad search, and authenticated API fallbacks including Jira Agile/Service Management; writes use Errands' word, intent, receipt and uncertain-outcome handling |

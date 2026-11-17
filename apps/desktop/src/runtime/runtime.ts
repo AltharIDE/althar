@@ -278,7 +278,7 @@ const program = Effect.gen(function* () {
           },
           openUrl: () => Effect.succeed(false),
           // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
-          busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
+          busy: { machine: machineIn(process.env.ALTHAR_MACHINE), pressure: false as const },
           // No sign-in of the person's is read for its usage: every provider's endpoint answers that there is none,
           // or, where a test names a share used (`ALTHAR_FAKE_PLAN`), each plan's five hours at that, resetting in two hours.
           usage: { readEndpoint: () => Promise.resolve(fakePlan(process.env.ALTHAR_FAKE_PLAN)) },

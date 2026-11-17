@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdtempSync } from 'node:fs'
 import { setPriority, tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -35,7 +35,7 @@ export { platformTrees, type ProcessTrees, type StopReport } from './processTree
  * Althar's own secrets and provider API keys are still excluded.
  */
 const INHERITED =
-  /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TMP|TEMP|LANG|LANGUAGE|TERM|TZ|COLORTERM|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|LC_[A-Z_]+|XDG_[A-Z_]+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy|GH_(TOKEN|ENTERPRISE_TOKEN|CONFIG_DIR|HOST)|GITHUB_(TOKEN|ENTERPRISE_TOKEN)|GLAB_(TOKEN|CONFIG_DIR)|GITLAB_(TOKEN|ACCESS_TOKEN|HOST)|(ANTHROPIC|OPENAI)_BASE_URL|SSH_AUTH_SOCK|SSH_AGENT_PID|SSH_ASKPASS|GIT_(SSH|SSH_COMMAND|ASKPASS|CONFIG_GLOBAL|CONFIG_SYSTEM|CONFIG_NOSYSTEM))$/
+  /^(ALTHAR_WORKER|PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TMP|TEMP|LANG|LANGUAGE|TERM|TZ|COLORTERM|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|LC_[A-Z_]+|XDG_[A-Z_]+|(HTTPS?|NO|ALL)_PROXY|(https?|no|all)_proxy|GH_(TOKEN|ENTERPRISE_TOKEN|CONFIG_DIR|HOST)|GITHUB_(TOKEN|ENTERPRISE_TOKEN)|GLAB_(TOKEN|CONFIG_DIR)|GITLAB_(TOKEN|ACCESS_TOKEN|HOST)|(ANTHROPIC|OPENAI)_BASE_URL|SSH_AUTH_SOCK|SSH_AGENT_PID|SSH_ASKPASS|GIT_(SSH|SSH_COMMAND|ASKPASS|CONFIG_GLOBAL|CONFIG_SYSTEM|CONFIG_NOSYSTEM))$/
 
 export const childEnvironment = (
   spec: LaunchSpec,
@@ -149,6 +149,15 @@ const setPriorityOf = (pid: number, priority: number) => {
   }
 }
 
+/** One scheduling identity for every command of a native session, isolated from earlier runtime instances. */
+const resourceInstance = `${process.pid}-${randomUUID()}`
+let anonymousWorker = 0
+export const workerOwner = (env: Readonly<Record<string, string | undefined>>) =>
+  createHash('sha256')
+    .update(`${resourceInstance}:${env.ALTHAR_WORKER ?? env.ALTHAR_WORK ?? `anonymous-${++anonymousWorker}`}`)
+    .digest('hex')
+    .slice(0, 32)
+
 const STDERR_KEPT = 8_192
 
 /** When the OS says a process started, as ISO 8601, or undefined if it can't say. With the pid, it tells a process from a later one given the same pid. */
@@ -178,82 +187,95 @@ export const spawnOwned = (
   cwd: string,
   options: SpawnOptions = {},
 ): Effect.Effect<OwnedProcess, AgentStartFailed, Scope.Scope> =>
-  Effect.acquireRelease(
-    Effect.gen(function* () {
-      const trees = options.trees ?? platformTrees()
-      const exited = yield* Deferred.make<ProcessExit>()
-      const stopped = yield* Deferred.make<StopReport>()
-      const temp = privateTemp(spec)
-      const inherited = { ...childEnvironment(spec), ...temp?.env }
-      // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled; what it runs may inherit more of Althar's environment, as reaching the device needs.
-      const launched = spec.onDevice === undefined ? spec : spec.onDevice({ cwd, env: inherited })
-      const env = launched === spec ? inherited : childEnvironment(launched)
-      const launch = yield* trees.launch(launched.command, launched.args).pipe(
-        Effect.mapError((reason) => new AgentStartFailed({ command: launched.command, reason })),
-        Effect.tapError(() => removeTemp(temp?.folder)),
-      )
-      const child = yield* Effect.try({
-        try: () =>
-          spawn(launch.command, [...launch.args], {
-            cwd,
-            detached: launch.detached,
-            windowsHide: true,
-            // Joined as they are, the program's own path quoted, as Node's own `shell: true` runs cmd.exe.
-            ...(launched.verbatim === true ? { windowsVerbatimArguments: true, argv0: `"${launch.command}"` } : {}),
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env,
-          }),
-        catch: (cause) => new AgentStartFailed({ command: launched.command, reason: String(cause) }),
-      }).pipe(Effect.tapError(() => removeTemp(temp?.folder)))
-      let stderr = ''
-      child.stderr.on('data', (chunk: Buffer) => {
-        const text = chunk.toString()
-        stderr = (stderr + text).slice(-STDERR_KEPT)
-        options.stderr?.(text, child.pid ?? 0)
-      })
-      // Taken hold of at once: a process that exits while its start is still being read would otherwise have what it
-      // printed thrown away, as Node discards the output of a child that exited with no one reading it.
-      let sequence = 0
-      const next = () => ++sequence
-      const stdin = tapped(Writable.toWeb(child.stdin), 'to_agent', options.capture, next)
-      const stdout = tapped(Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>, 'from_agent', options.capture, next)
-      child.once('exit', (code, signal) => Deferred.doneUnsafe(exited, Effect.succeed({ code, signal })))
-      const pid = yield* Effect.callback<number, AgentStartFailed>((resume) => {
-        child.once('spawn', () => resume(Effect.succeed(child.pid ?? 0)))
-        child.once('error', (error) =>
-          resume(
-            Effect.andThen(
-              removeTemp(temp?.folder),
-              Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message })),
-            ),
-          ),
-        )
-      })
-      // Lowered as soon as it is there, before it has started much of its own: what it starts inherits it.
-      if (options.background === true) (options.prioritize ?? setPriorityOf)(pid, BACKGROUND)
-      const osStartedAt = yield* osStartTime(pid, trees)
-      return {
-        pid,
-        ...(osStartedAt === undefined ? {} : { osStartedAt }),
-        environmentDigest: environmentDigest(env),
-        stdin,
-        stdout,
-        exited,
-        stopped,
-        stderrTail: () => stderr,
-        ...(temp === undefined ? {} : { temp: temp.folder }),
-      } satisfies OwnedProcess
-    }),
-    (owned) =>
+  Effect.suspend(() => {
+    let releaseScheduling: Effect.Effect<void> = Effect.void
+    let schedulingReleased = false
+    return Effect.acquireRelease(
       Effect.gen(function* () {
-        const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2), options.trees)
-        // The report waits until the OS has reaped the agent itself, so its pid is free when the report says so.
-        yield* Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.seconds(2)))
-        // Its own temporary folder goes once nothing of it is left to use it.
-        if (!stop.survivors) yield* removeTemp(owned.temp)
-        yield* Deferred.succeed(owned.stopped, stop)
-      }),
-  )
+        const trees = options.trees ?? platformTrees()
+        const exited = yield* Deferred.make<ProcessExit>()
+        const stopped = yield* Deferred.make<StopReport>()
+        const temp = privateTemp(spec)
+        const inherited = { ...childEnvironment(spec), ...temp?.env }
+        // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled; what it runs may inherit more of Althar's environment, as reaching the device needs.
+        const launched = spec.onDevice === undefined ? spec : spec.onDevice({ cwd, env: inherited })
+        const env = launched === spec ? inherited : childEnvironment(launched)
+        const launch = yield* trees
+          .launch(launched.command, launched.args, options.background === true ? { background: true, owner: workerOwner(env) } : {})
+          .pipe(
+            Effect.mapError((reason) => new AgentStartFailed({ command: launched.command, reason })),
+            Effect.tapError(() => removeTemp(temp?.folder)),
+          )
+        releaseScheduling = Effect.suspend(() => {
+          if (schedulingReleased) return Effect.void
+          schedulingReleased = true
+          return launch.release ?? Effect.void
+        })
+        const child = yield* Effect.try({
+          try: () =>
+            spawn(launch.command, [...launch.args], {
+              cwd,
+              detached: launch.detached,
+              windowsHide: true,
+              // Joined as they are, the program's own path quoted, as Node's own `shell: true` runs cmd.exe.
+              ...(launched.verbatim === true ? { windowsVerbatimArguments: true, argv0: `"${launch.command}"` } : {}),
+              stdio: ['pipe', 'pipe', 'pipe'],
+              env,
+            }),
+          catch: (cause) => new AgentStartFailed({ command: launched.command, reason: String(cause) }),
+        }).pipe(Effect.tapError(() => Effect.andThen(releaseScheduling, removeTemp(temp?.folder))))
+        let stderr = ''
+        child.stderr.on('data', (chunk: Buffer) => {
+          const text = chunk.toString()
+          stderr = (stderr + text).slice(-STDERR_KEPT)
+          options.stderr?.(text, child.pid ?? 0)
+        })
+        // Taken hold of at once: a process that exits while its start is still being read would otherwise have what it
+        // printed thrown away, as Node discards the output of a child that exited with no one reading it.
+        let sequence = 0
+        const next = () => ++sequence
+        const stdin = tapped(Writable.toWeb(child.stdin), 'to_agent', options.capture, next)
+        const stdout = tapped(Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>, 'from_agent', options.capture, next)
+        child.once('exit', (code, signal) => Deferred.doneUnsafe(exited, Effect.succeed({ code, signal })))
+        const pid = yield* Effect.callback<number, AgentStartFailed>((resume) => {
+          child.once('spawn', () => resume(Effect.succeed(child.pid ?? 0)))
+          child.once('error', (error) =>
+            resume(
+              Effect.andThen(
+                removeTemp(temp?.folder),
+                Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message })),
+              ),
+            ),
+          )
+        })
+        // Lowered as soon as it is there, before it has started much of its own: what it starts inherits it.
+        if (options.background === true) (options.prioritize ?? setPriorityOf)(pid, BACKGROUND)
+        const osStartedAt = yield* osStartTime(pid, trees)
+        return {
+          pid,
+          ...(osStartedAt === undefined ? {} : { osStartedAt }),
+          environmentDigest: environmentDigest(env),
+          stdin,
+          stdout,
+          exited,
+          stopped,
+          stderrTail: () => stderr,
+          ...(temp === undefined ? {} : { temp: temp.folder }),
+        } satisfies OwnedProcess
+      }).pipe(Effect.onError(() => releaseScheduling)),
+      (owned) =>
+        Effect.gen(function* () {
+          const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2), options.trees)
+          // The report waits until the OS has reaped the agent itself, so its pid is free when the report says so.
+          yield* Deferred.await(owned.exited).pipe(Effect.timeoutOption(Duration.seconds(2)))
+          // A scheduling group can still contain a child that detached from the Unix process group.
+          yield* releaseScheduling
+          // Its own temporary folder goes once nothing of it is left to use it.
+          if (!stop.survivors) yield* removeTemp(owned.temp)
+          yield* Deferred.succeed(owned.stopped, stop)
+        }).pipe(Effect.ensuring(releaseScheduling)),
+    )
+  })
 
 /**
  * Stops a process tree Althar owns (processTrees.ts): TERM where the platform

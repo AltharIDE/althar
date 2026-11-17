@@ -1,66 +1,54 @@
-# ADR-106: Althar quietly backs off when its work crowds the machine
+# ADR-106: Agent process families share CPU while Althar backs off under pressure
 
-> Proposed, not implemented. This replaces the earlier resource-broker proposal with a smaller, best-effort improvement. The Vitest-only implementation remains withdrawn.
-
-- **Status:** Proposed
+- **Status:** Implemented; native capability checks run in CI
 - **Date:** 2026-11-15
-- **Revised:** 2026-11-16
 - **Owner:** Runtime and provider-adapter maintainers
 - **Related:** [ADR-032, admission of agents](../scheduling.md#how-many-agents-work-at-once), [the instant UI requirement](../foundations.md#the-ui-is-instant), and [proposed ADR-103, execution hosts](103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md).
-- **Context:** Several agents building or testing at once can make the computer unpleasant to use. The useful outcome is that Althar quietly gives the person's apps room and starts less additional work when the machine is already struggling. It does not need to establish a security boundary, intercept every command or prove an exact resource quota first.
 
 ## Decision
 
-Add a small, automatic governor around Althar's existing background processes and admission queue. Use the machine's observed pressure and the work Althar already tracks. It applies regardless of whether a process happens to run Rust, Go, Python, a test runner or a custom script.
+Treat an agent and its ordinary descendant processes as one scheduling unit, independent of language or test framework. Share CPU between worker units where the OS provides the controls; preserve inherited background priority and pace new work under sustained machine pressure everywhere. Spare CPU remains available to a worker when others are idle.
 
-The feature runs with sensible defaults. It needs no new setup, resource panel, permission prompts or per-language configuration. Agents use their ordinary tools. A person should mostly notice that the computer remains usable while Althar works.
+This is automatic background behavior. There are no resource prompts, new settings, per-language adapters, worker flags in project manifests, or new command tools for agents to call. Commands keep their existing permission and sandbox paths. A process can run Rust, Go, Python, a custom script or a nested test runner without a scheduler integration for that language.
 
-## First version
+## Process controls
 
-1. **Keep agent work in the background.** Althar already starts agent processes and native command children at lower priority through `provider-adapters/src/process.ts`. Keep that behavior and cover ordinary descendant processes where the platform permits. The runtime and work the person directly waits on keep their existing priority.
-2. **Watch the machine while Althar has active work.** Reuse the existing process and machine readings, including descendants, for sustained CPU contention and memory pressure. Monitoring must work while the load meter is closed, stay off the UI thread and avoid frequent expensive scans.
-3. **Ease back on new work when pressure persists.** Extend the existing admission queue so fewer additional autonomous agent turns start while the machine is struggling. Include Althar-owned heavy setup and launch work where it can use the same policy without changing ordinary command authorization. Use the configured agent cap as an upper bound; keep any temporary reduction separate from the person's saved setting.
-4. **Recover gradually.** After pressure stays low, let more queued work start again. Use different backoff and recovery thresholds or a short stable period so the limit does not oscillate on every reading. Keep useful progress possible and preserve the existing queue priorities, stop behavior and priority of the person's direct actions.
-5. **Use practical process controls where available.** Group scheduling controls can improve sharing between worker trees on platforms that already support them. They are an incremental improvement. Lack of cgroup delegation, a denied OS call or weaker macOS controls must not prevent normal work from starting.
+`Sessions.ts` stamps each provider session with `ALTHAR_WORKER`. The launcher derives a private runtime-scoped scheduling identity from that marker. Native commands of one session share the identity, so launching several tool calls does not multiply that session's CPU weight. Helpers and replacement sessions have their own identities. The existing work marker remains responsible for task and project attribution.
 
-High CPU utilization alone is not a fault. One build on an otherwise idle computer should be able to use spare CPU. Backoff should respond to sustained contention or memory pressure, rather than trying to keep CPU usage permanently low.
-
-The first version primarily changes what starts next. It does not promise to resize an already running compiler's workers or rebalance every ongoing command instantly. Let running work finish; do not freeze or kill builds merely because the governor sees pressure. Explicit user stop and existing process cleanup still work as before.
-
-## Integrate with what exists
-
-| Existing part | Role in this change |
+| Platform | Background scheduling |
 | --- | --- |
-| `runtime/src/Busy.ts` | Own the temporary admission reduction and recovery alongside the existing agent cap and queue |
-| `runtime/src/MachineLoad.ts`, `machine.ts`, `processTree.ts` | Reuse cheap background observations and existing process ownership; distinguish stale or unavailable readings |
-| `provider-adapters/src/process.ts`, `processTrees.ts`, `keeper.ts` | Keep background priority and use available worker-tree controls without making them a startup requirement |
-| `runtime/src/Launches.ts`, `Setups.ts` | Share pressure policy for Althar-owned heavy work where practical, while preserving the person's existing run and stop semantics |
+| Linux | Where cgroup v2 CPU control is delegated, use a private background parent with weight 10 and equal worker children with weight 100. An exec wrapper joins the worker group before executing the command; ordinary descendants inherit membership. Weights are work-conserving, rather than fixed CPU quotas. |
+| Windows | The keeper uses an optional named parent Job Object shared by the worker's commands, with CPU weight 1. Each command retains its separate mandatory lifetime job. The child is created suspended and given below-normal priority before it runs. If optional job nesting is denied, retry the never-started child without the scheduling parent; command execution is not retried after it has begun. |
+| macOS | The exec wrapper attempts the OS background policy through `taskpolicy`, while preserving ordinary background niceness. This is a best-effort priority policy, not a promise of equal CPU shares or a hard CPU cap between process families. |
 
-The governor observes processes and machine pressure, rather than maintaining a list of command names or toolchains. A new language needs no scheduler change. Framework worker flags can be optional tuning later; they are not prerequisites for useful behavior.
+Unavailable optional controls fall back to background priority without asking the person to change OS permissions or disabling a provider. Foreground launches keep their existing behavior. Wrappers exec the original command with its arguments and streams intact, preserving the Unix process-group identity. The native platform checks exercise those paths rather than assuming Linux success certifies another OS.
 
-Do not introduce a new MCP command runner, make agents acquire resource leases, patch every provider's shell execution or move commands outside their existing sandbox for this first version. Provider loops and command permissions continue through their current paths.
+Linux scheduling groups have reference-counted lifetimes. The last owned command releases its worker group after process cleanup; launches racing with teardown wait for that generation to retire. Failed launch releases its allocation too. Cleanup kills remaining members of the private group, retries empty-group removal briefly and removes the private parent when unused. Resource names are scoped to the current runtime so cleanup cannot target an earlier runtime's worker by PID reuse.
 
-## Best-effort boundaries
+## Pressure-aware admission
 
-Normal descendants usually inherit background priority. A provider may change its children's priority, detach work or launch something through an external service. A simulator or container daemon may therefore sit outside the tree Althar can directly influence. Overall machine pressure should still cause Althar to start less additional work. We can improve ownership of a specific backend later if measurements show it matters.
+`Busy.ts` combines the existing configured agent cap with a temporary effective admission limit. The saved setting is never rewritten. Running builds continue: the pressure policy controls additional autonomous admissions, rather than freezing or killing current work. Existing queue priorities, explicit stop behavior and priority of the person's direct actions remain.
 
-Linux and Windows can offer stronger process-group controls than a portable priority adjustment; macOS needs its own practical behavior and measurement. Exact CPU shares, hard RAM ceilings and exclusive simulator-device ownership are not promises of this feature. Do not add privileged helpers, VMs or a mandatory machine-wide daemon to obtain those promises before shipping a useful improvement.
+A cheap host observation reads CPU counters, memory and native memory pressure where available, without scanning or attributing every process. It runs while task agents are active or work waits; an idle runtime waits for an event instead of polling. It does not depend on opening the load meter.
 
-If a reading or optional control fails, retain normal background priority and the existing agent cap, retry observations with bounded backoff and keep the diagnostic in the app's log. Do not leave work queued forever, disable a provider or ask the person to repair resource-control permissions. Keep policy state within the current runtime and rebuild it from observations after startup; a durable cross-profile lease journal is not required.
+- CPU saturation with runnable load above 1.25 per core is contention. On Windows, where Node reports no runnable load, sustained saturation among several active workers is the fallback signal. Full CPU usage by an uncontended build is allowed.
+- Sustained contention or memory warning for 15 seconds reduces new admission by one place. Critical native memory pressure, or less than 5% available memory without a native pressure signal, leaves one place immediately. One place remains so work can make progress.
+- Healthy pressure sustained for 30 seconds restores one place, up to the configured cap. Native macOS pressure is preferred over cache-heavy memory utilization.
+- Invalid, repeated stale or discontinuous readings restore normal admission rather than leaving a stale restriction. Read failures fall back and leave one debug diagnostic until readings recover. Idle work resets the temporary policy. All sampling and recovery use Effect's clock.
 
-Pressure policy must not repeatedly lower Unix niceness in a way it cannot later undo without privilege. Preserve existing background priority as the dependable baseline; use reversible controls only where their behavior has been checked.
+The configured cap and effective limit serve different purposes: Settings retains the person's chosen cap; queued-work counts reflect current admission. Existing work may temporarily exceed a reduced effective limit and is left running.
 
-## Verification and delivery
+## Boundaries
 
-Build an integrated change in the existing runtime, then measure it. The acceptance target is a clear improvement in responsiveness under ordinary mixed load, with no added workflow friction:
+CPU controls are per runtime and its workers, not a new persistent machine-wide command broker. Independent runtimes observe overall host pressure but do not maintain a shared lease journal. Linux without usable delegation and Windows with denied optional CPU nesting keep priority and admission control. macOS uses background policy and admission rather than claiming the same CPU-weight mechanism.
 
-- With fake machine readings and the test clock, sustained pressure reduces new admissions, brief spikes do not, and sustained recovery restores capacity within the configured cap.
-- Missing or stale telemetry and denied optional controls fall back without blocking progress, prompting the user or flooding the log.
-- Queue order and direct user actions retain their existing semantics. Stop works while work waits, and reducing admission does not kill or suspend running commands.
-- Real subprocess tests cover a command starting several children, without depending on a particular language or test framework.
-- Measure CPU contention, peak memory, concurrent work and app responsiveness before and after with several builds or test commands running together. Check that a single workload can still make good use of an idle machine and that the governor's own monitoring is cheap.
-- Exercise the default fallback on macOS, Linux and Windows, and any optional platform control on the host where it will run. Do not require identical enforcement mechanisms or eliminate every load spike to call the improvement useful.
+A provider can detach work, change priority or use an external service. Simulators, container daemons and Flatpak host services may sit outside the process family Althar can directly influence. Their pressure can still slow additional work; this implementation does not claim hard memory ceilings, ownership of those services or perfect fairness for escaped processes. It never adds a privileged helper or commandeers the person's existing simulator.
 
-Start with background priority, observed pressure and paced admission. Add stronger controls or special handling only when an observed problem justifies them. Cloud placement, companion features, per-language adapters and a universal execution service are separate work.
+## Verification
 
-DEV-86 stays in progress until this runtime behavior is implemented and measured. This document describes the intended first version; it is not evidence that the governor already exists.
+- Unit tests exercise equal worker weights, shared native-command ownership, teardown races, denied delegation, partial failures, optional-controller fallback, argument and protocol preservation, failed-launch cleanup, and resource identity isolation.
+- Pressure tests cover spikes, sustained backoff, critical memory, gradual recovery, native pressure signals, stale data and clock discontinuities. Real queue integration verifies direct actions, stop, recovery, sensor failure and preservation of the configured setting.
+- `resource-controls.yml` runs native launch and process-tree checks on Linux, Windows and macOS. Linux gets a private test delegation; the application itself requires no privileged setup. Windows reports whether CPU-weight nesting is available and verifies its priority fallback when it is not.
+- A bounded Linux experiment pins two worker families to one allowed CPU. One has four busy children and the other has one. It reports CPU shares before and after group scheduling, memory and foreground-probe latency. Results are measurements rather than flaky timing assertions.
+
+This replaces the withdrawn Vitest-only approach and the subsequent universal-execution-broker proposal. Native platform results and measured limits belong in the pull request; passing a synthetic worker-count experiment alone does not establish support for all OS resource mechanisms.
