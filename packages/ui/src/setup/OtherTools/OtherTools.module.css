@@ -397,7 +397,13 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+/* a branch keeps its name, the folder beside it gives way */
+.where :global(code:first-child) {
+  flex: none;
+  max-width: 55%;
+}
 .where :global(code + code) {
+  flex: 1;
   min-width: 0;
   color: var(--t-3);
 }

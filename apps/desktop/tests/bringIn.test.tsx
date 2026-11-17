@@ -163,7 +163,7 @@ describe('what other tools left, as tiles', () => {
     const claude = tiles[2]
     expect(claude?.size).toBe('2 conversations')
     expect(claude?.groups[2]?.items.map((item) => [item.title, item.where])).toEqual([
-      ['Gyroscope fixture', '4 messages'],
+      ['Gyroscope fixture', '4 prompts'],
       ['Lima export', 'in lima'],
     ])
   })

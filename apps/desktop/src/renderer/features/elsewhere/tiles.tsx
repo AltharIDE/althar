@@ -37,7 +37,7 @@ export const words = {
   detached: 'detached',
   archived: 'Archived there',
   setupOf: (tool: string) => `${tool}’s setup`,
-  messages: (n: number) => plural(n, 'message'),
+  prompts: (n: number) => plural(n, 'prompt'),
   ranIn: (name: string) => `in ${name}`,
   last: (when: string) => `Last worked on ${when}`,
   /** What the main button brings in, counted. */
@@ -111,7 +111,7 @@ const conversationItem = (one: ElsewhereConversation, worktrees: ReadonlyArray<E
     title: one.title,
     brand: one.agent === 'codex' ? Brand.Codex : Brand.ClaudeCode,
     ...(at === null ? {} : { at: ago(at, now) }),
-    where: [one.prompts === null ? null : words.messages(one.prompts), ran === undefined ? null : words.ranIn(ran.name)]
+    where: [one.prompts === null ? null : words.prompts(one.prompts), ran === undefined ? null : words.ranIn(ran.name)]
       .filter(Boolean)
       .join(' · '),
   }

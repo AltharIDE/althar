@@ -1,4 +1,4 @@
-import { createReadStream } from 'node:fs'
+import { createReadStream, realpathSync } from 'node:fs'
 import { open, readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -64,6 +64,15 @@ const END = 256 * 1024
 /** What Claude Code writes in a person's turn that isn't their words: its notes on commands, reminders and caveats. */
 const NOT_SAID =
   /^\s*<(local-command-caveat|local-command-stdout|local-command-stderr|command-name|command-message|command-args|task-notification|system-reminder|bash-input|bash-stdout|bash-stderr|user-prompt-submit-hook)>/
+
+/** A folder as the file system has it, as the folders looked in are: one reached through a link is the same folder. */
+const real = (path: string) => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
@@ -200,7 +209,7 @@ export const claudeSessions = async (places: Places, folders: ReadonlyArray<stri
     for (const file of files) {
       if (!file.endsWith('.jsonl')) continue
       const session = await claudeSession(join(root, name, file)).catch(() => null)
-      if (session !== null && folders.some((folder) => within(session.cwd, folder))) found.push(session)
+      if (session !== null && folders.some((folder) => within(real(session.cwd), folder))) found.push(session)
     }
   }
   return found
@@ -296,7 +305,7 @@ const rollouts = async (folder: string): Promise<ReadonlyArray<string>> => {
 /** Codex's conversations that ran in any of `folders` or inside one: from its state database, else from its rollouts' first records. */
 export const codexThreads = async (places: Places, folders: ReadonlyArray<string>): Promise<ReadonlyArray<Conversation>> => {
   const names = await codexNames(places)
-  const inside = (cwd: string | null) => cwd !== null && folders.some((folder) => within(cwd, folder))
+  const inside = (cwd: string | null) => cwd !== null && folders.some((folder) => within(real(cwd), folder))
   const state = await codexState(places)
   const listed =
     state === null

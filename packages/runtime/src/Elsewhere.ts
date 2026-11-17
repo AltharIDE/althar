@@ -158,6 +158,9 @@ export class Elsewhere extends Context.Service<
         }
       }
       const worktreeRoot = real(config.worktreeRoot)
+      /** A folder as the person knows the place: under their home, from ~. */
+      const home = real(places.home)
+      const homeless = (path: string) => (within(path, home) ? `~${path.slice(home.length)}` : path)
 
       /** The project's repositories here, with what each records of its setup. */
       const repositoriesOf = (projectId: string) =>
@@ -323,12 +326,12 @@ export class Elsewhere extends Context.Service<
                   title: `From ${agentName(conversation.agent)}: “${conversation.title}”`,
                   description: [
                     dateWords(conversation.startedAt),
-                    plural(messages.length, 'message'),
+                    plural(messages.filter((one) => one.role === 'person').length, 'prompt'),
                     left === 0 ? null : `the ${left} earliest left out`,
                   ]
                     .filter((one) => one !== null)
                     .join(' · '),
-                  role: 'brought_in',
+                  role: 'brought',
                   brought: { agent: conversation.agent, id: conversation.id, cwd: conversation.cwd },
                 },
                 first,
@@ -640,8 +643,8 @@ export class Elsewhere extends Context.Service<
                             worktree.tool === 'hand'
                               ? 'Brought in: a worktree made by hand'
                               : `Brought in from ${toolNames[worktree.tool]}`,
-                          description: `${worktree.path}${worktree.branch === null ? '' : ` · ${worktree.branch}`}`,
-                          role: 'brought_in',
+                          description: `${homeless(worktree.path)}${worktree.branch === null ? '' : ` · ${worktree.branch}`}`,
+                          role: 'brought',
                           brought: { tool: worktree.tool, path: worktree.path },
                         },
                         yield* timestamp,

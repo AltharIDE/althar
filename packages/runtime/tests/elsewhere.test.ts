@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -122,6 +122,21 @@ describe('looking elsewhere', () => {
         claudeTranscript(join(machine.home, '.claude', 'projects', claudeFolder(machine.repository), `${sessionIds.inRoot}.jsonl`)),
       )
       assert.deepStrictEqual([digest(machine.home), digest(join(machine.repository, '.git', 'worktrees'))], before)
+    }),
+  )
+
+  it.effect('knows a tool’s worktrees by where it makes them, though the home is reached through a link', () =>
+    Effect.gen(function* () {
+      const machine = computer(repository())
+      const link = join(mkdtempSync(join(tmpdir(), 'althar-link-')), 'home')
+      symlinkSync(machine.home, link)
+      const found = yield* lookAt(
+        [{ bindingId: 'b1', name: 'meridian', path: machine.repository, defaultBranch: 'main' }],
+        placesOf(link, {}, 'darwin'),
+        { ours: (path) => within(path, join(machine.home, 'Althar')), sessions: new Set() },
+      )
+      assert.strictEqual(found.worktrees.find((one) => one.path === machine.worktrees.conductor)?.tool, 'conductor')
+      assert.strictEqual(found.worktrees.find((one) => one.path === machine.worktrees.cursor)?.tool, 'cursor')
     }),
   )
 

@@ -125,7 +125,7 @@ export type RoundBlock =
       readonly task?: { readonly threadId: string; readonly title: string }
     }
   /** Its folder went, or came back: a line across the thread, a change of scene (ADR-056). */
-  | { readonly kind: 'folder'; readonly id: string; readonly text: string }
+  | { readonly kind: 'folder'; readonly id: string; readonly text: string; readonly brought?: boolean }
   /** A step of the work: a change started, a stamped row of its own (a task is a conversation plus parts). */
   | { readonly kind: 'work_step'; readonly id: string; readonly step: NonNullable<NoticeContent['step']> }
   /**
@@ -155,7 +155,8 @@ const ASIDES = [
 ]
 
 const roleOf = (content: NoticeContent): 'relayed' | 'aside' | 'folder' | 'news' =>
-  content.role === 'folder'
+  // Its folder going or coming back, or what was brought in from another tool: a line across the thread.
+  content.role === 'folder' || content.role === 'brought'
     ? 'folder'
     : relayed(content)
       ? 'relayed'
@@ -406,7 +407,7 @@ export const roundsOf = (
         }
         close()
         if (role === 'folder') {
-          out.push({ kind: 'folder', id: block.id, text: block.text })
+          out.push({ kind: 'folder', id: block.id, text: block.text, ...(content.role === 'brought' ? { brought: true } : {}) })
           return
         }
         out.push({

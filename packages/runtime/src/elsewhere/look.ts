@@ -190,11 +190,26 @@ export interface LookOptions {
 }
 
 /** What other tools left for these repositories. Each source is read on its own: one that fails finds nothing, and the rest are read. */
-export const lookAt = (repositories: ReadonlyArray<Repository>, places: Places, options: LookOptions) =>
+export const lookAt = (repositories: ReadonlyArray<Repository>, given: Places, options: LookOptions) =>
   Effect.gen(function* () {
-    const stores = yield* Effect.promise(() =>
-      readStores(places).catch(() => ({ worktrees: [], roots: { orca: [], t3: [], paradev: [] } })),
-    )
+    // Every folder as the file system has it, as git names worktrees: a home reached through a link (macOS's /var is
+    // /private/var) is the same home.
+    const places: Places = {
+      ...given,
+      home: real(given.home),
+      claude: real(given.claude),
+      codex: real(given.codex),
+      t3: real(given.t3),
+      paradev: given.paradev.map(real),
+      orca: given.orca.map(real),
+      conductor: real(given.conductor),
+      cursor: real(given.cursor),
+    }
+    const read = yield* Effect.promise(() => readStores(places).catch(() => ({ worktrees: [], roots: { orca: [], t3: [], paradev: [] } })))
+    const stores = {
+      ...read,
+      roots: { orca: read.roots.orca.map(real), t3: read.roots.t3.map(real), paradev: read.roots.paradev.map(real) },
+    }
     const recorded = new Map<string, Recorded>(stores.worktrees.map((one) => [real(one.path), one]))
     const worktrees: Array<FoundWorktree> = []
     const setups: Array<FoundSetupItem> = []
