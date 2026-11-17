@@ -942,7 +942,17 @@ export const ChangeTarget = Schema.Literals(['upstream', 'fork', 'upstream_branc
 export type ChangeTarget = typeof ChangeTarget.Type
 
 /** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
-export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export const Product = Schema.Literals([
+  'github',
+  'gitlab',
+  'bitbucket_cloud',
+  'bitbucket_dc',
+  'linear',
+  'jira_cloud',
+  'jira_dc',
+  'trello',
+  'clickup',
+])
 export type Product = typeof Product.Type
 
 /**
@@ -1334,7 +1344,7 @@ export const ConnectionSummary = Schema.Struct({
 export type ConnectionSummary = typeof ConnectionSummary.Type
 
 /** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
-export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello', 'clickup'])
 export type Service = typeof Service.Type
 
 /** A product a person can connect, and how they sign in to it. */

@@ -148,9 +148,11 @@ const CHANGES_OF = (product: Product): ReadonlyArray<IssueField> =>
       ? ['status', 'close', 'priority', 'assignee', 'labels', 'milestone', 'parent', 'type', 'components', 'due', 'title', 'description']
       : product === 'trello'
         ? ['status', 'close', 'assignee', 'labels', 'due', 'title', 'description']
-        : product === 'gitlab'
-          ? ['status', 'close', 'assignee', 'labels', 'milestone', 'estimate', 'type', 'due', 'title', 'description']
-          : ['status', 'close', 'assignee', 'labels', 'project', 'milestone', 'parent', 'type', 'title', 'description']
+        : product === 'clickup'
+          ? ['status', 'close', 'priority', 'assignee', 'labels', 'due', 'title', 'description']
+          : product === 'gitlab'
+            ? ['status', 'close', 'assignee', 'labels', 'milestone', 'estimate', 'type', 'due', 'title', 'description']
+            : ['status', 'close', 'assignee', 'labels', 'project', 'milestone', 'parent', 'type', 'title', 'description']
 
 /** What of those each product's adapter sets as it files an issue. */
 const CREATES_OF = (product: Product): ReadonlyArray<IssueField> =>
@@ -160,9 +162,11 @@ const CREATES_OF = (product: Product): ReadonlyArray<IssueField> =>
       ? ['assignee', 'milestone', 'parent', 'type', 'components', 'due']
       : product === 'trello'
         ? ['assignee', 'due']
-        : product === 'gitlab'
-          ? ['assignee', 'milestone', 'estimate', 'type', 'due']
-          : ['assignee', 'milestone', 'type']
+        : product === 'clickup'
+          ? ['assignee', 'due', 'status']
+          : product === 'gitlab'
+            ? ['assignee', 'milestone', 'estimate', 'type', 'due']
+            : ['assignee', 'milestone', 'type']
 
 /** A team's statuses, on the fake, as Linear's are: each with its category, in their order on the board. */
 const STATUSES: ReadonlyArray<Issue['status']> = [
@@ -1254,7 +1258,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       called('access').pipe(
         Effect.map(() => {
           const unseen = input.repositories.filter((path) => !repositories.has(path.join('/').toLowerCase())).map((path) => path.join('/'))
-          const host = product !== 'linear' && product !== 'jira_cloud' && product !== 'jira_dc' && product !== 'trello'
+          const host =
+            product !== 'linear' && product !== 'jira_cloud' && product !== 'jira_dc' && product !== 'trello' && product !== 'clickup'
           const lines: ReadonlyArray<AccessLine> = [
             line('account', 'ok', { fact: account.login }),
             ...(input.repositories.length === 0

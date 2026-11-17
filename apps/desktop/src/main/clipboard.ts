@@ -6,8 +6,8 @@
  * copied never reaches the page.
  */
 
-/** What the services' tokens start with: GitHub's fine-grained and classic, GitLab's, Atlassian's, Trello's and Linear's keys. */
-export const TOKEN_PREFIXES: ReadonlyArray<string> = ['github_pat_', 'ghp_', 'glpat-', 'ATATT', 'ATTA', 'lin_api_']
+/** What the services' tokens start with: GitHub's fine-grained and classic, GitLab's, Atlassian's, Trello's, Linear's and ClickUp's keys. */
+export const TOKEN_PREFIXES: ReadonlyArray<string> = ['github_pat_', 'ghp_', 'glpat-', 'ATATT', 'ATTA', 'lin_api_', 'pk_']
 
 /** The text, where it is a token; null for anything else. */
 export const tokenIn = (text: string): string | null => {

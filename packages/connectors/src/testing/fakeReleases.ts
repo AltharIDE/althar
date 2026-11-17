@@ -40,6 +40,7 @@ export const RELEASING: Readonly<Record<Product, ReleaseWay>> = {
   jira_cloud: 'draft',
   jira_dc: 'draft',
   trello: 'draft',
+  clickup: 'draft',
 }
 
 /** A gate a run waits on, as a test starts it: the kind its product has unless said; the account may give it unless said. */
