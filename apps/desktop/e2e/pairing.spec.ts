@@ -169,7 +169,7 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     await manage.getByRole('button', { name: 'My VPS, more', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Forget', exact: true }).click()
     await expect(manage.getByText('My VPS', { exact: true })).toHaveCount(0)
-    expect(readFileSync(join(clientRoot, 'profile/connection-keys/devices.json'), 'utf8')).not.toContain(saved.id)
+    await expect.poll(() => readFileSync(join(clientRoot, 'profile/connection-keys/devices.json'), 'utf8').includes(saved.id)).toBe(false)
     await manage.getByRole('button', { name: 'Undo', exact: true }).click()
     await expect(manage.getByText('My VPS', { exact: true })).toBeVisible()
     const reopened = electronApp.waitForEvent('window', { predicate: (candidate) => candidate !== page })

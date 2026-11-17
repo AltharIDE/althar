@@ -316,6 +316,21 @@ it('forgets a home at once, and Undo puts it back', async () => {
   await waitFor(() => expect(at.homes.restore).toHaveBeenCalledExactlyOnceWith(home.id))
 })
 
+it('closes Manage homes at once on project press but waits for Undo to finish before opening the restored connection', async () => {
+  const at = fixture()
+  const restoring = later<void>()
+  at.homes.restore.mockImplementation(() => restoring.promise)
+  const { close } = manage(at)
+  await userEvent.click(await screen.findByRole('button', { name: 'My server, more' }))
+  await userEvent.click(await screen.findByRole('menuitem', { name: 'Forget' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
+  await userEvent.click(screen.getByRole('button', { name: /ledger/ }))
+  expect(close).toHaveBeenCalledOnce()
+  expect(at.homes.open).not.toHaveBeenCalled()
+  await act(async () => restoring.resolve(undefined))
+  await waitFor(() => expect(at.homes.open).toHaveBeenCalledExactlyOnceWith(home.id, 'prj_ledger'))
+})
+
 it('renames a home in place, at once, and puts the old name back where main refuses it', async () => {
   const at = fixture()
   at.homes.rename.mockRejectedValueOnce(new Error('Give the home a name of at most 120 characters, without control characters.'))

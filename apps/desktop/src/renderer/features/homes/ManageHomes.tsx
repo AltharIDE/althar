@@ -101,6 +101,7 @@ const useSaved = (homes: HomesHost, overview: HomesOverview | null) => {
     shown,
     last,
     problem,
+    settled: () => pending.current,
     rename: (home: RemoteHome, name: string) => {
       const trimmed = name.trim()
       if (trimmed === '' || trimmed === home.name) return
@@ -137,7 +138,7 @@ const useSaved = (homes: HomesHost, overview: HomesOverview | null) => {
       clearTimeout(timer.current)
       unhide(home.id)
       setBack((was) => [...was, { home, at }])
-      void pending.current
+      pending.current = pending.current
         .then(() => homes.restore(home.id))
         .catch((error: unknown) => {
           if (!live.current) return
@@ -155,8 +156,11 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
   useQuietFocus(list)
   const ownKey = here !== null && here.current.kind !== 'local' ? here.current.home.homeId : 'local'
   const open = (id: string, projectId?: string) => {
-    void homes.open(id, projectId).catch(() => undefined)
     onClose()
+    void saved
+      .settled()
+      .then(() => homes.open(id, projectId))
+      .catch(() => undefined)
   }
   return (
     <Dialog title="Homes" width={600} tall onClose={onClose} actions={<Button onClick={onClose}>Done</Button>}>
