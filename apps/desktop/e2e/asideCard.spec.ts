@@ -33,7 +33,7 @@ test('an aside the coordinator starts has its own card in its thread, beside a t
     await expect(task.getByRole('button', { name: /Open task/ })).toBeVisible()
     await expect(aside).toContainText('What does the release script do with tags')
     await expect(aside.getByText('Implement')).toHaveCount(0)
-    await expect(aside.getByText(/^Ready$/)).toBeVisible({ timeout: 30_000 })
+    await expect(aside.getByText(/^Ready$/)).toBeVisible()
     // Its answer is its lead's report, not what its lead said after reporting it.
     await expect(aside).toContainText('Did the task.')
     await expect(aside).not.toContainText('Althar has your summary')
