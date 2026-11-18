@@ -26,6 +26,7 @@ import { useServices } from '../../data/services'
 import { addressOf } from '../../shared/running'
 import { useWorkToward } from '../../shared/useWorkToward'
 import { ago, running } from '../../shared/time'
+import { openCoordinator } from '../../shared/openCoordinator'
 import { askInDraft, type RunsModel, useRuns } from './useRuns'
 import { usePageOpener } from '../browser/opener'
 
@@ -258,6 +259,7 @@ export const useRunDialogs = (projectId: string, runnables: ReadonlyArray<Runnab
     ask: () => {
       setShowing(null)
       askInDraft(projectId)
+      openCoordinator(projectId)
       void navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Talk } })
     },
   }

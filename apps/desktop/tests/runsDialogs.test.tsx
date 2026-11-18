@@ -2,7 +2,8 @@ import { act, getDefaultNormalizer, screen, waitFor, within } from '@testing-lib
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type Launch } from '@althar/contracts'
+import { ApiError, type BoardTask, type Launch } from '@althar/contracts'
+import { Room } from '@althar/ui'
 
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -11,7 +12,7 @@ import { useProject } from '../src/renderer/features/project/useProject'
 import { placeOfLaunch, targetsOf } from '../src/renderer/features/runs/Runs'
 import { askAfterText, askText } from '../src/renderer/features/runs/useRuns'
 import { draftKey, setDraftText } from '../src/renderer/shared/drafts'
-import { coordinatorSnapshot, fakeClient, repositories, runnables } from './fixtures'
+import { card, coordinatorSnapshot, fakeClient, items, repositories, runnables, snapshot } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
 const navigate = vi.hoisted(() => vi.fn())
@@ -28,9 +29,10 @@ vi.mock('@tanstack/react-router', async (actual) => ({
  * with a line where it didn't.
  */
 
-function Project() {
+function Project({ room }: { room?: Room }) {
   return (
     <ProjectView
+      {...(room === undefined ? {} : { room })}
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
@@ -134,6 +136,65 @@ describe('adding something to run', () => {
     expect(client.send).not.toHaveBeenCalled()
     expect(askAfterText.startsWith('And please work out what this project runs')).toBe(true)
     expect(askText.startsWith('Please work out')).toBe(true)
+  })
+
+  it('leaves Settings for the coordinator even where its address asks for the conversation already', async () => {
+    // The navigation is a stand-in that changes nothing: the address stays as it was, as when it already said talk.
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ runnables })) })
+    withServices(<Project room={Room.Settings} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: /^Running/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Add something to run' }))
+    const add = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
+    await userEvent.click(add.getByRole('radio', { name: 'Ask the coordinator' }))
+    await userEvent.click(add.getByRole('button', { name: 'Ask the coordinator' }))
+    const composer = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    expect(composer).toHaveProperty('value', askText)
+    expect(within(screen.getByRole('radiogroup', { name: 'View' })).getByRole('radio', { name: 'Settings' })).toHaveProperty(
+      'ariaChecked',
+      'false',
+    )
+    await waitFor(() => expect(document.activeElement).toBe(composer))
+  })
+
+  it.each(['new', 'existing'] as const)('shows the coordinator’s own conversation over an aside left open (%s)', async (kind) => {
+    const aside: BoardTask = {
+      ...card(),
+      taskId: 'a1',
+      threadId: 'tha',
+      title: 'Retry',
+      phase: 'ready',
+      scratch: true,
+      state: 'active',
+      createdAt: '2026-11-12T10:00:00Z',
+      settledAt: null,
+      changed: null,
+      here: [],
+    }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ runnables, items: [items.says('The coordinator is here.')] })),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [aside], calls: [], settledTotal: 0 })),
+      getThread: vi.fn(async () => {
+        const thread = snapshot()
+        return { ...thread, threadId: 'tha', task: { ...thread.task, id: 'a1', scratch: true }, items: [items.says('The aside answered.')] }
+      }),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    if (kind === 'new') {
+      await userEvent.click(await screen.findByRole('button', { name: 'New aside' }))
+      await screen.findByRole('textbox', { name: 'Ask on the side' })
+    } else {
+      await userEvent.click(await screen.findByRole('tab', { name: 'Retry' }))
+      await screen.findByText('The aside answered.')
+    }
+    await pick('Add something to run')
+    const add = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
+    await userEvent.click(add.getByRole('radio', { name: 'Ask the coordinator' }))
+    await userEvent.click(add.getByRole('button', { name: 'Ask the coordinator' }))
+    // Its own conversation and composer, so Send goes to the coordinator, not the aside.
+    expect(await screen.findByText('The coordinator is here.')).toBeTruthy()
+    expect(screen.queryByText('The aside answered.')).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'Ask on the side' })).toBeNull()
+    expect(await screen.findByRole('textbox', { name: 'Tell the coordinator something' })).toHaveProperty('value', askText)
   })
 
   it('asks from Run’s own item, with nothing to run yet, with no dialog', async () => {
