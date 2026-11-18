@@ -12,7 +12,7 @@ import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { UnknownAgent } from './errors'
 import { Installs, isInstalled } from './Installs'
 import { Instance } from './Instance'
-import { blockedModelsOf, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
+import { blockedModelsOf, clearDefaultEffort, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
 import { change, timestamp } from './records'
 import { SignIns } from './SignIns'
 import { Accounts } from './Accounts'
@@ -186,11 +186,11 @@ export class Models extends Context.Service<
   {
     /** Every agent's models and efforts, as far as they are known, with the person's default efforts. */
     readonly catalog: Effect.Effect<ReadonlyArray<AgentModels>, SqlError.SqlError>
-    /** The person's default effort for one of an agent's models, for every session on it from now. */
+    /** The person's default effort for one of an agent's models, for every session on it from now; none takes theirs away. */
     setDefaultEffort(input: {
       readonly agentId: string
       readonly model: string
-      readonly effort: string
+      readonly effort: string | null
     }): Effect.Effect<void, SqlError.SqlError | UnknownAgent>
     /** Switches one of an agent's models off, or on again (ADR-015). */
     setModelBlocked(input: {
@@ -375,7 +375,8 @@ export class Models extends Context.Service<
         setDefaultEffort: (input) =>
           Effect.gen(function* () {
             const entry = yield* agents.get(input.agentId)
-            yield* setDefaultEffort(entry.definition.id, input.model, input.effort)
+            if (input.effort === null) yield* clearDefaultEffort(entry.definition.id, input.model)
+            else yield* setDefaultEffort(entry.definition.id, input.model, input.effort)
           }).pipe(Effect.provide(context)),
         setModelBlocked: (input) =>
           Effect.gen(function* () {

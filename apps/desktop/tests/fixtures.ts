@@ -722,7 +722,7 @@ export const items = {
       section: 'althar/plans-and-reviews',
       title: 'Plans and reviews',
       project: null,
-      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5' }],
+      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5', changes: ['Review rounds: 3 → 5'] }],
       by: { kind: 'coordinator', taskId: null, title: null },
       loosens: false,
       words: null,
