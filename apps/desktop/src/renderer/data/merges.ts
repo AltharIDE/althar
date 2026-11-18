@@ -183,13 +183,33 @@ export const usePressedMerges = (
     const under = new Map<string, Pressing>()
     for (const [url, one] of last) {
       const change = read.get(url)
-      // Gone through, it lands while it still reads open: once read in its queue, only a bypass is still landing.
-      const landing =
-        one.status === 'success' && one.lands && one.at + LANDS_WITHIN > now && change?.state === 'open' && !confirmedQueued(one, change)
+      // Once read in its queue, the reads say where it stands, though Merge hasn't answered yet: taken out again, it is out.
+      if (confirmedQueued(one, change)) continue
+      // Gone through, it lands while it still reads open.
+      const landing = one.status === 'success' && one.lands && one.at + LANDS_WITHIN > now && change?.state === 'open'
       if (one.status === 'pending' || landing) under.set(url, one.bypass ? 'bypass' : queuing(one, change, now) ? 'queue' : 'merge')
     }
     return under
   }, [last, changes, now])
+}
+
+/**
+ * The pull requests, by address, a read has said were in their merge queue
+ * since their merge was pressed, and says now are open and out of it: the
+ * queue took them out, so they are the person's to merge again, though the
+ * press may not have answered yet.
+ */
+export const useTakenOut = (changes: ReadonlyArray<Pick<ChangeSummary, 'url' | 'state' | 'queued'>> | null): ReadonlySet<string> => {
+  const { last } = usePressed(byUrl)
+  return useMemo(() => {
+    const read = new Map((changes ?? []).map((change) => [change.url, change]))
+    return new Set(
+      [...last].flatMap(([url, one]) => {
+        const change = read.get(url)
+        return change?.state === 'open' && change.queued !== true && confirmedQueued(one, change) ? [url] : []
+      }),
+    )
+  }, [last, changes])
 }
 
 const WAITS = ['merge-waits'] as const
@@ -245,16 +265,10 @@ export const useMerging = (tasks: ReadonlyArray<Pick<BoardTask, 'taskId' | 'chan
     const queued = new Set<string>()
     const failed: Record<string, string> = {}
     for (const one of last.values()) {
+      // Read in its queue, the queue has it: the reads say where it stands from then on, Merge answered or not.
+      if (landing(one) && confirmedQueued(one, open.get(one.taskId))) continue
       if (one.status === 'pending') merging.add(one.taskId)
-      else if (
-        one.status === 'success' &&
-        one.lands &&
-        landing(one) &&
-        one.at + LANDS_WITHIN > now &&
-        // Read in its queue, the queue has it: the reads say where it stands from then on.
-        !confirmedQueued(one, open.get(one.taskId))
-      )
-        merging.add(one.taskId)
+      else if (one.status === 'success' && one.lands && landing(one) && one.at + LANDS_WITHIN > now) merging.add(one.taskId)
       else if (one.status === 'error') failed[one.taskId] = messageOf(one.error)
       if (merging.has(one.taskId) && landing(one) && queuing(one, open.get(one.taskId), now)) queued.add(one.taskId)
     }

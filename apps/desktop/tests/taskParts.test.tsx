@@ -408,6 +408,37 @@ describe('a task’s parts', () => {
         expect(popover.queryByText('In the merge queue')).toBeNull()
         expect(popover.queryByText('Merging', said)).toBeNull()
       })
+
+      it('is out of its queue as soon as a read says so, while the host has still not answered the merge', async () => {
+        const { merge, answers } = held()
+        let read: ChangeSummary = bound
+        const getThread = vi.fn(async () => snapshot({ task: { ...base.task, changes: [read] } }))
+        const { client } = fakeClient({ getThread, merge })
+        const services = servicesFor(client)
+        render(
+          <ServicesProvider value={services}>
+            <Task />
+          </ServicesProvider>,
+        )
+        const popover = await parts()
+        await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
+        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        // A read has it in the queue, Merge still unanswered.
+        read = { ...bound, queued: true }
+        await act(() => services.cache.invalidateQueries())
+        // The cache tells the window on its next tick.
+        await act(() => new Promise((done) => setTimeout(done, 0)))
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
+        // Then the queue takes it out, Merge still unanswered: it is the person's to merge again, not Merging nor busy.
+        read = bound
+        await act(() => services.cache.invalidateQueries())
+        const again = await popover.findByRole('button', { name: 'Merge' })
+        expect(again.getAttribute('aria-busy')).not.toBe('true')
+        expect(popover.queryByText('In the merge queue')).toBeNull()
+        expect(popover.queryByText('Merging', said)).toBeNull()
+        expect(answers).toHaveLength(1)
+        act(() => answers[0]!.resolve())
+      })
     })
 
     /** Outputs of the same task, pressing through the model its header reads. */

@@ -1,9 +1,21 @@
-import { describe, expect, it } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { BoardTask } from '@althar/contracts'
 
-import { MERGE_QUEUE_STEP, MERGING_STEP, asMerging, mergeStandingOf, mergesThroughQueue } from '../src/renderer/data/merges'
-import { change } from './fixtures'
+import {
+  MERGE_QUEUE_STEP,
+  MERGING_STEP,
+  asMerging,
+  mergeStandingOf,
+  mergesThroughQueue,
+  useMerge,
+  useMerging,
+} from '../src/renderer/data/merges'
+import { ServicesProvider } from '../src/renderer/data/services'
+import { change, fakeClient } from './fixtures'
+import { servicesFor } from './render'
 
 /*
  * A merge bound for its branch's merge queue is in it from just after the
@@ -45,5 +57,28 @@ describe('a merge going into its queue', () => {
     ])
     // Its press refused, it is the person's again: no longer merging, nor in a queue.
     expect(asMerging(tasks, new Set(), new Set(['t1'])).map((one) => one.phase)).toEqual(['ready', 'ready'])
+  })
+
+  it('leaves the board’s merging once a read had it in its queue and the queue took it out, Merge still unanswered', async () => {
+    const answers: Array<() => void> = []
+    const { client } = fakeClient({ merge: vi.fn(() => new Promise<void>((resolve) => answers.push(resolve))) })
+    const services = servicesFor(client)
+    const wrapper = ({ children }: { children: ReactNode }) => <ServicesProvider value={services}>{children}</ServicesProvider>
+    const { result, rerender } = renderHook(
+      ({ read }: { read: BoardTask['change'] }) => ({ merging: useMerging([{ taskId: 't1', change: read }]), merge: useMerge() }),
+      { wrapper, initialProps: { read: bound } },
+    )
+    act(() => void result.current.merge({ taskId: 't1', head: bound.head ?? '', url: bound.url }))
+    await waitFor(() => expect(result.current.merging.merging.has('t1')).toBe(true))
+    await waitFor(() => expect(result.current.merging.queuing.has('t1')).toBe(true))
+    // A read has it in its queue: the board's own queue step says so (queuedToMerge), not the press.
+    rerender({ read: { ...bound, queued: true } })
+    expect(result.current.merging.merging.has('t1')).toBe(false)
+    // The queue takes it out, Merge unanswered: the person's, in Needs you, not at work merging.
+    rerender({ read: bound })
+    expect(result.current.merging.merging.has('t1')).toBe(false)
+    expect(result.current.merging.queuing.has('t1')).toBe(false)
+    expect(asMerging([ready({ taskId: 't1', change: bound })], result.current.merging.merging)[0]!.phase).toBe('ready')
+    act(() => answers[0]!())
   })
 })
