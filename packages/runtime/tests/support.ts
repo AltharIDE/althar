@@ -390,6 +390,8 @@ export const runtime = (
     readonly page?: RuntimeOptions['page']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
+    /** The zone leads and the coordinator are told the person's local time in; the computer's unless a test says. */
+    readonly zone?: RuntimeOptions['zone']
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
     readonly disk?: RuntimeOptions['disk']
     /** Whether agents' services answer, and how long a step waits to try one again; no service answers any test unless it says. */
@@ -444,6 +446,7 @@ export const runtime = (
     ...(more.skills === undefined ? {} : { skills: more.skills }),
     busy: { machine: ROOMY, pressure: false, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
+    ...(more.zone === undefined ? {} : { zone: more.zone }),
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
     // No test reaches a real service: one asked about answers, as it would online, unless the test says.
     connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },
