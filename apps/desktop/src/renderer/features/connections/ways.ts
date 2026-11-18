@@ -10,7 +10,7 @@ import { Brand } from '@althar/ui'
  * Only ways that can work here are offered.
  */
 
-export const SERVICES: ReadonlyArray<Service> = ['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello']
+export const SERVICES: ReadonlyArray<Service> = ['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello', 'clickup']
 
 const SERVICE: Readonly<Record<Service, { readonly name: string; readonly brand: Brand; readonly host: boolean }>> = {
   github: { name: 'GitHub', brand: Brand.GitHub, host: true },
@@ -19,6 +19,7 @@ const SERVICE: Readonly<Record<Service, { readonly name: string; readonly brand:
   linear: { name: 'Linear', brand: Brand.Linear, host: false },
   jira: { name: 'Jira', brand: Brand.Jira, host: false },
   trello: { name: 'Trello', brand: Brand.Trello, host: false },
+  clickup: { name: 'ClickUp', brand: Brand.ClickUp, host: false },
 }
 
 export const serviceName = (service: Service): string => SERVICE[service].name
@@ -39,6 +40,7 @@ const SERVICE_OF: Readonly<Record<Product, Service>> = {
   jira_cloud: 'jira',
   jira_dc: 'jira',
   trello: 'trello',
+  clickup: 'clickup',
 }
 
 /** The service a product is an edition of: Bitbucket for Bitbucket Cloud and Data Center alike. */

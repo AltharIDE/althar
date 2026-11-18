@@ -58,6 +58,7 @@ jobs:
       any: ${{ steps.plan.outputs.any }}
       e2e: ${{ steps.plan.outputs.e2e }}
       windows-e2e: ${{ steps.plan.outputs.windows-e2e }}
+      native-homes: ${{ steps.native.outputs.homes }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -78,6 +79,23 @@ jobs:
         env:
           DRAFT: ${{ github.event.pull_request.draft }}
         run: bun packages/testing/src/select.ts plan desktop "$RUNNER_TEMP/changed"
+      # Connection credentials must survive a real desktop relaunch using each OS's own keyring.
+      - id: native
+        env:
+          DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          bun -e '
+            const paths = (await Bun.file(`${process.env.RUNNER_TEMP}/changed`).text()).split("\n").filter(Boolean)
+            const globs = [
+              "apps/desktop/src/main/homes/**", "apps/desktop/src/main/{main,homeBridge}.ts",
+              "apps/desktop/src/connection/**", "apps/desktop/src/homes.ts", "apps/desktop/src/preload/**",
+              "apps/desktop/src/renderer/features/homes/**", "apps/desktop/e2e/{pairing.spec,support,networkHost,networkHost.config}.ts",
+              "apps/desktop/{package.json,vite.node.config.ts}", "packages/transport-node/**", "packages/contracts/**",
+              "packages/runtime/src/{networkApi,DevicePairings,ClientIdentities}.ts",
+              ".github/{actions/electron/**,workflows/desktop.yml}", "{bun.lock,.bun-version,.node-version}"
+            ].map((path) => new Bun.Glob(path))
+            console.log(`homes=${process.env.DRAFT !== "true" && paths.some((path) => path === "*" || globs.some((glob) => glob.match(path)))}`)
+          ' >> "$GITHUB_OUTPUT"
 
   verify:
     needs: plan
@@ -137,6 +155,110 @@ jobs:
           path: apps/desktop/test-results
           retention-days: 7
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
+      - if: always()
+        uses: ./.github/actions/flaky
+
+  native-homes:
+    name: native pairing (${{ matrix.os }})
+    needs: plan
+    if: needs.plan.outputs.native-homes == 'true'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/electron
+      # An isolated, unlocked real keychain avoids a runner image's login-keychain prompts.
+      - if: runner.os == 'macOS'
+        run: |
+          keychain="$RUNNER_TEMP/althar-native.keychain-db"
+          password="$(openssl rand -base64 24)"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -d user -s "$keychain"
+          # Grant this test's real Electron binary access to its own fixture secret, avoiding an unattended consent dialog.
+          electron="$(node -p 'require("electron")')"
+          # The unpackaged binary may initialize OSCrypt under its bundle name before JS applies the app name.
+          for application in Electron Althar; do
+            security add-generic-password -a "$application" -s "$application Safe Storage" -w "$(openssl rand -base64 24)" -T "$electron" "$keychain"
+          done
+      - run: bun run test:e2e e2e/pairing.spec.ts --reporter=list
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: native-pairing-${{ matrix.os }}
+          path: apps/desktop/test-results
+          retention-days: 7
+      - if: always() && runner.os == 'macOS'
+        run: security delete-keychain "$RUNNER_TEMP/althar-native.keychain-db"
+
+  home-coverage:
+    name: home connection coverage
+    needs: plan
+    if: needs.plan.outputs.native-homes == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/electron
+        with:
+          binary: 'false'
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - uses: ./.github/actions/flaky/quarantine
+      - run: bun run test:coverage
+      - name: Show remaining branch coverage gaps
+        if: failure()
+        run: |
+          bun -e '
+            const file = Bun.file("coverage/coverage-final.json")
+            if (!(await file.exists())) process.exit(0)
+            const report = await file.json()
+            const rows = Object.entries(report).map(([file, value]) => {
+              const branches = Object.entries(value.b).flatMap(([id, hits]) =>
+                hits.map((hit, index) => ({ hit, line: value.branchMap[id].locations[index]?.start.line ?? value.branchMap[id].line })))
+              return { file: file.split("src/renderer/").at(-1), total: branches.length,
+                covered: branches.filter((branch) => branch.hit > 0).length,
+                missing: branches.filter((branch) => branch.hit === 0).map((branch) => branch.line) }
+            })
+            const total = rows.reduce((sum, row) => sum + row.total, 0)
+            const covered = rows.reduce((sum, row) => sum + row.covered, 0)
+            console.log(JSON.stringify({ total, covered, needed: Math.ceil(total * .9) - covered }))
+            for (const row of rows.sort((a, b) => b.missing.length - a.missing.length).slice(0, 25))
+              console.log(JSON.stringify(row))
+          '
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: home-coverage-${{ github.run_attempt }}
+          path: apps/desktop/coverage/coverage-final.json
+          if-no-files-found: ignore
+          retention-days: 7
       - if: always()
         uses: ./.github/actions/flaky
 

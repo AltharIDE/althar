@@ -10,7 +10,7 @@ describe('the products', () => {
   it('available now are the ones with an adapter', () => {
     assert.deepStrictEqual(
       available().map((info) => info.product),
-      ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'],
+      ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello', 'clickup'],
     )
   })
 
@@ -37,6 +37,7 @@ describe('the products', () => {
     assert.strictEqual(products.jira_dc.apiFor('https://jira.meridian.dev'), 'https://jira.meridian.dev/rest/api/2')
     assert.strictEqual(products.linear.apiFor('https://linear.app'), 'https://api.linear.app')
     assert.strictEqual(products.trello.apiFor('https://trello.com'), 'https://api.trello.com/1')
+    assert.strictEqual(products.clickup.apiFor('https://app.clickup.com'), 'https://api.clickup.com/api/v2')
   })
 
   it.effect('ask a Jira Cloud site on its own domain where its API is, and no other product', () =>
@@ -95,6 +96,7 @@ describe('the products', () => {
         ['jira_cloud', 'email'],
         ['jira_dc', null],
         ['trello', 'key'],
+        ['clickup', null],
       ],
     )
     for (const info of Object.values(products)) {
@@ -144,7 +146,7 @@ describe('the products', () => {
     // Bitbucket Cloud and Data Center are one service, as a person connects it.
     assert.deepStrictEqual(
       Object.values(products).map((info) => info.service),
-      ['github', 'gitlab', 'bitbucket', 'bitbucket', 'linear', 'jira', 'jira', 'trello'],
+      ['github', 'gitlab', 'bitbucket', 'bitbucket', 'linear', 'jira', 'jira', 'trello', 'clickup'],
     )
     for (const info of available()) assert.isNotNull(info.access)
   })
@@ -177,6 +179,12 @@ describe('the products', () => {
     const trello = products.trello.make?.(options)
     assert.isUndefined(trello?.host)
     assert.strictEqual(trello?.tracker?.product, 'trello')
+    const clickup = products.clickup.make?.(options)
+    assert.isUndefined(clickup?.host)
+    assert.strictEqual(clickup?.tracker?.product, 'clickup')
+    // ClickUp's personal token goes as it is, with no scheme before it.
+    assert.strictEqual(products.clickup.token.kind, 'key')
+    assert.isNull(products.clickup.browser)
   })
 })
 

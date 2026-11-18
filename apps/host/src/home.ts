@@ -1,9 +1,10 @@
+import { readNetworkConfiguration, networkFiles } from './network'
 import { hostname, homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { API_VERSION } from '@althar/contracts'
 import { Context, Effect, Layer } from 'effect'
-import { Instance, listenLocalApi, Projects, Runtime, services } from '@althar/runtime'
+import { Instance, listenLocalApi, listenNetworkApi, Projects, Runtime, services } from '@althar/runtime'
 
 import metadata from '../package.json'
 import { configuredHome } from './configuration'
@@ -78,8 +79,16 @@ export const serveHome = (
       const options = yield* configuredHome(given)
       const vault = yield* openVault(options)
       const context = yield* Layer.build(runtime(options, vault.secrets, dependencies))
-      const endpoint = yield* listenLocalApi(options.profile).pipe(Effect.provideContext(context))
       const instance = Context.get(context, Instance)
+      const network = yield* readNetworkConfiguration(options.profile)
+      if (network !== undefined) {
+        const files = yield* networkFiles(options, network)
+        yield* listenNetworkApi({ ...files.config, certificate: files.certificate, key: files.key, version: HOST_VERSION }).pipe(
+          Effect.provideContext(context),
+          Effect.ensuring(Effect.sync(() => files.key.fill(0))),
+        )
+      }
+      const endpoint = yield* listenLocalApi(options.profile).pipe(Effect.provideContext(context))
       yield* ready({
         homeId: endpoint.homeId,
         hostDeviceId: instance.deviceId,

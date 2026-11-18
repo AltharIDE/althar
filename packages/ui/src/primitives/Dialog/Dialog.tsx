@@ -33,6 +33,8 @@ export interface DialogProps {
   onClose: () => void
   /** A step back, for a dialog that steps through pages of its own: a round chevron before its title, and what Escape does instead of closing it. */
   onBack?: () => void
+  /** A field or module may consume Escape before it closes the dialog or takes its step back. */
+  onEscapeKeyDown?: (event: KeyboardEvent) => void
   /** Something in it is under way: a press outside doesn't close it. Escape still does, or steps back. */
   holding?: boolean
   /** Where focus goes as it closes when what had it as it opened is gone by then, such as a button in a popover that closed. */
@@ -53,6 +55,7 @@ export function Dialog({
   actions,
   onClose,
   onBack,
+  onEscapeKeyDown,
   holding = false,
   returnFocus,
   onSubmit,
@@ -94,8 +97,10 @@ export function Dialog({
           style={{ width: `min(${width}px, calc(100vw - 32px))` }}
           {...(description == null ? { 'aria-describedby': undefined } : {})}
           onEscapeKeyDown={(event) => {
+            if (event.defaultPrevented) return
+            onEscapeKeyDown?.(event)
             // A step back before it closes.
-            if (onBack === undefined) return
+            if (event.defaultPrevented || onBack === undefined) return
             event.preventDefault()
             onBack()
           }}

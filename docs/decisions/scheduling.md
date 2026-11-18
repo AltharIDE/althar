@@ -427,3 +427,9 @@ how it stands.
 - 11 Nov 2026: the runtime reads the computer in the background while the meter is on, so the peek's trace isn't empty when a window comes back into view.
 - 10 Nov 2026: a lead's helpers each take a place of their own, four of a task's at once (ADR-087, [tasks § Helpers](tasks.md#helpers)).
 - 15 Nov 2026: completed or stopped tasks release background-only places; live lead and helper turns still count, whatever the task’s recorded state.
+
+## How agent process families share the machine
+
+ADR-106 gives each provider session a worker identity. Commands and ordinary child processes share that worker's CPU allocation where the platform supports it: delegated CPU groups on Linux, optional shared CPU-weight jobs on Windows, and background policy on macOS. Native tool calls from the same session share an identity. Background priority remains the fallback, so a new language needs no scheduler adapter or resource setup.
+
+Sustained contention or memory pressure temporarily paces additional autonomous work through the existing queue; recovery restores admission within the person's configured cap. Existing builds keep running, the saved setting stays intact, and direct user actions retain their priority. Idle CPU remains available. External services can escape a worker's process family, so this is automatic best-effort scheduling rather than a hard memory or universal CPU guarantee. [ADR-106](proposed/106-builds-and-tests-share-a-host-resource-budget.md) describes the controls, failure handling and native validation.

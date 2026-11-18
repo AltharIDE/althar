@@ -28,7 +28,7 @@ import { type Draft, type DraftClone, type DraftHome, type DraftIssues, type Dra
 const HOST_SERVICES: ReadonlyArray<Service> = ['github', 'gitlab', 'bitbucket']
 
 /** The trackers a project's issues can go to, beside its code host's own. */
-const TRACKER_SERVICES: ReadonlyArray<Service> = ['linear', 'jira', 'trello']
+const TRACKER_SERVICES: ReadonlyArray<Service> = ['linear', 'jira', 'trello', 'clickup']
 
 /** What a host calls a repository. */
 const thingOf = (service: Service) => (service === 'gitlab' ? 'project' : 'repository')

@@ -107,6 +107,23 @@ describe('a pasted link', () => {
       expect(looksLikeJira(link)).toBe(false)
   })
 
+  it('to ClickUp, by its own id or a custom id with its workspace', () => {
+    expect(parseLink('https://app.clickup.com/t/86a1b2c3d')).toEqual({
+      kind: 'issue',
+      product: 'clickup',
+      host: 'app.clickup.com',
+      ref: '86a1b2c3d',
+    })
+    expect(parseLink('https://app.clickup.com/t/9011223344/dev-12')).toEqual({
+      kind: 'issue',
+      product: 'clickup',
+      host: 'app.clickup.com',
+      ref: '9011223344/DEV-12',
+    })
+    expect(parseLink('https://app.clickup.com/9011223344/v/li/901')).toBeNull()
+    expect(parseLink('https://app.clickup.com/t/9011223344/not a key')).toBeNull()
+  })
+
   it('to Trello and Bitbucket', () => {
     expect(parseLink('https://trello.com/c/AbC123/42-fix-refunds')).toEqual({
       kind: 'issue',

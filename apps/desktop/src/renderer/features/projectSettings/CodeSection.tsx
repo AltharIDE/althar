@@ -33,7 +33,7 @@ export const text = {
   draftsElsewhere: 'Its drafts go to the tracker above',
   issuesOnly: 'Only its issues are here; the bound workspace is above',
   none: 'No tracker yet',
-  noneLine: 'Connect Linear, Jira, GitHub or Trello in Settings › Code hosts and trackers, and its issues can become tasks here.',
+  noneLine: 'Connect Linear, Jira, GitHub, Trello or ClickUp in Settings › Code hosts and trackers, and its issues can become tasks here.',
   /** MER issues · Linear; a tracker whose issues share no key by its name alone: Trello cards. */
   issues: (tracker: Tracker) =>
     tracker.key === null ? frontText.issues(tracker) : `${frontText.issues(tracker)} · ${productName(tracker.product)}`,
