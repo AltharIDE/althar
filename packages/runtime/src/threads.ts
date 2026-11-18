@@ -958,29 +958,22 @@ export const piecesOf = (line: string, budget: number): ReadonlyArray<string> =>
   return pieces
 }
 
-/**
- * The thread as text, oldest first: what a new agent reads when it takes over
- * (ADR-005), its most recent part within the budget. A line longer than the
- * budget comes in parts (`piecesOf`), so none of it is out of reach.
- * `omitted` says how many lines came before what is kept; read again with
- * that as `before`, it gives the ones before.
- */
-export const transcript = (
-  threadId: string,
-  budget: number,
-  options: {
-    /** Only the lines before this one, counting from the first: an earlier part. */
-    readonly before?: number
-    /** Only items of these kinds. */
-    readonly kinds?: ReadonlyArray<ItemKind>
-    /** At most this many lines, the last. */
-    readonly last?: number
-    /** What the thread's agent is called, in place of its agent's id. */
-    readonly agent?: string
-    /** False leaves out what still waits in the thread's queue: a brief's next turn says it itself, so it isn't said twice. */
-    readonly waiting?: boolean
-  } = {},
-) =>
+/** A line of the thread as text, and the kind of item it says. */
+export interface TranscriptLine {
+  readonly kind: ItemKind
+  readonly text: string
+}
+
+/** How the thread is said as text: by whom, and with or without what still waits. */
+interface Saying {
+  /** What the thread's agent is called, in place of its agent's id. */
+  readonly agent?: string
+  /** False leaves out what still waits in the thread's queue: a brief's next turn says it itself, so it isn't said twice. */
+  readonly waiting?: boolean
+}
+
+/** The thread's lines as text, oldest first, each with the kind of item it says: what `transcript` keeps a part of. */
+export const transcriptLines = (threadId: string, options: Saying = {}) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const items = yield* sql<{
@@ -1010,8 +1003,7 @@ export const transcript = (
           ? sql` AND NOT EXISTS (SELECT 1 FROM user_inputs u WHERE u.id = i.user_input_id AND u.state IN ('queued', 'noted'))`
           : sql``
       } ORDER BY i.sequence`
-    const lines = items.flatMap((item) => {
-      if (options.kinds !== undefined && !options.kinds.includes(item.kind)) return []
+    const said = (item: (typeof items)[number]): ReadonlyArray<string> => {
       const content = JSON.parse(item.content) as Record<string, unknown>
       const text = (key: string) => (typeof content[key] === 'string' ? (content[key] as string) : '')
       // A message brought in from another tool (Elsewhere.ts) was said by the agent there, in no session of Althar's.
@@ -1110,17 +1102,47 @@ export const transcript = (
         default:
           return []
       }
-    })
-    // The most recent part is kept; what doesn't fit is left out from the start.
-    const pieces = lines.flatMap((line) => piecesOf(line, budget))
-    const read = pieces.slice(0, Math.max(0, Math.min(options.before ?? pieces.length, pieces.length)))
-    const kept: Array<string> = []
-    let used = 0
-    for (const line of read.toReversed()) {
-      if (kept.length === options.last) break
-      if (used + line.length > budget) break
-      kept.unshift(line)
-      used += line.length + 1
     }
-    return { text: kept.join('\n'), omitted: read.length - kept.length }
+    return items.flatMap((item) => said(item).map((text): TranscriptLine => ({ kind: item.kind, text })))
+  })
+
+/** The last of these lines that fit the budget, and at most `last` of them; what doesn't fit is left out from the start. */
+export const lastWithin = <Line extends { readonly text: string }>(lines: ReadonlyArray<Line>, budget: number, last?: number) => {
+  const kept: Array<Line> = []
+  let used = 0
+  for (const line of lines.toReversed()) {
+    if (kept.length === last) break
+    if (used + line.text.length > budget) break
+    kept.unshift(line)
+    used += line.text.length + 1
+  }
+  return { kept, omitted: lines.length - kept.length }
+}
+
+/**
+ * The thread as text, oldest first: what a new agent reads when it takes over
+ * (ADR-005), its most recent part within the budget. A line longer than the
+ * budget comes in parts (`piecesOf`), so none of it is out of reach.
+ * `omitted` says how many lines came before what is kept; read again with
+ * that as `before`, it gives the ones before.
+ */
+export const transcript = (
+  threadId: string,
+  budget: number,
+  options: Saying & {
+    /** Only the lines before this one, counting from the first: an earlier part. */
+    readonly before?: number
+    /** Only items of these kinds. */
+    readonly kinds?: ReadonlyArray<ItemKind>
+    /** At most this many lines, the last. */
+    readonly last?: number
+  } = {},
+) =>
+  Effect.map(transcriptLines(threadId, options), (lines) => {
+    const pieces = lines
+      .filter((line) => options.kinds === undefined || options.kinds.includes(line.kind))
+      .flatMap((line) => piecesOf(line.text, budget).map((text) => ({ text })))
+    const read = pieces.slice(0, Math.max(0, Math.min(options.before ?? pieces.length, pieces.length)))
+    const { kept, omitted } = lastWithin(read, budget, options.last)
+    return { text: kept.map((line) => line.text).join('\n'), omitted }
   })

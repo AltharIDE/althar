@@ -62,7 +62,17 @@ import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { coordinatorRow, forgetItems } from './chatView'
 import { type Accepting, acceptingOf } from './admission'
 import { checkpointBeforeTurn, checkpointAfterTurn, recoverTurnUndo, undoConversation, undoTarget, canUndoTask } from './turnUndo'
-import { dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
+import {
+  coordinatorRecord,
+  dueForHandover,
+  dueForLeadHandover,
+  HANDED_OVER,
+  notesSection,
+  type Recent,
+  roomFor,
+  shrinks,
+  TOOK_OVER,
+} from './handover'
 import { notesOf } from './notes'
 import {
   AlreadyDelivered,
@@ -3911,10 +3921,19 @@ export class Sessions extends Context.Service<
                 AND EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
                   WHERE di.user_input_id = i.id AND d.delivered_at IS NOT NULL)`).map((one) => one.id),
                   )
-            const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, input.standsIn)
-            const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
+            // The coordinator's brief reads the project's records and its copies, and nothing of the session: it is written while
+            // the agent starts, which takes longer, so the person's first words to it wait for neither twice.
+            const briefing = thread.role === 'coordinator' ? yield* Effect.forkChild(briefFor(thread, { kind: 'start' })) : undefined
+            const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, input.standsIn).pipe(
+              Effect.onError(() => (briefing === undefined ? Effect.void : Fiber.interrupt(briefing))),
+            )
+            const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort).pipe(
+              Effect.onError(() => (briefing === undefined ? Effect.void : Fiber.interrupt(briefing))),
+            )
             // Every session starts from a brief (ADR-005), even the first on a task.
-            const brief = yield* briefFor(thread, { kind: 'start' }).pipe(beforeTakingOver(connected))
+            const brief = yield* (briefing === undefined ? briefFor(thread, { kind: 'start' }) : Fiber.join(briefing)).pipe(
+              beforeTakingOver(connected),
+            )
             return yield* activate(
               connected,
               {
@@ -4721,45 +4740,58 @@ export class Sessions extends Context.Service<
           Effect.orElseSucceed((): WorksIn => 'worktree'),
         )
 
-      /** The coordinator's brief: its role, the project's notes, and the thread so far. */
-      const coordinatorBrief = (thread: CoordinatorThread) =>
-        Effect.gen(function* () {
-          const notes = yield* notesOf(thread.projectId)
-          return [
-            ...coordinatorRole(thread, yield* projectWorksIn(thread.projectId), yield* projectTowards(thread.projectId)),
-            `Open errands:\n${(yield* errandLines(thread.projectId)).join('\n') || 'None.'}`,
-            ...(notes.length === 0 ? [] : [notesSection(notes)]),
-            ...(yield* threadSoFar(thread.threadId)),
-          ].join('\n\n')
-        })
-
       /** Names models by what each agent says of them, or by their ids where that can't be read. */
       const byId: ModelNamer = (step) => step.model ?? `${step.agentId}'s default model`
 
       /**
-       * A fresh coordinator session's brief, when Althar hands the
-       * conversation over (ADR-031): its role, then what it takes over, from
-       * the records rather than the raw thread. And how many tasks are open.
+       * A coordinator session's brief (ADR-031): its role, then the record
+       * of the project and the conversation, the same for every session it
+       * starts, on opening the project or taking over from another agent or a
+       * full context. Only how much of the conversation it carries word for
+       * word differs: a session handed a full context over carries its last
+       * few messages, any other as much of the thread as a brief holds. And
+       * how many tasks are open.
        */
-      const handoverBrief = (thread: CoordinatorThread) =>
+      const coordinatorRecordOf = (thread: CoordinatorThread, recent: Recent) =>
         Effect.gen(function* () {
           const modelOf = yield* modelNamer.pipe(
             Effect.catchCause((cause) =>
               Effect.as(Effect.logWarning('Could not read the models to name for the coordinator', cause), byId),
             ),
           )
-          const record = yield* handoverRecord({
-            projectId: thread.projectId,
-            threadId: thread.threadId,
-            modelOf,
-            working: (threadId) => threads.get(threadId)?.turnRunning === true,
-          })
-          const worksIn = yield* projectWorksIn(thread.projectId)
-          return {
-            text: [...coordinatorRole(thread, worksIn, yield* projectTowards(thread.projectId)), ...record.sections].join('\n\n'),
-            open: record.open,
-          }
+          const [role, record] = yield* Effect.all(
+            [
+              Effect.map(Effect.all([projectWorksIn(thread.projectId), projectTowards(thread.projectId)]), ([worksIn, towards]) =>
+                coordinatorRole(thread, worksIn, towards),
+              ),
+              coordinatorRecord({
+                projectId: thread.projectId,
+                threadId: thread.threadId,
+                modelOf,
+                working: (threadId) => threads.get(threadId)?.turnRunning === true,
+                copies: thread.folder.repositories,
+                recent,
+              }),
+            ],
+            { concurrency: 'unbounded' },
+          )
+          return { role, record }
         })
+
+      /** The coordinator's brief as a session starts: its role, the record, and as much of the thread as a brief holds. */
+      const coordinatorBrief = (thread: CoordinatorThread) =>
+        Effect.map(coordinatorRecordOf(thread, { budget: PROMPT_BUDGET }), ({ role, record }) => [...role, ...record.sections].join('\n\n'))
+
+      /**
+       * A fresh coordinator session's brief, when Althar hands the
+       * conversation over (ADR-031): its role, that it took over, then the
+       * record with the last few messages. And how many tasks are open.
+       */
+      const handoverBrief = (thread: CoordinatorThread) =>
+        Effect.map(coordinatorRecordOf(thread, HANDED_OVER), ({ role, record }) => ({
+          text: [...role, TOOK_OVER, ...record.sections].join('\n\n'),
+          open: record.open,
+        }))
 
       /**
        * Hands the thread to another agent. The new agent is started first; only
