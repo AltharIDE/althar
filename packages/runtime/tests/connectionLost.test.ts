@@ -336,4 +336,59 @@ describe('a lead’s turn after its plan whose connection is lost', () => {
       assert.lengthOf(kept, 1)
     }).pipe(Effect.provide(layer))
   })
+
+  it.live(
+    'goes by the latest turn of the words kept: one that goes again by itself counts them as asked, a lost connection again doesn’t',
+    () => {
+      const controls: Array<Parameters<NonNullable<FakeAgentOptions['sessionControls']>>[0]> = []
+      const held = holds()
+      const layer = Queries.layer.pipe(
+        Layer.provideMerge(runtime(':memory:', { holds: held, sessionControls: (one) => controls.push(one) })),
+      )
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const sessions = yield* Sessions
+        const queries = yield* Queries
+        const task = yield* planned('claude-code')
+        yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`, ([run]) => run?.state === 'succeeded')
+        yield* until(
+          Effect.map(queries.thread(task.threadId), (snapshot) => [snapshot.task?.phase]),
+          ([phase]) => phase === 'ready',
+        )
+        yield* sessions.send({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId: task.threadId,
+          body: scenarios.slow,
+          disposition: 'after_current',
+          sender: { kind: 'window' },
+        })
+        yield* until(items(task.threadId), (all) => all.some((item) => item.kind === 'agent_message' && item.content.text === 'Starting'))
+        yield* Effect.promise(() => controls.at(-1)!.lose())
+        held.open(scenarios.slow)
+        yield* until(turnsOf(task.threadId), (all) => all.at(-1)?.errorClass === 'transient')
+        yield* until(notices(task.threadId), (all) => all.includes("Fake claude-code couldn't answer."))
+        assert.isFalse((yield* queries.thread(task.threadId)).task?.followUp)
+        // The same words in a later turn that failed again: after it, they wait for whatever that failure waits for. A usage
+        // limit's reset, a fresh session for a lost one and a refused prompt each send them again by themselves; a lost
+        // connection outside any step waits for the person again.
+        const [failed] = yield* sql<{ id: string }>`
+        SELECT id FROM turn_deliveries WHERE thread_id = ${task.threadId} AND error_class = 'transient'`
+        const followsUp = (errorClass: string, at: string) =>
+          Effect.gen(function* () {
+            const id = `turn_${crypto.randomUUID().replaceAll('-', '')}`
+            yield* sql`INSERT INTO turn_deliveries (id, project_id, thread_id, provider_session_id, controller_generation, error_class,
+              state, requested_at, delivered_at, ended_at, origin)
+            SELECT ${id}, project_id, thread_id, provider_session_id, controller_generation, ${errorClass}, 'failed', ${at}, ${at}, ${at},
+              origin FROM turn_deliveries WHERE id = ${failed?.id ?? ''}`
+            yield* sql`INSERT INTO turn_delivery_inputs (project_id, delivery_id, user_input_id, position)
+            SELECT project_id, ${id}, user_input_id, position FROM turn_delivery_inputs WHERE delivery_id = ${failed?.id ?? ''}`
+            return (yield* queries.thread(task.threadId)).task?.followUp
+          })
+        assert.isTrue(yield* followsUp('usage_limit', '2999-01-01T00:00:01.000Z'), 'a usage limit after a lost connection')
+        assert.isTrue(yield* followsUp('session_lost', '2999-01-01T00:00:02.000Z'), 'a lost session, started afresh')
+        assert.isTrue(yield* followsUp('turn_in_progress', '2999-01-01T00:00:03.000Z'), 'a refused prompt, tried again shortly')
+        assert.isFalse(yield* followsUp('transient', '2999-01-01T00:00:04.000Z'), 'a lost connection again')
+      }).pipe(Effect.provide(layer))
+    },
+  )
 })

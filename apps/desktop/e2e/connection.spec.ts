@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { expect, type ElectronApplication, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, say, still } from './support'
+import { launch, openFirstProject, planTask, say, startTask, still, toConversation } from './support'
 
 /*
  * A step that loses its connection, as the person sees it (ADR-060). The fake
@@ -205,6 +205,45 @@ test('a stale Try again explains its refusal in the window', async () => {
     await expect(refusal).toBeVisible()
     await still(page)
     await refusal.screenshot({ path: 'test-results/connection-retry-refused.png', scale: 'css', animations: 'disabled' })
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('a lead’s turn after its plan that loses its connection ends failed, never Following up, and Try again sends it again', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const connection = join(home, 'connection')
+  writeFileSync(connection, '')
+  const { electronApp, page } = await launch(home, { ALTHAR_FAKE_CONNECTION: connection })
+  try {
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 800))
+    await openFirstProject(electronApp, page, repository(home))
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    // Its plan runs to its end.
+    await startTask(page, 'Add a retry to the checkout call')
+    await page.getByRole('button', { name: /Open task/ }).click()
+    await toConversation(page)
+    await expect(page.getByText('The task ends on its branch.').first()).toBeVisible()
+    await expect(page.getByText('Following up')).toHaveCount(0)
+    // The person writes to its lead, and the connection goes: Claude Code ends the turn as it did with the network gone.
+    writeFileSync(connection, 'offline')
+    const composer = page.getByRole('textbox', { name: /^(Tell .* something|Add to the queue)/ })
+    await composer.fill('What is left on the checkout?')
+    await composer.press('Enter')
+    await expect(page.getByText("Claude Code couldn't answer.").last()).toBeVisible()
+    // Over, failed: the header doesn't say Following up, and Try again is under the error.
+    const again = page.getByRole('button', { name: 'Try again' })
+    await expect(again).toBeVisible()
+    await expect(page.getByText('Following up')).toHaveCount(0)
+    await still(page)
+    await page.screenshot({ path: 'test-results/connection-follow-up-failed.png', scale: 'css', animations: 'disabled' })
+    // Back, Try again sends what the person said again, and it is answered.
+    writeFileSync(connection, '')
+    await again.click()
+    await expect(page.getByText(/^echo: /).last()).toBeVisible()
+    await expect(again).toHaveCount(0)
+    await still(page)
+    await page.screenshot({ path: 'test-results/connection-follow-up-again.png', scale: 'css', animations: 'disabled' })
   } finally {
     await electronApp.close()
   }
