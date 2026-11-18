@@ -33,7 +33,8 @@ const aside: BoardTask = {
   phase: 'ready',
   scratch: true,
   state: 'active',
-  createdAt: '2026-11-12T10:00:00Z',
+  // An hour ago: one left a week folds into "N older" and has no tab.
+  createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
   settledAt: null,
   changed: null,
   here: [],
