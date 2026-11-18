@@ -2871,6 +2871,13 @@ export class Runs extends Context.Service<
               ? `The person added a review to this change after its work went up. Review what changed since the last review, ${how}. Look at the earlier work only where the new work touches it.${mergedWords}`
               : `The person added a review to this change after its work went up, and none has read it yet. Review all of it, as it stands on its branch now${shown.length === 1 ? `: \`git diff ${shown[0]?.head ?? ''}\` in your copy shows it` : `, change by change:${how}`}.`
           }
+          // A change back from prototyping is read whole: no review before it stepped back counts, and none has read it since.
+          const sql = yield* SqlClient.SqlClient
+          const [plan] = yield* sql<{ since: string | null }>`
+            SELECT json_extract(parameters, '$.reviewsFrom') AS since FROM task_plans
+            WHERE task_id = ${run.taskId} AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1`
+          if (plan?.since != null && worktrees.every((worktree) => (from[worktree.path] ?? worktree.base) === worktree.base))
+            return `The person ships this change, back from prototyping: they explored designs on its branch and picked a direction, which the lead built. Review all of it, as it stands on its branch now${shown.length === 1 ? `: \`git diff ${shown[0]?.head ?? ''}\` in your copy shows it` : `, change by change:${how}`}. What was only the prototype's (a lab page, a direction switcher, throwaway screens) has no place in it.${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
           return `More to review. The person ships ${one === undefined ? 'what they and the lead did since the last review' : `${one}, one of the task’s changes: what they and the lead did on it since its last review`}${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.${mergedWords}${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
         })
 
@@ -2884,11 +2891,18 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const marks: Record<string, string> = {}
+          // A review stopped before it read anything read nothing; and a change back from prototyping is read whole, from where it
+          // started, so no review from before it stepped back counts.
+          const [plan] = yield* sql<{ since: string | null }>`
+            SELECT json_extract(parameters, '$.reviewsFrom') AS since FROM task_plans
+            WHERE task_id = ${taskId} AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1`
+          const since = plan?.since ?? null
           for (const worktree of yield* worktreesOf(taskId)) {
             const [last] = yield* sql<{ commitSha: string | null }>`
               SELECT s.commit_sha FROM workspace_snapshots s JOIN node_attempts a ON a.id = s.node_attempt_id
               JOIN nodes n ON n.id = a.node_id
               WHERE s.workspace_id = ${worktree.id} AND n.node_key = 'review' AND s.commit_sha IS NOT NULL
+                AND a.state NOT IN ('cancelled', 'failed') AND (${since} IS NULL OR s.taken_at > ${since})
               ORDER BY s.taken_at DESC, s.rowid DESC LIMIT 1`
             const read =
               last?.commitSha == null
@@ -3373,11 +3387,14 @@ export class Runs extends Context.Service<
             // What waits only brings the base branch in, as a merge of main that settled no conflict: none of it is the task's
             // work, so it goes up as it is, with no review and no round, and the task stays where it was. A review the person
             // added still runs. As far as its route goes: an open draft marked ready, then merged.
+            // Not while it is kept on its branch with its pull request left as it is (stepped back into prototyping): its Ship
+            // sends nothing there, nor marks it ready or merges it.
             if (
               !reviewOnly &&
               after.length === 0 &&
               onlyChange === undefined &&
               queued === undefined &&
+              !(yield* changes.keptOpen(taskId)) &&
               (yield* changes.onlyBaseWaits(taskId))
             ) {
               yield* changes.sendBaseOnly(taskId)
@@ -3648,7 +3665,7 @@ export class Runs extends Context.Service<
           // while its pull request stands open (a change stepped back to prototyping): pushing the branch would send its work there,
           // so it waits on the branch until the task ends in a pull request again, and that one carries on.
           const kept =
-            end === 'none'
+            end === 'none' && (yield* changes.keptOpen(run.taskId))
               ? (yield* changes.ofTask(run.taskId).pipe(Effect.orElseSucceed(() => []))).filter((one) => one.state === 'open')
               : []
           const stays = shipping?.stays === true || kept.length > 0
@@ -8488,6 +8505,7 @@ export class Runs extends Context.Service<
           if (plan === undefined) return yield* new TaskRefused({ taskId: input.taskId, why: 'no_lead' })
           const planned = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
           const was = endingOf(planned)
+          const now = yield* timestamp
           // Here: nothing goes up until it ships; else its ending, with nothing more of staying here. Read after the merge: its
           // reviewer's row skipped, so nothing waits on it before; read before it ships again: the fast lane's mark gone.
           const reshaped = (parameters: string) => {
@@ -8495,7 +8513,19 @@ export class Runs extends Context.Service<
               steps?: ReadonlyArray<PlanStep>
               ships?: Record<string, unknown>
             }
-            const { here, end, endChosen, reviewAfterMerge, ships, ...rest } = before
+            const { here, end, endChosen, reviewAfterMerge, ships, keptOpen, reviewsFrom, ...rest } = before
+            // A change stepped back from its pull request to its branch (into prototyping, or a chat) keeps that pull request as it
+            // is: marked, so nothing pushes to it until it ends in one again. Back in one, its next review reads the whole change,
+            // from where it started, not from what a review read before it stepped back.
+            const toPullRequest = input.end === 'draft' || input.end === 'ready'
+            const stepped = {
+              ...((input.end === 'none' || input.end === 'here') && (was === 'draft' || was === 'ready')
+                ? { keptOpen: true }
+                : toPullRequest || keptOpen === undefined
+                  ? {}
+                  : { keptOpen }),
+              ...(toPullRequest && keptOpen === true ? { reviewsFrom: now } : reviewsFrom === undefined ? {} : { reviewsFrom }),
+            }
             const chosen = input.end === undefined || input.chosen === undefined ? endChosen === true : input.chosen
             const ending = {
               ...(input.end === undefined
@@ -8532,6 +8562,7 @@ export class Runs extends Context.Service<
             return JSON.stringify({
               ...rest,
               ...ending,
+              ...stepped,
               ...shipped,
               ...after,
               ...(input.smallChange !== undefined

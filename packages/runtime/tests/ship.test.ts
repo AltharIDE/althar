@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -505,11 +505,18 @@ describe('talking to a lead once its plan is done', () => {
         assert.lengthOf(yield* runsOf(task.taskId), 1)
 
         // Prototyping on the same branch: what the lead commits stays here, and the person's Ship sends nothing to the pull request.
+        // Its lab page, the directions' switcher, stays out of the commits, in a folder git ignores.
+        mkdirSync(join(task.path, 'lab'), { recursive: true })
+        writeFileSync(join(task.path, 'lab', '.gitignore'), '*\n')
+        writeFileSync(join(task.path, 'lab', 'directions.html'), '<p>A · B · C</p>')
         yield* say(task.threadId, 'Try a flatter panel. [lead:commit]')
         yield* answered(task.threadId, task.turns + 1)
         yield* until(heldAt(task.taskId), (at) => at !== null)
         const prototyped = git(task.path, 'rev-parse', 'HEAD')
         assert.notStrictEqual(prototyped, reviewed)
+        // Its lead's own push sends nothing either: the pull request stays as it is.
+        assert.match(yield* callTool(lead, 'push_to_pull_request', {}), /^Nothing pushed: this task ends on its branch now/)
+        assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
         yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
         yield* until(runsOf(task.taskId), (all) => all.length === 2 && all.every((run) => run.state !== 'running'))
         const kept = (yield* results(task.threadId)).at(-1)?.summary
@@ -531,14 +538,19 @@ describe('talking to a lead once its plan is done', () => {
         yield* answered(task.threadId, task.turns + 2)
         yield* until(heldAt(task.taskId), (at) => at !== null)
         yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
-        // One review, over everything since the last: the prototype's commits and the build both.
+        // One review, over the whole change: from where it started, not from what a review read before it stepped back.
         const [brief] = yield* until(
           sql<{ body: string }>`
           SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
-          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%'`,
+          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'The person ships this change, back from prototyping%'`,
           (rows) => rows.length === 1,
         )
-        assert.include(brief?.body, `git diff ${reviewed.slice(0, 12)}`)
+        const [{ base } = { base: '' }] = yield* sql<{
+          base: string
+        }>`SELECT base_commit AS base FROM workspaces WHERE task_id = ${task.taskId}`
+        assert.include(brief?.body, 'Review all of it')
+        assert.include(brief?.body, `git diff ${base.slice(0, 12)}`)
+        assert.notInclude(brief?.body, `git diff ${reviewed.slice(0, 12)}`)
         // Then up to the same pull request: no other opens.
         yield* until(
           Effect.sync(() => [git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD')] as const),
@@ -550,9 +562,74 @@ describe('talking to a lead once its plan is done', () => {
         )
         const [card] = yield* until(cards(task.projectId), (all) => all[0]?.held === undefined && all[0]?.phase === 'ready')
         assert.strictEqual(card?.change?.number, 1)
+        // All along in the one worktree, where the lab page still is, and none of it in what went up.
+        const worktrees = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${task.taskId} AND access = 'write'`
+        assert.deepStrictEqual(
+          worktrees.map((one) => one.path),
+          [task.path],
+        )
+        assert.isTrue(existsSync(join(task.path, 'lab', 'directions.html')))
+        assert.notInclude(git(bare, 'ls-tree', '-r', '--name-only', BRANCH), 'lab/')
       }).pipe(Effect.provide(runtimeWith(github)))
     },
   )
+
+  it.live('stepped back into prototyping, a Ship of only a merge of main sends nothing to its pull request', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const runs = yield* Runs
+      const task = yield* opened(working)
+      const lead = yield* leadOf(task)
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      yield* callTool(lead, 'change_part', { part: 'preset', preset: 'Prototype', why: 'the person asked' })
+      // Only main's commits wait: the fast lane that sends a merge of the base up at once doesn't run while it prototypes.
+      mainMovesOn(bare, task.path)
+      git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'merge', '-q', '--no-edit', 'origin/main')
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* until(runsOf(task.taskId), (all) => all.length === 2 && all.every((run) => run.state !== 'running'))
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+      assert.deepStrictEqual(
+        github.changes.map((one) => [one.state, one.draft]),
+        [['open', true]],
+      )
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('a review stopped as its change stepped back into prototyping counts for nothing once it is a change again', () => {
+    const { working, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const runs = yield* Runs
+      const task = yield* opened(working, '[review:pass] [review:wait-later]')
+      const lead = yield* leadOf(task)
+      yield* say(task.threadId, 'Tighten it. [lead:commit]')
+      yield* answered(task.threadId, task.turns + 1)
+      yield* until(heldAt(task.taskId), (at) => at !== null)
+      // Ship's review starts, reading the branch, and is stopped when the person steps back.
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      yield* until(
+        sql<{ n: number }>`
+          SELECT count(*) AS n FROM user_inputs i JOIN threads t ON t.id = i.thread_id
+          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%'`,
+        ([row]) => (row?.n ?? 0) === 1,
+      )
+      yield* callTool(lead, 'change_part', { part: 'preset', preset: 'Prototype', why: 'the person asked' })
+      yield* until(runsOf(task.taskId), (all) => all.every((run) => run.state !== 'running'))
+      yield* callTool(lead, 'change_part', { part: 'preset', preset: 'Change', why: 'the person picked a direction' })
+      // The next Ship's review reads all of it: what the stopped one began on, too.
+      yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+      const [brief] = yield* until(
+        sql<{ body: string }>`
+          SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
+          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'The person ships this change, back from prototyping%'`,
+        (rows) => rows.length === 1,
+      )
+      const [{ base } = { base: '' }] = yield* sql<{
+        base: string
+      }>`SELECT base_commit AS base FROM workspaces WHERE task_id = ${task.taskId}`
+      assert.include(brief?.body, `git diff ${base.slice(0, 12)}`)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
 })
 
 /** The lead of a task's thread, as its tools are called. */
