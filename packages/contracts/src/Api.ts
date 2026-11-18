@@ -169,12 +169,26 @@ export const PresetParts = Schema.Struct({
   /** How it ends; absent, as the project's "How a task ends" says. */
   end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
   shelf: Schema.Literals(['scratch', 'board']),
+  /** Its lead and reviewer as `agent/model`; null, picked as for any step. A built-in names none. */
   lead: Schema.NullOr(Schema.String),
   reviewer: Schema.NullOr(Schema.String),
+  /** Their efforts, as their models write them; absent or null, their own or the person's default. */
+  effort: Schema.optional(Schema.NullOr(Schema.String)),
+  reviewerEffort: Schema.optional(Schema.NullOr(Schema.String)),
   brief: Schema.String,
   reviews: Schema.optional(Schema.Boolean),
 })
 export type PresetParts = typeof PresetParts.Type
+
+/** What the person may set on a built-in preset as their own: its lead and reviewer, their efforts, and its brief. */
+export const PresetTuning = Schema.Struct({
+  lead: Schema.optional(Schema.NullOr(Schema.String)),
+  reviewer: Schema.optional(Schema.NullOr(Schema.String)),
+  effort: Schema.optional(Schema.NullOr(Schema.String)),
+  reviewerEffort: Schema.optional(Schema.NullOr(Schema.String)),
+  brief: Schema.optional(Schema.String),
+})
+export type PresetTuning = typeof PresetTuning.Type
 
 /** A named set of starting parts: built in, or the person's own, kept to a project where `projectId` says. */
 export const Preset = Schema.Struct({
@@ -189,6 +203,8 @@ export const Preset = Schema.Struct({
   keptTo: Schema.optional(Schema.String),
   /** The project of the task it was saved from, by name: the one it can be kept to. Absent for one it can't. */
   from: Schema.optional(Schema.String),
+  /** A built-in one the person tuned: its lead, reviewer, efforts or brief are theirs, until they reset it. */
+  tuned: Schema.optional(Schema.Boolean),
 })
 export type Preset = typeof Preset.Type
 
@@ -5477,6 +5493,13 @@ const ProjectApi = RpcGroup.make(
     { id: Schema.String, name: Schema.String, parts: PresetParts, projectOnly: Schema.optional(Schema.Boolean) },
     Schema.Void,
   ),
+  /**
+   * Tunes a built-in preset as the person's own, from Settings: its lead and reviewer, their efforts, and its brief. The
+   * built-in itself names no model; nothing differing from it, it is back to its default.
+   */
+  command('TunePreset', { id: Schema.String, tuning: PresetTuning }, Schema.Void),
+  /** Takes a built-in preset back to its default, the person's tuning gone. */
+  command('ResetPreset', { id: Schema.String }, Schema.Void),
   /**
    * Picks another preset for a plan before it starts (a task is a conversation plus parts, "How a task starts"), by its id or
    * name: the plan's parts change to match. The preset's name.

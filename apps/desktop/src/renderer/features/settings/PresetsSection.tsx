@@ -1,27 +1,40 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useId, useState } from 'react'
 
-import type { Preset } from '@althar/contracts'
+import type { AgentStatus, Preset } from '@althar/contracts'
 import { Button, Field, FieldArea, FormRow, Icon, Segmented, SettingList, SettingRow, Switch, Problem } from '@althar/ui'
 
 import { useGoneAtOnce } from '../../data/goneAtOnce'
 import { useServices } from '../../data/services'
+import { ModelChoice, type ModelChoiceProps } from '../../shared/ModelChoice'
 
 /*
  * The person's presets (a task is a conversation plus parts, "Presets"):
  * named sets of a task's starting parts, the built-in ones and their own,
  * each with what it holds. Their own, saved from a task or kept from the
  * coordinator's offer, can be edited here, its name, parts and brief, kept
- * to the project of the task it came from or not, and removed; nobody has
- * to use this page.
+ * to the project of the task it came from or not, and removed. A built-in
+ * one names no model; the person can tune its lead, reviewer, their efforts
+ * and its brief as their own, and reset it to the built-in. Nobody has to
+ * use this page.
  */
 
 type Parts = Preset['parts']
+type Choice = ModelChoiceProps['value']
 
 export const presetsText = {
   title: 'Presets',
   builtIn: 'Built in',
+  tuned: 'Tuned',
   edit: 'Edit',
+  tune: 'Tune',
+  reset: 'Reset',
+  lead: 'Lead',
+  reviewer: 'Reviewer',
+  picked: 'Picked for each task',
+  pickedNote: 'By your defaults and the coordinator’s choice, as for any task.',
+  setOne: 'Choose a model',
+  unset: 'Back to picked for each task',
   remove: 'Remove',
   save: 'Save',
   cancel: 'Cancel',
@@ -45,6 +58,106 @@ export const presetsText = {
 } as const
 
 const PRESETS = ['presets'] as const
+
+/** A preset's `agent/model` as the model picker takes it, and back; `default` is the agent's own model. */
+const choiceOf = (named: string | null, effort: string | null | undefined): Choice | null => {
+  if (named === null) return null
+  const at = named.indexOf('/')
+  const model = at < 0 ? null : named.slice(at + 1)
+  return {
+    agentId: at < 0 ? named : named.slice(0, at),
+    model: model === null || model === 'default' ? null : model,
+    effort: effort ?? null,
+  }
+}
+const namedOf = (choice: Choice) => `${choice.agentId}/${choice.model ?? 'default'}`
+
+/** A built-in preset's lead or reviewer, as the person tunes it: picked for each task, or a model of theirs. */
+function TunedPick({
+  owner,
+  agents,
+  value,
+  onChange,
+}: {
+  owner: string
+  agents: ReadonlyArray<AgentStatus>
+  value: Choice | null
+  onChange: (choice: Choice | null) => void
+}) {
+  const first = agents[0]
+  if (value === null)
+    return (
+      <span>
+        {presetsText.picked}{' '}
+        {first !== undefined && (
+          <Button size="small" variant="quiet" onClick={() => onChange({ agentId: first.id, model: null, effort: null })}>
+            {presetsText.setOne}
+          </Button>
+        )}
+      </span>
+    )
+  return (
+    <ModelChoice
+      owner={owner}
+      agents={agents}
+      value={value}
+      onChange={onChange}
+      onRemove={() => onChange(null)}
+      variant="field"
+      placement="below"
+      text={{ remove: presetsText.unset }}
+    />
+  )
+}
+
+/** A built-in preset, as its row opens to tune it: its lead, reviewer, their efforts and its brief, as the person's own. */
+function PresetTuner({ preset, agents, onDone }: { preset: Preset; agents: ReadonlyArray<AgentStatus>; onDone: () => void }) {
+  const { client } = useServices()
+  const cache = useQueryClient()
+  const [lead, setLead] = useState(choiceOf(preset.parts.lead, preset.parts.effort))
+  const [reviewer, setReviewer] = useState(choiceOf(preset.parts.reviewer, preset.parts.reviewerEffort))
+  const [brief, setBrief] = useState(preset.parts.brief)
+  const [failed, setFailed] = useState<string | null>(null)
+  const ids = useId()
+  const save = async () => {
+    try {
+      await client.tunePreset(preset.id, {
+        lead: lead === null ? null : namedOf(lead),
+        effort: lead?.effort ?? null,
+        reviewer: reviewer === null ? null : namedOf(reviewer),
+        reviewerEffort: reviewer?.effort ?? null,
+        brief,
+      })
+      await cache.invalidateQueries({ queryKey: PRESETS })
+      onDone()
+    } catch (error) {
+      setFailed(error instanceof Error ? error.message : String(error))
+    }
+  }
+  return (
+    <div>
+      <FormRow label={presetsText.lead} note={lead === null ? presetsText.pickedNote : undefined}>
+        <TunedPick owner={presetsText.lead} agents={agents} value={lead} onChange={setLead} />
+      </FormRow>
+      {preset.parts.checked !== 'none' && (
+        <FormRow label={presetsText.reviewer} note={reviewer === null ? presetsText.pickedNote : undefined}>
+          <TunedPick owner={presetsText.reviewer} agents={agents} value={reviewer} onChange={setReviewer} />
+        </FormRow>
+      )}
+      <FormRow label={presetsText.brief} note={presetsText.briefNote} htmlFor={`${ids}-brief`}>
+        <FieldArea id={`${ids}-brief`} rows={3} value={brief} onChange={(event) => setBrief(event.target.value)} />
+      </FormRow>
+      {failed !== null && <Problem>{failed}</Problem>}
+      {/* oxlint-disable-next-line althar/press-at-once -- A form the runtime checks: it stays open until kept, so a refusal lands in it. */}
+      <Button size="small" onClick={() => void save()}>
+        {presetsText.save}
+      </Button>{' '}
+      <Button size="small" variant="quiet" onClick={onDone}>
+        {presetsText.cancel}
+      </Button>
+    </div>
+  )
+}
 
 const options = <K extends string>(words: Readonly<Record<K, string>>) =>
   (Object.keys(words) as Array<K>).map((value) => ({ value, label: words[value] }))
@@ -114,7 +227,7 @@ function PresetEditor({ preset, onDone }: { preset: Preset; onDone: () => void }
   )
 }
 
-export function PresetsSection() {
+export function PresetsSection({ agents = [] }: { agents?: ReadonlyArray<AgentStatus> }) {
   const { client } = useServices()
   const cache = useQueryClient()
   const read = useQuery({ queryKey: PRESETS, queryFn: () => client.listPresets() }).data
@@ -133,11 +246,48 @@ export function PresetsSection() {
           title={preset.name}
           note={preset.keptTo === undefined ? preset.about : `${presetsText.keptTo(preset.keptTo)}. ${preset.about}`}
           glyph={<Icon name="list" size={15} />}
-          {...(editing === preset.id ? { under: <PresetEditor preset={preset} onDone={() => setEditing(null)} /> } : {})}
+          {...(editing === preset.id
+            ? {
+                under: preset.builtin ? (
+                  <PresetTuner preset={preset} agents={agents} onDone={() => setEditing(null)} />
+                ) : (
+                  <PresetEditor preset={preset} onDone={() => setEditing(null)} />
+                ),
+              }
+            : {})}
         >
           {() =>
             preset.builtin ? (
-              <span>{presetsText.builtIn}</span>
+              <>
+                <span>{preset.tuned === true ? presetsText.tuned : presetsText.builtIn}</span>
+                <Button size="small" variant="quiet" onClick={() => setEditing(editing === preset.id ? null : preset.id)}>
+                  {presetsText.tune}
+                </Button>
+                {preset.tuned === true && (
+                  <Button
+                    size="small"
+                    variant="quiet"
+                    onClick={() => {
+                      // Back to the built-in at once; the runtime catches up behind it, and a refusal comes back with a line.
+                      setFailed(null)
+                      setEditing(null)
+                      const was = cache.getQueryData<ReadonlyArray<Preset>>(PRESETS)
+                      cache.setQueryData<ReadonlyArray<Preset>>(PRESETS, (list) =>
+                        list?.map((one) => (one.id === preset.id ? { ...one, tuned: false } : one)),
+                      )
+                      void client
+                        .resetPreset(preset.id)
+                        .catch((error: unknown) => {
+                          cache.setQueryData(PRESETS, was)
+                          setFailed(error instanceof Error ? error.message : String(error))
+                        })
+                        .finally(() => void cache.invalidateQueries({ queryKey: PRESETS }))
+                    }}
+                  >
+                    {presetsText.reset}
+                  </Button>
+                )}
+              </>
             ) : (
               <>
                 <Button size="small" variant="quiet" onClick={() => setEditing(editing === preset.id ? null : preset.id)}>

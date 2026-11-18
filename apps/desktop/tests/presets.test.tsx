@@ -5,14 +5,16 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Preset } from '@althar/contracts'
 
 import { PresetsSection } from '../src/renderer/features/settings/PresetsSection'
-import { fakeClient } from './fixtures'
+import { agents, fakeClient } from './fixtures'
 import { withServices } from './render'
 
 /*
  * Presets in Settings (a task is a conversation plus parts, "Presets"): the
- * built-in ones as they are, the person's own each with Edit, which opens its
- * name, parts and brief in its row, and whether it is kept to the project of
- * the task it was saved from.
+ * built-in ones, naming no model, each with Tune, which sets its lead,
+ * reviewer, their efforts and brief as the person's own, and Reset back to
+ * the built-in; the person's own each with Edit, which opens its name, parts
+ * and brief in its row, and whether it is kept to the project of the task it
+ * was saved from.
  */
 
 const own: Preset = {
@@ -39,8 +41,9 @@ describe('presets in Settings', () => {
     const { client } = fakeClient({ listPresets: vi.fn(async () => [builtIn, own]) })
     withServices(<PresetsSection />, client)
     expect(await screen.findByText(/Only in Meridian\. a worktree, no review/)).toBeTruthy()
-    // A built-in one has nothing to edit.
+    // A built-in one is tuned, not edited.
     expect(screen.getAllByRole('button', { name: 'Edit' })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: 'Tune' })).toHaveLength(1)
     await userEvent.click(screen.getByRole('button', { name: 'Edit' }))
     const name = screen.getByLabelText('Name')
     await userEvent.clear(name)
@@ -57,6 +60,41 @@ describe('presets in Settings', () => {
         projectOnly: false,
       }),
     )
+  })
+
+  it('tunes a built-in one as the person’s own: its lead, reviewer and brief, each picked for every task until set', async () => {
+    const { client } = fakeClient({ listPresets: vi.fn(async () => [builtIn, own]) })
+    withServices(<PresetsSection agents={agents} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Tune' }))
+    // Nothing named: both are picked for each task, as for any step.
+    expect(screen.getAllByText('Picked for each task')).toHaveLength(2)
+    const [lead] = screen.getAllByRole('button', { name: 'Choose a model' })
+    await userEvent.click(lead!)
+    await userEvent.click(await screen.findByRole('button', { name: /^Lead: / }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.type(screen.getByLabelText(/Brief/), 'Three directions.')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.tunePreset).toHaveBeenCalledWith('builtin:change', {
+        lead: expect.stringMatching(/^codex\//) as unknown as string,
+        effort: null,
+        reviewer: null,
+        reviewerEffort: null,
+        brief: 'Three directions.',
+      }),
+    )
+  })
+
+  it('resets a tuned built-in one at once, and brings the tuning back with a line where the runtime kept it', async () => {
+    const tuned: Preset = { ...builtIn, tuned: true, parts: { ...builtIn.parts, lead: 'codex/gpt-5' } }
+    const resetPreset = vi.fn(async () => Promise.reject(new Error('Althar couldn’t reset it.')))
+    const { client } = fakeClient({ listPresets: vi.fn(async () => [tuned]), resetPreset })
+    withServices(<PresetsSection agents={agents} />, client)
+    expect(await screen.findByText('Tuned')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Reset' }))
+    expect(resetPreset).toHaveBeenCalledWith('builtin:change')
+    expect((await screen.findByRole('alert')).textContent).toBe('Althar couldn’t reset it.')
+    expect(screen.getByText('Tuned')).toBeTruthy()
   })
 
   it('removes one at once, and no older list brings it back while removals overlap', async () => {

@@ -174,7 +174,10 @@ describe('presets, through the API', () => {
           reviewer: null,
           brief: 'Retry the checkout.\nTwice at most.\nThen give up.',
         })
-        assert.strictEqual(own[2]?.about, 'Local, reviewed before it ships, a pull request ready for review, led by Large')
+        assert.strictEqual(
+          own[2]?.about,
+          'Local, reviewed before it ships, a pull request ready for review, led by Large, reviewed by claude-code’s own model',
+        )
 
         // With neither a task nor parts there is nothing to keep, and a task that went has none either: neither is saved.
         assert.strictEqual(
@@ -196,6 +199,58 @@ describe('presets, through the API', () => {
           (yield* client.ListPresets({})).filter((one) => !one.builtin).map((one) => one.name),
           ['Retry work', 'Anywhere', 'Preset'],
         )
+      }),
+    ),
+  )
+
+  it.live('names no model on a built-in one, which the person tunes as their own and resets to the built-in', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected
+        const prototype = Effect.map(client.ListPresets({}), (all) => all.find((one) => one.id === 'builtin:prototype'))
+        const before = yield* prototype
+        assert.deepInclude(before?.parts, { lead: null, reviewer: null })
+        assert.notProperty(before, 'tuned')
+        assert.include(before?.about, 'the coordinator picks its lead')
+
+        // Their lead and effort, reviewer and brief: kept as theirs, the rest of it as built in.
+        yield* client.TunePreset({
+          commandId: commandId(),
+          id: 'builtin:prototype',
+          tuning: { lead: 'codex/large', effort: 'high', reviewer: 'claude-code/default', brief: '  Three directions.  ' },
+        })
+        const tuned = yield* prototype
+        assert.deepInclude(tuned, { name: 'Prototype', builtin: true, tuned: true })
+        assert.deepInclude(tuned?.parts, {
+          workspace: 'worktree',
+          checked: 'none',
+          end: 'none',
+          lead: 'codex/large',
+          effort: 'high',
+          reviewer: 'claude-code/default',
+          brief: 'Three directions.',
+        })
+        assert.include(tuned?.about, 'led by Large at high effort')
+        // Settings' edit of the person's own leaves a built-in alone.
+        assert.include(
+          yield* refused(client.EditPreset({ commandId: commandId(), id: 'builtin:prototype', name: 'Mine', parts: LOCAL })),
+          "isn't there",
+        )
+        // Tuned to nothing differing from the built-in, it is the built-in again.
+        yield* client.TunePreset({
+          commandId: commandId(),
+          id: 'builtin:prototype',
+          tuning: { lead: null, brief: before?.parts.brief ?? '' },
+        })
+        assert.deepStrictEqual(yield* prototype, before)
+        // Tuned, then reset: the built-in, as it was.
+        yield* client.TunePreset({ commandId: commandId(), id: 'Prototype', tuning: { lead: 'codex/large' } })
+        assert.isTrue((yield* prototype)?.tuned)
+        yield* client.ResetPreset({ commandId: commandId(), id: 'builtin:prototype' })
+        assert.deepStrictEqual(yield* prototype, before)
+        // Only a built-in one is tuned or reset.
+        assert.include(yield* refused(client.TunePreset({ commandId: commandId(), id: 'pst_none', tuning: {} })), "isn't there")
+        assert.include(yield* refused(client.ResetPreset({ commandId: commandId(), id: 'pst_none' })), "isn't there")
       }),
     ),
   )
@@ -296,6 +351,7 @@ describe('a preset a task’s card offers', () => {
     steps: ReadonlyArray<{ key: 'implement' | 'review'; agentId: string; model: string | null; skipped: boolean }>,
     titles: ReadonlyArray<string>,
     end: 'draft' | 'ready' | null = null,
+    worksIn?: 'checkout',
   ) =>
     Effect.forEach(titles, (title) =>
       Effect.gen(function* () {
@@ -313,6 +369,7 @@ describe('a preset a task’s card offers', () => {
               end,
               // An ending the person set is theirs; none set, the project's.
               ...(end === null ? {} : { endChosen: true }),
+              ...(worksIn === undefined ? {} : { worksIn }),
             })
             // Started, without running it: the offer looks at started plans.
             const sql = yield* SqlClient.SqlClient
@@ -337,16 +394,17 @@ describe('a preset a task’s card offers', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const made = yield* connected
-        // The coordinator planned three alike, and the person changed none: nothing of theirs to keep.
-        const theirs = yield* started(made, made.coordinatorId, CODEX_ALONE, ['Bump a', 'Bump b', 'Bump c'])
+        // Local, with no review, which no built-in one is. The coordinator planned three alike, and the person changed none:
+        // nothing of theirs to keep.
+        const theirs = yield* started(made, made.coordinatorId, CODEX_ALONE, ['Bump a', 'Bump b', 'Bump c'], null, 'checkout')
         assert.isUndefined(yield* offerOn(made, theirs[2] ?? ''))
         // The person set them up twice: not yet; the third time, by a name in plain words.
-        const mine = yield* started(made, made.personId, CODEX_ALONE, ['Fix a', 'Fix b'])
+        const mine = yield* started(made, made.personId, CODEX_ALONE, ['Fix a', 'Fix b'], null, 'checkout')
         assert.isUndefined(yield* offerOn(made, mine[1] ?? ''))
-        const [third] = yield* started(made, made.personId, CODEX_ALONE, ['Fix c'])
+        const [third] = yield* started(made, made.personId, CODEX_ALONE, ['Fix c'], null, 'checkout')
         const offer = yield* offerOn(made, third ?? '')
-        assert.deepInclude(offer, { name: 'No review' })
-        assert.deepInclude(offer?.parts, { workspace: 'worktree', checked: 'none', lead: 'codex/large' })
+        assert.deepInclude(offer, { name: 'Local, no review' })
+        assert.deepInclude(offer?.parts, { workspace: 'local', checked: 'none', lead: 'codex/large' })
         // Its ending was the project's, so the preset follows the project's.
         assert.isUndefined(offer?.parts.end)
 
@@ -360,7 +418,7 @@ describe('a preset a task’s card offers', () => {
         // Not to be offered again: the card stops, and a fourth alike isn't offered them.
         yield* made.client.DeclinePresetOffer({ commandId: commandId(), taskId: third ?? '' })
         assert.isUndefined(yield* offerOn(made, third ?? ''))
-        const [fourth] = yield* started(made, made.personId, CODEX_ALONE, ['Fix d'])
+        const [fourth] = yield* started(made, made.personId, CODEX_ALONE, ['Fix d'], null, 'checkout')
         assert.isUndefined(yield* offerOn(made, fourth ?? ''))
       }),
     ),
@@ -392,6 +450,8 @@ describe('a preset a task’s card offers', () => {
                   reason: null,
                   actorId: made.coordinatorId,
                   held: true,
+                  end: 'ready',
+                  endChosen: true,
                 }),
               ),
             )
@@ -403,12 +463,13 @@ describe('a preset a task’s card offers', () => {
           // Started by the person themselves, alike: the third one's card offers them.
           const mine: Array<string> = []
           for (const title of ['Fix a', 'Fix b', 'Fix c']) {
-            const one = yield* client.StartTask({ commandId: commandId(), projectId: project.id, title, steps: CODEX_ALONE })
+            // Ending in a pull request ready for review, as no built-in one does.
+            const one = yield* client.StartTask({ commandId: commandId(), projectId: project.id, title, steps: CODEX_ALONE, end: 'ready' })
             mine.push(one.id)
           }
           assert.isUndefined(yield* offered(mine[1] ?? ''))
           const offer = yield* offered(mine[2] ?? '')
-          assert.deepInclude(offer, { name: 'No review' })
+          assert.deepInclude(offer, { name: 'No review, ready PR' })
 
           // Kept under a name another preset has: refused, and that preset stays as it was.
           const other = { workspace: 'local', checked: 'before', shelf: 'board', lead: null, reviewer: null, brief: '' } as const
@@ -430,7 +491,7 @@ describe('a preset a task’s card offers', () => {
     Effect.scoped(
       Effect.gen(function* () {
         const made = yield* connected
-        // Prototype as it is: nothing new to keep.
+        // Prototype as it is, whichever model leads it: nothing new to keep.
         const opus = [{ key: 'implement', agentId: 'claude-code', model: 'claude-opus-5-5', skipped: false }] as const
         const prototypes = yield* started(made, made.personId, opus, ['Try a', 'Try b', 'Try c'])
         assert.isUndefined(yield* offerOn(made, prototypes[2] ?? ''))

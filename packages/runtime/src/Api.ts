@@ -142,7 +142,17 @@ import { postTeamReviews, Reviews, runOutside, sendMidTurn, setPostTeamReviews, 
 import { setShipRoute, shipRouteSetting } from './shipRoute'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
-import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
+import {
+  declinePresetOffer,
+  describe as describePreset,
+  editPreset,
+  partsOfTask,
+  presetsIn,
+  removePreset,
+  resetPreset,
+  savePreset,
+  tunePreset,
+} from './presets'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
@@ -2014,6 +2024,10 @@ export const handlers = apiLayer(
             ),
           ),
         ),
+      TunePreset: ({ commandId, id, tuning }) =>
+        once(commandId, api(tunePreset(id, tuning).pipe(Effect.asVoid, Effect.provideService(SqlClient.SqlClient, sql)))),
+      ResetPreset: ({ commandId, id }) =>
+        once(commandId, api(resetPreset(id).pipe(Effect.asVoid, Effect.provideService(SqlClient.SqlClient, sql)))),
       RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
       DeclinePresetOffer: ({ commandId, taskId }) =>
         once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, actorId), folderStore))),
