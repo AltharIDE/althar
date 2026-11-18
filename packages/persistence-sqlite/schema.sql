@@ -1129,7 +1129,7 @@ CREATE TABLE runnables (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   dropped_by_actor_id TEXT REFERENCES actors (id),
   dropped_at TEXT CHECK (dropped_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), task_id TEXT REFERENCES tasks (id),
   FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id)
 ) STRICT;
 
@@ -1731,3 +1731,5 @@ CREATE TABLE brought_in (
   ) STRICT;
 
 CREATE INDEX brought_in_task ON brought_in (task_id) WHERE task_id IS NOT NULL;
+
+CREATE INDEX runnables_of_task ON runnables (task_id) WHERE task_id IS NOT NULL AND dropped_at IS NULL;

@@ -219,6 +219,8 @@ export interface RuntimeOptions {
   readonly local?: { readonly every?: Duration.Duration }
   /** When automations run, and the clock and zone they are read by (`Automations.ts`). */
   readonly automations?: AutomationOptions
+  /** The zone the computer is in now, as a lead and the coordinator are told the person's local time in (`localTime.ts`): its clock's. */
+  readonly zone?: () => string
   /** How Althar tells whether an agent's service answers, and how long a step waits before it tries one that failed again (`Connectivity.ts`). */
   readonly connectivity?: ConnectivityOptions
 }
