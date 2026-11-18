@@ -13,7 +13,9 @@ import { startOf } from './Projects'
 import { bringBackThen } from './bringBack'
 import { thisDevice } from './device'
 import { Fetches, type Wanted } from './Fetches'
+import { git } from './git'
 import { Instance } from './Instance'
+import { filesNamed } from './keptRuns'
 import { makeKeyedLock } from './keyedLock'
 import { NotFound } from './errors'
 import { endingLine, printedMore, readable, servingAt, uncoloured } from './leftRunning'
@@ -158,6 +160,8 @@ interface Kept {
   readonly command: string | null
   readonly actorKind: string | null
   readonly agentId: string | null
+  /** The task it was kept for, by its lead: it goes once that task's worktrees are cleaned up. */
+  readonly taskId: string | null
 }
 
 type Store = SqlClient.SqlClient | Crypto.Crypto | Instance | RuntimeConfig | Live | Ledger
@@ -222,7 +226,9 @@ export class Launches extends Context.Service<
     /**
      * Keeps something for the project to run: a new one, at the end of the
      * list, unless the same is kept already; or, by id, a change to one. A
-     * null command is its repository's own way. Says which it is.
+     * null command is its repository's own way. Kept for a task, by its lead,
+     * it goes once that task's worktrees are cleaned up (`dropCleanedUp`);
+     * kept or changed by anyone else, it belongs to no task. Says which it is.
      */
     keepRunnable(input: {
       readonly projectId: string
@@ -231,9 +237,20 @@ export class Launches extends Context.Service<
       readonly command: string | null
       readonly repository?: string
       readonly actorId: ActorId
+      readonly taskId?: string | null
     }): Effect.Effect<{ readonly id: string; readonly name: string | null; readonly repository: string }, unknown>
     /** Drops one of the project's runnables; a run of it goes on until stopped. */
     dropRunnable(input: { readonly projectId: string; readonly id: string; readonly actorId: ActorId }): Effect.Effect<void, unknown>
+    /**
+     * Drops the runnables tasks' leads kept, of the task named or of every
+     * task, once all that task's worktrees are cleaned up, each with a line
+     * in its project's record: what they run mostly lived only on the task's
+     * branch. One whose every file it names is on its repository's default
+     * branch, as when its config merged, stays, and belongs to no task from
+     * then; so does one the person kept or changed. Says the names of those
+     * dropped.
+     */
+    dropCleanedUp(taskId?: string): Effect.Effect<ReadonlyArray<string>, unknown>
     /** Puts the project's runnables in this order, the first its default; any not named keep theirs, after. */
     orderRunnables(input: {
       readonly projectId: string
@@ -324,7 +341,7 @@ export class Launches extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<Kept>`
-            SELECT r.id, r.binding_id, r.name, r.command, a.kind AS actor_kind, a.agent_id
+            SELECT r.id, r.binding_id, r.name, r.command, a.kind AS actor_kind, a.agent_id, r.task_id
             FROM runnables r LEFT JOIN actors a ON a.id = r.kept_by_actor_id
             WHERE r.project_id = ${projectId} AND r.dropped_at IS NULL
             ORDER BY r.position, r.created_at, r.rowid`
@@ -1002,6 +1019,7 @@ export class Launches extends Context.Service<
         readonly command: string | null
         readonly repository?: string
         readonly actorId: ActorId
+        readonly taskId?: string | null
       }) =>
         provide(
           Effect.gen(function* () {
@@ -1052,6 +1070,7 @@ export class Launches extends Context.Service<
                     position: (last?.position ?? -1) + 1,
                     keptByActorId: input.actorId,
                     createdAt: at,
+                    taskId: input.taskId ?? null,
                   })}`
                   yield* recorded(input.projectId, input.actorId, 'project.runnable_kept', { name, command, repository: binding.name })
                 }),
@@ -1065,6 +1084,7 @@ export class Launches extends Context.Service<
                   name,
                   command,
                   keptByActorId: input.actorId,
+                  taskId: input.taskId ?? null,
                 })}, revision = revision + 1 WHERE id = ${was.id}`
                 yield* recorded(input.projectId, input.actorId, 'project.runnable_kept', {
                   id: was.id,
@@ -1114,6 +1134,79 @@ export class Launches extends Context.Service<
                 yield* recorded(input.projectId, input.actorId, 'project.runnables_ordered', { ids: order.map((one) => one.id) })
               }),
             )
+          }),
+        )
+
+      /** Whether every file a command names is on its repository's default branch, as fetched or here: none named is none there. */
+      const onDefaultBranch = (binding: Binding, command: string) =>
+        Effect.gen(function* () {
+          const files = filesNamed(command, binding.within)
+          if (files.length === 0) return false
+          const { remote, base } = yield* startOf({
+            repository: binding.repository,
+            base: binding.defaultBase,
+            changeTarget: binding.changeTarget,
+          }).pipe(Effect.orElseSucceed(() => ({ remote: 'origin', base: binding.defaultBase ?? 'main' })))
+          const holds = (ref: string) =>
+            Effect.forEach(files, (file) => git(binding.repository, 'cat-file', '-e', `${ref}:${file}`), { discard: true }).pipe(
+              Effect.as(true),
+              Effect.orElseSucceed(() => false),
+            )
+          return (yield* holds(`refs/remotes/${remote}/${base}`)) || (yield* holds(`refs/heads/${base}`))
+        })
+
+      const dropCleanedUp = (taskId?: string) =>
+        provide(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            // A task's that had a worktree, every one cleaned up now, on any device; a review's copy is no worktree of its.
+            const gone = yield* sql<{
+              id: string
+              projectId: string
+              bindingId: string
+              name: string | null
+              command: string
+              taskId: string
+            }>`
+              SELECT r.id, r.project_id, r.binding_id, r.name, r.command, r.task_id
+              FROM runnables r LEFT JOIN actors a ON a.id = r.kept_by_actor_id
+              WHERE r.dropped_at IS NULL AND r.task_id IS NOT NULL AND r.command IS NOT NULL
+                AND (${taskId ?? null} IS NULL OR r.task_id = ${taskId ?? null})
+                AND coalesce(a.kind, '') <> 'person'
+                AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = r.task_id AND w.access = 'write' AND w.reviewing IS NULL)
+                AND NOT EXISTS (SELECT 1 FROM workspaces w
+                  WHERE w.task_id = r.task_id AND w.access = 'write' AND w.reviewing IS NULL AND w.state <> 'cleaned')
+              ORDER BY r.project_id, r.position`
+            const dropped: Array<string> = []
+            const bindings = new Map<string, ReadonlyArray<Binding>>()
+            for (const run of gone) {
+              const of = bindings.get(run.projectId) ?? (yield* bindingsOf(run.projectId))
+              bindings.set(run.projectId, of)
+              const binding = of.find((one) => one.id === run.bindingId)
+              const at = yield* timestamp
+              if (binding !== undefined && (yield* onDefaultBranch(binding, run.command))) {
+                // It runs as kept on the default branch: the project's now, not the task's.
+                yield* sql`UPDATE runnables SET task_id = NULL, revision = revision + 1 WHERE id = ${run.id} AND dropped_at IS NULL`
+                continue
+              }
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  yield* sql`UPDATE runnables SET ${sql.update({
+                    droppedAt: at,
+                    droppedByActorId: instance.systemId,
+                  })}, revision = revision + 1 WHERE id = ${run.id} AND dropped_at IS NULL`
+                  yield* recorded(run.projectId, instance.systemId, 'project.runnable_dropped', {
+                    id: run.id,
+                    name: run.name,
+                    command: run.command,
+                    task: run.taskId,
+                    why: 'worktree_cleaned',
+                  })
+                }),
+              )
+              dropped.push(run.name ?? run.command)
+            }
+            return dropped
           }),
         )
 
@@ -1251,6 +1344,8 @@ export class Launches extends Context.Service<
                 command,
                 ...(asked.repository === undefined ? {} : { repository: asked.repository }),
                 actorId: actorOf(access),
+                // A lead's is its task's: it goes as that task's worktree does.
+                taskId: access.role === 'lead' ? access.taskId : null,
               })
               return `Kept: ${name} runs with \`${command}\`. ${yield* listed(access.projectId)}`
             }),
@@ -1483,6 +1578,12 @@ export class Launches extends Context.Service<
       // One set for leads and the coordinator (ADR-097): each reads its role where they differ.
       const actorOf = (access: ToolAccess) => (access.role === 'coordinator' ? instance.coordinatorId : instance.systemId)
       yield* toolServer.serve(POOL, [screenshotTool, runTool, stopTool, keepTool(actorOf), keepRunTool(actorOf)])
+      // What tasks' leads kept for tasks whose worktrees went while Althar was away, or before it said which task kept each,
+      // goes now: away from the start, as it reads each repository's default branch.
+      yield* Effect.forkIn(
+        dropCleanedUp().pipe(Effect.catchCause((cause) => Effect.logWarning('Could not drop what finished tasks kept to run', cause))),
+        launchesScope,
+      )
 
       return Launches.of({
         start,
@@ -1515,6 +1616,7 @@ export class Launches extends Context.Service<
         keep,
         keepRunnable,
         dropRunnable,
+        dropCleanedUp,
         orderRunnables,
         scripts,
       })

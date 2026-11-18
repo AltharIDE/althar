@@ -623,6 +623,10 @@ export class FolderCleanup extends Context.Service<
               const bytes = yield* sizeOfAll(now)
               yield* removeFolders(now, why === 'hand' && lost?.why === 'unreadable', why, bytes, actorId)
               facts.delete(now.taskId)
+              // What its lead kept to run goes with its worktree: it ran what was on its branch.
+              yield* launches
+                .dropCleanedUp(now.taskId)
+                .pipe(Effect.catchCause((cause) => Effect.logWarning('Could not drop what a finished task kept to run', cause)))
               const thread = yield* taskThreadOf(now.taskId)
               if (thread !== null)
                 yield* addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {

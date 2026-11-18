@@ -7,6 +7,8 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { migrations } from '@althar/persistence-sqlite'
+
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Launches } from '../src/Launches'
@@ -540,6 +542,61 @@ describe('what a project runs', () => {
       const [card] = yield* until(cardsIn({ threadId: task.threadId }), (all) => all.length > 0)
       assert.strictEqual(card?.runnableId, kit.id)
       yield* launches.stop(started.id)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('finds the task that ran what a lead kept before it was said, and drops it once that task’s worktree is gone', () =>
+    Effect.gen(function* () {
+      const launches = yield* Launches
+      const projects = yield* Projects
+      const sql = yield* SqlClient.SqlClient
+      const { projectId } = yield* open(twoServers())
+      const made = (title: string) =>
+        Effect.flatMap(Runtime.envelope('task.create', { title }), (envelope) => projects.createTask({ envelope, projectId, title }))
+      const gone = yield* made('Draft a lab')
+      const working = yield* made('Still at work')
+      const leadOf = (task: { taskId: string; threadId: string }): ToolAccess => ({
+        role: 'lead',
+        projectId,
+        threadId: task.threadId,
+        sessionId: 'none',
+        taskId: task.taskId,
+      })
+      yield* callTool(leadOf(gone), 'keep_run', { name: 'Lab', command: 'node lab.js' })
+      yield* callTool(leadOf(working), 'keep_run', { name: 'Kit', command: 'node kit.js' })
+      // Each ran in its task, which its card there says.
+      for (const [task, name] of [
+        [gone, 'Lab'],
+        [working, 'Kit'],
+      ] as const) {
+        const id = (yield* launches.runnables(projectId, null)).find((one) => one.name === name)?.id ?? ''
+        const started = yield* launches.start({ projectId, taskId: task.taskId, runnableId: id, threadId: task.threadId })
+        yield* until(cardsIn({ threadId: task.threadId }), (all) => all.some((card) => card.runnableId === id))
+        yield* launches.stop(started.id).pipe(Effect.ignore)
+      }
+      // As kept before a run remembered its task: the store's migration finds it from the thread.
+      yield* sql`UPDATE runnables SET task_id = NULL`
+      const backfill = migrations.find((one) => one.key === '0093_runnable_task')?.statements[1] ?? ''
+      yield* sql.unsafe(backfill)
+      const linked = yield* sql<{
+        name: string
+        taskId: string | null
+      }>`SELECT name, task_id FROM runnables WHERE name IS NOT NULL ORDER BY position`
+      assert.deepStrictEqual(
+        linked.map((row) => [row.name, row.taskId]),
+        [
+          ['Lab', gone.taskId],
+          ['Kit', working.taskId],
+        ],
+      )
+      // Once a worktree went, Althar starting drops what its task kept, and nothing of a task still at work.
+      yield* sql`UPDATE workspaces SET state = 'cleaned' WHERE task_id = ${gone.taskId}`
+      assert.deepStrictEqual(yield* launches.dropCleanedUp(), ['Lab'])
+      assert.deepStrictEqual(yield* launches.dropCleanedUp(), [])
+      assert.deepStrictEqual(
+        (yield* launches.runnables(projectId, null)).flatMap((one) => (one.own ? [] : [one.name])),
+        ['Kit'],
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 

@@ -344,6 +344,18 @@ by name, and `run_project` runs one by name, or the default without one. The
 list shows who said how: worked out, the person, the coordinator, or an
 agent. It is kept in the store (`runnables`).
 
+**What a task kept goes with its worktree.** One a task's lead keeps is that
+task's: what it runs, such as a prototype's lab, mostly lives only on the
+task's branch. Once every worktree of the task is cleaned up, it is dropped,
+with a `project.runnable_dropped` line in the project's record naming the
+task. Two kinds stay. One the person kept, or changed after, is theirs. One
+whose command names files that are all on its repository's default branch
+(its config merged, say) still runs as kept there, and belongs to the project
+from then on. A command that names no file, only a port or a script's name,
+is taken as the task's own and goes: the person keeps it back by hand. Runs
+kept before a run remembered its task are linked to the task whose thread
+kept or ran it, and those of tasks already cleaned up go as Althar starts.
+
 Before a run, a copy with nothing installed is set up first.
 
 ### Run and where it runs
