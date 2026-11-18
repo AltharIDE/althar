@@ -673,7 +673,8 @@ const playStall = async (
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
  * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does; `[coordinator:plan-fails]` with a
- * plan Althar refuses, so the draft never gets one),
+ * plan Althar refuses, so the draft never gets one; `[coordinator:plan-prototype]` from the Prototype preset, its lead on
+ * the large model), `[coordinator:discard]` discards each task named `[discard:<slug>]`,
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort; `[after:<slug>]` makes it wait for that task), and `[coordinator:start]` starts one at once, without a plan;
@@ -1518,6 +1519,13 @@ const playRole = async (
       const said = (ask.slice(0, ask.indexOf('[coordinator:keep-note]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
       return await call('keep_note', { note: said.trim() })
     }
+    // Told to discard tasks, `[discard:<slug>]` each, it discards them, one after another.
+    if (available.has('settle_task') && ask.includes('[coordinator:discard]')) {
+      const said: Array<string> = []
+      for (const [, task] of ask.matchAll(/\[discard:([a-z0-9-]+)\]/g))
+        said.push(await callStreamed('settle_task', { task, how: 'discard', why: 'One task, not several.' }))
+      return said.join('\n')
+    }
     // Asked for work on a schedule, it proposes an automation: the release notes, every Friday.
     if (available.has('propose_automation') && ask.includes('[coordinator:automate]')) {
       return await call('propose_automation', {
@@ -1574,11 +1582,15 @@ const playRole = async (
           agent: ask.includes('[coordinator:plan-fails]') ? 'no-such-agent' : 'claude-code',
           // `[coordinator:plan-effort]`: on its large model, thinking hard.
           ...(ask.includes('[coordinator:plan-effort]') ? { model: 'large', effort: 'high' } : {}),
+          // `[coordinator:plan-prototype]`: on its large model, whatever the preset's own is.
+          ...(ask.includes('[coordinator:plan-prototype]') ? { model: 'large' } : {}),
           reason: 'It knows the code.',
         },
         review: ask.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
         // `[coordinator:plan-small]`: a small change, reviewed only once it merged.
         ...(ask.includes('[coordinator:plan-small]') ? { small_change: true } : {}),
+        // `[coordinator:plan-prototype]`: planned from the Prototype preset.
+        ...(ask.includes('[coordinator:plan-prototype]') ? { preset: 'Prototype' } : {}),
         // `[after:<slug>]`: it waits for that task, and starts by itself once it has merged.
         ...(after === undefined ? {} : { waits_for: [after] }),
       })
