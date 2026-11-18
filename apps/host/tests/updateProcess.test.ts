@@ -54,8 +54,8 @@ const assembleFixture = async (source: BundleSource, folder: string) => {
     put(join(folder, 'node_modules', name, 'package.json'), JSON.stringify({ name, version, ...(main ? { main: 'index.js' } : {}) }))
     if (main) put(join(folder, 'node_modules', name, 'index.js'), '')
   }
-  module('@agentclientprotocol/claude-agent-acp', '0.107.1')
-  module('@agentclientprotocol/codex-acp', '2.6.0')
+  module('@agentclientprotocol/claude-agent-acp', '0.108.0')
+  module('@agentclientprotocol/codex-acp', '2.7.0')
   module('@anthropic-ai/claude-agent-sdk', '0.3.322')
   module(`@anthropic-ai/claude-agent-sdk-linux-${process.arch}`, '0.3.322', false)
   module('@openai/codex', '0.0.0')

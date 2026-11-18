@@ -2,13 +2,15 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { Activity, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type ThreadSnapshot } from '@althar/contracts'
+import { ApiError, PAGE, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
 
 import type { Client } from '../src/renderer/data/client'
 import { ServicesProvider } from '../src/renderer/data/services'
-import { useTask } from '../src/renderer/features/task/useTask'
+import { doing } from '../src/renderer/features/task/actions'
+import { presses, settleText, type TaskModel, useTask } from '../src/renderer/features/task/useTask'
 import { change, changed, fakeClient, items, snapshot } from './fixtures'
 import { servicesFor } from './render'
+import { queuedOf, queueShown, readingLocallyOf } from '../src/renderer/shared/items'
 
 /*
  * A task's view model on its own, for what its screen can't press on cue:
@@ -147,6 +149,26 @@ describe('opening the task’s first or next pull request', () => {
 })
 
 describe('what a task hears', () => {
+  it('puts an accepted message in the queue if its lead never starts, even while start is pending', async () => {
+    const { client, emit, result, unmount } = reading({ session: null, accepting: 'now' })
+    vi.mocked(client.startSession).mockImplementation(() => never<string>())
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    act(() => void result.current.send('No lead', { agentId: 'codex', model: null, effort: null }))
+    await waitFor(() => expect(client.startSession).toHaveBeenCalled())
+    const stored = { ...items.you('No lead', { state: 'queued', interrupting: false }), id: 'not-started-task', sequence: 1 }
+    vi.mocked(client.getThreadItem).mockResolvedValue(stored)
+    act(() => emit(changed('thread_item', stored.id, 'th1', 'p1')))
+    await waitFor(() => expect(result.current.snapshot?.items.some((item) => item.id === stored.id)).toBe(true))
+    await waitFor(() => {
+      const head = result.current.snapshot!
+      expect(head.items.find((item) => item.id === stored.id)).toMatchObject({ input: { claimed: false } })
+      const shown = queueShown(head.session, result.current.pending, head.accepting, head.items)
+      expect(queuedOf(head.items, shown, readingLocallyOf(head.session, head.accepting)).map((item) => item.text)).toEqual(['No lead'])
+    })
+    expect(result.current.pending).toBe(true)
+    unmount()
+  })
+
   it('keeps its launches where the project’s runs that changed are another project’s', async () => {
     const launch = {
       id: 'proc_1',
@@ -384,5 +406,257 @@ describe('what the person does on a task', () => {
       await marked
     })
     expect(result.current.doing).toBeNull()
+  })
+})
+
+/** A promise the test settles when it says, as a busy runtime's answer. */
+const answered = <A = void,>() => {
+  let settle: { resolve: (value: A) => void; reject: (failure: unknown) => void } = { resolve: () => undefined, reject: () => undefined }
+  const promise = new Promise<A>((resolve, reject) => (settle = { resolve, reject }))
+  return { promise, ...settle }
+}
+
+/**
+ * The task as the runtime holds it, which the test changes: every read of its thread, head or item, says it as it is
+ * then, read afresh each time, as the wire's are.
+ */
+const runtimeOf = (first: Partial<ThreadSnapshot> = {}) => {
+  let held = snapshot(first)
+  const fake = fakeClient({
+    getThread: vi.fn(async () => structuredClone(held)),
+    getThreadItem: vi.fn(async (_threadId: string, itemId: string) => held.items.find((item) => item.id === itemId) ?? null),
+  })
+  const view = hook(fake.client)
+  return { ...fake, ...view, now: (change: Partial<ThreadSnapshot>) => (held = { ...held, ...change }), held: () => held }
+}
+
+/** The runtime's word of a change to the task: its head read again, from the runtime as it is now. */
+const readAgain = async (fake: { emit: (event: ReturnType<typeof changed>) => void; client: Client }) => {
+  vi.mocked(fake.client.getThread).mockClear()
+  act(() => fake.emit(changed('task', 't1')))
+  await waitFor(() => expect(fake.client.getThread).toHaveBeenCalledWith('th1', { limit: 0 }))
+  await act(async () => {})
+}
+
+describe('what a press on a task shows, before the runtime says so', () => {
+  it('marks only its own press under way: nothing else is busy, and nothing is on its way to the lead', async () => {
+    const task = runtimeOf({ task: { ...snapshot().task, changes: [change()] } })
+    const stopping = answered()
+    vi.mocked(task.client.stopTask).mockReturnValue(stopping.promise)
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    act(() => void task.result.current.stop())
+    expect(task.result.current.pending).toBe(false)
+    expect(task.result.current.doing).toBeNull()
+    expect(task.result.current.busy.has(doing.push(change().url))).toBe(false)
+    act(() => void task.result.current.abandon())
+    expect(task.result.current.busy.has(presses.abandon)).toBe(true)
+    expect(task.result.current.busy.has(presses.attach)).toBe(false)
+    await act(async () => stopping.resolve())
+    await waitFor(() => expect(task.result.current.busy.has(presses.abandon)).toBe(false))
+  })
+
+  it.each([
+    ['Allow everything', (model: TaskModel) => model.setAllowEverything(true), (shown: ThreadSnapshot) => shown.task.allowEverything.task],
+    [
+      'Resolve conflicts',
+      (model: TaskModel) => model.setResolveConflicts(true),
+      (shown: ThreadSnapshot) => shown.task.resolveConflicts.task === true,
+    ],
+    ['Move to Scratch', (model: TaskModel) => model.shelve('scratch'), (shown: ThreadSnapshot) => shown.task.scratch === true],
+    ['Part of its issue', (model: TaskModel) => model.setIssuePart(true), (shown: ThreadSnapshot) => shown.task.issuePartOf === true],
+  ] as const)('shows %s from the press, through a read from before it, until a read after its answer', async (_name, press, of) => {
+    const task = runtimeOf()
+    const kept = answered()
+    for (const call of [
+      task.client.setTaskAllowEverything,
+      task.client.setTaskResolveConflicts,
+      task.client.shelveTask,
+      task.client.setTaskIssuePart,
+    ])
+      vi.mocked(call).mockReturnValue(kept.promise)
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    act(() => void press(task.result.current))
+    expect(of(task.result.current.snapshot!)).toBe(true)
+    // The runtime's word of something else, read before the press is kept: it doesn't take it back.
+    await readAgain(task)
+    expect(of(task.result.current.snapshot!)).toBe(true)
+    // Kept; from the read after it, what shows is the runtime's: here, changed back since by another window.
+    vi.mocked(task.client.getThread).mockClear()
+    await act(async () => kept.resolve())
+    await waitFor(() => expect(task.client.getThread).toHaveBeenCalledWith('th1', { limit: 0 }))
+    await waitFor(() => expect(of(task.result.current.snapshot!)).toBe(false))
+  })
+
+  it('keeps the last of two presses of one switch made before either is kept, as each read after lands', async () => {
+    const task = runtimeOf()
+    const first = answered()
+    const second = answered()
+    vi.mocked(task.client.setTaskAllowEverything).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    act(() => void task.result.current.setAllowEverything(true))
+    act(() => void task.result.current.setAllowEverything(false))
+    // The first is kept, and read after: the runtime has it on, but the second is still on its way.
+    task.now({ task: { ...task.held().task, allowEverything: { task: true, project: false } } })
+    vi.mocked(task.client.getThread).mockClear()
+    await act(async () => first.resolve())
+    await waitFor(() => expect(task.client.getThread).toHaveBeenCalledWith('th1', { limit: 0 }))
+    await act(async () => {})
+    expect(task.result.current.snapshot?.task.allowEverything.task).toBe(false)
+    task.now({ task: { ...task.held().task, allowEverything: { task: false, project: false } } })
+    await act(async () => second.resolve())
+    await act(async () => {})
+    expect(task.result.current.snapshot?.task.allowEverything.task).toBe(false)
+  })
+
+  it('keeps the last of two presses of one switch when the last is kept first: the earlier one, still waiting, shows no more', async () => {
+    const task = runtimeOf()
+    const first = answered()
+    const second = answered()
+    vi.mocked(task.client.setTaskAllowEverything).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    act(() => void task.result.current.setAllowEverything(true))
+    act(() => void task.result.current.setAllowEverything(false))
+    // The second is kept, and read after, while the first is still on its way: off, as the runtime says.
+    task.now({ task: { ...task.held().task, allowEverything: { task: false, project: false } } })
+    vi.mocked(task.client.getThread).mockClear()
+    await act(async () => second.resolve())
+    await waitFor(() => expect(task.client.getThread).toHaveBeenCalledWith('th1', { limit: 0 }))
+    await act(async () => {})
+    expect(task.result.current.snapshot?.task.allowEverything.task).toBe(false)
+    // The first answers at last: what it showed doesn't come back.
+    await act(async () => first.resolve())
+    await act(async () => {})
+    expect(task.result.current.snapshot?.task.allowEverything.task).toBe(false)
+  })
+
+  it('takes a switch back where the runtime refuses it, saying why', async () => {
+    const task = runtimeOf()
+    vi.mocked(task.client.setTaskAllowEverything).mockRejectedValue(
+      new ApiError({ reason: 'Refused', message: 'The project never allows it.' }),
+    )
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    await act(() => task.result.current.setAllowEverything(true))
+    expect(task.result.current.snapshot?.task.allowEverything.task).toBe(false)
+    expect(task.result.current.error).toBe('The project never allows it.')
+  })
+
+  it.each([
+    ['Done', (model: TaskModel) => model.markDone(), 'settled'],
+    ['Keep for later', (model: TaskModel) => model.keep(), 'kept'],
+  ] as const)('settles it from %s’s press, through a read from before it', async (_name, press, phase) => {
+    const task = runtimeOf({ task: { ...snapshot().task, phase: 'ready', kind: 'plain' } })
+    const kept = answered()
+    vi.mocked(task.client.markTaskDone).mockReturnValue(kept.promise)
+    vi.mocked(task.client.keepTaskForLater).mockReturnValue(kept.promise)
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    act(() => void press(task.result.current))
+    expect(task.result.current.snapshot?.task.phase).toBe(phase)
+    await readAgain(task)
+    expect(task.result.current.snapshot?.task.phase).toBe(phase)
+    task.now({ task: { ...task.held().task, phase } })
+    await act(async () => kept.resolve())
+    await waitFor(() => expect(task.result.current.busy.has(phase === 'settled' ? doing.markDone : doing.keep)).toBe(false))
+    expect(task.result.current.snapshot?.task.phase).toBe(phase)
+    expect(task.result.current.error).toBeNull()
+  })
+
+  it('takes Done back where the runtime answered but something of it opened meanwhile, saying so', async () => {
+    const task = runtimeOf({ task: { ...snapshot().task, phase: 'ready', kind: 'plain' } })
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    await act(() => task.result.current.markDone())
+    expect(task.result.current.snapshot?.task.phase).toBe('ready')
+    expect(task.result.current.error).toBe(settleText.stillOpen)
+  })
+
+  it('takes Done back where it failed, saying why', async () => {
+    const task = runtimeOf({ task: { ...snapshot().task, phase: 'ready', kind: 'plain' } })
+    vi.mocked(task.client.markTaskDone).mockRejectedValue(new ApiError({ reason: 'NotFound', message: 'That task isn’t there any more.' }))
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    await act(() => task.result.current.markDone())
+    expect(task.result.current.snapshot?.task.phase).toBe('ready')
+    expect(task.result.current.error).toBe('That task isn’t there any more.')
+  })
+})
+
+describe('a message taken back from the queue', () => {
+  const queued: ThreadItem = { ...items.you('Then the docs', { state: 'queued', interrupting: false }), id: 'q1' }
+  const stateOf = (shown: ThreadSnapshot | null) => {
+    const item = shown?.items.find((one) => one.id === 'q1')
+    return item?.kind === 'user_message' ? item.input?.state : undefined
+  }
+
+  it('is out of the queue from the press, though a read of it from before the runtime has it lands', async () => {
+    const task = runtimeOf({ items: [items.says('On it.'), queued] })
+    const taken = answered()
+    vi.mocked(task.client.takeBack).mockReturnValue(taken.promise)
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    let shown = false
+    act(() => void (shown = task.result.current.takeBack('q1')))
+    expect(shown).toBe(true)
+    expect(stateOf(task.result.current.snapshot)).toBe('withdrawn')
+    // What still waits is read again, as a message is delivered: the runtime hasn't taken it back yet.
+    act(() => task.emit(changed('user_input', 'in1')))
+    await waitFor(() => expect(task.client.getThreadItem).toHaveBeenCalledWith('th1', 'q1'))
+    await act(async () => {})
+    expect(stateOf(task.result.current.snapshot)).toBe('withdrawn')
+    // Taken back, and read so: from then on, the read says it.
+    task.now({
+      items: [items.says('On it.'), { ...queued, input: { state: 'withdrawn', interrupting: false } }] as ReadonlyArray<ThreadItem>,
+    })
+    await act(async () => taken.resolve())
+    vi.mocked(task.client.getThreadItem).mockClear()
+    act(() => task.emit(changed('thread_item', 'q1')))
+    await waitFor(() => expect(task.client.getThreadItem).toHaveBeenCalledWith('th1', 'q1'))
+    await waitFor(() => expect(stateOf(task.result.current.snapshot)).toBe('withdrawn'))
+    expect(task.result.current.error).toBeNull()
+  })
+
+  it('comes back where the lead had read it, saying why, for what it was taken back for to be put back too', async () => {
+    const task = runtimeOf({ items: [items.says('On it.'), queued] })
+    vi.mocked(task.client.takeBack).mockRejectedValue(new ApiError({ reason: 'AlreadyDelivered', message: 'The lead has it already.' }))
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    const refused = vi.fn()
+    act(() => void task.result.current.takeBack('q1', refused))
+    await waitFor(() => expect(refused).toHaveBeenCalled())
+    expect(stateOf(task.result.current.snapshot)).toBe('queued')
+    expect(task.result.current.error).toBe('The lead has it already.')
+  })
+
+  it('goes to the lead now, shown at once, and is never said twice where the lead had read it', async () => {
+    const task = runtimeOf({ items: [items.says('On it.'), queued] })
+    const taken = answered()
+    vi.mocked(task.client.takeBack).mockReturnValue(taken.promise)
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    const unsent = vi.fn()
+    act(() => task.result.current.sendQueuedNow('q1', 'Then the docs', undefined, unsent))
+    // Out of the queue, and said again, interrupting the lead, from the press.
+    expect(stateOf(task.result.current.snapshot)).toBe('withdrawn')
+    const again = task.result.current.snapshot?.items.filter((item) => item.id !== 'q1' && item.kind === 'user_message')
+    expect(again?.map((item) => item.kind === 'user_message' && [item.content.text, item.input?.interrupting])).toEqual([
+      ['Then the docs', true],
+    ])
+    await act(async () => taken.reject(new ApiError({ reason: 'AlreadyDelivered', message: 'The lead has it already.' })))
+    await waitFor(() => expect(task.result.current.error).toBe('The lead has it already.'))
+    expect(task.client.send).not.toHaveBeenCalled()
+    expect(unsent).not.toHaveBeenCalled()
+    expect(task.result.current.snapshot?.items.filter((item) => item.kind === 'user_message').map((item) => item.id)).toEqual(['q1'])
+  })
+})
+
+describe('a turn undone', () => {
+  it('goes from the thread as its undo answers, without waiting for the thread to be read again', async () => {
+    const asked: ThreadItem = { ...items.you('Try the other way'), id: 'u1', sequence: 5 }
+    const task = runtimeOf({ items: [{ ...items.says('First.'), sequence: 4 }, asked, { ...items.says('Done it.'), sequence: 6 }] })
+    await waitFor(() => expect(task.result.current.snapshot).not.toBeNull())
+    vi.mocked(task.client.getThread).mockImplementation(never)
+    vi.mocked(task.client.undoTurn).mockResolvedValue({ prompt: 'Try the other way', restored: 1, messages: [] })
+    let undone: Awaited<ReturnType<TaskModel['undoTurn']>> | undefined
+    await act(async () => {
+      undone = await task.result.current.undoTurn('u1')
+    })
+    expect(undone?.prompt).toBe('Try the other way')
+    expect(task.result.current.snapshot?.items.map((item) => item.sequence)).toEqual([4])
+    expect(task.client.getThread).toHaveBeenLastCalledWith('th1', { limit: PAGE })
+    expect(task.result.current.busy.has(presses.undo)).toBe(false)
   })
 })

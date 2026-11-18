@@ -130,8 +130,8 @@ const PARTS: Part[] = [
             their own terms. Althar sits on your computer beside them and passes nothing to us.
           </li>
           <li>
-            <strong>Where your code and tickets live.</strong> GitHub, GitLab or Bitbucket, Linear, Jira or Trello, on their sites or your
-            own servers: only the ones you connect, with the access you give them, and git’s own remotes as you push and pull.
+            <strong>Where your code and tickets live.</strong> GitHub, GitLab or Bitbucket, Linear, Jira, Trello or ClickUp, on their sites
+            or your own servers: only the ones you connect, with the access you give them, and git’s own remotes as you push and pull.
           </li>
           <li>
             <strong>GitHub’s releases</strong>, to check for updates to Althar and to the agents it installs.

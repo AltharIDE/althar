@@ -103,6 +103,7 @@ function PresetEditor({ preset, onDone }: { preset: Preset; onDone: () => void }
         </FormRow>
       )}
       {failed !== null && <Problem>{failed}</Problem>}
+      {/* oxlint-disable-next-line althar/press-at-once -- A form the runtime checks (a name another preset has): it stays open until kept, so a refusal lands in it. */}
       <Button size="small" onClick={() => void save()}>
         {presetsText.save}
       </Button>{' '}

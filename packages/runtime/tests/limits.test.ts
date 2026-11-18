@@ -214,7 +214,7 @@ describe('an agent out of usage', () => {
       const [ready] = yield* until(cardOf(projectId), (cards) => cards.some((card) => card.phase === 'ready'))
       assert.strictEqual(ready?.lead, 'codex')
       assert.deepStrictEqual(yield* said(task.threadId), [
-        `Fake claude-code ran out of usage while working on the task, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake codex takes the work over, on Large.`,
+        `Small on Fake claude-code ran out of usage while working on the task, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Large on Fake codex takes the work over until then.`,
         'implement: Did the task.',
         'The task ends on its branch.',
       ])
@@ -240,7 +240,7 @@ describe('an agent out of usage', () => {
       assert.deepStrictEqual([held?.phase, held?.step, held?.waits?.agentId], ['running', 'implement', 'claude-code'])
       assert.match(
         (yield* said(task.threadId))[0] ?? '',
-        /^Fake claude-code ran out of usage while working on the task\. The work waits until .+\.$/,
+        /^Small on Fake claude-code ran out of usage while working on the task\. The work waits until .+\.$/,
       )
       yield* atReset(back)
       const [ready] = yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
@@ -528,7 +528,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake opencode takes the review over, on Small.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake opencode takes the review over.`,
       )
       assert.include(lines, 'review: The change holds.')
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } })))
@@ -540,7 +540,7 @@ describe('an agent out of usage', () => {
       const lines = yield* reviewerOut
       assert.include(
         lines,
-        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code takes the review over, on Small, with the review by the same maker.`,
+        `Fake codex ran out of usage during the review, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake claude-code takes the review over, with the review by the same maker.`,
       )
     }).pipe(Effect.provide(withAgents({ codex: { outOfUsage: { until: back } } }, ['opencode'])))
   })
@@ -586,7 +586,7 @@ describe('an agent out of usage', () => {
       assert.include(reply, 'Fake claude-code was working on this when it reached its usage limit, and may have done some of it already.')
       assert.include(
         yield* said(threadId),
-        `Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake codex takes over, on Small.`,
+        `Small on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake codex takes over until then.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })
@@ -871,7 +871,10 @@ describe('a step held for a usage limit, handed over by the person', () => {
       yield* start
       const [held] = yield* until(cardOf(projectId), (cards) => cards[0]?.waits != null)
       assert.deepStrictEqual([held?.step, held?.waits?.agentId], ['review', 'codex'])
-      assert.match((yield* said(task.threadId)).at(-1) ?? '', /^Fake codex ran out of usage during the review\. The review waits until /)
+      assert.match(
+        (yield* said(task.threadId)).at(-1) ?? '',
+        /^Small on Fake codex ran out of usage during the review\. The review waits until /,
+      )
       yield* handOver(task.taskId, { kind: 'retry', agentId: 'opencode', accountId: yield* usual('opencode') })
       yield* until(cardOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.include(yield* said(task.threadId), 'review: The change holds.')

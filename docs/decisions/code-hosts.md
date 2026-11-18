@@ -30,8 +30,8 @@ an adapter per product.
 
 - **Code hosts:** GitHub, GitLab, Bitbucket Cloud and Bitbucket Data Center,
   hosted or on a team's own server.
-- **Trackers:** Linear, Jira Cloud, Jira Data Center, Trello, and GitHub's
-  and GitLab's own issues.
+- **Trackers:** Linear, Jira Cloud, Jira Data Center, Trello, ClickUp, and
+  GitHub's and GitLab's own issues.
 
 Each adapter declares what its product can do, and the screens show only
 that, in the service's own words. Each has a fake for tests and a contract
@@ -676,7 +676,9 @@ task, and a release waiting on main waits on.
 
 **A task's issue moves as the task does:** "Move issues along with their
 tasks", on unless the person turns it off, takes it to In Progress, In
-Review, then Done. Leads and the coordinator change issues with `change_issue`, file
+Review, then Done. **Its pull request is linked on it** as it opens: "Link
+pull requests on their issues", on unless the person turns it off. ClickUp
+has no link to attach to a task, so there it is a comment, posted once. Leads and the coordinator change issues with `change_issue`, file
 them with `draft_issue` (project, milestone, cycle, parent, assignee and
 the like), comment with `comment_on_issue`, and find them with
 `find_issues`.

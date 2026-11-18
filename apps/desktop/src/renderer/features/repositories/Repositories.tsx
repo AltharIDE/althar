@@ -1,26 +1,29 @@
 import { useState } from 'react'
 
 import type { ConnectionList, ProjectRepository, RepositoryHost, Service } from '@althar/contracts'
-import { ChangeTarget, HostReach, type MapHost, type MapRepository, RepositoryRole, Problem } from '@althar/ui'
+import { ChangeTarget, HostReach, type MapHost, type MapRepository, Problem } from '@althar/ui'
 import { ProjectRepositories } from '@althar/ui/screens'
 
 import { device } from '../../shared/device'
 import { shortFolder } from '../../shared/folders'
 import { PartPending, pendingText } from '../../shared/Pending'
+import { useWorkToward, type WorkTowardModel } from '../../shared/useWorkToward'
 import { productBrand } from '../../shared/products'
 import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
 import { serviceOfProduct } from '../connections/ways'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
 import { HEADING } from '../projectSettings/sections'
+import { CloneInto } from './CloneInto'
 import s from './Repositories.module.css'
 import type { RepositoriesModel } from './useRepositories'
 
 /*
  * A project's repositories, in its settings: where each is on this computer
- * and where its work goes, its role, and for a fork, where its pull requests
- * open. The kit's part; a folder is added through the system's picker or
- * dropped on it, and a host its work goes to is connected over the page, as
- * the section connects a tracker.
+ * and where its work goes, the branch its new tasks work toward, and for a
+ * fork, where its pull requests open. The kit's part; a folder is added through the system's picker or
+ * dropped on it, or a repository cloned into it, chosen as a new project's
+ * is, and a host its work goes to is connected over the page, as the
+ * section connects a tracker.
  */
 
 export const text = {
@@ -33,15 +36,6 @@ export const text = {
     stays: `Stays on ${device.this}`,
     staysHere: `Its work stays on ${device.this}.`,
   },
-}
-
-const ROLES: Readonly<Record<ProjectRepository['role'], RepositoryRole>> = {
-  service: RepositoryRole.Service,
-  frontend: RepositoryRole.Frontend,
-  infrastructure: RepositoryRole.Infrastructure,
-  library: RepositoryRole.Library,
-  docs: RepositoryRole.Docs,
-  other: RepositoryRole.Other,
 }
 
 const TARGETS = { upstream: ChangeTarget.Upstream, fork: ChangeTarget.Fork, upstream_branch: ChangeTarget.UpstreamBranch } as const
@@ -59,15 +53,19 @@ const reachOf = (host: RepositoryHost): HostReach =>
         ? HostReach.Connected
         : HostReach.SignInAgain
 
-/** A repository as the kit's map draws it. */
-export const entryOf = (repository: ProjectRepository): MapRepository => ({
+/**
+ * A repository as the kit's map draws it; with `toward`, the branch its new
+ * tasks work toward, as the person changes it, for every repository, as Work
+ * toward in the Tasks section offers it, a remote or none.
+ */
+export const entryOf = (repository: ProjectRepository, toward?: WorkTowardModel['shown']): MapRepository => ({
   id: repository.id,
   name: repository.name,
   ...(repository.path === null
     ? {}
     : { where: shortFolder(repository.folder === null ? repository.path : `${repository.path}/${repository.folder}`) }),
   ...(repository.branch === null ? {} : { branch: repository.branch }),
-  role: ROLES[repository.role],
+  ...(toward === undefined ? {} : { toward: towardOf(repository, toward) }),
   tasks: repository.tasks,
   ...(repository.host === null
     ? {}
@@ -89,6 +87,16 @@ export const entryOf = (repository: ProjectRepository): MapRepository => ({
             }),
       }),
 })
+
+/** The branch a repository's new tasks work toward, its default unless the person chose another, among those it has. */
+const towardOf = (repository: ProjectRepository, shown: WorkTowardModel['shown']) => {
+  const defaultBranch = repository.defaultBranch ?? 'main'
+  return {
+    branch: shown(repository.id, repository.workToward ?? null) ?? defaultBranch,
+    defaultBranch,
+    branches: repository.branches ?? [defaultBranch],
+  }
+}
 
 /** The hosts the repositories' work goes to, each once, in the order their repositories come. */
 export const hostsOf = (repositories: ReadonlyArray<ProjectRepository>): MapHost[] =>
@@ -122,23 +130,29 @@ export function Repositories({
 }) {
   // A repository only on this computer being put on a host: which, and through which connection.
   const [putting, setPutting] = useState<{ readonly repository: string; readonly connection: string } | null>(null)
+  // A repository being chosen to clone into it.
+  const [cloning, setCloning] = useState(false)
+  const toward = useWorkToward(model.projectId ?? '')
   const repositories = model.repositories
   if (repositories === null)
     return model.error === null ? <PartPending label={pendingText.page} /> : <Problem className={s.error}>{model.error}</Problem>
   return (
     <ProjectRepositories
       project={model.project ?? text.project}
-      repositories={repositories.map(entryOf)}
+      repositories={repositories.map((repository) => entryOf(repository, model.projectId === null ? undefined : toward.shown))}
       hosts={hostsOf(repositories)}
       reading={model.reading}
       {...(model.worktrees === null ? {} : { worktrees: model.worktrees })}
       adding={model.adding}
-      onRoleChange={model.setRole}
+      onTowardChange={toward.change}
+      onTowardCreate={toward.create}
       onTargetChange={model.setTarget}
       onAddRemote={(id) => void model.addParentRemote(id)}
       onLeaveOut={(id) => void model.leaveOut(id)}
       onAdd={() => void model.add()}
       onDrop={(files) => void model.addDropped(files)}
+      onClone={() => setCloning((now) => !now)}
+      cloning={cloning ? <CloneInto model={model} list={connections} have={repositories} onDone={() => setCloning(false)} /> : null}
       // The window opens web pages in the person's browser.
       onOpen={(href) => void window.open(href, '_blank')}
       onConnect={(id) => {
@@ -151,7 +165,7 @@ export function Repositories({
       {...(model.projectId === null
         ? {}
         : { putOnHost: putOnHostIn(model.projectId, repositories, connections, putting, setPutting, onConnect) })}
-      {...(model.error === null ? {} : { error: model.error })}
+      {...(model.error === null && toward.failed === null ? {} : { error: model.error ?? toward.failed?.message })}
       headingLevel={HEADING.part}
       mapText={text.map}
     />

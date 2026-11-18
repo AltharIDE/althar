@@ -247,6 +247,8 @@ tasks' folders go after a wait, and come back when the task needs them.
   task's folder once empty. The branch stays, and the folder's last commit is
   kept under `refs/althar/kept/<workspace>`. The thread says so in a line
   ("Folder removed 3 days after the task finished · 2.3 GB").
+- **A folder another tool made never goes** ([bringing in other tools'
+  work](#bringing-in-other-tools-work)): it is that tool's to remove.
 - **What holds a folder back:** uncommitted changes; an abandoned change
   whose commits were pushed nowhere; something running from it or setting it
   up; being opened from Althar today; or git not being able to say what's in
@@ -341,6 +343,29 @@ Agents keep it current, since they make the changes that move it:
 by name, and `run_project` runs one by name, or the default without one. The
 list shows who said how: worked out, the person, the coordinator, or an
 agent. It is kept in the store (`runnables`).
+
+**What a task kept goes with its worktree.** One a task's lead keeps is that
+task's: what it runs, such as a prototype's lab, mostly lives only on the
+task's branch. Once every worktree of the task is cleaned up, it is dropped,
+with a `project.runnable_dropped` line in the project's record naming the
+task. Three kinds stay. One the person kept, or changed after, is theirs,
+whoever changes it later. One whose command names files that are all on its
+repository's default branch (its config merged, say) still runs as kept
+there, and belongs to the project from then on; so does one whose files can't
+be told for sure, read as the shell reads it (what the shell works out, such
+as `"$CONFIG"`, or a `cd` out of the repository). A command that names no file,
+only a port or a script's name, is taken as the task's own and goes: the
+person keeps it back by hand. Where its repository, its branch or a folder
+it runs in can't be read on this device now, or git fails reading it, it
+waits for the next look, as Althar starts: only a file the branch, read, lacks
+drops it. Only a run still as
+it was read goes, so one the person changes meanwhile stays, and two sweeps
+at once drop it, and say so, once. Runs kept before a run remembered its task
+are linked to it only on evidence of that run: each `project.runnable_kept`
+line that set its name, command and repository, paired with the leads'
+`keep_run` calls it answered, all of one task; else the run its task started,
+by its id, as it was kept. A command kept in two repositories isn't taken for
+the other's. Those of tasks already cleaned up go as Althar starts.
 
 Before a run, a copy with nothing installed is set up first.
 
@@ -498,9 +523,82 @@ settling stops the agents and runs Althar tracks. Codex gives no output file
 for a command, so what it left running is stopped through it alone, and the
 sweep finds the rest.
 
+## Bringing in other tools' work
+
+Moving to Althar from another tool should feel like a move, not a fresh
+start (DEV-211, DEV-37). As a project is made, on the welcome's step for it
+and beside a new project's folders, Althar lists what other tools left for
+its repositories on this computer, a tile a tool: their worktrees, the setup
+they keep, and Claude Code's and Codex's conversations there. Nothing is
+taken at first: a press takes all of a tool, its chevron opens what's in it
+to pick one by one (`OtherTools` in the kit). What was picked comes in
+behind the window, which moves on at once.
+
+**Read only, to the byte.** Nothing of another tool's is written: its
+stores are copied, with their write-ahead logs, into a folder of Althar's
+own and read there, so not even SQLite's shared-memory index of their files
+is touched, and git reads a worktree's state with its optional locks off,
+so it neither takes the index's lock nor writes a refreshed index back.
+
+**Found through git, named by the tools.** `git worktree list` names every
+worktree of a repository, whoever made it, so one made by a tool Althar
+doesn't know, or by hand, is found too. Each tool's own records only say
+whose it is and what it's called, as its code writes them: Orca's profile
+store (its `worktreeMeta`, split into parts), T3 Code's threads' projection,
+Paradev's host store (Superset's before it), Codex's mark in the worktree's
+git folder; Conductor's store isn't documented, so its worktrees are known
+by where Conductor makes them. Each is read on its own: a store that can't
+be read finds nothing, and the rest are read. Althar's own worktrees, review
+copies and its agents' sessions are never offered.
+
+**What each becomes, in the task model:**
+
+| Brought in | Becomes |
+|---|---|
+| A worktree on a branch | A change in place: the task's workspace is that folder, on its branch, with what it holds (`workspaces.made_by` names the tool). Its plan, on the person's lead, is held, so it waits Up next until they start it; its thread opens with where it came from. Its pull request, opened from its branch, is its own as any is |
+| A detached worktree (Codex makes them) | A quick task's, whose branch is made where its lead first writes |
+| A worktree on the default branch | Not offered: it can't be a task's branch |
+| A conversation that ran in a worktree brought in | That task's history, whether picked or not: its person's words and the agent's replies, at their own times, after a line saying where it came from |
+| Any other conversation | An aside on Scratch, its history the same, its copy of the default branch made only once the person writes to it |
+| A setup (`conductor.json`, `orca.yaml`, `t3.json`, `.paradev/config.toml`, `.cursor/worktrees.json`) | Its repository's recorded setup, one per repository; a command that reads the tool's variables for where the checkout is (`$CONDUCTOR_ROOT_PATH` and the like) has them set first, and Conductor's `.worktreeinclude` names the files to copy in |
+
+**A folder another tool made stays that tool's.** Althar never sets it up
+(the tool did), never commits in it to leave it, never rewinds, moves or
+switches it, and never removes it: finished, it isn't cleaned up; a change
+in one can't be dropped or joined into another; it can't move to Local. Where
+its tool removed it, the work comes back from its branch in a folder of
+Althar's own, never in the tool's place, and is Althar's from then on. A
+detached one, on no branch, has its commit kept as it comes in, under
+`refs/althar/kept/<workspace>` as a removed folder's last commit is, so it
+comes back at that commit rather than where it branched off.
+
+**Carrying a conversation on** is how any thread carries on: the next
+session's brief has the thread so far, the conversation brought in with it,
+an aside's first one too. Claude Code's own `--resume` of a copied session
+was turned down for now: it would carry one agent's session only, where the
+brief carries any conversation to any agent.
+
+**Twice is once.** What came in is kept by its key (a worktree's folder, a
+setup's tool and checkout, a conversation's agent and id, in `brought_in`),
+so bringing it in again finds it, and listing again says what it became.
+Each thing comes in in a transaction of its own (an aside together with its
+history): one that can't come in says why, and the rest come in. The window
+has moved on by then, so what didn't come in, or a bringing in that failed as
+a whole, is said in the project's conversation, where it stays: each by name
+and why, with Try again for what another try could bring in. One the runtime
+never got (refused before it answered) it can't say, so the window keeps what
+was picked, by project and past a reload, and says it there the same way
+until another try goes through.
+
+Not built yet: offering what's new since from a project's settings, for a
+project made before this, or one still worked on in another tool; the board
+card saying where a task came from; and Cursor's own chats, which it keeps
+in its editor's storage.
+
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) opened every sandbox's network.
 - 8 Nov 2026: Althar repairs a worktree whose link to its repository broke (#654).
 - 10 Nov 2026: a running task moves between a worktree and Local, and changes the branch it works toward at any time (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 17 Nov 2026: bringing in other tools' worktrees, setups and conversations (DEV-211, DEV-37): each worktree a task in place, which Althar never sets up, moves or removes.

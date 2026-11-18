@@ -178,10 +178,15 @@ describe('a pull request, by the person and the lead', () => {
           yield* Deferred.succeed(release, undefined)
         }
         if (news === 'limited') {
-          yield* until(
-            sql<{ waiting: string | null }>`SELECT waits_for_place AS waiting FROM threads WHERE id = ${threadId}`,
-            (rows) => rows[0]?.waiting != null,
-          )
+          // It waits for its account's reset, as its card says, never for a place: no agent is busy, and none is waited for.
+          const [held] = yield* until(cards(projectId), (all) => all.find((card) => card.taskId === taskId)?.waits != null)
+          const [session] = yield* sql<{
+            accountId: string
+          }>`SELECT account_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC LIMIT 1`
+          assert.strictEqual(held?.waits?.accountId, session?.accountId)
+          assert.isNull(held?.queued)
+          const [marker] = yield* sql<{ waiting: string | null }>`SELECT waits_for_place AS waiting FROM threads WHERE id = ${threadId}`
+          assert.isNull(marker?.waiting)
           assert.lengthOf(yield* turns(threadId), before)
           const [queued] = yield* sql<{
             body: string
@@ -191,6 +196,8 @@ describe('a pull request, by the person and the lead', () => {
         }
         const heard = yield* until(turns(threadId), (rows) => rows.slice(before).some((row) => row.prompt?.includes(expected) === true))
         assert.isTrue(heard.slice(before).some((row) => row.prompt?.includes(expected) === true))
+        // Back in usage, its card no longer says it waits for the reset.
+        if (news === 'limited') yield* until(cards(projectId), (all) => all.find((card) => card.taskId === taskId)?.waits == null)
         // Sent back for its checks, it is told an update from main is update_branch or the queue, never the plan again.
         if (news === 'queue')
           assert.isTrue(

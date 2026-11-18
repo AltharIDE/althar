@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useRouterState } from '@tanstack/react-router'
 import { useEffect, useMemo, useState } from 'react'
 import { Room } from '@althar/ui'
+import { socketCanCall } from '@althar/contracts'
 
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
@@ -9,6 +10,7 @@ import { draftKey, setDraftText } from '../../shared/drafts'
 import { useEditorList } from '../../shared/OpenIn'
 import { usePreferences } from '../../shared/usePreferences'
 import { useNewTab } from '../tabs/TabsFrame'
+import { showHomes } from '../homes/useHomes'
 import { isSection } from '../settings/sections'
 import { isProjectSection } from '../projectSettings/sections'
 import type { Place } from '../../shared/dictation/Loose'
@@ -22,6 +24,18 @@ import type { Context, Entry, Go, Use } from './model'
 const EMPTY_PROJECTS: ReadonlyArray<import('@althar/contracts').ProjectSummary> = []
 const EMPTY_DOCUMENTS: ReadonlyArray<import('@althar/contracts').SearchDocument> = []
 const USES = 'althar.search.uses'
+const remoteAction = (go: Go) => {
+  switch (go.to) {
+    case 'allow':
+      return socketCanCall('Answer')
+    case 'merge':
+      return socketCanCall('Merge')
+    case 'file':
+      return socketCanCall('OpenCode')
+    default:
+      return true
+  }
+}
 const readUses = (): Readonly<Record<string, Use>> => {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(USES) ?? '{}')
@@ -78,6 +92,7 @@ export function FinderView({
   place?: (to: Place) => void
 }) {
   const { client, cache, feed, host } = useServices()
+  const remote = client.connection !== undefined
   const navigate = useNavigate()
   const path = useRouterState({ select: (state) => state.location.pathname })
   const thread = path.startsWith('/threads/') ? path.slice('/threads/'.length) : null
@@ -105,13 +120,20 @@ export function FinderView({
   const actionRead = useQuery({ ...reads(client).thread(drilled ?? ''), enabled: drilled !== null })
   const hydrated = useMemo(() => {
     // Dictate is there where this window can dictate.
-    const all = withTaskActions(entries, actionRead.data).filter((one) => one.id !== 'command:dictate' || host.dictation !== undefined)
+    const available = withTaskActions(entries, actionRead.data).filter(
+      (one) => one.id !== 'command:dictate' || host.dictation !== undefined,
+    )
+    const all = remote
+      ? available
+          .filter((one) => remoteAction(one.go))
+          .map((one) => (one.acts === undefined ? one : { ...one, acts: one.acts.filter((act) => remoteAction(act.go)) }))
+      : available
     if (place === undefined) return all
     return all
       .filter((one) => one.kind === 'task' || one.id.startsWith('project:'))
       .map((one) => ({ ...one, acts: one.acts?.filter((act) => act.id === 'open').map((act) => ({ ...act, title: 'Place it here' })) }))
-  }, [entries, actionRead.data, place, host.dictation])
-  const editors = useEditorList()
+  }, [entries, actionRead.data, place, host.dictation, remote])
+  const editors = useEditorList(!remote)
   const { preferences } = usePreferences()
   const newTab = useNewTab()
   const [error, setError] = useState<string | null>(null)
@@ -210,8 +232,10 @@ export function FinderView({
         return
       }
       case 'command':
-        if (go.command === 'new-project') newTab.start()
-        else if (go.command === 'usage') onUsage?.()
+        if (go.command === 'new-project') {
+          if (remote) showHomes()
+          else newTab.start()
+        } else if (go.command === 'usage') onUsage?.()
         else if (go.command === 'dictate') pressDictationShortcut()
         else if (go.command === 'stop' && go.taskId !== undefined) await client.stopTask(go.taskId)
         else if (go.command === 'resume' && go.taskId !== undefined) await client.resumeTask({ taskId: go.taskId })

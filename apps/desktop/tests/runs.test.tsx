@@ -13,6 +13,12 @@ import { askText, nameOf } from '../src/renderer/features/runs/useRuns'
 import { coordinatorSnapshot, fakeClient, repositories, runnables, scripts } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
+const navigate = vi.hoisted(() => vi.fn())
+vi.mock('@tanstack/react-router', async (actual) => ({
+  ...(await actual<typeof import('@tanstack/react-router')>()),
+  useNavigate: () => navigate,
+}))
+
 /*
  * What a project runs, from its front (ADR-090): Run opens the list, each
  * started and stopped there, several at once; where it runs picked beside it,
@@ -125,13 +131,16 @@ describe('what the project runs, from its front', () => {
       repository: 'meridian-api',
     })
 
-    // The coordinator is asked in the project's conversation.
+    // The coordinator is asked in the project's conversation: its composer holds the ask, unsent.
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add something to run' })).toBeNull())
     await userEvent.click((await listed()).getByRole('button', { name: 'Add something to run' }))
     const ask = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.click(ask.getByRole('radio', { name: 'Ask the coordinator' }))
     await userEvent.click(ask.getByRole('button', { name: 'Ask the coordinator' }))
-    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: askText, disposition: 'after_current' }))
+    expect(screen.queryByRole('dialog', { name: 'Add something to run' })).toBeNull()
+    expect(screen.getByDisplayValue(askText)).toBeTruthy()
+    expect(navigate).toHaveBeenLastCalledWith({ to: '/projects/$projectId', params: { projectId: 'p1' }, search: { room: 'talk' } })
+    expect(client.send).not.toHaveBeenCalled()
   })
 
   it('says over the composer what went wrong running one from the button', async () => {
@@ -183,6 +192,8 @@ describe('what the project runs, from its front', () => {
     expect(client.orderRunnables).toHaveBeenLastCalledWith('p1', ['rnbl_storybook', 'rnbl_dev'])
     await userEvent.click(list.getByRole('button', { name: 'Remove Storybook' }))
     expect(client.dropRunnable).toHaveBeenCalledWith('p1', 'rnbl_storybook')
+    // Gone from the list at once, before the runtime's word of it.
+    expect(list.queryByRole('button', { name: 'Remove Storybook' })).toBeNull()
     // Its repository's own way: named, it stays its own.
     await userEvent.click(list.getByRole('button', { name: 'Edit bun run dev' }))
     const edit = within(await screen.findByRole('dialog', { name: 'Edit bun run dev' }))
@@ -197,9 +208,9 @@ describe('what the project runs, from its front', () => {
     })
     // Back to the list once kept; from there, adding opens too.
     const again = within(await screen.findByRole('dialog', { name: 'What meridian runs' }))
-    await userEvent.click(again.getByRole('button', { name: 'Edit Storybook' }))
-    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Edit Storybook' })).getByRole('button', { name: 'Remove' }))
-    expect(client.dropRunnable).toHaveBeenLastCalledWith('p1', 'rnbl_storybook')
+    await userEvent.click(again.getByRole('button', { name: 'Edit bun run dev' }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Edit bun run dev' })).getByRole('button', { name: 'Remove' }))
+    expect(client.dropRunnable).toHaveBeenLastCalledWith('p1', 'rnbl_dev')
     await userEvent.click(
       within(await screen.findByRole('dialog', { name: 'What meridian runs' })).getByRole('button', { name: 'Add something to run' }),
     )

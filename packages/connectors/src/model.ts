@@ -15,11 +15,21 @@ import type { HostReleases } from './releases'
  */
 
 /** Every product Althar has, or will have, an adapter for. Cloud and Data Center are separate products. */
-export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export const Product = Schema.Literals([
+  'github',
+  'gitlab',
+  'bitbucket_cloud',
+  'bitbucket_dc',
+  'linear',
+  'jira_cloud',
+  'jira_dc',
+  'trello',
+  'clickup',
+])
 export type Product = typeof Product.Type
 
 /** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
-export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello', 'clickup'])
 export type Service = typeof Service.Type
 
 /** Someone on the service: a person, or a bot such as CI. */

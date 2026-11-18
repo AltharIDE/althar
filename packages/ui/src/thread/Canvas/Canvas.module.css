@@ -238,5 +238,17 @@
 .page {
   flex: 1;
   min-height: 0;
+  position: relative;
   background: var(--paper);
+}
+
+/* the canvas's picture, while something of the window's own is over its place */
+.pageStill {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  user-select: none;
 }

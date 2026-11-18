@@ -12,7 +12,7 @@ import { ClientIdentities } from './ClientIdentities'
 import { Instance } from './Instance'
 import { MAX_SOCKET_FRAME, socketPort, type SocketPort } from './socketPort'
 
-import { AUTH_FRAME_LIMIT, LocalApiEndpoint, readFrame as read } from '@althar/transport-node'
+import { AUTH_FRAME_LIMIT, untilPortCloses, LocalApiEndpoint, readFrame as read } from '@althar/transport-node'
 export { authenticateApiClient, openApiSocket, LocalApiEndpoint, type ClientAuthentication } from '@althar/transport-node'
 const MAX_CONNECTIONS = 32
 const failed = () =>
@@ -57,7 +57,7 @@ const accept = (port: SocketPort, secret: string) =>
     port.post({ type: 'Authenticated', identity, apiVersion: API_VERSION })
     const sender =
       identity.role === 'paired_device' ? { kind: 'paired_device' as const, deviceId: identity.deviceId } : { kind: 'socket' as const }
-    yield* Layer.launch(connection(port, sender, identity))
+    yield* untilPortCloses(port, Layer.launch(connection(port, sender, identity)))
   })
 
 /** A fresh private socket per launch; the descriptor is published only after the server is listening. No network interface is opened. */

@@ -28,6 +28,8 @@ export const runtimeWith = (
   /** How long checks may run before Althar gives up on them; its own default unless a test says. */
   checksStuck?: Duration.Duration,
   agent: FakeAgentOptions = {},
+  /** How long a look that heard checks fail has to tell the lead before the card says nobody is on them. */
+  checksTold?: Duration.Duration,
 ) =>
   Queries.layer.pipe(
     Layer.provideMerge(
@@ -36,6 +38,7 @@ export const runtimeWith = (
         listenEvery: Duration.millis(100),
         idle: { quiet: Duration.millis(300), ...idle },
         ...(checksStuck === undefined ? {} : { checksStuck }),
+        ...(checksTold === undefined ? {} : { checksTold }),
       }),
     ),
   )

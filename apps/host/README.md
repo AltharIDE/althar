@@ -145,3 +145,96 @@ service and its sessions running. Existing service updates are unchanged: an
 explicit apply restarts the service and disconnects attached clients, which
 check the new host identity/API version when reconnecting. A newer incompatible
 API requires a compatible client before attachment.
+
+## Direct HTTPS/WSS and device pairing
+
+Direct access is opt-in. Supply a matching RSA or ECDSA PEM certificate and key as private
+regular files (mode 0600); keep the TLS key outside the profile and worktrees.
+The leaf certificate may be private or self-signed and can be up to 4 KiB
+in DER form. The pairing code carries the certificate and pins its public
+key. Reachability can use Tailscale, another private network or a direct
+HTTPS address. No relay or Althar account is required.
+
+```sh
+althar-host configure-network --profile /path/to/profile \
+  --origin https://home.example:6769 --listen-address 0.0.0.0 \
+  --tls-certificate /private/tls/certificate.pem --tls-key /private/tls/key.pem
+systemctl --user restart althar-host.service
+althar-host pair --profile /path/to/profile
+```
+
+In the desktop, open **Homes → Connect a home…** (also available from **File → Homes…**). Choose **Pairing code**. Paste the code,
+check the destination, name the home and choose **Pair and open**. A home opens
+in its own window; its projects stay on the host. SSH remains another route.
+A code enrolls one device key and expires after five minutes or on host restart.
+A lost reply may retry with the same saved pending key while the code is valid.
+The desktop requires an OS keyring and never saves plaintext connection keys.
+
+These devices can work with existing projects/tasks, but cannot approve
+permissions or enroll trusted approval devices. Desktop file transfers,
+previews, provider setup and protected approval enrollment are separate work.
+A personal host remains a trusted OS-user boundary, not an isolated worker.
+
+```sh
+althar-host devices --profile /path/to/profile
+althar-host revoke-device --profile /path/to/profile --device-id dev_...
+althar-host disable-network --profile /path/to/profile
+```
+
+Revocation ends the device's streams and prevents reconnect immediately;
+commands already admitted may finish. `devices` is paged: use its returned
+`next` value with `--after`. Disabling/reconfiguring the listener takes an
+explicit service restart. Existing updater policy stays unchanged. Compatible
+updates and restarts preserve registered devices. Pair again after changing
+the TLS key or replacing a self-signed certificate. Renewals with the same
+key and a still-trusted certificate chain reconnect normally. Keep the
+desktop keyring and home database in their respective
+recovery plans. Invitations are deliberately not restored after a restart.
+
+## Native worker diagnostic
+
+The worker listener is opt-in and uses a separate gRPC port. Provision a CA
+and a server certificate with a subject alternative name matching the URL
+that workers will use. Give each worker its own client certificate and
+private key. Keep PEM files at mode 0600 and keep the server key outside
+the home profile and worktrees. Use a dedicated OS account for each worker
+and keep its credentials and journal private to that account.
+
+For a worker on the same Linux machine, use a server certificate valid for
+`localhost` and bind to loopback. For a worker on another machine, choose a
+reachable private IP and the matching certificate name.
+
+```sh
+althar-host configure-workers --profile /path/to/profile \
+  --worker-ca /private/tls/ca.pem --tls-certificate /private/tls/home.pem \
+  --tls-key /private/tls/home.key
+althar-host enroll-worker --profile /path/to/profile \
+  --worker-certificate /private/tls/client.pem
+systemctl --user restart althar-host.service
+althar-host worker-run --profile /path/to/profile --worker-id "$WORKER_ID"
+```
+
+Use the ID printed by `enroll-worker` as `WORKER_ID` and the ID from
+`althar-host status` as `HOME_ID`. On the worker, invoke the Linux binary
+once to pick up the queued diagnostic. Keep the same journal directory on
+subsequent invocations so the worker can replay a recorded result.
+
+```sh
+cargo build --locked --release -p althar-worker
+target/release/althar-worker https://localhost:6770 "$HOME_ID" "$WORKER_ID" \
+  /private/tls/ca.pem /private/tls/client.pem /private/tls/client.key /private/worker-journal
+althar-host worker-result --profile /path/to/profile --attempt-id "$ATTEMPT_ID"
+```
+
+Use the attempt ID from `worker-run` as `ATTEMPT_ID`. A `succeeded` result
+contains the diagnostic output. An `unknown` result means the home could
+not confirm execution, including when a start grant was lost or an offer
+expired. Each attempt gets at most one start grant. Enrollment and attempt
+state survive home restarts in `workers/ledger.sqlite`. Preserve that
+ledger and the worker journal when recovering an installation.
+
+Use `revoke-worker --worker-id "$WORKER_ID"` to reject the certificate on new
+connections and at the next message on an existing stream. A replacement
+certificate gets a fresh enrollment. Use `disable-workers` and restart the
+home to close the listener. The worker requires its own release artifact
+and rollout before it can participate in managed updates.

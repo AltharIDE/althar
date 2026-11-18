@@ -369,7 +369,8 @@ describe('the project’s bar', () => {
     const aside = {
       ...card(),
       state: 'open' as const,
-      createdAt: '2026-11-11T11:00:00.000Z',
+      // Fresh against the real clock: an aside left over a week folds into "older" and loses its tab.
+      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
       settledAt: null,
       changed: null,
       here: [],
@@ -765,7 +766,7 @@ describe('the Talk room', () => {
     const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
     withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(await screen.findByText('Waiting · 4 agents busy')).toBeTruthy()
     // Nothing to start: it starts on its own once an agent is free. It can still be held, which takes it out of the line.
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
@@ -789,7 +790,7 @@ describe('the Talk room', () => {
     const waitingCard = card({ phase: 'running', step: 'review', queued: { busy: 4, atOnce: 4 }, branch: 'althar/midway' })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
     withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(await screen.findByText('Waiting · 4 agents busy')).toBeTruthy()
     const track = screen.getByRole('list', { name: 'Steps' })
     expect(track.getAttribute('data-status')).toBe('queued')
     // The branch is on the task's own view, not on the card.

@@ -1,3 +1,4 @@
+import { DevicePairings } from './DevicePairings'
 import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
 import { Context, Layer } from 'effect'
 
@@ -28,6 +29,7 @@ import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
 import { PageTools } from './PageTools'
 import { Canvases } from './Canvases'
+import { Elsewhere } from './Elsewhere'
 import { Situations } from './Situations'
 import { PlanUsage } from './PlanUsage'
 import { Permissions } from './Permissions'
@@ -114,7 +116,10 @@ export const layer = (options: RuntimeLayerOptions) => {
       Layer.provideMerge(
         Errands.layer.pipe(
           Layer.provideMerge(
-            Layer.mergeAll(ApiCommands.layer, ClientIdentities.layer).pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))),
+            DevicePairings.layer.pipe(
+              Layer.provideMerge(Layer.mergeAll(ApiCommands.layer, ClientIdentities.layer)),
+              Layer.provideMerge(startupLayer('instance', Instance.layer)),
+            ),
           ),
         ),
       ),
@@ -212,6 +217,8 @@ export const layer = (options: RuntimeLayerOptions) => {
         PageTools.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
         Canvases.layer,
+        // What other tools left for a project's repositories, and bringing it in (Elsewhere.ts).
+        Elsewhere.layer,
         MachineLoad.layer,
         Overlaps.layer,
         // A child that ended, and a call that waits while the person is away (Situations.ts).

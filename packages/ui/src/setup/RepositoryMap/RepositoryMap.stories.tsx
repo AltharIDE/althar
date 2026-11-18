@@ -18,7 +18,8 @@ const meta = {
     repositories: MAP_MERIDIAN,
     hosts: MAP_HOSTS,
     worktrees: '~/Althar/meridian',
-    onRoleChange: fn(),
+    onTowardChange: fn(),
+    onTowardCreate: fn(),
     onTargetChange: fn(),
     onLeaveOut: fn(),
     onOpen: fn(),
@@ -297,11 +298,23 @@ export const LeavingOutQuietly: Story = {
   },
 }
 
-export const ChangingRole: Story = {
+/** The branch new tasks work toward, said on each card: pointed at, a picker that says what changing it does. */
+export const ChangingTheBranch: Story = {
   play: async ({ args, canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('combobox', { name: 'Role of meridian-infra' }))
-    await userEvent.click(await within(document.body).findByRole('option', { name: 'Library' }))
-    await expect(args.onRoleChange).toHaveBeenCalledWith('infra', RepositoryRole.Library)
+    const page = within(document.body)
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Branch new tasks in meridian-api work toward: main' }))
+    await expect(await page.findByText(/New tasks start from this branch and open their pull requests into it/)).toBeVisible()
+    await userEvent.click(page.getByRole('option', { name: /release\/2\.4/ }))
+    await expect(args.onTowardChange).toHaveBeenCalledWith('api', 'release/2.4')
+  },
+}
+
+/** No role to pick, and no line saying Althar opens the pull requests where it does. */
+export const Quiet: Story = {
+  play: async ({ canvasElement }) => {
+    const map = within(canvasElement)
+    await expect(map.queryByRole('combobox', { name: /Role of/ })).toBeNull()
+    await expect(map.queryByText('Althar opens the pull requests')).toBeNull()
   },
 }
 

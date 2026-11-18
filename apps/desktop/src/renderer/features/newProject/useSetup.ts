@@ -1,4 +1,4 @@
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import type { ConnectionList, ConnectionSummary, Product, RepositoryOwner, Service } from '@althar/contracts'
@@ -8,10 +8,9 @@ import { repositoryFolder } from '@althar/ui/screens'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { device } from '../../shared/device'
-import { useFound } from '../../shared/found'
+import { thingOf, useHostRepositories } from '../../shared/hostRepositories'
 import { productBrand } from '../../shared/products'
 import { changesOn, hostnameOf, remoteOf } from '../../shared/remotes'
-import { ago } from '../../shared/time'
 import { serviceBrand, serviceName, serviceOfProduct } from '../connections/ways'
 import { type Draft, type DraftClone, type DraftHome, type DraftIssues, type DraftPlan, type DraftStore, sameRepository } from './draft'
 
@@ -24,25 +23,11 @@ import { type Draft, type DraftClone, type DraftHome, type DraftIssues, type Dra
  * welcome shows the same, a step at a time.
  */
 
-/** The code hosts Althar works with, in the order they're offered. */
-const HOST_SERVICES: ReadonlyArray<Service> = ['github', 'gitlab', 'bitbucket']
-
 /** The trackers a project's issues can go to, beside its code host's own. */
-const TRACKER_SERVICES: ReadonlyArray<Service> = ['linear', 'jira', 'trello']
-
-/** What a host calls a repository. */
-const thingOf = (service: Service) => (service === 'gitlab' ? 'project' : 'repository')
+const TRACKER_SERVICES: ReadonlyArray<Service> = ['linear', 'jira', 'trello', 'clickup']
 
 /** A code host's own issues, where Althar takes them: GitHub's and GitLab's. Bitbucket's are rarely where a team keeps them. */
 const issuesOf = (product: Product | null) => (product === 'github' ? 'GitHub Issues' : product === 'gitlab' ? 'GitLab issues' : null)
-
-/** A repository's path on a host, as its URL says it: https://github.com/a/b, git@github.com:a/b.git. Null for anything else. */
-const pastedOf = (typed: string) => {
-  const text = typed.trim()
-  if (!/^(?:https?:\/\/|ssh:\/\/|git@)/i.test(text)) return null
-  const ref = remoteOf(text.replace(/\/+$/, ''))
-  return ref === null || !ref.path.includes('/') ? null : ref
-}
 
 /** How the setup reads, for the page: each part, what is chosen, and what Create does. */
 export interface SetupModel {
@@ -121,123 +106,19 @@ const nameOf = (connection: ConnectionSummary, all: ReadonlyArray<ConnectionSumm
 export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList | null): SetupModel & SetupActions => {
   const { client, host: system } = useServices()
   const read = reads(client)
-  const found = useFound()
   const [connecting, setConnecting] = useState<Service | null>(null)
   const change = (next: (now: Draft) => Draft) => store.change(draft.id, next)
 
-  const codeHosts = ready(list, (service) => HOST_SERVICES.includes(service))
   const trackers = ready(list, (service) => TRACKER_SERVICES.includes(service))
   // Folders chosen, or being read, start it on A folder; otherwise Clone.
   const way: SetupWay =
     draft.way ?? (draft.folders.some((folder) => folder.came === undefined) || draft.reading.length > 0 ? 'folder' : 'clone')
-  const listed = useQueries({ queries: codeHosts.map((connection) => read.hostRepositories(connection.id)) })
   const words = draft.name
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((word) => word.length >= 3)
+  const { codeHosts, hosts, repositories, failed, pasted, retry, cloneOf } = useHostRepositories(list, draft.query, words)
   const slug = repositoryFolder(draft.name.trim())
-
-  const hosts: ReadonlyArray<SetupHost> = HOST_SERVICES.map((service) => {
-    const option = list?.products.find((product) => product.service === service && product.hostedUrl !== null)
-    return {
-      id: service,
-      name: serviceName(service),
-      brand: serviceBrand(service),
-      thing: thingOf(service),
-      connected: codeHosts.some((connection) => serviceOfProduct(connection.product) === service),
-      how:
-        option?.browserSignIn === true
-          ? 'In your browser'
-          : option?.tokenNeeds === 'email'
-            ? 'With an Atlassian API token'
-            : 'With a token',
-    }
-  })
-
-  // What main found here, by name: a repository of the same name may be the one to clone, and is added, not cloned, if so.
-  const foundByName = new Map((found.data?.repositories ?? []).map((one) => [one.name.toLowerCase(), one]))
-  const repositoryOf = (
-    connection: ConnectionSummary,
-    path: ReadonlyArray<string>,
-    extra: Partial<HostedRepository> = {},
-  ): HostedRepository => {
-    const name = path.at(-1) ?? ''
-    const here = foundByName.get(name.toLowerCase())
-    return {
-      id: `${connection.id}:${path.join('/')}`,
-      host: serviceOfProduct(connection.product),
-      owner: path.slice(0, -1).join('/'),
-      name,
-      description: null,
-      private: false,
-      pushed: null,
-      like: words.some((word) => name.toLowerCase().includes(word)),
-      here: here === undefined ? null : here.where,
-      ...extra,
-    }
-  }
-  const all = codeHosts.flatMap((connection, at) =>
-    (listed[at]?.data ?? [])
-      .filter((one) => !one.archived)
-      .map((one) =>
-        repositoryOf(connection, one.path, {
-          description: one.description,
-          private: one.private,
-          pushed: one.pushedAt === null ? null : ago(one.pushedAt),
-        }),
-      ),
-  )
-  const reading = listed.some((query) => query.data === undefined && !query.isError)
-  const failed = codeHosts.flatMap((connection, at) => (listed[at]?.isError === true ? [serviceOfProduct(connection.product)] : []))
-
-  // A URL pasted: the repository it names, on a host connected where one is; else cloned with the person's own git sign-in.
-  const ref = pastedOf(draft.query)
-  const pastedConnection = ref === null ? undefined : codeHosts.find((connection) => hostnameOf(connection.webUrl) === ref.host)
-  const pastedClone: DraftClone | null =
-    ref === null
-      ? null
-      : {
-          id: pastedConnection === undefined ? `url:${draft.query.trim()}` : `${pastedConnection.id}:${ref.path}`,
-          remote: ref.path,
-          from:
-            pastedConnection === undefined ? { url: draft.query.trim() } : { connectionId: pastedConnection.id, path: ref.path.split('/') },
-          product: pastedConnection?.product ?? null,
-          hostName: pastedConnection?.name ?? ref.host,
-          host: ref.host,
-          here: null,
-        }
-  const pasted: HostedRepository | null =
-    ref === null || pastedClone === null
-      ? null
-      : (all.find((one) => one.id === pastedClone.id) ?? {
-          id: pastedClone.id,
-          host: pastedConnection === undefined ? '' : serviceOfProduct(pastedConnection.product),
-          owner: ref.path.split('/').slice(0, -1).join('/'),
-          name: ref.path.split('/').at(-1) ?? ref.path,
-          description: null,
-          private: false,
-          pushed: null,
-          like: false,
-          here: null,
-        })
-
-  const cloneOf = (id: string): DraftClone | null => {
-    if (pastedClone !== null && pastedClone.id === id) return pastedClone
-    const connection = codeHosts.find((one) => id.startsWith(`${one.id}:`))
-    const shown = all.find((one) => one.id === id)
-    if (connection === undefined || shown === undefined) return null
-    const path = [...shown.owner.split('/').filter(Boolean), shown.name]
-    const here = foundByName.get(shown.name.toLowerCase())
-    return {
-      id,
-      remote: path.join('/'),
-      from: { connectionId: connection.id, path },
-      product: connection.product,
-      hostName: connection.name,
-      host: hostnameOf(connection.webUrl),
-      here: here === undefined ? null : { found: here.id, where: here.where },
-    }
-  }
 
   // Where a clone goes unless the person chooses: read once a window, as where people keep code changes seldom.
   const usual = useQuery({ queryKey: ['clone-place'], queryFn: () => system.clonePlace(), staleTime: Infinity, enabled: way === 'clone' })
@@ -394,7 +275,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
   return {
     way,
     hosts,
-    repositories: reading && all.length === 0 ? null : all,
+    repositories,
     failed,
     pasted,
     chosen: draft.clone?.id ?? null,
@@ -443,9 +324,7 @@ export const useSetup = (draft: Draft, store: DraftStore, list: ConnectionList |
         name: now.name.trim() === '' ? (clone.remote.split('/').at(-1) ?? '').replace(/^./, (first) => first.toUpperCase()) : now.name,
       }))
     },
-    retry: () => {
-      for (const query of listed) if (query.isError) void query.refetch()
-    },
+    retry,
     connect: setConnecting,
     endConnect: () => setConnecting(null),
     onHome: (value) =>

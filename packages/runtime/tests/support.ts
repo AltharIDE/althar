@@ -41,6 +41,7 @@ import type { LoadOptions } from '../src/MachineLoad'
 import { WORK } from '../src/machine'
 import type { PlanUsageOptions } from '../src/PlanUsage'
 import type { ModelFactsOptions } from '../src/ModelFacts'
+import { KEPT_FOR } from '../src/Queries'
 
 /** The repository every test starts from, made once per worker: copying it is much quicker than running git anew. */
 let template: string | undefined
@@ -132,8 +133,11 @@ const launchedEnv = (agentId: string, cwd: string, env: Readonly<Record<string, 
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
 
-/** Whether the fake `claude-code` holds the coordinator in a sandbox it never leaves, as Claude Code's does where it starts. */
-export const fakeSandbox = { contains: false }
+/**
+ * Whether the fake `claude-code` holds the coordinator in a sandbox it never leaves, as Claude Code's does where it starts;
+ * and its sandbox probe, which each of its sessions waits for first (`ready`), in at once unless a test holds it.
+ */
+export const fakeSandbox = { contains: false, ready: (): Promise<unknown> => Promise.resolve() }
 
 /** When a fake agent's sign-in ends, by its id, as its status says it where the test sets one (Claude Code's claude.ai sign-in). */
 export const fakeSignInEnds = new Map<string, string>()
@@ -192,6 +196,7 @@ export const definition = (
           return { ...(options?.skills === undefined ? {} : registry['claude-code'].sessionMeta?.(role, options)), fake: { asks: true } }
         },
         contains: () => fakeSandbox.contains,
+        ready: () => fakeSandbox.ready(),
         upFront: true as const,
       }
     : {}),
@@ -339,10 +344,13 @@ export const runtime = (
     readonly checksAppear?: Duration.Duration
     /** How long a change's checks may run before it is the person's; 45 minutes unless a test says. */
     readonly checksStuck?: Duration.Duration
+    readonly checksTold?: Duration.Duration
     /** How long a publish step that may pass waits before it is tried again; none at all unless a test says. */
     readonly publishAgain?: Duration.Duration
     /** How long a task is under way after its agent went or its lead's turn ended; none at all unless a test says. */
     readonly betweenAgents?: Duration.Duration
+    /** How long cards are kept between reads at most, until their task moves: none unless a test says, as most write the store by hand. */
+    readonly keptFor?: Duration.Duration
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
     /** Agents signed in on a key, paid per use, rather than a plan: by id, or by an account's home. */
     readonly perUse?: ReadonlyArray<string>
@@ -383,6 +391,8 @@ export const runtime = (
     readonly page?: RuntimeOptions['page']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
+    /** The zone leads and the coordinator are told the person's local time in; the computer's unless a test says. */
+    readonly zone?: RuntimeOptions['zone']
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
     readonly disk?: RuntimeOptions['disk']
     /** Whether agents' services answer, and how long a step waits to try one again; no service answers any test unless it says. */
@@ -413,9 +423,13 @@ export const runtime = (
     ...(more.mergeLineEvery === undefined ? {} : { mergeLineEvery: more.mergeLineEvery }),
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
+    ...(more.checksTold === undefined ? {} : { checksTold: more.checksTold }),
     publishAgain: more.publishAgain ?? Duration.zero,
     ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
+    // Cards worked out afresh on every read, as most tests write the store by hand; `ALTHAR_TEST_KEEP_CARDS=1` keeps them as
+    // Althar does, to run any test on the cache production reads through.
+    keptFor: more.keptFor ?? (process.env.ALTHAR_TEST_KEEP_CARDS === '1' ? KEPT_FOR : Duration.zero),
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),
@@ -432,8 +446,9 @@ export const runtime = (
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     ...(more.page === undefined ? {} : { page: more.page }),
     ...(more.skills === undefined ? {} : { skills: more.skills }),
-    busy: { machine: ROOMY, ...more.busy },
+    busy: { machine: ROOMY, pressure: false, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
+    ...(more.zone === undefined ? {} : { zone: more.zone }),
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
     // No test reaches a real service: one asked about answers, as it would online, unless the test says.
     connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },

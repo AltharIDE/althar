@@ -499,10 +499,114 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
-    const part = await screen.findByRole('switch', { name: 'Only part of MER-231' })
-    expect(part.getAttribute('aria-checked')).toBe('false')
+    await screen.findByRole('radiogroup', { name: 'What merging does to MER-231' })
+    expect(screen.getByRole('radio', { name: 'Closes it' }).getAttribute('aria-checked')).toBe('true')
+    const part = screen.getByRole('radio', { name: 'Part of it' })
     await userEvent.click(part)
-    await waitFor(() => expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true))
+    await waitFor(() => expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true, 'MER-231'))
+  })
+
+  it('heads its thread with each issue it came from, on any tracker, each with its own switch, shown at once', async () => {
+    const base = snapshot()
+    const issue = (product: 'linear' | 'github', key: string, ref = key) => ({
+      product,
+      ref,
+      key,
+      title: `Work for ${key}`,
+      url: `https://example.com/${key}`,
+      status: { name: 'Todo', category: 'todo' as const },
+      priority: null,
+      container: null,
+    })
+    let answer: () => void = () => {}
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          task: {
+            ...base.task,
+            issue: issue('linear', 'DEV-211'),
+            fromIssues: [issue('linear', 'DEV-211'), { ...issue('github', '#37', 'meridian/api#37'), partOf: true }],
+          },
+        }),
+      ),
+      setTaskIssuePart: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))),
+    })
+    withServices(<Task />, client)
+    const part = (group: HTMLElement) => within(group).getByRole('radio', { name: 'Part of it' })
+    const first = part(await screen.findByRole('radiogroup', { name: 'What merging does to DEV-211' }))
+    const second = part(screen.getByRole('radiogroup', { name: 'What merging does to #37' }))
+    expect(first.getAttribute('aria-checked')).toBe('false')
+    expect(second.getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(first)
+    // Shown at once, before Althar answers; for that one issue alone, by its ref.
+    expect(first.getAttribute('aria-checked')).toBe('true')
+    expect(second.getAttribute('aria-checked')).toBe('true')
+    expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true, 'DEV-211')
+    answer()
+  })
+
+  it('switches one of two issues sharing a key on its own, by the task’s tie to it', async () => {
+    const base = snapshot()
+    const issue = (product: 'linear' | 'jira_cloud', link: string) => ({
+      product,
+      ref: 'DEV-37',
+      key: 'DEV-37',
+      title: `DEV-37 on ${product}`,
+      url: `https://example.com/${product}/DEV-37`,
+      status: { name: 'Todo', category: 'todo' as const },
+      priority: null,
+      container: null,
+      link,
+    })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          task: {
+            ...base.task,
+            issue: issue('linear', 'xlink_linear'),
+            fromIssues: [issue('linear', 'xlink_linear'), issue('jira_cloud', 'xlink_jira')],
+          },
+        }),
+      ),
+      setTaskIssuePart: vi.fn(() => new Promise<void>(() => {})),
+    })
+    withServices(<Task />, client)
+    await screen.findAllByRole('radiogroup', { name: 'What merging does to DEV-37' })
+    const [linear, jira] = screen
+      .getAllByRole('radiogroup', { name: 'What merging does to DEV-37' })
+      .map((group) => within(group).getByRole('radio', { name: 'Part of it' }))
+    await userEvent.click(jira as HTMLElement)
+    expect(jira?.getAttribute('aria-checked')).toBe('true')
+    expect(linear?.getAttribute('aria-checked')).toBe('false')
+    expect(client.setTaskIssuePart).toHaveBeenCalledWith(base.task.id, true, 'xlink_jira')
+  })
+
+  it('says nothing of its issue’s merge where it ends with no pull request', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          task: {
+            ...base.task,
+            end: 'none',
+            changes: [],
+            issue: {
+              product: 'linear',
+              ref: 'MER-231',
+              key: 'MER-231',
+              title: 'Rate-limit refunds',
+              url: 'https://linear.app/m/issue/MER-231',
+              status: { name: 'Todo', category: 'todo' },
+              priority: null,
+              container: 'Meridian',
+            },
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await screen.findByText('Rate-limit refunds')
+    expect(screen.queryByRole('radiogroup', { name: 'What merging does to MER-231' })).toBeNull()
   })
 
   it('shows the issues its lead drafted as cards in the thread, files them one by one or all at once, and waits on the person', async () => {
@@ -1825,6 +1929,28 @@ describe('a task', () => {
     expect(screen.getByRole('region', { name: 'Queued' })).toBeTruthy()
   })
 
+  it('takes its images off again with its words, leaving the draft as it was, when the lead has the message already', async () => {
+    const picture = { digest: 'e'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'queued.png', unkept: null }
+    const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    let refuse: (failure: Error) => void = () => undefined
+    vi.mocked(client.takeBack).mockImplementationOnce(() => new Promise<never>((_, reject) => (refuse = reject)))
+    withServices(<Task />, client)
+    const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    await userEvent.type(busy, 'My own words')
+    fireEvent.drop(busy, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'mine.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'mine.png' })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    // In the composer at once, its image beside the one there was.
+    expect(await screen.findByRole('img', { name: 'queued.png' })).toBeTruthy()
+    // The lead had it already: the words and the image it brought go, what was there before stays.
+    await act(async () => refuse(new Error('The lead has read it already.')))
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    await waitFor(() => expect(screen.queryByRole('img', { name: 'queued.png' })).toBeNull())
+    expect(screen.getByRole('img', { name: 'mine.png' })).toBeTruthy()
+    expect((busy as HTMLTextAreaElement).value).toBe('My own words')
+  })
+
   it('sends a queued message now, with its images by their digests: out of the queue, and said again to interrupt the lead', async () => {
     const picture = { digest: 'f'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }
     const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])
@@ -1845,7 +1971,11 @@ describe('a task', () => {
 
   it('sends nothing, and leaves the queue as it was, where the lead has the queued message already', async () => {
     const queued = items.you('Use the helper', { state: 'queued', interrupting: false })
-    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })),
+      // Read again, it is as the runtime holds it.
+      getThreadItem: vi.fn(async (_threadId: string, itemId: string) => (itemId === queued.id ? queued : null)),
+    })
     vi.mocked(client.takeBack).mockRejectedValueOnce(new Error('The lead has read it already.'))
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'Send now' }))
@@ -3538,6 +3668,26 @@ describe('a task', () => {
     expect(await screen.findByRole('button', { name: 'Lead: Claude Sonnet Low' })).toBeTruthy()
   })
 
+  it('says whose place a lead a usage limit handed the task to holds, until when, and puts that one back when pressed', async () => {
+    const base = thread()
+    const until = isoAfter(2 * 60 * 60 * 1000)
+    const standing = {
+      ...base,
+      session: { ...base.session!, standsIn: { agentId: 'codex', model: 'gpt-5.2-codex', effort: null, until } },
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => standing) })
+    withServices(<Task />, client)
+    const chip = await screen.findByRole('button', { name: 'For gpt-5.2-codex' })
+    act(() => chip.focus())
+    expect((await screen.findByRole('tooltip')).textContent).toBe(
+      `gpt-5.2-codex ran out of usage and leads again at ${clock(until)}. Press to put it back now.`,
+    )
+    // Pressed, the lead the task was given is picked again, at once, to take over with what is said next.
+    await userEvent.click(chip)
+    expect(screen.getByRole('button', { name: /^Lead: gpt-5\.2-codex/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'For gpt-5.2-codex' })).toBeNull()
+  })
+
   it('goes back to the model it was on, and says why, where the agent won’t take the pick', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => thread()),
@@ -3599,11 +3749,9 @@ describe('a task', () => {
     // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, how many are busy and how many run at a time.
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
       status: TaskStatus.Queued,
-      state: 'Waiting: 4 of 4 agents busy on this Mac',
+      state: 'Waiting · 4 agents busy',
     })
-    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe(
-      'Waiting: 6 agents busy on this Mac, 2 at a time',
-    )
+    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe('Waiting · 6 agents busy, 2 at a time')
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     // Under way with no session yet, between agents or on its way, as its card on the board says: working, not stopped.
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Running, state: 'Working' })

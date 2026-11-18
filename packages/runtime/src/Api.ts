@@ -1,3 +1,4 @@
+import { DevicePairings } from './DevicePairings'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
@@ -9,6 +10,8 @@ import {
   API_VERSION,
   NEW_PROJECT_DEFAULTS,
   apiVersionRefusal,
+  BACKGROUND,
+  LANE_HEADER,
   ClientAuthority,
   SocketAllowed,
   type MessageSender,
@@ -31,7 +34,7 @@ import {
 import { parseRemote } from '@althar/connectors'
 import { ActorId, type ProjectId } from '@althar/domain'
 import { Commands, Ledger } from '@althar/persistence-sqlite'
-import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Stream } from 'effect'
+import { Cause, Clock, Context, Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
 import { RpcServer, type RpcMiddleware } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
@@ -86,7 +89,7 @@ import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
-import { Live } from './Live'
+import { deltasFor, Live, newestOf, watchedKey, watchedOf } from './Live'
 import { missedReports } from './missedReports'
 import { PullRequestScreenshots } from './PullRequestScreenshots'
 import {
@@ -95,6 +98,7 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
+  linksIssues,
   Policies,
   type ProjectRules,
   repositoryFilesOf,
@@ -164,6 +168,7 @@ import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolR
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
+import { Elsewhere } from './Elsewhere'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
@@ -245,6 +250,11 @@ const realOf = (path: string): string => {
   }
 }
 /** What the person asked for, as a task they made says it: what they wrote, or, from an issue, which the thread shows, what they added to it. */
+/** The issues a task is made from, each once, in the order given: issue first, then issues. */
+const issuesOf = (issue: string | undefined, issues: ReadonlyArray<string> | undefined): ReadonlyArray<string> => {
+  const all = [...(issue === undefined ? [] : [issue]), ...(issues ?? [])].map((one) => one.trim()).filter((one) => one !== '')
+  return all.filter((one, index) => all.findIndex((other) => other.toLowerCase() === one.toLowerCase()) === index)
+}
 const requestOf = (title: string, description: string | undefined, issue: string | undefined): { readonly request?: string } => {
   const words = issue === undefined ? [title, description ?? ''].filter((part) => part.trim() !== '').join('\n\n') : (description ?? '')
   return words.trim() === '' ? {} : { request: words }
@@ -301,6 +311,7 @@ export const handlers = apiLayer(
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const canvases = yield* Canvases
+    const elsewhere = yield* Elsewhere
     const instance = yield* Instance
     const identity = (yield* CurrentClient) ?? {
       homeId: instance.homeId,
@@ -309,6 +320,13 @@ export const handlers = apiLayer(
       role: sender.kind,
     }
     const identities = yield* ClientIdentities
+    const pairings = yield* DevicePairings
+    const connectionAdmin = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
+        ? effect
+        : Effect.fail(
+            new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }),
+          )
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
     const sql = yield* SqlClient.SqlClient
@@ -720,6 +738,7 @@ export const handlers = apiLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        linkIssues: linksIssues(rules),
         afterMergeReview: afterMergeReviewOf(rules),
         repositoryFiles: repositoryFilesOf(rules),
       }
@@ -856,38 +875,31 @@ export const handlers = apiLayer(
         ),
       )
 
-    /* An agent's message or thought as far as it has streamed, before the store has all of it; and how full its context is, as it says. */
-    const streaming = Stream.unwrap(
-      Effect.map(live.subscribe, (events) =>
-        events.pipe(
-          Stream.flatMap((event): Stream.Stream<WatchEvent> =>
-            event._tag === 'Streaming'
-              ? Stream.make({
-                  _tag: 'Streaming',
-                  threadId: event.threadId,
-                  itemId: event.itemId,
-                  sequence: event.sequence,
-                  kind: event.kind,
-                  agentId: event.agentId,
-                  text: event.text,
-                })
-              : event._tag === 'Output'
-                ? Stream.make({ _tag: 'Output', threadId: event.threadId, itemId: event.itemId, text: event.text, dropped: event.dropped })
-                : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
-                  ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
-                  : event._tag === 'Background'
-                    ? Stream.make({ _tag: 'Background', threadId: event.threadId, background: event.background })
-                    : event._tag === 'Launches'
-                      ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
-                      : event._tag === 'PlanUsage'
-                        ? Stream.make({ _tag: 'PlanUsage', usage: event.usage })
-                        : event._tag === 'Drafting'
-                          ? Stream.make({ _tag: 'Drafting', threadId: event.threadId, drafts: event.drafts })
-                          : Stream.empty,
-          ),
-        ),
-      ),
-    )
+    /*
+     * What is happening now, for one watch: an agent's message or thought as
+     * far as it has streamed, before the store has all of it; how full its
+     * context is, as it says; a command's output; and what the runtime sends
+     * whole as it changes. Each is whole, so a watch that falls behind is sent
+     * the newest of each (`newestOf`), and nothing piles up for a window that
+     * stopped reading. With `deltas`, a message comes as what was added since
+     * this watch last sent it, not whole every time to every window.
+     */
+    const streaming = (deltas: boolean): Stream.Stream<WatchEvent> =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const events = Stream.flatMap(yield* live.subscribe, (event) => {
+            const shown = watchedOf(event)
+            return shown === undefined ? Stream.empty : Stream.make(shown)
+          })
+          const newest = yield* newestOf(events, watchedKey)
+          if (!deltas) return newest
+          const sent = deltasFor()
+          return Stream.flatMap(newest, (event) => {
+            const delta = sent(event)
+            return delta === undefined ? Stream.empty : Stream.make(delta)
+          })
+        }),
+      )
 
     const implemented: ApiHandlers = {
       ...(yield* agentCatalogHandlers),
@@ -905,7 +917,9 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      ListClientDevices: (options) => identities.list(options),
+      IssueDevicePairing: ({ tokenHash }) => connectionAdmin(pairings.issue(tokenHash)),
+      RevokeConnectionDevice: ({ deviceId }) => connectionAdmin(pairings.revokeConnection(deviceId)),
+      ListClientDevices: (options) => connectionAdmin(identities.list(options)),
       RegisterClientDevice: ({ name, publicKey, role }) => identities.register({ name, publicKey, role }),
       RevokeClientDevice: ({ deviceId }) => identities.revoke(deviceId),
       WatchFrom: ({ position }) =>
@@ -932,7 +946,7 @@ export const handlers = apiLayer(
                 reason: 'SnapshotRequired',
                 message: 'This saved position is older than the available change history. Read a fresh snapshot before watching again.',
               })
-            return Stream.merge(changes(position.cursor, true), streaming)
+            return Stream.merge(changes(position.cursor, true), streaming(false))
           }),
         ),
       Status: ({ recheck }) =>
@@ -954,6 +968,28 @@ export const handlers = apiLayer(
           }),
         ),
       ListProjects: () => api(queries.projects),
+      LookElsewhere: ({ projectId, grant }) =>
+        api(
+          Effect.map(
+            grant !== undefined ? Effect.flatMap(folders.path(grant), (path) => elsewhere.lookIn(path)) : elsewhere.look(projectId ?? ''),
+            (found) => ({
+              worktrees: [...found.worktrees],
+              setups: [...found.setups],
+              conversations: [...found.conversations],
+            }),
+          ),
+        ),
+      BringIn: ({ commandId, projectId, worktrees, setups, conversations, steps }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.bring_in', { projectId, worktrees, setups, conversations }, commandId)
+              const brought = yield* elsewhere.bringIn({ envelope: said, projectId, worktrees, setups, conversations, steps })
+              return { ...brought, tasks: [...brought.tasks], asides: [...brought.asides], failed: [...brought.failed] }
+            }),
+          ),
+        ),
       ReadFolder: ({ grant }) =>
         api(
           Effect.gen(function* () {
@@ -1244,10 +1280,14 @@ export const handlers = apiLayer(
             return { tasks: yield* findTasks(input, working) }
           }),
         ),
-      CreateTask: ({ commandId, projectId, title, description, issue, repositories }) =>
+      CreateTask: ({ commandId, projectId, title, description, issue: named, issues: others, repositories }) =>
         api(
           Effect.gen(function* () {
+            const all = issuesOf(named, others)
+            const issue = all[0]
             const from = yield* issueFor(projectId, issue)
+            // Each is read before the task is made, so one no tracker has makes no task.
+            yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
             const created = yield* projects.createTask({
               envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
               projectId,
@@ -1257,7 +1297,7 @@ export const handlers = apiLayer(
               ...(repositories === undefined ? {} : { repositories }),
               ...requestOf(title, description, issue),
             })
-            if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
+            for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })
             return yield* queries.task(created.taskId)
           }),
         ),
@@ -1270,6 +1310,17 @@ export const handlers = apiLayer(
           }),
         ),
       GetThreadItem: ({ threadId, itemId }) => api(queries.shown(threadId, itemId)),
+      // What a burst of changes touched, in one call: each as GetThreadItem reads it, the ones the thread shows. One gone
+      // since is left out on its own, as one it keeps for Althar is, rather than failing the rest.
+      GetThreadItems: ({ threadId, itemIds }) =>
+        api(
+          Effect.map(
+            Effect.forEach(new Set(itemIds), (itemId) =>
+              queries.shown(threadId, itemId).pipe(Effect.catchTag('NotFound', () => Effect.succeed(null))),
+            ),
+            (found) => found.filter((item) => item !== null),
+          ),
+        ),
       ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       ListCanvases: ({ projectId, archived }) => api(canvases.list(projectId, archived === true)),
@@ -1764,12 +1815,15 @@ export const handlers = apiLayer(
         api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue, end, repositories, chat, taskId }) =>
+      StartTask: ({ commandId, projectId, title, description, steps, issue: named, issues: others, end, repositories, chat, taskId }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
+              const all = issuesOf(named, others)
+              const issue = all[0]
               const from = yield* issueFor(projectId, issue)
+              yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
               const created = yield* projects.createTask({
                 envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
@@ -1786,7 +1840,7 @@ export const handlers = apiLayer(
                   ? { plain: true, shelf: 'scratch' as const, ...(description?.trim() ? { request: description } : {}) }
                   : requestOf(title, description, issue)),
               })
-              if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
+              for (const one of all) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue: one })
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
               const projectEnd = aside ? null : yield* pullRequests.endFor(projectId, created.taskId)
               const planId = yield* plans.propose({
@@ -1909,7 +1963,19 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      SetTaskIssuePart: ({ commandId, taskId, partOf }) => once(commandId, api(issues.setPart(taskId, partOf))),
+      // Without an issue named, its first, as the one switch of a runtime before set.
+      SetTaskIssuePart: ({ commandId, taskId, partOf, issue }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const named = issue ?? (yield* issues.allOfTask(taskId))[0]?.link
+              yield* issues.setPart(taskId, partOf, named ?? '')
+              // Its open pull request says it in the words trackers read: in the background, as the switch shows it at once.
+              yield* pullRequests.issuesChanged(taskId)
+            }),
+          ),
+        ),
       ChangeReviewDraft: ({ commandId, draftId, verdict, summary, comments }) =>
         once(
           commandId,
@@ -2589,7 +2655,7 @@ export const handlers = apiLayer(
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
-      Watch: ({ since }) => Stream.merge(changes(since), streaming),
+      Watch: ({ since, deltas }) => Stream.merge(changes(since), streaming(deltas === true)),
     }
     return implemented
   }),
@@ -2605,9 +2671,39 @@ export const isInside = (
   return within !== '' && within !== '..' && !within.startsWith(`..${paths.sep}`) && !paths.isAbsolute(within)
 }
 
+/** How many reads nobody waits on run at once (`BACKGROUND`): a few, so a press always finds the thread all but free. */
+export const BEHIND_AT_ONCE = 2
+
+/**
+ * The reads that go behind when nobody waits on them: the store's large ones,
+ * which the window's feed reads again on almost every change and which hold
+ * the runtime's thread while they run. A read that waits on a process or the
+ * network holds nothing meanwhile, so it would only keep a place in the lane
+ * from the reads that need it: it is answered as it comes, marked or not.
+ */
+export const BEHIND_CALLS: ReadonlySet<string> = new Set([
+  'ListProjects',
+  'GetHome',
+  'GetBoard',
+  'GetCoordinator',
+  'GetThread',
+  'GetThreadItem',
+  'GetThreadItems',
+])
+
+/**
+ * The lane every connection's background reads share: the reads the window's
+ * change feed starts to keep what a screen holds current. They run a few at a
+ * time, in turn; a command, a read a screen waits on and a watch never queue
+ * here, so however many changes an agent makes, a press is answered next.
+ */
+export class Behind extends Context.Service<Behind, Semaphore.Semaphore>()('@althar/runtime/Behind') {
+  static readonly layer: Layer.Layer<Behind> = Layer.effect(Behind, Semaphore.make(BEHIND_AT_ONCE))
+}
+
 /** The runtime's services: the store, this launch, and everything the API calls. Built once per launch. */
 export const services = (options: Runtime.RuntimeLayerOptions) =>
-  Layer.mergeAll(Nudges.layer, UsageData.layer, Folders.layer).pipe(
+  Layer.mergeAll(Nudges.layer, UsageData.layer, Folders.layer, Behind.layer).pipe(
     Layer.provideMerge(Queries.layer),
     Layer.provideMerge(Runtime.layer(options)),
     // Below everything, so a failure kept anywhere is said through the one listener.
@@ -2622,6 +2718,7 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
       const identities = yield* ClientIdentities
       const commands = yield* ApiCommands
       const sql = yield* SqlClient.SqlClient
+      const behind = yield* Behind
       const identity: ClientIdentity = Object.freeze({
         ...(authenticated ?? {
           homeId: instance.homeId,
@@ -2700,7 +2797,10 @@ export const connection = (port: PortLike, sender: MessageSender, authenticated?
                 })
               })
               if (typeof payload !== 'object' || payload === null || !('commandId' in payload) || typeof payload.commandId !== 'string')
-                return yield* positioned
+                // A large read nobody waits on goes behind, a few at a time. Never a watch, which would keep its place for good.
+                return yield* headers[LANE_HEADER] === BACKGROUND && BEHIND_CALLS.has(rpc._tag)
+                  ? behind.withPermits(1)(positioned)
+                  : positioned
               // Effect RPC erases the handler's success type in middleware. The schema and effect come from the same validated RPC definition.
               const result = rpc.successSchema as Schema.Codec<RpcMiddleware.SuccessValue, unknown>
               const handle = Effect.andThen(identities.check(identity), positioned).pipe(

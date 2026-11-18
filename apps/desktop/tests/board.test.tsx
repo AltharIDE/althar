@@ -351,7 +351,7 @@ describe('the board’s lanes', () => {
         const next = within(screen.getByRole('region', { name: 'Up next' }))
         expect(next.getAllByText('Continues · Implement')).toHaveLength(2)
         expect(next.getByText('Continues · Review')).toBeTruthy()
-        expect(next.getAllByText(/^4 of 4 agents busy on /)).toHaveLength(2)
+        expect(next.getAllByText(/^4 agents busy$/)).toHaveLength(2)
         expect(next.getByText('Waiting for the connection')).toBeTruthy()
         expect(next.getByText('Paused')).toBeTruthy()
         // The line's places come after what continues; every row Althar orders for a place has a grip, what is paused none.
@@ -1722,7 +1722,7 @@ describe('every state the board shows', () => {
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Codex is out of usage until ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
     // One waiting for a free agent says so, and what for.
-    expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(screen.getByText('4 agents busy')).toBeTruthy()
     expect(screen.getByText('Waiting')).toBeTruthy()
     expect(screen.getByText("Couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
@@ -1825,7 +1825,7 @@ describe('every state the board shows', () => {
           startedAt: '2026-10-01T09:30:00.000Z',
         }),
       )
-      expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+      expect(screen.getByText('4 agents busy')).toBeTruthy()
       const track = screen.getByRole('list', { name: 'Steps' })
       expect(within(track).getByText('Implement').closest('li')?.className).toMatch(/done/)
       // The step it waits on isn't drawn as running: the kit's track stands still and empty for a waiting task.
@@ -2313,8 +2313,12 @@ describe('a ready card’s next step, done from the card', () => {
         keptAt: '2026-09-30T11:00:00.000Z',
       }),
     ]
-    const markTaskDone = vi.fn(async () => {})
-    const keepTaskForLater = vi.fn(async () => {})
+    // Each kept as the runtime keeps it: the board read after says so.
+    const moved = (phase: BoardTask['phase']) => async (taskId: string) => {
+      tasks = tasks.map((one) => (one.taskId === taskId ? { ...one, phase } : one))
+    }
+    const markTaskDone = vi.fn(moved('settled'))
+    const keepTaskForLater = vi.fn(moved('kept'))
     const settledWithOnePress = vi.fn(async () => {})
     const onOpen = vi.fn()
     withServices(
@@ -2327,7 +2331,7 @@ describe('a ready card’s next step, done from the card', () => {
     // Done on the Kept shelf settles nothing in Needs you: it isn't counted.
     const lane = within(screen.getByRole('region', { name: /^Settled/ }))
     await userEvent.click(lane.getByRole('button', { name: /^Kept/, pressed: false }))
-    await userEvent.click(lane.getByRole('button', { name: 'Done' }))
+    await userEvent.click((await cardOf('Spike the limits')).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(markTaskDone).toHaveBeenCalledWith('p2'))
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(settledWithOnePress).toHaveBeenCalledOnce()

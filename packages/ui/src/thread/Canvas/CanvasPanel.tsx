@@ -259,6 +259,21 @@ export function CanvasPicture({ src, alt }: { src: string; alt: string }) {
 }
 
 /** Where a page canvas is drawn: a place the host lays the canvas's own view over, as wide and tall as the panel. */
-export function CanvasPagePlace({ ref, canvas }: { ref?: Ref<HTMLDivElement>; canvas: string }) {
-  return <div ref={ref} className={s.page} data-canvas-page={canvas} />
+export function CanvasPagePlace({
+  ref,
+  canvas,
+  still = null,
+  onStill,
+}: {
+  ref?: Ref<HTMLDivElement>
+  canvas: string
+  /** A picture of the canvas, drawn in its place while its view is aside for something over it. */
+  still?: string | null
+  onStill?: () => void
+}) {
+  return (
+    <div ref={ref} className={s.page} data-canvas-page={canvas}>
+      {still !== null && <img className={s.pageStill} src={still} alt="" draggable={false} onLoad={onStill} />}
+    </div>
+  )
 }

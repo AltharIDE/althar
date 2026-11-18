@@ -252,6 +252,26 @@ const said = (text: string | null | undefined) => (text === undefined || text ==
  * review its change had goes with it (pullRequestReview.ts): the seal at its
  * head, in its corner, and the review folded after it.
  */
+/** An issue a pull request comes from, as its description names it. */
+export interface PullRequestIssue {
+  readonly key: string
+  readonly url: string
+  /** It lives on the pull request's own host, which links its key by itself. */
+  readonly sameHost: boolean
+  readonly partOf?: boolean
+}
+
+/** The lines a description names its issues in: those it does all of, then those it does part of, each in a line of its own, where a tracker reads its keys. */
+const issueLines = (issues: ReadonlyArray<PullRequestIssue>) => {
+  const named = (issue: PullRequestIssue) => (issue.sameHost ? issue.key : `[${issue.key}](${issue.url})`)
+  const whole = issues.filter((issue) => issue.partOf !== true).map(named)
+  const part = issues.filter((issue) => issue.partOf === true).map(named)
+  return [
+    ...(whole.length === 0 ? [] : [`${whole.length === 1 ? 'Issue' : 'Issues'}: ${whole.join(', ')}`]),
+    ...(part.length === 0 ? [] : [`Part of ${part.join(', ')}`]),
+  ].join('\n')
+}
+
 export const bodyOf = (input: {
   /** What the task built, as the lead last said it: the description where the lead wrote none. */
   readonly built?: string | null
@@ -259,8 +279,8 @@ export const bodyOf = (input: {
   readonly lead: string | null
   /** What to say where the lead said nothing at all, as a next pull request's finding and commits do: never an empty description. */
   readonly fallback?: string | null
-  /** The issue it came from; `partOf` where it does only part of it, said in the words trackers read as not closing it. */
-  readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null
+  /** The issue it came from, or each of several; `partOf` where it does only part of one, said in the words trackers read as not closing it. */
+  readonly issue: PullRequestIssue | ReadonlyArray<PullRequestIssue> | null
   /** The repository's template, if it has one. */
   readonly template?: string | null
   /** The description the lead wrote for the pull request: in the template, where there is one. */
@@ -281,10 +301,8 @@ export const bodyOf = (input: {
   const described = describedOf(input)
   if (described !== '') parts.push(described)
   if (input.review?.details != null) parts.push(input.review.details)
-  if (input.issue !== null) {
-    const named = input.issue.sameHost ? input.issue.key : `[${input.issue.key}](${input.issue.url})`
-    parts.push(input.issue.partOf === true ? `Part of ${named}` : `Issue: ${named}`)
-  }
+  const issues = issueLines(input.issue === null ? [] : 'key' in input.issue ? [input.issue] : input.issue)
+  if (issues !== '') parts.push(issues)
   if (input.automation !== undefined && input.automation !== null)
     parts.push(`Opened by [Althar](https://github.com/AltharIDE/althar)’s ${nameInLine(input.automation)}.`)
   else if (input.credit !== false) parts.push('Opened by [Althar](https://github.com/AltharIDE/althar).')
@@ -329,7 +347,10 @@ const SEAL = /^<picture>\n[^]*?\n<\/picture>(?:\n\n|$)/
 const NOTE =
   /^> \*\*(?:Reviewed (?:once|twice|\d+ times); the last fixes weren’t reviewed\.|The last fixes weren’t reviewed\.)\*\* The code changed after the last review pass, and no later pass read it\.(?:\n\n|$)/
 const CREDIT = /(?:^|\n\n)Opened by \[Althar\]\(https:\/\/github\.com\/AltharIDE\/althar\)[^\n]*(?=\n|$)/g
-const ISSUE = /(?:^|\n\n)(?:Issue: |Part of )(?:\[[^\]\n]+\]\([^)\s]+\)|\S+)(?=\n\n|$)/g
+/* The issues' lines: `Issue: ` or `Issues: ` and their keys, then `Part of ` and theirs, each key linked or bare. */
+const ISSUE_KEY = String.raw`(?:\[[^\]\n]+\]\([^)\s]+\)|[^\s,]+)`
+const ISSUE_LINE = String.raw`(?:Issues?: |Part of )${ISSUE_KEY}(?:, ${ISSUE_KEY})*`
+const ISSUE = new RegExp(String.raw`(?:^|\n\n)${ISSUE_LINE}(?:\n${ISSUE_LINE})?(?=\n\n|$)`, 'g')
 const FOLD = '<details>\n<summary>Reviewed by '
 
 /** The last paragraph in `text` that `line` matches, where it starts and ends; null where none does. */
@@ -375,6 +396,23 @@ export const framedOf = (body: string) => {
     rest = rest.slice(0, cut).trimEnd()
   }
   return { head, described: rest, tail }
+}
+
+/**
+ * A description naming the issues given, as they are now: its issues' lines
+ * given anew where Althar put them, else put before Althar's credit, or at
+ * its end. Whatever else it says, the lead's part and someone's on the host,
+ * stays as it was. With no issues, their lines go.
+ */
+export const withIssues = (body: string, issues: ReadonlyArray<PullRequestIssue>) => {
+  const { head, described, tail } = framedOf(body)
+  const lines = issueLines(issues)
+  const end = tail.join('\n\n')
+  const had = lastParagraph(end, ISSUE)
+  const credit = lastParagraph(end, CREDIT)
+  const at = had ?? (credit === null ? { start: end.length, end: end.length } : { start: credit.start, end: credit.start })
+  const after = [end.slice(0, at.start).trim(), lines, end.slice(at.end).trim()].filter((part) => part !== '').join('\n\n')
+  return [...head, described, after].filter((part) => part !== '').join('\n\n')
 }
 
 /** A description with its lead's part given anew, and what Althar put around it as it was. */
@@ -528,6 +566,10 @@ export const checksGoneForLead = (name: string, failing: ReadonlyArray<string>) 
  */
 export const unsettledLine = (failing: ReadonlyArray<string>, how: 'ended' | 'gone' = 'ended') =>
   `${failingWords(failing)}, and ${how === 'gone' ? "the lead's agent stopped" : 'the lead stopped'}. Tell it what to do.`
+
+/** Why the checks that fail on a change are the person's, as its card says, where Althar couldn't tell its lead they failed. */
+export const unreachedLine = (failing: ReadonlyArray<string>) =>
+  `${failingWords(failing)}, and Althar couldn't tell the lead. Tell it what to do.`
 
 /** Why the checks that fail on a change are the person's, as its card says, where its lead spent its tries and said nothing more. */
 export const spentLine = (failing: ReadonlyArray<string>, tries: number) => `${failingWords(failing)} after ${tries} fixes.`

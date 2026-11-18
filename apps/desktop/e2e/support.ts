@@ -121,7 +121,12 @@ export const launch = async (
   const inherited = Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) =>
-        name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_') && name.toUpperCase() !== 'PATH' && !DESKTOP_NAMES.includes(name),
+        name !== 'ELECTRON_RUN_AS_NODE' &&
+        // The real keychain is for a spec that asks for it (pairing.spec.ts), never one inherited from the shell.
+        name !== 'ALTHAR_NATIVE_KEYRING' &&
+        !name.startsWith('GIT_') &&
+        name.toUpperCase() !== 'PATH' &&
+        !DESKTOP_NAMES.includes(name),
     ),
   )
   const electronApp = await electron.launch({

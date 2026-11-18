@@ -60,7 +60,8 @@ export interface Spot {
   /** Whether its project was removed: its task is over here, as a settled one is. */
   readonly removed: number
   /** The checkout, Local; null for a worktree. */
-  readonly kind: 'checkout' | null
+  /** Local, the person's checkout; `adopted`, a folder another tool made, which Althar never moves, rewinds or removes; else null. */
+  readonly kind: 'checkout' | 'adopted' | null
   readonly state: string
   readonly path: string
   readonly branch: string
@@ -85,7 +86,9 @@ export interface Spot {
 
 const SPOT = `
   SELECT w.id, w.project_id, w.task_id, h.id AS thread_id, w.binding_id, b.display_name AS name, b.slug AS binding_slug,
-    p.slug AS project_slug, k.slug AS task_slug, k.title, k.state AS task_state, p.archived_at IS NOT NULL AS removed, w.kind, w.state, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
+    p.slug AS project_slug, k.slug AS task_slug, k.title, k.state AS task_state, p.archived_at IS NOT NULL AS removed,
+    -- A folder another tool made (Elsewhere.ts) is never moved, rewound or removed: none of what follows takes it for a worktree of Althar's.
+    CASE WHEN w.made_by IS NULL THEN w.kind ELSE 'adopted' END AS kind, w.state, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
     w.base_commit, w.returns_to, w.returned_at, l.path AS repository, b.default_base_ref AS base, b.change_target, w.base_ref, w.toward,
     w.moving_to, w.name AS change
   FROM workspaces w

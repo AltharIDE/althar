@@ -1,0 +1,444 @@
+/* What other tools left, a tile each, that opens: the face is a tool's mark and tick, its name, how much, a fact. */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.top,
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 10px 6px;
+}
+.heading,
+.headTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font: 600 12.5px/1.2 var(--font);
+  color: var(--t-1);
+}
+.headCount {
+  font: 500 11px/1 var(--mono);
+  color: var(--t-3);
+}
+.grow {
+  flex: 1;
+}
+.allNone {
+  display: inline-flex;
+  gap: 10px;
+  font-size: 12px;
+}
+
+/* The rows keep their gap as the tiles' own margin, so a panel between two rows starts from nothing and grows. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  column-gap: 8px;
+}
+.grid > .tile {
+  margin-bottom: 8px;
+}
+.tile {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  transition:
+    background var(--base) var(--ease),
+    box-shadow var(--base) var(--ease),
+    scale var(--press) var(--ease-out);
+}
+.tile:hover {
+  background: var(--hover-paper);
+}
+/* an answer to the press, on the tile as a whole */
+.tile:has(> .take:active) {
+  scale: var(--scale-press);
+}
+.tile[data-state='on'] {
+  box-shadow: inset 0 0 0 1.5px var(--ink-fill);
+}
+.tile[data-state='mixed'] {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.tile[data-open],
+.tile[data-open]:hover {
+  background: var(--sunk);
+}
+.take {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  padding: 12px 12px 11px;
+  border-radius: inherit;
+  text-align: left;
+}
+.take:focus-visible {
+  outline-offset: 2px;
+}
+.faceTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  align-self: stretch;
+  margin-bottom: 6px;
+}
+.mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--t-1);
+}
+.box {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
+  color: var(--on-ink);
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+/* the tick or the dash pops in on the kit's spring */
+.box > * {
+  transition:
+    scale var(--enter) var(--ease-move),
+    opacity var(--enter) var(--ease-out);
+}
+@starting-style {
+  .box > * {
+    scale: 0.4;
+    opacity: 0;
+  }
+}
+.box[data-state='on'],
+.box[data-state='mixed'] {
+  background: var(--ink-fill);
+  box-shadow: none;
+}
+.dash {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--on-ink);
+}
+.tileName {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--t-1);
+}
+.size {
+  font-size: 12px;
+  color: var(--t-2);
+}
+.some {
+  color: var(--t-3);
+}
+.tileFact {
+  min-height: 16px;
+  padding-right: 22px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.open {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--t-3);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease),
+    rotate var(--fold) var(--ease-fold),
+    scale var(--press) var(--ease-out);
+}
+.open:hover {
+  background: var(--pressed-paper);
+  color: var(--t-1);
+}
+.open:active {
+  scale: var(--scale-press);
+}
+.open:focus-visible {
+  outline-offset: 1px;
+}
+.open[aria-expanded='true'] {
+  color: var(--t-1);
+  rotate: 180deg;
+}
+
+/* the panel: its height eases out on the fold; closing, quicker */
+.drawer {
+  grid-column: 1 / -1;
+  min-height: 0;
+  height: var(--h, 0px);
+  /* clipped below as it grows, never above, where its notch reaches up to the tile */
+  clip-path: inset(-10px -8px 0 -8px);
+  transition: height var(--fold) var(--ease-fold);
+}
+.drawer:not([data-open]) {
+  transition-duration: var(--slow);
+}
+.drawerInner {
+  padding-bottom: 8px;
+}
+/* it grows from the opened tile, from --scale-pop with a fade */
+.inside {
+  position: relative;
+  container-type: inline-size;
+  border-radius: 12px;
+  background: var(--sunk);
+  transform-origin: calc((100% + 8px) * var(--notch) - 4px) 0;
+  transition:
+    opacity var(--enter) var(--ease-out),
+    scale var(--fold) var(--ease-fold);
+}
+.drawer:not([data-open]) .inside {
+  opacity: 0;
+  scale: var(--scale-pop);
+  transition-duration: var(--exit), var(--slow);
+}
+@starting-style {
+  .drawer[data-open] .inside {
+    opacity: 0;
+    scale: var(--scale-pop);
+  }
+}
+/* the notch under the opened tile: grows from the panel's edge, slides on the spring to another tile in the row */
+.notch {
+  position: absolute;
+  top: -8px;
+  left: -9px;
+  width: 18px;
+  height: 8px;
+  background: var(--sunk);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  translate: calc((100cqw + 8px) * var(--notch) - 4px) 0;
+  transform-origin: 50% 100%;
+  transition:
+    translate var(--move) var(--ease-move),
+    scale var(--enter) var(--ease-out) 80ms;
+}
+.drawer:not([data-open]) .notch {
+  scale: 1 0;
+  transition-delay: 0s;
+}
+@starting-style {
+  .drawer[data-open] .notch {
+    scale: 1 0;
+  }
+}
+.rise,
+.was {
+  padding: 14px 6px 6px;
+}
+/* what it showed before, fading out over what rises in, quicker than it came */
+.was {
+  position: absolute;
+  inset: 0 0 auto;
+  max-height: 100%;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--exit) var(--ease-out);
+}
+@starting-style {
+  .was {
+    opacity: 1;
+  }
+}
+/* what's inside rises in, a row after another */
+.rise [data-rise] {
+  transition:
+    opacity var(--enter) var(--ease-out) calc(70ms + var(--i, 0) * 18ms),
+    translate var(--fold) var(--ease-out) calc(70ms + var(--i, 0) * 18ms),
+    background var(--fast) var(--ease);
+}
+@starting-style {
+  .rise [data-rise] {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+/* what's in a tool: a group each, a tick a row */
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  position: relative;
+  border-radius: 8px;
+}
+.row:hover {
+  background: var(--hover-paper);
+}
+.row + .row::before {
+  content: '';
+  position: absolute;
+  top: -1.5px;
+  left: 36px;
+  right: 10px;
+  height: 1px;
+  background: var(--line);
+}
+.row:hover::before,
+.row:hover + .row::before {
+  opacity: 0;
+}
+.rowHit {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.tick {
+  display: grid;
+  place-items: center;
+  flex: none;
+  margin-top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--t-3);
+}
+.tick[data-state='checked'] {
+  background: var(--ink-fill);
+  box-shadow: none;
+  color: var(--on-ink);
+}
+.tick:focus-visible {
+  outline-offset: 2px;
+}
+.tickMark {
+  display: grid;
+  place-items: center;
+}
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.titleLine {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--t-1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.row[data-off] .name {
+  color: var(--t-2);
+}
+.at {
+  flex: none;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.where {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.where :global(code) {
+  overflow: hidden;
+  font: 11.5px/1.4 var(--mono);
+  color: var(--t-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* a branch keeps its name, the folder beside it gives way */
+.where :global(code:first-child) {
+  flex: none;
+  max-width: 55%;
+}
+.where :global(code + code) {
+  flex: 1;
+  min-width: 0;
+  color: var(--t-3);
+}
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 1px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.fact :global(svg) {
+  color: var(--t-3);
+}
+
+/* with reduced motion, nothing travels or grows: what comes and goes only fades */
+@media (prefers-reduced-motion: reduce) {
+  .drawer,
+  .open,
+  .tile {
+    transition: none;
+  }
+  .inside,
+  .drawer:not([data-open]) .inside,
+  .notch,
+  .drawer:not([data-open]) .notch {
+    scale: none;
+  }
+  .rise [data-rise] {
+    translate: none;
+  }
+}

@@ -124,7 +124,7 @@ jobs:
       - uses: ./.github/actions/electron
       # As in e2e.yml: Chromium's sandbox, and a keyring on a virtual display.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
+      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0 openssh-server
       - env:
           SHARD: ${{ matrix.shard }}
           RUNS: ${{ fromJSON(needs.plan.outputs.specs).runs }}

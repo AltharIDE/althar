@@ -1,7 +1,11 @@
+import type { ReactNode } from 'react'
+
+import { Afterimage } from '../../lib/Afterimage'
 import { cx } from '../../lib/cx'
 import { useDragOver } from '../../lib/dragOver'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
+import { Disclosure, Fold } from '../../primitives/Fold/Fold'
 import { below, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Problem } from '../../primitives/Problem/Problem'
 import { EmptyState } from '../../setup/EmptyState/EmptyState'
@@ -17,8 +21,14 @@ import s from './ProjectRepositories.module.css'
  * with the tasks made with it, and nothing in its folder changes; the last
  * one stays, as tasks need somewhere to work. Each change is kept at once.
  * With none, and none being read, what will be here and how one gets here
- * stand in the map's place, under the way to add one.
+ * stand in the map's place, under the way to add one. Beside adding a
+ * folder, one can be cloned: the screen gives what chooses it (`cloning`),
+ * which opens above the map as everything opens, and folds away as it is
+ * cloned or put away.
  */
+
+/** How long a picture of what chose one stays after it is put away, for it to fold away rather than vanish: the kit's --fold, and a little. */
+const FOLDED = 400
 
 export interface ProjectRepositoriesText {
   title: string
@@ -28,10 +38,13 @@ export interface ProjectRepositoriesText {
   /** While a folder is held over them. */
   dropping: string
   add: string
+  clone: string
   leaveOut: (project: string) => string
   /** With none: what will be here, and how one gets here. */
   none: string
   noneLine: string
+  /** With none, where one can be cloned too. */
+  noneLineClone: string
 }
 
 export const projectRepositoriesText: ProjectRepositoriesText = {
@@ -39,9 +52,11 @@ export const projectRepositoriesText: ProjectRepositoriesText = {
   drop: 'or drop a folder here',
   dropping: 'Let go to add it',
   add: 'Add a folder',
+  clone: 'Clone a repository',
   leaveOut: (project) => `Leave out of ${project}`,
   none: 'No repositories yet',
   noneLine: 'Add the folder its code is in, and its tasks work there.',
+  noneLineClone: 'Clone its repository, or add the folder its code is in, and its tasks work there.',
 }
 
 export type ProjectRepositoriesProps = RootProps<
@@ -52,7 +67,8 @@ export type ProjectRepositoriesProps = RootProps<
     | 'hosts'
     | 'reading'
     | 'worktrees'
-    | 'onRoleChange'
+    | 'onTowardChange'
+    | 'onTowardCreate'
     | 'onTargetChange'
     | 'onAddRemote'
     | 'onLeaveOut'
@@ -65,6 +81,10 @@ export type ProjectRepositoriesProps = RootProps<
     onAdd?: () => void
     /** Folders dropped on them. Without it, a drop does nothing. */
     onDrop?: (files: readonly File[]) => void
+    /** Starts cloning one: the screen shows what chooses it in `cloning`. Without it, nothing is cloned here. */
+    onClone?: () => void
+    /** What chooses a repository to clone and where it goes, over the map, while one is being chosen. */
+    cloning?: ReactNode
     /** A folder is being added. */
     adding?: boolean
     /** Why the last change didn't happen. */
@@ -80,6 +100,8 @@ export function ProjectRepositories({
   project,
   onAdd,
   onDrop,
+  onClone,
+  cloning,
   adding = false,
   error,
   headingLevel = 2,
@@ -89,7 +111,8 @@ export function ProjectRepositories({
   hosts,
   reading,
   worktrees,
-  onRoleChange,
+  onTowardChange,
+  onTowardCreate,
   onTargetChange,
   onAddRemote,
   onLeaveOut,
@@ -101,24 +124,32 @@ export function ProjectRepositories({
 }: ProjectRepositoriesProps) {
   const t = { ...projectRepositoriesText, ...text }
   const { over, handlers } = useDragOver(onDrop)
+  const open = cloning != null
   return (
     <SettingGroup
       title={t.title}
       {...(t.note === undefined ? {} : { note: t.note })}
       headingLevel={headingLevel}
-      {...(onAdd === undefined
+      {...(onAdd === undefined && onClone === undefined
         ? {}
         : {
             action: (
               <span className={s.add}>
-                {onDrop !== undefined && (
+                {onDrop !== undefined && onAdd !== undefined && (
                   <span className={s.drop} aria-live="polite">
                     {over ? t.dropping : t.drop}
                   </span>
                 )}
-                <Button size="small" icon="plus" busy={adding} onClick={onAdd}>
-                  {t.add}
-                </Button>
+                {onAdd !== undefined && (
+                  <Button size="small" icon="plus" busy={adding} onClick={onAdd}>
+                    {t.add}
+                  </Button>
+                )}
+                {onClone !== undefined && (
+                  <Button size="small" icon="download" onClick={onClone} aria-expanded={cloning != null}>
+                    {t.clone}
+                  </Button>
+                )}
               </span>
             ),
           })}
@@ -127,26 +158,45 @@ export function ProjectRepositories({
       {...rest}
     >
       {error !== undefined && <Problem>{error}</Problem>}
-      {repositories.length === 0 && (reading === undefined || reading.length === 0) ? (
-        <EmptyState icon="folder" title={t.none} line={t.noneLine} headingLevel={below(headingLevel)} />
-      ) : (
-        <RepositoryMap
-          repositories={repositories}
-          hosts={hosts}
-          onRoleChange={onRoleChange}
-          onTargetChange={onTargetChange}
-          headingLevel={below(headingLevel)}
-          text={{ leaveOut: t.leaveOut(project), ...mapText }}
-          className={s.map}
-          {...(reading === undefined ? {} : { reading })}
-          {...(worktrees === undefined ? {} : { worktrees })}
-          {...(onAddRemote === undefined ? {} : { onAddRemote })}
-          {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
-          {...(onOpen === undefined ? {} : { onOpen })}
-          {...(onConnect === undefined ? {} : { onConnect })}
-          {...(putOnHost === undefined ? {} : { putOnHost })}
-        />
-      )}
+      <div className={s.body}>
+        {/* Always there where one can be cloned, so it opens as everything does, rather than appearing. */}
+        {onClone !== undefined && (
+          <Disclosure open={open}>
+            <Fold bleed={false}>
+              {/* Put away, it stops at once; what folds away is only a picture of it. */}
+              <Afterimage open={open} lasts={FOLDED}>
+                {cloning}
+              </Afterimage>
+            </Fold>
+          </Disclosure>
+        )}
+        {repositories.length === 0 && (reading === undefined || reading.length === 0) ? (
+          <EmptyState
+            icon="folder"
+            title={t.none}
+            line={onClone === undefined ? t.noneLine : t.noneLineClone}
+            headingLevel={below(headingLevel)}
+          />
+        ) : (
+          <RepositoryMap
+            repositories={repositories}
+            hosts={hosts}
+            {...(onTowardChange === undefined ? {} : { onTowardChange })}
+            {...(onTowardCreate === undefined ? {} : { onTowardCreate })}
+            onTargetChange={onTargetChange}
+            headingLevel={below(headingLevel)}
+            text={{ leaveOut: t.leaveOut(project), ...mapText }}
+            className={s.map}
+            {...(reading === undefined ? {} : { reading })}
+            {...(worktrees === undefined ? {} : { worktrees })}
+            {...(onAddRemote === undefined ? {} : { onAddRemote })}
+            {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
+            {...(onOpen === undefined ? {} : { onOpen })}
+            {...(onConnect === undefined ? {} : { onConnect })}
+            {...(putOnHost === undefined ? {} : { putOnHost })}
+          />
+        )}
+      </div>
     </SettingGroup>
   )
 }

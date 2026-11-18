@@ -79,7 +79,8 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     const here = page.getByRole('list', { name: HERE })
     // The name, first in its card; its folder, which ends the same, follows.
     await expect(here.getByText('meridian-web', { exact: true }).first()).toBeVisible()
-    await expect(here.getByRole('combobox', { name: 'Role of meridian-web' })).toHaveText(/Frontend/)
+    // The branch its new tasks work toward, a picker on its card.
+    await expect(here.getByRole('button', { name: /^Branch new tasks in meridian-web work toward: / })).toBeVisible()
     const github = page.getByRole('region', { name: 'GitHub' })
     await expect(github.getByText('meridian/web')).toBeVisible()
     await expect(github.getByText('Not connected')).toBeVisible()

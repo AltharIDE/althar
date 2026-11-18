@@ -1,4 +1,5 @@
 import { isStartupStage, type StartupStage } from '../startup'
+import { isHomesOverview, isHomeState, type HomeProject, type HomesOverview, type HomeState } from '../homes'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 import { doNotTrack } from '../main/appPreferences'
@@ -21,8 +22,8 @@ import type { PageKey, PageState } from '../main/browser/page'
  * install, and restarting into it. An update that couldn't move the
  * store, with where its copy is as the person knows the place, which main
  * shows in the file manager when asked. Quit with work under way, asking what to do. Whether DO_NOT_TRACK is set, which
- * keeps usage data off. And reporting a problem, and the page's own errors,
- * for the log. And the pages beside the conversations (ADR-100): opening,
+ * keeps usage data off. And reporting a problem, and the page's own errors
+ * and slow frames, for the log. And the pages beside the conversations (ADR-100): opening,
  * placing and pointing at one, as main holds it, and how each stands. The page never sees or sends a path. It gets no Node, no
  * file system, no shell.
  */
@@ -125,7 +126,75 @@ ipcRenderer.on('althar:page-opened', (_event, owner: string) => {
   for (const listener of pagesOpened) listener(owner)
 })
 
+const homeStates = new Set<(state: HomeState) => void>()
+const homeDialogs = new Set<() => void>()
+ipcRenderer.on('althar:home-state', (_event, value: unknown) => {
+  if (isHomeState(value)) for (const listener of homeStates) listener(value)
+})
+ipcRenderer.on('althar:homes-open', () => {
+  for (const listener of homeDialogs) listener()
+})
+/* What main knows of every home, as it changes: for the chip's menu and Manage homes. */
+const overviews = new Set<(overview: HomesOverview) => void>()
+ipcRenderer.on('althar:homes-overview', (_event, value: unknown) => {
+  if (isHomesOverview(value)) for (const listener of overviews) listener(value)
+})
+/* A project to show, from another window's Manage homes: held until the page listens, as a window that just opened doesn't yet. */
+let pendingProject: string | undefined
+const projectShown = new Set<(projectId: string) => void>()
+ipcRenderer.on('althar:homes-project', (_event, projectId: unknown) => {
+  if (typeof projectId !== 'string') return
+  if (projectShown.size === 0) pendingProject = projectId
+  for (const listener of projectShown) listener(projectId)
+})
+
 contextBridge.exposeInMainWorld('althar', {
+  homes: {
+    state: () => ipcRenderer.invoke('althar:homes-state'),
+    list: () => ipcRenderer.invoke('althar:homes-list'),
+    pairingInfo: (code: string) => ipcRenderer.invoke('althar:homes-pairing-info', code),
+    pair: (code: string, name: string) => ipcRenderer.invoke('althar:homes-pair', code, name),
+    overview: () => ipcRenderer.invoke('althar:homes-overview'),
+    inspect: (target: unknown) => ipcRenderer.invoke('althar:homes-inspect', target),
+    connect: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-connect', checkId, name),
+    save: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-save', checkId, name),
+    open: (id: string, projectId?: string) => ipcRenderer.invoke('althar:homes-open', id, projectId),
+    rename: (id: string, name: string) => ipcRenderer.invoke('althar:homes-rename', id, name),
+    change: (id: string, checkId: string) => ipcRenderer.invoke('althar:homes-change', id, checkId),
+    forget: (id: string) => ipcRenderer.invoke('althar:homes-forget', id),
+    restore: (id: string) => ipcRenderer.invoke('althar:homes-restore', id),
+    report: (projects: ReadonlyArray<HomeProject>): void => ipcRenderer.send('althar:homes-report', projects),
+    cancelCheck: () => ipcRenderer.invoke('althar:homes-cancel'),
+    reconnect: () => ipcRenderer.invoke('althar:homes-reconnect'),
+    onState: (listener: (state: HomeState) => void) => {
+      homeStates.add(listener)
+      return () => {
+        homeStates.delete(listener)
+      }
+    },
+    onOpen: (listener: () => void) => {
+      homeDialogs.add(listener)
+      return () => {
+        homeDialogs.delete(listener)
+      }
+    },
+    onOverview: (listener: (overview: HomesOverview) => void) => {
+      overviews.add(listener)
+      return () => {
+        overviews.delete(listener)
+      }
+    },
+    onProject: (listener: (projectId: string) => void) => {
+      projectShown.add(listener)
+      if (pendingProject !== undefined) {
+        listener(pendingProject)
+        pendingProject = undefined
+      }
+      return () => {
+        projectShown.delete(listener)
+      }
+    },
+  },
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
   startup: (stage: string, duration?: number): void => ipcRenderer.send('althar:startup', stage, duration),
@@ -291,10 +360,14 @@ contextBridge.exposeInMainWorld('althar', {
     ): void => ipcRenderer.send('althar:canvas-show', threadId, target, panel),
     close: (threadId: string): void => ipcRenderer.send('althar:canvas-close', threadId),
     reload: (threadId: string): void => ipcRenderer.send('althar:canvas-reload', threadId),
+    still: (threadId: string): Promise<string | null> => ipcRenderer.invoke('althar:canvas-still', threadId),
+    cover: (threadId: string, covered: boolean): Promise<void> => ipcRenderer.invoke('althar:canvas-cover', threadId, covered),
   },
   // What the page couldn't handle, for main's log: its message and stack, nothing else.
   logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>
     ipcRenderer.send('althar:window-error', error),
+  // What made the page slow, for main's log: its long frames and slow presses, by what they were on, never what it shows.
+  logFrames: (frames: unknown): void => ipcRenderer.send('althar:window-frames', frames),
   onOpen: (listener: (threadId: string) => void): (() => void) => {
     opening.add(listener)
     if (pending !== undefined) {
