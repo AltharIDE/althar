@@ -4,26 +4,21 @@ import '@althar/ui/styles.css'
 import '../app.css'
 
 import {
-  AppVersion,
   Button,
-  CrashReports,
   Icon,
   KeepAwake,
   LinkButton,
   Logo,
-  Path,
   Segmented,
   SettingGroup,
   SettingSwitch,
   SettingList,
-  SettingRow,
   SettingsLayout,
   SettingsNav,
   TaskFolders,
   type FolderWait,
   taskFoldersText,
   Switch,
-  UsageData,
   storageSize,
 } from '@althar/ui'
 import { type KeyboardEvent, StrictMode, useEffect, useRef, useState } from 'react'
@@ -33,7 +28,7 @@ import { GROUPS, sectionText } from '../features/settings/sections'
 import { text as settingsText } from '../features/settings/text'
 import s from './AboutPrototype.module.css'
 
-type Direction = 'a' | 'b' | 'c' | 'd' | 'e' | 'f'
+type Direction = 'a' | 'b' | 'c' | 'd'
 type Theme = 'light' | 'dark'
 
 const GB = 1024 ** 3
@@ -42,38 +37,29 @@ const LOG_BYTES = 11 * 1024 ** 2
 const DISK_BYTES = 994 * GB
 const DISK_FREE = 212 * GB
 const DISCORD = 'https://discord.gg/QA2g8MwKda'
-const RELEASE_NOTES = 'https://github.com/AltharIDE/althar/releases/tag/v0.9.0'
+const WEBSITE = 'https://althar.ai'
+const CHANGELOG = 'https://althar.ai/changelog'
 
 const DIRECTIONS = [
   {
     id: 'a',
-    name: 'Proportion',
-    note: 'The clearest sense of scale; the chart adds a little visual weight.',
+    name: 'Chip',
+    note: 'A small chip beside the version: always there, never loud; easy to stop seeing.',
   },
   {
     id: 'b',
-    name: 'Reclaim',
-    note: 'One aligned storage list; task folders lead, with Free up space one press away.',
+    name: 'Edition',
+    note: 'Althar Early access as the name, the version under it: reads like a release, not a warning.',
   },
   {
     id: 'c',
-    name: 'Quiet',
-    note: 'The calmest, most compact screen; proportions take more hunting.',
+    name: 'Note',
+    note: 'A band that says what early access means, with Discord and Report a problem in it: clearest, takes the most room.',
   },
   {
     id: 'd',
-    name: 'Disk',
-    note: 'Sizes against the whole disk and what’s free; needs a disk read, and the bar is one more thing to read.',
-  },
-  {
-    id: 'e',
-    name: 'Finished',
-    note: 'Frees space in one press, from finished tasks; Althar must know which tasks are done.',
-  },
-  {
-    id: 'f',
-    name: 'Tiles',
-    note: 'A header with the version, sizes as three tiles; roomier, paths drop to tooltips.',
+    name: 'Eyebrow',
+    note: 'A small label over the name, in the label face: quiet and typographic; the least explicit.',
   },
 ] as const
 
@@ -110,7 +96,7 @@ const INITIAL_FOLDERS = [
 
 function initialDirection(): Direction {
   const given = new URLSearchParams(window.location.search).get('direction')
-  return DIRECTIONS.some((direction) => direction.id === given) ? (given as Direction) : 'f'
+  return DIRECTIONS.some((direction) => direction.id === given) ? (given as Direction) : 'a'
 }
 
 function initialTheme(): Theme {
@@ -124,7 +110,6 @@ export function AboutPrototype() {
   const [crashes, setCrashes] = useState(true)
   const [removed, setRemoved] = useState<ReadonlyArray<string>>([])
   const [lastRemoved, setLastRemoved] = useState<ReadonlyArray<string> | null>(null)
-  const [cleanupOpen, setCleanupOpen] = useState(false)
   const [section, setSection] = useState<'about' | 'this-mac'>('about')
   const [flash, setFlash] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
@@ -208,8 +193,6 @@ export function AboutPrototype() {
     taskBytes,
     totalBytes,
     folders,
-    cleanupOpen,
-    setCleanupOpen,
     show,
     measure,
     measured,
@@ -247,12 +230,7 @@ export function AboutPrototype() {
         }
       >
         {section === 'this-mac' && <ThisMac {...shared} flash={flash} />}
-        {section === 'about' && direction === 'a' && <Proportion {...shared} />}
-        {section === 'about' && direction === 'b' && <Reclaim {...shared} />}
-        {section === 'about' && direction === 'c' && <Quiet {...shared} />}
-        {section === 'about' && direction === 'd' && <Disk {...shared} />}
-        {section === 'about' && direction === 'e' && <Finished {...shared} />}
-        {section === 'about' && direction === 'f' && <Tiles {...shared} />}
+        {section === 'about' && <Tiles {...shared} early={direction} />}
       </SettingsLayout>
 
       {notice !== null && (
@@ -299,8 +277,6 @@ interface DirectionProps {
   taskBytes: number
   totalBytes: number
   folders: typeof INITIAL_FOLDERS
-  cleanupOpen: boolean
-  setCleanupOpen: (open: boolean) => void
   show: (place: (typeof PLACES)[number]) => void
   measure: () => void
   measured: boolean
@@ -315,21 +291,6 @@ interface DirectionProps {
   setUsage: (on: boolean) => void
   crashes: boolean
   setCrashes: (on: boolean) => void
-}
-
-function Version({
-  style,
-  updateChecked,
-  onCheck,
-  onReport,
-}: Pick<DirectionProps, 'updateChecked' | 'onCheck' | 'onReport'> & { style: 'line' | 'quiet' }) {
-  return (
-    <div className={style === 'quiet' ? s.quietVersion : s.lineVersion}>
-      <AppVersion version="0.9.0" notes={RELEASE_NOTES} />
-      {updateChecked ? <span className={s.updateState}>Up to date</span> : <LinkButton onClick={onCheck}>Check for updates</LinkButton>}
-      <LinkButton onClick={onReport}>Report a problem</LinkButton>
-    </div>
-  )
 }
 
 function Measure({ measured, onMeasure }: { measured: boolean; onMeasure: () => void }) {
@@ -350,355 +311,84 @@ function ShowButton({ place, onShow, compact = false }: { place: (typeof PLACES)
   )
 }
 
-function bytesFor(id: PlaceId, taskBytes: number) {
-  if (id === 'profile') return PROFILE_BYTES
-  if (id === 'logs') return LOG_BYTES
-  return taskBytes
-}
-
 function place(id: PlaceId) {
   const found = PLACES.find((one) => one.id === id)
   if (found === undefined) throw new Error(`Unknown storage place: ${id}`)
   return found
 }
 
-function Proportion(props: DirectionProps) {
-  const { taskBytes, totalBytes } = props
-  return (
-    <>
-      <Version style="line" updateChecked={props.updateChecked} onCheck={props.onCheck} onReport={props.onReport} />
-      <SettingGroup
-        title="Storage"
-        note={`At least ${storageSize(totalBytes)} on this computer`}
-        action={<Measure measured={props.measured} onMeasure={props.measure} />}
-      >
-        <div className={s.proportionSummary}>
-          <div className={s.storageBar} aria-hidden="true">
-            <span className={s.taskSegment} style={{ width: `${(taskBytes / totalBytes) * 100}%` }} />
-            <span className={s.profileSegment} style={{ width: `${(PROFILE_BYTES / totalBytes) * 100}%` }} />
-            <span className={s.logSegment} style={{ width: `${Math.max((LOG_BYTES / totalBytes) * 100, 0.15)}%` }} />
-          </div>
-          <div className={s.proportionKey}>
-            <span>
-              <i className={s.taskKey} />
-              Task folders {Math.round((taskBytes / totalBytes) * 100)}%
-            </span>
-            <span>
-              <i className={s.profileKey} />
-              Profile {Math.round((PROFILE_BYTES / totalBytes) * 100)}%
-            </span>
-            <Button size="small" trailingIcon="arrow" onClick={() => props.setCleanupOpen(!props.cleanupOpen)}>
-              Free space
-            </Button>
-          </div>
-        </div>
-        {props.cleanupOpen && <Cleanup folders={props.folders} onRemove={props.remove} />}
-        <SettingList>
-          {PLACES.map((one) => (
-            <SettingRow key={one.id} title={one.title} note={<Path path={one.path} className={s.path} />}>
-              {() => (
-                <>
-                  <span className={s.size}>
-                    {one.id === 'worktrees' ? `at least ${storageSize(taskBytes)}` : storageSize(bytesFor(one.id, taskBytes))}
-                  </span>
-                  <ShowButton place={one} onShow={() => props.show(one)} />
-                </>
-              )}
-            </SettingRow>
-          ))}
-        </SettingList>
-      </SettingGroup>
-      <Privacy {...props} compact />
-    </>
-  )
-}
-
-function Reclaim(props: DirectionProps) {
-  const share = props.totalBytes === 0 ? 0 : Math.round((props.taskBytes / props.totalBytes) * 100)
-  const tasks = place('worktrees')
-  return (
-    <>
-      <Version style="line" updateChecked={props.updateChecked} onCheck={props.onCheck} onReport={props.onReport} />
-      <SettingGroup
-        title="Storage"
-        note={`At least ${storageSize(props.totalBytes)} on this computer`}
-        action={<Measure measured={props.measured} onMeasure={props.measure} />}
-      >
-        <SettingList>
-          <SettingRow
-            title={tasks.title}
-            className={s.reclaimRow}
-            note={
-              <span className={s.reclaimNote}>
-                <span>{share}% of Althar’s storage</span>
-                <Path path={tasks.path} className={s.path} />
-                <span className={s.reclaimAction}>
-                  <Button size="small" onClick={() => props.setCleanupOpen(!props.cleanupOpen)}>
-                    {props.cleanupOpen ? 'Done' : 'Free up space…'}
-                  </Button>
-                </span>
-              </span>
-            }
-            under={props.cleanupOpen ? <Cleanup folders={props.folders} onRemove={props.remove} crowded /> : undefined}
-          >
-            {() => (
-              <>
-                <span className={s.size}>at least {storageSize(props.taskBytes)}</span>
-                <ShowButton compact place={tasks} onShow={() => props.show(tasks)} />
-              </>
-            )}
-          </SettingRow>
-          {(['profile', 'logs'] as const).map((id) => {
-            const one = place(id)
-            return (
-              <SettingRow key={id} title={one.title} note={<Path path={one.path} className={s.path} />}>
-                {() => (
-                  <>
-                    <span className={s.size}>{storageSize(bytesFor(id, props.taskBytes))}</span>
-                    <ShowButton compact place={one} onShow={() => props.show(one)} />
-                  </>
-                )}
-              </SettingRow>
-            )
-          })}
-        </SettingList>
-      </SettingGroup>
-      <Privacy {...props} compact />
-    </>
-  )
-}
-
-function Quiet(props: DirectionProps) {
-  return (
-    <>
-      <SettingGroup
-        title="Storage"
-        note={`At least ${storageSize(props.totalBytes)}`}
-        action={<Measure measured={props.measured} onMeasure={props.measure} />}
-      >
-        <SettingList>
-          {PLACES.map((one) => (
-            <SettingRow
-              key={one.id}
-              title={one.title}
-              className={one.id === 'worktrees' ? s.quietRow : undefined}
-              note={<Path path={one.path} className={s.path} />}
-              under={
-                one.id === 'worktrees' ? (
-                  <div className={s.quietCleanup}>
-                    <LinkButton onClick={() => props.setCleanupOpen(!props.cleanupOpen)}>
-                      {props.cleanupOpen ? 'Hide task folders' : 'Free space'}
-                    </LinkButton>
-                    {props.cleanupOpen && <Cleanup folders={props.folders} onRemove={props.remove} />}
-                  </div>
-                ) : undefined
-              }
-            >
-              {() => (
-                <>
-                  <span className={s.size}>
-                    {one.id === 'worktrees' ? `at least ${storageSize(props.taskBytes)}` : storageSize(bytesFor(one.id, props.taskBytes))}
-                  </span>
-                  <ShowButton place={one} onShow={() => props.show(one)} />
-                </>
-              )}
-            </SettingRow>
-          ))}
-        </SettingList>
-      </SettingGroup>
-      <Privacy {...props} compact />
-      <Version style="quiet" updateChecked={props.updateChecked} onCheck={props.onCheck} onReport={props.onReport} />
-    </>
-  )
-}
-
-function Disk(props: DirectionProps) {
-  const used = DISK_BYTES - DISK_FREE
-  const other = used - props.totalBytes
-  const pct = (bytes: number) => `${(bytes / DISK_BYTES) * 100}%`
-  const tasks = place('worktrees')
-  return (
-    <>
-      <Version style="line" updateChecked={props.updateChecked} onCheck={props.onCheck} onReport={props.onReport} />
-      <SettingGroup title="Storage" action={<Measure measured={props.measured} onMeasure={props.measure} />}>
-        <div className={s.disk}>
-          <div className={s.diskFigures}>
-            <span className={s.diskBig}>{storageSize(props.totalBytes)}</span>
-            <span className={s.diskOf}>of this disk’s {storageSize(DISK_BYTES)}</span>
-            <span className={s.diskFree}>
-              {storageSize(DISK_FREE + (INITIAL_FOLDERS.reduce((sum, one) => sum + one.bytes, 0) - props.taskBytes))} free
-            </span>
-          </div>
-          <div className={s.diskBar} aria-hidden="true">
-            <span className={s.diskTasks} style={{ width: pct(props.taskBytes) }} />
-            <span className={s.diskProfile} style={{ width: pct(PROFILE_BYTES + LOG_BYTES) }} />
-            <span className={s.diskOther} style={{ width: pct(other) }} />
-          </div>
-          <div className={s.proportionKey}>
-            <span>
-              <i className={s.taskKey} />
-              Task folders
-            </span>
-            <span>
-              <i className={s.profileKey} />
-              Profile and logs
-            </span>
-            <span>
-              <i className={s.otherKey} />
-              Everything else
-            </span>
-          </div>
-        </div>
-        <SettingList>
-          <SettingRow
-            title={tasks.title}
-            note={<Path path={tasks.path} className={s.path} />}
-            under={props.cleanupOpen ? <Cleanup folders={props.folders} onRemove={props.remove} /> : undefined}
-          >
-            {() => (
-              <>
-                <span className={s.size}>at least {storageSize(props.taskBytes)}</span>
-                <Button size="small" onClick={() => props.setCleanupOpen(!props.cleanupOpen)}>
-                  {props.cleanupOpen ? 'Done' : 'Free up space…'}
-                </Button>
-                <ShowButton compact place={tasks} onShow={() => props.show(tasks)} />
-              </>
-            )}
-          </SettingRow>
-          {(['profile', 'logs'] as const).map((id) => {
-            const one = place(id)
-            return (
-              <SettingRow key={id} title={one.title} note={<Path path={one.path} className={s.path} />}>
-                {() => (
-                  <>
-                    <span className={s.size}>{storageSize(bytesFor(id, props.taskBytes))}</span>
-                    <ShowButton compact place={one} onShow={() => props.show(one)} />
-                  </>
-                )}
-              </SettingRow>
-            )
-          })}
-        </SettingList>
-      </SettingGroup>
-      <Privacy {...props} compact />
-    </>
-  )
-}
-
-function Finished(props: DirectionProps) {
-  const finished = props.folders.filter((one) => one.done !== null)
-  const finishedBytes = finished.reduce((sum, one) => sum + one.bytes, 0)
-  const tasks = place('worktrees')
-  return (
-    <>
-      <Version style="line" updateChecked={props.updateChecked} onCheck={props.onCheck} onReport={props.onReport} />
-      <SettingGroup
-        title="Storage"
-        note={`At least ${storageSize(props.totalBytes)} on this computer`}
-        action={<Measure measured={props.measured} onMeasure={props.measure} />}
-      >
-        {finished.length > 0 ? (
-          <div className={s.reclaimBanner}>
-            <span className={s.reclaimWords}>
-              <strong>{storageSize(finishedBytes)} in folders of finished tasks</strong>
-              <span>The tasks and their conversations stay.</span>
-            </span>
-            <Button onClick={() => props.removeMany(finished.map((one) => one.id))}>
-              Remove {finished.length === 1 ? 'it' : `all ${finished.length}`}
-            </Button>
-          </div>
-        ) : (
-          <div className={s.reclaimBanner}>
-            <span className={s.reclaimWords}>
-              <strong>No finished tasks’ folders left</strong>
-              <span>Folders of open tasks stay until you settle them.</span>
-            </span>
-          </div>
-        )}
-        <SettingList>
-          <SettingRow title={tasks.title} note={<Path path={tasks.path} className={s.path} />}>
-            {() => (
-              <>
-                <span className={s.size}>at least {storageSize(props.taskBytes)}</span>
-                <ShowButton compact place={tasks} onShow={() => props.show(tasks)} />
-              </>
-            )}
-          </SettingRow>
-          <ul className={s.taskFolders}>
-            {props.folders.map((folder) => (
-              <li key={folder.id}>
-                <span className={s.folderName}>
-                  <strong>{folder.title}</strong>
-                  <span>{folder.project}</span>
-                </span>
-                <span className={folder.done === null ? s.folderOpen : s.folderDone}>{folder.done ?? 'Open'}</span>
-                <span className={s.folderSize}>{storageSize(folder.bytes)}</span>
-                <span className={s.folderRemove}>
-                  <Button size="small" variant="quiet" onClick={() => props.remove(folder.id)}>
-                    Remove
-                  </Button>
-                </span>
-              </li>
-            ))}
-          </ul>
-          {(['profile', 'logs'] as const).map((id) => {
-            const one = place(id)
-            return (
-              <SettingRow key={id} title={one.title} note={<Path path={one.path} className={s.path} />}>
-                {() => (
-                  <>
-                    <span className={s.size}>{storageSize(bytesFor(id, props.taskBytes))}</span>
-                    <ShowButton compact place={one} onShow={() => props.show(one)} />
-                  </>
-                )}
-              </SettingRow>
-            )
-          })}
-        </SettingList>
-      </SettingGroup>
-      <Privacy {...props} compact />
-    </>
-  )
-}
-
-function Tiles(props: DirectionProps) {
+function Tiles(props: DirectionProps & { early: Direction }) {
   const tiles = [
     { one: place('worktrees'), bytes: props.taskBytes, lead: true },
     { one: place('profile'), bytes: PROFILE_BYTES, lead: false },
     { one: place('logs'), bytes: LOG_BYTES, lead: false },
   ]
+  const { early } = props
+  const updates = props.updateChecked ? (
+    <span className={s.upToDate}>
+      <i className={s.okDot} />
+      Up to date
+    </span>
+  ) : (
+    <LinkButton onClick={props.onCheck}>Check for updates</LinkButton>
+  )
+  const discord = (
+    <Button size="small" trailingIcon="external" onClick={() => window.open(DISCORD, '_blank')}>
+      <span className={s.withMark}>
+        <DiscordMark />
+        Discord
+      </span>
+    </Button>
+  )
+  const reportButton = (
+    <Button size="small" onClick={props.onReport}>
+      Report a problem
+    </Button>
+  )
   return (
     <>
       <header className={s.appHeader}>
         <Logo size={36} />
         <span className={s.appWords}>
-          <strong>Althar 0.9.0</strong>
+          {early === 'd' && <span className={s.eyebrow}>Early access</span>}
+          {early === 'b' ? (
+            <strong>
+              Althar <span className={s.edition}>Early access</span>
+            </strong>
+          ) : (
+            <span className={s.nameLine}>
+              <strong>Althar 0.9.0</strong>
+              {early === 'a' && <span className={s.eaChip}>Early access</span>}
+            </span>
+          )}
           <span className={s.appState}>
-            {props.updateChecked ? (
-              <>
-                <i className={s.okDot} />
-                Up to date
-              </>
-            ) : (
-              <LinkButton onClick={props.onCheck}>Check for updates</LinkButton>
-            )}
+            {early === 'b' && <span className={s.versionSmall}>0.9.0</span>}
+            {updates}
           </span>
         </span>
         <span className={s.appActions}>
-          <Button size="small" trailingIcon="external" onClick={() => window.open(RELEASE_NOTES, '_blank')}>
+          <Button size="small" trailingIcon="external" onClick={() => window.open(WEBSITE, '_blank')}>
+            Website
+          </Button>
+          <Button size="small" trailingIcon="external" onClick={() => window.open(CHANGELOG, '_blank')}>
             What’s new
           </Button>
-          <Button size="small" trailingIcon="external" onClick={() => window.open(DISCORD, '_blank')}>
-            <span className={s.withMark}>
-              <DiscordMark />
-              Discord
-            </span>
-          </Button>
-          <Button size="small" onClick={props.onReport}>
-            Report a problem
-          </Button>
+          {early !== 'c' && discord}
+          {early !== 'c' && reportButton}
         </span>
       </header>
+      {early === 'c' && (
+        <div className={s.eaNote}>
+          <span className={s.eaWords}>
+            <strong>Early access</strong>
+            <span>Althar changes every week, and some things will break. Tell us when they do.</span>
+          </span>
+          <span className={s.eaActions}>
+            {discord}
+            {reportButton}
+          </span>
+        </div>
+      )}
       <SettingGroup title="Storage" action={<Measure measured={props.measured} onMeasure={props.measure} />}>
         <div className={s.tiles}>
           {tiles.map(({ one, bytes, lead }) => (
@@ -831,60 +521,6 @@ function ThisMac(props: DirectionProps & { flash: number }) {
         />
       </SettingList>
     </div>
-  )
-}
-
-function Cleanup({
-  folders,
-  onRemove,
-  crowded = false,
-}: {
-  folders: typeof INITIAL_FOLDERS
-  onRemove: (id: string) => void
-  crowded?: boolean
-}) {
-  return (
-    <div className={crowded ? s.crowdedCleanup : s.cleanup}>
-      <div className={s.cleanupHead}>
-        <strong>Remove folders you no longer need</strong>
-        <span>The task and its conversation stay in Althar.</span>
-      </div>
-      {folders.length === 0 ? (
-        <p className={s.empty}>No task folders left to remove.</p>
-      ) : (
-        <ul className={s.folderList}>
-          {folders.map((folder) => (
-            <li key={folder.id}>
-              <span className={s.folderName}>
-                <strong>{folder.title}</strong>
-                <span>{folder.project}</span>
-              </span>
-              <span className={s.folderSize}>{storageSize(folder.bytes)}</span>
-              <Button size="small" variant="danger" onClick={() => onRemove(folder.id)}>
-                Remove
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  )
-}
-
-function Privacy({
-  usage,
-  setUsage,
-  crashes,
-  setCrashes,
-  compact = false,
-}: Pick<DirectionProps, 'usage' | 'setUsage' | 'crashes' | 'setCrashes'> & { compact?: boolean }) {
-  return (
-    <SettingGroup title="Privacy" note="Anonymous. Never your code or any name.">
-      <SettingList>
-        <UsageData on={usage} onChange={setUsage} text={{ note: compact ? 'How Althar is used.' : undefined }} />
-        <CrashReports on={crashes} onChange={setCrashes} text={{ note: compact ? 'What failed, and where.' : undefined }} />
-      </SettingList>
-    </SettingGroup>
   )
 }
 
