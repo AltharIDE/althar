@@ -1167,7 +1167,7 @@ export function TaskView({
           runnables={snapshot.task.runnables}
           launches={snapshot.task.launches}
           now={now}
-          onRun={(id) => void model.runProject(id)}
+          onRun={(id) => model.runProject(id)}
           onStop={(id) => void model.stopLaunch(id)}
           onClear={(id) => void model.clearLaunch(id)}
         />

@@ -926,7 +926,7 @@ export function ProjectView({
                     runnables={coordinator.runnables}
                     launches={coordinator.launches}
                     now={now}
-                    onRun={(id, taskId) => void model.runProject(taskId, id)}
+                    onRun={(id, taskId) => model.runProject(taskId, id)}
                     onStop={(id) => void model.stopLaunch(id)}
                     onClear={(id) => void model.clearLaunch(id)}
                     onRunRef={model.runRef}

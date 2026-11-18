@@ -16,7 +16,7 @@ import {
   type RunTargetRun,
 } from '@althar/ui'
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { messageOf, type RunRef } from '../../data/client'
 import { reads } from '../../data/reads'
@@ -46,6 +46,9 @@ import { usePageOpener } from '../browser/opener'
 
 /** How long a run that hasn't said where it answers is taken as starting; after, as running with no address, as an app's window. */
 export const STARTING_FOR = 10_000
+
+/** How long after its start answered a run that shows as starting waits for its launch to show. */
+const LAND = 1_500
 
 /** A run as the button says it: starting, up where it answers, or how it ended by itself; a stopped one is gone. */
 const runOf = (launch: Launch, now: string): RunTargetRun =>
@@ -152,7 +155,7 @@ export const placeOfLaunch = (launch: Launch, repository?: string): RunPlace => 
 export type Attempt =
   | { readonly state: 'fetching' }
   /** A press, before the runtime says a run exists: `from` is the run it was pressed over, if any, which it replaces once another comes. */
-  | { readonly state: 'starting'; readonly from: string | null }
+  | { readonly state: 'starting'; readonly from: string | null; readonly token: number }
   | { readonly state: 'unfetched'; readonly why: string; readonly at: string }
 
 /** The same pull request or branch, whatever repository either says: a run's place says none. */
@@ -187,7 +190,8 @@ export const targetsOf = (
           : attempt?.state === 'unfetched'
             ? { state: 'unfetched', why: attempt.why, since: ago(attempt.at, new Date(now)) }
             : attempt?.state === 'starting' && (here === undefined || here.id === attempt.from)
-              ? { state: 'starting' }
+              ? // No launch yet: nothing to stop until there is.
+                { state: 'starting', pending: true }
               : here === undefined
                 ? undefined
                 : runOf(here, now)
@@ -634,12 +638,23 @@ export function Runs({
   const ended = (runnableId: string) =>
     launches.findLast((launch) => launch.runnableId === runnableId && runsAt(launch, place) && launch.ended !== null)
 
-  /** What shows as starting lets go once the start has answered and the runtime's launch has had its time to land; a start that failed says so itself. */
-  const letGoOf = (key: string, started: void | Promise<void>) => {
+  const pressed = useRef(0)
+  /** What shows as starting lets go a moment after its own start answered (which reads the runtime's runs again, so its launch is there by then); one pressed again since is left alone. */
+  const letGoOf = (key: string, token: number, started: void | Promise<void>) => {
     const letGo = () => {
-      setTimeout(() => attempt(key, null), STARTING_FOR)
+      setTimeout(
+        () =>
+          setAttempts((was) => {
+            const now = was.get(key)
+            if (now?.state !== 'starting' || now.token !== token) return was
+            const next = new Map(was)
+            next.delete(key)
+            return next
+          }),
+        LAND,
+      )
     }
-    Promise.resolve(started).finally(letGo)
+    void Promise.resolve(started).finally(letGo)
   }
 
   const run = (runnableId: string) => {
@@ -650,8 +665,9 @@ export function Runs({
         (launch) => launch.runnableId === runnableId && runsAt(launch, place, runnables.find((one) => one.id === runnableId)?.repository),
       )
       if (live(runnableId) !== undefined) return
-      attempt(key, { state: 'starting', from: mine.at(-1)?.id ?? null })
-      letGoOf(key, onRun(runnableId, place.kind === 'task' ? place.key.slice('task:'.length) : null))
+      const token = ++pressed.current
+      attempt(key, { state: 'starting', from: mine.at(-1)?.id ?? null, token })
+      letGoOf(key, token, onRun(runnableId, place.kind === 'task' ? place.key.slice('task:'.length) : null))
       return
     }
     if (onRunRef === undefined) return

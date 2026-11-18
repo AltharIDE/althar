@@ -46,10 +46,11 @@ export function RunOf({
   /** Runs it again, where it ran: the task's, which of the project's runnables, and the branch or pull request, fetched afresh, where the card says. */
   onRunAgain: (taskId: string | null, runnableId: string | null, ref?: RunRef) => void
   /** Puts a prompt about its failure in the composer, unsent. Without it, a failed run offers no help. */
-  onHelp?: (run: RunContent) => void
+  onHelp?: (run: RunContent, output: () => Promise<string | undefined>) => void
 }) {
   const url = run.url
   const opener = usePageOpener()
+  const { client } = useServices()
   const [open, setOpen] = useState(false)
   const output = useRunOutput(run.launchId, open, run.ended === null)
   return (
@@ -59,7 +60,9 @@ export function RunOf({
       {...(run.ended === null
         ? { onStop: () => onStop(run.launchId) }
         : { onRunAgain: () => onRunAgain(run.taskId, run.runnableId ?? null, ...(run.ref == null ? [] : [refOf(run.ref)])) })}
-      {...(onHelp !== undefined && runFailed(run) ? { onHelp: () => onHelp(run) } : {})}
+      {...(onHelp !== undefined && runFailed(run)
+        ? { onHelp: () => onHelp(run, () => client.readLaunchOutput(run.launchId).then((read) => read.text)) }
+        : {})}
       output={output}
       outputOpen={open}
       onOutputOpenChange={setOpen}
