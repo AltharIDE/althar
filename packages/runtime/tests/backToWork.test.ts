@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 
 import { assert, describe, it } from '@effect/vitest'
@@ -33,6 +34,7 @@ import {
   runtimeWith,
   taskSays,
   titled,
+  worktreeOf,
 } from './conflictsSupport'
 
 /*
@@ -332,6 +334,19 @@ describe('failed checks alone', () => {
         Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ state: string }>`SELECT state FROM user_inputs WHERE body = ${body}`),
         ([one]) => one?.state === 'delivered',
       )
+      // Nor does the same words for another of its repositories' PR #1, which its lead has: as a note marked taken, so the
+      // fake lead doesn't fix anything for it.
+      const other = 'Checks failed on PR #1: test. Their checks are yours to see through, in meridian/web.'
+      yield* (yield* Sessions).send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId, body: other }),
+        threadId,
+        body: other,
+        quiet: true,
+        note: true,
+      })
+      yield* Effect.flatMap(SqlClient.SqlClient, (sql) => sql`UPDATE user_inputs SET state = 'delivered' WHERE body = ${other}`)
+      yield* Effect.sleep('400 millis')
+      assert.notStrictEqual((yield* cardOf(projectId))?.step, 'checks')
       assert.notStrictEqual((yield* cardOf(projectId))?.step, 'checks')
       // The next look tells the lead: Fixing the checks, under way, while it is at them.
       const seen: Array<{ readonly step: string | null; readonly phase: string }> = []
@@ -345,7 +360,10 @@ describe('failed checks alone', () => {
         ([one]) => one?.change?.checks?.outcome === 'passed',
       )
       assert.isTrue(seen.some((one) => one.step === 'checks' && one.phase === 'running'))
-      assert.strictEqual((yield* given(threadId)).filter((body) => body.startsWith('Checks failed')).length, 1)
+      assert.strictEqual(
+        (yield* given(threadId)).filter((body) => body.startsWith('Checks failed') && !body.includes('meridian/web')).length,
+        1,
+      )
     }).pipe(Effect.provide(runtimeWith({ github }, {}, undefined, {}, Duration.millis(300))))
   })
 
@@ -362,7 +380,11 @@ describe('failed checks alone', () => {
       yield* untoldFailure(github, taskId, () => {
         held = true
       })
+      const [mark] = yield* sql<{
+        sequence: number
+      }>`SELECT coalesce(max(sequence), 0) AS sequence FROM user_inputs WHERE thread_id = ${threadId}`
       // Its lead has nothing to start again from.
+      const [lead] = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE thread_id = ${threadId} LIMIT 1`
       yield* (yield* Sessions).stop(threadId)
       yield* sql`PRAGMA foreign_keys = OFF`
       yield* sql`DELETE FROM provider_sessions WHERE thread_id = ${threadId}`
@@ -377,6 +399,36 @@ describe('failed checks alone', () => {
       assert.include(
         (yield* notices(threadId)).map((one) => one.title),
         unreachedLine(['test']),
+      )
+      // The message that would have told it to fix them is withdrawn: a lead started later for something else never takes it up.
+      const told = yield* sql<{
+        state: string
+      }>`SELECT state FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE 'Checks failed%' AND sequence > ${mark?.sequence ?? 0}`
+      assert.deepStrictEqual(
+        told.map((one) => one.state),
+        ['withdrawn'],
+      )
+      const { path } = yield* worktreeOf(taskId)
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path, encoding: 'utf8' }).trim()
+      const body = 'Anything else to look at?'
+      const sessions = yield* Sessions
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
+      yield* sessions.start({ threadId, agentId: lead?.agentId ?? '' })
+      yield* until(sql<{ state: string }>`SELECT state FROM user_inputs WHERE body = ${body}`, ([one]) => one?.state === 'delivered')
+      // Taken up, it would have gone with the person's message, and the fake lead would commit a fix for it.
+      yield* Effect.sleep('1 second')
+      assert.deepStrictEqual(
+        (yield* sql<{
+          state: string
+        }>`SELECT state FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE 'Checks failed%' AND sequence > ${mark?.sequence ?? 0}`).map(
+          (one) => one.state,
+        ),
+        ['withdrawn'],
+      )
+      // It answers the person (`[lead:edit]` commits what it was asked), and commits no fix for the checks of its own.
+      assert.notInclude(
+        execFileSync('git', ['log', '--format=%s', `${head}..HEAD`], { cwd: path, encoding: 'utf8' }),
+        'Fix the failing check',
       )
     }).pipe(Effect.provide(runtimeWith({ github }, {}, undefined, {}, Duration.millis(300))))
   })

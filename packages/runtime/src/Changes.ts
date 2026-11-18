@@ -5128,7 +5128,7 @@ export class Changes extends Context.Service<
               const failedAt = failing
                 ? said.findLast((one) => one.kind === 'checks' && one.outcome === 'failed' && one.sha === head)?.at
                 : undefined
-              const unreached = open && failedAt !== undefined && !(yield* toldSince(taskId, nameOf(snapshot), failedAt))
+              const unreached = open && failedAt !== undefined && !(yield* toldSince(link.id, failedAt))
               // On the card, once the look that heard them has had its moment to tell the lead: never the person's between.
               const untold =
                 unreached && failedAt !== undefined && (yield* nowFor(failedAt, TELLS_WITHIN)) - Date.parse(failedAt) >= TELLS_WITHIN
@@ -5198,17 +5198,42 @@ export class Changes extends Context.Service<
        * waiting for the session that is running. Not anything else said on the thread, nor a message waiting for a lead whose
        * session never started.
        */
-      const toldSince = (taskId: string, name: string, since: string) =>
+      const toldSince = (linkId: string, since: string) =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const said = `Checks failed on ${name}`
-          const rows = yield* sql<{ threadId: string; state: string }>`
-            SELECT i.thread_id, i.state FROM user_inputs i JOIN threads h ON h.id = i.thread_id
-            WHERE h.task_id = ${taskId} AND h.kind = 'task' AND i.accepted_at >= ${since}
-              AND substr(i.body, 1, ${said.length + 1}) IN (${`${said}:`}, ${`${said} `})`
+          const rows = yield* checksSent(linkId, since)
           if (rows.some((row) => row.state === 'delivered')) return true
           const queued = rows.find((row) => row.state === 'queued')
           return queued !== undefined && Option.isSome(yield* sessions.running(queued.threadId))
+        })
+
+      /** The messages that told a task's lead the checks on this pull request failed, since `since` (`tellLead`), and where each is. */
+      const checksSent = (linkId: string, since = '') =>
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ id: string; threadId: string; projectId: string; state: string }>`
+            SELECT i.id, i.thread_id, i.project_id, i.state FROM observations o JOIN user_inputs i ON i.id = json_extract(o.payload, '$.inputId')
+            WHERE o.subject_type = 'external_link' AND o.subject_id = ${linkId} AND o.kind = 'checks_sent' AND o.observed_at >= ${since}
+            ORDER BY o.observed_at`,
+        )
+
+      /**
+       * Checks handed to the person are theirs: a message that told the lead to fix them, waiting still for its next turn, is
+       * withdrawn, so a lead started later for something else doesn't take it up and push a fix of its own.
+       */
+      const withdrawChecks = (linkId: string) =>
+        Effect.gen(function* () {
+          for (const one of yield* checksSent(linkId)) {
+            if (one.state !== 'queued' && one.state !== 'noted') continue
+            const revision = yield* change('user_inputs', one.id, { state: 'withdrawn' })
+            yield* fact({
+              projectId: one.projectId as ProjectId,
+              aggregateType: 'user_input',
+              aggregateId: one.id,
+              revision,
+              type: 'user_input.withdrawn',
+              actorId: instance.systemId,
+            })
+          }
         })
 
       /** Where the checks that failed on one of a task's pull requests stand (`fixesOf`): null where it isn't open, or its task settled. */
@@ -5353,13 +5378,17 @@ export class Changes extends Context.Service<
           const running = Option.isSome(yield* sessions.running(thread.id))
           // A note is kept whatever: the lead reads it with its next turn, in this session or the next.
           if (!running && !wake && !note) return false
-          yield* sessions.send({
+          const sent = yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: thread.id, heard: link.id }, undefined, instance.systemId),
             threadId: thread.id,
             body: parts.join('\n\n'),
             quiet: true,
             note,
           })
+          // Which message told it this pull request's checks failed, by this link, not its words: another repository's pull
+          // request can have the same number (`toldSince`), and a hand-off withdraws it (`withdrawChecks`).
+          if (parts.some((part) => part.startsWith('Checks failed')))
+            yield* heard(link, 'checks_sent', `sent:${sent.inputId}`, { inputId: sent.inputId })
           // Whether its lead takes it: one with no session to start again from doesn't.
           return running || note || (yield* sessions.startLast(thread.id))
         })
@@ -7553,11 +7582,7 @@ export class Changes extends Context.Service<
           if (sum == null || sum.sha !== snapshot.headSha || sum.outcome !== 'failed') return
           const told = yield* Effect.gen(function* () {
             // Told already, its message waiting for a lead whose session never started, or went: started again for it, not told twice.
-            const said = `Checks failed on ${name}`
-            const [waiting] = yield* sql<{ threadId: string }>`
-              SELECT i.thread_id FROM user_inputs i JOIN threads h ON h.id = i.thread_id
-              WHERE h.task_id = ${link.taskId} AND h.kind = 'task' AND i.state = 'queued'
-                AND substr(i.body, 1, ${said.length + 1}) IN (${`${said}:`}, ${`${said} `}) LIMIT 1`
+            const waiting = (yield* checksSent(link.id)).find((one) => one.state === 'queued')
             if (waiting !== undefined) {
               return Option.isSome(yield* sessions.running(waiting.threadId)) || (yield* sessions.startLast(waiting.threadId))
             }
@@ -7578,7 +7603,11 @@ export class Changes extends Context.Service<
           const why = unreachedLine(sum.failing)
           const at = yield* timestamp
           yield* sql.withTransaction(
-            Effect.andThen(heard(link, 'checks_handed', `handed:${sum.sha}:${at}`, { sha: sum.sha, why }), sayOn(link, why)),
+            Effect.all([
+              heard(link, 'checks_handed', `handed:${sum.sha}:${at}`, { sha: sum.sha, why }),
+              withdrawChecks(link.id),
+              sayOn(link, why),
+            ]),
           )
           yield* touchCard(link.taskId)
         })
