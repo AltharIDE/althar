@@ -57,7 +57,8 @@ class SetupFailure extends Error {
 const failure = (code: string, message: string) => new SetupFailure(code, message)
 const notFound = () => failure('SetupNotFound', 'Start setup with a verified release first.')
 const locked = () => failure('LockHeld', 'Another host setup is running. Check setup status before retrying.')
-const invalidRelease = () => failure('SignatureMismatch', 'The portable release failed signature, expiration or platform verification.')
+const invalidRelease = (detail: string) =>
+  failure('SignatureMismatch', `The portable release failed signature, expiration or platform verification. ${detail}`)
 const readState = async (root: string): Promise<State | null> => {
   const bytes = await readPrivate(statePath(root), 32 * 1024, true)
   if (bytes === null) return null
@@ -79,7 +80,7 @@ const appendOutput = async (root: string, text: string) => {
 const verify = async (plan: Plan) => {
   try {
     const bytes = await readPrivate(plan.manifest, MAX_MANIFEST_BYTES, true)
-    if (bytes === null) throw invalidRelease()
+    if (bytes === null) throw invalidRelease('The signed manifest is missing.')
     const actual = releaseInfo()
     const release = verifyRelease(bytes, {
       keys: [await readReleaseKey(plan.key)],
@@ -90,10 +91,15 @@ const verify = async (plan: Plan) => {
     })
     const { manifest } = release
     if (actual.version !== manifest.version || actual.apiVersion !== manifest.apiVersion || actual.storage !== manifest.storage)
-      throw invalidRelease()
+      throw invalidRelease('The executable metadata does not match the signed manifest.')
     return release
-  } catch {
-    throw invalidRelease()
+  } catch (error) {
+    if (error instanceof SetupFailure) throw error
+    if (error instanceof HostError && error.code === 'UnsafePermissions')
+      throw invalidRelease('The manifest is not an owner-only, regular file.')
+    if (error instanceof HostError && error.code === 'UpdateNotConfigured')
+      throw invalidRelease('The pinned public key could not be read securely.')
+    throw invalidRelease('The manifest did not authenticate under the pinned key and freshness policy.')
   }
 }
 
@@ -155,6 +161,7 @@ const launch = async (options: HostOptions, commands: ServiceCommands, plan: Pla
         options.profile,
         '--key-file',
         options.keyFile,
+        ...(options.worktreesExplicit ? ['--worktrees', options.worktrees] : []),
         '--manifest',
         plan.manifest,
         '--release-key',

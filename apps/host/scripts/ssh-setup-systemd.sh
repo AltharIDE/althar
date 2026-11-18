@@ -15,7 +15,7 @@ managed=()
 cleanup() {
   code=$?
   if [[ $code != 0 ]]; then
-    tail -80 "$work/sshd.log" || true
+    sudo tail -80 "$work/sshd.log" || true
     for user in "${managed[@]}"; do
       sudo journalctl --no-pager -n 50 "_UID=$(id -u "$user")" || true
     done
@@ -65,7 +65,7 @@ Subsystem sftp internal-sftp
 Match User root
     AuthorizedKeysFile $ssh_root/authorized_keys
 CONFIG
-sudo /usr/sbin/sshd -f "$work/sshd.conf" -E "$work/sshd.log"
+sudo env -u XDG_RUNTIME_DIR -u DBUS_SESSION_BUS_ADDRESS /usr/sbin/sshd -f "$work/sshd.conf" -E "$work/sshd.log"
 ssh_pid=$(cat "$work/sshd.pid")
 ssh_options=(-F /dev/null -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$work/known-hosts" -o BatchMode=yes -o IdentitiesOnly=yes -i "$work/login")
 remote() { local user=$1; shift; ssh "${ssh_options[@]}" -p "$port" "$user@127.0.0.1" "$@"; }
@@ -140,7 +140,15 @@ printf 'incomplete archive' > "$work/incomplete"
 expect_failure SignatureMismatch install_upload "$(upload "$work/incomplete")"
 remote althar 'echo install > ~/.althar-fixture-stage'
 ready_upload=$(upload "$fixture/${release[6]}")
-install_upload "$ready_upload" | grep -F '"detached":true'
+if ! output=$(install_upload "$ready_upload"); then
+  printf '%s\n' "$output"
+  printf 'Expected verification file checksums:\n'
+  printf '%s' "${release[4]}" | base64 -d | sha256sum
+  printf '%s' "${release[5]}" | base64 -d | sha256sum
+  remote althar 'stat -c "%a %u %s %n" ~/.local/share/althar-host-program.setup-v1/bundle-*/.manifest ~/.local/share/althar-host-program.setup-v1/bundle-*/.release-key; sha256sum ~/.local/share/althar-host-program.setup-v1/bundle-*/.manifest ~/.local/share/althar-host-program.setup-v1/bundle-*/.release-key'
+  exit 1
+fi
+printf '%s\n' "$output" | grep -F '"detached":true'
 status_contains althar '"step":"setup","state":"started"'
 expect_failure LockHeld boot althar resume
 kill_setup
@@ -172,10 +180,19 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=127.0.0.1' -addext 
 sudo install -m 0644 "$work/https.crt" "$cert"
 touch "$work/installed-cert"
 sudo update-ca-certificates >/dev/null
-pushd "$fixture" >/dev/null
-openssl s_server -quiet -WWW -accept 127.0.0.1:8443 -cert "$work/https.crt" -key "$work/https.key" > "$work/https.log" 2>&1 &
+node --input-type=module - "$work/https.crt" "$work/https.key" "$fixture/${release[6]}" > "$work/https.log" 2>&1 <<'SERVER' &
+import { createReadStream, readFileSync, statSync } from 'node:fs'
+import { createServer } from 'node:https'
+import { basename } from 'node:path'
+const [certificate, key, archive] = process.argv.slice(2)
+const length = statSync(archive).size
+createServer({ cert: readFileSync(certificate), key: readFileSync(key) }, (request, response) => {
+  if (request.url !== `/${basename(archive)}`) return response.writeHead(404).end()
+  response.writeHead(200, { 'Content-Length': length })
+  createReadStream(archive).pipe(response)
+}).listen(8443, '127.0.0.1')
+SERVER
 https_pid=$!
-popd >/dev/null
 install_download() {
   boot althar-operator "install download ${release[0]} ${release[1]} ${release[2]} $1 ${release[4]} ${release[5]}"
 }
