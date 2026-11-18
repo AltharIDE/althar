@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, copyFileSync, realpathSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -58,9 +58,28 @@ const portNumber = () =>
 // "Keychain Not Found" dialog. So it runs only where the workflow made a disposable keychain and named it in
 // ALTHAR_E2E_ISOLATED_KEYCHAIN (desktop.yml's native pairing job), never on CI=true alone.
 const isolatedKeychain = process.env.ALTHAR_E2E_ISOLATED_KEYCHAIN
+/**
+ * Whether macOS's default keychain and its whole search list are that one disposable file, so the app can reach no other
+ * (checked only where the variable is set; `security` here lists settings and opens no keychain).
+ */
+const keychainIsolated = (path: string): boolean => {
+  try {
+    const listed = (command: string): string[] =>
+      execFileSync('security', [command, '-d', 'user'], { encoding: 'utf8' })
+        .split('\n')
+        .map((line) => line.trim().replace(/^"|"$/g, ''))
+        .filter((line) => line !== '')
+        .map((line) => realpathSync(line))
+    const expected = realpathSync(path)
+    const list = listed('list-keychains')
+    return listed('default-keychain').every((line) => line === expected) && list.length === 1 && list[0] === expected
+  } catch {
+    return false
+  }
+}
 test.skip(
-  process.platform === 'darwin' && (isolatedKeychain === undefined || isolatedKeychain === '' || !existsSync(isolatedKeychain)),
-  "Needs a disposable macOS keychain (ALTHAR_E2E_ISOLATED_KEYCHAIN), which only the native pairing CI job makes: it never touches a person's login keychain",
+  process.platform === 'darwin' && (isolatedKeychain === undefined || isolatedKeychain === '' || !keychainIsolated(isolatedKeychain)),
+  "Needs macOS to use only a disposable keychain (ALTHAR_E2E_ISOLATED_KEYCHAIN, set up by the native pairing CI job): it never touches a person's login keychain",
 )
 
 test('pairs a desktop with a separate HTTPS home, reconnects after restart and loses access immediately on revocation', async () => {
