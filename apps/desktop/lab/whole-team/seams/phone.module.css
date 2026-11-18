@@ -1,0 +1,56 @@
+.desk {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+  background: var(--n-1);
+}
+.phone {
+  width: 390px;
+  height: 760px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 44px;
+  padding: 12px;
+  background: #1c1a17;
+  box-shadow: var(--lift-2);
+}
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  padding: 0 22px;
+  border-radius: 32px 32px 0 0;
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.notch {
+  width: 96px;
+  height: 22px;
+  border-radius: 12px;
+  background: #1c1a17;
+}
+.screen {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 32px 32px;
+  background: var(--paper);
+}
+.note {
+  max-width: 260px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+.note p {
+  margin: 0 0 6px;
+}
+.noteTitle {
+  font-weight: 600;
+  color: var(--t-1);
+}

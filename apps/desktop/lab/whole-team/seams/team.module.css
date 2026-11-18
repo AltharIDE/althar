@@ -1,0 +1,448 @@
+/* The preview: the app laid out at its size, drawn as large as the panel lets it. */
+.previewArea {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.preview {
+  border: 0;
+  display: block;
+  transform-origin: 0 0;
+  background: var(--paper);
+}
+.previewArea[data-pointing] .preview {
+  cursor: crosshair;
+}
+.sides {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.sidesNote {
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+/* a person's face: their initial in their ink */
+.face {
+  flex-shrink: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: var(--project-clay);
+  user-select: none;
+}
+.face[data-ink='teal'] {
+  background: var(--project-teal);
+}
+.face[data-ink='ochre'] {
+  background: var(--project-ochre);
+}
+.face[data-ink='plum'] {
+  background: var(--project-plum);
+}
+
+/* the app as it runs, drawn small */
+.shot {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.shotFrame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  background: var(--paper);
+}
+.shotFrame iframe {
+  position: absolute;
+  inset: 0 auto auto 0;
+  border: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.shot figcaption {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.pair {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* E: the team in the project's row */
+.teamChip {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px 0 6px;
+  border-radius: 14px;
+  margin-right: 6px;
+}
+.teamChip:hover {
+  background: var(--line);
+}
+.teamFace {
+  box-shadow: 0 0 0 2px var(--paper);
+}
+.teamFace + .teamFace {
+  margin-left: -5px;
+}
+.team {
+  display: grid;
+  gap: 10px;
+}
+.teamHead {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.teamList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+.teamRow {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.teamWho {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.teamName {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.teamRole {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--t-3);
+}
+.teamWhat {
+  font-size: 12.5px;
+  color: var(--t-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.teamWhere {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.teamWhere[data-tone='you'] {
+  color: var(--signal-ink);
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--live);
+}
+.teamFoot {
+  margin: 2px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+/* a teammate's card says whose it is */
+.whose {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+/* B: the hand-off */
+.handOff {
+  display: grid;
+  gap: 18px;
+}
+.approver {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.approverWho {
+  display: grid;
+  gap: 2px;
+  justify-items: start;
+}
+.approverWhy {
+  font-size: 12px;
+  color: var(--t-3);
+}
+.approverWhy code,
+.people code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.goes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--t-2);
+}
+.goes li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.goes li svg {
+  color: var(--t-3);
+}
+.noteLabel {
+  display: grid;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.withAna {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.withAnaWords {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.withAnaTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+.withAnaWhen {
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+/* C: the evidence */
+.evidence {
+  height: 100%;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 28px 32px 32px;
+  max-width: 920px;
+  margin: 0 auto;
+}
+.ask {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.askWords p {
+  margin: 0;
+}
+.askTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.askWhen {
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.quote {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--n-1);
+  font-size: 13.5px;
+  color: var(--t-2);
+}
+.facts {
+  margin: 0;
+  display: grid;
+  gap: 14px;
+}
+.facts > div {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.facts dt {
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.facts dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-1);
+}
+.files {
+  margin-top: 8px;
+}
+.decide {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.quiet {
+  color: var(--t-3);
+}
+.flip {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.flipShots > div[hidden] {
+  display: none;
+}
+.merged {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--t-2);
+}
+.merged svg {
+  color: var(--ok);
+}
+.evidence[data-narrow] {
+  padding: 18px 16px 0;
+  max-width: none;
+  gap: 14px;
+}
+.evidence[data-narrow] .facts > div {
+  grid-template-columns: 1fr;
+  gap: 2px;
+  padding-top: 10px;
+}
+.evidence[data-narrow] .decide {
+  position: sticky;
+  bottom: 0;
+  margin: 4px -16px 0;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+.evidence[data-narrow] .decide > * {
+  flex: 1;
+}
+.phoneShots {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+/* D: who may do what */
+.people {
+  display: grid;
+  gap: 32px;
+  margin-bottom: 40px;
+}
+.login {
+  color: var(--t-3);
+}
+.matrix {
+  width: 100%;
+  border-collapse: collapse;
+}
+.matrix th,
+.matrix td {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  text-align: center;
+  vertical-align: middle;
+}
+.matrix thead th {
+  width: 84px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--t-3);
+}
+.matrix thead th:first-child {
+  width: auto;
+}
+.matrix td > * {
+  margin: 0 auto;
+}
+.matrix .matrixHead {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--t-1);
+}
+.matrixKind {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--t-1);
+}
+.matrixPaths {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-3);
+}
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.always {
+  color: var(--t-3);
+}
+.held {
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+
+/* D: the guardrail Maya meets */
+.guard {
+  margin: 0 0 10px;
+}
+.guardWho {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
