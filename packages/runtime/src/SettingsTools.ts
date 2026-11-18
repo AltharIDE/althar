@@ -105,6 +105,8 @@ interface Field {
   readonly say?: (before: unknown, after: unknown, names: Names) => ReadonlyArray<string>
   /** A map it takes replaces the whole of what was there, so a key left out is taken out; otherwise a map names only the keys it changes. */
   readonly whole?: boolean
+  /** A key of its map a change adds was absent before, and Undo takes it away by writing none for it. */
+  readonly forgets?: boolean
 }
 
 /** A section of the Settings screens, by its address, with what it holds and how a change to it is made. */
@@ -149,22 +151,39 @@ const stable = (value: unknown): string =>
 
 const same = (a: unknown, b: unknown) => stable(a) === stable(b)
 
+const isMap = (value: unknown): value is Values => value !== null && typeof value === 'object' && !Array.isArray(value)
+
 /**
- * Whether a setting still holds what a change left it: its value now is the one given. A map that names only the keys it
- * changes holds while those keys do, whatever the others became; one given whole, or any other value, holds only as it is.
+ * Whether a setting still holds what a change left it: its value now is the one given. A map that names only the fields
+ * it changes holds while those fields do, at any depth, whatever the others became (a repository's role, while its
+ * change target moved on); one given whole, or any other value, holds only as it is. A key absent holds only as none, where the setting takes none to mean taking it away (`forgets`).
  */
-const holds = (field: Field | undefined, now: unknown, given: unknown): boolean => {
-  const map = (value: unknown): value is Values => value !== null && typeof value === 'object' && !Array.isArray(value)
-  if (field?.whole !== true && map(now) && map(given))
-    return Object.entries(given).every(([key, value]) => key in now && same(now[key], value))
-  return same(now, given)
+const holdsAt = (now: unknown, given: unknown, whole: boolean, forgets: boolean): boolean =>
+  !whole && isMap(now) && isMap(given)
+    ? Object.entries(given).every(([key, value]) =>
+        key in now ? holdsAt(now[key], value, whole, false) : forgets && (value === null || value === undefined),
+      )
+    : same(now, given)
+
+const holds = (field: Field | undefined, now: unknown, given: unknown): boolean =>
+  holdsAt(now, given, field?.whole === true, field?.forgets === true)
+
+/**
+ * A map's fields a change names, as they were, for Undo to put back: the rest of a map it changes only in part isn't its
+ * to put back. A key that was absent is none, where the setting takes none to mean taking it away (`forgets`).
+ */
+const namedAt = (now: unknown, given: unknown, forgets: boolean, top: boolean): unknown => {
+  if (!isMap(given) || !isMap(now)) return now
+  const kept: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(given)) {
+    if (key in now) kept[key] = namedAt(now[key], value, forgets, false)
+    else if (top && forgets) kept[key] = null
+  }
+  return kept
 }
 
-/** A map's keys a change names, as they were: the rest of a map it changes only in part isn't its to put back. */
-const named = (field: Field | undefined, now: unknown, given: unknown): unknown => {
-  const map = (value: unknown): value is Values => value !== null && typeof value === 'object' && !Array.isArray(value)
-  return field?.whole !== true && map(now) && map(given) ? Object.fromEntries(Object.entries(now).filter(([key]) => key in given)) : now
-}
+const named = (field: Field | undefined, now: unknown, given: unknown): unknown =>
+  field?.whole === true ? now : namedAt(now, given, field?.forgets === true, true)
 
 /* ---- How a setting loosens what asks ---- */
 
@@ -237,7 +256,7 @@ const field = (
   label: string,
   takes: string,
   schema: Schema.Top,
-  more: Pick<Field, 'loosens' | 'loosening' | 'say' | 'whole'> = {},
+  more: Pick<Field, 'loosens' | 'loosening' | 'say' | 'whole' | 'forgets'> = {},
 ): Field => ({
   label,
   takes,
@@ -696,9 +715,9 @@ export class SettingsTools extends Context.Service<
           fields: {
             efforts: field(
               'Default efforts',
-              'by "agent/model" (as list_models names them), the effort a session on it starts at: { "claude-code/opus": "high" }',
-              Schema.Record(Schema.String, Schema.String),
-              { say: defaultEfforts },
+              'by "agent/model" (as list_models names them), the effort a session on it starts at, or null for the agent\'s own: { "claude-code/opus": "high" }',
+              Schema.Record(Schema.String, Schema.NullOr(Schema.String)),
+              { say: defaultEfforts, forgets: true },
             ),
             turnedOff: field(
               'Models turned off',
@@ -720,7 +739,7 @@ export class SettingsTools extends Context.Service<
           write: (_projectId, change) =>
             Effect.gen(function* () {
               const models = yield* Models
-              for (const [key, effort] of Object.entries((change['efforts'] as Record<string, string> | undefined) ?? {})) {
+              for (const [key, effort] of Object.entries((change['efforts'] as Record<string, string | null> | undefined) ?? {})) {
                 const at = key.indexOf('/')
                 if (at <= 0) return yield* new ToolRefused({ message: `Name each as "agent/model": ${key} isn't.` })
                 yield* models.setDefaultEffort({ agentId: key.slice(0, at), model: key.slice(at + 1), effort })

@@ -53,6 +53,19 @@ describe('a list', () => {
     ).toEqual(['Added the command git push, exactly (allow) to Commands'])
   })
 
+  it('cuts a long pattern short alone, never its scope or decision', () => {
+    const long = 'y'.repeat(120)
+    const lines = changesOf(
+      'Commands',
+      [{ pattern: long, decision: 'allow', match: 'exact' }],
+      [{ pattern: long, decision: 'never', match: 'exact' }],
+    )
+    expect(lines).toEqual([
+      `Added the command ${'y'.repeat(59)}…, exactly (never) to Commands`,
+      `Removed the command ${'y'.repeat(59)}…, exactly (allow) from Commands`,
+    ])
+  })
+
   it('says a rule’s scope, and a change of scope alone', () => {
     const exact = [{ pattern: 'npm publish', decision: 'never', match: 'exact' }]
     const prefix = [{ pattern: 'npm publish', decision: 'never' }]

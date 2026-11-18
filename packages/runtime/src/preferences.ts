@@ -43,6 +43,13 @@ export const defaultEffortsOf = (agentId: string) =>
       SELECT model, effort FROM model_preferences WHERE agent_id = ${agentId} ORDER BY model`
   })
 
+/** Takes the person's default effort for an agent's model away, so a session on it starts at the agent's own. */
+export const clearDefaultEffort = (agentId: string, model: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql`DELETE FROM model_preferences WHERE agent_id = ${agentId} AND model = ${model}`
+  })
+
 export const setDefaultEffort = (agentId: string, model: string, effort: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient

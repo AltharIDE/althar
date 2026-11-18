@@ -35,7 +35,7 @@ const wordsOf = (value: unknown): string => {
   if (value === null || value === undefined) return 'none'
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'bigint') return String(value)
-  if (Array.isArray(value)) return value.length === 0 ? 'none' : value.map(itemWords).join(', ')
+  if (Array.isArray(value)) return value.length === 0 ? 'none' : value.map((one) => itemWords(one)).join(', ')
   if (isMap(value)) {
     const pairs = Object.entries(value).map(([key, one]) => `${key}: ${wordsOf(one)}`)
     return pairs.length === 0 ? 'none' : pairs.join(', ')
@@ -49,14 +49,20 @@ const wordsOf = (value: unknown): string => {
  * command alone, any other for every command that starts with its pattern, so moving between them reads as a change),
  * any other object by its values.
  */
-const itemWords = (item: unknown): string => {
-  if (isMap(item) && typeof item['pattern'] === 'string' && typeof item['decision'] === 'string')
+const itemWords = (item: unknown, shown = false): string => {
+  if (isMap(item) && typeof item['pattern'] === 'string' && typeof item['decision'] === 'string') {
+    // Only the pattern is cut short in a line, never its scope or its decision, which tell one rule from another.
+    const pattern = shown ? clip(item['pattern']) : item['pattern']
     return item['match'] === 'exact'
-      ? `the command ${item['pattern']}, exactly (${item['decision']})`
-      : `commands starting with ${item['pattern']} (${item['decision']})`
+      ? `the command ${pattern}, exactly (${item['decision']})`
+      : `commands starting with ${pattern} (${item['decision']})`
+  }
   if (isMap(item)) return Object.values(item).map(wordsOf).join(' ')
   return wordsOf(item)
 }
+
+/** An item as a line says it: cut short, a rule by its pattern alone. */
+const itemShown = (item: unknown) => (isMap(item) && typeof item['pattern'] === 'string' ? itemWords(item, true) : clip(itemWords(item)))
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 
@@ -72,15 +78,15 @@ export const changesOf = (label: string, before: unknown, after: unknown, whole 
   const items = (value: unknown) => (Array.isArray(value) ? (value as ReadonlyArray<unknown>) : [])
   if (Array.isArray(after) || Array.isArray(before)) {
     if ((Array.isArray(after) || none(after)) && (Array.isArray(before) || none(before))) {
-      const wasWords = new Set(items(before).map(itemWords))
-      const nowWords = new Set(items(after).map(itemWords))
+      const wasWords = new Set(items(before).map((one) => itemWords(one)))
+      const nowWords = new Set(items(after).map((one) => itemWords(one)))
       return [
         ...items(after)
           .filter((one) => !wasWords.has(itemWords(one)))
-          .map((one) => `Added ${clip(itemWords(one))} to ${label}`),
+          .map((one) => `Added ${itemShown(one)} to ${label}`),
         ...items(before)
           .filter((one) => !nowWords.has(itemWords(one)))
-          .map((one) => `Removed ${clip(itemWords(one))} from ${label}`),
+          .map((one) => `Removed ${itemShown(one)} from ${label}`),
       ]
     }
   } else if ((isMap(after) || none(after)) && (isMap(before) || none(before))) {
@@ -112,7 +118,7 @@ export const modelsTurnedOff = (before: unknown, after: unknown, names: Names): 
 export const defaultEfforts = (before: unknown, after: unknown, names: Names): ReadonlyArray<string> => {
   const was = isMap(before) ? before : {}
   return Object.entries(isMap(after) ? after : {}).flatMap(([key, effort]) => {
-    if (was[key] === effort) return []
+    if ((was[key] ?? null) === (effort ?? null)) return []
     const at = key.indexOf('/')
     const model = at > 0 ? names.model(key.slice(0, at), key.slice(at + 1)) : key
     return [`Default effort for ${model}: ${inWords(was[key])} → ${inWords(effort)}`]

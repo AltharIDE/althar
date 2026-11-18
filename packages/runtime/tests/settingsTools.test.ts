@@ -518,6 +518,15 @@ describe('each section of the settings, as agents change it', () => {
         }),
         /Repositories › .+ › role: frontend → docs/,
       )
+      // The role alone was named, and the repository reads back with more (its change target): Settings still shows the
+      // change while the role holds, and Undo puts the role back, not called moot.
+      const settings = yield* SettingsTools
+      const kept = (yield* settings.changed(projectId)).find((one) => one.key === 'repositories')
+      assert.isDefined(kept)
+      assert.match(kept?.changes?.[0] ?? '', /role: frontend → docs$/)
+      yield* settings.undo((yield* lineIds(coordinator.threadId)).at(-1) ?? '')
+      assert.strictEqual((yield* (yield* Projects).repositories(projectId))[0]?.role, 'frontend')
+      assert.strictEqual((yield* lines(coordinator.threadId)).at(-1)?.state, 'undone')
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -587,6 +596,15 @@ describe('each section of the settings, as agents change it', () => {
         'Added commands starting with rm -rf / (ask) to Commands',
         'Removed the command rm -rf /, exactly (ask) from Commands',
       ])
+      // A long pattern is cut short alone: its scope and its decision stay, so an allow and a never differ.
+      const long = `${'x'.repeat(100)} --force`
+      yield* callTool(coordinator, 'change_settings', {
+        section: 'project/rules',
+        change: { commands: [{ pattern: long, decision: 'allow', match: 'exact' }] },
+      })
+      const longLines = (yield* lines(coordinator.threadId)).at(-1)?.moves[0]?.changes ?? []
+      const added = longLines.find((line) => line.startsWith('Added'))
+      assert.match(added ?? '', /^Added the command x{59}…, exactly \(allow\) to Commands$/)
 
       // Plain settings, each in words: none, a list, and what an agent's accounts are.
       const plain = yield* callTool(coordinator, 'change_settings', {
@@ -672,6 +690,10 @@ describe('each section of the settings, as agents change it', () => {
         /^Changed Agents: Default effort for gpt-test: none → high\./,
       )
       assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/agents' }), '"codex/gpt-test":"high"')
+      // An effort that had no default before: Undo takes the new one away, and the card says it is undone.
+      yield* (yield* SettingsTools).undo((yield* lineIds(coordinator.threadId)).at(-1) ?? '')
+      assert.notInclude(yield* callTool(coordinator, 'read_settings', { section: 'althar/agents' }), 'codex/gpt-test')
+      assert.strictEqual((yield* lines(coordinator.threadId)).at(-1)?.state, 'undone')
       // One agent's models alone, while others are in the catalog: its change shows in Settings with its line's words, and
       // Undo puts back that agent's, whatever the others have become.
       const settings = yield* SettingsTools
