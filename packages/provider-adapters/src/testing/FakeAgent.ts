@@ -672,7 +672,8 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
- * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does),
+ * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does; `[coordinator:plan-fails]` with a
+ * plan Althar refuses, so the draft never gets one),
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort; `[after:<slug>]` makes it wait for that task), and `[coordinator:start]` starts one at once, without a plan;
@@ -980,8 +981,11 @@ const playRole = async (
   await client.connect(transport as Parameters<typeof client.connect>[0])
   try {
     const available = new Set((await client.listTools()).tools.map((tool) => tool.name))
+    // Whether the last call was refused: streamed, a refused call ends failed, as an agent's does.
+    let refused = false
     const call = async (name: string, args: Record<string, unknown>) => {
       const result = await client.callTool({ name, arguments: args })
+      refused = result.isError === true
       const content = Array.isArray(result.content) ? result.content : []
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
     }
@@ -1017,7 +1021,7 @@ const playRole = async (
       await notify({
         sessionUpdate: 'tool_call_update',
         toolCallId,
-        status: 'completed',
+        status: refused ? 'failed' : 'completed',
         content: [{ type: 'content', content: { type: 'text', text: answer } }],
         _meta: meta,
       })
@@ -1566,7 +1570,8 @@ const playRole = async (
       const planned = await callStreamed('propose_plan', {
         task: slug,
         lead: {
-          agent: 'claude-code',
+          // `[coordinator:plan-fails]`: on a model nobody has, so its plan is refused and never comes.
+          agent: ask.includes('[coordinator:plan-fails]') ? 'no-such-agent' : 'claude-code',
           // `[coordinator:plan-effort]`: on its large model, thinking hard.
           ...(ask.includes('[coordinator:plan-effort]') ? { model: 'large', effort: 'high' } : {}),
           reason: 'It knows the code.',
