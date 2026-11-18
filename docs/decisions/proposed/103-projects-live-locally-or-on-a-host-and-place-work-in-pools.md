@@ -4,7 +4,7 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-07
-- **Updated:** 2026-11-16
+- **Updated:** 2026-11-18
 - **Owner:** Runtime and desktop maintainers
 - **Amends:** [ADR-048](../foundations.md#where-the-runtime-runs-and-who-may-reach-it),
   not replaces it: the local utility process, one writer per profile and
@@ -273,6 +273,20 @@ events by sequence. Tool requests to the home carry the session, project,
 attempt and token. The home enforces their tool role and current lease;
 the worker's loopback MCP gateway exposes only that session's tools.
 
+Keep worker connection and enrollment separate from that execution
+protocol. The personal-host diagnostic dials a reachable home and verifies
+its certificate with mutual TLS. For managed workers, prototype an outbound
+connection from each side to a narrow execution gateway so a desktop home
+behind NAT can dispatch work. Reuse the Protobuf execution messages, their
+version and capability negotiation, and the journal and replay rules.
+Verify both application identities and their grants across the gateway.
+Bind a managed worker credential to its allocation, home and expiry, then
+bind each start to the home-issued project, attempt, fence and execution
+lease. Document the gateway's visibility into routed worker messages and
+the separate storage used for scoped data transfers. A cloud account can
+buy capacity. The home authorizes work and mediated actions, and the person
+authorizes protected approvals.
+
 A client disconnect does not end a task. Losing the worker's connection to
 the home is different: after its bounded lease grace, it stops starting
 work and stops owned processes, retaining source, logs and results for
@@ -389,6 +403,31 @@ health and any managed-service metering are separate from product analytics.
 
 ### Local, Connect, Hosted and cloud workers
 
+The proposed first paid product is **managed worker capacity for an
+existing home**. A desktop home or a personally hosted home offers
+**Run in cloud** for an eligible new task. Sustained capacity pressure can
+surface that action when a task is likely to wait. The first release asks
+the person to confirm placement and spend, and keeps running attempts on
+their current worker.
+Account linking enables allocation, a spending limit and a usage receipt
+for the cloud run. Leave prices and plans open. Track compute separately
+from model usage.
+
+The cloud service provisions and retires an isolated runner, issues its
+short-lived credential, connects it to the home and meters its compute.
+The home owns scheduling, approval policy, conversations, project state
+and the final task record. Give the runner the chosen source snapshot and only the
+credentials and artifact access that attempt needs. Authorize each transfer
+separately. Scope retention and cleanup to the attempt so a worker can be
+retired after preserving its result. A desktop home still needs to be
+awake to coordinate and respond to asks. If it goes offline, the worker
+follows the bounded lease and reconciliation rules, and the home can pick
+up retained results when it returns.
+
+The proposed second paid product is **hosting the home itself**. It keeps
+the coordinator and project record available when the person's device is
+offline. Home migration, recovery and export belong to that product.
+
 Keep these independent: local/self-hosted single-player; optional **Connect**
 relay access to running homes; **Hosted** for a managed single-player home;
 cloud workers as optional compute; and multiplayer collaboration. This is
@@ -425,7 +464,7 @@ New hosts and protocols named here still have to be built.
 | `packages/runtime` control | [`Runtime.ts`](../../../packages/runtime/src/Runtime.ts), [`Config.ts`](../../../packages/runtime/src/Config.ts), [`Api.ts`](../../../packages/runtime/src/Api.ts), [`Instance.ts`](../../../packages/runtime/src/Instance.ts) and [`ToolServer.ts`](../../../packages/runtime/src/ToolServer.ts): host services, actor provenance, placement, fenced worker dispatch and result reconciliation. The current tool server is loopback HTTP with per-session role tokens, not a remote UI endpoint. |
 | `packages/runtime` execution/files | [`Projects.ts`](../../../packages/runtime/src/Projects.ts), [`local.ts`](../../../packages/runtime/src/local.ts), [`Sessions.ts`](../../../packages/runtime/src/Sessions.ts), [`Runs.ts`](../../../packages/runtime/src/Runs.ts), [`Launches.ts`](../../../packages/runtime/src/Launches.ts), [`Folders.ts`](../../../packages/runtime/src/Folders.ts), [`diffs.ts`](../../../packages/runtime/src/diffs.ts), [`sentFiles.ts`](../../../packages/runtime/src/sentFiles.ts) and [`Artifacts.ts`](../../../packages/runtime/src/Artifacts.ts): move filesystem/process operations behind host-qualified execution and transfer interfaces. Today they assume local paths and processes. |
 | `packages/provider-adapters`, `packages/skills` | [`AgentConnection.ts`](../../../packages/provider-adapters/src/AgentConnection.ts) and [`projection.ts`](../../../packages/skills/src/projection.ts): run ACP beside the agent, host capability probes, supported headless auth and portable skill projection. Extend #684's `agentTools.ts`, `mcpSync.ts`, `skillSync.ts` and `agentServers.ts` when it lands; those files are still on its branch at this writing. |
-| Managed services (later) | Connect relay, pairing/discovery, Hosted lifecycle, regional storage and optional cloud capacity. Same client/worker contracts; service routing and billing do not grant person authority. |
+| Managed services | First, account linking, an outbound execution gateway, isolated worker allocation, bounded artifact transfer and metering. Later, managed home lifecycle and optional client relay. Preserve home and person authority across all three. |
 
 The desktop host waits for the first screen before connector fetches,
 seals through main, and asks main to draw screenshots. The headless host must
@@ -475,10 +514,11 @@ outcome after an interrupted attempt. The
 [operator guide](../../../apps/host/README.md#native-worker-diagnostic)
 covers certificate and journal setup.
 
-The next two slices can be developed independently against the existing
-home. Deliver direct connectivity first for the client path; neither slice
-needs a relay. The following work remains proposed beyond the accepted
-transport and language choices.
+Client enrollment, self-hosted projects and managed worker capacity can
+advance independently where they share the existing home and execution
+contract. The first paid release tests a managed worker from an existing
+home. A hosted home follows as its own product. The following work remains
+proposed beyond the accepted transport and language choices.
 
 ```mermaid
 flowchart TD
@@ -487,12 +527,12 @@ flowchart TD
     Existing --> Worker[Built: enrolled Rust worker and recoverable diagnostic]
     Direct --> Approval[Protected owner keys and approval recovery]
     Worker --> Commands[Project work, isolation and process-tree cancellation]
+    Commands --> Proof[One real project task on a separate worker]
+    Proof --> Cloud[First paid product: managed workers for existing homes]
+    Cloud --> Hosted[Second paid product: managed home and recovery]
     Approval --> Personal[Usable personal remote project]
-    Commands --> Personal
-    Personal --> Pools[Several assigned workers and local testing]
-    Personal --> Hosted[Managed home: lifecycle, backups and recovery]
-    Pools --> Cloud[Isolated managed compute]
-    Hosted --> Cloud
+    Proof --> Personal
+    Proof --> Pools[Several assigned workers and local testing]
     Direct -. Later optional .-> Relay[Account-backed encrypted relay]
     Direct -. Key and origin review .-> Clients[Phone and web clients]
     Hosted -. Separate authorization work .-> Multiplayer[Organization and project collaboration]
@@ -513,7 +553,17 @@ flowchart TD
    unconfirmed external effects. Add automated enrollment and a signed
    worker artifact. Capture the warm/cold and memory baseline described
    above with real project setup and provider startup.
-3. **One usable personal remote project.** Connect the client and worker
+3. **Managed workers for existing homes.** Prove one eligible Linux task
+   initiated from a desktop home behind NAT. Reserve capped compute for a
+   linked account, provision one isolated runner, transfer a scoped
+   workspace, and return logs and a durable result to the existing home.
+   Offer the same execution path from a personal Node home. Prove retry
+   deduplication for allocation and metering, credential expiry, cancellation
+   and recovery, source and secret isolation, regional placement, provider
+   sign-in, cleanup and recovery of unpushed work. Verify reusable images
+   and snapshots are free of credentials. Measure time to useful work
+   before widening the platform, provider or account matrix.
+4. **One usable personal remote project.** Connect the client and worker
    paths. Co-locate a personal Linux home and worker initially; create a
    remote project and clone its repositories rather than silently moving a
    local one. Ship host-side agent login, setup, files/diffs/artifacts,
@@ -522,23 +572,17 @@ flowchart TD
    and records its result with the desktop asleep, then reconnect. Gate
    each provider on supported headless sign-in, refresh and plan usage on
    that VPS. An unsupported provider remains unavailable there.
-4. **Several workers and local testing.** Automatic placement across assigned
+5. **Several workers and local testing.** Automatic placement across assigned
    pools, resource reservations, fenced leases, host outages and snapshots;
    Run on this computer and platform-qualified setup. Prove a saturated host
    sends a new task to another approved worker, unassigned pools stay unused,
    concurrent homes cannot overbook, a stale attempt cannot complete, and
    local verification includes uncommitted remote source without losing edits.
-5. **Hosted single-player.** Managed regional homes, recovery and export,
+6. **Hosted single-player.** Managed regional homes, recovery and export,
    secrets, independent updates and entitlements. Use the person's own pools
    first; distinguish coordinator availability, provider usage and worker
    capacity. Prove restore, key recovery, writer fencing, offline clients and
    a complete export back to a personal host. This does not wait for relay.
-6. **Managed cloud workers.** Isolated environments, prepared snapshots,
-   capacity controls, retention and measured startup. Reuse placement and
-   lease protocols. Prove tenant separation, cancellation, no secret in a
-   reusable snapshot, regional placement and export of unpushed work before
-   retiring capacity. Supported provider sign-in in managed environments is
-   a separate release gate, checked again rather than inherited from a VPS.
 
 **Optional later connection work:** an encrypted relay can reuse the paired
 client API after a routing, abuse-control, privacy and operating-cost review.
