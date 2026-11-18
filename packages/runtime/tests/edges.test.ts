@@ -6,7 +6,7 @@ import { ConnectorFailed } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Deferred, Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 import { TestClock } from 'effect/testing'
 
@@ -187,25 +187,42 @@ describe('listening', () => {
     }).pipe(Effect.provide(runtimeWith({ github })), onTestClock)
   })
 
-  it.live('keeps going when the host fails, and goes quiet when the connection is removed', () => {
+  it.effect('keeps going when the host fails, and goes quiet when the connection is removed', () => {
     const { working, bare } = hosted()
-    const github = makeFakeService({ pushUrl: () => bare })
+    // What the host says of a pull request after it failed, held until the test lets it go: a read under way as the connection goes.
+    const gate = Effect.runSync(Deferred.make<void>())
+    let holdAfter = Number.POSITIVE_INFINITY
+    const activity = () => github.calls.filter((call) => call === 'activity').length
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      waitsFor: (method) => (method === 'activity' && activity() > holdAfter ? Deferred.await(gate) : Effect.void),
+    })
     github.addRepository(['meridian', 'api'])
     return Effect.gen(function* () {
       const { threadId, taskId } = yield* withPullRequest(github, bare, working)
       const changes = yield* Changes
       const connections = yield* Connections
       const instance = yield* Instance
+      // The host fails, and the next look asks it again all the same.
       github.failNext('activity', 'unreachable')
+      const before = activity()
+      holdAfter = before + 1
       yield* changes.refresh(taskId)
-      yield* Effect.sleep('200 millis')
+      yield* until(Effect.sync(activity), (asked) => asked > before)
+      yield* changes.refresh(taskId)
+      yield* until(Effect.sync(activity), (asked) => asked > before + 1)
+      // Removed while that look is under way, what it then reads arrives nowhere, and the next asks nothing.
       const [connection] = yield* connections.list
       yield* connections.remove(connection?.id ?? '', instance.personId)
       github.commentAs(1, 'dana', 'Anyone there?')
+      yield* Deferred.succeed(gate, undefined)
       yield* changes.refresh(taskId)
-      yield* Effect.sleep('400 millis')
+      // Behind the task's lock, as every look is: once it has it, the one under way has ended.
+      yield* changes.stopListening(taskId, 'https://github.com/meridian/api/pull/99')
+      yield* TestClock.adjust('1 second')
       assert.lengthOf(yield* arrivals(threadId), 0)
-    }).pipe(Effect.provide(runtimeWith({ github })))
+      assert.strictEqual(activity(), before + 2)
+    }).pipe(Effect.provide(runtimeWith({ github })), onTestClock)
   })
 })
 
