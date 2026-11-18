@@ -172,8 +172,9 @@ it.each(['https://github.com/ada/unlisted', 'https://git.example.com/ada/unliste
     act(() => at.result.current.choose(pasted.id))
     const picked = at.store.get()?.clone
     expect(picked?.remote).toBe('ada/unlisted')
-    expect(picked?.from).toEqual(url.includes('github.com') ? { connectionId: 'conn1', path: ['ada', 'unlisted'] } : { url })
-    expect(at.result.current.clone?.brand === null).toBe(!url.includes('github.com'))
+    const github = new URL(url).hostname === 'github.com'
+    expect(picked?.from).toEqual(github ? { connectionId: 'conn1', path: ['ada', 'unlisted'] } : { url })
+    expect(at.result.current.clone?.brand === null).toBe(!github)
     act(() => at.result.current.connect('gitlab'))
     expect(at.result.current.connecting).toBe('gitlab')
     act(() => at.result.current.endConnect())
