@@ -39,11 +39,13 @@ export const openWindow = async (port: DomMessagePort, host: Host, home?: HomeSt
   const listed = await timed('first-projects', () =>
     cache.fetchQuery(read.projects()).catch((failure: unknown) => {
       // A runtime of another API version answers every call the same; the window never half-opens over it.
-      if (home?.current.kind === 'ssh' || (failure instanceof ApiError && failure.reason === API_VERSION_MISMATCH)) throw failure
+      if ((home !== undefined && home.current.kind !== 'local') || (failure instanceof ApiError && failure.reason === API_VERSION_MISMATCH))
+        throw failure
       return null
     }),
   )
-  const position = home?.current.kind === 'ssh' ? checkedPosition(listed?.position, home.current.home.homeId) : listed?.cursor
+  const position =
+    home !== undefined && home.current.kind !== 'local' ? checkedPosition(listed?.position, home.current.home.homeId) : listed?.cursor
   const feed = follow(client, cache, position)
   const services: Services = { client, host, cache, feed }
   const router = makeRouter({ client, cache })

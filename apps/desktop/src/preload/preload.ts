@@ -152,6 +152,8 @@ contextBridge.exposeInMainWorld('althar', {
   homes: {
     state: () => ipcRenderer.invoke('althar:homes-state'),
     list: () => ipcRenderer.invoke('althar:homes-list'),
+    pairingInfo: (code: string) => ipcRenderer.invoke('althar:homes-pairing-info', code),
+    pair: (code: string, name: string) => ipcRenderer.invoke('althar:homes-pair', code, name),
     overview: () => ipcRenderer.invoke('althar:homes-overview'),
     inspect: (target: unknown) => ipcRenderer.invoke('althar:homes-inspect', target),
     connect: (checkId: string, name: string) => ipcRenderer.invoke('althar:homes-connect', checkId, name),

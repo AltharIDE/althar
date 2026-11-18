@@ -27,9 +27,9 @@ export interface Editors {
 }
 
 /** The editors found on this Mac, read once for the window; none until they are. */
-export const useEditorList = (): Editors['editors'] => {
+export const useEditorList = (enabled = true): Editors['editors'] => {
   const { client } = useServices()
-  return useQuery({ queryKey: ['editors'], queryFn: () => client.listEditors(), staleTime: Number.POSITIVE_INFINITY }).data ?? []
+  return useQuery({ queryKey: ['editors'], queryFn: () => client.listEditors(), staleTime: Number.POSITIVE_INFINITY, enabled }).data ?? []
 }
 
 /** The editors found on this Mac, with whether they are still being looked for, and looking again. */

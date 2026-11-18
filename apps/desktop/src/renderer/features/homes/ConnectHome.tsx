@@ -1,9 +1,23 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { Button, Caret, Code, CopyButton, Dialog, Disclosure, DisclosureTrigger, Field, Fold, Problem, Spinner } from '@althar/ui'
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import {
+  Button,
+  Caret,
+  Code,
+  CopyButton,
+  Dialog,
+  Disclosure,
+  DisclosureTrigger,
+  Field,
+  Fold,
+  Problem,
+  Spinner,
+  Segmented,
+} from '@althar/ui'
 
 import type { CheckedHome, HomesHost, SshHomeTarget } from '../../../homes'
 import { homeProblem, nameFrom } from './useHomes'
 import s from './Homes.module.css'
+import { PairHome } from './PairHome'
 
 /*
  * Connecting a home: the host, checked first (read-only, and cancelled by any
@@ -191,6 +205,27 @@ export function Working({ children }: { children: string }) {
 }
 
 export function ConnectHome({ homes, onClose }: { homes: HomesHost; onClose: () => void }) {
+  const [method, setMethod] = useState<'pair' | 'ssh'>(homes.pair === undefined ? 'ssh' : 'pair')
+  const choice =
+    homes.pair === undefined ? undefined : (
+      <Segmented
+        label="Connection method"
+        value={method}
+        onChange={setMethod}
+        options={[
+          { value: 'pair', label: 'Pairing code' },
+          { value: 'ssh', label: 'SSH' },
+        ]}
+      />
+    )
+  return method === 'pair' ? (
+    <PairHome homes={homes} onClose={onClose} choice={choice} />
+  ) : (
+    <SshConnectHome homes={homes} onClose={onClose} choice={choice} />
+  )
+}
+
+function SshConnectHome({ homes, onClose, choice }: { homes: HomesHost; onClose: () => void; choice: ReactNode }) {
   const id = useId()
   const form = useConnect(homes, onClose)
   const checked = form.checked !== null && (form.phase === 'checked' || form.phase === 'connecting')
@@ -218,6 +253,7 @@ export function ConnectHome({ homes, onClose }: { homes: HomesHost; onClose: () 
       }
     >
       <div className={s.form}>
+        {choice}
         <div className={s.field}>
           <label className={s.field} htmlFor={`${id}-host`}>
             <span>SSH host</span>

@@ -60,3 +60,7 @@ export { InstallFailed, Installs, type OnDevice } from './Installs'
 
 export { AfterOpen, startup } from './startup'
 export { lagLogged, watchLag } from './lag'
+
+export { DevicePairings } from './DevicePairings'
+
+export { listenNetworkApi, type NetworkApiOptions } from './networkApi'
