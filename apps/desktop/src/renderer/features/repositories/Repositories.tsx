@@ -12,6 +12,7 @@ import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
 import { serviceOfProduct } from '../connections/ways'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
 import { HEADING } from '../projectSettings/sections'
+import { CloneInto } from './CloneInto'
 import s from './Repositories.module.css'
 import type { RepositoriesModel } from './useRepositories'
 
@@ -19,8 +20,9 @@ import type { RepositoriesModel } from './useRepositories'
  * A project's repositories, in its settings: where each is on this computer
  * and where its work goes, its role, and for a fork, where its pull requests
  * open. The kit's part; a folder is added through the system's picker or
- * dropped on it, and a host its work goes to is connected over the page, as
- * the section connects a tracker.
+ * dropped on it, or a repository cloned into it, chosen as a new project's
+ * is, and a host its work goes to is connected over the page, as the
+ * section connects a tracker.
  */
 
 export const text = {
@@ -121,6 +123,8 @@ export function Repositories({
 }) {
   // A repository only on this computer being put on a host: which, and through which connection.
   const [putting, setPutting] = useState<{ readonly repository: string; readonly connection: string } | null>(null)
+  // A repository being chosen to clone into it.
+  const [cloning, setCloning] = useState(false)
   const repositories = model.repositories
   if (repositories === null)
     return model.error === null ? <PartPending label={pendingText.page} /> : <Problem className={s.error}>{model.error}</Problem>
@@ -137,6 +141,8 @@ export function Repositories({
       onLeaveOut={(id) => void model.leaveOut(id)}
       onAdd={() => void model.add()}
       onDrop={(files) => void model.addDropped(files)}
+      onClone={() => setCloning((now) => !now)}
+      cloning={cloning ? <CloneInto model={model} list={connections} have={repositories} onDone={() => setCloning(false)} /> : null}
       // The window opens web pages in the person's browser.
       onOpen={(href) => void window.open(href, '_blank')}
       onConnect={(id) => {

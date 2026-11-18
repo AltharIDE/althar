@@ -8,6 +8,9 @@ import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { device } from '../../shared/device'
 import { shortFolder } from '../../shared/folders'
+import type { CloneChoice } from '../../shared/hostRepositories'
+import { remoteOf } from '../../shared/remotes'
+import { sameRepository } from '../newProject/draft'
 
 /*
  * A project's repositories screen's view model: its repositories as this
@@ -16,7 +19,8 @@ import { shortFolder } from '../../shared/folders'
  * runtime says no. A folder picked or dropped is read first, so the page
  * shows what is being added while it is; adding and leaving out read the
  * repositories, and the projects, again, so the tabs and the home have them
- * before the change feed is heard.
+ * before the change feed is heard. A repository cloned shows the same way,
+ * waiting where it goes while it is cloned, and joins them once it is.
  */
 
 /** A folder being added, as the page shows it while it is read. */
@@ -24,6 +28,12 @@ export interface ReadingFolder {
   readonly id: string
   readonly name: string
   /** Where it is, as the person knows the place: ~/code/meridian-infra. */
+  readonly where: string
+}
+
+/** A folder a repository is cloned into, and where it is, as the person knows the place. */
+export interface ClonePlace {
+  readonly grant: string
   readonly where: string
 }
 
@@ -46,6 +56,12 @@ export interface RepositoriesModel {
   readonly add: () => Promise<void>
   /** Adds the repositories at each folder dropped on the page. */
   readonly addDropped: (files: ReadonlyArray<File>) => Promise<void>
+  /**
+   * Clones a repository into the folder `into` grants, and adds it: one on
+   * this computer already, the same repository, is added from where it is.
+   * Nowhere given, the person is asked where, should it need cloning.
+   */
+  readonly clone: (choice: CloneChoice, into: ClonePlace | null) => Promise<void>
 }
 
 export const useRepositories = (projectId: string): RepositoriesModel => {
@@ -110,6 +126,31 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
   )
 
   /**
+   * Adds what `work` brings, one at a time, in the order they came, so none
+   * clears what another shows: the page is adding while any wait.
+   */
+  const queued = useCallback(
+    (work: () => Promise<void>): Promise<void> => {
+      setWaiting((now) => now + 1)
+      const added = queue.current
+        .then(async () => {
+          setError(null)
+          try {
+            await work()
+          } catch (failure) {
+            setError(messageOf(failure))
+          }
+          await again()
+          setReading([])
+        })
+        .finally(() => setWaiting((now) => now - 1))
+      queue.current = added
+      return added
+    },
+    [again],
+  )
+
+  /**
    * Adds the repositories at a folder the person granted: read first, so
    * the page shows each one coming that the project doesn't have yet, until
    * the repositories are read again with them; folders picked or dropped
@@ -123,32 +164,60 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
         if (name !== null) setError(`${name} isn’t a folder on ${device.this}.`)
         return Promise.resolve()
       }
-      setWaiting((now) => now + 1)
-      // One folder at a time, in the order they came, so none clears what another shows.
-      const added = queue.current
-        .then(async () => {
-          setError(null)
-          try {
-            const folder = await client.readFolder(grant)
-            const have = new Set((cache.getQueryData<ReadonlyArray<ProjectRepository>>(key) ?? []).map((repository) => repository.path))
-            // Each comes whole, by its own name, as the runtime adds it: a folder inside one adds the repository it is in.
-            setReading(
-              folder.repositories
-                .filter((repository) => !have.has(repository.path))
-                .map((repository) => ({ id: repository.path, name: repository.name, where: shortFolder(repository.path) })),
-            )
-            await client.addRepositories(projectId, grant)
-          } catch (failure) {
-            setError(messageOf(failure))
-          }
-          await again()
-          setReading([])
-        })
-        .finally(() => setWaiting((now) => now - 1))
-      queue.current = added
-      return added
+      return queued(async () => {
+        const folder = await client.readFolder(grant)
+        const have = new Set((cache.getQueryData<ReadonlyArray<ProjectRepository>>(key) ?? []).map((repository) => repository.path))
+        // Each comes whole, by its own name, as the runtime adds it: a folder inside one adds the repository it is in.
+        setReading(
+          folder.repositories
+            .filter((repository) => !have.has(repository.path))
+            .map((repository) => ({ id: repository.path, name: repository.name, where: shortFolder(repository.path) })),
+        )
+        await client.addRepositories(projectId, grant)
+      })
     },
-    [client, cache, key, projectId, again],
+    [client, cache, key, projectId, queued],
+  )
+
+  /** The repository main found of the chosen one's name, granted, where it is the same repository on the same host. */
+  const foundGrant = useCallback(
+    async (choice: CloneChoice): Promise<string | null> => {
+      if (choice.here === null) return null
+      const grant = await host.grantFound(choice.here.found).catch(() => null)
+      if (grant === null) return null
+      const reading = await client.readFolder(grant).catch(() => null)
+      const [found] = reading?.kind === 'repository' ? reading.repositories : []
+      const ref = found?.remote == null ? null : remoteOf(found.remote)
+      return ref !== null && sameRepository({ host: ref.host, remote: ref.path }, choice) ? grant : null
+    },
+    [client, host],
+  )
+
+  /** Clones it, shown at once where it goes, waiting as a folder read does, then adds it. */
+  const clone = useCallback(
+    (choice: CloneChoice, into: ClonePlace | null): Promise<void> => {
+      const name = choice.remote.split('/').at(-1) ?? choice.remote
+      const shown = { id: `clone:${choice.id}`, name, where: choice.here?.where ?? `${into?.where ?? '…'}/${name}` }
+      // Shown in the frame it is pressed: the queue shows it again as its turn comes.
+      setReading((now) => [...now, shown])
+      return queued(async () => {
+        setReading([shown])
+        const here = await foundGrant(choice)
+        if (here !== null) {
+          await client.addRepositories(projectId, here)
+          return
+        }
+        // Not the one here after all: cloned, where the person says where there's nowhere given.
+        const at = into ?? (await host.pickClonePlace())
+        if (at === null) return
+        if (choice.here !== null) setReading([{ ...shown, where: `${at.where}/${name}` }])
+        const cloned = await client.cloneRepository(at.grant, choice.from)
+        // An empty repository clones too, with no commit to branch from: it gets its first, as a folder with no commit does.
+        await client.prepareFolder(cloned.grant, cloned.path)
+        await client.addRepositories(projectId, cloned.grant)
+      })
+    },
+    [client, host, projectId, queued, foundGrant],
   )
 
   return {
@@ -166,5 +235,6 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
     addDropped: async (files) => {
       for (const file of files) await addGranted(await host.grantDropped(file), file.name)
     },
+    clone,
   }
 }

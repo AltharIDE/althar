@@ -74,7 +74,7 @@ export const text = {
 }
 
 /** A service's walk in, in place, with a way back to what was there before it. */
-function ConnectInPlace({ service, onDone: ended }: { service: Service; onDone: () => void }) {
+export function ConnectInPlace({ service, onDone: ended }: { service: Service; onDone: () => void }) {
   // Ended, the walk goes, and focus with it: back to the way chosen, so the keyboard still has the page.
   const onDone = () => {
     ended()

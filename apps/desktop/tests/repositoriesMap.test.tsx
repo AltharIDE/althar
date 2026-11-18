@@ -2,21 +2,21 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type ConnectionList, type ProjectRepository } from '@althar/contracts'
+import { ApiError, type ConnectionList, type HostRepository, type ProjectRepository } from '@althar/contracts'
 import { Brand, ChangeTarget, HostReach, RepositoryRole } from '@althar/ui'
 
 import type { Opening } from '../src/renderer/features/connections/ConnectDialog'
 import { ForkOffer, useForkOffer } from '../src/renderer/features/repositories/ForkOffer'
 import { entryOf, hostsOf, Repositories } from '../src/renderer/features/repositories/Repositories'
 import { useRepositories } from '../src/renderer/features/repositories/useRepositories'
-import { connectionList, fakeClient, project, repositories } from './fixtures'
+import { connectionList, fakeClient, fakeHost, githubConnection, project, repositories } from './fixtures'
 import { withServices } from './render'
 
 /*
  * A project's repositories as the map draws them, where the rest of their
  * tests don't go: one not on this Mac, in a folder of a repository, on no
  * branch, staying here, or on a host Althar doesn't know or must sign in to
- * again; and the part for a project not listed yet.
+ * again; the part for a project not listed yet; and one cloned into it.
  */
 
 const [api, web, infra] = repositories as [ProjectRepository, ProjectRepository, ProjectRepository]
@@ -83,6 +83,101 @@ describe('a project’s repositories part', () => {
     withServices(<Part connections={null} onConnect={vi.fn()} />, client)
     await waitFor(() => expect(screen.getByText(/Tasks work in their own worktrees, in/)).toBeTruthy())
     expect(screen.getByText('~/Althar/meridian')).toBeTruthy()
+  })
+})
+
+describe('a repository cloned into a project that has some', () => {
+  const hosted = (path: string): HostRepository => ({
+    path: path.split('/'),
+    description: null,
+    private: true,
+    pushedAt: null,
+    webUrl: `https://github.com/${path}`,
+    archived: false,
+  })
+  const connected: ConnectionList = { ...connectionList, connections: [githubConnection] }
+
+  function Part() {
+    return <Repositories model={useRepositories('p1')} connections={connected} onConnect={vi.fn()} />
+  }
+
+  const opened = (overrides: Parameters<typeof fakeClient>[0] = {}, host: Parameters<typeof fakeHost>[0] = {}) => {
+    const fake = fakeClient({
+      getRepositories: vi.fn(async () => [api, web]),
+      listHostRepositories: vi.fn(async () => [hosted('meridian/api'), hosted('meridian/mobile')]),
+      cloneRepository: vi.fn(async () => ({ grant: 'grant_mobile', path: '/Users/me/code/mobile' })),
+      ...overrides,
+    })
+    const fakes = fakeHost(host)
+    withServices(<Part />, fake.client, fakes)
+    return { ...fake, host: fakes }
+  }
+
+  it('offers your repositories it hasn’t, clones the one chosen where you keep code, and adds it, shown on the map at once', async () => {
+    let cloned: (value: { grant: string; path: string }) => void = () => undefined
+    const { client, host } = opened({
+      cloneRepository: vi.fn(() => new Promise<{ grant: string; path: string }>((resolve) => (cloned = resolve))),
+    })
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    const rows = await panel.findAllByRole('button', { name: /^Clone [a-z]/ })
+    // meridian/api is the project's already.
+    expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(['Clone meridian/mobile'])
+    expect(await screen.findByText('Into ~/code')).toBeTruthy()
+    await userEvent.click(rows[0]!)
+    await userEvent.click(screen.getByRole('button', { name: 'Clone' }))
+    // Put away at once, the clone waiting where it goes.
+    expect(screen.queryByRole('region', { name: 'Clone a repository' })).toBeNull()
+    expect(await screen.findByText('~/code/mobile')).toBeTruthy()
+    expect(host.clonePlace).toHaveBeenCalled()
+    await waitFor(() =>
+      expect(client.cloneRepository).toHaveBeenCalledWith('grant_code', {
+        connectionId: githubConnection.id,
+        path: ['meridian', 'mobile'],
+      }),
+    )
+    cloned({ grant: 'grant_mobile', path: '/Users/me/code/mobile' })
+    await waitFor(() => expect(client.addRepositories).toHaveBeenCalledWith('p1', 'grant_mobile'))
+    expect(client.prepareFolder).toHaveBeenCalledWith('grant_mobile', '/Users/me/code/mobile')
+  })
+
+  it('clones one a URL names, into a folder the person chooses', async () => {
+    const { client, host } = opened()
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Change: Into ~/code' }))
+    expect(await screen.findByText('Into ~/elsewhere')).toBeTruthy()
+    expect(host.pickClonePlace).toHaveBeenCalled()
+    await userEvent.type(screen.getByRole('searchbox'), 'https://gitlab.com/someone/elsewhere.git')
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone someone/elsewhere' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clone' }))
+    await waitFor(() =>
+      expect(client.cloneRepository).toHaveBeenCalledWith('grant_elsewhere', { url: 'https://gitlab.com/someone/elsewhere.git' }),
+    )
+    await waitFor(() => expect(client.addRepositories).toHaveBeenCalledWith('p1', 'grant_mobile'))
+  })
+
+  it('says why a clone didn’t happen, and adds nothing', async () => {
+    const { client } = opened({
+      cloneRepository: vi.fn(async () => {
+        throw new ApiError({ reason: 'GitFailed', message: 'There’s a folder called mobile in ~/code already.' })
+      }),
+    })
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone meridian/mobile' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Clone' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('There’s a folder called mobile in ~/code already.')
+    expect(client.addRepositories).not.toHaveBeenCalled()
+  })
+
+  it('asks where it goes where there’s nowhere usual, and clones nothing if the person cancels', async () => {
+    const { client, host } = opened({}, { clonePlace: vi.fn(async () => null), pickClonePlace: vi.fn(async () => null) })
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone meridian/mobile' }))
+    expect(screen.getByRole('button', { name: 'Choose where it goes' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Clone' }))
+    await waitFor(() => expect(host.pickClonePlace).toHaveBeenCalled())
+    expect(screen.getByRole('region', { name: 'Clone a repository' })).toBeTruthy()
+    expect(client.cloneRepository).not.toHaveBeenCalled()
   })
 })
 
