@@ -1,4 +1,5 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
+import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -10,6 +11,7 @@ import { Card, type CardActions } from '../src/renderer/features/project/Card'
 import { DraftingCard } from '../src/renderer/features/project/DraftingCard'
 import { agents, card, fakeClient } from './fixtures'
 import { withServices } from './render'
+import { planStillAsked } from '../src/renderer/shared/planIt'
 
 /*
  * A task that never began says where it stands, wherever the person sees it:
@@ -66,8 +68,6 @@ describe('a draft whose plan did not come, while the coordinator is still at wor
       title: 'Explore: what the team looks like before multiplayer',
       slug: 'explore-the-team',
     })
-    // Asked once: it isn't offered again while the plan comes.
-    expect(screen.queryByRole('button', { name: 'Plan it' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Discard' }))
     expect(onDiscard).toHaveBeenCalledWith('t5')
     expect(screen.getByText('Discarded')).toBeTruthy()
@@ -99,6 +99,63 @@ describe('a draft whose plan did not come, while the coordinator is still at wor
   })
 })
 
+describe('Plan it, asked', () => {
+  const askedAt = Date.parse(NOW)
+  const at = (seconds: number) => new Date(askedAt + seconds * 1000).toISOString()
+
+  it('is on its way until the coordinator turn that took the ask is over', () => {
+    // A turn still going when it was asked: the ask waits for the next.
+    expect(planStillAsked(askedAt, at(-30), null)).toBe(true)
+    expect(planStillAsked(askedAt, at(-30), at(5))).toBe(true)
+    // The turn that took it, begun since, still going.
+    expect(planStillAsked(askedAt, at(6), at(5))).toBe(true)
+    // Over: where no plan came, Plan it is offered again.
+    expect(planStillAsked(askedAt, at(6), at(40))).toBe(false)
+    expect(planStillAsked(askedAt, null, null)).toBe(true)
+  })
+
+  it('is offered again on both cards once the ask is no longer on its way', () => {
+    const planAsked = vi.fn(() => true)
+    const thread = () => (
+      <Card
+        card={card({ taskId: 't5', slug: 'explore-the-team', title: 'Explore the team', phase: 'stopped', plan: null, unplanned: true })}
+        actions={actions({ onPlanDraft: vi.fn(), onDiscard: vi.fn(), planAsked })}
+      />
+    )
+    const live = () => (
+      <DraftingCard
+        draft={draft({ unplanned: true })}
+        project="Meridian"
+        held
+        onHold={vi.fn()}
+        onPlan={vi.fn()}
+        planAsked={planAsked}
+        onDiscard={vi.fn()}
+      />
+    )
+    for (const shown of [thread, live]) {
+      planAsked.mockReturnValue(true)
+      // Drawn again as the window draws it when the turn or the ask changes.
+      let redraw: () => void = () => {}
+      function Shown() {
+        const [, setDrawn] = useState(0)
+        redraw = () => setDrawn((n) => n + 1)
+        return shown()
+      }
+      const { unmount } = withServices(<Shown />, fakeClient().client)
+      // Asked, and on its way: not offered twice.
+      expect(screen.queryByRole('button', { name: 'Plan it' })).toBeNull()
+      expect(screen.getByText('No plan yet')).toBeTruthy()
+      // Not sent, or the turn that took it ended with no plan: offered again.
+      planAsked.mockReturnValue(false)
+      act(() => redraw())
+      expect(screen.getByRole('button', { name: 'Plan it' })).toBeTruthy()
+      expect(planAsked).toHaveBeenCalledWith('t5')
+      unmount()
+    }
+  })
+})
+
 describe("a task's card in the thread, never begun", () => {
   it('says a draft has no plan once the turn is over, and asks the coordinator to plan it', async () => {
     const onPlanDraft = vi.fn()
@@ -113,7 +170,7 @@ describe("a task's card in the thread, never begun", () => {
     expect(screen.getByText('No plan yet')).toBeTruthy()
     expect(screen.queryByText('Stopped')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
-    expect(onPlanDraft).toHaveBeenCalledWith({ title: 'Explore the team', slug: 'explore-the-team' })
+    expect(onPlanDraft).toHaveBeenCalledWith({ taskId: 't5', title: 'Explore the team', slug: 'explore-the-team' })
     await userEvent.click(screen.getByRole('button', { name: 'Discard' }))
     expect(onDiscard).toHaveBeenCalledWith('t5')
     expect(screen.getByText('Discarded')).toBeTruthy()

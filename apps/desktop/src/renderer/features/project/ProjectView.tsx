@@ -85,7 +85,7 @@ import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { DraftingCard, useDraftingCards } from './DraftingCard'
-import { planIt } from '../../shared/planIt'
+import { planIt, planStillAsked } from '../../shared/planIt'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
@@ -577,6 +577,15 @@ export function ProjectView({
 
   // The team of a task, open from its row up next or from a small change's card, while it can still change.
   const [teamFor, setTeamFor] = useState<string | null>(null)
+  // Drafts whose plan the person asked for, by task, when: Plan it comes back where the ask wasn't sent, or once the
+  // coordinator's turn that took it is over and no plan came.
+  const [plansAsked, setPlansAsked] = useState<ReadonlyMap<string, number>>(new Map())
+  const unask = (taskId: string) =>
+    setPlansAsked((now) => {
+      const next = new Map(now)
+      next.delete(taskId)
+      return next
+    })
   const actions: CardActions = {
     project: name,
     ...(about === null ? {} : { projectId: about }),
@@ -593,7 +602,19 @@ export function ProjectView({
     onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // A draft whose plan didn't come: the coordinator is asked for it, in the person's words, which show in the thread at once.
-    onPlanDraft: (task) => void model.say(planIt(task), null),
+    onPlanDraft: (task) => {
+      setPlansAsked((now) => new Map(now).set(task.taskId, Date.now()))
+      void model
+        .say(planIt(task), null)
+        .then((sent) => {
+          if (!sent) unask(task.taskId)
+        })
+        .catch(() => unask(task.taskId))
+    },
+    planAsked: (taskId) => {
+      const askedAt = plansAsked.get(taskId)
+      return askedAt !== undefined && planStillAsked(askedAt, turnStarted, turnEnded)
+    },
     onDiscard: (taskId) => model.discardTask(taskId),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),
@@ -1131,6 +1152,7 @@ export function ProjectView({
                                   held={drafting.held(draft)}
                                   onHold={() => drafting.hold(draft)}
                                   onPlan={actions.onPlanDraft}
+                                  planAsked={actions.planAsked}
                                   onDiscard={actions.onDiscard}
                                 />
                               ))}

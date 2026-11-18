@@ -31,6 +31,7 @@ export function DraftingCard({
   held,
   onHold,
   onPlan,
+  planAsked,
   onDiscard,
 }: {
   draft: Draft
@@ -38,7 +39,9 @@ export function DraftingCard({
   held: boolean
   onHold: () => void
   /** Asks the coordinator for its plan, once its plan didn't come. */
-  onPlan?: (task: { readonly title: string; readonly slug: string }) => void
+  onPlan?: (task: { readonly taskId: string; readonly title: string; readonly slug: string }) => void
+  /** Whether its plan was asked for and is still on its way: Plan it isn't offered again until it isn't. */
+  planAsked?: (taskId: string) => boolean
   /** Discards its task; done once the runtime has it, rejected where it didn't. */
   onDiscard?: (taskId: string) => Promise<void>
 }) {
@@ -46,8 +49,6 @@ export function DraftingCard({
   const effortOf = useEffortNames()
   // Discarded from here shows at once, and as it was again where the runtime turns it down.
   const [discarding, setDiscarding] = useState(false)
-  // Asked for its plan: it isn't offered again while it comes.
-  const [asked, setAsked] = useState(false)
   const discarded = draft.discarded === true || discarding
   const ended = discarded ? ('discarded' as const) : draft.unplanned === true ? ('unplanned' as const) : undefined
   const task =
@@ -76,14 +77,7 @@ export function DraftingCard({
         if (next) onHold()
       }}
       drafting={{ phase: phaseOf(draft), ...(ended === undefined ? {} : { ended }) }}
-      {...(task === null || onPlan === undefined || asked
-        ? {}
-        : {
-            onPlan: () => {
-              setAsked(true)
-              onPlan(task)
-            },
-          })}
+      {...(task === null || onPlan === undefined || planAsked?.(task.taskId) === true ? {} : { onPlan: () => onPlan(task) })}
       {...(task === null || onDiscard === undefined
         ? {}
         : {

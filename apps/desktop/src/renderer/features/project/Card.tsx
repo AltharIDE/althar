@@ -102,7 +102,9 @@ export interface CardActions {
   /** Picks another preset for a plan: its parts change to match. */
   readonly onPreset?: (planId: string, preset: string) => void
   /** Asks the coordinator for the plan of a draft whose plan didn't come. */
-  readonly onPlanDraft?: (task: { readonly title: string; readonly slug: string }) => void
+  readonly onPlanDraft?: (task: { readonly taskId: string; readonly title: string; readonly slug: string }) => void
+  /** Whether a draft's plan was asked for and is still on its way: Plan it isn't offered again until it isn't. */
+  readonly planAsked?: (taskId: string) => boolean
   /** Discards a task from its card; done once the runtime has it, rejected where it didn't. */
   readonly onDiscard?: (taskId: string) => Promise<void>
 }
@@ -336,10 +338,10 @@ function NotBegun({ card, actions }: { card: TaskCardContent; actions: CardActio
   const named = useModelNames()
   const effortOf = useEffortNames()
   const [discarding, setDiscarding] = useState(false)
-  const [asked, setAsked] = useState(false)
   const plan = card.plan
   const discarded = card.discarded === true || discarding
   const { onPlanDraft, onDiscard } = actions
+  const asked = actions.planAsked?.(card.taskId) ?? false
   return (
     <TaskLaunch
       task={card.slug}
@@ -354,10 +356,7 @@ function NotBegun({ card, actions }: { card: TaskCardContent; actions: CardActio
       {...(discarded || onPlanDraft === undefined || asked
         ? {}
         : {
-            onPlan: () => {
-              setAsked(true)
-              onPlanDraft({ title, slug: card.slug })
-            },
+            onPlan: () => onPlanDraft({ taskId: card.taskId, title, slug: card.slug }),
           })}
       {...(discarded || onDiscard === undefined
         ? {}
