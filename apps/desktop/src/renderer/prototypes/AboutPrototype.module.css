@@ -680,3 +680,14 @@
     display: none;
   }
 }
+
+.withMark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mark {
+  flex: none;
+  color: var(--t-2);
+}
