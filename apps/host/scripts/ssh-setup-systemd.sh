@@ -68,7 +68,16 @@ CONFIG
 sudo env -u XDG_RUNTIME_DIR -u DBUS_SESSION_BUS_ADDRESS /usr/sbin/sshd -f "$work/sshd.conf" -E "$work/sshd.log"
 ssh_pid=$(cat "$work/sshd.pid")
 ssh_options=(-F /dev/null -o ConnectTimeout=5 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$work/known-hosts" -o BatchMode=yes -o IdentitiesOnly=yes -i "$work/login")
-remote() { local user=$1; shift; ssh "${ssh_options[@]}" -p "$port" "$user@127.0.0.1" "$@"; }
+remote() {
+  local user=$1
+  shift
+  # The GitHub VM can export its primary runner's XDG variables through PAM.
+  ssh "${ssh_options[@]}" -p "$port" "$user@127.0.0.1" \
+    'export XDG_CONFIG_HOME="$HOME/.config" XDG_DATA_HOME="$HOME/.local/share" XDG_RUNTIME_DIR="/run/user/$(id -u)"; export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus";' "$@"
+}
+prepare_user_manager() {
+  remote "$1" 'systemctl --user import-environment HOME XDG_CONFIG_HOME XDG_DATA_HOME XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS'
+}
 boot() { local user=$1; shift; remote "$user" "sh -s -- $*" < "$bootstrap"; }
 expect_failure() {
   local code=$1 output
@@ -81,7 +90,7 @@ status_contains() {
   for ((i = 0; i < 90; i++)); do
     status=$(boot "$user" status)
     if [[ $status == *"$pattern"* ]]; then printf '%s\n' "$status"; return; fi
-    if [[ $status == *'"state":"failed"'* ]]; then break; fi
+    if [[ $status == '{"protocol":1,"state":"failed",'* ]]; then break; fi
     sleep 1
   done
   printf '%s\n' "$status"
@@ -95,6 +104,7 @@ key=$(cat "$work/root-key")
 boot root "root-login '$key'" | grep -F '"login":"althar","linger":true'
 boot root "root-login '$key'" | grep -F '"login":"althar","linger":true'
 [[ $(remote althar 'grep -c "^ssh-ed25519 " ~/.ssh/authorized_keys') == 1 ]]
+prepare_user_manager althar
 boot althar probe | grep -F '"systemdUserManager":true'
 expect_failure NotEnoughDisk boot althar 'probe 9999999999'
 
@@ -175,6 +185,7 @@ sudo install -d -o althar-operator -m 0700 /home/althar-operator/.ssh
 sudo install -o althar-operator -m 0600 "$work/root-key" /home/althar-operator/.ssh/authorized_keys
 boot althar-operator probe | grep -F '"code":"LingerOff"'
 sudo loginctl enable-linger althar-operator
+prepare_user_manager althar-operator
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' \
   -keyout "$work/https.key" -out "$work/https.crt" 2>/dev/null
 sudo install -m 0644 "$work/https.crt" "$cert"
