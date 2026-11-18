@@ -62,8 +62,15 @@ export type AskAnsweredProps = RootProps<
     said: ReactNode
     /** What was said can run long, as someone's own words do: it wraps, rather than pushing what follows off the line. */
     wrap?: boolean
+    /**
+     * What was said and what follows it may run to a second line: what follows drops below rather than squeezing
+     * in beside it, and Undo stays clear of both at any width.
+     */
+    flow?: boolean
     /** What follows it, quieter: a scope, a note, who answered. */
     children?: ReactNode
+    /** More under the line, opened by the consumer: what the line counts. Needs `flow`. */
+    detail?: ReactNode
     /** Take the answer back. Without it, no Undo: an answer someone else gave, or one already acted on, stays. */
     onUndo?: () => void
     /** Undo's words. */
@@ -81,7 +88,9 @@ export function AskAnswered({
   denied = false,
   said,
   wrap = false,
+  flow = false,
   children,
+  detail,
   onUndo,
   undo = 'Undo',
   focusOnMount = false,
@@ -103,7 +112,12 @@ export function AskAnswered({
     }
   }, [focusOnMount])
   return (
-    <div ref={line} className={cx(s.answered, wrap && s.wrap, className)} tabIndex={focusOnMount ? -1 : undefined} {...rest}>
+    <div
+      ref={line}
+      className={cx(s.answered, wrap && s.wrap, flow && s.flow, className)}
+      tabIndex={focusOnMount ? -1 : undefined}
+      {...rest}
+    >
       <Icon name={denied ? 'close' : 'check'} size={11} />
       <span className={s.said}>{said}</span>
       {children}
@@ -112,6 +126,7 @@ export function AskAnswered({
           {undo}
         </LinkButton>
       )}
+      {detail !== undefined && <div className={s.detail}>{detail}</div>}
     </div>
   )
 }

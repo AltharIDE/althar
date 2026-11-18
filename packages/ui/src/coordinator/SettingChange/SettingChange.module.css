@@ -4,11 +4,19 @@
   color: var(--t-2);
 }
 
-/* What it was, quieter than what it is now. */
-.before {
-  color: var(--t-3);
+/* What changed, a line each, under the question or the count. */
+.lines {
+  margin: 0 0 4px;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--t-2);
+  overflow-wrap: anywhere;
+}
+.lines li + li {
+  margin-top: 2px;
 }
 
-.move b {
-  font-weight: 600;
+.more {
+  margin: 0 0 8px;
 }

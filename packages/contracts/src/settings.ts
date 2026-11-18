@@ -60,12 +60,18 @@ export const SettingChanger = Schema.Struct({
 })
 export type SettingChanger = typeof SettingChanger.Type
 
-/** One setting a change moved: its words as the screen shows them, and what it was and is, in words. */
+/**
+ * One setting a change moved: its words as the screen shows them, and what it was and is in a few words (a list or an
+ * object is never its whole self here), and `changes`, what moved, a line for each thing in plain words (`Turned on
+ * Kimi K3.1 Pro in OpenCode`, `Default effort for Claude Opus 5.5: high → xhigh`). A change kept before `changes`
+ * existed has none, and its line says only that the setting moved.
+ */
 export const SettingMove = Schema.Struct({
   key: Schema.String,
   label: Schema.String,
   before: Schema.String,
   after: Schema.String,
+  changes: Schema.optional(Schema.Array(Schema.String)),
 })
 export type SettingMove = typeof SettingMove.Type
 

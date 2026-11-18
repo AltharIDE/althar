@@ -13,8 +13,8 @@ import { coordinatorSnapshot, fakeClient, items } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
 /*
- * An agent's change to a setting (ADR-097), in its thread: a line, before and
- * after, whose Undo names its item; one that loosens what asks and that no
+ * An agent's change to a setting (ADR-097), in its thread: a line of what
+ * changed, whose Undo names its item; one that loosens what asks and that no
  * message of the person's asked for is a card whose Change makes it. Settings
  * says which agent changed a section's settings last.
  */
@@ -44,7 +44,9 @@ describe('an agent’s change to a setting', () => {
             section: 'project/rules',
             title: 'Rules',
             project: 'Meridian',
-            moves: [{ key: 'allowEverything', label: 'Allow everything', before: 'off', after: 'on' }],
+            moves: [
+              { key: 'allowEverything', label: 'Allow everything', before: 'off', after: 'on', changes: ['Allow everything: off → on'] },
+            ],
             loosens: true,
             why: 'Builds keep stopping to ask.',
             state: 'asked',
@@ -55,13 +57,72 @@ describe('an agent’s change to a setting', () => {
     })
     withServices(<Project />, client)
     expect(await screen.findByText('Settings › Plans and reviews')).toBeTruthy()
-    expect(document.body.textContent).toContain('Review rounds 3 → 5')
-    expect(document.body.textContent).toContain('Change Allow everything off → on in Meridian › Rules?')
+    expect(document.body.textContent).toContain('Review rounds: 3 → 5')
+    expect(document.body.textContent).toContain('Make this change in Meridian › Rules?')
+    expect(document.body.textContent).toContain('Allow everything: off → on')
     await userEvent.click(screen.getByRole('button', { name: 'Undo' }))
     expect(client.undoSettingChange).toHaveBeenCalledWith('set1')
     expect(screen.getByText('Builds keep stopping to ask.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Change' }))
     expect(client.answerSettingChange).toHaveBeenCalledWith('set2', true)
+  })
+
+  it('says what changed in a list, never the list, and folds many changes to a count', async () => {
+    const turnedOff = Array.from({ length: 150 }, (_, at) => `anthropic/model-${at}`)
+    const { client } = fakeClient({
+      getCoordinator: talking(
+        items.setting(
+          {
+            section: 'althar/agents',
+            title: 'Agents',
+            moves: [
+              {
+                key: 'turnedOff',
+                label: 'Models turned off',
+                before: 'none',
+                after: turnedOff.join(', ').slice(0, 59),
+                changes: ['Turned on Kimi K3.1 Pro in OpenCode'],
+              },
+            ],
+          },
+          'set1',
+        ),
+        items.setting(
+          {
+            section: 'althar/agents',
+            title: 'Agents',
+            moves: [
+              {
+                key: 'turnedOff',
+                label: 'Models turned off',
+                before: 'none',
+                after: 'many',
+                changes: ['Turned off GPT-6 Luna in Codex', 'Turned off GPT-6 Sol in Codex', 'Turned on Kimi K3 in OpenCode'],
+              },
+            ],
+          },
+          'set2',
+        ),
+        // A change kept before its lines were words: its raw lists are never shown.
+        items.setting(
+          {
+            section: 'althar/agents',
+            title: 'Agents',
+            moves: [{ key: 'turnedOff', label: 'Models turned off', before: `{"claude-code":${JSON.stringify(turnedOff)}}`, after: '{}' }],
+          },
+          'set3',
+        ),
+      ),
+    })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Turned on Kimi K3.1 Pro in OpenCode')).toBeTruthy()
+    expect(screen.getByText('3 changes')).toBeTruthy()
+    expect(screen.queryByText('Turned off GPT-6 Luna in Codex')).toBeNull()
+    expect(screen.getByText('Models turned off changed')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('{"claude-code"')
+    await userEvent.click(screen.getByRole('button', { name: 'Show all 3' }))
+    expect(screen.getByText('Turned off GPT-6 Luna in Codex')).toBeTruthy()
+    expect(screen.getByText('Turned on Kimi K3 in OpenCode')).toBeTruthy()
   })
 
   it('shows in Settings, named for the agent that made it', async () => {

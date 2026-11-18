@@ -4,26 +4,37 @@ import { Rhythm } from '../../lib/rhythm'
 import type { RootProps } from '../../lib/props'
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../primitives/Ask/Ask'
 import { Button } from '../../primitives/Button/Button'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import s from './SettingChange.module.css'
 
 /*
  * An agent's change to a setting, in its conversation (ADR-097). Made, it is
- * one line: the setting, what it was and is now, with Undo. One that loosens
- * what asks, and that no message of the person's asked for, is a card they
- * press first: Change makes it, Not now leaves it. Once undone, declined or
- * overtaken, a line saying so.
+ * a line of what changed, in plain words and real names (`Turned on Kimi K3.1
+ * Pro in OpenCode`, `Default effort for Claude Opus 5.5: high → xhigh`), with
+ * Undo: never a list or an object's whole self. Several changes fold to a
+ * count, with each one a press away. One that loosens what asks, and that no
+ * message of the person's asked for, is a card they press first: Change
+ * makes it, Not now leaves it. Once undone, declined or overtaken, a line
+ * saying so.
  */
 
 export interface SettingChangeMove {
   readonly label: string
+  /** What it was and is, in a few words; a change kept before `changes` may hold a whole list, which is never shown. */
   readonly before: string
   readonly after: string
+  /** What moved, a line for each thing, in plain words. */
+  readonly changes?: ReadonlyArray<string>
 }
 
 export interface SettingChangeText {
   kicker: string
-  /** The question on a card: the settings, and where. */
-  ask: (what: ReactNode, where: string) => ReactNode
+  /** The question on a card: how many changes, and where. */
+  ask: (count: number, where: string) => ReactNode
+  /** Several changes, folded to a line. */
+  many: (count: number) => string
+  show: (count: number) => string
+  hide: string
   change: string
   notNow: string
   declined: string
@@ -35,11 +46,10 @@ export interface SettingChangeText {
 
 export const settingChangeText: SettingChangeText = {
   kicker: 'Setting',
-  ask: (what, where) => (
-    <>
-      Change {what} in {where}?
-    </>
-  ),
+  ask: (count, where) => `${count === 1 ? 'Make this change' : `Make these ${count} changes`} in ${where}?`,
+  many: (count) => `${count} changes`,
+  show: (count) => `Show all ${count}`,
+  hide: 'Hide',
   change: 'Change',
   notNow: 'Not now',
   declined: 'Not now.',
@@ -78,14 +88,36 @@ const short = (words: string) => {
   return line.length > 120 ? `${line.slice(0, 119)}…` : line
 }
 
-/** One setting moved: its name, then before → after. */
-function Moved({ move }: { move: SettingChangeMove }) {
+/** The longest a value is let run in a line, as a change kept before its lines were words may hold a whole list. */
+const LONGEST = 60
+
+/**
+ * What a move says, a line for each thing that moved. A change kept before it had its lines says what it can: a short
+ * value before and after, and for a long one, which is a list or an object, only that the setting changed.
+ */
+const changeLinesOf = (move: SettingChangeMove): ReadonlyArray<string> => {
+  if (move.changes !== undefined) return move.changes
+  const plain = (value: string) => value.length <= LONGEST && !/^[[{]/.test(value)
+  return plain(move.before) && plain(move.after) ? [`${move.label}: ${move.before} → ${move.after}`] : [`${move.label} changed`]
+}
+
+/** Lines, one under another. */
+function Lines({ lines }: { lines: ReadonlyArray<string> }) {
   return (
-    <span className={s.move}>
-      {move.label} <span className={s.before}>{move.before}</span> → <b>{move.after}</b>
-    </span>
+    <ul className={s.lines}>
+      {lines.map((line, at) => (
+        // A line can repeat (a setting named twice), so it is its place that tells them apart.
+        <li key={`${at}:${line}`}>{line}</li>
+      ))}
+    </ul>
   )
 }
+
+/** How many lines a made change reads in full, beside its Undo, before it folds to a count. */
+const FEW = 2
+
+/** A card's lines, which it shows whole up to this many. */
+const CARD_FEW = 5
 
 export function SettingChange({
   section,
@@ -104,20 +136,24 @@ export function SettingChange({
 }: SettingChangeProps) {
   const t = { ...settingChangeText, ...text }
   const [answered, setAnswered] = useState(false)
+  const [all, setAll] = useState(false)
   const where = t.where(section, project)
-  const list = moves.map((move, at) => (
-    <span key={move.label}>
-      {at > 0 && '; '}
-      <Moved move={move} />
-    </span>
-  ))
+  const lines = moves.flatMap(changeLinesOf)
+  const toggle = (limit: number) =>
+    lines.length > limit && (
+      <LinkButton aria-expanded={all} onClick={() => setAll(!all)}>
+        {all ? t.hide : t.show(lines.length)}
+      </LinkButton>
+    )
   if (state === 'asked') {
     const answer = (yes: boolean) => {
       setAnswered(true)
       onAnswer?.(yes)
     }
     return (
-      <AskCard icon="gear" kicker={t.kicker} what={t.ask(<>{list}</>, where)} className={className} data-rhythm={Rhythm.Card} {...rest}>
+      <AskCard icon="gear" kicker={t.kicker} what={t.ask(lines.length, where)} className={className} data-rhythm={Rhythm.Card} {...rest}>
+        <Lines lines={all ? lines : lines.slice(0, CARD_FEW)} />
+        {lines.length > CARD_FEW && <p className={s.more}>{toggle(CARD_FEW)}</p>}
         {why !== undefined && <p className={s.why}>{why}</p>}
         {onAnswer !== undefined && (
           <AskFoot>
@@ -132,31 +168,35 @@ export function SettingChange({
       </AskCard>
     )
   }
-  if (state === 'done')
+  if (state === 'done') {
+    const folded = lines.length > FEW
     return (
       <AskAnswered
         className={className}
         data-rhythm={Rhythm.Fold}
-        said={<>{list}</>}
-        wrap
+        said={folded ? t.many(lines.length) : lines.join('; ')}
+        flow
         focusOnMount={answered}
         {...(onUndo === undefined ? {} : { onUndo })}
+        {...(folded && all ? { detail: <Lines lines={lines} /> } : {})}
         {...rest}
       >
         <AskNote>{words === undefined ? where : `${where}, as you asked: “${short(words)}”`}</AskNote>
+        {folded && toggle(FEW)}
       </AskAnswered>
     )
+  }
   return (
     <AskAnswered
       className={className}
       data-rhythm={Rhythm.Fold}
       denied={state !== 'undone'}
       said={state === 'undone' ? t.undone : state === 'declined' ? t.declined : t.moot}
-      wrap
+      flow
       focusOnMount={answered}
       {...rest}
     >
-      <AskNote>{state === 'moot' && said !== undefined ? said : <>{list}</>}</AskNote>
+      <AskNote>{state === 'moot' && said !== undefined ? said : lines.length === 1 ? lines[0] : t.many(lines.length)}</AskNote>
     </AskAnswered>
   )
 }

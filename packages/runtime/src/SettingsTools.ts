@@ -71,6 +71,7 @@ import { listSkills } from './Skills'
 import { addItem, updateItem } from './threads'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { agentTools } from './agentTools'
+import { changesOf, defaultEfforts, inWords, modelsTurnedOff, plainNames, said, type Names } from './settingWords'
 
 /*
  * Settings, as the person changes them on the Settings screens, for the
@@ -100,6 +101,8 @@ interface Field {
   readonly loosens?: (before: unknown, after: unknown) => boolean
   /** When it loosens, in words, for read_settings. */
   readonly loosening?: string
+  /** What a change to it says, a line for each thing that moved, where the generic diff of its value doesn't say it well. */
+  readonly say?: (before: unknown, after: unknown, names: Names) => ReadonlyArray<string>
 }
 
 /** A section of the Settings screens, by its address, with what it holds and how a change to it is made. */
@@ -143,17 +146,6 @@ const stable = (value: unknown): string =>
   ) ?? 'null'
 
 const same = (a: unknown, b: unknown) => stable(a) === stable(b)
-
-/** A value as a line says it: on or off, none, a list, or as it is. */
-export const inWords = (value: unknown): string => {
-  if (value === true) return 'on'
-  if (value === false) return 'off'
-  if (value === null || value === undefined) return 'none'
-  if (Array.isArray(value))
-    return value.length === 0 ? 'none' : value.map((one) => (typeof one === 'string' ? one : stable(one))).join(', ')
-  if (typeof value === 'string' || typeof value === 'number') return String(value)
-  return stable(value)
-}
 
 /* ---- How a setting loosens what asks ---- */
 
@@ -222,7 +214,7 @@ const Changing = Schema.Struct({
   message_id: Schema.optional(Schema.String),
 })
 
-const field = (label: string, takes: string, schema: Schema.Top, more: Pick<Field, 'loosens' | 'loosening'> = {}): Field => ({
+const field = (label: string, takes: string, schema: Schema.Top, more: Pick<Field, 'loosens' | 'loosening' | 'say'> = {}): Field => ({
   label,
   takes,
   schema: schema as unknown as Schema.Codec<unknown, unknown>,
@@ -681,11 +673,13 @@ export class SettingsTools extends Context.Service<
               'Default efforts',
               'by "agent/model" (as list_models names them), the effort a session on it starts at: { "claude-code/opus": "high" }',
               Schema.Record(Schema.String, Schema.String),
+              { say: defaultEfforts },
             ),
             turnedOff: field(
               'Models turned off',
               'by agent id, the whole list of its models turned off: { "codex": ["gpt-6.1-luna"] }',
               Schema.Record(Schema.String, Schema.Array(Schema.String)),
+              { say: modelsTurnedOff },
             ),
           },
           read: () =>
@@ -1001,13 +995,35 @@ export class SettingsTools extends Context.Service<
           return message?.body
         })
 
+      /** What agents and their models are called on screen, for the lines of a change to them. */
+      const namesOf = Effect.gen(function* () {
+        const catalog = yield* (yield* Models).catalog
+        const agents = yield* Agents
+        return {
+          agent: (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId,
+          model: (agentId: string, model: string) =>
+            catalog.find((one) => one.agentId === agentId)?.models.find((offered) => offered.id === model)?.name ?? model,
+        } satisfies Names
+      })
+
+      /** What a change moved, in plain words: a line for each thing that changed, never a value's whole list or object. */
       const movesOf = (section: Section, before: Values, after: Values) =>
-        Object.keys(after).map((key) => ({
-          key,
-          label: section.fields[key]?.label ?? key,
-          before: inWords(before[key]),
-          after: inWords(after[key]),
-        }))
+        Effect.gen(function* () {
+          const names = Object.keys(after).some((key) => section.fields[key]?.say !== undefined) ? yield* namesOf : plainNames
+          return Object.keys(after).map((key) => {
+            const one = section.fields[key]
+            const label = one?.label ?? key
+            const lines = one?.say?.(before[key], after[key], names) ?? changesOf(label, before[key], after[key])
+            return {
+              key,
+              label,
+              before: inWords(before[key]),
+              after: inWords(after[key]),
+              // A change that moved nothing a line can name (an agent Althar doesn't have) still says which setting it was.
+              changes: lines.length === 0 ? [`${label} changed`] : lines,
+            }
+          })
+        })
 
       /** What of a change loosens what asks, in words; empty where nothing does. */
       const looseningOf = (section: Section, before: Values, after: Values, current: Values) => {
@@ -1041,7 +1057,7 @@ export class SettingsTools extends Context.Service<
             section: section.id,
             title: section.title,
             project: section.scope === 'project' ? yield* projectNameOf(access.projectId) : null,
-            moves: movesOf(section, input.before, input.after),
+            moves: yield* movesOf(section, input.before, input.after),
             by: input.by,
             loosens: input.loosens,
             words: input.words,
@@ -1161,7 +1177,7 @@ export class SettingsTools extends Context.Service<
               section: section.id,
               title: section.title,
               project: section.scope === 'project' ? yield* projectNameOf(access.projectId) : null,
-              moves: movesOf(section, moved, after),
+              moves: yield* movesOf(section, moved, after),
               by,
               loosens: true,
               words: null,
@@ -1201,10 +1217,8 @@ export class SettingsTools extends Context.Service<
             actorId: actorOf(by),
           })
           if (undoing !== undefined) yield* settle(undoing, 'undone', null)
-          const said = Object.entries(after)
-            .map(([key, value]) => `${section.fields[key]?.label ?? key}: ${inWords(moved[key])} → ${inWords(value)}`)
-            .join('; ')
-          return `${undoing === undefined ? 'Changed' : 'Undid'} ${section.title}: ${said}. A line in your thread says so, with Undo; Settings shows it at once. To put it back yourself, change_settings with undo: ${id}.`
+          const told = said((yield* movesOf(section, moved, after)).flatMap((move) => move.changes))
+          return `${undoing === undefined ? 'Changed' : 'Undid'} ${section.title}: ${told}. A line in your thread says so, with Undo; Settings shows it at once. To put it back yourself, change_settings with undo: ${id}.`
         })
 
       /** The settings in a section now, for a row's keys, and whether they are still as one side of it left them. */
