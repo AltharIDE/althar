@@ -74,7 +74,10 @@ export const storageSizes = (places: Readonly<Record<PlaceId, string>>, measureI
       joined.waiting++
       return new Promise<StorageSize>((resolveSize, reject) => {
         const leave = () => {
-          if (--joined.waiting === 0 && signal?.aborted === true) joined.stop.abort()
+          if (--joined.waiting !== 0 || signal?.aborted !== true) return
+          joined.stop.abort()
+          // Forgotten as it is stopped, not once it ends: a look meanwhile measures anew rather than join it.
+          if (kept.get(place) === joined) kept.delete(place)
         }
         const abandon = () => {
           signal?.removeEventListener('abort', abandon)
