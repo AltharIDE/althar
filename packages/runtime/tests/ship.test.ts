@@ -574,6 +574,32 @@ describe('talking to a lead once its plan is done', () => {
     },
   )
 
+  it.live('stepped back into prototyping, a push of its own task by its lead sends nothing to its pull request, held or not', () => {
+    const { working, bare, github } = onGitHub()
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const task = yield* opened(working)
+      const lead = yield* leadOf(task)
+      const pushed = git(bare, 'rev-parse', BRANCH)
+      yield* callTool(lead, 'change_part', { part: 'preset', preset: 'Prototype', why: 'the person asked' })
+      // A prototype's commit with nothing holding it, as while its first run is still at work: push_task, the card's Push, has it.
+      writeFileSync(join(task.path, 'flat.md'), 'A flatter panel.\n')
+      git(task.path, 'add', '-A')
+      git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'Try a flatter panel')
+      yield* sql`UPDATE workspaces SET held_at = NULL WHERE task_id = ${task.taskId}`
+      const head = git(task.path, 'rev-parse', 'HEAD')
+      assert.match(
+        yield* callTool(lead, 'push_task', { head, why: 'trying it' }),
+        /Nothing pushed: this task ends on its branch now, stepped back from its pull request/,
+      )
+      assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+      assert.deepStrictEqual(
+        github.changes.map((one) => [one.state, one.draft]),
+        [['open', true]],
+      )
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('stepped back into prototyping, a Ship of only a merge of main sends nothing to its pull request', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {

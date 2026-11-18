@@ -9596,6 +9596,12 @@ export class Changes extends Context.Service<
           provide(
             locked(taskId)(
               Effect.gen(function* () {
+                // Stepped back into prototyping: its pull request stays as it is, whoever asks, until it is a change again.
+                if (yield* keptOpenOf(taskId))
+                  return yield* new ToolRefused({
+                    message:
+                      'Nothing pushed: this task ends on its branch now, stepped back from its pull request (as for prototyping), so its pull request stays as it is. Make it a change again (change_part with preset Change, or ending draft or ready) and Ship sends what waits there, after its review.',
+                  })
                 if ((yield* holdsOf(taskId)).length > 0) return yield* new ShipRefused({ taskId, why: 'held' })
                 yield* taken(taskId, 'pushed')
                 return yield* push(taskId, head, url)
