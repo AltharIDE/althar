@@ -1,0 +1,95 @@
+/* lighter than a task's card: a line round it on the page, no sheet and no lift */
+.card {
+  position: relative;
+  padding: 11px 14px 12px;
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  overflow: hidden;
+}
+/* something in it waits on you: violet, like every ask */
+.yours.card {
+  background: var(--signal-paper);
+  box-shadow: inset 0 0 0 1px var(--signal-line);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.kicker svg {
+  flex: none;
+}
+/* where it stands, at the end: never cut, the kicker gives way */
+.state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.running .state {
+  color: var(--live);
+}
+.yours .state {
+  color: var(--signal-ink);
+}
+.failed .state {
+  color: var(--danger);
+}
+:is(.stopped, .waiting, .paused) .state svg {
+  color: var(--t-3);
+}
+
+.title {
+  margin: 6px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--t-1);
+}
+.stopped .title {
+  color: var(--t-2);
+}
+
+/* its result, up front: a few lines, then it gives way to the aside itself */
+.result {
+  display: -webkit-box;
+  margin: 4px 0 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+  overflow-wrap: anywhere;
+}
+:is(.running, .waiting, .paused) .result {
+  color: var(--t-3);
+}
+
+/* the strip every card ends in, edge to edge */
+.next {
+  margin: 11px -14px -12px;
+}
+.yours .next {
+  border-top-color: color-mix(in srgb, var(--signal) 14%, transparent);
+}
