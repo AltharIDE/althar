@@ -56,10 +56,11 @@ export const uploadIssueAttachment = (
         )
       return { status: 201, body: { filename, url, linked: true }, next: null }
     }
-    if (!['jira_cloud', 'jira_dc', 'trello'].includes(product)) return yield* rejected('This product has no issue attachment upload API.')
+    if (!['jira_cloud', 'jira_dc', 'trello', 'clickup'].includes(product))
+      return yield* rejected('This product has no issue attachment upload API.')
     const boundary = `althar-${createHash('sha256').update(bytes).digest('hex').slice(0, 24)}`
     const before = new TextEncoder().encode(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mediaType}\r\n\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="${product === 'clickup' ? 'attachment' : 'file'}"; filename="${filename}"\r\nContent-Type: ${mediaType}\r\n\r\n`,
     )
     const after = new TextEncoder().encode(`\r\n--${boundary}--\r\n`)
     const form = new Uint8Array(before.length + bytes.length + after.length)
@@ -70,11 +71,15 @@ export const uploadIssueAttachment = (
       product,
       fetch: options.fetch,
       authorization: Effect.map(options.credential, authorizationOf),
-      ...(product === 'trello' ? {} : { headers: { 'X-Atlassian-Token': 'no-check' } }),
+      ...(product === 'trello' || product === 'clickup' ? {} : { headers: { 'X-Atlassian-Token': 'no-check' } }),
     })
     const root = withoutTrailingSlashes(options.apiUrl)
     const path =
-      product === 'trello' ? `/cards/${encodeURIComponent(issue)}/attachments` : `/issue/${encodeURIComponent(issue)}/attachments`
+      product === 'trello'
+        ? `/cards/${encodeURIComponent(issue)}/attachments`
+        : product === 'clickup'
+          ? `/task/${encodeURIComponent(issue)}/attachment`
+          : `/issue/${encodeURIComponent(issue)}/attachments`
     const body = yield* http.upload(Schema.Unknown, root + path, form, `multipart/form-data; boundary=${boundary}`)
     return { status: 201, body, next: null }
   })

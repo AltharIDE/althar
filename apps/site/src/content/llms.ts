@@ -54,7 +54,7 @@ export const DOES = [
   },
   {
     title: 'Works with your tools.',
-    body: 'Linear, Jira, Trello and GitHub Issues for the work coming in, each issue landing in the right project; GitHub, GitLab and Bitbucket for the pull requests going out. Issues in, pull requests out.',
+    body: 'Linear, Jira, Trello, ClickUp and GitHub Issues for the work coming in, each issue landing in the right project; GitHub, GitLab and Bitbucket for the pull requests going out. Issues in, pull requests out.',
   },
   {
     title: 'Wherever you are, still in reach.',
