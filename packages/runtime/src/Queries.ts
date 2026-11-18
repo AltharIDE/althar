@@ -1422,7 +1422,13 @@ export class Queries extends Context.Service<
             standsIn:
               standsIn === undefined
                 ? null
-                : { agentId: standsIn.agentId, model: standsIn.model, effort: standsIn.effort, until: standsIn.until },
+                : {
+                    agentId: standsIn.agentId,
+                    model: standsIn.model,
+                    effort: standsIn.effort,
+                    until: standsIn.until,
+                    ...(standsIn.why === undefined ? {} : { why: standsIn.why }),
+                  },
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
             background: Option.isSome(running) && running.value.sessionId === session.id ? running.value.background : [],
           }

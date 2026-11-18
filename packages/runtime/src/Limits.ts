@@ -182,11 +182,18 @@ export const outWords = (input: {
   return input.nothingFree === true ? `${out}. No other model is free: ${waits} ${until}.` : `${out}. ${capitalized(waits)} ${until}.`
 }
 
-/** What a thread says when the lead a task was given has usage again, and takes the thread back from the one that stood in. */
+/**
+ * What a thread says when the lead a task was given takes the thread back from the one that stood in for it: it has
+ * usage again, or the step it ended without its report is over.
+ */
 export const backWords = (input: {
   readonly given: { readonly agent: string; readonly model: string | null }
   readonly standIn: { readonly agent: string; readonly model: string | null }
-}): string => `${whoWords(input.given)} has usage again and takes over again from ${whoWords(input.standIn)}.`
+  readonly why?: 'limit' | 'low' | 'stall'
+}): string =>
+  input.why === 'stall'
+    ? `The step ${whoWords(input.standIn)} took over is done: ${whoWords(input.given)} leads again.`
+    : `${whoWords(input.given)} has usage again and takes over again from ${whoWords(input.standIn)}.`
 
 /**
  * What a thread says when a step's agent ended twice without its report (once

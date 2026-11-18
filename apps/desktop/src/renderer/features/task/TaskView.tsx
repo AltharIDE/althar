@@ -1384,6 +1384,7 @@ export function TaskView({
               <StandInPlace
                 given={named(standIn.agentId, standIn.model).name}
                 until={standIn.until}
+                why={standIn.why}
                 onPutBack={() => choose({ agentId: standIn.agentId, model: standIn.model, effort: standIn.effort })}
               />
             )}

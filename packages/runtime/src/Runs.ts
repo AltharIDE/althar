@@ -88,7 +88,6 @@ import { Setups } from './Setups'
 import { type MergeStanding, mergeStandingOf, reviewsBeforeShip, routeOfShip, shipStopOf, taskShipRoute } from './shipRoute'
 import { quickIn } from './kinds'
 import {
-  backWords,
   capitalized,
   Limits,
   lowWords,
@@ -101,7 +100,7 @@ import {
   whenWords,
   whoWords,
 } from './Limits'
-import { standInOf } from './standIn'
+import { type StandIn, standInOf, whenBack } from './standIn'
 import { NO_REPORT } from './missedReports'
 import { AutoModels } from './modelMoves'
 import { Live, type LiveEvent } from './Live'
@@ -4407,6 +4406,8 @@ export class Runs extends Context.Service<
         accountId?: string,
         /** What the thread's line says Althar dealt with: a usage limit, or a step gone quiet or without its report. */
         about: 'limit' | 'stall' = 'limit',
+        /** The step attempt handed on, where one is: a stand-in for a step without its report leads until it is over. */
+        attemptId?: string,
       ) =>
         Effect.gen(function* () {
           const { implement } = yield* stepsOf(run)
@@ -4454,6 +4455,7 @@ export class Runs extends Context.Service<
               ...(nextModel == null ? {} : { model: nextModel }),
               ...(nextEffort == null ? {} : { effort: nextEffort }),
               ...(said === undefined ? {} : { said, about }),
+              ...(said === undefined || attemptId === undefined ? {} : { attemptId }),
               ...(nextAccountId === undefined ? {} : { accountId: nextAccountId }),
             })
           }
@@ -4476,13 +4478,46 @@ export class Runs extends Context.Service<
               last === undefined || last.agentId !== starting.agentId || (starting.model !== null && starting.model !== last.model)
             yield* sayOut(run.threadId, run.projectId, said, about, handover)
           }
+          // Another agent for the plan's lead, out or nearly out as it starts, only stands in for it: the plan's lead takes the
+          // task back once it has usage again (standIn.ts), as one handed on while it runs does.
+          const standsIn = instead === undefined || implement === undefined ? undefined : yield* standInForPlan(run, implement)
           return yield* sessions.start({
             threadId: run.threadId,
             agentId: instead?.agentId ?? auto?.agentId ?? wanted,
             ...((auto?.model ?? chosen) === null ? {} : { model: (auto?.model ?? chosen) as string }),
             ...(thinks === null ? {} : { effort: thinks }),
             ...(startingAccountId === undefined ? {} : { accountId: startingAccountId }),
+            ...(standsIn === undefined ? {} : { standsIn }),
           })
+        })
+
+      /**
+       * Who another agent stands in for where the plan's lead is out, or nearly out, as its step starts: the plan's lead, on its
+       * model and effort, until its account's reset.
+       */
+      const standInForPlan = (run: RunRow, planned: PlanStep) =>
+        Effect.gen(function* () {
+          const out = yield* limits.out(planned.agentId, run.projectId)
+          if (Option.isSome(out))
+            return {
+              agentId: planned.agentId,
+              model: planned.model ?? null,
+              effort: planned.effort ?? null,
+              accountId: out.value.accountId,
+              until: out.value.until,
+            } satisfies StandIn
+          const low = yield* limits.nearlyOut(planned.agentId, run.projectId, planned.model ?? undefined)
+          if (Option.isNone(low)) return undefined
+          const until =
+            low.value.resetsAt ?? new Date((yield* Clock.currentTimeMillis) + Duration.toMillis(Duration.hours(1))).toISOString()
+          return {
+            agentId: planned.agentId,
+            model: planned.model ?? null,
+            effort: planned.effort ?? null,
+            accountId: low.value.accountId,
+            until,
+            why: 'low',
+          } satisfies StandIn
         })
 
       /**
@@ -7050,6 +7085,7 @@ export class Runs extends Context.Service<
             effort ?? (answer.kind === 'retry' ? answer.effort : undefined),
             accountId,
             about,
+            attemptId ?? undefined,
           )
           if (!(yield* resume(sessionId))) return
           if (answer.kind === 'tell')
@@ -7674,41 +7710,21 @@ export class Runs extends Context.Service<
           if (live.value.agentId === waiting.agentId) yield* sessions.wake(waiting.threadId)
         })
 
-      /**
-       * The lead a usage limit stopped has usage again: it leads the thread again from its next turn, as a change of lead
-       * does, and the thread says so. Not where the stand-in isn't the thread's lead any more, or someone chose its lead since.
+      /*
+       * Stand-ins whose lead couldn't be queued back just now (it was being handed over, or stopping): each waits a while
+       * before the next try, so the loop never spins on it.
        */
-      const giveBack = (one: {
-        readonly sessionId: string
-        readonly threadId: string
-        readonly projectId: ProjectId
-        readonly agentId: string
-        readonly model: string | null
-      }) =>
+      const notYetBack = new Map<string, number>()
+
+      /**
+       * The lead a stand-in stands in for is back (its usage, or the step it failed over): it leads the thread again from its
+       * next turn, queued in one move with the checks that nothing newer was chosen (Sessions' `giveBack`), and the thread says
+       * so as it takes over. Until it has, the stand-in stays one, so a stop, a restart or a lead that couldn't start tries again.
+       */
+      const giveBack = (one: { readonly sessionId: string; readonly threadId: string }) =>
         Effect.gen(function* () {
-          const live = yield* sessions.running(one.threadId)
-          if (Option.isNone(live) || live.value.sessionId !== one.sessionId || live.value.stopping || live.value.nextLead !== undefined)
-            return
-          const standsIn = yield* standInOf(one.sessionId)
-          if (Option.isNone(standsIn)) return
-          const given = standsIn.value
-          const changed = yield* sessions.changeLead({
-            threadId: one.threadId,
-            agentId: given.agentId,
-            ...(given.model === null ? {} : { model: given.model }),
-            ...(given.effort === null ? {} : { effort: given.effort }),
-          })
-          if (changed !== 'later') return
-          yield* addItem({ projectId: one.projectId, threadId: one.threadId }, 'notice', {
-            source: 'runtime',
-            severity: 'info',
-            title: backWords({
-              given: yield* limits.named(given.agentId, given.model, given.accountId),
-              standIn: yield* limits.named(one.agentId, one.model, live.value.accountId),
-            }),
-            about: 'limit',
-            handover: true,
-          })
+          if (yield* sessions.giveBack(one)) return void notYetBack.delete(one.sessionId)
+          notYetBack.set(one.sessionId, (yield* Clock.currentTimeMillis) + Duration.toMillis(Duration.seconds(30)))
         })
 
       /* The turns whose waiting message was given back this launch, so one that fails again waits for its own reset. */
@@ -7996,22 +8012,26 @@ export class Runs extends Context.Service<
             })
           }
           // A lead standing in for the one a usage limit stopped gives the thread back once that one has usage again (standIn.ts).
-          const standing = yield* sql<{ sessionId: string; threadId: string; projectId: ProjectId; agentId: string; model: string | null }>`
-            SELECT s.id AS session_id, s.thread_id, s.project_id, s.agent_id, s.model FROM provider_sessions s
+          const standing = yield* sql<{ sessionId: string; threadId: string; projectId: ProjectId }>`
+            SELECT s.id AS session_id, s.thread_id, s.project_id FROM provider_sessions s
             JOIN threads t ON t.id = s.thread_id
             WHERE s.state IN ('active', 'waiting_approval') AND t.kind IN ('coordinator', 'task')
               AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
                 AND f.type = 'provider_session.starting' AND json_extract(f.payload, '$.standsIn') IS NOT NULL)`
           for (const one of standing) {
+            // Queued back already, it waits for its next turn; one that couldn't start comes back here with its choice cleared.
+            const live = yield* sessions.running(one.threadId)
+            if (Option.isNone(live) || live.value.sessionId !== one.sessionId || live.value.stopping || live.value.nextLead !== undefined)
+              continue
             const standsIn = yield* standInOf(one.sessionId).pipe(contained('Runs.held', () => Option.none()))
             if (Option.isNone(standsIn)) continue
-            const given = standsIn.value
-            const out = yield* (
-              given.accountId === null ? limits.out(given.agentId, one.projectId) : limits.outAccount(given.accountId)
-            ).pipe(contained('Runs.held', () => undefined))
-            if (out === undefined) continue
-            due.push({ key: one.sessionId, at: Option.isSome(out) ? Date.parse(out.value.until) : 0, run: giveBack(one) })
+            const at = yield* whenBack(standsIn.value, (given) =>
+              given.accountId === null ? limits.out(given.agentId, one.projectId) : limits.outAccount(given.accountId),
+            ).pipe(contained('Runs.held', () => Option.none<number>()))
+            if (Option.isNone(at)) continue
+            due.push({ key: one.sessionId, at: Math.max(at.value, notYetBack.get(one.sessionId) ?? 0), run: giveBack(one) })
           }
+          for (const sessionId of notYetBack.keys()) if (!standing.some((one) => one.sessionId === sessionId)) notYetBack.delete(sessionId)
           // A turn given back that no longer waits, its thread's latest turn now another, never waits again.
           const waitingTurns = new Set(messages.map((message) => message.turnId))
           for (const turnId of given) if (!waitingTurns.has(turnId)) given.delete(turnId)
