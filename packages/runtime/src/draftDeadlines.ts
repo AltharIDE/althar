@@ -25,6 +25,17 @@ export const stillDraft = (taskId: string) =>
   })
 
 /**
+ * Whether a plan was ever made for the task, whatever became of it since: a task discarded with its plan has one, and one
+ * discarded before its plan came has none, though neither is a draft any more.
+ */
+export const planMade = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [plan] = yield* sql<{ one: number }>`SELECT 1 AS one FROM task_plans WHERE task_id = ${taskId} LIMIT 1`
+    return plan !== undefined
+  })
+
+/**
  * Tells every open board and home when a draft's moment is over if its plan
  * still hasn't come: it is the person's then, and only a change to the task
  * makes them read it again. A task already past its moment is touched at once.

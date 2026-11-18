@@ -17,7 +17,7 @@ import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
 import { words } from './words'
 import { teamChanges, teamLine } from './teamWords'
-import { armDraftDeadlines, stillDraft, surfaceDraftAt } from './draftDeadlines'
+import { armDraftDeadlines, planMade, stillDraft, surfaceDraftAt } from './draftDeadlines'
 import { Live, type LiveEvent } from './Live'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
@@ -1210,11 +1210,12 @@ export class Coordinator extends Context.Service<
             const ending = draftsBy.get(threadId)?.calls.get(call.toolCallId)
             yield* redraft(threadId, (drafts) => callEnded(drafts, call.toolCallId, call.status === 'completed'))
             // A plan's call can fail after its plan was proposed (a preset that didn't apply): the plan is in, and its card.
+            // Only a plan made says so: a task discarded before its call failed is no longer a draft, yet has none.
             const taskId =
               call.status === 'failed' && ending?.tool === 'propose_plan'
                 ? (draftsBy.get(threadId)?.drafts.find((draft) => draft.key === ending.draft)?.taskId ?? null)
                 : null
-            if (taskId !== null && !(yield* stillDraft(taskId))) yield* redraft(threadId, (drafts) => plannedAnyway(drafts, taskId))
+            if (taskId !== null && (yield* planMade(taskId))) yield* redraft(threadId, (drafts) => plannedAnyway(drafts, taskId))
           }
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not follow a task as it was drafted', cause)))
       yield* Effect.forkScoped(Stream.runForEach(yield* live.subscribe, (event) => provide(followDrafts(event))))

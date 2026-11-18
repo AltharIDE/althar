@@ -165,4 +165,47 @@ describe('a task drafted whose plan never came', () => {
       assert.isUndefined(card?.discarded)
     }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
+
+  it.live('keeps its Discarded card where it was discarded before its plan call failed', () =>
+    Effect.gen(function* () {
+      const { threadId, coordinator, told, live } = yield* opened(repository())
+      yield* callTool(coordinator, 'draft_task', { title: 'Explore approvals', description: 'From evidence alone. [lead:finish]' })
+      const call = (status: 'pending' | 'failed') =>
+        live.publish({
+          _tag: 'Agent',
+          threadId,
+          event:
+            status === 'pending'
+              ? {
+                  _tag: 'ToolCall',
+                  toolCallId: 'p2',
+                  title: 'Propose plan',
+                  kind: 'other',
+                  status,
+                  althar: 'propose_plan',
+                  rawInput: { task: 'explore-approvals' },
+                }
+              : { _tag: 'ToolCallUpdate', toolCallId: 'p2', status },
+        })
+      yield* call('pending')
+      yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.some((one) => one.slug === 'explore-approvals' && one.planning),
+      )
+      // Discarded while its plan is on its way, and then its plan's call fails: no plan came.
+      yield* callTool(coordinator, 'settle_task', { task: 'explore-approvals', how: 'discard', why: 'one task, not five' })
+      yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.some((one) => one.slug === 'explore-approvals' && one.discarded === true),
+      )
+      yield* call('failed')
+      yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.some((one) => one.slug === 'explore-approvals' && !one.planned && one.unplanned === true),
+      )
+      yield* live.publish({ _tag: 'TurnEnded', threadId, turnId: 'turn', state: 'completed' })
+      const [card] = yield* until(cardsOn(threadId), (cards) => cards.some((one) => one.slug === 'explore-approvals'))
+      assert.deepInclude(card, { discarded: true, plan: null })
+    }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
 })
