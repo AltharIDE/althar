@@ -347,7 +347,18 @@ export class Connections extends Context.Service<
     findServer(service: Service, typed: string): Effect.Effect<Found, unknown>
     /** Asks the service what a connection can do. */
     check(connectionId: string): Effect.Effect<Check, unknown>
+    /**
+     * Removes the connection once nothing it reads for is under way: what
+     * reads through it with `whileThere` then ends first, and none starts after.
+     */
     remove(connectionId: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /**
+     * Runs `effect`, which reads through the connection and acts on what it
+     * read, unless the connection is removed or being removed: then nothing,
+     * and none. A removal waits for one under way to end, so what it read is
+     * acted on whole, before it, or not at all.
+     */
+    whileThere<A, E, R>(connectionId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<Option.Option<A>, unknown, R>
     /** A connection's adapters, signed in through it. */
     adapters(connectionId: string): Effect.Effect<Adapters & { readonly info: ConnectionInfo }, unknown>
     /**
@@ -486,6 +497,22 @@ export class Connections extends Context.Service<
        * token another has just replaced or removed.
        */
       const writing = new Map<string, Semaphore.Semaphore>()
+
+      /**
+       * What reads through a connection and acts on it holds a share of it
+       * (`whileThere`); a removal says so first, then takes every share, so it
+       * waits for those under way, and one taken after sees it and does nothing.
+       */
+      const ALL_SHARES = 1_000_000
+      const shares = new Map<string, Semaphore.Semaphore>()
+      const sharesOf = (connectionId: string) => {
+        const known = shares.get(connectionId)
+        if (known !== undefined) return known
+        const made = Semaphore.makeUnsafe(ALL_SHARES)
+        shares.set(connectionId, made)
+        return made
+      }
+      const removing = new Set<string>()
       const writeLock = (connectionId: string) => {
         const known = writing.get(connectionId)
         if (known !== undefined) return known
@@ -1754,14 +1781,42 @@ export class Connections extends Context.Service<
         check: (connectionId) => provide(check(connectionId)),
         remove: (connectionId, actorId) =>
           provide(
-            writeLock(connectionId).withPermits(1)(
-              Effect.gen(function* () {
-                const row = yield* rowOf(connectionId)
-                yield* moveTo(row, 'removed', 'connection.removed', actorId)
-                yield* secrets.remove(row.credentialRef)
-                adapterCache.delete(connectionId)
-              }),
+            Effect.suspend(() => {
+              removing.add(connectionId)
+              return sharesOf(connectionId).withPermits(ALL_SHARES)(
+                writeLock(connectionId).withPermits(1)(
+                  Effect.gen(function* () {
+                    const row = yield* rowOf(connectionId)
+                    yield* moveTo(row, 'removed', 'connection.removed', actorId)
+                    yield* secrets.remove(row.credentialRef)
+                    adapterCache.delete(connectionId)
+                  }),
+                ),
+              )
+            }).pipe(
+              // Removed, it stays so in its row, which a share reads; not removed after all, it is there to read through again.
+              Effect.ensuring(
+                Effect.sync(() => {
+                  removing.delete(connectionId)
+                  shares.delete(connectionId)
+                }),
+              ),
             ),
+          ),
+        whileThere: (connectionId, effect) =>
+          sharesOf(connectionId).withPermits(1)(
+            Effect.gen(function* () {
+              // Taken after its removal began, or after it ended, the share reads nothing: checked once held, so none slips past.
+              if (removing.has(connectionId)) return Option.none()
+              const there = yield* provide(
+                Effect.gen(function* () {
+                  const sql = yield* SqlClient.SqlClient
+                  const [row] = yield* sql<{ id: string }>`SELECT id FROM connections WHERE id = ${connectionId} AND state <> 'removed'`
+                  return row !== undefined
+                }),
+              )
+              return there ? Option.some(yield* effect) : Option.none()
+            }),
           ),
         adapters: (connectionId) => provide(Effect.map(rowOf(connectionId), (row) => ({ ...adaptersOf(row), info: toInfo(row) }))),
         hostOf: (remotes, options) => provide(hostOf(remotes, options)),

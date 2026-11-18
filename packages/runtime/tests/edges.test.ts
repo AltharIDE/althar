@@ -6,7 +6,7 @@ import { ConnectorFailed } from '@althar/connectors'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Deferred, Duration, Effect, Layer } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 import { TestClock } from 'effect/testing'
 
@@ -211,16 +211,29 @@ describe('listening', () => {
       yield* until(Effect.sync(activity), (asked) => asked > before)
       yield* changes.refresh(taskId)
       yield* until(Effect.sync(activity), (asked) => asked > before + 1)
-      // Removed while that look is under way, what it then reads arrives nowhere, and the next asks nothing.
+      // Removed while that look is under way, the removal waits for it: what it reads is heard whole, in the thread and by the
+      // lead, before the connection goes, and none reads after the removal began.
       const [connection] = yield* connections.list
-      yield* connections.remove(connection?.id ?? '', instance.personId)
+      const connectionId = connection?.id ?? ''
+      const removal = yield* Effect.forkChild(connections.remove(connectionId, instance.personId))
+      yield* until(connections.whileThere(connectionId, Effect.void), Option.isNone)
+      assert.isUndefined(removal.pollUnsafe(), 'the removal waits for the look under way')
       github.commentAs(1, 'dana', 'Anyone there?')
       yield* Deferred.succeed(gate, undefined)
+      yield* Fiber.join(removal)
+      const sql = yield* SqlClient.SqlClient
+      const told = () => sql<{ body: string }>`SELECT body FROM user_inputs WHERE body LIKE '%there?%'`
+      assert.deepInclude((yield* arrivals(threadId))[0], { kind: 'comment', from: 'dana', text: 'Anyone there?' })
+      assert.lengthOf(yield* told(), 1)
+      assert.include((yield* told())[0]?.body, 'Anyone there?')
+      // Removed, the connection reads nothing more: what is said after arrives nowhere, and its lead isn't told it.
+      github.commentAs(1, 'dana', 'Still there?')
       yield* changes.refresh(taskId)
-      // Behind the task's lock, as every look is: once it has it, the one under way has ended.
+      // Behind the task's lock, as every look is: once it has it, any look asked for has ended.
       yield* changes.stopListening(taskId, 'https://github.com/meridian/api/pull/99')
       yield* TestClock.adjust('1 second')
-      assert.lengthOf(yield* arrivals(threadId), 0)
+      assert.lengthOf(yield* arrivals(threadId), 1)
+      assert.lengthOf(yield* told(), 1)
       assert.strictEqual(activity(), before + 2)
     }).pipe(Effect.provide(runtimeWith({ github })), onTestClock)
   })

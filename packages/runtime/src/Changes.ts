@@ -4932,32 +4932,12 @@ export class Changes extends Context.Service<
         })
 
       /** An arrival in the task's thread. */
-      /**
-       * Whether what was read of a link through its connection is still to be
-       * heard: not once the connection is removed. A read under way as it was
-       * removed began with it there, and ends after.
-       */
-      const stillConnected = (link: LinkRow) =>
-        Effect.gen(function* () {
-          if (link.connectionId === null) return true
-          const sql = yield* SqlClient.SqlClient
-          const [there] = yield* sql<{ id: string }>`
-            SELECT id FROM connections WHERE id = ${link.connectionId} AND state <> 'removed'`
-          return there !== undefined
-        })
-
-      /** Says in the task's thread what was heard, while its connection is there: checked in the one write, so none comes after a removal. */
       const arrive = (link: LinkRow, content: Readonly<Record<string, unknown>>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              if (!(yield* stillConnected(link))) return
-              const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${link.taskId} AND kind = 'task'`
-              if (thread !== undefined)
-                yield* addItem({ projectId: link.projectId, threadId: thread.id }, 'arrival', { source: link.product, ...content })
-            }),
-          )
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${link.taskId} AND kind = 'task'`
+          if (thread !== undefined)
+            yield* addItem({ projectId: link.projectId, threadId: thread.id }, 'arrival', { source: link.product, ...content })
         })
 
       /** Tells the task's lead, if one is running, what it should hear. */
@@ -5408,7 +5388,16 @@ export class Changes extends Context.Service<
           // from what they saved, so a host's read that lags behind its merge doesn't open it again.
           const link = (yield* linksOf(asked.taskId)).find((candidate) => candidate.id === asked.id) ?? asked
           if (link.connectionId === null) return false
-          const adapters = yield* connections.adapters(link.connectionId)
+          // Read and acted on whole while its connection is there, or not at all: a removal waits for it, and none reads after one
+          // began. Nothing read through a connection being removed is half heard, so a connection made again hears it anew.
+          const polled = yield* connections.whileThere(link.connectionId, pollThrough(link, link.connectionId, how))
+          return Option.getOrElse(polled, () => false)
+        })
+
+      /** One look at a pull request through its connection, held by `poll` against the connection's removal. */
+      const pollThrough = (link: LinkRow, connectionId: string, how: { readonly force: boolean; readonly fresh: boolean }) =>
+        Effect.gen(function* () {
+          const adapters = yield* connections.adapters(connectionId)
           const host = adapters.host
           if (host === undefined) return false
           const account = adapters.info.account
@@ -5737,8 +5726,6 @@ export class Changes extends Context.Service<
           // Waiting for another change of the task's to merge, its failures are that one's to fix: they start no fix either.
           const forShip =
             (yield* worktreeOf(link.taskId, before.url))?.heldAt != null || (yield* waitingOn(link.taskId, before.url)) !== null
-          // Removed while this read, the connection says nothing more: its lead isn't told what was read either.
-          if (!(yield* stillConnected(link))) return happened
           yield* tellLead(link, forNote, false, 'note')
           // Merged or closed, what is said on it after starts no turn: its lead reads it with its next one (tellLead).
           yield* tellLead(
