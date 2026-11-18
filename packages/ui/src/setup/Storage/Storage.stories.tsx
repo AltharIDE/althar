@@ -171,3 +171,17 @@ export const CopyPath: Story = {
     await expect(await view.findByRole('button', { name: 'Copied' })).toHaveFocus()
   },
 }
+
+/** Copy path where the clipboard refuses, as in a window not allowed to write it: the path, focused and selected, to copy by hand. */
+export const CopyRefused: Story = {
+  args: { copy: fn(async () => Promise.reject(new Error('Write permission denied.'))) },
+  play: async ({ canvasElement }) => {
+    const view = within(canvasElement)
+    view.getByRole('button', { name: 'Copy path, Profile' }).focus()
+    await userEvent.keyboard('{Enter}')
+    const field = await view.findByRole('textbox', { name: 'Path, Profile' })
+    await expect(field).toHaveValue('/home/me/.local/share/althar')
+    await expect(field).toHaveFocus()
+    await expect((field as HTMLInputElement).selectionEnd).toBe('/home/me/.local/share/althar'.length)
+  },
+}

@@ -124,3 +124,12 @@
     grid-column: 1 / -1;
   }
 }
+
+/* where the clipboard refused it: the path in a field, selected, to copy by hand */
+.field {
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+}

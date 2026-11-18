@@ -91,7 +91,9 @@ export const useTaskFolders = (onTask?: (threadId: string) => void): TaskFolders
         (done) => {
           setBusy(null)
           setFreed((was) => (was ?? 0) + done.freed)
-          if (done.freed > 0) sizeChanged('worktrees')
+          // Whatever it says it freed (a folder it couldn't measure, or the disk filling meanwhile, can read as none),
+          // the runtime forgot the task folders' size: About measures them anew.
+          sizeChanged('worktrees')
           if (done.failed > 0) setError(text.someFailed(done.failed))
           void cache.invalidateQueries({ queryKey: keys.folders })
         },

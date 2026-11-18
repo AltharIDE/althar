@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react'
+import { type ComponentProps, useEffect, useRef, useState } from 'react'
 
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
@@ -61,6 +61,8 @@ export interface StorageText {
   share: (fraction: number) => string
   /** Names a Copy path button: what it does, then the place. */
   copyPath: (place: string) => string
+  /** Names the path, to select, where the clipboard refused it. */
+  pathOf: (place: string) => string
   /** Where the place that can be freed is freed. */
   freeUp: string
   measureAgain: string
@@ -93,6 +95,7 @@ export const storageText: StorageText = {
   showLabel: (show, place) => `${show}, ${place}`,
   share: (fraction) => (fraction < 0.01 ? '<1%' : `${Math.round(fraction * 100)}%`),
   copyPath: (place) => `Copy path, ${place}`,
+  pathOf: (place) => `Path, ${place}`,
   freeUp: 'Free up space',
   measureAgain: 'Measure again',
 }
@@ -112,6 +115,9 @@ export interface StorageProps {
 
 export function Storage({ places, onShow, onMeasureAgain, freeUp, copy, text, headingLevel }: StorageProps) {
   const t = { ...storageText, ...text }
+  // The place whose path the clipboard refused (as in a window not allowed to write it): its path, to select.
+  const [refused, setRefused] = useState<string | null>(null)
+  const write = copy ?? clipboard
   const measuring = places.some((place) => place.figure.state === 'measuring')
   // A share only once every size is in, and whole: a part, or a lower bound, never shows as a share of the whole.
   const exact = (figure: StorageFigure) => figure.state === 'done' && figure.approximate !== true && (figure.unreadable ?? 0) === 0
@@ -137,11 +143,16 @@ export function Storage({ places, onShow, onMeasureAgain, freeUp, copy, text, he
               <span className={s.title}>{place.title}</span>
               {whole > 0 && place.figure.state === 'done' && <span className={s.share}>{t.share(place.figure.bytes / whole)}</span>}
               <Figure figure={place.figure} t={t} />
-              {place.problem !== undefined && (
+              {(place.problem !== undefined || refused === place.id) && (
                 <span className={s.problem}>
-                  <span role="alert">{t.couldntOpen(place.problem)}</span>
-                  {/* The file manager didn't open: the path, to copy. */}
-                  {place.path !== '' && <span className={s.path}>{place.path}</span>}
+                  {place.problem !== undefined && <span role="alert">{t.couldntOpen(place.problem)}</span>}
+                  {/* The clipboard refused it: the path, selected, to copy by hand. */}
+                  {refused === place.id && place.path !== '' ? (
+                    <PathField path={place.path} label={t.pathOf(place.title)} />
+                  ) : (
+                    // The file manager didn't open: the path, to copy.
+                    place.path !== '' && <span className={s.path}>{place.path}</span>
+                  )}
                 </span>
               )}
               <span className={s.actions}>
@@ -156,7 +167,15 @@ export function Storage({ places, onShow, onMeasureAgain, freeUp, copy, text, he
                     ghost
                     value={place.path}
                     text={{ copy: t.copyPath(place.title) }}
-                    {...(copy === undefined ? {} : { write: copy })}
+                    write={(path) =>
+                      write(path).then(
+                        () => setRefused((was) => (was === place.id ? null : was)),
+                        (failure: unknown) => {
+                          setRefused(place.id)
+                          throw failure
+                        },
+                      )
+                    }
                   />
                 )}
                 <Button
@@ -176,6 +195,21 @@ export function Storage({ places, onShow, onMeasureAgain, freeUp, copy, text, he
         })}
       </ul>
     </SettingGroup>
+  )
+}
+
+const clipboard = (text: string) =>
+  navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('No clipboard in this context'))
+
+/** A path the clipboard refused, selected and focused as it appears, to copy by hand. */
+function PathField({ path, label }: { path: string; label: string }) {
+  const field = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    field.current?.focus()
+    field.current?.select()
+  }, [])
+  return (
+    <input ref={field} className={cx(s.path, s.field)} readOnly value={path} aria-label={label} onFocus={(e) => e.currentTarget.select()} />
   )
 }
 
