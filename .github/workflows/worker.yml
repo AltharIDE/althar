@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - 'apps/worker/**'
+      - 'apps/host/**'
       - 'packages/worker-protocol/**'
       - 'packages/testing/**'
       - '.github/workflows/worker.yml'
@@ -34,12 +35,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: .node-version
-      - run: bun install --frozen-lockfile --ignore-scripts --filter althar --filter @althar/worker-protocol
+      - run: bun install --frozen-lockfile --ignore-scripts --filter althar --filter @althar/worker-protocol --filter @althar/host
       - run: rustup show
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked -p althar-worker --all-targets -- -D warnings
       - run: cargo test --locked -p althar-worker
-      - run: cargo build --locked -p althar-worker --examples
+      - run: cargo build --locked -p althar-worker --bins --examples
+      - working-directory: apps/host
+        run: bun run build
       - name: Check Protobuf compatibility
         env:
           BASE: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
@@ -60,3 +63,4 @@ jobs:
           bun run check
           bun run test
           bun run test:interop
+          bun run test:execution

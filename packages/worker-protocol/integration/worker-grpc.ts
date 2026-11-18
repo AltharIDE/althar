@@ -1,13 +1,14 @@
 import { equal, match, notEqual, rejects } from 'node:assert/strict'
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { createHash, X509Certificate } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { Client, credentials, status } from '@grpc/grpc-js'
+import { workerCertificates } from './worker-certificates.ts'
 import { bindWorkerHandshake } from '../src/grpc.ts'
 import { MAX_HELLO_BYTES, WorkerControlService } from '../src/index.ts'
 
@@ -22,78 +23,7 @@ void test('the Rust worker negotiates over mTLS only with a matching enrollment'
   const root = mkdtempSync(join(tmpdir(), 'althar-worker-grpc-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
 
-  const path = (name: string): string => join(root, name)
-  const openssl = (...args: string[]): void => {
-    execFileSync('openssl', args, { cwd: root, timeout: 5000, stdio: 'pipe' })
-  }
-  const authority = (name: string): void => {
-    openssl(
-      'req',
-      '-new',
-      '-x509',
-      '-newkey',
-      'ec',
-      '-pkeyopt',
-      'ec_paramgen_curve:P-256',
-      '-nodes',
-      '-days',
-      '1',
-      '-subj',
-      `/CN=${name}`,
-      '-keyout',
-      `${name}.key`,
-      '-out',
-      `${name}.pem`,
-      '-addext',
-      'basicConstraints=critical,CA:true',
-      '-addext',
-      'keyUsage=critical,keyCertSign',
-    )
-  }
-  const issue = (name: string, use: 'serverAuth' | 'clientAuth'): void => {
-    const san = use === 'serverAuth' ? '\nsubjectAltName=DNS:localhost' : ''
-    writeFileSync(
-      path(`${name}.ext`),
-      `basicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=${use}${san}\n`,
-    )
-    openssl(
-      'req',
-      '-new',
-      '-newkey',
-      'ec',
-      '-pkeyopt',
-      'ec_paramgen_curve:P-256',
-      '-nodes',
-      '-subj',
-      `/CN=${name}`,
-      '-keyout',
-      `${name}.key`,
-      '-out',
-      `${name}.csr`,
-    )
-    openssl(
-      'x509',
-      '-req',
-      '-in',
-      `${name}.csr`,
-      '-CA',
-      'home-ca.pem',
-      '-CAkey',
-      'home-ca.key',
-      '-CAcreateserial',
-      '-extfile',
-      `${name}.ext`,
-      '-days',
-      '1',
-      '-out',
-      `${name}.pem`,
-    )
-  }
-  authority('home-ca')
-  authority('other-ca')
-  issue('home', 'serverAuth')
-  issue('enrolled', 'clientAuth')
-  issue('unenrolled', 'clientAuth')
+  const path = workerCertificates(root, true)
   const certificate = new X509Certificate(readFileSync(path('enrolled.pem')))
   const fingerprint = createHash('sha256').update(certificate.raw).digest('hex')
   const enrolled = new Map([[fingerprint, workerId]])

@@ -1,4 +1,5 @@
 import type { NetworkConfiguration } from './network'
+import type { WorkerConfiguration } from './workers'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
@@ -12,6 +13,12 @@ Commands:
   pair             Print a single-use, five-minute device pairing code
   devices          List this home's registered client devices
   revoke-device    Revoke a connection device immediately
+  configure-workers  Configure an opt-in mutual TLS worker listener
+  disable-workers  Disable the worker listener on the next restart
+  enroll-worker    Register an operator-provisioned worker certificate
+  revoke-worker    Revoke a worker's certificate
+  worker-run       Queue one Linux diagnostic on an enrolled worker
+  worker-result    Read a diagnostic's durable state and output
   init             Initialize a private profile and a separate encryption key
   serve            Run the home until stopped
   status           Check the running home's private API
@@ -26,11 +33,15 @@ Commands:
 Options:
   --origin <https-origin>    Address clients use to reach this home
   --listen-address <ip>      Bind address (default: 127.0.0.1)
-  --listen-port <port>       HTTPS/WSS port (default: 6769)
+  --listen-port <port>       HTTPS/WSS port (6769) or worker gRPC port (6770)
   --tls-certificate <file>   Private RSA/ECDSA PEM certificate file
   --tls-key <file>           Matching PEM key outside profile/worktrees
   --after <dev_id>           Read the next page of devices
   --device-id <dev_id>       Connection device to revoke
+  --worker-ca <file>        Trusted worker certificate authority for configure-workers
+  --worker-certificate <file>  Worker client certificate for enroll-worker
+  --worker-id <wrk_id>      Worker for worker-run or revoke-worker
+  --attempt-id <watt_id>    Diagnostic for worker-result
   --profile <dir>             Host profile (default: XDG data/althar-host)
   --worktrees <dir>           Task worktrees (default: <profile>/worktrees)
   --key-file <file>           Separate 32-byte master key; never a project file
@@ -62,6 +73,12 @@ export interface HostOptions {
     | 'pair'
     | 'devices'
     | 'revoke-device'
+    | 'configure-workers'
+    | 'disable-workers'
+    | 'enroll-worker'
+    | 'revoke-worker'
+    | 'worker-run'
+    | 'worker-result'
     | 'init'
     | 'serve'
     | 'status'
@@ -80,6 +97,10 @@ export interface HostOptions {
     | 'help'
     | 'version'
   readonly network?: NetworkConfiguration
+  readonly workerConfiguration?: WorkerConfiguration
+  readonly workerCertificate?: string
+  readonly workerId?: string
+  readonly workerAttemptId?: string
   readonly deviceAfter?: string
   readonly revokeDeviceId?: string
   readonly profile: string
@@ -134,6 +155,10 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     '--tls-certificate',
     '--tls-key',
     '--device-id',
+    '--worker-ca',
+    '--worker-certificate',
+    '--worker-id',
+    '--attempt-id',
     '--after',
     '--home-id',
     '--client-api-version',
@@ -157,6 +182,12 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     'pair',
     'devices',
     'revoke-device',
+    'configure-workers',
+    'disable-workers',
+    'enroll-worker',
+    'revoke-worker',
+    'worker-run',
+    'worker-result',
     'connect-stdio',
     'init',
     'serve',
@@ -207,6 +238,12 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
         case 'pair':
         case 'devices':
         case 'revoke-device':
+        case 'configure-workers':
+        case 'disable-workers':
+        case 'enroll-worker':
+        case 'revoke-worker':
+        case 'worker-run':
+        case 'worker-result':
         case 'init':
         case 'serve':
         case 'status':
@@ -260,10 +297,23 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   if (flags.has('--controller-pid') && command !== 'recover-update' && command !== 'recover-locked')
     return invalid('The controller process option is internal to managed service startup.')
   if (
-    ['--origin', '--listen-address', '--listen-port', '--tls-certificate', '--tls-key'].some((flag) => flags.has(flag)) &&
-    command !== 'configure-network'
+    ['--listen-address', '--listen-port', '--tls-certificate', '--tls-key'].some((flag) => flags.has(flag)) &&
+    command !== 'configure-network' &&
+    command !== 'configure-workers'
   )
-    return invalid('Network settings require configure-network.')
+    return invalid('Listener settings require configure-network or configure-workers.')
+  if (flags.has('--origin') && command !== 'configure-network') return invalid('--origin requires configure-network.')
+  if (flags.has('--worker-ca') !== (command === 'configure-workers'))
+    return invalid('configure-workers requires --worker-ca, --tls-certificate and --tls-key.')
+  if (flags.has('--worker-certificate') !== (command === 'enroll-worker')) return invalid('enroll-worker requires --worker-certificate.')
+  const workerId = flags.get('--worker-id')
+  if (command === 'worker-run' || command === 'revoke-worker') {
+    if (!/^wrk_[0-9a-f]{32}$/.test(workerId ?? '')) return invalid('Choose the --worker-id printed by enroll-worker.')
+  } else if (workerId !== undefined) return invalid('--worker-id requires worker-run or revoke-worker.')
+  const workerAttemptId = flags.get('--attempt-id')
+  if (command === 'worker-result') {
+    if (!/^watt_[0-9a-f]{32}$/.test(workerAttemptId ?? '')) return invalid('Choose the --attempt-id printed by worker-run.')
+  } else if (workerAttemptId !== undefined) return invalid('--attempt-id requires worker-result.')
   if (flags.has('--after') && (command !== 'devices' || !/^dev_[0-9a-f]{32}$/.test(flags.get('--after') ?? '')))
     return invalid('--after requires devices and a device id from the previous page.')
   if (flags.has('--device-id') && command !== 'revoke-device') return invalid('--device-id requires revoke-device.')
@@ -274,6 +324,13 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
       return invalid('configure-network requires --origin, --tls-certificate and --tls-key.')
     const port = Number(flags.get('--listen-port') ?? '6769')
     if (!Number.isSafeInteger(port) || port < 1 || port > 65535) return invalid('Use a listen port from 1 to 65535.')
+  }
+  const workerPort = Number(flags.get('--listen-port') ?? '6770')
+  if (command === 'configure-workers') {
+    if (!flags.has('--tls-certificate') || !flags.has('--tls-key'))
+      return invalid('configure-workers requires --worker-ca, --tls-certificate and --tls-key.')
+    if (!Number.isSafeInteger(workerPort) || workerPort < 0 || workerPort > 65535)
+      return invalid('Use a worker listen port from 0 to 65535.')
   }
   const serviceName = flags.get('--service-name') ?? 'althar-host'
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$/.test(serviceName))
@@ -308,6 +365,21 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
         }),
     ...(flags.has('--after') ? { deviceAfter: flags.get('--after') ?? '' } : {}),
     ...(flags.has('--device-id') ? { revokeDeviceId: flags.get('--device-id') ?? '' } : {}),
+    ...(command === 'configure-workers'
+      ? {
+          workerConfiguration: {
+            version: 1 as const,
+            address: flags.get('--listen-address') ?? '127.0.0.1',
+            port: workerPort,
+            ca: resolve(flags.get('--worker-ca') ?? ''),
+            certificate: resolve(flags.get('--tls-certificate') ?? ''),
+            key: resolve(flags.get('--tls-key') ?? ''),
+          },
+        }
+      : {}),
+    ...(flags.has('--worker-certificate') ? { workerCertificate: resolve(flags.get('--worker-certificate') ?? '') } : {}),
+    ...(workerId === undefined ? {} : { workerId }),
+    ...(workerAttemptId === undefined ? {} : { workerAttemptId }),
     profile,
     worktrees: resolve(flags.get('--worktrees') ?? join(profile, 'worktrees')),
     worktreesExplicit: flags.has('--worktrees'),

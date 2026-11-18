@@ -1,6 +1,6 @@
 use std::{error::Error, io, time::Duration};
 
-use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 
 use crate::wire::worker_control_service_client::WorkerControlServiceClient;
 use crate::{HandshakeError, MAX_HELLO_BYTES, accept_home_frame, valid_id, wire, worker_hello};
@@ -15,15 +15,13 @@ pub struct WorkerEnrollment<'a> {
     pub worker_private_key_pem: &'a [u8],
 }
 
-/// Confirm one enrolled TLS peer and negotiated protocol session.
-pub async fn probe_home(
+pub(crate) async fn client(
     address: &str,
-    enrollment: WorkerEnrollment<'_>,
-) -> Result<wire::HomeHello, Box<dyn Error + Send + Sync>> {
+    enrollment: &WorkerEnrollment<'_>,
+) -> Result<WorkerControlServiceClient<Channel>, Box<dyn Error + Send + Sync>> {
     if !valid_id(enrollment.home_id, "home_") {
         return Err(HandshakeError::InvalidIdentity.into());
     }
-    let offer = worker_hello(enrollment.worker_id)?;
     let endpoint = Endpoint::from_shared(address.to_owned())?;
     if endpoint.uri().scheme_str() != Some("https") || enrollment.home_ca_pem.is_empty() {
         return Err(io::Error::new(
@@ -38,12 +36,20 @@ pub async fn probe_home(
             enrollment.worker_certificate_pem,
             enrollment.worker_private_key_pem,
         ));
-    let endpoint = endpoint.tls_config(tls)?;
+    let channel = endpoint.tls_config(tls)?.connect().await?;
+    Ok(WorkerControlServiceClient::new(channel)
+        .max_decoding_message_size(MAX_HELLO_BYTES)
+        .max_encoding_message_size(MAX_HELLO_BYTES))
+}
+
+/// Confirm one enrolled TLS peer and negotiated protocol session.
+pub async fn probe_home(
+    address: &str,
+    enrollment: WorkerEnrollment<'_>,
+) -> Result<wire::HomeHello, Box<dyn Error + Send + Sync>> {
+    let offer = worker_hello(enrollment.worker_id)?;
     tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
-        let channel = endpoint.connect().await?;
-        let mut client = WorkerControlServiceClient::new(channel)
-            .max_decoding_message_size(MAX_HELLO_BYTES)
-            .max_encoding_message_size(MAX_HELLO_BYTES);
+        let mut client = client(address, &enrollment).await?;
         let mut reply = client
             .connect(tokio_stream::once(offer))
             .await?

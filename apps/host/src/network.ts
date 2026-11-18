@@ -26,7 +26,7 @@ const invalid = () =>
     message:
       'Configure an HTTPS origin, IP listen address, port and matching private TLS certificate/key files outside project workspaces.',
   })
-const inside = (root: string, path: string) => {
+export const insidePath = (root: string, path: string) => {
   const name = relative(root, path)
   return name === '' || (!isAbsolute(name) && name !== '..' && !name.startsWith(`..${sep}`))
 }
@@ -58,7 +58,7 @@ export const networkFiles = (options: Pick<HostOptions, 'profile' | 'worktrees'>
       const origin = httpsOrigin(config.origin)
       if (!isIP(config.address) || !isAbsolute(config.certificate) || !isAbsolute(config.key)) throw invalid()
       const keyPath = await realpath(config.key)
-      if (inside(await realpath(options.profile), keyPath) || inside(await realpath(options.worktrees), keyPath)) throw invalid()
+      if (insidePath(await realpath(options.profile), keyPath) || insidePath(await realpath(options.worktrees), keyPath)) throw invalid()
       const certificate = await readPrivate(config.certificate, 64 * 1024)
       const key = await readPrivate(config.key, 64 * 1024)
       if (certificate === null || key === null) throw invalid()

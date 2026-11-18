@@ -1,7 +1,21 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { toBinary } from '@bufbuild/protobuf'
+import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Server, ServerCredentials, status, type MethodDefinition, type ServerDuplexStream } from '@grpc/grpc-js'
-import { HomeFrameSchema, MAX_HELLO_BYTES, WorkerControlService, WorkerHandshakeError, negotiateWorkerHello } from './index.ts'
+import {
+  DiagnosticOutcome,
+  DiagnosticOfferSchema,
+  DiagnosticStartSchema,
+  HomeFrameSchema,
+  MAX_HELLO_BYTES,
+  WorkerControlService,
+  WorkerFrameSchema,
+  WorkerHandshakeError,
+  negotiateWorkerHello,
+  validWorkerProtocolId,
+  type DiagnosticOffer,
+  type DiagnosticResult,
+  type HomeFrame,
+} from './index.ts'
 
 const identity = (value: Buffer): Buffer => value
 const connect: MethodDefinition<Buffer, Buffer> = {
@@ -21,7 +35,18 @@ interface HomeWorkerTransport {
   readonly privateKeyPem: Buffer
   /** Look up a currently enrolled worker by SHA-256 of its verified certificate in DER format. */
   readonly workerForCertificate: (fingerprint: string) => string | undefined
+  readonly diagnostics?: {
+    readonly next: (workerId: string) => Omit<DiagnosticOffer, '$typeName'> | undefined
+    readonly claim: (workerId: string, attemptId: string, fence: string) => number
+    readonly complete: (workerId: string, result: DiagnosticResult) => boolean
+  }
 }
+
+export const MAX_DIAGNOSTIC_OUTPUT = 1024
+export const DIAGNOSTIC_LEASE_MS = 15_000
+const frame = (payload: HomeFrame['payload']) => Buffer.from(toBinary(HomeFrameSchema, create(HomeFrameSchema, { payload })))
+
+export const workerCertificateFingerprint = (der: Uint8Array): string => createHash('sha256').update(der).digest('hex')
 
 const fail = (call: ServerDuplexStream<Buffer, Buffer>, code: status, message: string): void => {
   call.emit('error', Object.assign(new Error(message), { code }))
@@ -40,6 +65,7 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
     'grpc.max_send_message_length': MAX_HELLO_BYTES,
     'grpc.max_concurrent_streams': 8,
   })
+  const connected = new Set<string>()
   server.addService(
     { connect },
     {
@@ -49,41 +75,109 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
           fail(call, status.UNAUTHENTICATED, 'A verified worker certificate is required')
           return
         }
-        const fingerprint = createHash('sha256').update(peer.raw).digest('hex')
-        const timer = setTimeout(() => fail(call, status.DEADLINE_EXCEEDED, 'The worker did not send a handshake'), 5_000)
+        const fingerprint = workerCertificateFingerprint(peer.raw)
+        let workerId: string | undefined
+        let ownsStream = false
+        let offer: Omit<DiagnosticOffer, '$typeName'> | undefined
+        let askedToStart = false
+        let finished = false
+        const reject = (code: status, message: string): void => {
+          if (finished) return
+          finished = true
+          fail(call, code, message)
+        }
+        const finish = (): void => {
+          finished = true
+          release()
+          call.end()
+        }
+        const expired = (): void => reject(status.DEADLINE_EXCEEDED, 'The worker did not finish the protocol exchange')
+        let timer = setTimeout(expired, 5_000)
         const clear = (): void => clearTimeout(timer)
-        const missing = (): void => fail(call, status.INVALID_ARGUMENT, 'The worker handshake is missing')
-        call.once('cancelled', clear)
-        call.once('close', clear)
-        call.once('error', clear)
-        const receive = (bytes: Buffer): void => {
+        const release = (): void => {
           clear()
-          call.removeListener('end', missing)
-          call.pause()
+          if (ownsStream && workerId !== undefined) connected.delete(workerId)
+          ownsStream = false
+        }
+        call.once('cancelled', () => {
+          finished = true
+          release()
+        })
+        call.once('close', release)
+        call.once('error', release)
+        const receive = (bytes: Buffer): void => {
+          if (finished) return
           try {
-            const workerId = home.workerForCertificate(fingerprint)
-            if (!workerId) {
-              fail(call, status.UNAUTHENTICATED, 'The worker certificate is not enrolled')
+            const enrolled = home.workerForCertificate(fingerprint)
+            if (!enrolled || (workerId !== undefined && workerId !== enrolled)) {
+              reject(status.UNAUTHENTICATED, 'The worker certificate is not enrolled')
               return
             }
-            const reply = negotiateWorkerHello(bytes, {
-              homeId: home.homeId,
-              workerId,
-              sessionId: `wsn_${randomUUID().replaceAll('-', '')}`,
-            })
-            call.write(Buffer.from(toBinary(HomeFrameSchema, reply)))
-            call.end()
+            const diagnostics = home.diagnostics
+            if (workerId === undefined) {
+              workerId = enrolled
+              const reply = negotiateWorkerHello(
+                bytes,
+                { homeId: home.homeId, workerId, sessionId: `wsn_${randomUUID().replaceAll('-', '')}` },
+                diagnostics !== undefined,
+              )
+              call.write(Buffer.from(toBinary(HomeFrameSchema, reply)))
+              if (reply.payload.case === 'hello' && reply.payload.value.supportsDiagnostics) {
+                if (connected.has(workerId)) return reject(status.ALREADY_EXISTS, 'This worker already has an active exchange')
+                connected.add(workerId)
+                ownsStream = true
+                offer = diagnostics?.next(workerId)
+              }
+              if (offer === undefined) return finish()
+              clear()
+              timer = setTimeout(expired, DIAGNOSTIC_LEASE_MS + 5_000)
+              call.write(frame({ case: 'diagnosticOffer', value: create(DiagnosticOfferSchema, offer) }))
+              return
+            }
+            const payload = fromBinary(WorkerFrameSchema, bytes, { readUnknownFields: false }).payload
+            if (
+              offer === undefined ||
+              diagnostics === undefined ||
+              (payload.case !== 'diagnosticClaim' && payload.case !== 'diagnosticResult') ||
+              payload.value.attemptId !== offer.attemptId ||
+              payload.value.fence !== offer.fence
+            ) {
+              return reject(status.PERMISSION_DENIED, 'This stream does not own the attempt and fence')
+            }
+            if (payload.case === 'diagnosticClaim') {
+              if (askedToStart || offer.claimableForMs === 0) return reject(status.FAILED_PRECONDITION, 'This attempt cannot start again')
+              askedToStart = true
+              const { attemptId, fence } = offer
+              const runForMs = diagnostics.claim(workerId, attemptId, fence)
+              if (runForMs === 0) return reject(status.FAILED_PRECONDITION, 'The start lease is no longer available')
+              call.write(frame({ case: 'diagnosticStart', value: create(DiagnosticStartSchema, { attemptId, fence, runForMs }) }))
+              return
+            }
+            const result = payload.value
+            if (
+              !validWorkerProtocolId(result.attemptId, 'watt_') ||
+              !validWorkerProtocolId(result.fence, 'wfn_') ||
+              ![DiagnosticOutcome.SUCCEEDED, DiagnosticOutcome.FAILED, DiagnosticOutcome.UNKNOWN].some(
+                (outcome) => outcome === result.outcome,
+              ) ||
+              result.output.length > MAX_DIAGNOSTIC_OUTPUT ||
+              (result.outcome === DiagnosticOutcome.UNKNOWN && result.output.length !== 0)
+            ) {
+              return reject(status.INVALID_ARGUMENT, 'The worker returned an invalid diagnostic result')
+            }
+            if (!diagnostics.complete(workerId, result)) return reject(status.FAILED_PRECONDITION, 'The attempt is no longer active')
+            return finish()
           } catch (error) {
             if (error instanceof WorkerHandshakeError) {
               const code = error.reason === 'WrongWorker' ? status.PERMISSION_DENIED : status.INVALID_ARGUMENT
-              fail(call, code, error.message)
+              reject(code, error.message)
               return
             }
-            fail(call, status.INTERNAL, 'Could not negotiate a worker session')
+            reject(status.INTERNAL, 'Could not complete the worker exchange')
           }
         }
-        call.once('data', receive)
-        call.once('end', missing)
+        call.on('data', receive)
+        call.once('end', () => reject(status.INVALID_ARGUMENT, 'The worker exchange ended before completion'))
       },
     },
   )

@@ -3,6 +3,8 @@
 use prost::Message;
 use std::{error::Error, fmt};
 
+#[cfg(target_os = "linux")]
+pub mod diagnostic;
 pub mod grpc;
 
 pub mod wire {
@@ -55,6 +57,7 @@ pub fn worker_hello(worker_id: &str) -> Result<wire::WorkerFrame, HandshakeError
             worker_id: worker_id.to_owned(),
             min_version: PROTOCOL_VERSION,
             max_version: PROTOCOL_VERSION,
+            accepts_diagnostics: false,
         })),
     })
 }
@@ -116,6 +119,7 @@ mod tests {
             worker_id: WORKER.to_owned(),
             session_id: SESSION.to_owned(),
             version: PROTOCOL_VERSION,
+            supports_diagnostics: false,
         }
     }
 
