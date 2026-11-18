@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, getDefaultNormalizer, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -9,9 +9,16 @@ import { useConnections } from '../src/renderer/features/connections/useConnecti
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { placeOfLaunch, targetsOf } from '../src/renderer/features/runs/Runs'
-import { askText } from '../src/renderer/features/runs/useRuns'
+import { askAfterText, askText } from '../src/renderer/features/runs/useRuns'
+import { draftKey, setDraftText } from '../src/renderer/shared/drafts'
 import { coordinatorSnapshot, fakeClient, repositories, runnables } from './fixtures'
 import { useSettingsOf, withServices } from './render'
+
+const navigate = vi.hoisted(() => vi.fn())
+vi.mock('@tanstack/react-router', async (actual) => ({
+  ...(await actual<typeof import('@tanstack/react-router')>()),
+  useNavigate: () => navigate,
+}))
 
 /*
  * What a project runs, where the rest of its tests don't go: a run in a
@@ -32,6 +39,9 @@ function Project() {
     />
   )
 }
+
+/** Words as they stand, their new lines kept. */
+const asIs = { normalizer: getDefaultNormalizer({ collapseWhitespace: false }) }
 
 const refused = (message: string) => new ApiError({ reason: 'SqlError', message })
 
@@ -102,21 +112,40 @@ describe('adding something to run', () => {
     expect(screen.getByRole('dialog', { name: 'Add something to run' })).toBeTruthy()
   })
 
-  it('asks the coordinator at once, said in its thread, and asks again where it couldn’t, saying why', async () => {
-    let refuse: (failure: unknown) => void = () => undefined
-    const client = await shown({ send: vi.fn(() => new Promise<void>((_, reject) => (refuse = reject))) })
+  it('asks the coordinator in its composer, unsent, after what the person had written, once however often it is asked', async () => {
+    const client = await shown()
+    await act(async () => setDraftText(draftKey.coordinator('p1'), 'The login page looks off on Safari.'))
     await pick('Add something to run')
     const add = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
     await userEvent.click(add.getByRole('radio', { name: 'Ask the coordinator' }))
+    // Nothing to wait on: the scripts read behind it don't make it busy.
+    expect(add.getByRole('button', { name: 'Ask the coordinator' }).getAttribute('aria-busy')).not.toBe('true')
     await userEvent.click(add.getByRole('button', { name: 'Ask the coordinator' }))
-    // Closed from the press, and said in the conversation, before the runtime has it.
+    // Closed from the press, the conversation asked for, and the words there, unsent, never over the person's own.
     expect(screen.queryByRole('dialog', { name: 'Add something to run' })).toBeNull()
-    expect(screen.getByText(askText)).toBeTruthy()
-    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: askText, disposition: 'after_current' }))
-    await act(async () => refuse(refused('The coordinator isn’t running.')))
+    expect(navigate).toHaveBeenLastCalledWith({ to: '/projects/$projectId', params: { projectId: 'p1' }, search: { room: 'talk' } })
+    expect(screen.getByDisplayValue(`The login page looks off on Safari.\n${askAfterText}`, asIs)).toBeTruthy()
+    // Asked again, it is there once.
+    await pick('Add something to run')
     const again = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
-    expect((await again.findByRole('alert')).textContent).toContain('The coordinator isn’t running.')
-    expect(screen.queryByText(askText)).toBeNull()
+    await userEvent.click(again.getByRole('radio', { name: 'Ask the coordinator' }))
+    await userEvent.click(again.getByRole('button', { name: 'Ask the coordinator' }))
+    expect(screen.getByDisplayValue(`The login page looks off on Safari.\n${askAfterText}`, asIs)).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    expect(askAfterText.startsWith('And please work out what this project runs')).toBe(true)
+    expect(askText.startsWith('Please work out')).toBe(true)
+  })
+
+  it('asks from Run’s own item, with nothing to run yet, with no dialog', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ runnables: [] })) })
+    withServices(<Project />, client)
+    await screen.findByRole('button', { name: /^Coordinator: / })
+    await userEvent.click(screen.getByRole('button', { name: /^Run/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Ask the coordinator to work it out/ }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByDisplayValue(askText, asIs)).toBeTruthy()
+    expect(navigate).toHaveBeenLastCalledWith({ to: '/projects/$projectId', params: { projectId: 'p1' }, search: { room: 'talk' } })
+    expect(client.send).not.toHaveBeenCalled()
   })
 })
 
