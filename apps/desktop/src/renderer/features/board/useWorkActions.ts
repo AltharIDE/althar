@@ -6,6 +6,7 @@ import { messageOf, type OnePress, type StuckAnswer } from '../../data/client'
 import { useMerge, useMerging } from '../../data/merges'
 import { useServices } from '../../data/services'
 import { headsOf } from '../../shared/mergeHere'
+import { planIt } from '../../shared/planIt'
 
 /*
  * What the person does from a dock, on the board or the home: answer a call,
@@ -28,10 +29,6 @@ export interface ActionFailure {
   readonly action: 'push' | 'merge' | 'ship' | 'other'
   readonly message: string
 }
-
-/** What the coordinator is asked when the person carries on a draft that has no plan: it plans it, or says why it can't. */
-const planIt = (task: { readonly title: string; readonly slug: string }) =>
-  `Plan “${task.title}” (${task.slug}): it is a draft with no plan. Call propose_plan for it, or tell me why you can't.`
 
 export interface WorkActions {
   /** The tasks as the person's presses left them: those Done or kept for later moved at once, until a read says so. */

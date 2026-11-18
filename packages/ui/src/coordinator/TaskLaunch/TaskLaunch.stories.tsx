@@ -501,6 +501,42 @@ export const InTheConversation: Story = {
   ),
 }
 
+/** Drafted, and its plan didn't come: it says so, still, and offers to plan or discard it. */
+export const NoPlanYet: Story = {
+  render: () => (
+    <TaskLaunch
+      task="901"
+      title="Explore: what the team looks like before multiplayer"
+      project={PROJECT}
+      steps={[
+        { id: 'implement', label: 'Implement', agents: [] },
+        { id: 'review', label: 'Review', agents: [] },
+      ]}
+      picker={() => null}
+      onStart={() => {}}
+      drafting={{ phase: 'sizing', ended: 'unplanned' }}
+      onPlan={fn()}
+      onDiscard={fn()}
+    />
+  ),
+}
+
+/** Discarded while it was drafted: it says so where it was, with nothing left to do. */
+export const DiscardedWhileDrafted: Story = {
+  render: () => (
+    <TaskLaunch
+      task="900"
+      title="Explore: roles and guardrails for non-engineers"
+      preset="Prototype"
+      project={PROJECT}
+      steps={[{ id: 'implement', label: 'Implement', agents: [OPUS], effort: 'Extra high' }]}
+      picker={() => null}
+      onStart={() => {}}
+      drafting={{ phase: 'end', ended: 'discarded' }}
+    />
+  ),
+}
+
 export const AllStates: Story = {
   render: () => (
     <States

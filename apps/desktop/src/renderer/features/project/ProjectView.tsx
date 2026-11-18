@@ -85,6 +85,7 @@ import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { DraftingCard, useDraftingCards } from './DraftingCard'
+import { planIt } from '../../shared/planIt'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
@@ -591,6 +592,9 @@ export function ProjectView({
     onOpen: onTask,
     onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
+    // A draft whose plan didn't come: the coordinator is asked for it, in the person's words, which show in the thread at once.
+    onPlanDraft: (task) => void model.say(planIt(task), null),
+    onDiscard: (taskId) => model.discardTask(taskId),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),
     ...(presets === undefined
@@ -1126,6 +1130,8 @@ export function ProjectView({
                                   project={name}
                                   held={drafting.held(draft)}
                                   onHold={() => drafting.hold(draft)}
+                                  onPlan={actions.onPlanDraft}
+                                  onDiscard={actions.onDiscard}
                                 />
                               ))}
                             </ThreadShellProvider>

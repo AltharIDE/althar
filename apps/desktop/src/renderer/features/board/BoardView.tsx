@@ -138,6 +138,10 @@ export const text = {
   stoppedBy: stepText.stoppedBy,
   carryOn: 'Resume',
   carryingOn: 'Telling the lead',
+  /** A draft whose plan never came: what it is, in place of Stopped, and what carries it on, the coordinator asked for its plan. */
+  unplanned: 'No plan yet',
+  planIt: 'Plan it',
+  planning: 'Asking the coordinator',
   /** What the lead is told to carry on. */
   carryOnNote: 'Carry on.',
   /** What the lead is told to carry on where its branch conflicts: settle that first, as part of going on. */
@@ -580,9 +584,10 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
   return {
     ...rest,
     status: TaskStatus.Stopped,
-    word: text.status[TaskStatus.Stopped],
+    // A draft whose plan never came didn't stop: it has no plan, and nothing stopped it.
+    word: work.unplanned === true ? text.unplanned : text.status[TaskStatus.Stopped],
     // What stopped it, where something says; the word Stopped says the rest.
-    ...(work.stopped?.by == null ? {} : { why: text.stoppedBy[work.stopped.by] }),
+    ...(work.stopped?.by == null || work.unplanned === true ? {} : { why: text.stoppedBy[work.stopped.by] }),
     // When, where something says; else no time.
     ...(work.stopped?.at == null ? {} : { at: ago(work.stopped.at, new Date(now)) }),
     ...(sendBack === undefined && work.conflictUnsent == null
@@ -629,10 +634,10 @@ export const stoppedCardOf = (work: BoardTask, now: string, actions?: CardAction
                       <NextStep
                         signal={!merges}
                         busy={actions?.sending?.has(work.taskId) ?? false}
-                        doing={text.carryingOn}
+                        doing={work.unplanned === true ? text.planning : text.carryingOn}
                         onPress={() => void sendBack(work, work.conflictUnsent == null ? text.carryOnNote : text.carryOnMergingNote, true)}
                       >
-                        {text.carryOn}
+                        {work.unplanned === true ? text.planIt : text.carryOn}
                       </NextStep>
                     )}
                   </>

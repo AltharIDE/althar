@@ -52,6 +52,8 @@ export const text = {
   now: stepText.now,
   /** A small change's card, as Team's dialog entry elsewhere is named. */
   changeTeam: 'Change the team…',
+  /** A task discarded once it had begun: its card's word. */
+  discarded: 'Discarded',
 }
 
 const STATUS: Readonly<Record<TaskCardContent['phase'], TaskStatus>> = {
@@ -99,6 +101,10 @@ export interface CardActions {
   readonly presets?: ReadonlyArray<{ readonly name: string; readonly about: string; readonly reviews: boolean }>
   /** Picks another preset for a plan: its parts change to match. */
   readonly onPreset?: (planId: string, preset: string) => void
+  /** Asks the coordinator for the plan of a draft whose plan didn't come. */
+  readonly onPlanDraft?: (task: { readonly title: string; readonly slug: string }) => void
+  /** Discards a task from its card; done once the runtime has it, rejected where it didn't. */
+  readonly onDiscard?: (taskId: string) => Promise<void>
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
@@ -314,6 +320,57 @@ function PlanCard({
   )
 }
 
+/** A draft's steps before anyone is chosen for them: a lead's and a reviewer's seat, open. */
+const OPEN_SEATS: ReadonlyArray<LaunchStep> = [
+  { id: 'implement', label: text.label.implement, agents: [] },
+  { id: 'review', label: text.label.review, agents: [] },
+]
+
+/**
+ * A task that never began, as its card stays: drafted with no plan, which it says plainly, offering to plan it (the
+ * coordinator is asked) or discard it; or discarded before it began, from a draft or a plan, planned or held, which it
+ * says where its foot said when it starts. Discard shows at once, and as it was again where the runtime turns it down.
+ */
+function NotBegun({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
+  const title = useTaskTitle(card.taskId, card.title)
+  const named = useModelNames()
+  const effortOf = useEffortNames()
+  const [discarding, setDiscarding] = useState(false)
+  const [asked, setAsked] = useState(false)
+  const plan = card.plan
+  const discarded = card.discarded === true || discarding
+  const { onPlanDraft, onDiscard } = actions
+  return (
+    <TaskLaunch
+      task={card.slug}
+      title={title}
+      {...(plan?.preset === undefined ? {} : { preset: plan.preset })}
+      project={actions.project}
+      steps={plan === null ? OPEN_SEATS : launchSteps(plan, named, effortOf, card.reviewing != null)}
+      picker={() => null}
+      onStart={() => undefined}
+      {...(plan === null ? {} : plan.end === null ? { hideEnd: true } : { end: ENDS[plan.end] })}
+      drafting={{ phase: 'end', ended: discarded ? 'discarded' : 'unplanned' }}
+      {...(discarded || onPlanDraft === undefined || asked
+        ? {}
+        : {
+            onPlan: () => {
+              setAsked(true)
+              onPlanDraft({ title, slug: card.slug })
+            },
+          })}
+      {...(discarded || onDiscard === undefined
+        ? {}
+        : {
+            onDiscard: () => {
+              setDiscarding(true)
+              void onDiscard(card.taskId).catch(() => setDiscarding(false))
+            },
+          })}
+    />
+  )
+}
+
 /** Its latest pull request; those of its earlier rounds of work (ADR-034) are on its own view. */
 const pullRequestOf = (latest: ChangeSummary) => `${latest.short} ${latest.prefix}${latest.number}`
 
@@ -334,6 +391,8 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
   const effortOf = useEffortNames()
+  // Never begun: drafted with no plan, or discarded before it started, wherever it was then.
+  if (card.unplanned === true || (card.discarded === true && card.startedAt === null)) return <NotBegun card={card} actions={actions} />
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
@@ -349,8 +408,11 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   const handedBack = card.phase === 'ready' ? (card.handedBack ?? card.checksBack ?? null) : null
   // Waiting for a free agent, it says so, rather than that it runs.
   // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
-  const status =
-    card.queued !== null
+  // Discarded once it had begun: it stopped there, and says it was discarded.
+  const discarded = card.discarded === true
+  const status = discarded
+    ? TaskStatus.Stopped
+    : card.queued !== null
       ? TaskStatus.Queued
       : handedBack !== null
         ? TaskStatus.Yours
@@ -358,8 +420,9 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
           ? TaskStatus.Paused
           : STATUS[card.phase]
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
-  const now =
-    handedBack !== null
+  const now = discarded
+    ? undefined
+    : handedBack !== null
       ? handedBack
       : status === TaskStatus.Done
         ? card.summary?.split('\n')[0]
@@ -407,7 +470,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
             ),
           })}
       onOpen={() => actions.onOpen(card.threadId)}
-      text={{ status: text.status }}
+      text={{ status: discarded ? { ...text.status, [TaskStatus.Stopped]: text.discarded } : text.status }}
     />
   )
 }

@@ -11,7 +11,9 @@ import { stepText } from '../../shared/steps'
  * card's own, filling in as the draft is written, from the moment it begins,
  * rather than the whole card after a long wait. Hold is its one action: a
  * draft held here comes as a held plan. The thread's card takes its
- * place once the plan is in.
+ * place once the plan is in. Where its plan's call failed it says it has no
+ * plan, still, offering to plan or discard it; discarded, from here or
+ * anywhere, it says so.
  */
 
 /** What drafting is at, from what is written so far. */
@@ -23,9 +25,35 @@ export const phaseOf = (draft: Draft): LaunchPhase => {
   return 'end'
 }
 
-export function DraftingCard({ draft, project, held, onHold }: { draft: Draft; project: string; held: boolean; onHold: () => void }) {
+export function DraftingCard({
+  draft,
+  project,
+  held,
+  onHold,
+  onPlan,
+  onDiscard,
+}: {
+  draft: Draft
+  project: string
+  held: boolean
+  onHold: () => void
+  /** Asks the coordinator for its plan, once its plan didn't come. */
+  onPlan?: (task: { readonly title: string; readonly slug: string }) => void
+  /** Discards its task; done once the runtime has it, rejected where it didn't. */
+  onDiscard?: (taskId: string) => Promise<void>
+}) {
   const named = useModelNames()
   const effortOf = useEffortNames()
+  // Discarded from here shows at once, and as it was again where the runtime turns it down.
+  const [discarding, setDiscarding] = useState(false)
+  // Asked for its plan: it isn't offered again while it comes.
+  const [asked, setAsked] = useState(false)
+  const discarded = draft.discarded === true || discarding
+  const ended = discarded ? ('discarded' as const) : draft.unplanned === true ? ('unplanned' as const) : undefined
+  const task =
+    draft.taskId === null || draft.slug === null || draft.title === null
+      ? null
+      : { taskId: draft.taskId, slug: draft.slug, title: draft.title }
   const step = (key: 'implement' | 'review', who: Draft['lead']): LaunchStep => ({
     id: key,
     label: stepText.label[key],
@@ -47,7 +75,23 @@ export function DraftingCard({ draft, project, held, onHold }: { draft: Draft; p
       onHeldChange={(next) => {
         if (next) onHold()
       }}
-      drafting={{ phase: phaseOf(draft) }}
+      drafting={{ phase: phaseOf(draft), ...(ended === undefined ? {} : { ended }) }}
+      {...(task === null || onPlan === undefined || asked
+        ? {}
+        : {
+            onPlan: () => {
+              setAsked(true)
+              onPlan(task)
+            },
+          })}
+      {...(task === null || onDiscard === undefined
+        ? {}
+        : {
+            onDiscard: () => {
+              setDiscarding(true)
+              void onDiscard(task.taskId).catch(() => setDiscarding(false))
+            },
+          })}
     />
   )
 }
