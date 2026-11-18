@@ -122,3 +122,69 @@ it('draws a completed team or a plan without a review with their selected models
   expect(screen.queryByText('Review')).toBeNull()
   expect(screen.getByRole('button', { name: 'Hold' })).not.toBeNull()
 })
+
+const coverageDraft = draft({ key: 'draft' })
+const coverageLead = { agentId: 'claude-code', model: 'claude-opus-5-5', effort: null }
+it('follows drafting through brief, sizing, lead, review and ending, allowing review to be omitted', () => {
+  expect(phaseOf(coverageDraft)).toBe('writing')
+  expect(phaseOf({ ...coverageDraft, brief: true })).toBe('sizing')
+  expect(phaseOf({ ...coverageDraft, brief: true, planning: true })).toBe('lead')
+  expect(phaseOf({ ...coverageDraft, brief: true, planning: true, lead: coverageLead })).toBe('review')
+  expect(phaseOf({ ...coverageDraft, brief: true, planning: true, lead: coverageLead, noReview: true })).toBe('end')
+  expect(phaseOf({ ...coverageDraft, brief: true, planned: true, lead: coverageLead })).toBe('end')
+  expect(phaseOf({ ...coverageDraft, brief: true, planning: true, lead: coverageLead, review: coverageLead })).toBe('end')
+})
+
+it('holds a draft immediately, restores runtime state on refusal, and replaces it only with its own task card', async () => {
+  let reject!: (error: Error) => void
+  const hold = vi.fn(
+    () =>
+      new Promise<void>((_, no) => {
+        reject = no
+      }),
+  )
+  const own = { ...coverageDraft, taskId: 'own' }
+  const other = { ...coverageDraft, key: 'other', taskId: 'other' }
+  const cards = [items.card({ ...card(), taskId: 'other' }), items.you('Plan it')]
+  const hook = renderHook(({ threadId }) => useDraftingCards(threadId, [own, other, coverageDraft], cards, hold), {
+    initialProps: { threadId: 'thread' as string | null },
+  })
+  expect(hook.result.current.shown).toEqual([own, coverageDraft])
+  act(() => hook.result.current.hold(own))
+  expect(hook.result.current.held(own)).toBe(true)
+  expect(hold).toHaveBeenCalledWith('thread', 'draft')
+  await act(async () => reject(new Error('Refused')))
+  expect(hook.result.current.held(own)).toBe(false)
+  expect(hook.result.current.held({ ...own, held: true })).toBe(true)
+  hook.rerender({ threadId: null })
+  act(() => hook.result.current.hold(own))
+  expect(hold).toHaveBeenCalledOnce()
+})
+
+it('renders a drafting plan with its selected lead and can hold it before it is complete', async () => {
+  const { client } = fakeClient()
+  const hold = vi.fn()
+  const view = withServices(<DraftingCard draft={coverageDraft} project="Project" held={false} onHold={hold} />, client)
+  await userEvent.click(await screen.findByRole('button', { name: /Hold/ }))
+  expect(hold).toHaveBeenCalledOnce()
+  view.unmount()
+  withServices(
+    <DraftingCard
+      draft={{
+        ...coverageDraft,
+        title: 'Build it',
+        slug: 'build-it',
+        preset: 'Change',
+        lead: coverageLead,
+        review: coverageLead,
+        brief: true,
+        planning: true,
+      }}
+      project="Project"
+      held
+      onHold={hold}
+    />,
+    client,
+  )
+  await waitFor(() => expect(screen.getByText('Build it')).not.toBeNull())
+})
