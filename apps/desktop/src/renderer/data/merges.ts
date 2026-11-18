@@ -125,7 +125,8 @@ const usePressed = (keyOf: (one: Pressed) => string | undefined): { last: Readon
   const next = ends.length === 0 ? null : Math.min(...ends)
   useEffect(() => {
     if (next === null) return
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, next - Date.now()))
+    // At least the time it waited for: a timer may fire a moment early by the clock, and the same end would set none again.
+    const timer = setTimeout(() => setNow(Math.max(Date.now(), next)), Math.max(0, next - Date.now()))
     return () => clearTimeout(timer)
   }, [next])
   return { last, now }
