@@ -107,10 +107,67 @@ one. No automatic migration or two-way database sync in the first slice.
 
 ### Pools and task placement
 
-A project names the pools it may use. A pool contains enrolled workers;
-hosts advertise OS, architecture, available CPU, memory and disk, installed
-tools, provider/account capabilities and reachable services. Host membership
-alone gives no access to an unassigned project's repositories or secrets.
+#### Worker ownership and access
+
+Every pool has one owner, either a person or an organization. The
+[existing project owner contract](../../../packages/contracts/src/identities.ts)
+already represents both kinds of owner. Use the durable person identity
+for personal projects and private worker pools. Linking a cloud account
+adds a login and billing relationship for managed services while retaining
+the person's existing local identity. An organization has its own
+ownership and billing records. Its members act through their individual
+accounts with roles granted by the organization.
+
+The home is the project writer and scheduler. A project and its home have
+an owner scope, and projects in a home initially share that scope. Keep
+ownership separate from the home ID, machine and endpoint. Moving the
+home preserves project and pool ownership. One computer can serve a
+personal home and attach as a client to a company home. Each connection
+uses the identity and grants for its own home.
+
+A worker registration belongs to a pool. For private capacity the owner
+administers its workers. For managed capacity Althar operates the
+machines and allocates workers for the owner's pool. A pool grants
+specific homes and projects access. Within a home, a project can use its
+owner's approved pools, subject to the person's role and the project's
+placement policy. The first version admits each worker to one home at a
+time and uses same-owner pool grants. An owner can later authorize a
+pool for several of its homes through separate enrollments and an
+allocator that prevents them reserving the same capacity.
+
+The selected project determines the owner scope before the home resolves
+eligible pools. Check the authenticated person's permission, the project
+and home grant, capacity, and the payer's limit before dispatch. A worker
+receives credentials for the authorized project and attempt. Keep work,
+secrets and artifacts within that scope. Revocation blocks new
+admissions. The home applies the existing lease and cancellation policy
+to work already admitted.
+
+| Situation | Pool available to the project | Who pays |
+| --- | --- | --- |
+| Personal Pro user runs a personal project in Althar Cloud | Their personal managed pool, provided when they link their cloud account | Their personal cloud account |
+| The same user runs a personal project on their own worker | Their personal private pool | They operate their machine |
+| The same user opens a company project from the company home | A company pool approved for that project, subject to their company role | The company operates private capacity or pays for its managed capacity |
+
+Managed admissions record the payer and cap with the project, home,
+pool and attempt. Reuse the same reservation and receipt for delivery
+retries. Membership changes affect future authorization while historic
+receipts retain the payer recorded at admission. A personal plan can
+include a monthly compute allowance. Allowances, prices and overage
+terms remain product decisions.
+
+Ship the personal managed path first with a default pool and a personal
+budget. Keep the owner scope and grants explicit in the model so company
+roles and pools can use the same placement and metering path when
+collaboration ships.
+
+#### Placement
+
+A project names the pools it may use. A pool supplies private workers or
+managed capacity. Enrolled workers advertise OS, architecture, available
+CPU, memory and disk, installed tools, provider/account capabilities and
+reachable services. Access to repositories and secrets requires a
+project-scoped grant.
 
 Place each new task on an eligible worker across those pools. Check required
 platform, repository access, credentials and capacity first; prefer prepared
