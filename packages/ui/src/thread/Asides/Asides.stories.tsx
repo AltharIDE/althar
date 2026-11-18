@@ -232,6 +232,7 @@ export const OverTheThreadScrolled: Story = {
     const scroller = canvasElement.querySelector<HTMLElement>('[class*="scroll"]:not([class*="scrollArea"])')
     if (scroller === null) throw new Error('no scroller')
     scroller.scrollTop = 200
+    scroller.dispatchEvent(new Event('scroll'))
     await waitFor(() => expect(canvasElement.querySelector('[data-scrolled]')).not.toBeNull())
   },
 }
