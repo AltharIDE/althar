@@ -29,3 +29,6 @@ apps/desktop/.flatpak-builder/
 
 # A database a test or a run left in the working folder
 /althar.sqlite*
+
+# Cargo workspace build products
+/target/
