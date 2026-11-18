@@ -8,7 +8,7 @@ import { homeProblem } from './useHomes'
 import s from './Homes.module.css'
 
 /** A code identifies the home and its TLS key before the connection credential is exchanged. */
-export function usePairStep(homes: HomesHost, onClose: () => void): Step {
+export function usePairStep(homes: HomesHost, onClose: () => void, focus: boolean): Step {
   const id = useId()
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
@@ -83,7 +83,7 @@ export function usePairStep(homes: HomesHost, onClose: () => void): Step {
             autoComplete="off"
             spellCheck={false}
             // oxlint-disable-next-line jsx-a11y/no-autofocus -- the dialog is opened to paste a code; its first field takes the keys.
-            autoFocus
+            autoFocus={focus}
             onChange={(event) => {
               setCode(event.currentTarget.value)
               setInfo(null)

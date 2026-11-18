@@ -134,15 +134,17 @@ export const useConnect = (homes: HomesHost, onDone?: () => void, start?: { targ
     },
     connect: () => {
       if (checked === null || name.trim() === '') return
+      // An edit or a switch away abandons it: what it comes to then is no longer this form's.
+      const at = generation.current
       setPhase('connecting')
       setProblem(null)
       void homes
         .connect(checked.checkId, name)
         .then(() => {
-          if (live.current) onDone?.()
+          if (live.current && generation.current === at) onDone?.()
         })
         .catch((error: unknown) => {
-          if (!live.current) return
+          if (!live.current || generation.current !== at) return
           setProblem(homeProblem(error))
           setPhase('refused')
           setChecked(null)
@@ -263,8 +265,10 @@ export interface Step {
  */
 export function ConnectHome({ homes, onClose }: { homes: HomesHost; onClose: () => void }) {
   const [method, setMethod] = useState<'pair' | 'ssh'>(homes.pair === undefined ? 'ssh' : 'pair')
-  const ssh = useSshStep(homes, onClose)
-  const pair = usePairStep(homes, onClose)
+  // The first field takes the keys as the dialog opens; a method chosen after keeps focus on its switch.
+  const [switched, setSwitched] = useState(false)
+  const ssh = useSshStep(homes, onClose, !switched)
+  const pair = usePairStep(homes, onClose, !switched)
   const step = method === 'pair' ? pair : ssh
   return (
     <Dialog
@@ -288,6 +292,7 @@ export function ConnectHome({ homes, onClose }: { homes: HomesHost; onClose: () 
             onChange={(next) => {
               if (next === method) return
               step.leave()
+              setSwitched(true)
               setMethod(next)
             }}
             className={s.method}
@@ -303,7 +308,7 @@ export function ConnectHome({ homes, onClose }: { homes: HomesHost; onClose: () 
   )
 }
 
-function useSshStep(homes: HomesHost, onClose: () => void): Step {
+function useSshStep(homes: HomesHost, onClose: () => void, focus: boolean): Step {
   const id = useId()
   const form = useConnect(homes, onClose)
   const checked = form.checked !== null && (form.phase === 'checked' || form.phase === 'connecting') ? form.checked : null
@@ -338,8 +343,10 @@ function useSshStep(homes: HomesHost, onClose: () => void): Step {
             autoComplete="off"
             maxLength={4096}
             className={s.mono}
+            // While it connects, the host it connects to stays as it is.
+            readOnly={form.phase === 'connecting'}
             // oxlint-disable-next-line jsx-a11y/no-autofocus -- the dialog is opened to type a host; its first field takes the keys.
-            autoFocus
+            autoFocus={focus}
             onChange={(event) => form.setTarget(event.currentTarget.value)}
           />
           {problem !== null && <Refusal problem={problem} id={`${id}-problem`} />}
