@@ -36,7 +36,7 @@ test('frees a finished preview’s place, names the live holder, and starts wait
     await expect(page.getByRole('article', { name: 'Add a retry to checkout', exact: true })).toContainText('Running')
     await expect(page.getByText(/^Waiting: /)).toHaveCount(0)
     await startTask(page, 'Tidy checkout tests', '[lead:finish]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy on .+: Add a retry to checkout$/)).toBeVisible()
+    await expect(page.getByText(/^Waiting · 1 agent busy$/)).toBeVisible()
 
     await expect(page.getByRole('button', { name: /^Keeping a place/ })).toHaveCount(0)
     await still(page)

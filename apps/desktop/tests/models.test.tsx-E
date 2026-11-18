@@ -1,0 +1,519 @@
+import { QueryClient } from '@tanstack/react-query'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { Brand } from '@althar/ui'
+import { describe, expect, it, vi } from 'vitest'
+
+import type { AgentModels, AgentStatus } from '@althar/contracts'
+
+import { useModels, useSetDefaultEffort } from '../src/renderer/data/models'
+import { recheckStatus } from '../src/renderer/data/reads'
+import { useModelNames } from '../src/renderer/shared/modelNames'
+import {
+  catalogOf,
+  defaultEffortOf,
+  choiceOf,
+  defaultPins,
+  effortId,
+  effortName,
+  infoOf,
+  keyOf,
+  makerOf,
+  modelName,
+  moveTo,
+  togglePin,
+  useModelPrefs,
+} from '../src/renderer/shared/models'
+import { canPick } from '../src/renderer/shared/agents'
+import { agents, fakeClient, models, withoutOpenCode } from './fixtures'
+import { withServices } from './render'
+
+const signedIn = agents.filter(canPick)
+const catalog = catalogOf(models, signedIn)
+
+describe('the models every agent offers', () => {
+  it('are one list, each known by its agent and its own id', () => {
+    expect(catalog.models.map((info) => [info.id, info.name, info.short])).toEqual([
+      ['claude-code:default', 'Claude Code default', 'Claude Code default'],
+      ['claude-code:opus', 'Claude Opus', 'Claude Opus'],
+      ['claude-code:sonnet', 'Claude Sonnet', 'Claude Sonnet'],
+      ['codex:gpt-5.2-codex', 'gpt-5.2-codex', 'gpt-5.2-codex'],
+      ['codex:gpt-5.2', 'gpt-5.2', 'gpt-5.2'],
+    ])
+    expect(catalog.models[2]).toMatchObject({
+      mark: Brand.Anthropic,
+      efforts: ['Low', 'Medium', 'High'],
+      note: 'For everyday tasks',
+      via: 'via Claude Code',
+    })
+    expect(catalog.runtimes).toEqual([
+      { id: 'claude-code', name: 'Claude Code', brand: Brand.ClaudeCode },
+      { id: 'codex', name: 'Codex', how: 'this Mac', brand: Brand.Codex },
+    ])
+    expect(choiceOf(keyOf('opencode', 'anthropic/claude-sonnet:thinking'))).toEqual({
+      agentId: 'opencode',
+      model: 'anthropic/claude-sonnet:thinking',
+    })
+    expect(choiceOf(keyOf('codex', null))).toEqual({ agentId: 'codex', model: null })
+  })
+
+  it('say whose a shared name is, keep a provider apart, put back a family a name leaves out, and carry the maker’s mark', () => {
+    const opencode: AgentStatus = {
+      id: 'opencode',
+      name: 'OpenCode',
+      signIn: 'signed_in',
+      login: 'opencode auth login',
+      version: null,
+      ways: [],
+      accounts: [],
+      addsAccounts: true,
+      guide: null,
+      installed: true,
+      kept: false,
+      download: null,
+      problem: null,
+    }
+    const plain = (id: string, name: string) => ({ id, name, description: null, efforts: [], effort: null })
+    const offered: AgentModels = {
+      agentId: 'opencode',
+      models: [
+        plain('anthropic/opus', 'Opus'),
+        plain('qwen/qwen3-coder', 'qwen/Qwen3 Coder'),
+        { ...plain('local', 'My own'), efforts: [{ id: 'xhigh', name: 'Xhigh' }] },
+        plain('opencode/big-pickle', 'OpenCode Zen/Big Pickle'),
+        plain('other/big-pickle', 'Other / Big Pickle'),
+        plain('acme/kimi-k3', 'Acme/Kimi K3'),
+        plain('zeta/kimi-k3', 'Zeta/Kimi K3'),
+        plain('openai/gpt-6-sol', 'OpenAI/6 Sol'),
+        plain('gemini-3-pro', '3 Pro'),
+        plain('v2', '2'),
+        plain('opencode-go/deepseek-v4.1-flash', 'opencode-go/DeepSeek V4.1 Flash'),
+        plain('opencode-zen/deepseek-v4.1-flash', 'opencode-zen/DeepSeek V4.1 Flash'),
+        plain('opencode-go/glm-5.3', 'opencode-go/GLM-5.3'),
+      ],
+      model: null,
+      effort: null,
+      defaults: [],
+      blocked: [],
+      probing: false,
+      images: true,
+    }
+    const both = catalogOf([...models, offered], [...signedIn, opencode])
+    const named = (id: string) => both.models.find((info) => info.id === id)
+    // A name is as people know it, whichever agent runs the model.
+    expect([named('claude-code:opus')?.name, named('opencode:anthropic/opus')?.short]).toEqual(['Claude Opus', 'Opus'])
+    expect(named('opencode:qwen/qwen3-coder')).toMatchObject({ name: 'Qwen3 Coder', short: 'Qwen3 Coder', mark: Brand.Alibaba })
+    expect(named('opencode:qwen/qwen3-coder')?.route).toBeUndefined()
+    expect(named('opencode:local')?.mark).toBeUndefined()
+    // Two entries with one name say where each runs, in words: the provider that names the agent, or else the provider.
+    expect([named('opencode:opencode/big-pickle'), named('opencode:other/big-pickle')]).toEqual([
+      expect.objectContaining({ name: 'Big Pickle', route: 'OpenCode Zen', via: 'via OpenCode Zen' }),
+      expect.objectContaining({ name: 'Big Pickle', route: 'OpenCode', via: 'via OpenCode' }),
+    ])
+    expect([named('opencode:acme/kimi-k3')?.route, named('opencode:zeta/kimi-k3')?.route]).toEqual(['Acme', 'Zeta'])
+    // Where a model is only named, not chosen, it is named alone; the hover says the way.
+    const alone = catalogOf([...models, offered], [...signedIn, opencode], { apart: false })
+    expect(alone.models.find((info) => info.id === 'opencode:other/big-pickle')).toMatchObject({ name: 'Big Pickle', via: 'via OpenCode' })
+    expect(alone.models.find((info) => info.id === 'opencode:other/big-pickle')?.route).toBeUndefined()
+    // A provider that names the agent keeps its route on hover, even where the name is only shown on a line.
+    expect(alone.models.find((info) => info.id === 'opencode:opencode-go/deepseek-v4.1-flash')).toMatchObject({
+      name: 'DeepSeek V4.1 Flash',
+      via: 'via OpenCode Go',
+    })
+    expect([named('opencode:openai/gpt-6-sol')?.name, named('opencode:gemini-3-pro')?.name, named('opencode:v2')?.name]).toEqual([
+      'GPT-6 Sol',
+      'Gemini 3 Pro',
+      '2',
+    ])
+    expect(alone.models.find((info) => info.id === 'opencode:openai/gpt-6-sol')?.name).toBe('GPT-6 Sol')
+    // A chip never carries a raw provider id: the plain name, the provider in words only where the model is offered twice.
+    expect([named('opencode:opencode-go/deepseek-v4.1-flash'), named('opencode:opencode-zen/deepseek-v4.1-flash')]).toEqual([
+      expect.objectContaining({ short: 'DeepSeek V4.1 Flash', route: 'OpenCode Go' }),
+      expect.objectContaining({ short: 'DeepSeek V4.1 Flash', route: 'OpenCode Zen' }),
+    ])
+    expect(named('opencode:opencode-go/glm-5.3')).toMatchObject({ short: 'GLM-5.3' })
+    expect(named('opencode:opencode-go/glm-5.3')?.route).toBeUndefined()
+    // Each model has effort levels of its own, and some none; levels an agent runs together are written apart.
+    expect([named('opencode:local')?.efforts, named('opencode:v2')?.efforts]).toEqual([['Extra high'], []])
+    expect([effortName(both, 'opencode:local', 'xhigh'), effortId(both, 'opencode:local', 'Extra high')]).toEqual(['Extra high', 'xhigh'])
+    expect([effortName(both, 'opencode:v2', 'xhigh'), effortId(both, 'opencode:v2', 'Extra high')]).toEqual([null, 'Extra high'])
+    expect(both.runtimes.at(-1)).toEqual({ id: 'opencode', name: 'OpenCode' })
+    expect([makerOf('opencode', 'gemini-3-pro'), makerOf('opencode', 'o4-mini'), makerOf('codex', 'whatever')]).toEqual([
+      Brand.Google,
+      Brand.OpenAI,
+      Brand.OpenAI,
+    ])
+  })
+
+  it('offer nothing of an agent whose every model is switched off, not its own default', () => {
+    const codex = models.find((offered) => offered.agentId === 'codex')
+    if (codex === undefined) throw new Error('Codex offers models')
+    const off = catalogOf([{ ...codex, blocked: codex.models.map((model) => model.id) }], signedIn)
+    expect(off.models.some((info) => info.runtime === 'codex')).toBe(false)
+  })
+
+  it('leave out an agent that isn’t installed, its own default, its pin and its count', () => {
+    // Junie has no status command: not installed, its sign-in is only unknown.
+    const junie: AgentStatus = { ...agents[1]!, id: 'junie', name: 'Junie', signIn: 'unknown', installed: false }
+    const offered = [...withoutOpenCode, junie].filter(canPick)
+    expect(offered.map((agent) => agent.id)).toEqual(['claude-code', 'codex'])
+    const without = catalogOf([], offered)
+    expect(without.models.map((info) => info.name)).toEqual(['Claude Code default', 'Codex default'])
+    expect(without.models).toHaveLength(2)
+    expect(defaultPins(without)).toEqual(['claude-code:', 'codex:'])
+    // Installed, it is offered again.
+    expect(catalogOf([], [...offered, { ...junie, installed: true }]).models.map((info) => info.name)).toContain('Junie default')
+  })
+
+  it('stand for an agent whose models aren’t known yet by its own default', () => {
+    const unknown = catalogOf([], signedIn)
+    expect(unknown.models.map((info) => [info.id, info.name])).toEqual([
+      ['claude-code:', 'Claude Code default'],
+      ['codex:', 'Codex default'],
+    ])
+    expect(infoOf(unknown, { agentId: 'codex', model: null }).id).toBe('codex:')
+    expect(defaultPins(unknown)).toEqual(['claude-code:', 'codex:'])
+  })
+
+  it('name a model the agent doesn’t list from its id, a version it writes with dashes as people write it: Claude Opus 5.5, never Opus 5 5', () => {
+    const named = (model: string) => infoOf(catalog, { agentId: 'claude-code', model }).name
+    expect(named('claude-opus-5-5')).toBe('Claude Opus 5.5')
+    expect(named('claude-sonnet-5-5')).toBe('Claude Sonnet 5.5')
+    expect(named('claude-3-5-sonnet')).toBe('Claude 3.5 Sonnet')
+    expect(named('gemini-2-5-pro')).toBe('Gemini 2.5 Pro')
+    expect(named('opencode-go/glm-5-3')).toBe('GLM 5.3')
+    // A version already dotted, a lone number, and a date stay as they are.
+    expect(named('opencode-go/deepseek-v4.1-flash')).toBe('DeepSeek V4.1 Flash')
+    expect(named('gpt-6-sol')).toBe('GPT 6 Sol')
+    expect(named('claude-sonnet-4-20250514')).toBe('Claude Sonnet 4 20250514')
+    expect(named('o3-mini-2025-01-31')).toBe('O3 Mini 2025 01 31')
+    expect(modelName(catalog, 'claude-code', 'claude-opus-5-5')).toBe('Claude Opus 5.5')
+  })
+
+  it('show a choice as its model, what its agent is on, or as it was set', () => {
+    expect(infoOf(catalog, { agentId: 'claude-code', model: 'sonnet' }).name).toBe('Claude Sonnet')
+    expect(infoOf(catalog, { agentId: 'codex', model: null }).id).toBe('codex:gpt-5.2-codex')
+    // One the agent no longer lists, and an agent the picker doesn't offer.
+    expect(infoOf(catalog, { agentId: 'codex', model: 'gpt-4.1' })).toEqual({
+      id: 'codex:gpt-4.1',
+      name: 'GPT 4.1',
+      short: 'GPT 4.1',
+      runtime: 'codex',
+      efforts: [],
+      via: 'via Codex',
+      mark: Brand.OpenAI,
+    })
+    expect(infoOf(catalog, { agentId: 'opencode', model: null })).toMatchObject({ id: 'opencode:', name: 'opencode' })
+    expect(defaultPins(catalog)).toEqual(['claude-code:default', 'codex:gpt-5.2-codex'])
+    expect([modelName(catalog, 'claude-code', 'sonnet'), modelName(catalog, 'claude-code', 'default')]).toEqual(['Sonnet', null])
+    expect([modelName(catalog, 'codex', 'gpt-4.1'), modelName(catalog, 'codex', null)]).toEqual(['GPT 4.1', null])
+    const sol = catalogOf(
+      [{ ...models[1]!, models: [{ id: 'gpt-6-sol', name: '6 Sol', description: null, efforts: [], effort: null }] }],
+      signedIn,
+    )
+    expect(modelName(sol, 'codex', 'gpt-6-sol')).toBe('GPT-6 Sol')
+    // An agent's own default has the efforts of the model it is on.
+    expect([effortName(catalog, 'codex:', 'extra-high'), effortName(catalog, 'codex:gpt-5.2', null)]).toEqual(['Extra high', null])
+    expect([effortId(catalog, 'codex:gpt-5.2', 'Extra high'), effortId(catalog, 'opencode:', 'Deep')]).toEqual(['extra-high', 'Deep'])
+  })
+
+  it('name a model by the id it was stored as, before or without its provider being listed', () => {
+    const plain = (id: string, name: string) => ({ id, name, description: null, efforts: [], effort: null })
+    const opencode = agents.find((agent) => agent.id === 'opencode')
+    if (opencode === undefined) throw new Error('OpenCode is an agent')
+    const offered: AgentModels = {
+      agentId: 'opencode',
+      models: [plain('deepseek-v4.1-flash', 'DeepSeek V4.1 Flash')],
+      model: null,
+      effort: null,
+      defaults: [],
+      blocked: [],
+      probing: false,
+      images: true,
+    }
+    // Stored with the provider before its id, as OpenCode does, while the list names it without.
+    const bare = catalogOf([...models, offered], agents)
+    expect(infoOf(bare, { agentId: 'opencode', model: 'opencode-go/deepseek-v4.1-flash' })).toMatchObject({
+      id: 'opencode:deepseek-v4.1-flash',
+      name: 'DeepSeek V4.1 Flash',
+      short: 'DeepSeek V4.1 Flash',
+      mark: Brand.DeepSeek,
+      // The listed name leaves the provider out; the stored id still says the route.
+      via: 'via OpenCode Go',
+    })
+    // Listed with the provider before its id, while it was stored without.
+    const prefixed = catalogOf(
+      [...models, { ...offered, models: [plain('opencode-go/deepseek-v4.1-flash', 'opencode-go/DeepSeek V4.1 Flash')] }],
+      agents,
+    )
+    expect(infoOf(prefixed, { agentId: 'opencode', model: 'deepseek-v4.1-flash' })).toMatchObject({
+      name: 'DeepSeek V4.1 Flash',
+      // Listed with the provider, stored without: the listing's route is kept.
+      via: 'via OpenCode Go',
+    })
+    // Before the agent has said what it offers: people's words, never the raw slug.
+    const probing = catalogOf([...models, { ...offered, models: [] }], agents)
+    expect(infoOf(probing, { agentId: 'opencode', model: 'opencode-go/deepseek-v4.1-flash' })).toMatchObject({
+      name: 'DeepSeek V4.1 Flash',
+      short: 'DeepSeek V4.1 Flash',
+      mark: Brand.DeepSeek,
+      via: 'via OpenCode Go',
+    })
+    // Nothing names it at all: still readable, without the provider.
+    expect(infoOf(probing, { agentId: 'opencode', model: 'acme/new-model' })).toMatchObject({ name: 'New Model' })
+    // Go and Zen are different routes: a Go id the list lacks never borrows Zen's entry.
+    const zenOnly = catalogOf(
+      [...models, { ...offered, models: [plain('opencode-zen/deepseek-v4.1-flash', 'opencode-zen/DeepSeek Zen')] }],
+      agents,
+    )
+    expect(infoOf(zenOnly, { agentId: 'opencode', model: 'opencode-go/deepseek-v4.1-flash' })).toMatchObject({
+      id: 'opencode:opencode-go/deepseek-v4.1-flash',
+      name: 'DeepSeek V4.1 Flash',
+      via: 'via OpenCode Go',
+    })
+    // Both routes listed: each keeps its own, and an exact id wins over an earlier bare match.
+    const bothRoutes = catalogOf(
+      [
+        ...models,
+        {
+          ...offered,
+          models: [
+            plain('opencode-zen/deepseek-v4.1-flash', 'opencode-zen/DeepSeek Zen'),
+            plain('opencode-go/deepseek-v4.1-flash', 'opencode-go/DeepSeek Go'),
+          ],
+        },
+      ],
+      agents,
+      { apart: false },
+    )
+    expect(infoOf(bothRoutes, { agentId: 'opencode', model: 'opencode-go/deepseek-v4.1-flash' })).toMatchObject({
+      name: 'DeepSeek Go',
+      via: 'via OpenCode Go',
+    })
+    expect(infoOf(bothRoutes, { agentId: 'opencode', model: 'opencode-zen/deepseek-v4.1-flash' })).toMatchObject({
+      name: 'DeepSeek Zen',
+      via: 'via OpenCode Zen',
+    })
+    expect(modelName(bothRoutes, 'opencode', 'opencode-go/deepseek-v4.1-flash')).toBe('DeepSeek Go')
+  })
+
+  it('carry the person’s default effort for each model, or else the one it starts at', () => {
+    const kept = catalogOf(
+      models.map((offered) =>
+        offered.agentId === 'codex' ? { ...offered, defaults: [{ model: 'gpt-5.2', effort: 'extra-high' }] } : offered,
+      ),
+      signedIn,
+    )
+    expect([...kept.defaults]).toEqual([['codex:gpt-5.2', 'extra-high']])
+    const info = (id: string) => kept.models.find((model) => model.id === id)!
+    expect([defaultEffortOf(kept, info('codex:gpt-5.2')), defaultEffortOf(kept, info('codex:gpt-5.2-codex'))]).toEqual([
+      'Extra high',
+      'Medium',
+    ])
+    // Until the one it starts at is known, what its agent is on, for the model it is on only.
+    const seen = catalogOf(
+      models.map((offered) =>
+        offered.agentId === 'codex'
+          ? { ...offered, effort: 'high', models: offered.models.map((model) => ({ ...model, effort: null })) }
+          : offered,
+      ),
+      signedIn,
+    )
+    const on = (id: string) => seen.models.find((model) => model.id === id)!
+    expect([defaultEffortOf(seen, on('codex:gpt-5.2-codex')), defaultEffortOf(seen, on('codex:gpt-5.2'))]).toEqual(['High', null])
+  })
+})
+
+describe('moving a running thread to a choice', () => {
+  it('changes only what changed, or hands it to another agent', async () => {
+    const { client } = fakeClient()
+    const on = { agentId: 'claude-code', model: 'opus', effort: 'high' }
+    await moveTo(client, 'th1', on, { ...on, model: null })
+    await moveTo(client, 'th1', on, { ...on, effort: null })
+    expect([client.setModel, client.setEffort, client.switchAgent].map((call) => vi.mocked(call).mock.calls.length)).toEqual([0, 0, 0])
+    await moveTo(client, 'th1', on, { ...on, model: 'sonnet', effort: 'low' })
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' })
+    expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', effort: 'low' })
+    await moveTo(client, 'th1', on, { agentId: 'codex', model: null, effort: 'low' })
+    expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', effort: 'low' })
+  })
+})
+
+function Prefs() {
+  const prefs = useModelPrefs()
+  return <output>{JSON.stringify(prefs)}</output>
+}
+
+describe('the person’s pins', () => {
+  it('start from the pins shown, and are kept in this window’s storage', () => {
+    render(<Prefs />)
+    expect(screen.getByRole('status').textContent).toBe('{"pins":null}')
+    act(() => togglePin('codex:gpt-5.2', ['claude-code:default']))
+    act(() => togglePin('claude-code:default', ['ignored']))
+    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: ['codex:gpt-5.2'] })
+    expect(window.localStorage.getItem('althar.models')).toBe(screen.getByRole('status').textContent)
+  })
+
+  it('are read again from storage, and what isn’t theirs is left out', () => {
+    window.localStorage.setItem('althar.models', JSON.stringify({ pins: ['a', 'b'], efforts: { 'codex:x': 'low' } }))
+    const view = render(<Prefs />)
+    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: ['a', 'b'] })
+    view.unmount()
+    window.localStorage.setItem('althar.models', JSON.stringify({ pins: [1, 'a'] }))
+    render(<Prefs />)
+    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: null })
+  })
+
+  it('are none where storage holds something else, or can’t be read or written', () => {
+    window.localStorage.setItem('althar.models', '{not json')
+    const view = render(<Prefs />)
+    expect(screen.getByRole('status').textContent).toBe('{"pins":null}')
+    view.unmount()
+    window.localStorage.setItem('althar.models', '"a string"')
+    render(<Prefs />)
+    expect(screen.getByRole('status').textContent).toBe('{"pins":null}')
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('blocked')
+    })
+    // Kept for this window only.
+    act(() => togglePin('codex:x', []))
+    expect(JSON.parse(screen.getByRole('status').textContent ?? '')).toEqual({ pins: ['codex:x'] })
+    getItem.mockRestore()
+    setItem.mockRestore()
+  })
+})
+
+function Known() {
+  const known = useModels()
+  return <output>{known === null ? 'none yet' : known.map((agent) => `${agent.agentId}:${agent.models.length}`).join(' ')}</output>
+}
+
+describe('reading the models', () => {
+  it('reads them once for the window, and again shortly while an agent is still being asked', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const asked = models.map((agent) =>
+        agent.agentId === 'opencode'
+          ? { ...agent, models: [{ id: 'm', name: 'M', description: null, efforts: [], effort: null }], probing: false }
+          : agent,
+      )
+      const getModels = vi.fn().mockResolvedValueOnce(models).mockResolvedValue(asked)
+      const { client } = fakeClient({ getModels })
+      withServices(
+        <>
+          <Known />
+          <Known />
+        </>,
+        client,
+      )
+      expect(screen.getAllByRole('status')[0]?.textContent).toBe('none yet')
+      await waitFor(() => expect(screen.getAllByRole('status')[1]?.textContent).toBe('claude-code:3 codex:2 opencode:0'))
+      expect(getModels).toHaveBeenCalledTimes(1)
+      await act(() => vi.advanceTimersByTimeAsync(2000))
+      await waitFor(() => expect(screen.getAllByRole('status')[0]?.textContent).toBe('claude-code:3 codex:2 opencode:1'))
+      await act(() => vi.advanceTimersByTimeAsync(4000))
+      expect(getModels).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads them again once the person sets a default effort, and keeps the one there was when it isn’t set', async () => {
+    let kept: ReadonlyArray<{ readonly model: string; readonly effort: string }> = []
+    let first: (known: ReadonlyArray<AgentModels>) => void = () => undefined
+    const now = () => models.map((offered) => (offered.agentId === 'codex' ? { ...offered, defaults: kept, probing: false } : offered))
+    const getModels = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise((resolve) => (first = resolve)))
+      .mockImplementation(async () => now())
+    const setDefaultEffort = vi
+      .fn()
+      .mockImplementationOnce(async (input: { model: string; effort: string }) => {
+        kept = [{ model: input.model, effort: input.effort }]
+      })
+      .mockRejectedValueOnce(new Error('The port closed'))
+    const { client } = fakeClient({ getModels, setDefaultEffort })
+    function Defaults() {
+      const known = useModels()
+      const setDefault = useSetDefaultEffort()
+      return (
+        <>
+          <output>{JSON.stringify(known?.find((offered) => offered.agentId === 'codex')?.defaults ?? null)}</output>
+          <button type="button" onClick={() => void setDefault({ agentId: 'codex', model: 'gpt-5.2', effort: 'high' })}>
+            Set
+          </button>
+        </>
+      )
+    }
+    withServices(<Defaults />, client)
+    // Set while the first read is on its way: read again once it is back.
+    await userEvent.click(screen.getByRole('button', { name: 'Set' }))
+    await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledWith({ agentId: 'codex', model: 'gpt-5.2', effort: 'high' }))
+    act(() => first(now()))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('[{"model":"gpt-5.2","effort":"high"}]'))
+    expect(getModels).toHaveBeenCalledTimes(2)
+    // One that isn't set leaves what there was, and isn't read again for.
+    await userEvent.click(screen.getByRole('button', { name: 'Set' }))
+    await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledTimes(2))
+    expect(getModels).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('status').textContent).toBe('[{"model":"gpt-5.2","effort":"high"}]')
+  })
+
+  it('reads them again once the agents’ sign-ins are checked again: one found signed in may only now say them', async () => {
+    const settled = models.map((agent) => ({ ...agent, probing: false }))
+    const { client } = fakeClient({ getModels: vi.fn(async () => settled) })
+    withServices(<Known />, client)
+    await waitFor(() => expect(client.getModels).toHaveBeenCalledTimes(1))
+    await recheckStatus(client, new QueryClient())
+    await waitFor(() => expect(client.getModels).toHaveBeenCalledTimes(2))
+  })
+
+  it('offers each agent’s own default when they can’t be read', async () => {
+    const { client } = fakeClient({ getModels: vi.fn(async () => Promise.reject(new Error('The port closed'))) })
+    withServices(<Known />, client)
+    await waitFor(() => expect(client.getModels).toHaveBeenCalled())
+    expect(screen.getByRole('status').textContent).toBe('none yet')
+  })
+})
+
+function NamedOn({ agentId, model, account }: { agentId: string; model: string; account?: string }) {
+  const named = useModelNames()
+  const info = named(agentId, model, account ?? null)
+  return <output>{`${info.name}|${info.via ?? ''}`}</output>
+}
+
+describe('naming a model on a screen', () => {
+  it('keeps its route on hover before and after the agent lists it, and under an account', async () => {
+    let answer: (value: ReadonlyArray<AgentModels>) => void = () => undefined
+    const reading = new Promise<ReadonlyArray<AgentModels>>((resolve) => (answer = resolve))
+    const { client } = fakeClient({ getModels: vi.fn(async () => reading) })
+    withServices(
+      <>
+        <NamedOn agentId="opencode" model="opencode-go/deepseek-v4.1-flash" />
+        <NamedOn agentId="opencode" model="opencode-go/deepseek-v4.1-flash" account="work" />
+      </>,
+      client,
+    )
+    const [shown, withAccount] = screen.getAllByRole('status')
+    // Before OpenCode has reported its models: the id in people's words, the route on hover.
+    await waitFor(() => expect(shown?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go'))
+    expect(withAccount?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go · work')
+    // Once it lists the model by its bare id, with a name that leaves the provider out,
+    // the stored id still gives the route: the name stays and the hover keeps OpenCode Go.
+    await act(async () =>
+      answer([
+        ...models,
+        {
+          ...models[2]!,
+          models: [{ id: 'deepseek-v4.1-flash', name: 'DeepSeek V4.1 Flash', description: null, efforts: [], effort: null }],
+        },
+      ]),
+    )
+    await waitFor(() => expect(client.getModels).toHaveBeenCalled())
+    await waitFor(() => expect(shown?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go'))
+    expect(withAccount?.textContent).toBe('DeepSeek V4.1 Flash|via OpenCode Go · work')
+  })
+})

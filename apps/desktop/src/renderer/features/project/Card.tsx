@@ -16,7 +16,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { useServices } from '../../data/services'
 import { openBlockers, standsOf } from '../../shared/blockers'
-import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import { externalWaitWords, holdersWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
@@ -171,12 +171,14 @@ function PlanCard({
   plan,
   actions,
   queued,
+  queuedTitle,
 }: {
   card: TaskCardContent
   plan: Plan
   actions: CardActions
   /** Started, waiting for a free agent: what for. */
   queued?: string
+  queuedTitle?: string
 }) {
   const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
@@ -271,6 +273,7 @@ function PlanCard({
       }}
       wait={Math.max(1, plan.startsAfter ?? COUNTDOWN)}
       {...(queued === undefined ? {} : { queued })}
+      {...(queuedTitle === undefined ? {} : { queuedTitle })}
       {...(waitsFor.length === 0 ? {} : { waitsFor })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
@@ -338,7 +341,16 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
   if (card.planWaits === true && card.queued !== null && card.plan !== null)
-    return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
+    return (
+      <PlanCard
+        key={card.plan.id}
+        card={card}
+        plan={card.plan}
+        actions={actions}
+        queued={queuedWords(card.queued)}
+        queuedTitle={holdersWords(card.queued)}
+      />
+    )
   // So does one started Local that waits for its checkout (ADR-091).
   if (card.planWaits === true && card.waitsForCheckout != null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={localText.waits(card.waitsForCheckout)} />
