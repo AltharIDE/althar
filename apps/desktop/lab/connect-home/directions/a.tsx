@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Code, CopyButton, Dialog, Icon, LiveDot, ProjectInk, ProjectMark, Spinner } from '@althar/ui'
 
 import type { Flow } from '../flow'
@@ -10,8 +10,17 @@ import s from './a.module.css'
  * and the home being made, joined by a line drawn as the connection stands:
  * drafted, being reached, found, connecting, connected, or broken where it
  * failed. The home's card fills in as it is typed and found. A first home
- * opens on the same drawing, with work running on the home.
+ * opens on the same drawing, with work running on the home, then sets the
+ * home up: over SSH, where Althar installs it, or with one command run on
+ * the server, which prints the pairing code to paste here.
  */
+
+type View = 'intro' | 'setup' | 'form'
+type Route = 'ssh' | 'line'
+
+/** What the server runs to become a home: installs althar-host, starts it as a service, prints a pairing code. Assumed: there is no installer yet. */
+const INSTALL = 'curl -fsSL https://althar.dev/home | sh'
+const DOCS = 'https://althar.dev/docs/homes'
 
 const SAMPLE = [
   { id: 'prj_meridian', ink: ProjectInk.Clay },
@@ -20,27 +29,42 @@ const SAMPLE = [
 ]
 
 export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: boolean; onClose: () => void }) {
-  const [intro, setIntro] = useState(first)
-  const stage = intro ? 'intro' : flow.stage
+  const [view, setView] = useState<View>(first ? 'intro' : 'form')
+  const [route, setRoute] = useState<Route>('ssh')
+  // Came through setup over SSH: checking the host is where Althar installs it.
+  const [installs, setInstalls] = useState(false)
+  const stage = view === 'form' ? flow.stage : view
+  const go = () => {
+    if (view === 'intro') return setView('setup')
+    if (view === 'setup') {
+      flow.setMethod(route === 'ssh' ? 'ssh' : 'pair')
+      setInstalls(route === 'ssh')
+      return setView('form')
+    }
+    flow.submit()
+  }
+  const title = view === 'intro' ? 'Your first home' : view === 'setup' ? 'Set up a home' : 'Connect a home'
   return (
     <Dialog
-      title={intro ? 'Your first home' : 'Connect a home'}
+      title={title}
       width={660}
       holding={flow.busy}
       onClose={onClose}
-      onSubmit={intro ? () => setIntro(false) : flow.submit}
+      onSubmit={go}
       actions={
-        intro ? (
-          <>
-            <Button onClick={onClose}>Not now</Button>
-            <Button type="submit" variant="signal">
-              Set one up
-            </Button>
-          </>
-        ) : (
+        view === 'form' ? (
           <>
             <Button onClick={onClose}>Cancel</Button>
             {flow.action}
+          </>
+        ) : (
+          <>
+            <Button onClick={view === 'intro' ? onClose : () => setView(first ? 'intro' : 'form')}>
+              {view === 'intro' ? 'Not now' : 'Back'}
+            </Button>
+            <Button type="submit" variant="signal">
+              {view === 'intro' ? 'Set one up' : route === 'ssh' ? 'Continue' : 'Paste its code'}
+            </Button>
           </>
         )
       }
@@ -52,34 +76,57 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
           </span>
           <span className={s.words}>
             <span className={s.name}>This computer</span>
-            {intro && <span className={s.where}>Can sleep</span>}
+            {view === 'intro' && <span className={s.where}>Can sleep</span>}
           </span>
         </div>
-        <Wire stage={stage} method={flow.method} />
-        <HomeCard flow={flow} intro={intro} />
+        <Wire
+          stage={stage}
+          how={view === 'intro' ? 'always on' : (view === 'setup' ? route === 'ssh' : flow.method === 'ssh') ? 'ssh' : 'https'}
+        />
+        <HomeCard flow={flow} view={view} />
       </div>
-      {intro ? (
+      {view === 'intro' && (
         <div className={s.intro}>
           <h3 className={s.lede}>Work that keeps going while this computer sleeps</h3>
           <p className={s.copy}>
             A home is a computer that runs Althar for you, such as a server that stays on. Its tasks run there, and you open its projects
             from here, each in a window of its own.
           </p>
-          <p className={s.need}>
-            It needs <Code>althar-host</Code> running on that computer.
-          </p>
         </div>
-      ) : (
+      )}
+      {view === 'setup' && <Setup route={route} onRoute={setRoute} />}
+      {view === 'form' && (
         <div className={s.form} key="form">
           <MethodSwitch flow={flow} className={s.method} />
-          {flow.method === 'ssh' ? <HostField flow={flow} focus={!first} /> : <CodeField flow={flow} focus={!first} />}
-          {flow.method === 'ssh' && flow.found === null && <Options flow={flow} />}
+          {flow.method === 'ssh' ? (
+            <HostField
+              flow={flow}
+              focus={!first}
+              help={installs ? 'Althar installs and starts althar-host there, where it isn’t yet.' : undefined}
+            />
+          ) : (
+            <CodeField
+              flow={flow}
+              focus={!first}
+              help={
+                <>
+                  On the home, <Code>althar-host pair</Code> prints one.{' '}
+                  <button type="button" className={s.link} onClick={() => setView('setup')}>
+                    Not set up yet?
+                  </button>
+                </>
+              }
+            />
+          )}
+          {installs && flow.method === 'ssh' && flow.stage === 'checking' && <Installing where={flow.where} />}
+          {flow.method === 'ssh' && flow.found === null && flow.stage !== 'checking' && <Options flow={flow} />}
           {flow.found !== null && (
             <>
               <p className={s.note}>
                 {flow.method === 'ssh' ? (
                   <>
-                    On the host, <Code>althar-host status</Code> prints the same identity. Connect only if it does.
+                    {installs && 'It’s running there now. '}On the host, <Code>althar-host status</Code> prints the same identity. Connect
+                    only if it does.
                   </>
                 ) : (
                   'Tasks and conversations are available. Approvals need a trusted device.'
@@ -95,12 +142,127 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
   )
 }
 
+/** The two ways a server becomes a home: Althar sets it up over SSH, or one command run on it does. */
+function Setup({ route, onRoute }: { route: Route; onRoute: (next: Route) => void }) {
+  return (
+    <div className={s.setup}>
+      <div className={s.routes} role="radiogroup" aria-label="How to set it up">
+        <RouteCard
+          on={route === 'ssh'}
+          onPick={() => onRoute('ssh')}
+          icon="terminal"
+          title="Over SSH"
+          line="Althar installs it for you."
+          tag="Easiest"
+        />
+        <RouteCard
+          on={route === 'line'}
+          onPick={() => onRoute('line')}
+          icon="globe"
+          title="One command on the server"
+          line="It prints a pairing code."
+        />
+      </div>
+      {route === 'ssh' ? (
+        <div className={s.detail} key="ssh">
+          <p className={s.copy}>
+            Any Linux server you can reach with <Code>ssh</Code> from this computer: a VPS, a machine at home, a spare box. Althar installs{' '}
+            <Code>althar-host</Code>, starts it so it survives restarts, and connects. Nothing to copy.
+          </p>
+        </div>
+      ) : (
+        <div className={s.detail} key="line">
+          <div className={s.term}>
+            <span className={s.prompt} aria-hidden="true">
+              $
+            </span>
+            <code className={s.command}>{INSTALL}</code>
+            <CopyButton value={INSTALL} className={s.termCopy} />
+          </div>
+          <ol className={s.ticks}>
+            <li>Installs althar-host and starts it as a service</li>
+            <li>Reaches it over Tailscale where it’s there, or the server’s own address</li>
+            <li>Ends with a pairing code to paste here</li>
+          </ol>
+          <p className={s.aside}>
+            Already set up? <Code>althar-host pair</Code> prints a new code.{' '}
+            <a className={s.link} href={DOCS} target="_blank" rel="noreferrer">
+              Other ways to install
+              <Icon name="external" size={10} />
+            </a>
+          </p>
+        </div>
+      )}
+      <p className={s.aside}>
+        No server yet?{' '}
+        <a className={s.link} href={`${DOCS}#servers`} target="_blank" rel="noreferrer">
+          What to get
+          <Icon name="external" size={10} />
+        </a>
+      </p>
+    </div>
+  )
+}
+
+function RouteCard({
+  on,
+  onPick,
+  icon,
+  title,
+  line,
+  tag,
+}: {
+  on: boolean
+  onPick: () => void
+  icon: 'terminal' | 'globe'
+  title: string
+  line: string
+  tag?: string
+}) {
+  return (
+    <button type="button" role="radio" aria-checked={on} className={s.route} onClick={onPick}>
+      <span className={s.glyph}>
+        <Icon name={icon} size={14} />
+      </span>
+      <span className={s.words}>
+        <span className={s.routeTitle}>
+          {title}
+          {tag !== undefined && <span className={s.tag}>{tag}</span>}
+        </span>
+        <span className={s.routeLine}>{line}</span>
+      </span>
+    </button>
+  )
+}
+
+const STEPS = ['Reaching the server', 'Installing althar-host', 'Starting its service', 'Reading its identity']
+
+/** Setting the home up over SSH, as the check goes: each step ticks as it's done. */
+function Installing({ where }: { where: string }) {
+  const [at, setAt] = useState(new URLSearchParams(location.search).has('s') ? 2 : 0)
+  useEffect(() => {
+    if (at >= STEPS.length - 1) return
+    const timer = setTimeout(() => setAt((was) => was + 1), 320)
+    return () => clearTimeout(timer)
+  }, [at])
+  return (
+    <ol className={s.steps} aria-live="polite" aria-label={`Setting up ${where}`}>
+      {STEPS.map((step, index) => (
+        <li key={step} data-state={index < at ? 'done' : index === at ? 'now' : 'later'}>
+          <span className={s.tick}>{index < at ? <Icon name="check" size={10} /> : index === at ? <Spinner size="small" /> : null}</span>
+          {step}
+        </li>
+      ))}
+    </ol>
+  )
+}
+
 /** The line between the two: how the connection stands, with how it's made over it. */
-function Wire({ stage, method }: { stage: string; method: 'pair' | 'ssh' }) {
+function Wire({ stage, how }: { stage: string; how: string }) {
   const broken = stage === 'refused'
   return (
     <div className={s.wire} aria-hidden="true">
-      <span className={s.how}>{stage === 'intro' ? 'always on' : method === 'ssh' ? 'ssh' : 'https'}</span>
+      <span className={s.how}>{how}</span>
       <svg className={s.line} viewBox="0 0 100 12" preserveAspectRatio="none">
         {broken ? (
           <>
@@ -123,10 +285,11 @@ function Wire({ stage, method }: { stage: string; method: 'pair' | 'ssh' }) {
   )
 }
 
-function HomeCard({ flow, intro }: { flow: Flow; intro: boolean }) {
-  const found = flow.found !== null && !intro
-  const name = intro ? 'Your server' : flow.name.trim()
-  const where = intro ? '' : flow.where
+function HomeCard({ flow, view }: { flow: Flow; view: View }) {
+  const intro = view === 'intro'
+  const found = flow.found !== null && view === 'form'
+  const name = view === 'form' ? flow.name.trim() : 'Your server'
+  const where = view === 'setup' ? 'Not set up yet' : view === 'form' ? flow.where : ''
   return (
     <div className={s.card} data-home="" data-found={found || intro || undefined}>
       <div className={s.head}>
@@ -138,12 +301,12 @@ function HomeCard({ flow, intro }: { flow: Flow; intro: boolean }) {
             {name === '' ? 'New home' : name}
           </span>
           {!intro && (
-            <span className={s.where} data-empty={where === '' || undefined}>
+            <span className={s.where} data-empty={where === '' || view === 'setup' || undefined}>
               {where === '' ? (flow.method === 'ssh' ? 'user@host' : 'From its pairing code') : where}
             </span>
           )}
         </span>
-        {flow.stage === 'connected' && !intro && (
+        {flow.stage === 'connected' && view === 'form' && (
           <span className={s.live}>
             <LiveDot />
             Open

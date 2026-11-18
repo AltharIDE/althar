@@ -17,6 +17,9 @@
 .board[data-stage='intro'] {
   min-height: 176px;
 }
+.board[data-stage='setup'] {
+  min-height: 112px;
+}
 
 .card {
   display: flex;
@@ -307,6 +310,196 @@
   font-size: 12px;
   color: var(--t-3);
 }
+
+/* setting the home up: two ways, then what each takes */
+.setup {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  animation: arrive var(--enter) var(--ease-out) both;
+}
+.routes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.route {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  text-align: left;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+.route:hover {
+  background: var(--n-2);
+}
+.route[aria-checked='true'] {
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1.5px var(--t-1),
+    var(--lift-card);
+}
+.route[aria-checked='true'] .glyph {
+  background: var(--t-1);
+  color: var(--paper);
+}
+.route:focus-visible {
+  outline: 2px solid var(--focus, var(--live));
+  outline-offset: 2px;
+}
+.routeTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--t-1);
+}
+.routeLine {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--t-3);
+}
+.tag {
+  padding: 0 6px;
+  border-radius: 99px;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--live);
+  background: color-mix(in srgb, var(--live) 12%, transparent);
+}
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: arrive var(--enter) var(--ease-out) both;
+}
+.term {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 6px 6px 14px;
+  border-radius: 10px;
+  background: var(--term);
+}
+.prompt {
+  font: 400 12.5px/20px var(--mono);
+  color: var(--term-t4);
+}
+.command {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  font: 500 12.5px/20px var(--mono);
+  color: var(--term-t1);
+  white-space: nowrap;
+}
+.termCopy {
+  flex: none;
+}
+.ticks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: tick;
+}
+.ticks li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--t-2);
+  counter-increment: tick;
+}
+.ticks li::before {
+  content: counter(tick);
+  flex: none;
+  width: 14px;
+  font: 500 11px/18px var(--mono);
+  color: var(--t-4);
+}
+.aside {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  font: inherit;
+  color: var(--t-1);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-underline-offset: 2px;
+  background: none;
+  cursor: pointer;
+}
+.link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* installing over SSH, as the check goes */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: -4px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  list-style: none;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--t-2);
+  transition: color var(--enter) var(--ease-out);
+}
+.steps li[data-state='later'] {
+  color: var(--t-4);
+}
+.steps li[data-state='done'] {
+  color: var(--t-3);
+}
+.tick {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 99px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.steps li[data-state='done'] .tick {
+  background: var(--live);
+  box-shadow: none;
+  color: var(--paper);
+}
+.steps li[data-state='now'] .tick {
+  box-shadow: none;
+}
+
 @keyframes arrive {
   from {
     opacity: 0;
@@ -315,6 +508,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .board,
+  .route,
+  .steps li,
   .card[data-home],
   .reveal,
   .node {

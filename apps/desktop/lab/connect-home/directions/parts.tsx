@@ -75,7 +75,7 @@ export function Options({ flow }: { flow: Flow }) {
   )
 }
 
-export function CodeField({ flow, focus = true, help = true }: { flow: Flow; focus?: boolean; help?: boolean }) {
+export function CodeField({ flow, focus = true, help = true }: { flow: Flow; focus?: boolean; help?: boolean | ReactNode }) {
   const id = useId()
   const problem = flow.method === 'pair' && flow.pair.info === null ? flow.pair.problem : null
   return (
@@ -85,11 +85,13 @@ export function CodeField({ flow, focus = true, help = true }: { flow: Flow; foc
       under={
         problem !== null ? (
           <Problem size="small">{problem}</Problem>
-        ) : help ? (
+        ) : help === true ? (
           <p className={s.help}>
             On the host, run <Code>althar-host pair</Code> to create a code.
           </p>
-        ) : null
+        ) : help === false ? null : (
+          <p className={s.help}>{help}</p>
+        )
       }
     >
       <Field

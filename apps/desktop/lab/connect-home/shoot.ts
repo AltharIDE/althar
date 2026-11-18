@@ -7,16 +7,19 @@ import { chromium } from '@playwright/test'
  * Shoots the Connect a home lab (README.md), headless, at 1×, into lab/connect-home/shots: each direction's scenes, the
  * dialog alone, and a sheet of each direction's scenes side by side.
  *
- *   node lab/connect-home/shoot.ts <name> [direction…]     directions: 0 a b c
+ *   node lab/connect-home/shoot.ts <name> [direction…]     directions: 0 a
  *
  * With the lab running (Connect a home lab, on port 6141). THEME=dark draws them dark.
  */
 
 const [name = 'shot', ...asked] = process.argv.slice(2)
-const directions = asked.length > 0 ? asked : ['0', 'a', 'b', 'c']
+const directions = asked.length > 0 ? asked : ['0', 'a']
 const theme = process.env.THEME ?? 'light'
 const SCENES = [
   { label: 'First home', m: 'pair', s: 'intro', first: true },
+  { label: 'Set up: over SSH', m: 'pair', s: 'setup', first: true },
+  { label: 'Set up: one command', m: 'pair', s: 'setup-line', first: true },
+  { label: 'Installing over SSH', m: 'pair', s: 'installing', first: true },
   { label: 'Pairing code', m: 'pair', s: 'form' },
   { label: 'Code read', m: 'pair', s: 'found' },
   { label: 'Code refused', m: 'pair', s: 'refused' },
@@ -32,7 +35,7 @@ const browser = await chromium.launch()
 for (const d of directions) {
   const files: Array<{ label: string; file: string }> = []
   for (const scene of SCENES) {
-    if (d === '0' && scene.s === 'intro') continue
+    if (d === '0' && 'first' in scene) continue
     const page = await browser.newPage({ viewport: { width: 1000, height: 760 }, deviceScaleFactor: 1 })
     page.on('pageerror', (error) => console.error(`${d} ${scene.s}:`, error.message))
     const first = 'first' in scene ? '&first=1' : ''

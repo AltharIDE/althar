@@ -11,15 +11,13 @@ import { ConnectHome } from '../../src/renderer/features/homes/ConnectHome'
 import { useFlow, type Method } from './flow'
 import { failNext, homes } from './host'
 import { DrawingDirection } from './directions/a'
-import { SetupDirection } from './directions/b'
-import { HostSideDirection } from './directions/c'
 import s from './lab.module.css'
 
 /*
  * The Connect a home lab (README.md): directions for the dialog, each made
  * of the kit's components and the app's own connection form, on a home host
  * that answers after a while (F fails its next answer). The bar swaps the
- * direction in place (0 as built, A–C, with keys), the way of connecting
+ * direction in place (0 as built, A the drawing, with keys), the way of connecting
  * (P, S), and whether this is the person's first home (I). ?s= drives the
  * dialog to a scene, for shooting.
  */
@@ -27,8 +25,6 @@ import s from './lab.module.css'
 const DIRECTIONS = [
   { key: '0', label: 'As built' },
   { key: 'a', label: 'The drawing' },
-  { key: 'b', label: 'The setup' },
-  { key: 'c', label: 'The host side' },
 ] as const
 type Direction = (typeof DIRECTIONS)[number]['key']
 
@@ -60,7 +56,10 @@ const type = (label: string, value: string) => {
 }
 const find = (name: string) =>
   [...document.querySelectorAll('[role=dialog] button, [role=dialog] [role=radio]')].find(
-    (one) => one.textContent?.trim() === name || one.getAttribute('aria-label') === name,
+    (one) =>
+      one.textContent?.trim() === name ||
+      one.getAttribute('aria-label') === name ||
+      (one.getAttribute('role') === 'radio' && one.textContent?.startsWith(name) === true),
   )
 const press = (name: string, must = true) => {
   const button = find(name)
@@ -76,6 +75,22 @@ const drive = async ({ m, first }: State) => {
   await wait(200)
   if (scene === null || (first && scene === 'intro')) return
   const step = () => wait(90)
+  if (first && scene.startsWith('setup')) {
+    press('Set one up')
+    await step()
+    if (scene === 'setup-line') press('One command on the server')
+    return
+  }
+  if (first && scene === 'installing') {
+    press('Set one up')
+    await step()
+    press('Continue')
+    await step()
+    type('SSH host', 'deploy@vps.example.com')
+    await step()
+    press('Check host')
+    return
+  }
   if (m === 'ssh') press('SSH', false)
   else press('Pairing code', false)
   await step()
@@ -111,9 +126,7 @@ const drive = async ({ m, first }: State) => {
 function Dialogs({ state, onClose }: { state: State; onClose: () => void }) {
   const flow = useFlow(homes, onClose, state.m)
   if (state.d === '0') return <ConnectHome homes={homes} onClose={onClose} />
-  if (state.d === 'a') return <DrawingDirection flow={flow} first={state.first} onClose={onClose} />
-  if (state.d === 'b') return <SetupDirection flow={flow} first={state.first} onClose={onClose} />
-  return <HostSideDirection flow={flow} first={state.first} onClose={onClose} />
+  return <DrawingDirection flow={flow} first={state.first} onClose={onClose} />
 }
 
 let driven = false

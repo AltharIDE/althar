@@ -38,7 +38,7 @@ export const homes: HomesHost = {
   list: async () => [],
   overview: async () => ({ homes: [], windows: { local: 'local' }, projects: {}, opened: {} }),
   inspect: async (target): Promise<CheckedHome> => {
-    if (scene === 'checking') return never()
+    if (scene === 'checking' || scene === 'installing') return never()
     await wait(1300)
     if (scene === 'refused' || failed())
       throw new Error(`ssh: Could not resolve hostname ${target.target.split('@').at(-1)}: nodename nor servname provided, or not known`)
