@@ -54,6 +54,11 @@ export interface RuntimeOptions {
   readonly worktreeRoot: string
   /** The profile and the logs, which About › Storage measures beside the worktrees; without them it says it can't. */
   readonly storage?: { readonly profile: string; readonly logs: string }
+  /**
+   * Where other tools keep their work (`Elsewhere.ts`): the person's home and the variables the tools read, such as
+   * `CODEX_HOME`. Without it, the person's own, as this process has them.
+   */
+  readonly elsewhere?: { readonly home: string; readonly env: Readonly<Record<string, string | undefined>> }
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
   /**

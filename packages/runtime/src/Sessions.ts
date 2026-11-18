@@ -78,7 +78,7 @@ import {
   type UnknownAgent,
 } from './errors'
 import { Instance } from './Instance'
-import { Limits } from './Limits'
+import { backWords, Limits } from './Limits'
 import { PlanUsage } from './PlanUsage'
 import { PAGE_VIEW_BRIEF } from './PageTools'
 import { Live } from './Live'
@@ -89,6 +89,7 @@ import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
 import { teamLeadOf } from './teamLead'
+import { isBack, type StandIn, standInOf } from './standIn'
 import { BETWEEN_AGENTS_MS } from './needsYou'
 import { guardEnv, guardHolds } from './pushGuard'
 import { change, fact, timestamp } from './records'
@@ -832,6 +833,8 @@ export class Sessions extends Context.Service<
       readonly effort?: string
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
+      /** Who it stands in for, where Althar started it in place of the lead the task was given (standIn.ts). */
+      readonly standsIn?: StandIn
     }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /**
      * Starts the agent last on the thread again, on the model and effort it
@@ -946,6 +949,11 @@ export class Sessions extends Context.Service<
       readonly model?: string
       readonly effort?: string
     }): Effect.Effect<'later' | 'same' | 'none'>
+    /**
+     * The lead a session stands in for takes the thread back from its next turn (standIn.ts), where that session still leads
+     * and stands in, and nothing was chosen for it since: whether it was queued.
+     */
+    giveBack(input: { readonly threadId: string; readonly sessionId: string }): Effect.Effect<boolean>
     /** Hands the thread to another agent: a new session, briefed with the thread so far (ADR-005). */
     switchAgent(input: {
       readonly threadId: string
@@ -956,6 +964,8 @@ export class Sessions extends Context.Service<
       readonly said?: string
       /** What the loop dealt with by switching, for the home: an agent's usage limit, or a step gone quiet. */
       readonly about?: 'limit' | 'stall'
+      /** The step attempt it hands on, for a stall: the new lead stands in until that is over (standIn.ts). */
+      readonly attemptId?: string
       /** What the person said with it, and any images and files: the new agent's first turn, after its brief, and never the old one's. */
       readonly message?: {
         readonly envelope: CommandEnvelope
@@ -1685,7 +1695,8 @@ export class Sessions extends Context.Service<
 
       /** Records a new session, still starting, on the account it runs on. */
       /** A session, starting; on the model asked for, so it is named by it from the first. */
-      const createSession = (thread: ThreadContext, agentId: string, account: Account, model?: string) =>
+      /** `standsIn`: who it stands in for, where a usage limit handed it the thread (standIn.ts). */
+      const createSession = (thread: ThreadContext, agentId: string, account: Account, model?: string, standsIn?: StandIn) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessionId = yield* newId(Ids.providerSession)
@@ -1705,7 +1716,12 @@ export class Sessions extends Context.Service<
                 ...(model === undefined ? {} : { model }),
                 startedAt: yield* timestamp,
               })}`
-              yield* sessionFact(thread, sessionId, 1, 'provider_session.starting', { agentId, accountId: account.id })
+              yield* sessionFact(thread, sessionId, 1, 'provider_session.starting', {
+                agentId,
+                accountId: account.id,
+                // On the given lead's own agent, a lead given no model of its own has none to go back to: it doesn't stand in.
+                ...(standsIn === undefined || (standsIn.agentId === agentId && standsIn.model === null) ? {} : { standsIn }),
+              })
             }),
           )
           return sessionId
@@ -1831,6 +1847,18 @@ export class Sessions extends Context.Service<
           return waiting !== undefined
         })
 
+      /** What the thread says as the lead a session stood in for takes it back from it. */
+      const backSaid = (standsIn: StandIn, standIn: Running) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [on] = yield* sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE id = ${standIn.sessionId}`
+          return backWords({
+            given: yield* limits.named(standsIn.agentId, standsIn.model, standsIn.accountId),
+            standIn: yield* limits.named(standIn.entry.definition.id, on?.model ?? null, standIn.account.id),
+            ...(standsIn.why === undefined ? {} : { why: standsIn.why }),
+          })
+        }).pipe(Effect.orElseSucceed(() => undefined))
+
       /** Pending intent has a feed revision of its own; it never changes what the agent has actually accepted. */
       const setLeadChoice = (
         running: Running,
@@ -1929,7 +1957,21 @@ export class Sessions extends Context.Service<
         previous: Running,
         next: { readonly agentId: string; readonly model?: string; readonly effort?: string },
       ): Effect.Effect<void, never, Store> =>
-        switchAgent({ threadId: previous.thread.threadId, ...next }).pipe(
+        Effect.gen(function* () {
+          // The lead a stand-in stood in for, taking the thread back as Althar queued it (`giveBack`): said now it does.
+          const standing = Option.getOrUndefined(
+            yield* standInOf(previous.sessionId).pipe(Effect.orElseSucceed(() => Option.none<StandIn>())),
+          )
+          const back =
+            standing !== undefined && standing.agentId === next.agentId && (next.model === undefined || next.model === standing.model)
+              ? yield* backSaid(standing, previous)
+              : undefined
+          return yield* switchAgent({
+            threadId: previous.thread.threadId,
+            ...next,
+            ...(back === undefined ? {} : { said: back, about: standing?.why === 'stall' ? ('stall' as const) : ('limit' as const) }),
+          })
+        }).pipe(
           Effect.catchCause((cause) =>
             Effect.andThen(
               Effect.logWarning('Could not hand a lead to the agent it was changed to', cause),
@@ -3820,6 +3862,8 @@ export class Sessions extends Context.Service<
         readonly effort?: string
         readonly accountId?: string
         readonly recovering?: string
+        /** Who it stands in for, as the session it starts again after did. */
+        readonly standsIn?: StandIn
       }) =>
         exclusive(
           input.threadId,
@@ -3867,7 +3911,7 @@ export class Sessions extends Context.Service<
                 AND EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
                   WHERE di.user_input_id = i.id AND d.delivered_at IS NOT NULL)`).map((one) => one.id),
                   )
-            const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
+            const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, input.standsIn)
             const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
             // Every session starts from a brief (ADR-005), even the first on a task.
             const brief = yield* briefFor(thread, { kind: 'start' }).pipe(beforeTakingOver(connected))
@@ -4155,14 +4199,17 @@ export class Sessions extends Context.Service<
       const asideState = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [row] = yield* sql<{ aside: number | null; unsaid: number | null }>`
-            SELECT k.shelf IS 'scratch' AND EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state != 'replaced'
-                AND json_extract(p.parameters, '$.aside') = 1) AS aside,
+          const [row] = yield* sql<{ aside: number | null; brought: number | null; unsaid: number | null }>`
+            SELECT k.shelf IS 'scratch' AND (EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state != 'replaced'
+                AND json_extract(p.parameters, '$.aside') = 1)
+                -- Or a conversation brought in from another tool (Elsewhere.ts), an aside with no plan of its own.
+                OR EXISTS (SELECT 1 FROM brought_in i WHERE i.task_id = k.id AND i.kind = 'conversation')) AS aside,
+              EXISTS (SELECT 1 FROM brought_in i WHERE i.task_id = k.id AND i.kind = 'conversation') AS brought,
               (k.request IS NULL OR trim(k.request) = '') AND NOT EXISTS (SELECT 1 FROM user_inputs u
                 JOIN threads t ON t.id = u.thread_id AND t.kind = 'task' WHERE t.task_id = k.id) AS unsaid
             FROM tasks k WHERE k.id = ${taskId}`
           const aside = row?.aside === 1
-          return { aside, unsaid: aside && row?.unsaid === 1 }
+          return { aside, brought: row?.brought === 1, unsaid: aside && row?.unsaid === 1 }
         })
 
       /** The thread so far, for a brief, oldest first, within the prompt's budget: what waits in its queue the turn says itself. */
@@ -4295,6 +4342,8 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const [first] = thread.repositories
           const errands = yield* errandLines(thread.projectId, thread.taskId)
+          // A conversation brought in from another tool carries on here: its first session reads it, as a fresh one would.
+          const { brought } = yield* asideState(thread.taskId)
           return [
             why.kind === 'start'
               ? "You are an aside of this project's coordinator, in Althar: a quick chat the person opened beside their conversation with the coordinator, off the board. Answer what they ask, in your reply, as briefly as it allows; a greeting gets a greeting back. Your reply is the answer: there is no step to finish, no report, and no finish_step or evidence to give."
@@ -4309,7 +4358,10 @@ export class Sessions extends Context.Service<
             `read_turn gives this turn’s byPerson and message ids; only their message from the window or a paired device, or an open errand’s recorded next step, may authorize an asked-for tool.${errands.length === 0 ? '' : ` Open errands concerning it:\n${errands.join('\n')}`}`,
             ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
             STANDING_DICTATED,
-            ...(why.kind === 'start' ? [] : yield* threadSoFar(thread.threadId)),
+            ...(brought && why.kind === 'start'
+              ? ['This conversation was brought in from another tool, where the person had it: carry it on from where it stands.']
+              : []),
+            ...(why.kind === 'start' && !brought ? [] : yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
         })
 
@@ -4717,6 +4769,48 @@ export class Sessions extends Context.Service<
        * switch is queued once the old one has stopped, so it is the new one's
        * first turn, after the brief, and never the old one's.
        */
+      /**
+       * Who a session Althar hands the thread to, for a usage limit or a step gone without its report, stands in for: the lead
+       * the previous one stood in for, where it did, on the same terms; else the previous one itself, as it ran, until its
+       * reset or the end of the step it failed (`attemptId`). None where it is the same lead again (started afresh, or on
+       * another of its accounts) or the one it stood in for taking the thread back.
+       */
+      const standInFor = (
+        previous: Running,
+        projectId: string,
+        agentId: string,
+        model: string | undefined,
+        why: 'limit' | 'stall',
+        attemptId: string | undefined,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [was] = yield* sql<{ model: string | null; effort: string | null }>`
+            SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
+          const kept = Option.getOrUndefined(yield* standInOf(previous.sessionId))
+          const given = kept ?? {
+            agentId: previous.entry.definition.id,
+            model: was?.model ?? null,
+            effort: was?.effort ?? null,
+            accountId: previous.account.id,
+          }
+          if (given.agentId === agentId && (model === undefined || model === given.model)) return undefined
+          if (kept !== undefined) return kept
+          if (why === 'stall') return { ...given, until: null, why, ...(attemptId === undefined ? {} : { attemptId }) } satisfies StandIn
+          const out = yield* given.accountId === null ? limits.out(given.agentId, projectId) : limits.outAccount(given.accountId)
+          if (Option.isSome(out)) return { ...given, until: out.value.until } satisfies StandIn
+          // Handed on while only nearly out, it isn't out at all: it is back once its window resets, not at once.
+          const low = yield* limits.nearlyOut(given.agentId, projectId, given.model ?? undefined)
+          const until =
+            Option.getOrUndefined(low)?.resetsAt ??
+            new Date((yield* Clock.currentTimeMillis) + Duration.toMillis(Duration.hours(1))).toISOString()
+          return { ...given, until, why: 'low' } satisfies StandIn
+        })
+
+      /** Whether the lead a session stands in for is back: its usage again, or the step it failed over (standIn.ts). */
+      const backFrom = (standsIn: StandIn, projectId: string) =>
+        isBack(standsIn, (one) => (one.accountId === null ? limits.out(one.agentId, projectId) : limits.outAccount(one.accountId)))
+
       const switchAgent = (input: {
         readonly threadId: string
         readonly agentId: string
@@ -4724,6 +4818,7 @@ export class Sessions extends Context.Service<
         readonly effort?: string
         readonly said?: string
         readonly about?: 'limit' | 'stall'
+        readonly attemptId?: string
         readonly accountId?: string
         readonly message?: {
           readonly envelope: CommandEnvelope
@@ -4753,10 +4848,26 @@ export class Sessions extends Context.Service<
               ...accountOf(input),
               ...(input.model === undefined ? {} : { model: input.model }),
             })
+            // Another agent or model takes the thread, not the same one on another of its accounts: always said in the window.
+            const [was] =
+              previous === undefined
+                ? []
+                : yield* (yield* SqlClient.SqlClient)<{ model: string | null }>`
+                    SELECT model FROM provider_sessions WHERE id = ${previous.sessionId}`
+            const moved =
+              previous === undefined ||
+              previous.entry.definition.id !== entry.definition.id ||
+              (input.model !== undefined && input.model !== was?.model)
+            // A usage limit or a failed step hands the lead on for a while: the new one stands in for the lead the task was given,
+            // which takes it back. Chosen (no `about`), it leads as chosen.
+            const standsIn =
+              input.about !== undefined && previous !== undefined
+                ? yield* standInFor(previous, thread.projectId, entry.definition.id, input.model, input.about, input.attemptId)
+                : undefined
             // Starting a replacement can take arbitrarily long. Future input belongs to it from here, while the old turn may finish.
             if (previous !== undefined) previous.handover = 'under_way'
             return yield* Effect.gen(function* () {
-              const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
+              const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, standsIn)
               const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
               const brief = yield* Effect.gen(function* () {
                 if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
@@ -4766,7 +4877,8 @@ export class Sessions extends Context.Service<
                   title:
                     input.said ??
                     (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
-                  ...(input.about === undefined ? {} : { about: input.about }),
+                  // Another model takes the thread: always shown, whatever made the switch (never a silent one).
+                  ...(input.about === undefined ? {} : { about: input.about, ...(moved ? { handover: true } : {}) }),
                 })
                 if (input.message !== undefined)
                   yield* send({
@@ -4863,7 +4975,9 @@ export class Sessions extends Context.Service<
               previous.handover = 'left'
               return yield* Queue.offer(previous.wake, undefined)
             }
-            const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model)
+            // Started afresh, a stand-in still stands in for the lead it was given.
+            const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId))
+            const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model, standsIn)
             const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
             yield* Effect.andThen(
               stopRunning(previous, { state: 'superseded', by: sessionId }),
@@ -4944,8 +5058,17 @@ export class Sessions extends Context.Service<
       const startLast = (threadId: string, recovering?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null; startedAt: string }>`
-            SELECT s.agent_id, s.model, s.effort, s.started_at FROM provider_sessions s WHERE s.thread_id = ${threadId}
+          const [last] = yield* sql<{
+            id: string
+            projectId: ProjectId
+            agentId: string
+            accountId: string | null
+            model: string | null
+            effort: string | null
+            startedAt: string
+          }>`
+            SELECT s.id, s.project_id, s.agent_id, s.account_id, s.model, s.effort, s.started_at FROM provider_sessions s
+            WHERE s.thread_id = ${threadId}
             ORDER BY (SELECT max(f.sequence) FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id) DESC,
               s.started_at DESC, s.rowid DESC LIMIT 1`
           if (last === undefined) return false
@@ -4972,12 +5095,39 @@ export class Sessions extends Context.Service<
                   changed.at,
                   threads.get(threadId),
                 )
+          // The last lead stood in for the one a usage limit stopped (standIn.ts): that one leads again where it has usage again,
+          // after a stop or a restart too; else the stand-in carries on standing in.
+          const standing =
+            on.agentId === last.agentId && on.model === last.model ? Option.getOrUndefined(yield* standInOf(last.id)) : undefined
+          // Queued back by `giveBack` before the stop, it is still standing in: the given lead starts, as it would have.
+          if (standing !== undefined && (yield* backFrom(standing, last.projectId))) {
+            yield* start({
+              threadId,
+              agentId: standing.agentId,
+              ...(recovering === undefined ? {} : { recovering }),
+              ...(standing.model === null ? {} : { model: standing.model }),
+              ...(standing.effort === null ? {} : { effort: standing.effort }),
+            })
+            yield* addItem({ projectId: last.projectId, threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: backWords({
+                given: yield* limits.named(standing.agentId, standing.model, standing.accountId),
+                standIn: yield* limits.named(last.agentId, last.model, last.accountId),
+                ...(standing.why === undefined ? {} : { why: standing.why }),
+              }),
+              about: standing.why === 'stall' ? 'stall' : 'limit',
+              handover: true,
+            })
+            return true
+          }
           yield* start({
             threadId,
             agentId: on.agentId,
             ...(recovering === undefined ? {} : { recovering }),
             ...(on.model === null ? {} : { model: on.model }),
             ...(on.effort == null ? {} : { effort: on.effort }),
+            ...(standing === undefined ? {} : { standsIn: standing }),
           })
           return true
         })
@@ -5261,6 +5411,46 @@ export class Sessions extends Context.Service<
                 }),
               )
             }).pipe(Effect.orDie),
+          ),
+        giveBack: (input) =>
+          run(
+            Effect.gen(function* () {
+              const running = threads.get(input.threadId)
+              if (running === undefined) return false
+              const sql = yield* SqlClient.SqlClient
+              // One transaction: the stand-in still the lead, still standing in, and nothing chosen for it since, as the lead given
+              // back is queued; a choice made meanwhile (chooseLead, changeLead) is never overwritten. No `choice` is recorded, so
+              // the stand-in stays one until the given lead has started (`takeOver`), and a stop or restart before still gives it back.
+              const queued = yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  if (running.stopping || running.sessionId !== input.sessionId || running.handover !== 'none') return undefined
+                  if (threads.get(input.threadId) !== running || running.nextLead !== undefined) return undefined
+                  const standsIn = Option.getOrUndefined(yield* standInOf(input.sessionId))
+                  if (standsIn === undefined) return undefined
+                  const next = {
+                    agentId: standsIn.agentId,
+                    ...(standsIn.model === null ? {} : { model: standsIn.model }),
+                    ...(standsIn.effort === null ? {} : { effort: standsIn.effort }),
+                  }
+                  return (yield* setLeadChoice(running, next, { onlyIfEmpty: true })) ? standsIn : undefined
+                }),
+              )
+              if (queued === undefined) return false
+              // The same agent on its own model again is set between turns, with no hand-over to say it: said here.
+              if (queued.agentId === running.entry.definition.id) {
+                const said = yield* backSaid(queued, running)
+                if (said !== undefined)
+                  yield* addItem({ projectId: running.thread.projectId, threadId: input.threadId }, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: said,
+                    about: queued.why === 'stall' ? 'stall' : 'limit',
+                    handover: true,
+                  })
+                yield* Effect.forkIn(run(applyLead(running)), sessionsScope)
+              }
+              return true
+            }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not give a lead back', cause), false))),
           ),
         switchAgent: (input) => run(switchAgent(input)),
         moved: (threadId) =>

@@ -1,3 +1,4 @@
+import { standInOf } from './standIn'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
@@ -722,8 +723,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       }
     }
     case 'notice': {
-      // Quota belongs in Plan usage. Blocking work keeps its actionable task state.
-      if (text(content, 'source') === 'runtime' && text(content, 'about') === 'limit') return undefined
+      // Quota belongs in Plan usage, and blocking work keeps its actionable task state; but a handover to another model is
+      // always said, where it happens: who ran out, who took over, until when (never a silent switch).
+      if (text(content, 'source') === 'runtime' && text(content, 'about') === 'limit' && field(content, 'handover') !== true)
+        return undefined
       const severity = text(content, 'severity')
       const description = text(content, 'description')
       const role = text(content, 'role')
@@ -1385,6 +1388,8 @@ export class Queries extends Context.Service<
             ? options.find((option) => field(option, 'id') === definition?.definition.options.model)
             : undefined
           const values = field(modelOption, 'values')
+          // Handed the thread by a usage limit, it stands in for the lead the task was given, which takes over again at its reset.
+          const standsIn = Option.getOrUndefined(yield* standInOf(session.id))
           return {
             id: session.id,
             agentId: session.agentId,
@@ -1414,6 +1419,16 @@ export class Queries extends Context.Service<
                     effort: running.value.nextLead.effort ?? null,
                   }
                 : null,
+            standsIn:
+              standsIn === undefined
+                ? null
+                : {
+                    agentId: standsIn.agentId,
+                    model: standsIn.model,
+                    effort: standsIn.effort,
+                    until: standsIn.until,
+                    ...(standsIn.why === undefined ? {} : { why: standsIn.why }),
+                  },
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
             background: Option.isSome(running) && running.value.sessionId === session.id ? running.value.background : [],
           }

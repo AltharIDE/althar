@@ -2,6 +2,8 @@
    simpleicons.org), monochrome, on a 24px grid. Brand names and marks belong to their owners;
    they are used here only to name those products. Regenerate rather than edit by hand. */
 
+import { TOOL_BRANDS } from './tools'
+
 /** Every product Althar can show a mark for: model labs, agent runtimes, and the places work comes from. */
 export enum Brand {
   Anthropic = 'anthropic',
@@ -56,6 +58,10 @@ export enum Brand {
   Opsgenie = 'opsgenie',
   Statuspage = 'statuspage',
   Loom = 'loom',
+  Conductor = 'conductor',
+  Orca = 'orca',
+  T3Code = 't3-code',
+  Paradev = 'paradev',
 }
 
 export interface BrandPath {
@@ -69,6 +75,12 @@ export interface BrandDrawing {
   /** Lobe marks cut their holes with the even-odd rule; Simple Icons use nonzero. */
   evenOdd: boolean
   paths: readonly BrandPath[]
+  /** Its own grid, for a mark drawn from a tool's own source (tools.ts); else the 24px one. */
+  viewBox?: string
+  /** An outline as its source draws one, in its own units. */
+  stroke?: number
+  /** An outline in screen pixels whatever the size, for a fine-lined mark that would vanish small. */
+  weight?: number
 }
 
 export const BRANDS: Record<Brand, BrandDrawing> = {
@@ -558,4 +570,8 @@ export const BRANDS: Record<Brand, BrandDrawing> = {
       },
     ],
   },
+  [Brand.Conductor]: TOOL_BRANDS.conductor,
+  [Brand.Orca]: TOOL_BRANDS.orca,
+  [Brand.T3Code]: TOOL_BRANDS.t3Code,
+  [Brand.Paradev]: TOOL_BRANDS.paradev,
 }

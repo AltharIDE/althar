@@ -363,7 +363,8 @@ export class FolderCleanup extends Context.Service<
             (SELECT t.id FROM threads t WHERE t.task_id = k.id AND t.kind = 'task' ORDER BY t.created_at, t.rowid LIMIT 1) AS thread_id
           FROM tasks k JOIN projects p ON p.id = k.project_id
           WHERE k.state IN ('done', 'abandoned') AND k.settled_at IS NOT NULL AND p.archived_at IS NULL
-            AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.kind IS NULL)
+            AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.kind IS NULL
+              AND w.made_by IS NULL)
           ORDER BY k.settled_at DESC, k.id`
         const workspaces = yield* sql<Workspace>`
           SELECT w.id, w.task_id, w.project_id, w.path, w.access, w.branched_at IS NOT NULL AS branched, w.base_commit, l.path AS repository,
@@ -373,6 +374,8 @@ export class FolderCleanup extends Context.Service<
           JOIN repository_bindings b ON b.id = w.binding_id
           JOIN repository_locations l ON l.binding_id = w.binding_id AND l.device_id = ${instance.deviceId}
           WHERE w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.kind IS NULL AND k.state IN ('done', 'abandoned')
+            -- A folder another tool made is that tool's to remove, never Althar's (Elsewhere.ts).
+            AND w.made_by IS NULL
           ORDER BY b.created_at, b.rowid`
         return tasks.map((task): Candidate => {
           const opened = task.openedAt === null ? null : Date.parse(task.openedAt)
