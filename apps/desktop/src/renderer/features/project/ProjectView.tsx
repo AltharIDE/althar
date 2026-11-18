@@ -590,6 +590,9 @@ export function ProjectView({
     onCreateBranch: (planId, steps, end, repositoryId, branch) =>
       void model.changePlanToNewBranch(planId, steps, end, repositoryId, branch),
     onOpen: onTask,
+    // An aside opens where its pill does, over the coordinator's conversation; one Scratch no longer lists opens as a task.
+    onOpenAside: (taskId, threadId) =>
+      (lanes?.scratch ?? NO_TASKS).some((one) => one.taskId === taskId) ? asides.pick(taskId) : onTask(threadId),
     onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.

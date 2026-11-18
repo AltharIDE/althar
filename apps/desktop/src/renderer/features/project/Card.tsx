@@ -2,6 +2,8 @@ import { useState } from 'react'
 
 import type { AgentStatus, ChangeSummary, PlanStep, Product, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
+  AsideCard,
+  AsideState,
   type IssueRefProps,
   type LaunchStep,
   LinkButton,
@@ -89,6 +91,8 @@ export interface CardActions {
   /** Makes a branch its list doesn't have, in the plan's repository, and points the plan at it (ADR-093). */
   readonly onCreateBranch: (planId: string, steps: ReadonlyArray<PlanStep>, end: End | null, repositoryId: string, branch: string) => void
   readonly onOpen: (threadId: string) => void
+  /** Opens an aside beside the coordinator, as its pill does; absent where there is no room for one, and it opens as a task does. */
+  readonly onOpenAside?: (taskId: string, threadId: string) => void
   /** Opens a task's team dialog: a small change's card, which starts at once, offers it from the start. */
   readonly onChangeTeam?: (taskId: string) => void
   /** Stops a command a task's lead left running, from the task that waits for the place it keeps. */
@@ -354,6 +358,8 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // So does one started Local that waits for its checkout (ADR-091).
   if (card.planWaits === true && card.waitsForCheckout != null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={localText.waits(card.waitsForCheckout)} />
+  // An aside (a quick job on Scratch, off the board) has no steps to show: its own card, lighter, says so.
+  if (card.scratch === true) return <Aside card={card} actions={actions} title={title} />
   // A review has no steps to go through: its lead reads and drafts.
   const steps = stepNames(card.reviewing == null ? (card.plan?.steps ?? []) : [], card.followUp === true)
   const at = stepIndex(steps, card.step)
@@ -420,6 +426,44 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
           })}
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: text.status }}
+    />
+  )
+}
+
+/** Where an aside stands, as its card says it: one its lead ended unasked failed; one the person stopped is stopped. */
+const asideStateOf = (card: TaskCardContent): AsideState => {
+  if (card.phase === 'ready' || card.phase === 'settled')
+    return (card.handedBack ?? card.checksBack ?? null) === null ? AsideState.Ready : AsideState.Yours
+  if (card.phase === 'waiting') return AsideState.Yours
+  if (card.phase === 'stopped')
+    return card.stopped?.by === 'declined' || card.stopped?.by === 'interrupted' ? AsideState.Stopped : AsideState.Failed
+  if (card.phase === 'held' || card.phase === 'kept') return AsideState.Stopped
+  return AsideState.Running
+}
+
+/** An aside's card: where it stands, its result or what it is at, and a way in beside the coordinator. */
+function Aside({ card, actions, title }: { card: TaskCardContent; actions: CardActions; title: string }) {
+  const state = asideStateOf(card)
+  const said = card.latest?.by === 'lead' ? card.latest.said : undefined
+  const result =
+    state === AsideState.Ready
+      ? (card.summary ?? said)
+      : state === AsideState.Stopped
+        ? card.stopped?.by == null
+          ? undefined
+          : stepText.stoppedBy[card.stopped.by]
+        : state === AsideState.Running && card.queued !== null
+          ? queuedWords(card.queued)
+          : state === AsideState.Running && card.waits !== null
+            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
+            : said
+  return (
+    <AsideCard
+      task={card.slug}
+      title={title}
+      state={state}
+      result={result ?? undefined}
+      onOpen={() => (actions.onOpenAside === undefined ? actions.onOpen(card.threadId) : actions.onOpenAside(card.taskId, card.threadId))}
     />
   )
 }
