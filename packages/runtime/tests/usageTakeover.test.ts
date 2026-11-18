@@ -215,7 +215,7 @@ describe('automatic usage takeover by model', () => {
       assert.include(taken, 'Carry on with the task from where it stands')
       const notices = (yield* items(task.threadId)).filter((item) => item.kind === 'notice' && item.content.about === 'limit')
       assert.lengthOf(notices, 1)
-      assert.include(notices[0]?.content.title, 'Fake codex takes the work over, on GPT Strong.')
+      assert.include(notices[0]?.content.title, 'GPT Strong on Fake codex takes the work over until then.')
       yield* noCall
     }).pipe(
       Effect.provide(
@@ -288,7 +288,7 @@ describe('automatic usage takeover by model', () => {
       ])
       const notices = (yield* items(task.threadId)).filter((item) => item.kind === 'notice' && item.content.about === 'limit')
       assert.lengthOf(notices, 1)
-      assert.include(notices[0]?.content.title, 'on DeepSeek Strong.')
+      assert.include(notices[0]?.content.title, 'DeepSeek Strong on Fake opencode takes the review over until then.')
       assert.notInclude(notices[0]?.content.title, 'opencode-go')
       assert.notInclude(notices[0]?.content.title, 'reviews its own work')
       yield* noCall

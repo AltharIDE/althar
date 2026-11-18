@@ -3632,6 +3632,22 @@ export const SessionSummary = Schema.Struct({
   nextLead: Schema.optional(
     Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), effort: Schema.NullOr(Schema.String) })),
   ),
+  /**
+   * The lead it stands in for, where Althar handed the thread to it: who the task was given, why (its usage ran out, it was
+   * nearly out, or it ended a step without its report), and when that one is back and takes over again (null: once the step
+   * is done). Absent or null where it leads as chosen.
+   */
+  standsIn: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        agentId: Schema.String,
+        model: Schema.NullOr(Schema.String),
+        effort: Schema.NullOr(Schema.String),
+        until: Schema.NullOr(Schema.String),
+        why: Schema.optional(Schema.Literals(['limit', 'low', 'stall'])),
+      }),
+    ),
+  ),
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
   /** What it left running in the background, while it runs, in the order it started them. */
