@@ -1,6 +1,6 @@
 import { type RefObject, useCallback, useEffect, useState } from 'react'
 
-import { draftOf as draftNow, setDraftText, useDraftWords } from './drafts'
+import { draftOf as draftNow, setDraftText, subscribeDraft } from './drafts'
 import type { RunContent } from './thread'
 
 /*
@@ -39,11 +39,14 @@ export const helpPrompt = (run: Fix, tail?: string) => {
 
 export function useHelpMeFix(key: string, busy: boolean, input: RefObject<HTMLTextAreaElement | null>) {
   const [suggestion, setSuggestion] = useState<string | undefined>(undefined)
-  const written = useDraftWords(key, (text) => text.trim() !== '')
-  // Taken, or written over: it is no longer suggested.
-  useEffect(() => {
-    if (written) setSuggestion(undefined)
-  }, [written])
+  // Taken, or written over: it is no longer suggested. Listened to here, not read as state, so a word typed never draws the screen.
+  useEffect(
+    () =>
+      subscribeDraft(key, () => {
+        if (draftNow(key).text.trim() !== '') setSuggestion(undefined)
+      }),
+    [key],
+  )
   const place = useCallback(
     (prompt: string) => {
       const now = draftNow(key)
