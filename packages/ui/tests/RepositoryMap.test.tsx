@@ -192,4 +192,19 @@ describe('a repository that joins', () => {
     expect(card(joined.name)?.classList.contains('arrives')).toBe(true)
     expect(document.querySelectorAll('.arrives')).toHaveLength(1)
   })
+
+  it('draws its wire again where the card settles once it has arrived, as its slide moves it unseen by a resize', () => {
+    resizes()
+    const { again } = map({ repositories: MAP_MERIDIAN.slice(0, 2) })
+    again({ repositories: MAP_MERIDIAN.slice(0, 3) })
+    const before = paths()
+    // Settled: lower than it started, with nothing resized.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { top: 48, bottom: 88, height: 40, left: 20, right: 320, width: 300, x: 20, y: 48, toJSON: () => ({}) } as DOMRect
+    })
+    act(() => {
+      card(MAP_MERIDIAN[2]!.name)?.dispatchEvent(new Event('animationend', { bubbles: true }))
+    })
+    expect(paths()).not.toEqual(before)
+  })
 })

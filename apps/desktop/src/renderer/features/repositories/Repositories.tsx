@@ -55,8 +55,8 @@ const reachOf = (host: RepositoryHost): HostReach =>
 
 /**
  * A repository as the kit's map draws it; with `toward`, the branch its new
- * tasks work toward, as the person changes it, where it has a host to work
- * toward one on.
+ * tasks work toward, as the person changes it, for every repository, as Work
+ * toward in the Tasks section offers it, a remote or none.
  */
 export const entryOf = (repository: ProjectRepository, toward?: WorkTowardModel['shown']): MapRepository => ({
   id: repository.id,
@@ -65,7 +65,7 @@ export const entryOf = (repository: ProjectRepository, toward?: WorkTowardModel[
     ? {}
     : { where: shortFolder(repository.folder === null ? repository.path : `${repository.path}/${repository.folder}`) }),
   ...(repository.branch === null ? {} : { branch: repository.branch }),
-  ...(toward === undefined || repository.host === null ? {} : { toward: towardOf(repository, toward) }),
+  ...(toward === undefined ? {} : { toward: towardOf(repository, toward) }),
   tasks: repository.tasks,
   ...(repository.host === null
     ? {}

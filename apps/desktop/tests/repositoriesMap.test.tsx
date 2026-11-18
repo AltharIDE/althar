@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ApiError, type ConnectionList, type HostRepository, type ProjectRepository } from '@althar/contracts'
 import { Brand, ChangeTarget, HostReach } from '@althar/ui'
 
+import type { Client } from '../src/renderer/data/client'
 import type { Opening } from '../src/renderer/features/connections/ConnectDialog'
 import { ForkOffer, useForkOffer } from '../src/renderer/features/repositories/ForkOffer'
 import { entryOf, hostsOf, Repositories } from '../src/renderer/features/repositories/Repositories'
@@ -98,6 +99,18 @@ describe('a project’s repositories part', () => {
     )
   })
 
+  it('says the branch new tasks work toward for a repository with no remote too, not the one checked out', async () => {
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
+      getRepositories: vi.fn(async () => [
+        { ...api, host: null, branch: 'spike', defaultBranch: 'main', workToward: 'next', branches: ['main', 'next', 'spike'] },
+      ]),
+    })
+    withServices(<Part connections={connectionList} onConnect={vi.fn()} />, client)
+    expect(await screen.findByRole('button', { name: 'Branch new tasks in meridian-api work toward: next' })).toBeTruthy()
+    expect(screen.queryByText('spike')).toBeNull()
+  })
+
   it('names the project’s worktrees where they are made', async () => {
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })) })
     withServices(<Part connections={null} onConnect={vi.fn()} />, client)
@@ -160,6 +173,44 @@ describe('a repository cloned into a project that has some', () => {
     cloned({ grant: 'grant_mobile', path: '/Users/me/code/mobile' })
     await waitFor(() => expect(client.addRepositories).toHaveBeenCalledWith('p1', 'grant_mobile'))
     expect(client.prepareFolder).toHaveBeenCalledWith('grant_mobile', '/Users/me/code/mobile')
+  })
+
+  it('stops a sign-in started in the panel the moment it is put away: one answered after is cancelled, and opens nothing', async () => {
+    type Started = Awaited<ReturnType<Client['startSignIn']>>
+    let started: (value: Started) => void = () => undefined
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    // GitHub signed in to in the browser, through its app.
+    const browsing: ConnectionList = {
+      ...connectionList,
+      products: connectionList.products.map((one) => (one.product === 'github' ? { ...one, browserSignIn: true } : one)),
+    }
+    const { client } = fakeClient({
+      listConnections: vi.fn(async () => browsing),
+      getRepositories: vi.fn(async () => [api, web]),
+      getConnectGuide: vi.fn(async () => ({ service: 'github' as const, places: [], clis: [], email: null, tokenPages: [] })),
+      startSignIn: vi.fn(() => new Promise<Started>((resolve) => (started = resolve))),
+    })
+    function Unconnected() {
+      return <Repositories model={useRepositories('p1')} connections={browsing} onConnect={vi.fn()} />
+    }
+    withServices(<Unconnected />, client)
+    const toggle = await screen.findByRole('button', { name: 'Clone a repository' })
+    await userEvent.click(toggle)
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    await userEvent.click(await panel.findByRole('button', { name: 'Connect GitHub' }))
+    await userEvent.click(await panel.findByRole('button', { name: /^Continue with GitHub/ }))
+    await waitFor(() => expect(client.startSignIn).toHaveBeenCalled())
+    // Put away while GitHub is still being asked; then GitHub answers.
+    await userEvent.click(toggle)
+    started({ flowId: 'flow_late', kind: 'browser', url: 'https://github.com/login/oauth/authorize' })
+    await waitFor(() => expect(client.cancelSignIn).toHaveBeenCalledWith('flow_late'))
+    expect(open).not.toHaveBeenCalled()
+    // Opened again, it starts afresh: no walk left from before.
+    await userEvent.click(toggle)
+    expect(
+      await within(await screen.findByRole('region', { name: 'Clone a repository' })).findByRole('button', { name: 'Connect GitHub' }),
+    ).toBeTruthy()
+    open.mockRestore()
   })
 
   it('clones one a URL names, into a folder the person chooses', async () => {

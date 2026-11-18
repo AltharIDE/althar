@@ -1,5 +1,6 @@
-import { type ReactNode, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 
+import { Afterimage } from '../../lib/Afterimage'
 import { cx } from '../../lib/cx'
 import { useDragOver } from '../../lib/dragOver'
 import type { RootProps } from '../../lib/props'
@@ -26,7 +27,7 @@ import s from './ProjectRepositories.module.css'
  * cloned or put away.
  */
 
-/** How long what chose one is kept after it is put away, for it to fold away rather than vanish: the kit's --fold, and a little. */
+/** How long a picture of what chose one stays after it is put away, for it to fold away rather than vanish: the kit's --fold, and a little. */
 const FOLDED = 400
 
 export interface ProjectRepositoriesText {
@@ -121,15 +122,7 @@ export function ProjectRepositories({
 }: ProjectRepositoriesProps) {
   const t = { ...projectRepositoriesText, ...text }
   const { over, handlers } = useDragOver(onDrop)
-  // What chooses one, kept while it folds away once it's put away.
   const open = cloning != null
-  const [kept, setKept] = useState<ReactNode>(cloning)
-  if (open && kept !== cloning) setKept(cloning)
-  useEffect(() => {
-    if (open) return undefined
-    const gone = window.setTimeout(() => setKept(null), FOLDED)
-    return () => window.clearTimeout(gone)
-  }, [open])
   return (
     <SettingGroup
       title={t.title}
@@ -167,7 +160,12 @@ export function ProjectRepositories({
         {/* Always there where one can be cloned, so it opens as everything does, rather than appearing. */}
         {onClone !== undefined && (
           <Disclosure open={open}>
-            <Fold bleed={false}>{open ? cloning : kept}</Fold>
+            <Fold bleed={false}>
+              {/* Put away, it stops at once; what folds away is only a picture of it. */}
+              <Afterimage open={open} lasts={FOLDED}>
+                {cloning}
+              </Afterimage>
+            </Fold>
           </Disclosure>
         )}
         {repositories.length === 0 && (reading === undefined || reading.length === 0) ? (

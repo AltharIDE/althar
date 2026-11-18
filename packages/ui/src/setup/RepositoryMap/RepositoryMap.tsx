@@ -412,9 +412,13 @@ export function RepositoryMap({
     // And once the type has loaded, which moves everything a little.
     let on = true
     void document.fonts?.ready.then(() => on && measure())
+    // And as a card that arrives settles: its slide moves it without changing its size, so nothing above sees it.
+    const settled = () => measure()
+    root.addEventListener('animationend', settled)
     return () => {
       on = false
       watch.disconnect()
+      root.removeEventListener('animationend', settled)
     }
   }, [layout])
 
