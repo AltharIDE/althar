@@ -64,3 +64,5 @@ export { lagLogged, watchLag } from './lag'
 export { DevicePairings } from './DevicePairings'
 
 export { listenNetworkApi, type NetworkApiOptions } from './networkApi'
+export { simulatorsHere, type DeviceHost } from './deviceHost'
+export { Devices, type OpenDevice } from './Devices'

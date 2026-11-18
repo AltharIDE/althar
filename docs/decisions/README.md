@@ -44,6 +44,9 @@ Proposals waiting now:
   and worker-language choices are in [Foundations](foundations.md#remote-connections-and-native-workers); the wider design remains proposed.
 - [ADR-104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md):
   canvases the project's agents draw, version and hear comments on; the first slice is built.
+- [ADR-107](proposed/107-a-task-gets-a-simulator-or-emulator-of-its-own.md):
+  an iOS simulator or an Android emulator of a task's own, which its lead starts, drives and screenshots; a prototype
+  of the tools and a design lab are built.
 
 ## The old ADRs
 
@@ -174,3 +177,4 @@ one.
 | [104](proposed/104-a-project-keeps-canvases-its-agents-draw-and-the-person-comments-on.md) | A project keeps canvases: its agents write files and publish them as versions any lead or the coordinator can get, change and look at; HTML runs in a view and scheme of its own; the person's comments go to the conversation and stay on the canvas | Proposed, first slice built; would fold into [desktop-app](desktop-app.md), [tasks § What agents hand back](tasks.md#what-agents-hand-back) and [what-agents-may-do § Althar's tools outside the sandbox](what-agents-may-do.md#althars-tools-outside-the-sandbox) |
 | 105 | Undo from a delivered task message restores its turn and later turns from private checkpoints, preserves commits and unrelated edits, and restarts the agent from retained context | [desktop-app § Undo from a task message](desktop-app.md#undo-from-a-task-message) |
 | [106](proposed/106-builds-and-tests-share-a-host-resource-budget.md) | Agent process families share CPU where supported, with background priority and pressure-aware admission everywhere and no per-language setup | [scheduling § Process families](scheduling.md#how-agent-process-families-share-the-machine) |
+| [107](proposed/107-a-task-gets-a-simulator-or-emulator-of-its-own.md) | A lead or the coordinator starts an iOS simulator or an Android emulator of its own, never the person's, installs on it, drives it and screenshots it, outside its sandbox; it goes with its task | Proposed, prototype built; would fold into [what-agents-may-do § Althar's tools outside the sandbox](what-agents-may-do.md#althars-tools-outside-the-sandbox) and [desktop-app](desktop-app.md) |

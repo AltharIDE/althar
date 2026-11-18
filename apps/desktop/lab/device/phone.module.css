@@ -1,0 +1,236 @@
+/* A device's screen (Phone.tsx): the phone app's own tokens (althar-mobile src/ui/tokens.ts), at the device's points. */
+.phone {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  background: #f4f2ec;
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    0 18px 40px -18px rgba(52, 42, 26, 0.35);
+  transition: box-shadow var(--fast) var(--ease-out);
+}
+.driving {
+  box-shadow:
+    0 0 0 2px var(--live),
+    0 18px 40px -18px rgba(52, 42, 26, 0.35);
+}
+.points {
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform-origin: 0 0;
+  color: #141417;
+  font-family: var(--font);
+}
+.statusIos,
+.statusAndroid {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.statusIos {
+  height: 54px;
+  padding: 4px 30px 0 46px;
+}
+.statusAndroid {
+  height: 40px;
+  padding: 0 22px 0 24px;
+}
+.time {
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: -0.2px;
+}
+.statusAndroid .time {
+  font-weight: 500;
+  font-size: 14px;
+}
+.icons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.island {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  width: 126px;
+  height: 37px;
+  margin-left: -63px;
+  border-radius: 20px;
+  background: #000;
+}
+.camera {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  border-radius: 50%;
+  background: #111;
+}
+.homeIos,
+.homeAndroid {
+  position: absolute;
+  left: 50%;
+  z-index: 2;
+  border-radius: 3px;
+  background: #141417;
+}
+.homeIos {
+  bottom: 8px;
+  width: 140px;
+  height: 5px;
+  margin-left: -70px;
+}
+.homeAndroid {
+  bottom: 10px;
+  width: 108px;
+  height: 4px;
+  margin-left: -54px;
+  opacity: 0.8;
+}
+.app {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+}
+.light {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 70%;
+  background: radial-gradient(120% 70% at 50% 0%, rgba(43, 59, 255, 0.1), rgba(244, 242, 236, 0) 70%);
+}
+.top {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 128px 28px 0;
+  text-align: center;
+}
+.title {
+  margin: 26px 0 0;
+  font-size: 26px;
+  line-height: 31px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+.sub {
+  max-width: 300px;
+  margin: 10px 0 0;
+  color: #45454c;
+  font-size: 16px;
+  line-height: 22px;
+}
+.foot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+  padding: 0 20px 34px;
+}
+.where {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 14px;
+  border: 0.5px solid rgba(20, 16, 10, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.66);
+  color: #45454c;
+  font-size: 13px;
+  line-height: 18px;
+}
+.where strong {
+  color: #141417;
+  font-size: 14px;
+  font-weight: 600;
+}
+.where code {
+  color: #141417;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr;
+  gap: 10px;
+}
+.quiet,
+.ink {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 52px;
+  border-radius: 26px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.quiet {
+  background: #ffffff;
+  box-shadow: 0 0 0 0.5px rgba(20, 20, 28, 0.18);
+}
+.ink {
+  background: #141417;
+  color: #ffffff;
+}
+.link {
+  align-self: center;
+  padding: 8px 0 0;
+  color: #45454c;
+  font-size: 14px;
+}
+.new {
+  align-self: center;
+  max-width: 280px;
+  color: #63636b;
+  font-size: 12.5px;
+  line-height: 17px;
+  text-align: center;
+}
+.tap {
+  position: absolute;
+  z-index: 3;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: rgba(43, 59, 255, 0.22);
+  box-shadow: 0 0 0 2px rgba(43, 59, 255, 0.6);
+  opacity: 0;
+  animation: tapped 900ms var(--ease-out);
+  pointer-events: none;
+}
+@keyframes tapped {
+  0% {
+    opacity: 1;
+    transform: scale(0.6);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tap {
+    animation: tappedStill 900ms linear;
+  }
+  @keyframes tappedStill {
+    0%,
+    60% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+}

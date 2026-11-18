@@ -27,6 +27,7 @@ import { Launches } from './Launches'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
+import { Devices } from './Devices'
 import { PageTools } from './PageTools'
 import { Canvases } from './Canvases'
 import { Elsewhere } from './Elsewhere'
@@ -215,6 +216,8 @@ export const layer = (options: RuntimeLayerOptions) => {
         IntegrationTools.layer,
         // The page beside a conversation, read and driven by its lead and the coordinator (ADR-100).
         PageTools.layer,
+        // A simulator or an emulator of its own beside each task, started and driven by its lead (Devices.ts).
+        Devices.layer,
         // The project's canvases, drawn by its agents and commented on by the person (ADR-104).
         Canvases.layer,
         // What other tools left for a project's repositories, and bringing it in (Elsewhere.ts).

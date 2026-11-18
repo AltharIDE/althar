@@ -388,6 +388,8 @@ export const runtime = (
     readonly screenshot?: RuntimeOptions['screenshot']
     /** How the page beside a conversation is reached, where a test drives one; without, none can be. */
     readonly page?: RuntimeOptions['page']
+    /** This computer's simulators and emulators, where a test fakes them; without, none can run. */
+    readonly devices?: RuntimeOptions['devices']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
     /** The zone leads and the coordinator are told the person's local time in; the computer's unless a test says. */
@@ -443,6 +445,7 @@ export const runtime = (
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     ...(more.page === undefined ? {} : { page: more.page }),
+    ...(more.devices === undefined ? {} : { devices: more.devices }),
     ...(more.skills === undefined ? {} : { skills: more.skills }),
     busy: { machine: ROOMY, pressure: false, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),

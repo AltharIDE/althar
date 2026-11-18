@@ -25,6 +25,7 @@ import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
 import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
+import type { DeviceHost } from './deviceHost'
 import type { PageAnswer, PageCall } from './pageBridge'
 import type { SkillsConfig } from './Skills'
 
@@ -108,6 +109,11 @@ export interface RuntimeOptions {
    * Without it, the page tools say this Althar can't drive pages.
    */
   readonly page?: (owner: string, call: PageCall) => Effect.Effect<PageAnswer, string>
+  /**
+   * This computer's iOS simulators and Android emulators, which a lead or the coordinator starts and drives beside its
+   * conversation (Devices.ts): `simulatorsHere()` in the desktop app. Without it, the device tools say this Althar can't run them.
+   */
+  readonly devices?: DeviceHost
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
   readonly openUrl?: (url: string) => Effect.Effect<boolean>
   /** The editors on this device a task's files open in, and opening one on a folder, at a file and line where it can; without it, none. */

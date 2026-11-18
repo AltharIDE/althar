@@ -24,6 +24,7 @@ import {
   startup,
   UsageData,
   lagLogged,
+  simulatorsHere,
   watchLag,
 } from '@althar/runtime'
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
@@ -194,6 +195,8 @@ const options = {
   openUrl: openInBrowser,
   screenshot: screenshots.ask,
   page: pages.ask,
+  // This computer's iOS simulators and Android emulators, a device of its own beside each task (Devices.ts).
+  devices: simulatorsHere(),
   editors: {
     list: () =>
       device === undefined

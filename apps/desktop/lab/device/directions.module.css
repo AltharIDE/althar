@@ -1,0 +1,153 @@
+/* The four directions' own layout (Directions.tsx); everything they draw with is the kit's. */
+.panel {
+  height: 100%;
+}
+.body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+}
+.stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.picker {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-left: -6px;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  color: var(--t-1);
+  font-size: 13px;
+}
+.picker:hover {
+  background: var(--hover-faint);
+}
+.picker svg {
+  align-self: center;
+  color: var(--t-3);
+}
+.heading {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--t-1);
+}
+.model {
+  font-weight: 560;
+}
+.os {
+  color: var(--t-3);
+  font-size: 12px;
+}
+.starting {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--n-1);
+  color: var(--t-2);
+  font-size: 13px;
+}
+.cant {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 300px;
+  margin: 0 auto;
+  padding: 24px;
+  text-align: center;
+}
+.cant strong {
+  color: var(--t-1);
+  font-size: 14px;
+  font-weight: 560;
+}
+.cant p {
+  margin: 0 0 6px;
+  color: var(--t-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.cantIcon {
+  color: var(--t-3);
+}
+.pageEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pair {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 10px 14px 6px;
+}
+.half {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  margin: 0;
+}
+.caption {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 0 10px;
+  font-size: 12px;
+  color: var(--t-1);
+}
+.shotsBody {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+}
+.strip {
+  display: flex;
+  gap: 10px;
+  padding: 12px 16px 16px;
+  overflow-x: auto;
+  border-top: 1px solid var(--line);
+}
+.thumb {
+  flex: none;
+  padding: 3px;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow var(--fast) var(--ease-out);
+}
+.thumb[aria-pressed='true'] {
+  box-shadow: inset 0 0 0 2px var(--t-1);
+}
+.thumb:hover:not([aria-pressed='true']) {
+  box-shadow: inset 0 0 0 1px var(--line-3);
+}
+.thumbStarting {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 49px;
+  border-radius: 7px;
+  background: var(--n-2);
+}
