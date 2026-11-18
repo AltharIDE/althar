@@ -5,8 +5,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("../../packages/worker-protocol/proto");
     let schema = root.join("althar/worker/v1/control.proto");
     println!("cargo:rerun-if-changed={}", schema.display());
-    prost_build::Config::new()
-        .protoc_executable(protoc_bin_vendored::protoc_bin_path()?)
-        .compile_protos(&[schema], &[root])?;
+    let mut config = prost_build::Config::new();
+    config.protoc_executable(protoc_bin_vendored::protoc_bin_path()?);
+    tonic_prost_build::configure()
+        .build_server(false)
+        // The RPC is named Connect. The caller builds its own TLS channel.
+        .build_transport(false)
+        .compile_with_config(config, &[schema], &[root])?;
     Ok(())
 }

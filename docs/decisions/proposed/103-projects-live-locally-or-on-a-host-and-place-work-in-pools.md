@@ -454,8 +454,7 @@ multiplayer permission model. Pricing and entitlements remain separate.
 bridge and CLI attach through the private socket or system OpenSSH with
 socket authority, expected home/API checks and checked feed positions.
 [Desktop SSH attachment #982](https://github.com/AltharIDE/althar/pull/982)
-is in review as of 16 Nov, not merged. It does not provide protected device
-enrollment or person-only approvals.
+merged on 17 Nov with socket authority.
 
 **Connection-only direct access implemented, 16 Nov 2026:** opt-in HTTPS/WSS,
 operator-issued five-minute invitations, encrypted desktop keys, paired-device
@@ -465,7 +464,16 @@ approval devices or use desktop-local files/previews. A pin in the operator's
 code authenticates a private TLS endpoint; changing the TLS key needs pairing
 again. Invitations end on restart, while registrations remain durable. Host
 setup/certificate provisioning, protected approvals and real provider/VPS
-validation remain release work. Native workers are not implemented here.
+validation remain release work.
+
+**Native worker diagnostic:** [the Protobuf foundation](https://github.com/AltharIDE/althar/pull/1026)
+merged on 18 Nov. The opt-in Linux home listener authenticates a worker
+using mutual TLS and a durable enrollment. The home can issue a single
+fenced start grant for a fixed diagnostic. The worker journals the start
+and result, and the home persists a replayed result or records an unknown
+outcome after an interrupted attempt. The
+[operator guide](../../../apps/host/README.md#native-worker-diagnostic)
+covers certificate and journal setup.
 
 The next two slices can be developed independently against the existing
 home. Deliver direct connectivity first for the client path; neither slice
@@ -476,9 +484,11 @@ transport and language choices.
 flowchart TD
     Existing[Built: shared API and persistent Node home]
     Existing --> Direct[HTTPS/WSS delivered; trusted approval enrollment pending]
-    Existing --> Worker[Next execution slice: Rust worker and Protobuf contract]
-    Direct --> Personal[Usable personal remote project]
-    Worker --> Personal
+    Existing --> Worker[Built: enrolled Rust worker and recoverable diagnostic]
+    Direct --> Approval[Protected owner keys and approval recovery]
+    Worker --> Commands[Project work, isolation and process-tree cancellation]
+    Approval --> Personal[Usable personal remote project]
+    Commands --> Personal
     Personal --> Pools[Several assigned workers and local testing]
     Personal --> Hosted[Managed home: lifecycle, backups and recovery]
     Pools --> Cloud[Isolated managed compute]
@@ -496,16 +506,13 @@ flowchart TD
    clients. Prove an unpaired process cannot answer an ask and reconnect
    cannot replay an external action. Direct transport alone does not close
    this approval-security gate.
-2. **One native worker execution path.** Add a pinned Rust workspace,
-   canonical Protobuf schemas and reproducible TypeScript/Rust bindings.
-   Validate gRPC as the first transport candidate. Enroll one authenticated
-   worker and run one real command from the Node home with a durable
-   attempt/lease/fencing record, a worker journal and bounded streamed
-   output. Prove process-tree cancellation, dropped acknowledgements,
-   reconnect replay, stale attempts, worker/home restart reconciliation and
-   explicit unknown outcomes for unconfirmed external effects. Capture the
-   warm/cold and memory baseline described above. Do not start with a broad
-   rewrite of provider adapters, a new scheduler or managed sandbox fleet.
+2. **Extend the native worker execution path to project work.** Build on
+   the locked Rust toolchain, shared Protobuf bindings and authenticated
+   diagnostic. Add project-scoped authorization, renewable leases, bounded
+   live logs, and process-tree cancellation with reconciliation of
+   unconfirmed external effects. Add automated enrollment and a signed
+   worker artifact. Capture the warm/cold and memory baseline described
+   above with real project setup and provider startup.
 3. **One usable personal remote project.** Connect the client and worker
    paths. Co-locate a personal Linux home and worker initially; create a
    remote project and clone its repositories rather than silently moving a

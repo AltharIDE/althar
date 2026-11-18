@@ -190,3 +190,51 @@ the TLS key or replacing a self-signed certificate. Renewals with the same
 key and a still-trusted certificate chain reconnect normally. Keep the
 desktop keyring and home database in their respective
 recovery plans. Invitations are deliberately not restored after a restart.
+
+## Native worker diagnostic
+
+The worker listener is opt-in and uses a separate gRPC port. Provision a CA
+and a server certificate with a subject alternative name matching the URL
+that workers will use. Give each worker its own client certificate and
+private key. Keep PEM files at mode 0600 and keep the server key outside
+the home profile and worktrees. Use a dedicated OS account for each worker
+and keep its credentials and journal private to that account.
+
+For a worker on the same Linux machine, use a server certificate valid for
+`localhost` and bind to loopback. For a worker on another machine, choose a
+reachable private IP and the matching certificate name.
+
+```sh
+althar-host configure-workers --profile /path/to/profile \
+  --worker-ca /private/tls/ca.pem --tls-certificate /private/tls/home.pem \
+  --tls-key /private/tls/home.key
+althar-host enroll-worker --profile /path/to/profile \
+  --worker-certificate /private/tls/client.pem
+systemctl --user restart althar-host.service
+althar-host worker-run --profile /path/to/profile --worker-id "$WORKER_ID"
+```
+
+Use the ID printed by `enroll-worker` as `WORKER_ID` and the ID from
+`althar-host status` as `HOME_ID`. On the worker, invoke the Linux binary
+once to pick up the queued diagnostic. Keep the same journal directory on
+subsequent invocations so the worker can replay a recorded result.
+
+```sh
+cargo build --locked --release -p althar-worker
+target/release/althar-worker https://localhost:6770 "$HOME_ID" "$WORKER_ID" \
+  /private/tls/ca.pem /private/tls/client.pem /private/tls/client.key /private/worker-journal
+althar-host worker-result --profile /path/to/profile --attempt-id "$ATTEMPT_ID"
+```
+
+Use the attempt ID from `worker-run` as `ATTEMPT_ID`. A `succeeded` result
+contains the diagnostic output. An `unknown` result means the home could
+not confirm execution, including when a start grant was lost or an offer
+expired. Each attempt gets at most one start grant. Enrollment and attempt
+state survive home restarts in `workers/ledger.sqlite`. Preserve that
+ledger and the worker journal when recovering an installation.
+
+Use `revoke-worker --worker-id "$WORKER_ID"` to reject the certificate on new
+connections and at the next message on an existing stream. A replacement
+certificate gets a fresh enrollment. Use `disable-workers` and restart the
+home to close the listener. The worker requires its own release artifact
+and rollout before it can participate in managed updates.
