@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -173,6 +173,8 @@ export interface TaskFoldersProps {
   busy?: string | null
   /** What went wrong, in words. */
   error?: string
+  /** The person was sent here to free space: the row comes into view and lights for a moment, so they see where they landed. */
+  lit?: boolean
   text?: Partial<TaskFoldersText>
 }
 
@@ -316,9 +318,19 @@ export function TaskFolders({
   freed = null,
   busy = null,
   error,
+  lit = false,
   text,
 }: TaskFoldersProps) {
   const t = { ...taskFoldersText, ...text, waits: { ...taskFoldersText.waits, ...text?.waits } }
+  const row = useRef<HTMLDivElement>(null)
+  const [glow, setGlow] = useState(lit)
+  useEffect(() => {
+    if (!lit) return
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
+    row.current?.scrollIntoView?.({ block: 'center', behavior: still ? 'auto' : 'smooth' })
+    const off = window.setTimeout(() => setGlow(false), 1100)
+    return () => window.clearTimeout(off)
+  }, [lit])
   const going = total(goes)
   const holding = total(held)
   const width = (n: number) => `${disk === null || disk.total === 0 ? 0 : (Math.max(0, n) / disk.total) * 100}%`
@@ -326,6 +338,8 @@ export function TaskFolders({
   const none = !any && !measuring && freed === null
   return (
     <SettingRow
+      ref={row}
+      className={cx(lit && s.lit, glow && s.glow)}
       title={t.title}
       note={t.waits[wait].note}
       glyph={<Icon name="folder" size={15} />}

@@ -6,25 +6,24 @@ import { type StoragePlaceRow, Storage, storageSize } from './Storage'
 const MB = 1024 ** 2
 const GB = 1024 ** 3
 
+const freeUp = { id: 'worktrees', onFreeUp: fn() }
+
 const places = (figures: Partial<Record<string, StoragePlaceRow['figure']>> = {}): ReadonlyArray<StoragePlaceRow> => [
   {
     id: 'profile',
     title: 'Profile',
-    note: 'Projects, tasks and settings. ',
     path: '/home/me/.local/share/althar',
     figure: figures.profile ?? { state: 'done', bytes: 184 * MB },
   },
   {
     id: 'logs',
     title: 'Logs',
-    note: 'What Althar writes as it runs. ',
     path: '/home/me/.local/share/althar/logs',
     figure: figures.logs ?? { state: 'done', bytes: 12.4 * MB },
   },
   {
     id: 'worktrees',
     title: 'Task folders',
-    note: 'A copy of each project for each task. ',
     path: '/home/me/Althar',
     figure: figures.worktrees ?? { state: 'done', bytes: 23.6 * GB },
   },
@@ -33,7 +32,7 @@ const places = (figures: Partial<Record<string, StoragePlaceRow['figure']>> = {}
 const meta = {
   title: 'Setup/Storage',
   component: Storage,
-  args: { places: places(), onShow: fn(), onMeasureAgain: fn() },
+  args: { places: places(), onShow: fn(), onMeasureAgain: fn(), freeUp },
   render: (args) => (
     <div style={{ width: 640 }}>
       <Storage {...args} />
@@ -43,11 +42,19 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Three places, each with its path, its size and a button to show it in the file manager. */
+/** A tile a place, with its size and share, the task folders leading with Free up space; Show's tooltip says the path. */
 export const WithSizes: Story = {
   play: async ({ canvasElement, args }) => {
     const view = within(canvasElement)
     await expect(view.getByText('24 GB')).toBeInTheDocument()
+    await expect(view.getByText('99%')).toBeInTheDocument()
+    await expect(view.getAllByText('<1%')).toHaveLength(2)
+    await expect(view.getByRole('button', { name: 'Show in Files, Task folders' })).toHaveAttribute(
+      'title',
+      'Show in Files: /home/me/Althar',
+    )
+    await userEvent.click(view.getByRole('button', { name: 'Free up space' }))
+    await expect(freeUp.onFreeUp).toHaveBeenCalledOnce()
     await userEvent.click(
       view.getByRole('button', {
         name: 'Show in Files, Task folders',
@@ -69,6 +76,8 @@ export const Measuring: Story = {
   play: async ({ canvasElement }) => {
     const view = within(canvasElement)
     await expect(view.getAllByText('measuring…')).toHaveLength(2)
+    // No share until every size is in: a part never shows as the whole.
+    await expect(view.queryByText(/%$/)).toBeNull()
     await expect(view.getByRole('button', { name: 'Measure again' })).toBeDisabled()
   },
 }
@@ -81,7 +90,7 @@ export const Approximate: Story = {
     }),
   },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('at least 41 GB')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText(/41 GB/)).toHaveTextContent('at least 41 GB')
   },
 }
 
@@ -94,7 +103,7 @@ export const Unreadable: Story = {
   },
   play: async ({ canvasElement }) => {
     const view = within(canvasElement)
-    await expect(view.getByText('at least 12 GB')).toBeInTheDocument()
+    await expect(view.getByText(/12 GB/)).toHaveTextContent('at least 12 GB')
     await expect(view.getByText('3 items couldn’t be read')).toBeInTheDocument()
   },
 }
@@ -134,7 +143,7 @@ export const Sizes: Story = {
   },
 }
 
-/** Show failed, as where no file manager opens: the row says why, and the path stays there to copy. */
+/** Show failed, as where no file manager opens: the tile says why. */
 export const ShowFailed: Story = {
   args: {
     places: places().map((place) => (place.id === 'logs' ? { ...place, problem: 'No application is registered to open folders' } : place)),
