@@ -108,6 +108,10 @@ export const text = {
     title: 'Move issues along with their tasks',
     line: 'To In Progress, In Review, then Done',
   },
+  linkIssues: {
+    title: 'Link pull requests on their issues',
+    line: 'As a task’s pull request opens, its issue links to it. On ClickUp, that’s a comment on the task.',
+  },
   repositoryFiles: 'Repository files',
   bots: {
     title: 'Review bots',
@@ -312,6 +316,7 @@ export function TasksSection({
     { rule: 'postScreenshots', words: text.postScreenshots, on: rules.postScreenshots, set: model.setPostScreenshots },
     { rule: 'resolveConflicts', words: text.conflicts, on: rules.resolveConflicts, set: model.setResolveConflicts },
     { rule: 'moveIssues', words: text.moveIssues, on: rules.moveIssues, set: model.setMoveIssues },
+    { rule: 'linkIssues', words: text.linkIssues, on: rules.linkIssues, set: model.setLinkIssues },
   ]
   return (
     <>

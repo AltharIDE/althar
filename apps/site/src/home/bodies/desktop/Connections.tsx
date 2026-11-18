@@ -9,7 +9,7 @@ import s from './Connections.module.css'
 /*
  * What Althar works with, in a console seamed as Flow's is: the agents it
  * runs, the code hosts and trackers it has connectors for
- * (packages/connectors: GitHub, GitLab, Bitbucket, Linear, Jira, Trello),
+ * (packages/connectors: GitHub, GitLab, Bitbucket, Linear, Jira, Trello, ClickUp),
  * and any MCP server, each group by what it is for.
  */
 
@@ -37,6 +37,7 @@ const GROUPS: ReadonlyArray<{ name: string; items: readonly Item[]; wide?: boole
       { id: 'linear', name: 'Linear', mark: brand(Brand.Linear) },
       { id: 'jira', name: 'Jira', mark: brand(Brand.Jira) },
       { id: 'trello', name: 'Trello', mark: brand(Brand.Trello) },
+      { id: 'clickup', name: 'ClickUp', mark: brand(Brand.ClickUp) },
       { id: 'github-issues', name: 'GitHub Issues', mark: brand(Brand.GitHub) },
     ],
   },

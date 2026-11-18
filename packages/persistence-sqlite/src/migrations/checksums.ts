@@ -94,4 +94,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0088_task_waits': '50cf327d31c793fa27b909e3a20070a3a03eac8e05e1d5f88c325ff1fcc3dbcf',
   '0089_task_waits_cleared': '70682d694a775b2dc77fc2d60a4bf04da59bd55175b3b20a6722535504f5c1ec',
   '0090_card_reads': '2c2b1b4d1c7d62ef08f2dab3f6002a924e9f9f0005be56a4f2e51e10c8c263a0',
+  '0091_clickup': '9d380e4871a714d04f9d9bcd642a55855fe05420b4121aec76f7f3df7980cb95',
 }

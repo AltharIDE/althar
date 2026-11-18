@@ -145,3 +145,48 @@ service and its sessions running. Existing service updates are unchanged: an
 explicit apply restarts the service and disconnects attached clients, which
 check the new host identity/API version when reconnecting. A newer incompatible
 API requires a compatible client before attachment.
+
+## Direct HTTPS/WSS and device pairing
+
+Direct access is opt-in. Supply a matching RSA or ECDSA PEM certificate and key as private
+regular files (mode 0600); keep the TLS key outside the profile and worktrees.
+The leaf certificate may be private or self-signed and can be up to 4 KiB
+in DER form. The pairing code carries the certificate and pins its public
+key. Reachability can use Tailscale, another private network or a direct
+HTTPS address. No relay or Althar account is required.
+
+```sh
+althar-host configure-network --profile /path/to/profile \
+  --origin https://home.example:6769 --listen-address 0.0.0.0 \
+  --tls-certificate /private/tls/certificate.pem --tls-key /private/tls/key.pem
+systemctl --user restart althar-host.service
+althar-host pair --profile /path/to/profile
+```
+
+In the desktop, open **Homes → Connect a home…** (also available from **File → Homes…**). Choose **Pairing code**. Paste the code,
+check the destination, name the home and choose **Pair and open**. A home opens
+in its own window; its projects stay on the host. SSH remains another route.
+A code enrolls one device key and expires after five minutes or on host restart.
+A lost reply may retry with the same saved pending key while the code is valid.
+The desktop requires an OS keyring and never saves plaintext connection keys.
+
+These devices can work with existing projects/tasks, but cannot approve
+permissions or enroll trusted approval devices. Desktop file transfers,
+previews, provider setup and protected approval enrollment are separate work.
+A personal host remains a trusted OS-user boundary, not an isolated worker.
+
+```sh
+althar-host devices --profile /path/to/profile
+althar-host revoke-device --profile /path/to/profile --device-id dev_...
+althar-host disable-network --profile /path/to/profile
+```
+
+Revocation ends the device's streams and prevents reconnect immediately;
+commands already admitted may finish. `devices` is paged: use its returned
+`next` value with `--after`. Disabling/reconfiguring the listener takes an
+explicit service restart. Existing updater policy stays unchanged. Compatible
+updates and restarts preserve registered devices. Pair again after changing
+the TLS key or replacing a self-signed certificate. Renewals with the same
+key and a still-trusted certificate chain reconnect normally. Keep the
+desktop keyring and home database in their respective
+recovery plans. Invitations are deliberately not restored after a restart.

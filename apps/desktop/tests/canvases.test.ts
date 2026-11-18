@@ -19,7 +19,10 @@ const channels = vi.hoisted(() => ({ listened: new Map<string, (...args: Array<u
 
 vi.mock('electron', () => ({
   BrowserWindow: { fromWebContents: () => ({ id: 1 }) },
-  ipcMain: { on: (channel: string, listener: (...args: Array<unknown>) => void) => void channels.listened.set(channel, listener) },
+  ipcMain: {
+    on: (channel: string, listener: (...args: Array<unknown>) => void) => void channels.listened.set(channel, listener),
+    handle: (channel: string, listener: (...args: Array<unknown>) => void) => void channels.listened.set(channel, listener),
+  },
   session: { fromPartition: () => ({}) },
   WebContentsView: class {},
 }))
@@ -151,7 +154,7 @@ describe('what a canvas may reach', () => {
 })
 
 describe('the window’s calls about canvases', () => {
-  it('are each checked: only Althar’s windows, a thread’s key and a version whole', () => {
+  it('are each checked: only Althar’s windows, a thread’s key and a version whole', async () => {
     expect(targetOf({ projectId: PROJECT, canvasId: CANVAS, version: 2, manifest: 'f'.repeat(64) })).not.toBeNull()
     for (const bad of [
       null,
@@ -169,7 +172,12 @@ describe('the window’s calls about canvases', () => {
     const closed = vi.fn()
     const reloaded = vi.fn()
     const mine = { name: 'Althar’s window' }
-    handleCanvases({ show: shown, close: closed, reload: reloaded, opened: () => null }, (contents) => contents === (mine as never))
+    const picture = vi.fn(async () => 'data:image/jpeg;base64,AAAA')
+    const covered = vi.fn()
+    handleCanvases(
+      { show: shown, close: closed, reload: reloaded, still: picture, cover: covered, opened: () => null },
+      (contents) => contents === (mine as never),
+    )
     const call = (channel: string, sender: unknown, ...args: Array<unknown>) => channels.listened.get(channel)?.({ sender }, ...args)
     const target = { projectId: PROJECT, canvasId: CANVAS, version: 2, manifest: 'f'.repeat(64) }
     call('althar:canvas-show', mine, THREAD, target, { x: 1, y: 2, width: 300, height: 400 })
@@ -182,6 +190,15 @@ describe('the window’s calls about canvases', () => {
     call('althar:canvas-close', mine, THREAD)
     expect(reloaded).toHaveBeenCalledWith(THREAD)
     expect(closed).toHaveBeenCalledWith(THREAD)
+    expect(await call('althar:canvas-still', mine, THREAD)).toBe('data:image/jpeg;base64,AAAA')
+    expect(await call('althar:canvas-still', mine, 'nope')).toBeNull()
+    call('althar:canvas-cover', mine, THREAD, true)
+    expect(covered).toHaveBeenLastCalledWith(THREAD, true)
+    call('althar:canvas-cover', mine, THREAD, 'yes')
+    expect(covered).toHaveBeenLastCalledWith(THREAD, false)
+    call('althar:canvas-cover', mine, 'nope', true)
+    expect(covered).toHaveBeenCalledTimes(2)
+    expect(() => call('althar:canvas-cover', { name: 'a canvas' }, THREAD, true)).toThrow('Only Althar’s own windows')
     expect(() => call('althar:canvas-close', { name: 'a canvas' }, THREAD)).toThrow('Only Althar’s own windows')
   })
 })

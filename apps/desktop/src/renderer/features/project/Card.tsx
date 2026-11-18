@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
+import type { AgentStatus, ChangeSummary, PlanStep, Product, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
   type IssueRefProps,
   type LaunchStep,
@@ -16,7 +16,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { useServices } from '../../data/services'
 import { openBlockers, standsOf } from '../../shared/blockers'
-import { externalWaitWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
+import { externalWaitWords, holdersWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { localText } from '../../shared/local'
@@ -111,9 +111,17 @@ export const endOf = (end: TaskEnd): End => (end === TaskEnd.DraftPr ? 'draft' :
 const placeOf = (where: Where): WorksIn => (where === 'checkout' ? WorksIn.Local : WorksIn.Worktree)
 const whereOf = (place: WorksIn): Where => (place === WorksIn.Local ? 'checkout' : 'worktree')
 
-/** The issue a task came from, as the kit marks it. */
-const fromOf = (card: TaskCardContent): IssueRefProps | undefined =>
-  card.issue === null ? undefined : { mark: productBrand(card.issue.product), id: card.issue.key, linear: card.issue.product === 'linear' }
+/** The issues a task came from, as the kit marks them: its first, and any others after it. */
+const fromOf = (card: TaskCardContent): IssueRefProps | undefined => {
+  if (card.issue === null) return undefined
+  const refOf = (issue: { readonly product: Product; readonly key: string }) => ({
+    mark: productBrand(issue.product),
+    id: issue.key,
+    linear: issue.product === 'linear',
+  })
+  const also = (card.fromIssues ?? []).slice(1).map(refOf)
+  return { ...refOf(card.issue), ...(also.length === 0 ? {} : { also }) }
+}
 
 /**
  * The plan's steps as the kit shows them, by model; the agent's id rides on
@@ -163,12 +171,14 @@ function PlanCard({
   plan,
   actions,
   queued,
+  queuedTitle,
 }: {
   card: TaskCardContent
   plan: Plan
   actions: CardActions
   /** Started, waiting for a free agent: what for. */
   queued?: string
+  queuedTitle?: string
 }) {
   const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
@@ -263,6 +273,7 @@ function PlanCard({
       }}
       wait={Math.max(1, plan.startsAfter ?? COUNTDOWN)}
       {...(queued === undefined ? {} : { queued })}
+      {...(queuedTitle === undefined ? {} : { queuedTitle })}
       {...(waitsFor.length === 0 ? {} : { waitsFor })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
@@ -330,7 +341,16 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
   if (card.planWaits === true && card.queued !== null && card.plan !== null)
-    return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
+    return (
+      <PlanCard
+        key={card.plan.id}
+        card={card}
+        plan={card.plan}
+        actions={actions}
+        queued={queuedWords(card.queued)}
+        queuedTitle={holdersWords(card.queued)}
+      />
+    )
   // So does one started Local that waits for its checkout (ADR-091).
   if (card.planWaits === true && card.waitsForCheckout != null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={localText.waits(card.waitsForCheckout)} />

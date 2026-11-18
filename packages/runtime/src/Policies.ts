@@ -120,6 +120,12 @@ export const ProjectRules = Schema.Struct({
   ),
   moveIssues: Schema.optional(Schema.Boolean),
   /**
+   * Whether a task's pull request is linked on the issue it came from, as
+   * Althar opens it: an attachment on Linear and Trello, a remote link on
+   * Jira, a comment on ClickUp. On without it.
+   */
+  linkIssues: Schema.optional(Schema.Boolean),
+  /**
    * What an explicitly configured review after merge brings back (docs/decisions/reviews.md, "An explicit review after merge"): `major`, only blocking and major findings put the task in Needs you, the rest stay in the thread; `all`, any
    * finding does; `none`, no review is owed after the merge. `major` without it, a project made before it included.
    */
@@ -225,6 +231,9 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
+
+/** Whether a revision's rules link a task's pull request on its issue as it opens: they do unless the person turned it off. */
+export const linksIssues = (rules: ProjectRules): boolean => rules.linkIssues ?? true
 
 /** What a revision's rules have an explicitly requested review after merge bring back: only major findings, unless the person chose. */
 export const afterMergeReviewOf = (rules: ProjectRules): AfterMergeRule => rules.afterMergeReview ?? 'major'

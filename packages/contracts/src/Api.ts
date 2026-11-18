@@ -1,3 +1,4 @@
+import { PairingInvitation, PairingTokenHash } from './pairing'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { AcpCatalog, AcpConnection } from './agentCatalog'
 import { AttentionEvent } from './attention'
@@ -959,7 +960,17 @@ export const ChangeTarget = Schema.Literals(['upstream', 'fork', 'upstream_branc
 export type ChangeTarget = typeof ChangeTarget.Type
 
 /** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
-export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export const Product = Schema.Literals([
+  'github',
+  'gitlab',
+  'bitbucket_cloud',
+  'bitbucket_dc',
+  'linear',
+  'jira_cloud',
+  'jira_dc',
+  'trello',
+  'clickup',
+])
 export type Product = typeof Product.Type
 
 /**
@@ -1291,6 +1302,8 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved along with it: to its tracker's In Progress as it starts, In Review and Done with its pull request. */
   moveIssues: Schema.Boolean,
+  /** Whether a task's pull request is linked on its issue as it opens: an attachment, a remote link, or a comment on ClickUp. */
+  linkIssues: Schema.Boolean,
   /** What a small change's review after it merges brings back to the person: only major findings, any, or no review at all. */
   afterMergeReview: AfterMergeRule,
   /** Whether skill and OpenSpec files may be written to, committed in, or pushed from the project's repositories; each off unless turned on. */
@@ -1364,7 +1377,7 @@ export const ConnectionSummary = Schema.Struct({
 export type ConnectionSummary = typeof ConnectionSummary.Type
 
 /** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
-export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello', 'clickup'])
 export type Service = typeof Service.Type
 
 /** A product a person can connect, and how they sign in to it. */
@@ -1552,6 +1565,15 @@ export const IssueSummary = Schema.Struct({
   container: Schema.NullOr(Schema.String),
 })
 export type IssueSummary = typeof IssueSummary.Type
+
+/** An issue a task came from: as last seen, and whether the task does only part of it, so its merge comments on it rather than closing it. */
+export const TaskIssue = Schema.Struct({
+  ...IssueSummary.fields,
+  partOf: Schema.optional(Schema.Boolean),
+  /** The id of the task's tie to it, which names it alone where two trackers share its key. Absent from a runtime before. */
+  link: Schema.optional(Schema.String),
+})
+export type TaskIssue = typeof TaskIssue.Type
 
 export const IssueList = Schema.Struct({ issues: Schema.Array(IssueSummary) })
 export type IssueList = typeof IssueList.Type
@@ -2602,6 +2624,16 @@ export type LinkedTask = typeof LinkedTask.Type
 export const TaskBlocker = Schema.Struct({ ...LinkedTask.fields, stands: BlockerStanding })
 export type TaskBlocker = typeof TaskBlocker.Type
 
+/** An issue a task came from, as its card shows it, with the connection Althar reads it and moves it through, where it has one. */
+export const CardIssue = Schema.Struct({
+  product: Product,
+  key: Schema.String,
+  title: Schema.String,
+  url: Schema.String,
+  connectionId: Schema.optional(Schema.String),
+})
+export type CardIssue = typeof CardIssue.Type
+
 export const TaskCard = Schema.Struct({
   /** Open errands concerning this task, from durable records. */
   errands: Schema.optional(Schema.Array(Schema.String)),
@@ -2670,16 +2702,10 @@ export const TaskCard = Schema.Struct({
       repositoryId: Schema.optional(Schema.String),
     }),
   ),
-  /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
-  issue: Schema.NullOr(
-    Schema.Struct({
-      product: Product,
-      key: Schema.String,
-      title: Schema.String,
-      url: Schema.String,
-      connectionId: Schema.optional(Schema.String),
-    }),
-  ),
+  /** The (first) issue it came from, and the connection Althar reads it and moves it through, where it has one. */
+  issue: Schema.NullOr(CardIssue),
+  /** Each issue it came from, on any trackers, the first being `issue`. Absent where it came from one or none, and from a runtime before. */
+  fromIssues: Schema.optional(Schema.Array(CardIssue)),
   /** Its pull request, once opened: the open one, else its latest. */
   change: Schema.NullOr(ChangeSummary),
   /** Its other pull requests, newest first: those of earlier rounds of its work, merged or closed (ADR-034). */
@@ -4115,10 +4141,12 @@ export const ThreadSnapshot = Schema.Struct({
     /** When its work started, and when it settled: how long it has run. */
     startedAt: Schema.NullOr(Schema.String),
     settledAt: Schema.NullOr(Schema.String),
-    /** The issue it came from. */
+    /** The (first) issue it came from. */
     issue: Schema.NullOr(IssueSummary),
-    /** It does only part of its issue: its merge comments on it and leaves it open, rather than closing it. */
+    /** It does only part of its (first) issue: its merge comments on it and leaves it open, rather than closing it. */
     issuePartOf: Schema.optional(Schema.Boolean),
+    /** Each issue it came from, on any trackers, the first being `issue`, each with its own `partOf`. Absent from a runtime before. */
+    fromIssues: Schema.optional(Schema.Array(TaskIssue)),
     /** Its pull requests, as last seen, oldest first. */
     changes: Schema.Array(ChangeSummary),
     /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
@@ -4781,6 +4809,9 @@ export const AttentionApi = RpcGroup.make(
 ).middleware(ClientAuthority)
 
 const socketCalls = new Set<string>([
+  'IssueDevicePairing',
+  'ListClientDevices',
+  'RevokeConnectionDevice',
   'GetConnectionInfo',
   'Status',
   'ListProjects',
@@ -4826,6 +4857,8 @@ const socketCalls = new Set<string>([
 ])
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
+/** The same deny-by-default policy used at authenticated ingress, for clients that show their connection's capabilities. */
+export const socketCanCall = (tag: string): boolean => tag === 'WatchFrom' || tag === 'WatchAttention' || socketCalls.has(tag)
 
 /** The prompt returned to the composer after its turn and later conversation were undone. */
 export const UndoTurnResult = Schema.Struct({
@@ -4836,7 +4869,7 @@ export const UndoTurnResult = Schema.Struct({
 export type UndoTurnResult = typeof UndoTurnResult.Type
 
 const call = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
-  Rpc.make(tag, { payload, success, error: ApiError }).annotate(SocketAllowed, socketCalls.has(tag))
+  Rpc.make(tag, { payload, success, error: ApiError }).annotate(SocketAllowed, socketCanCall(tag))
 
 /** A command: what it says, and the client's id for it. */
 const command = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
@@ -4846,6 +4879,8 @@ const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, ma
 
 const ConnectionApi = RpcGroup.make(
   call('GetConnectionInfo', {}, ConnectionInfo),
+  command('IssueDevicePairing', { tokenHash: PairingTokenHash }, PairingInvitation),
+  command('RevokeConnectionDevice', { deviceId: ClientDeviceId }, Schema.Void),
   call('ListClientDevices', ClientListOptions.fields, ClientPage),
   command(
     'RegisterClientDevice',
@@ -5035,6 +5070,8 @@ const ProjectApi = RpcGroup.make(
       title: Schema.String,
       description: Schema.optional(Schema.String),
       issue: Schema.optional(Schema.String),
+      /** Other issues it comes from, beside issue, on any trackers: each its link or key. */
+      issues: Schema.optional(Schema.Array(Schema.String)),
       /** The project's repositories it changes, by name: needed only in a project of several. */
       repositories: Schema.optional(Schema.Array(Schema.String)),
     },
@@ -5175,6 +5212,8 @@ const ProjectApi = RpcGroup.make(
       steps: Schema.Array(PlanStep),
       /** The issue it comes from: its link or its key. */
       issue: Schema.optional(Schema.String),
+      /** Other issues it comes from, beside issue, on any trackers: each its link or key. */
+      issues: Schema.optional(Schema.Array(Schema.String)),
       /** What happens when the work is done; without it, a draft pull request where the repository's host is connected. */
       end: Schema.optional(Schema.NullOr(TaskEnd)),
       /** The project's repositories it changes, by name: needed only in a project of several. */
@@ -5246,7 +5285,8 @@ const ProjectApi = RpcGroup.make(
    */
   command('PreferIssueCards', { threadId: Schema.String, atOnce: Schema.Boolean }, Schema.Void),
   /** Whether a task does only part of its issue: its merge comments on the issue and leaves it open, rather than closing it. */
-  command('SetTaskIssuePart', { taskId: Schema.String, partOf: Schema.Boolean }, Schema.Void),
+  /** Whether a task does only part of an issue it came from: the one named by its ref or key, or its first where none is. */
+  command('SetTaskIssuePart', { taskId: Schema.String, partOf: Schema.Boolean, issue: Schema.optional(Schema.String) }, Schema.Void),
   /** Discards changes to issues: nothing changes on the tracker. */
   command('DiscardIssueChanges', { changesId: Schema.String }, Schema.Void),
   /**
@@ -5855,6 +5895,7 @@ const WorkApi = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      linkIssues: Schema.optional(Schema.Boolean),
       afterMergeReview: Schema.optional(AfterMergeRule),
       repositoryFiles: Schema.optional(RepositoryFilesSetting),
       /** What the person changed of what leads' sandboxes let through, each list whole. */

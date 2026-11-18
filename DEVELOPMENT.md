@@ -78,7 +78,7 @@ everything, Windows' tests, coverage and the packages too, after merge.
 
 [ARCHITECTURE.md](ARCHITECTURE.md) is the target every app and package moves toward. In short:
 
-- Strict TypeScript for the existing app and home; Rust for the planned worker supervisor and sandbox execution agent, with a Protobuf worker contract ([Foundations](docs/decisions/foundations.md#remote-connections-and-native-workers-decided-not-built)). Validate anything untrusted at runtime in either language.
+- Strict TypeScript for the existing app and home; Rust for the planned worker supervisor and sandbox execution agent, with a Protobuf worker contract ([Foundations](docs/decisions/foundations.md#remote-connections-and-native-workers)). Validate anything untrusted at runtime in either language.
 - Tests first for new behaviour, and at least 90% line and branch coverage in each app and package.
 - Accessibility to WCAG 2.2 AA from the first implementation.
 - A consequential decision amends its area document in [`docs/decisions`](docs/decisions), with a dated Changes entry; undecided proposals stay in `proposed/`. Do not add numbered ADRs. An exception gets an owner and an expiry.
@@ -89,6 +89,10 @@ uses it. The desktop app is MVVM in feature folders
 ([ADR-010](docs/decisions/foundations.md#the-desktop-apps-layers)).
 
 Each app and package has its own `ARCHITECTURE.md` for what is specific to it. Before naming anything on screen, check [the glossary](docs/glossary.md).
+
+### Background work shares the machine
+
+Althar automatically runs agent process families at background priority and uses CPU weights where delegated Linux groups or Windows jobs permit them; macOS also attempts its background scheduling policy. Native commands from one session share a worker identity, independent of the language or runner. Sustained machine pressure temporarily reduces new autonomous admissions and recovery restores them, without rewriting the agent cap or killing running builds. Missing OS controls keep the normal priority and admission fallback. No project worker flags or extra resource setup are required. [ADR-106](docs/decisions/proposed/106-builds-and-tests-share-a-host-resource-budget.md) describes the platform limits and tests.
 
 ### Tests that hold
 

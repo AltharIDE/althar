@@ -1424,6 +1424,8 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // Its pull request is linked on the issue it came from, until the person says.
+          linkIssues: true,
           // A small change's review after it merges brings back only blocking and major findings, until the person says.
           afterMergeReview: 'major',
           // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
@@ -2782,6 +2784,8 @@ describe('code hosts and trackers, through the API', () => {
           description: '[lead:finish] [lead:edit]',
           steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
           issue: 'MER-231',
+          // The same issue again, in another case, is tied once.
+          issues: ['mer-231', ' '],
         })
         assert.strictEqual(started.branch, 'althar/mer-231-rate-limit-refunds')
         const thread = yield* until(client.GetThread({ threadId: started.threadId }), (snapshot) => snapshot.task.changes.length === 1)
@@ -2802,6 +2806,18 @@ describe('code hosts and trackers, through the API', () => {
         assert.strictEqual(refused._tag, 'ApiError')
         yield* client.MarkReady({ commandId: commandId(), taskId: started.id })
         assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.draft)
+        // Its issue switched to only part of, its first where none is named: its pull request says so in the words trackers read.
+        yield* client.SetTaskIssuePart({ commandId: commandId(), taskId: started.id, partOf: true })
+        yield* until(
+          Effect.sync(() => github.changes[0]?.body ?? ''),
+          (body) => body.includes('Part of [MER-231]('),
+        )
+        const tie = (yield* client.GetThread({ threadId: started.threadId })).task.fromIssues?.[0]?.link ?? ''
+        yield* client.SetTaskIssuePart({ commandId: commandId(), taskId: started.id, partOf: false, issue: tie })
+        yield* until(
+          Effect.sync(() => github.changes[0]?.body ?? ''),
+          (body) => body.includes('Issue: [MER-231]('),
+        )
         // On the board it is ready to accept, its pull request with it.
         const ready = (yield* client.GetBoard({ projectId: project.id })).tasks.find((task) => task.taskId === started.id)
         assert.deepInclude(ready, { phase: 'ready', changed: null })

@@ -1,3 +1,5 @@
+import { configureNetwork, disableNetwork } from './network'
+import { issuePairing, listConnectionDevices, revokeConnectionDevice } from './pairing'
 import { join } from 'node:path'
 
 import { Cause, Effect, Option } from 'effect'
@@ -74,6 +76,37 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
               ),
       })
     switch (options.command) {
+      case 'configure-network': {
+        const configured = yield* configuredHome(options)
+        const network = yield* configureNetwork(configured)
+        return yield* out(network, `Direct access configured: ${network.origin}\nRestart the host explicitly to apply this setting.`)
+      }
+      case 'disable-network': {
+        const configured = yield* configuredHome(options)
+        yield* disableNetwork(configured.profile)
+        return yield* out({ enabled: false }, 'Direct access disabled for the next start. Restart the host to close its listener.')
+      }
+      case 'pair': {
+        const configured = yield* configuredHome(options)
+        const invitation = yield* issuePairing(configured)
+        return yield* out(invitation, `Home: ${invitation.homeId}\nPairing code (single use, expires in five minutes):\n${invitation.code}`)
+      }
+      case 'devices': {
+        const page = yield* listConnectionDevices(options)
+        return yield* out(
+          page,
+          page.clients
+            .map((device) => `${device.deviceId}  ${device.name}  ${device.role}  ${device.revokedAt === null ? 'active' : 'revoked'}`)
+            .join('\n') + (page.next === null ? '' : `\nMore devices: run devices --after ${page.next}`),
+        )
+      }
+      case 'revoke-device': {
+        yield* revokeConnectionDevice(options)
+        return yield* out(
+          { deviceId: options.revokeDeviceId, revoked: true },
+          'Device access revoked. Its live connections close; work already admitted may finish.',
+        )
+      }
       case 'connect-stdio':
         return yield* serveStdio(
           options.profile,

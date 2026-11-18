@@ -88,6 +88,7 @@ export const projectRules: ProjectRulesView = {
   branchPattern: null,
   titlePattern: null,
   moveIssues: true,
+  linkIssues: true,
   afterMergeReview: 'major',
   repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
@@ -723,7 +724,7 @@ export const items = {
       section: 'althar/plans-and-reviews',
       title: 'Plans and reviews',
       project: null,
-      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5' }],
+      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5', changes: ['Review rounds: 3 → 5'] }],
       by: { kind: 'coordinator', taskId: null, title: null },
       loosens: false,
       words: null,
@@ -1084,7 +1085,7 @@ export const agentTools: AgentTools = {
 
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
-  const watching: Array<number | undefined> = []
+  const watching: Array<number | import('@althar/contracts').FeedPosition | undefined> = []
   const starts = new Set<() => void>()
   const client: Client = {
     status: vi.fn(async () => status),
