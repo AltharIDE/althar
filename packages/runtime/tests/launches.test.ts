@@ -7,6 +7,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import type { ProjectId } from '@althar/domain'
 import { migrations } from '@althar/persistence-sqlite'
 
 import { Coordinator } from '../src/Coordinator'
@@ -16,6 +17,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { lineOf, runCommandIn, scriptsIn } from '../src/runCommand'
 import * as Runtime from '../src/Runtime'
+import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, until } from './support'
 
@@ -545,16 +547,20 @@ describe('what a project runs', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('finds the task that ran what a lead kept before it was said, and drops it once that task’s worktree is gone', () =>
+  it.live('finds the task that kept what a lead kept before it was said, only where its project’s threads name one', () =>
     Effect.gen(function* () {
       const launches = yield* Launches
       const projects = yield* Projects
       const sql = yield* SqlClient.SqlClient
       const { projectId } = yield* open(twoServers())
-      const made = (title: string) =>
-        Effect.flatMap(Runtime.envelope('task.create', { title }), (envelope) => projects.createTask({ envelope, projectId, title }))
-      const gone = yield* made('Draft a lab')
-      const working = yield* made('Still at work')
+      const elsewhere = yield* open(twoServers())
+      const made = (inProject: string, title: string) =>
+        Effect.flatMap(Runtime.envelope('task.create', { title }), (envelope) =>
+          projects.createTask({ envelope, projectId: inProject, title }),
+        )
+      const gone = yield* made(projectId, 'Draft a lab')
+      const working = yield* made(projectId, 'Still at work')
+      const other = yield* made(elsewhere.projectId, 'Another project’s')
       const leadOf = (task: { taskId: string; threadId: string }): ToolAccess => ({
         role: 'lead',
         projectId,
@@ -562,42 +568,121 @@ describe('what a project runs', () => {
         sessionId: 'none',
         taskId: task.taskId,
       })
+      /** A lead's keep_run call as its thread kept it. */
+      const called = (task: { threadId: string }, inProject: string, command: string) =>
+        addItem(
+          { projectId: inProject as ProjectId, threadId: task.threadId },
+          'tool_call',
+          {
+            title: 'mcp__althar__keep_run',
+            kind: 'other',
+            status: 'completed',
+            rawInput: { command },
+          },
+          { toolCallId: `call-${Math.random()}` },
+        )
+      const idOf = (name: string) =>
+        Effect.map(launches.runnables(projectId, null), (all) => all.find((one) => one.name === name)?.id ?? '')
+      const ran = (task: { taskId: string; threadId: string }, name: string) =>
+        Effect.gen(function* () {
+          const id = yield* idOf(name)
+          const started = yield* launches.start({ projectId, taskId: task.taskId, runnableId: id, threadId: task.threadId })
+          yield* until(cardsIn({ threadId: task.threadId }), (all) => all.some((card) => card.runnableId === id))
+          yield* launches.stop(started.id).pipe(Effect.ignore)
+        })
+      // Lab: kept and run at once by its task. Kit: the same, though another project's lead kept the same command.
       yield* callTool(leadOf(gone), 'keep_run', { name: 'Lab', command: 'node lab.js' })
+      yield* ran(gone, 'Lab')
       yield* callTool(leadOf(working), 'keep_run', { name: 'Kit', command: 'node kit.js' })
-      // Each ran in its task, which its card there says.
-      for (const [task, name] of [
-        [gone, 'Lab'],
-        [working, 'Kit'],
-      ] as const) {
-        const id = (yield* launches.runnables(projectId, null)).find((one) => one.name === name)?.id ?? ''
-        const started = yield* launches.start({ projectId, taskId: task.taskId, runnableId: id, threadId: task.threadId })
-        yield* until(cardsIn({ threadId: task.threadId }), (all) => all.some((card) => card.runnableId === id))
-        yield* launches.stop(started.id).pipe(Effect.ignore)
-      }
-      // As kept before a run remembered its task: the store's migration finds it from the thread.
+      yield* ran(working, 'Kit')
+      yield* called(other, elsewhere.projectId, 'node kit.js')
+      // Shared: kept long before another task ran it. Twice: two tasks' leads kept the same command.
+      yield* callTool(leadOf(gone), 'keep_run', { name: 'Shared', command: 'node shared.js' })
+      yield* sql`UPDATE runnables SET created_at = ${new Date(Date.now() - 600_000).toISOString()} WHERE name = 'Shared'`
+      yield* ran(working, 'Shared')
+      yield* callTool(leadOf(gone), 'keep_run', { name: 'Twice', command: 'node twice.js' })
+      yield* called(gone, projectId, 'node twice.js')
+      yield* called(working, projectId, 'node twice.js')
+      // As kept before a run remembered its task: the store's migration finds it from the threads.
       yield* sql`UPDATE runnables SET task_id = NULL`
-      const backfill = migrations.find((one) => one.key === '0093_runnable_task')?.statements[1] ?? ''
-      yield* sql.unsafe(backfill)
-      const linked = yield* sql<{
-        name: string
-        taskId: string | null
-      }>`SELECT name, task_id FROM runnables WHERE name IS NOT NULL ORDER BY position`
+      yield* sql.unsafe(migrations.find((one) => one.key === '0093_runnable_task')?.statements[1] ?? '')
+      const linked = yield* sql<{ name: string; taskId: string | null }>`
+        SELECT name, task_id FROM runnables WHERE name IS NOT NULL ORDER BY position`
       assert.deepStrictEqual(
         linked.map((row) => [row.name, row.taskId]),
         [
           ['Lab', gone.taskId],
           ['Kit', working.taskId],
+          ['Shared', null],
+          ['Twice', null],
         ],
       )
-      // Once a worktree went, Althar starting drops what its task kept, and nothing of a task still at work.
+      // Once its worktree went, Althar starting drops what its task kept, and nothing of a task still at work.
       yield* sql`UPDATE workspaces SET state = 'cleaned' WHERE task_id = ${gone.taskId}`
       assert.deepStrictEqual(yield* launches.dropCleanedUp(), ['Lab'])
-      assert.deepStrictEqual(yield* launches.dropCleanedUp(), [])
       assert.deepStrictEqual(
         (yield* launches.runnables(projectId, null)).flatMap((one) => (one.own ? [] : [one.name])),
-        ['Kit'],
+        ['Kit', 'Shared', 'Twice'],
       )
     }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live(
+    'drops what a cleaned-up task kept once, waits where its branch can’t be read, and leaves what the person changes meanwhile',
+    () =>
+      Effect.gen(function* () {
+        const launches = yield* Launches
+        const projects = yield* Projects
+        const instance = yield* Instance
+        const sql = yield* SqlClient.SqlClient
+        const { projectId } = yield* open(twoServers())
+        const gone = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', { title: 'Draft a lab' }),
+          projectId,
+          title: 'Draft a lab',
+        })
+        const lead: ToolAccess = { role: 'lead', projectId, threadId: gone.threadId, sessionId: 'none', taskId: gone.taskId }
+        // Each names a file only the task's branch had: what is on the default branch has to be read to know.
+        for (const name of ['Drafting lab', 'Search lab', 'Errand lab'])
+          yield* callTool(lead, 'keep_run', { name, command: `node lab/${name.split(' ')[0]!.toLowerCase()}.js` })
+        yield* sql`UPDATE workspaces SET state = 'cleaned' WHERE task_id = ${gone.taskId}`
+        const tasksOf = sql<{ name: string; taskId: string | null }>`SELECT name, task_id FROM runnables WHERE name LIKE '% lab'`
+        // Its default branch can't be read here now: nothing goes, and each is still its task's, for the next sweep.
+        const [binding] = yield* sql<{
+          id: string
+          base: string | null
+        }>`SELECT id, default_base_ref AS base FROM repository_bindings WHERE project_id = ${projectId}`
+        yield* sql`UPDATE repository_bindings SET default_base_ref = 'not-fetched' WHERE id = ${binding?.id ?? ''}`
+        assert.deepStrictEqual(yield* launches.dropCleanedUp(), [])
+        assert.isTrue((yield* tasksOf).every((row) => row.taskId === gone.taskId))
+        yield* sql`UPDATE repository_bindings SET default_base_ref = ${binding?.base ?? null} WHERE id = ${binding?.id ?? ''}`
+        // Two sweeps at once, as Althar starting and a folder going, and the person changing one meanwhile: each goes once,
+        // said once; the one the person changed, before the sweep got to it, stays theirs.
+        const errand = (yield* launches.runnables(projectId, null)).find((one) => one.name === 'Errand lab')?.id ?? ''
+        const [first, second, edited] = yield* Effect.all(
+          [
+            launches.dropCleanedUp(),
+            launches.dropCleanedUp(gone.taskId),
+            Effect.exit(
+              launches.keepRunnable({ projectId, id: errand, name: 'Errand lab', command: 'node errand.js', actorId: instance.personId }),
+            ),
+          ],
+          { concurrency: 'unbounded' },
+        )
+        const said = yield* sql<{
+          payload: string
+        }>`SELECT payload FROM record_events WHERE type = 'project.runnable_dropped' ORDER BY sequence`
+        const saidNames = said.map((row) => (JSON.parse(row.payload) as { name: string }).name)
+        assert.sameMembers([...first, ...second], saidNames)
+        assert.strictEqual(new Set(saidNames).size, saidNames.length)
+        assert.includeMembers(saidNames, ['Drafting lab', 'Search lab'])
+        const [left] = yield* sql<{ droppedAt: string | null; kind: string }>`
+        SELECT r.dropped_at, a.kind FROM runnables r JOIN actors a ON a.id = r.kept_by_actor_id WHERE r.id = ${errand}`
+        // Changed before it went, it is the person's and stays, unsaid; else it went once, and the change came too late.
+        if (saidNames.includes('Errand lab')) assert.isNotNull(left?.droppedAt)
+        else assert.deepStrictEqual([left?.droppedAt, left?.kind, edited._tag], [null, 'person', 'Success'])
+        assert.deepStrictEqual(yield* launches.dropCleanedUp(), [])
+      }).pipe(Effect.provide(withQueries())),
   )
 
   it.live('lets agents keep more to run by name, run one by name, and drop it', () =>

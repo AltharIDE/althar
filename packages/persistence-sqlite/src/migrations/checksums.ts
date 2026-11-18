@@ -96,5 +96,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0090_card_reads': '2c2b1b4d1c7d62ef08f2dab3f6002a924e9f9f0005be56a4f2e51e10c8c263a0',
   '0091_clickup': '9d380e4871a714d04f9d9bcd642a55855fe05420b4121aec76f7f3df7980cb95',
   '0092_brought_in': '2f295d69e42c0a7637980466e966cfe5076fabd974a789f2fe3edbfd66f35d9e',
-  '0093_runnable_task': 'f2409b00e778421ea5d931bc27d8312329f53c1b2e765e2dc9cf7c13c276bff5',
+  '0093_runnable_task': '7b70669a9a55c393da259f237895fb766dd1a6c3ecc96e8164e8635c27b23bf1',
 }

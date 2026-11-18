@@ -228,7 +228,8 @@ export class Launches extends Context.Service<
      * list, unless the same is kept already; or, by id, a change to one. A
      * null command is its repository's own way. Kept for a task, by its lead,
      * it goes once that task's worktrees are cleaned up (`dropCleanedUp`);
-     * kept or changed by anyone else, it belongs to no task. Says which it is.
+     * kept or changed by anyone else, it belongs to no task. One the person
+     * kept or changed stays theirs, whoever changes it after. Says which it is.
      */
     keepRunnable(input: {
       readonly projectId: string
@@ -246,9 +247,11 @@ export class Launches extends Context.Service<
      * task, once all that task's worktrees are cleaned up, each with a line
      * in its project's record: what they run mostly lived only on the task's
      * branch. One whose every file it names is on its repository's default
-     * branch, as when its config merged, stays, and belongs to no task from
-     * then; so does one the person kept or changed. Says the names of those
-     * dropped.
+     * branch, as when its config merged, or whose files can't be told for
+     * sure, stays, and belongs to no task from then; so does one the person
+     * kept or changed. One whose repository can't be read here now waits for
+     * the next sweep. Only one still as it was read goes. Says the names of
+     * those dropped.
      */
     dropCleanedUp(taskId?: string): Effect.Effect<ReadonlyArray<string>, unknown>
     /** Puts the project's runnables in this order, the first its default; any not named keep theirs, after. */
@@ -1077,14 +1080,16 @@ export class Launches extends Context.Service<
               )
               return { id, name, repository: binding.name }
             }
+            // One the person kept or changed stays theirs, whoever changes it after: no task's, so it never goes with one.
+            const theirs = was.actorKind === 'person'
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 yield* sql`UPDATE runnables SET ${sql.update({
                   bindingId: binding.id,
                   name,
                   command,
-                  keptByActorId: input.actorId,
-                  taskId: input.taskId ?? null,
+                  ...(theirs ? {} : { keptByActorId: input.actorId }),
+                  taskId: theirs ? null : (input.taskId ?? null),
                 })}, revision = revision + 1 WHERE id = ${was.id}`
                 yield* recorded(input.projectId, input.actorId, 'project.runnable_kept', {
                   id: was.id,
@@ -1137,22 +1142,46 @@ export class Launches extends Context.Service<
           }),
         )
 
-      /** Whether every file a command names is on its repository's default branch, as fetched or here: none named is none there. */
-      const onDefaultBranch = (binding: Binding, command: string) =>
+      /**
+       * What becomes of a run a task kept once its worktrees went: `keep` where every file it names is on its repository's
+       * default branch, as fetched or here, or where what it needs can't be told for sure; `drop` where it names none, or one
+       * that isn't there; `later` where its repository can't be read here now (on another device, its folder or branch
+       * missing), to look again as Althar next starts.
+       */
+      const fateOf = (binding: Binding | undefined, command: string, within: string | null) =>
         Effect.gen(function* () {
-          const files = filesNamed(command, binding.within)
-          if (files.length === 0) return false
+          const named = filesNamed(command, within)
+          if (named === null) return 'keep' as const
+          // A folder outside the repository it runs in: gone, it can't run; there, what it needs there can't be told.
+          if (named.outside.length > 0) return named.outside.every((folder) => existsSync(folder)) ? ('keep' as const) : ('drop' as const)
+          if (named.files.length === 0) return 'drop' as const
+          if (binding === undefined || !existsSync(binding.repository)) return 'later' as const
           const { remote, base } = yield* startOf({
             repository: binding.repository,
             base: binding.defaultBase,
             changeTarget: binding.changeTarget,
           }).pipe(Effect.orElseSucceed(() => ({ remote: 'origin', base: binding.defaultBase ?? 'main' })))
-          const holds = (ref: string) =>
-            Effect.forEach(files, (file) => git(binding.repository, 'cat-file', '-e', `${ref}:${file}`), { discard: true }).pipe(
+          const refs: Array<string> = []
+          for (const ref of [`refs/remotes/${remote}/${base}`, `refs/heads/${base}`])
+            if (
+              yield* git(binding.repository, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`).pipe(
+                Effect.as(true),
+                Effect.orElseSucceed(() => false),
+              )
+            )
+              refs.push(ref)
+          if (refs.length === 0) return 'later' as const
+          // Its branch read, a file it can't find there isn't there.
+          for (const ref of refs) {
+            const holds = yield* Effect.forEach(named.files, (file) => git(binding.repository, 'cat-file', '-e', `${ref}:${file}`), {
+              discard: true,
+            }).pipe(
               Effect.as(true),
               Effect.orElseSucceed(() => false),
             )
-          return (yield* holds(`refs/remotes/${remote}/${base}`)) || (yield* holds(`refs/heads/${base}`))
+            if (holds) return 'keep' as const
+          }
+          return 'drop' as const
         })
 
       const dropCleanedUp = (taskId?: string) =>
@@ -1160,6 +1189,13 @@ export class Launches extends Context.Service<
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
             // A task's that had a worktree, every one cleaned up now, on any device; a review's copy is no worktree of its.
+            const cleanedUp = (one: string | null) => sql`
+              r.dropped_at IS NULL AND r.task_id IS NOT NULL AND r.command IS NOT NULL
+                AND (${one} IS NULL OR r.task_id = ${one})
+                AND coalesce((SELECT a.kind FROM actors a WHERE a.id = r.kept_by_actor_id), '') <> 'person'
+                AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = r.task_id AND w.access = 'write' AND w.reviewing IS NULL)
+                AND NOT EXISTS (SELECT 1 FROM workspaces w
+                  WHERE w.task_id = r.task_id AND w.access = 'write' AND w.reviewing IS NULL AND w.state <> 'cleaned')`
             const gone = yield* sql<{
               id: string
               projectId: string
@@ -1167,15 +1203,10 @@ export class Launches extends Context.Service<
               name: string | null
               command: string
               taskId: string
+              revision: number
             }>`
-              SELECT r.id, r.project_id, r.binding_id, r.name, r.command, r.task_id
-              FROM runnables r LEFT JOIN actors a ON a.id = r.kept_by_actor_id
-              WHERE r.dropped_at IS NULL AND r.task_id IS NOT NULL AND r.command IS NOT NULL
-                AND (${taskId ?? null} IS NULL OR r.task_id = ${taskId ?? null})
-                AND coalesce(a.kind, '') <> 'person'
-                AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = r.task_id AND w.access = 'write' AND w.reviewing IS NULL)
-                AND NOT EXISTS (SELECT 1 FROM workspaces w
-                  WHERE w.task_id = r.task_id AND w.access = 'write' AND w.reviewing IS NULL AND w.state <> 'cleaned')
+              SELECT r.id, r.project_id, r.binding_id, r.name, r.command, r.task_id, r.revision
+              FROM runnables r WHERE ${cleanedUp(taskId ?? null)}
               ORDER BY r.project_id, r.position`
             const dropped: Array<string> = []
             const bindings = new Map<string, ReadonlyArray<Binding>>()
@@ -1183,18 +1214,24 @@ export class Launches extends Context.Service<
               const of = bindings.get(run.projectId) ?? (yield* bindingsOf(run.projectId))
               bindings.set(run.projectId, of)
               const binding = of.find((one) => one.id === run.bindingId)
+              const fate = yield* fateOf(binding, run.command, binding?.within ?? null)
+              if (fate === 'later') continue
               const at = yield* timestamp
-              if (binding !== undefined && (yield* onDefaultBranch(binding, run.command))) {
-                // It runs as kept on the default branch: the project's now, not the task's.
-                yield* sql`UPDATE runnables SET task_id = NULL, revision = revision + 1 WHERE id = ${run.id} AND dropped_at IS NULL`
+              // Only as it was read, and still its task's to drop: changed meanwhile, as by the person, or dropped by
+              // another sweep, it is left, and nothing is said.
+              const still = sql`r.id = ${run.id} AND r.revision = ${run.revision} AND r.task_id = ${run.taskId} AND ${cleanedUp(run.taskId)}`
+              if (fate === 'keep') {
+                // It runs as kept on the default branch, or can't be told not to: the project's now, not the task's.
+                yield* sql`UPDATE runnables AS r SET task_id = NULL, revision = revision + 1 WHERE ${still}`
                 continue
               }
-              yield* sql.withTransaction(
+              const went = yield* sql.withTransaction(
                 Effect.gen(function* () {
-                  yield* sql`UPDATE runnables SET ${sql.update({
+                  const changed = yield* sql<{ id: string }>`UPDATE runnables AS r SET ${sql.update({
                     droppedAt: at,
                     droppedByActorId: instance.systemId,
-                  })}, revision = revision + 1 WHERE id = ${run.id} AND dropped_at IS NULL`
+                  })}, revision = revision + 1 WHERE ${still} RETURNING id`
+                  if (changed.length === 0) return false
                   yield* recorded(run.projectId, instance.systemId, 'project.runnable_dropped', {
                     id: run.id,
                     name: run.name,
@@ -1202,9 +1239,10 @@ export class Launches extends Context.Service<
                     task: run.taskId,
                     why: 'worktree_cleaned',
                   })
+                  return true
                 }),
               )
-              dropped.push(run.name ?? run.command)
+              if (went) dropped.push(run.name ?? run.command)
             }
             return dropped
           }),

@@ -465,6 +465,7 @@ describe('a task whose folder was removed', () => {
       const task = yield* finished('done', 4, 'Draft a lab', (root) => {
         mkdirSync(join(root, 'lab'))
         commit(root, 'lab/merged.js', 'merged\n')
+        commit(root, 'lab/my lab.js', 'spaced\n')
       })
       commit(task.worktree, 'lab/drafting.js', 'drafting\n')
       const launches = yield* Launches
@@ -486,10 +487,20 @@ describe('a task whose folder was removed', () => {
       const lead = leadOf(task.taskId, task.threadId)
       yield* callTool(lead, 'keep_run', { name: 'Drafting lab', command: 'node lab/drafting.js' })
       yield* callTool(lead, 'keep_run', { name: 'Merged lab', command: 'cd lab && node merged.js' })
+      yield* callTool(lead, 'keep_run', { name: 'Spaced lab', command: 'node "lab/my lab.js"' })
       yield* callTool(lead, 'keep_run', { name: 'Storybook 6136', command: 'npm run storybook -- --port 6136' })
       yield* callTool(lead, 'keep_run', { name: 'Notes', command: 'node lab/notes.js' })
       yield* callTool(leadOf(other.taskId, other.threadId), 'keep_run', { name: 'Other lab', command: 'node lab/other.js' })
       yield* launches.keepRunnable({ projectId: task.projectId, name: 'Mine', command: 'node mine.js', actorId: instance.personId })
+      // The person's Storybook, which the lead keeps again by its name, and then changes: it stays the person's.
+      yield* launches.keepRunnable({
+        projectId: task.projectId,
+        name: 'Storybook',
+        command: 'npm run storybook',
+        actorId: instance.personId,
+      })
+      yield* callTool(lead, 'keep_run', { name: 'Storybook', command: 'npm run storybook' })
+      yield* callTool(lead, 'keep_run', { name: 'Storybook', command: 'npm run storybook -- --quiet' })
       // The person changes one the lead kept: it is theirs now.
       const notes = (yield* launches.runnables(task.projectId, null)).find((one) => one.name === 'Notes')
       yield* launches.keepRunnable({
@@ -505,9 +516,11 @@ describe('a task whose folder was removed', () => {
         (yield* launches.runnables(task.projectId, null)).flatMap((one) => (one.own ? [] : [[one.name, one.from]])),
         [
           ['Merged lab', 'agent'],
+          ['Spaced lab', 'agent'],
           ['Notes', 'person'],
           ['Other lab', 'agent'],
           ['Mine', 'person'],
+          ['Storybook', 'person'],
         ],
       )
       // Each dropped says so in the project's record, by the task that kept it.
