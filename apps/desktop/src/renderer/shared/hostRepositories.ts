@@ -1,5 +1,8 @@
 import { useQueries } from '@tanstack/react-query'
 
+import type { Client } from '../data/client'
+import type { Host } from '../data/services'
+
 import type { ConnectionList, ConnectionSummary, Product, Service } from '@althar/contracts'
 import type { HostedRepository, SetupHost } from '@althar/ui'
 
@@ -48,6 +51,14 @@ export interface CloneChoice {
   /** A repository main found of the same name, which may be it, on this computer already: added, not cloned, where it is. */
   readonly here: { readonly found: string; readonly where: string } | null
 }
+
+/** Whether two remotes are one repository: the same host, and the same path there, which code hosts read whatever its case. */
+export const sameRepository = (
+  one: { readonly host: string; readonly remote: string },
+  other: { readonly host: string; readonly remote: string },
+) =>
+  one.host.toLowerCase() === other.host.toLowerCase() &&
+  one.remote.replace(/\.git$/, '').toLowerCase() === other.remote.replace(/\.git$/, '').toLowerCase()
 
 /** The code hosts connected and ready. */
 export const readyHosts = (list: ConnectionList | null) =>
@@ -152,7 +163,10 @@ export const useHostRepositories = (
           product: pastedConnection?.product ?? null,
           hostName: pastedConnection?.name ?? ref.host,
           host: ref.host,
-          here: null,
+          here: (() => {
+            const here = foundByName.get((ref.path.split('/').at(-1) ?? '').toLowerCase())
+            return here === undefined ? null : { found: here.id, where: here.where }
+          })(),
         }
   const pasted: HostedRepository | null =
     ref === null || pastedClone === null
@@ -196,4 +210,19 @@ export const useHostRepositories = (
       }
     },
   }
+}
+
+/**
+ * The checkout main found of a chosen repository's name, granted, where it
+ * is that repository: its remote the same one on the same host. Null for one
+ * of the same name that is another, or that can't be read.
+ */
+export const checkoutOf = async (choice: CloneChoice, host: Host, client: Client): Promise<string | null> => {
+  if (choice.here === null) return null
+  const grant = await host.grantFound(choice.here.found).catch(() => null)
+  if (grant === null) return null
+  const reading = await client.readFolder(grant).catch(() => null)
+  const [found] = reading?.kind === 'repository' ? reading.repositories : []
+  const ref = found?.remote == null ? null : remoteOf(found.remote)
+  return ref !== null && sameRepository({ host: ref.host, remote: ref.path }, choice) ? grant : null
 }

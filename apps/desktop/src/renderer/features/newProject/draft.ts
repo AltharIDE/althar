@@ -15,7 +15,7 @@ import { type Client, messageOf, newProjectId } from '../../data/client'
 import { keys, reads as readsOf } from '../../data/reads'
 import type { Host } from '../../data/services'
 import { shortFolder } from '../../shared/folders'
-import type { CloneChoice } from '../../shared/hostRepositories'
+import { type CloneChoice, sameRepository } from '../../shared/hostRepositories'
 import { remoteOf } from '../../shared/remotes'
 
 /*
@@ -207,13 +207,8 @@ export interface DraftActions {
 
 const IDLE: DraftSteps = { source: 'idle', home: 'idle', issues: 'idle' }
 
-/** Whether two remotes are one repository: the same host, and the same path there, which code hosts read whatever its case. */
-export const sameRepository = (
-  one: { readonly host: string; readonly remote: string },
-  other: { readonly host: string; readonly remote: string },
-) =>
-  one.host.toLowerCase() === other.host.toLowerCase() &&
-  one.remote.replace(/\.git$/, '').toLowerCase() === other.remote.replace(/\.git$/, '').toLowerCase()
+/** Kept here too, where the new project's own code and tests have it. */
+export { sameRepository }
 
 /** The ink a draft's mark is drawn in: the person's, or what the runtime would pick beside the projects there are. */
 export const inkOf = (draft: Draft, projects: ReadonlyArray<ProjectSummary>): ProjectInk =>

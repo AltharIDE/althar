@@ -169,6 +169,70 @@ describe('a repository cloned into a project that has some', () => {
     expect(client.addRepositories).not.toHaveBeenCalled()
   })
 
+  it('offers the same path on another host, which is another repository', async () => {
+    // The project's meridian/api is on GitLab; GitHub's meridian/api is another one.
+    const onGitLab = {
+      ...api,
+      host: { ...api.host!, product: 'gitlab' as const, name: 'GitLab', url: 'https://gitlab.com/meridian/api', account: null },
+    }
+    opened({ getRepositories: vi.fn(async () => [onGitLab, web]) })
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    expect(await panel.findByRole('button', { name: 'Clone meridian/api' })).toBeTruthy()
+    expect(panel.getByRole('button', { name: 'Clone meridian/mobile' })).toBeTruthy()
+  })
+
+  /** A checkout named mobile on this computer, its remote `remote`. */
+  const withCheckout = (remote: string) =>
+    [
+      {
+        readFolder: vi.fn(async () => ({
+          kind: 'repository' as const,
+          name: 'mobile',
+          repositories: [{ path: '/Users/me/code/mobile', folder: null, name: 'mobile', branch: 'main', remote, commits: true }],
+          project: null,
+        })),
+      },
+      {
+        findRepositories: vi.fn(async () => ({
+          lookedIn: ['~/code'],
+          repositories: [{ id: 'found_mobile', name: 'mobile', where: '~/code/mobile', branch: 'main', worked: 0 }],
+        })),
+      },
+    ] as const
+
+  it('clones one of the same name as a checkout here that is another repository, saying where it goes', async () => {
+    const [client, host] = withCheckout('git@github.com:someone-else/mobile.git')
+    const opening = opened(client, host)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    await waitFor(() => expect(opening.client.readFolder).toHaveBeenCalledWith('grant_found_mobile'))
+    await userEvent.click(await panel.findByRole('button', { name: 'Clone meridian/mobile' }))
+    expect(panel.getByText('Into ~/code')).toBeTruthy()
+    await userEvent.click(panel.getByRole('button', { name: 'Clone' }))
+    await waitFor(() =>
+      expect(opening.client.cloneRepository).toHaveBeenCalledWith('grant_code', {
+        connectionId: githubConnection.id,
+        path: ['meridian', 'mobile'],
+      }),
+    )
+  })
+
+  it('adds the checkout here that is the repository, chosen from the list or by its URL pasted, and clones nothing', async () => {
+    const [client, host] = withCheckout('git@github.com:meridian/mobile.git')
+    const opening = opened(client, host)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    await userEvent.click(await panel.findByRole('button', { name: 'Add meridian/mobile' }))
+    expect(panel.getByText('~/code/mobile')).toBeTruthy()
+    expect(panel.queryByText('Into ~/code')).toBeNull()
+    await userEvent.type(panel.getByRole('searchbox'), 'https://github.com/meridian/mobile')
+    await userEvent.click(await panel.findByRole('button', { name: /meridian\/mobile$/ }))
+    await userEvent.click(panel.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(opening.client.addRepositories).toHaveBeenCalledWith('p1', 'grant_found_mobile'))
+    expect(opening.client.cloneRepository).not.toHaveBeenCalled()
+  })
+
   it('asks where it goes where there’s nowhere usual, and clones nothing if the person cancels', async () => {
     const { client, host } = opened({}, { clonePlace: vi.fn(async () => null), pickClonePlace: vi.fn(async () => null) })
     await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))

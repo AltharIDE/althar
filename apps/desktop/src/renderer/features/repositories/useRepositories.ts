@@ -9,8 +9,6 @@ import { useServices } from '../../data/services'
 import { device } from '../../shared/device'
 import { shortFolder } from '../../shared/folders'
 import type { CloneChoice } from '../../shared/hostRepositories'
-import { remoteOf } from '../../shared/remotes'
-import { sameRepository } from '../newProject/draft'
 
 /*
  * A project's repositories screen's view model: its repositories as this
@@ -37,6 +35,9 @@ export interface ClonePlace {
   readonly where: string
 }
 
+/** Where a repository chosen comes from: cloned into a place, or a checkout of it on this computer, by its grant. */
+export type CloneTo = ClonePlace | { readonly checkout: string; readonly where: string }
+
 export interface RepositoriesModel {
   /** The project's id, for what puts one of its repositories on a host. */
   readonly projectId: string | null
@@ -56,12 +57,8 @@ export interface RepositoriesModel {
   readonly add: () => Promise<void>
   /** Adds the repositories at each folder dropped on the page. */
   readonly addDropped: (files: ReadonlyArray<File>) => Promise<void>
-  /**
-   * Clones a repository into the folder `into` grants, and adds it: one on
-   * this computer already, the same repository, is added from where it is.
-   * Nowhere given, the person is asked where, should it need cloning.
-   */
-  readonly clone: (choice: CloneChoice, into: ClonePlace | null) => Promise<void>
+  /** Clones a repository into the place given and adds it, or adds the checkout of it found on this computer. */
+  readonly clone: (choice: CloneChoice, to: CloneTo) => Promise<void>
 }
 
 export const useRepositories = (projectId: string): RepositoriesModel => {
@@ -179,45 +176,30 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
     [client, cache, key, projectId, queued],
   )
 
-  /** The repository main found of the chosen one's name, granted, where it is the same repository on the same host. */
-  const foundGrant = useCallback(
-    async (choice: CloneChoice): Promise<string | null> => {
-      if (choice.here === null) return null
-      const grant = await host.grantFound(choice.here.found).catch(() => null)
-      if (grant === null) return null
-      const reading = await client.readFolder(grant).catch(() => null)
-      const [found] = reading?.kind === 'repository' ? reading.repositories : []
-      const ref = found?.remote == null ? null : remoteOf(found.remote)
-      return ref !== null && sameRepository({ host: ref.host, remote: ref.path }, choice) ? grant : null
-    },
-    [client, host],
-  )
-
-  /** Clones it, shown at once where it goes, waiting as a folder read does, then adds it. */
+  /**
+   * Adds it as the panel said: from the checkout on this computer it was
+   * found to be, or cloned into the place shown, waiting on the map where it
+   * goes from the frame it is pressed until it joins them.
+   */
   const clone = useCallback(
-    (choice: CloneChoice, into: ClonePlace | null): Promise<void> => {
+    (choice: CloneChoice, to: CloneTo): Promise<void> => {
       const name = choice.remote.split('/').at(-1) ?? choice.remote
-      const shown = { id: `clone:${choice.id}`, name, where: choice.here?.where ?? `${into?.where ?? '…'}/${name}` }
+      const shown = { id: `clone:${choice.id}`, name, where: 'checkout' in to ? to.where : `${to.where}/${name}` }
       // Shown in the frame it is pressed: the queue shows it again as its turn comes.
       setReading((now) => [...now, shown])
       return queued(async () => {
         setReading([shown])
-        const here = await foundGrant(choice)
-        if (here !== null) {
-          await client.addRepositories(projectId, here)
+        if ('checkout' in to) {
+          await client.addRepositories(projectId, to.checkout)
           return
         }
-        // Not the one here after all: cloned, where the person says where there's nowhere given.
-        const at = into ?? (await host.pickClonePlace())
-        if (at === null) return
-        if (choice.here !== null) setReading([{ ...shown, where: `${at.where}/${name}` }])
-        const cloned = await client.cloneRepository(at.grant, choice.from)
+        const cloned = await client.cloneRepository(to.grant, choice.from)
         // An empty repository clones too, with no commit to branch from: it gets its first, as a folder with no commit does.
         await client.prepareFolder(cloned.grant, cloned.path)
         await client.addRepositories(projectId, cloned.grant)
       })
     },
-    [client, host, projectId, queued, foundGrant],
+    [client, projectId, queued],
   )
 
   return {
