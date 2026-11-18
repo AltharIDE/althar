@@ -149,7 +149,11 @@ export const placeOfLaunch = (launch: Launch, repository?: string): RunPlace => 
 }
 
 /** A run asked for on a branch or pull request, until it runs: fetching, or what went wrong. */
-export type Attempt = { readonly state: 'fetching' } | { readonly state: 'unfetched'; readonly why: string; readonly at: string }
+export type Attempt =
+  | { readonly state: 'fetching' }
+  /** A press, before the runtime says a run exists: `from` is the run it was pressed over, if any, which it replaces once another comes. */
+  | { readonly state: 'starting'; readonly from: string | null }
+  | { readonly state: 'unfetched'; readonly why: string; readonly at: string }
 
 /** The same pull request or branch, whatever repository either says: a run's place says none. */
 const sameRef = (one: RunPlace, other: RunPlace) => {
@@ -182,9 +186,11 @@ export const targetsOf = (
           ? { state: 'fetching' }
           : attempt?.state === 'unfetched'
             ? { state: 'unfetched', why: attempt.why, since: ago(attempt.at, new Date(now)) }
-            : here === undefined
-              ? undefined
-              : runOf(here, now)
+            : attempt?.state === 'starting' && (here === undefined || here.id === attempt.from)
+              ? { state: 'starting' }
+              : here === undefined
+                ? undefined
+                : runOf(here, now)
       return {
         id: one.id,
         ...(one.name === null ? {} : { name: one.name }),
@@ -538,7 +544,7 @@ export function Runs({
   readonly launches: ReadonlyArray<Launch>
   readonly now: string
   /** Runs one in a task's worktree, or with null a copy of the default branch, as the screen runs it. */
-  readonly onRun: (runnableId: string, taskId: string | null) => void
+  readonly onRun: (runnableId: string, taskId: string | null) => void | Promise<void>
   /** Stops a run, as the screen stops it. */
   readonly onStop: (launchId: string) => void
   /** Clears one that ended by itself. */
@@ -628,9 +634,24 @@ export function Runs({
   const ended = (runnableId: string) =>
     launches.findLast((launch) => launch.runnableId === runnableId && runsAt(launch, place) && launch.ended !== null)
 
+  /** What shows as starting lets go once the start has answered and the runtime's launch has had its time to land; a start that failed says so itself. */
+  const letGoOf = (key: string, started: void | Promise<void>) => {
+    const letGo = () => {
+      setTimeout(() => attempt(key, null), STARTING_FOR)
+    }
+    Promise.resolve(started).finally(letGo)
+  }
+
   const run = (runnableId: string) => {
     if (place.choice === undefined) {
-      onRun(runnableId, place.kind === 'task' ? place.key.slice('task:'.length) : null)
+      // Starting at once, as pressed: the runtime's launch takes over when it lands, and a start that never lands lets go.
+      const key = attemptKey(place, runnableId)
+      const mine = launches.filter(
+        (launch) => launch.runnableId === runnableId && runsAt(launch, place, runnables.find((one) => one.id === runnableId)?.repository),
+      )
+      if (live(runnableId) !== undefined) return
+      attempt(key, { state: 'starting', from: mine.at(-1)?.id ?? null })
+      letGoOf(key, onRun(runnableId, place.kind === 'task' ? place.key.slice('task:'.length) : null))
       return
     }
     if (onRunRef === undefined) return

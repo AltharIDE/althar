@@ -81,6 +81,7 @@ import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { pillOf, runIdOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { useHelpMeFix } from '../../shared/helpMeFix'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { localText } from '../../shared/local'
@@ -545,6 +546,8 @@ export function TaskView({
             take: text.carriedTake,
           },
   })
+  // "Help me fix it" on a failed run: a prompt for the composer, unsent.
+  const helpMe = useHelpMeFix(kept, model.snapshot?.session?.turnRunning ?? false, voice.inputRef)
   const { client, host: servicesHost } = useServices()
   // Images and files to send with what the person says, and which agents take images.
   const images = useAttachments(kept, servicesHost)
@@ -1265,7 +1268,11 @@ export function TaskView({
         draft={kept}
         // What a task that finished and isn't a change is likely told next, for Tab to take; its lead marks it done (settle_task). A
         // review's draft is posted by the person, on it, so nothing is suggested there.
-        {...(settleable && done && !embedded ? { suggestion: text.suggest } : {})}
+        {...(helpMe.suggestion !== undefined
+          ? { suggestion: helpMe.suggestion }
+          : settleable && done && !embedded
+            ? { suggestion: text.suggest }
+            : {})}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
@@ -1820,6 +1827,7 @@ export function TaskView({
                                 threadTask={snapshot.task.id}
                                 onStop={(id) => void model.stopLaunch(id)}
                                 onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
+                                onHelp={helpMe.help}
                               />
                             )}
                             // An issue the lead drafted is filed from its card, only when the person says.
