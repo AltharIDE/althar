@@ -172,6 +172,7 @@ private_dir "$root" || fail get UnsafeState
   journal=$root/transfer.jsonl
   : > "$journal"
   : > "$root/transfer.log"
+  chmod 600 -- "$journal" "$root/transfer.log" || fail get UnsafeState
   event get started ",\"bytes\":0,\"totalBytes\":$bytes"
   scratch=$(mktemp -d "$root/transfer.XXXXXXXX") || fail get CannotDownload
   pid=''
@@ -220,6 +221,8 @@ private_dir "$root" || fail get UnsafeState
     tar -xzf "$archive" --no-same-owner --no-same-permissions -C "$scratch/bundle" 2>>"$root/transfer.log" || fail get ReleaseExtractionFailed
     printf '%s' "$envelope" | base64 -d > "$scratch/bundle/.manifest" || fail get InvalidRequest
     printf '%s' "$public_key" | base64 -d > "$scratch/bundle/.release-key" || fail get InvalidRequest
+    # A directory’s default ACL can override the process umask on new files.
+    chmod 600 -- "$scratch/bundle/.manifest" "$scratch/bundle/.release-key" || fail get UnsafeState
     mv -T -- "$scratch/bundle" "$bundle" || fail get ReleaseExtractionFailed
   fi
   [ -d "$bundle" ] && [ ! -L "$bundle" ] || fail get UnsafeState

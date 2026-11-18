@@ -126,7 +126,14 @@ const launch = async (options: HostOptions, commands: ServiceCommands, plan: Pla
     throw failure('NoUserManager', 'Could not reach the systemd user manager in this login session.')
   }
   if (await unitActive(system)) throw locked()
-  const inherited = ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'ALTHAR_HOST_PROFILE'].flatMap((key) => {
+  const inherited = [
+    'HOME',
+    'XDG_CONFIG_HOME',
+    'XDG_DATA_HOME',
+    'XDG_RUNTIME_DIR',
+    'DBUS_SESSION_BUS_ADDRESS',
+    'ALTHAR_HOST_PROFILE',
+  ].flatMap((key) => {
     const value = process.env[key]
     return value === undefined ? [] : [`--setenv=${key}=${value}`]
   })
