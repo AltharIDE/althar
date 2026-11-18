@@ -1,14 +1,14 @@
 import { PAIRING_CODE_MAX_LENGTH } from '@althar/contracts'
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { Button, Code, Dialog, Field, Problem } from '@althar/ui'
+import { useEffect, useId, useRef, useState } from 'react'
+import { Button, Code, Field } from '@althar/ui'
 
 import type { HomesHost } from '../../../homes'
-import { Identity } from './ConnectHome'
+import { FoundHome, Refusal, type Step } from './ConnectHome'
 import { homeProblem } from './useHomes'
 import s from './Homes.module.css'
 
 /** A code identifies the home and its TLS key before the connection credential is exchanged. */
-export function PairHome({ homes, onClose, choice }: { homes: HomesHost; onClose: () => void; choice: ReactNode }) {
+export function usePairStep(homes: HomesHost, onClose: () => void): Step {
   const id = useId()
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
@@ -57,54 +57,56 @@ export function PairHome({ homes, onClose, choice }: { homes: HomesHost; onClose
         }
       })
   }
-  return (
-    <Dialog
-      title="Connect a home"
-      width={480}
-      holding={pending}
-      onClose={onClose}
-      onSubmit={pair}
-      actions={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="signal" busy={pending} disabled={pending || info === null || name.trim() === ''}>
-            {pending ? 'Pairing…' : 'Pair and open'}
-          </Button>
-        </>
-      }
-    >
-      <div className={s.form}>
-        {choice}
-        <label className={s.field} htmlFor={`${id}-code`}>
-          <span>Pairing code</span>
+  return {
+    busy: pending,
+    leave: () => void homes.cancelCheck().catch(() => undefined),
+    submit: pair,
+    action: (
+      <Button type="submit" variant="signal" busy={pending} disabled={pending || info === null || name.trim() === ''}>
+        {pending ? 'Pairing…' : 'Pair and open'}
+      </Button>
+    ),
+    body: (
+      <>
+        <div className={s.field}>
+          <label className={s.fieldLabel} htmlFor={`${id}-code`}>
+            Pairing code
+          </label>
           <Field
             id={`${id}-code`}
             type="password"
             value={code}
             maxLength={PAIRING_CODE_MAX_LENGTH}
             disabled={pending}
+            invalid={problem !== null && info === null}
+            aria-describedby={`${id}-help`}
             autoComplete="off"
             spellCheck={false}
+            // oxlint-disable-next-line jsx-a11y/no-autofocus -- the dialog is opened to paste a code; its first field takes the keys.
+            autoFocus
             onChange={(event) => {
               setCode(event.currentTarget.value)
               setInfo(null)
               setProblem(null)
             }}
           />
-        </label>
-        <p className={s.note}>
-          On the host, run <Code>althar-host pair</Code> to create a code.
-        </p>
-        {problem !== null && <Problem>{problem}</Problem>}
+          {problem !== null ? (
+            <Refusal problem={problem} id={`${id}-help`} />
+          ) : (
+            <p className={s.help} id={`${id}-help`}>
+              On the host, run <Code>althar-host pair</Code> to create a code.
+            </p>
+          )}
+        </div>
         {info !== null && (
-          <section className={s.check} aria-label="The home in this code">
-            <strong className={s.target}>{info.origin}</strong>
-            <Identity homeId={info.homeId} />
-            <p className={s.note}>Tasks and conversations are available. Approvals need a trusted device.</p>
-          </section>
+          <FoundHome where={info.origin} homeId={info.homeId} label="The home in this code">
+            Tasks and conversations are available. Approvals need a trusted device.
+          </FoundHome>
         )}
-        <label className={s.field} htmlFor={`${id}-name`}>
-          <span>Name</span>
+        <div className={s.field}>
+          <label className={s.fieldLabel} htmlFor={`${id}-name`}>
+            Name
+          </label>
           <Field
             id={`${id}-name`}
             value={name}
@@ -114,8 +116,8 @@ export function PairHome({ homes, onClose, choice }: { homes: HomesHost; onClose
             placeholder="My server"
             onChange={(event) => setName(event.currentTarget.value)}
           />
-        </label>
-      </div>
-    </Dialog>
-  )
+        </div>
+      </>
+    ),
+  }
 }

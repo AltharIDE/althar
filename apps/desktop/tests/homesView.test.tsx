@@ -125,6 +125,24 @@ it('discards an obsolete pairing preview and cancels pairing when its form is le
   expect(screen.getByLabelText('SSH host')).not.toBeNull()
   expect(at.homes.cancelCheck).toHaveBeenCalled()
 })
+it('keeps what was typed for each way of connecting as the person switches between them, in one dialog', async () => {
+  const at = fixture()
+  const homes = {
+    ...at.homes,
+    pair: vi.fn(async () => {}),
+    pairingInfo: vi.fn(async () => ({ origin: 'https://my-vps.test', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER })),
+  }
+  render(<ConnectHome homes={homes} onClose={() => {}} />)
+  const dialog = screen.getByRole('dialog', { name: 'Connect a home' })
+  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
+  await userEvent.click(screen.getByRole('radio', { name: 'SSH' }))
+  await userEvent.type(screen.getByLabelText('SSH host'), 'deploy@vps.test')
+  await userEvent.click(screen.getByRole('radio', { name: 'Pairing code' }))
+  expect(screen.getByRole('dialog', { name: 'Connect a home' })).toBe(dialog)
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('My VPS')
+  await userEvent.click(screen.getByRole('radio', { name: 'SSH' }))
+  expect((screen.getByLabelText('SSH host') as HTMLInputElement).value).toBe('deploy@vps.test')
+})
 const later = <A,>() => {
   let resolve!: (value: A) => void
   return {
