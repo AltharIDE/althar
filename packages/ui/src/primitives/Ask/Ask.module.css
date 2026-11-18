@@ -80,6 +80,31 @@
   min-width: 0;
   overflow-wrap: break-word;
 }
+/* it may take a second line: said, then what follows, with Undo last and never over either */
+.flow {
+  flex-wrap: wrap;
+  align-items: baseline;
+  row-gap: 3px;
+  padding-block: 8px;
+}
+.flow .said,
+.flow .note {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.flow .said {
+  /* never so wide that the check is left alone on a line above it: the check, its gap and the words always share one */
+  max-width: calc(100% - 19px);
+}
+.flow .undo {
+  white-space: nowrap;
+}
+.detail {
+  flex: 1 0 100%;
+  /* under the said words, past the check and its gap */
+  padding-left: 19px;
+}
 .note {
   min-width: 0;
   color: var(--t-3);

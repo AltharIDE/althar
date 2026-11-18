@@ -92,6 +92,7 @@ import { statements as errandWords } from './0087_errand_words'
 import { statements as taskWaits } from './0088_task_waits'
 import { statements as taskWaitsCleared } from './0089_task_waits_cleared'
 import { statements as cardReads } from './0090_card_reads'
+import { statements as clickup } from './0091_clickup'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -201,6 +202,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0088_task_waits', statements: taskWaits },
   { key: '0089_task_waits_cleared', statements: taskWaitsCleared },
   { key: '0090_card_reads', statements: cardReads },
+  { key: '0091_clickup', statements: clickup },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

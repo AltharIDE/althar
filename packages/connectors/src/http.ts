@@ -148,6 +148,8 @@ const ErrorBody = Schema.Struct({
   errors: Schema.optional(Schema.Union([Schema.Array(Schema.Unknown), Schema.Record(Schema.String, Schema.Unknown)])),
   errorMessages: Schema.optional(Schema.Array(Schema.String)),
   error_description: Schema.optional(Schema.String),
+  // ClickUp's, beside its ECODE.
+  err: Schema.optional(Schema.String),
 })
 
 /**
@@ -216,6 +218,7 @@ const rawMessageOf = (body: string, fallback: string): string => {
   const said = [wordsOf(parsed.message), detail].filter((part) => part !== undefined && part !== '').join(': ')
   if (said !== '') return said
   if (parsed.error_description !== undefined) return parsed.error_description
+  if (parsed.err !== undefined && parsed.err !== '') return parsed.err
   if (typeof parsed.error === 'string') return parsed.error
   const nested = Option.getOrUndefined(Schema.decodeUnknownOption(NestedError)(parsed.error))
   const words = [nested?.message, typeof nested?.detail === 'string' ? nested.detail : '']

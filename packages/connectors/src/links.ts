@@ -79,6 +79,7 @@ export const HOSTED: KnownHosts = new Map<string, Product>([
   ['bitbucket.org', 'bitbucket_cloud'],
   ['linear.app', 'linear'],
   ['trello.com', 'trello'],
+  ['app.clickup.com', 'clickup'],
 ])
 
 /** Reads a link to an issue or a change on a known host; null for anything else. */
@@ -136,6 +137,16 @@ export const parseLink = (link: string, hosts: KnownHosts = HOSTED): LinkRef | n
       return kind === 'c' && shortLink !== undefined && /^[A-Za-z0-9]+$/.test(shortLink)
         ? { kind: 'issue', product, host, ref: shortLink }
         : null
+    }
+    case 'clickup': {
+      // https://app.clickup.com/t/<task id>, or /t/<workspace>/<custom id> where the workspace gives custom ids
+      const [kind, first, second] = segments
+      if (kind !== 't' || first === undefined) return null
+      if (second !== undefined)
+        return /^\d+$/.test(first) && /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(second)
+          ? { kind: 'issue', product, host, ref: `${first}/${second.toUpperCase()}` }
+          : null
+      return /^[A-Za-z0-9]+$/.test(first) ? { kind: 'issue', product, host, ref: first } : null
     }
     case 'bitbucket_cloud':
     case 'bitbucket_dc': {

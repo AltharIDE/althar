@@ -10,3 +10,12 @@
 .changed li + li {
   margin-top: 2px;
 }
+
+/* What the change moved, under the sentence that says who. */
+.lines {
+  margin: 2px 0 0;
+  padding: 0 0 0 14px;
+  list-style: none;
+  color: var(--t-3);
+  overflow-wrap: anywhere;
+}
