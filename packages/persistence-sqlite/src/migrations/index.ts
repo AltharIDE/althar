@@ -93,6 +93,7 @@ import { statements as taskWaits } from './0088_task_waits'
 import { statements as taskWaitsCleared } from './0089_task_waits_cleared'
 import { statements as cardReads } from './0090_card_reads'
 import { statements as clickup } from './0091_clickup'
+import { statements as broughtIn } from './0092_brought_in'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -203,6 +204,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0089_task_waits_cleared', statements: taskWaitsCleared },
   { key: '0090_card_reads', statements: cardReads },
   { key: '0091_clickup', statements: clickup },
+  { key: '0092_brought_in', statements: broughtIn },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

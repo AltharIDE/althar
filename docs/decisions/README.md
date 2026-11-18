@@ -13,7 +13,7 @@ matters, and says plainly what is decided but not built yet.
 | [The person's setup](the-persons-setup.md) | The person's MCP servers, skills and sign-in in every role; Althar ships no skills |
 | [Tasks](tasks.md) | What a task is, its kinds and card, questions, rounds and shipping again, Needs you, the small-change lane, plan settings, what agents hand back |
 | [Scheduling](scheduling.md) | Agents at once, what goes first, Running and Up next, lost connections, Althar's share of the load, automations |
-| [Workspaces and runs](workspaces-and-runs.md) | Worktree or Local, the branch a task works toward, setup, cleaning folders away, Run, running any branch or pull request, what agents leave running |
+| [Workspaces and runs](workspaces-and-runs.md) | Worktree or Local, the branch a task works toward, setup, cleaning folders away, Run, running any branch or pull request, what agents leave running, bringing in other tools' work |
 | [Code hosts and trackers](code-hosts.md) | Connectors, connecting, pushing, attached pull requests, forks, conflicts and checks, acting on the host, merging, releases, trackers |
 | [Reviews](reviews.md) | Who reviews and how, review after merge, others' pull requests, the seal, screenshots and Outputs |
 | [The desktop app](desktop-app.md) | How the window reads, threads in rounds, what opens beside a conversation, dictation, themes, the window's frame, motion, the welcome |
