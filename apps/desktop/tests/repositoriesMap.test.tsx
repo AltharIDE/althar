@@ -233,6 +233,20 @@ describe('a repository cloned into a project that has some', () => {
     expect(opening.client.cloneRepository).not.toHaveBeenCalled()
   })
 
+  it('adds the checkout here a pasted URL names that the host’s list hasn’t, showing Add where it is', async () => {
+    const [client, host] = withCheckout('git@github.com:someone/mobile.git')
+    const opening = opened(client, host)
+    await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
+    const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
+    await userEvent.type(panel.getByRole('searchbox'), 'https://github.com/someone/mobile')
+    await userEvent.click(await panel.findByRole('button', { name: 'Add someone/mobile' }))
+    expect(panel.getByText('~/code/mobile')).toBeTruthy()
+    expect(panel.queryByText('Into ~/code')).toBeNull()
+    await userEvent.click(panel.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(opening.client.addRepositories).toHaveBeenCalledWith('p1', 'grant_found_mobile'))
+    expect(opening.client.cloneRepository).not.toHaveBeenCalled()
+  })
+
   it('asks where it goes where there’s nowhere usual, and clones nothing if the person cancels', async () => {
     const { client, host } = opened({}, { clonePlace: vi.fn(async () => null), pickClonePlace: vi.fn(async () => null) })
     await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))

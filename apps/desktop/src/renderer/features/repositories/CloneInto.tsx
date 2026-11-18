@@ -5,7 +5,7 @@ import type { ConnectionList, ProjectRepository, RepositoryHost, Service } from 
 import { type HostedRepository, RepositoryClone } from '@althar/ui'
 
 import { useServices } from '../../data/services'
-import { checkoutOf, HOST_SERVICES, sameRepository, useHostRepositories } from '../../shared/hostRepositories'
+import { type CloneChoice, checkoutOf, HOST_SERVICES, sameRepository, useHostRepositories } from '../../shared/hostRepositories'
 import { hostnameOf } from '../../shared/remotes'
 import { ConnectInPlace } from '../newProject/SetupSide'
 import type { RepositoriesModel } from './useRepositories'
@@ -72,9 +72,12 @@ export function CloneInto({
     const at = named.findIndex((choice) => choice.id === id)
     return at === -1 ? null : (checked[at]?.data ?? null)
   }
-  // Shown at its checkout only where it is that repository: else, cloned as any other.
-  const shown = ({ one }: { readonly one: HostedRepository }): HostedRepository =>
-    one.here !== null && checkoutFor(one.id) === null ? { ...one, here: null } : one
+  // Shown at its checkout exactly where it is read to be that repository, as Clone then adds it: else, cloned as any other.
+  // A pasted URL's row, made up where the host's list hasn't it, takes its checkout from the same reading.
+  const shown = ({ one, choice }: { readonly one: HostedRepository; readonly choice: CloneChoice | null }): HostedRepository => {
+    const at = choice?.here != null && checkoutFor(choice.id) !== null ? choice.here.where : null
+    return one.here === at ? one : { ...one, here: at }
+  }
   const repositories = found.repositories === null ? null : listed.map(shown)
   const choice = chosen === null ? null : found.cloneOf(chosen)
   const checkout = choice === null ? null : checkoutFor(choice.id)
