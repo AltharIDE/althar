@@ -2,7 +2,7 @@
 
 A persistent Althar project home under plain Node on Linux. The service owns the runtime, SQLite writer, projects and agent processes; an attached client does not own their lifetime. It uses the existing versioned private API and its socket authority rules.
 
-This is the host service foundation of [ADR-103](../../docs/decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md), including signed portable releases and a managed updater. Desktop SSH bootstrap, protected client enrollment, remote files and previews, worker pools and relay transport still need implementation. Real provider subscription login/refresh and systemd reboot on a personal VPS remain release gates. Tests use temporary profiles; release smoke checks probe real bundled provider binaries without credentials.
+This is the host service foundation of [ADR-103](../../docs/decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md), including signed portable releases and a managed updater. The [SSH bootstrap protocol](bootstrap/README.md) supports desktop-driven installation. Protected client enrollment, remote files and previews, worker pools and relay transport still need implementation. Real provider subscription login/refresh and systemd reboot on a personal VPS remain release gates. Tests use temporary profiles; release smoke checks probe real bundled provider binaries without credentials.
 
 ## Build and initialize
 
