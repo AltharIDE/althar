@@ -482,14 +482,23 @@ describe('handing the coordinator to a fresh session', () => {
       assert.match(
         recent,
         new RegExp(
-          `^The last messages of the conversation, oldest first \\(the ${20 + cut - RECENT_MESSAGES} before them are left out\\):\n`,
+          `^The last messages of the conversation, oldest first \\(the ${20 + cut - RECENT_MESSAGES} before them are in short above\\):\n`,
         ),
       )
       assert.notInclude(recent, '[person] Message 3\n')
       assert.include(recent, '[person] Message 5\n[you] echo: Message 5')
+      // Those before them are there in short, from the first: what the person said whole, each reply's start.
+      const earlier = brief.slice(
+        brief.indexOf('Earlier in the conversation, in short'),
+        brief.indexOf('The last messages of the conversation'),
+      )
+      assert.match(earlier, /^Earlier in the conversation, in short, oldest first: [^\n]+ read_thread has each of them whole:\n/)
+      assert.include(earlier, '[person] Message 1\n')
+      assert.include(earlier, '[person] Message 3\n[you] echo: Message 3\n')
+      // The fake's first answer, the whole brief echoed, is only its start.
+      assert.match(earlier, /\n\[you\] echo: You are the coordinator of the project [^\n]{100,200}…\n/)
       // The older ones are read through the tools, as far back as they go: a page at a time, each saying where the one before it starts.
       const latest = yield* callTool({ ...access, sessionId: fresh.id }, 'read_thread', {})
-      assert.include(latest, '[person] Last one. [context:85]')
       let own = latest
       for (let page = latest; ;) {
         const before = /^\(The (\d+) earliest items are left out: read_thread with before \1 reads back from there\.\)\n/.exec(page)?.[1]
@@ -497,6 +506,7 @@ describe('handing the coordinator to a fresh session', () => {
         page = yield* callTool({ ...access, sessionId: fresh.id }, 'read_thread', { before: Number(before) })
         own = `${page}\n${own}`
       }
+      assert.include(own, '[person] Last one. [context:85]')
       assert.include(own, '[person] Message 1\n[you] echo: ')
       // Read back past its start, there is nothing more.
       assert.strictEqual(yield* callTool({ ...access, sessionId: fresh.id }, 'read_thread', { before: 0 }), 'Nothing comes before that.')
