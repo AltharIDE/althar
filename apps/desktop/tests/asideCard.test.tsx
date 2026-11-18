@@ -76,6 +76,64 @@ describe("an aside's card in the coordinator's thread", () => {
     expect(screen.getByText('Stopped when you interrupted it')).toBeTruthy()
   })
 
+  it('waits for its checkout as an aside, never as a plan with its steps', () => {
+    withServices(
+      <Card
+        card={aside({
+          phase: 'running',
+          planWaits: true,
+          waitsForCheckout: { why: 'taken', by: { taskId: 't9', title: 'Fix the login loop' } },
+        })}
+        actions={actions()}
+      />,
+      fakeClient().client,
+    )
+    expect(screen.getByText('Aside on Scratch')).toBeTruthy()
+    expect(screen.getByText('Waiting')).toBeTruthy()
+    expect(screen.getByText('Waits for Local: Fix the login loop is there')).toBeTruthy()
+    expect(screen.queryByText('Implement')).toBeNull()
+  })
+
+  it('shows the answer to a follow-up, not the first answer its summary still holds', () => {
+    withServices(
+      <Card
+        card={aside({
+          phase: 'ready',
+          summary: 'It tags from the version.',
+          latest: { at: '2026-11-18T19:40:00.000Z', by: 'lead', said: 'Yes: a tag pushed by hand starts the same run.' },
+        })}
+        actions={actions()}
+      />,
+      fakeClient().client,
+    )
+    expect(screen.getByText('Yes: a tag pushed by hand starts the same run.')).toBeTruthy()
+    expect(screen.queryByText('It tags from the version.')).toBeNull()
+  })
+
+  it('keeps its result when the person keeps it for later', () => {
+    withServices(<Card card={aside({ phase: 'kept', summary: 'It tags from the version.' })} actions={actions()} />, fakeClient().client)
+    expect(screen.getByText('Kept for later')).toBeTruthy()
+    expect(screen.getByText('It tags from the version.')).toBeTruthy()
+    expect(screen.queryByText('Stopped')).toBeNull()
+  })
+
+  it('says it waits for the connection, and when it tries again', () => {
+    withServices(
+      <Card
+        card={aside({
+          phase: 'running',
+          reconnects: { agentId: 'claude-code', service: 'Anthropic', offline: false, next: '2026-11-18T19:45:00.000Z', failure: null },
+          latest: { at: '2026-11-18T19:30:00.000Z', by: 'lead', said: 'Reading scripts/release.ts' },
+        })}
+        actions={actions()}
+      />,
+      fakeClient().client,
+    )
+    expect(screen.getByText('Paused')).toBeTruthy()
+    expect(screen.getByText(/^Anthropic failed: trying again at/)).toBeTruthy()
+    expect(screen.queryByText('Reading scripts/release.ts')).toBeNull()
+  })
+
   it('opens as a task does where nothing opens asides in place', async () => {
     const onOpen = vi.fn()
     withServices(<Card card={aside({ phase: 'ready', summary: 'Done.' })} actions={actions({ onOpen })} />, fakeClient().client)

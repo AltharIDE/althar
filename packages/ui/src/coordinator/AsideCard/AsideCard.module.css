@@ -51,7 +51,7 @@
 .failed .state {
   color: var(--danger);
 }
-.stopped .state svg {
+:is(.stopped, .waiting, .paused) .state svg {
   color: var(--t-3);
 }
 
@@ -82,7 +82,7 @@
   color: var(--t-2);
   overflow-wrap: anywhere;
 }
-.running .result {
+:is(.running, .waiting, .paused) .result {
   color: var(--t-3);
 }
 

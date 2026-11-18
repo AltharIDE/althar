@@ -20,7 +20,13 @@ export const AsideState = {
   Running: 'running',
   /** Something in it waits on the person. */
   Yours: 'yours',
+  /** Waiting to begin: for a free agent, or for the checkout it works in. */
+  Waiting: 'waiting',
+  /** Begun, held up: a usage limit, or a lost connection it retries. */
+  Paused: 'paused',
   Ready: 'ready',
+  /** Done, and kept for later by the person: its result stands. */
+  Kept: 'kept',
   /** Its lead ended before it finished, not by the person. */
   Failed: 'failed',
   /** The person stopped it. */
@@ -42,7 +48,10 @@ export const asideCardText: AsideCardText = {
   state: {
     [AsideState.Running]: 'Running',
     [AsideState.Yours]: 'Needs you',
+    [AsideState.Waiting]: 'Waiting',
+    [AsideState.Paused]: 'Paused',
     [AsideState.Ready]: 'Ready',
+    [AsideState.Kept]: 'Kept for later',
     [AsideState.Failed]: 'Failed',
     [AsideState.Stopped]: 'Stopped',
   },
@@ -51,7 +60,10 @@ export const asideCardText: AsideCardText = {
   noResult: {
     [AsideState.Running]: undefined,
     [AsideState.Yours]: undefined,
+    [AsideState.Waiting]: undefined,
+    [AsideState.Paused]: undefined,
     [AsideState.Ready]: undefined,
+    [AsideState.Kept]: undefined,
     [AsideState.Failed]: 'It ended before it finished. Open it to try again.',
     [AsideState.Stopped]: undefined,
   },
@@ -61,7 +73,10 @@ export const asideCardText: AsideCardText = {
 const GLYPH: Record<Exclude<AsideState, 'failed'>, TaskStatus> = {
   [AsideState.Running]: TaskStatus.Running,
   [AsideState.Yours]: TaskStatus.Yours,
+  [AsideState.Waiting]: TaskStatus.Queued,
+  [AsideState.Paused]: TaskStatus.Paused,
   [AsideState.Ready]: TaskStatus.Done,
+  [AsideState.Kept]: TaskStatus.Done,
   [AsideState.Stopped]: TaskStatus.Stopped,
 }
 

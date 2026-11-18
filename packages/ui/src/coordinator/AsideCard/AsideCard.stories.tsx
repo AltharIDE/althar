@@ -70,6 +70,21 @@ export const NeedsYou: Story = {
   },
 }
 
+/** Waiting to begin, here for the checkout it works in. */
+export const Waiting: Story = {
+  args: { state: AsideState.Waiting, result: 'Waits for Local: Fix the login loop is there' },
+}
+
+/** Begun, held up: a lost connection it tries again. */
+export const Paused: Story = {
+  args: { state: AsideState.Paused, result: 'Anthropic failed: trying again at 19:45' },
+}
+
+/** Done, and kept for later by the person: its result still up front. */
+export const Kept: Story = {
+  args: { state: AsideState.Kept, result: Ready.args?.result },
+}
+
 export const Stopped: Story = {
   args: { state: AsideState.Stopped, result: 'Stopped when you interrupted it' },
 }
@@ -137,6 +152,9 @@ export const AllStates: Story = {
         { state: 'failed', node: <AsideCard {...args} {...Failed.args} /> },
         { state: 'failed, nothing said', node: <AsideCard {...args} {...FailedSilently.args} /> },
         { state: 'needs you', node: <AsideCard {...args} {...NeedsYou.args} /> },
+        { state: 'waiting', node: <AsideCard {...args} {...Waiting.args} /> },
+        { state: 'paused', node: <AsideCard {...args} {...Paused.args} /> },
+        { state: 'kept for later', node: <AsideCard {...args} {...Kept.args} /> },
         { state: 'stopped', node: <AsideCard {...args} {...Stopped.args} /> },
         { state: 'no way in', node: <AsideCard {...args} onOpen={undefined} /> },
         { state: 'open, hover', force: 'hover', node: <AsideCard {...args} /> },

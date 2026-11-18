@@ -98,8 +98,10 @@ import {
   AskInAside,
   asidesText,
   COORDINATOR,
+  opensInPlace,
   useAsideMoves,
   useAsides,
+  withOpenAside,
 } from './Asides'
 import { coordinatorSigned } from '../../shared/signed'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
@@ -590,9 +592,10 @@ export function ProjectView({
     onCreateBranch: (planId, steps, end, repositoryId, branch) =>
       void model.changePlanToNewBranch(planId, steps, end, repositoryId, branch),
     onOpen: onTask,
-    // An aside opens where its pill does, over the coordinator's conversation; one Scratch no longer lists opens as a task.
+    // An aside opens where its pill does, over the coordinator's conversation, waiting on the person or not; one that left
+    // Scratch, or was cleared, opens as a task.
     onOpenAside: (taskId, threadId) =>
-      (lanes?.scratch ?? NO_TASKS).some((one) => one.taskId === taskId) ? asides.pick(taskId) : onTask(threadId),
+      (seen?.tasks ?? NO_TASKS).some((one) => one.taskId === taskId && opensInPlace(one)) ? asides.pick(taskId) : onTask(threadId),
     onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
@@ -1023,7 +1026,7 @@ export function ProjectView({
                       <Now ticking every={ticking ? SECOND : MINUTE}>
                         {(now) => (
                           <AsidesBar
-                            scratch={lanes.scratch}
+                            scratch={withOpenAside(lanes.scratch, aside, seen?.tasks ?? NO_TASKS)}
                             open={aside}
                             first={asides.first}
                             title={asides.title}

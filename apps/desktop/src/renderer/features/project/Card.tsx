@@ -341,6 +341,10 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
   const effortOf = useEffortNames()
+  // An aside (a quick job on Scratch, off the board) has no steps to show or plan to change: its own card, lighter, says so,
+  // whatever it waits for. Only one counting down to its start keeps the plan's card, which can hold it.
+  if (card.scratch === true && !(card.phase === 'planned' && card.plan?.startsAt != null))
+    return <Aside card={card} actions={actions} title={title} />
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
@@ -358,8 +362,6 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // So does one started Local that waits for its checkout (ADR-091).
   if (card.planWaits === true && card.waitsForCheckout != null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={localText.waits(card.waitsForCheckout)} />
-  // An aside (a quick job on Scratch, off the board) has no steps to show: its own card, lighter, says so.
-  if (card.scratch === true) return <Aside card={card} actions={actions} title={title} />
   // A review has no steps to go through: its lead reads and drafts.
   const steps = stepNames(card.reviewing == null ? (card.plan?.steps ?? []) : [], card.followUp === true)
   const at = stepIndex(steps, card.step)
@@ -434,35 +436,56 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
 const asideStateOf = (card: TaskCardContent): AsideState => {
   if (card.phase === 'ready' || card.phase === 'settled')
     return (card.handedBack ?? card.checksBack ?? null) === null ? AsideState.Ready : AsideState.Yours
+  // Kept for later by the person: done, its result standing.
+  if (card.phase === 'kept') return AsideState.Kept
   if (card.phase === 'waiting') return AsideState.Yours
   if (card.phase === 'stopped')
     return card.stopped?.by === 'declined' || card.stopped?.by === 'interrupted' ? AsideState.Stopped : AsideState.Failed
-  if (card.phase === 'held' || card.phase === 'kept') return AsideState.Stopped
+  if (card.phase === 'held') return AsideState.Stopped
+  if (card.queued !== null || (card.planWaits === true && card.waitsForCheckout != null)) return AsideState.Waiting
+  if (card.waits !== null || card.reconnects != null || card.externalWait !== undefined) return AsideState.Paused
   return AsideState.Running
 }
 
 /** An aside's card: where it stands, its result or what it is at, and a way in beside the coordinator. */
 function Aside({ card, actions, title }: { card: TaskCardContent; actions: CardActions; title: string }) {
   const state = asideStateOf(card)
+  // Its lead's latest words are the newest thing said in it: after a follow-up they answer it, where its summary is still the
+  // first answer's, so the summary stands only where the lead has said nothing since.
   const said = card.latest?.by === 'lead' ? card.latest.said : undefined
-  const result =
-    state === AsideState.Ready
-      ? (card.summary ?? said)
-      : state === AsideState.Stopped
-        ? card.stopped?.by == null
-          ? undefined
-          : stepText.stoppedBy[card.stopped.by]
-        : state === AsideState.Running && card.queued !== null
+  const answer = said ?? card.summary ?? undefined
+  const result = (() => {
+    switch (state) {
+      case AsideState.Ready:
+      case AsideState.Kept:
+      case AsideState.Failed:
+        return answer
+      case AsideState.Stopped:
+        return card.stopped?.by == null ? undefined : stepText.stoppedBy[card.stopped.by]
+      case AsideState.Waiting:
+        return card.queued !== null
           ? queuedWords(card.queued)
-          : state === AsideState.Running && card.waits !== null
+          : card.waitsForCheckout == null
+            ? undefined
+            : localText.waits(card.waitsForCheckout)
+      case AsideState.Paused:
+        return card.externalWait !== undefined
+          ? externalWaitWords(card.externalWait, clock)
+          : card.waits !== null
             ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
-            : said
+            : card.reconnects != null
+              ? reconnectsWords(card.reconnects, clock)
+              : said
+      default:
+        return said
+    }
+  })()
   return (
     <AsideCard
       task={card.slug}
       title={title}
       state={state}
-      result={result ?? undefined}
+      result={result}
       onOpen={() => (actions.onOpenAside === undefined ? actions.onOpen(card.threadId) : actions.onOpenAside(card.taskId, card.threadId))}
     />
   )
