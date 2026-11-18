@@ -218,6 +218,17 @@
 .underTabs .trayPress {
   flex: 1;
 }
+/* where it answers gives way first; how a failed one ended doesn't */
+.underTabs .trayAddress {
+  flex-shrink: 12;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.underTabs .trayName {
+  min-width: 2.5em;
+}
 
 /* ── B3 · Only when called: a panel to work in ──────────────────────── */
 .called {

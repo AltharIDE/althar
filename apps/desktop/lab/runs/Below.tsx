@@ -83,7 +83,7 @@ export function FootTabs({ foot, className }: { foot: Foot; className?: string }
               <RunMark run={one} />
               <span className={s.trayName}>{one.name}</span>
               {(phase === 'failed' || phase === 'starting' || one.url !== null) && (
-                <span className={s.trayState}>
+                <span className={cx(s.trayState, phase === 'running' && s.trayAddress)}>
                   <RunState run={one} short inPress />
                 </span>
               )}
