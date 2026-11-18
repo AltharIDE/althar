@@ -561,8 +561,9 @@ export interface Fixing {
   /** While so, the checks on its head fail: its lead is told them, or at them, so it is under way, not the person's (DEV-173). */
   readonly withLead: boolean
   /**
-   * The checks on its head fail and are its lead's, but nothing has reached its thread since: a look that ended before it told
-   * the lead, or a message that never went. Nobody is on them until the next look tells the lead or hands them to the person.
+   * The checks on its head fail and are its lead's, but its lead doesn't have the message that they failed: a look that ended
+   * before it told the lead, or a message waiting for a lead that never started. Nobody is on them until the next look tells
+   * the lead or hands them to the person.
    */
   readonly untold: boolean
   /** A run of failures its lead is really on: open, and told, or the checks on its fix running. */
@@ -5046,7 +5047,6 @@ export class Changes extends Context.Service<
             pushedAt: string | null
             hasChecks: number
             spokenAt: string | null
-            reachedAt: string
           }>`
             SELECT l.id, l.snapshot,
               (SELECT ended_at FROM runs WHERE task_id = k.id AND (plan_id IS NOT NULL OR created_at <= l.created_at)
@@ -5057,13 +5057,7 @@ export class Changes extends Context.Service<
                 AND c.kind = 'checks' WHERE e.project_id = l.project_id AND e.kind = 'change'
                 AND json_extract(e.snapshot, '$.repository') = json_extract(l.snapshot, '$.repository')) AS has_checks,
               (SELECT max(i.accepted_at) FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id JOIN threads h ON h.id = i.thread_id
-                WHERE h.task_id = k.id AND a.kind = 'person') AS spoken_at,
-              max(
-                coalesce((SELECT max(i.accepted_at) FROM user_inputs i JOIN threads h ON h.id = i.thread_id
-                  WHERE h.task_id = k.id AND h.kind = 'task'), ''),
-                coalesce((SELECT max(d.requested_at) FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id
-                  WHERE h.task_id = k.id AND h.kind = 'task'), '')
-              ) AS reached_at
+                WHERE h.task_id = k.id AND a.kind = 'person') AS spoken_at
             FROM tasks k JOIN external_links l ON l.task_id = k.id AND l.kind = 'change'
             WHERE k.id = ${taskId} AND k.state = 'open' AND json_extract(l.snapshot, '$.state') = 'open' AND l.listening = 1`
           // A card kept from this is worked out again once each one's checks have had their moment to show (standsOn.ts).
@@ -5128,13 +5122,13 @@ export class Changes extends Context.Service<
                   Math.max(link.endedAt === null ? 0 : Date.parse(link.endedAt), link.pushedAt === null ? 0 : Date.parse(link.pushedAt)) <
                   checksAppear
               const failing = outcome === 'failed' && (snapshot.checks?.failed ?? 0) > 0
-              // Failing on its head and its lead's, but nothing reached its thread since they last failed: a look at the pull request
-              // that ended before it told the lead, or a message that never went. Not under way, whatever the card would say; the
-              // next look tells the lead, or hands them to the person (`tellUntold`).
+              // Failing on its head and its lead's, but its lead doesn't have the message that they failed (`toldSince`): a look at the
+              // pull request that ended before it told the lead, or a message waiting for a lead that never started. Nobody is on
+              // them; the next look tells the lead, or hands them to the person (`tellUntold`).
               const failedAt = failing
                 ? said.findLast((one) => one.kind === 'checks' && one.outcome === 'failed' && one.sha === head)?.at
                 : undefined
-              const unreached = open && failedAt !== undefined && link.reachedAt < failedAt
+              const unreached = open && failedAt !== undefined && !(yield* toldSince(taskId, nameOf(snapshot), failedAt))
               // On the card, once the look that heard them has had its moment to tell the lead: never the person's between.
               const untold =
                 unreached && failedAt !== undefined && (yield* nowFor(failedAt, TELLS_WITHIN)) - Date.parse(failedAt) >= TELLS_WITHIN
@@ -5197,7 +5191,25 @@ export class Changes extends Context.Service<
        * How long the look that heard checks fail has to tell the lead, or run them again, before the card says nobody is on them
        * (`untold`): it reads their logs and asks the host first.
        */
-      const TELLS_WITHIN = Duration.toMillis(Duration.minutes(1))
+      const TELLS_WITHIN = Duration.toMillis((yield* RuntimeConfig).checksTold ?? Duration.minutes(1))
+
+      /**
+       * Whether its lead has the message that the checks on this pull request failed, sent since `since`: taken up by a turn, or
+       * waiting for the session that is running. Not anything else said on the thread, nor a message waiting for a lead whose
+       * session never started.
+       */
+      const toldSince = (taskId: string, name: string, since: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const said = `Checks failed on ${name}`
+          const rows = yield* sql<{ threadId: string; state: string }>`
+            SELECT i.thread_id, i.state FROM user_inputs i JOIN threads h ON h.id = i.thread_id
+            WHERE h.task_id = ${taskId} AND h.kind = 'task' AND i.accepted_at >= ${since}
+              AND substr(i.body, 1, ${said.length + 1}) IN (${`${said}:`}, ${`${said} `})`
+          if (rows.some((row) => row.state === 'delivered')) return true
+          const queued = rows.find((row) => row.state === 'queued')
+          return queued !== undefined && Option.isSome(yield* sessions.running(queued.threadId))
+        })
 
       /** Where the checks that failed on one of a task's pull requests stand (`fixesOf`): null where it isn't open, or its task settled. */
       const fixingOn = (link: LinkRow) => Effect.map(fixesOf(link.taskId), (all) => all.find((one) => one.linkId === link.id) ?? null)
@@ -5331,16 +5343,16 @@ export class Changes extends Context.Service<
        */
       const tellLead = (link: LinkRow, parts: ReadonlyArray<string>, wake = false, how: 'turn' | 'note' = 'turn') =>
         Effect.gen(function* () {
-          if (parts.length === 0) return
+          if (parts.length === 0) return true
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string; state: string }>`
             SELECT t.id, k.state FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.task_id = ${link.taskId} AND t.kind = 'task'`
-          if (thread === undefined || !['open', 'done'].includes(thread.state)) return
+          if (thread === undefined || !['open', 'done'].includes(thread.state)) return false
           const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(link.snapshot)))
           const note = how === 'note' || thread.state === 'done' || seen?.state === 'merged' || seen?.state === 'closed'
           const running = Option.isSome(yield* sessions.running(thread.id))
           // A note is kept whatever: the lead reads it with its next turn, in this session or the next.
-          if (!running && !wake && !note) return
+          if (!running && !wake && !note) return false
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: thread.id, heard: link.id }, undefined, instance.systemId),
             threadId: thread.id,
@@ -5348,7 +5360,8 @@ export class Changes extends Context.Service<
             quiet: true,
             note,
           })
-          if (!running && !note) yield* sessions.startLast(thread.id)
+          // Whether its lead takes it: one with no session to start again from doesn't.
+          return running || note || (yield* sessions.startLast(thread.id))
         })
 
       /**
@@ -7539,23 +7552,34 @@ export class Changes extends Context.Service<
           const sum = snapshot.checks
           if (sum == null || sum.sha !== snapshot.headSha || sum.outcome !== 'failed') return
           const told = yield* Effect.gen(function* () {
+            // Told already, its message waiting for a lead whose session never started, or went: started again for it, not told twice.
+            const said = `Checks failed on ${name}`
+            const [waiting] = yield* sql<{ threadId: string }>`
+              SELECT i.thread_id FROM user_inputs i JOIN threads h ON h.id = i.thread_id
+              WHERE h.task_id = ${link.taskId} AND h.kind = 'task' AND i.state = 'queued'
+                AND substr(i.body, 1, ${said.length + 1}) IN (${`${said}:`}, ${`${said} `}) LIMIT 1`
+            if (waiting !== undefined) {
+              return Option.isSome(yield* sessions.running(waiting.threadId)) || (yield* sessions.startLast(waiting.threadId))
+            }
             const failed = yield* failedOn(link, host, repository)
             const logs = failed?.logs ?? []
             const reran = yield* ranAgain(link, sum.sha)
             const workspace = yield* worktreeOf(link.taskId, row.url).pipe(Effect.orElseSucceed(() => undefined))
             const branch = workspace === undefined ? null : yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
             yield* heard(link, 'checks_told', `told:${sum.sha}${reran?.again ?? ''}`, { sha: sum.sha, branch })
-            yield* tellLead(
+            return yield* tellLead(
               link,
               [checksForLeadAlone({ ...sum, list: sum.list ?? [] }, name, logs, FIX_ROUNDS - fixing.failed + 1, base)],
               true,
             )
-            return true
           }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not tell the lead its checks failed', cause), false)))
           if (told) return
+          // The person's, with the line saying so, or neither: kept together, so a hand-off is never left without its line.
           const why = unreachedLine(sum.failing)
-          yield* heard(link, 'checks_handed', `handed:${sum.sha}:${yield* timestamp}`, { sha: sum.sha, why })
-          yield* sayOn(link, why)
+          const at = yield* timestamp
+          yield* sql.withTransaction(
+            Effect.andThen(heard(link, 'checks_handed', `handed:${sum.sha}:${at}`, { sha: sum.sha, why }), sayOn(link, why)),
+          )
           yield* touchCard(link.taskId)
         })
 
