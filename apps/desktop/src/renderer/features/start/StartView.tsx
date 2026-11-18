@@ -217,7 +217,7 @@ export function StartView({
           <BareBar />
           <main className={s.remoteEmpty}>
             <Icon name="home" size={28} className={s.remoteGlyph} />
-            <h1>No projects on {here?.current.kind === 'ssh' ? here.current.home.name : 'this home'} yet</h1>
+            <h1>No projects on {here !== null && here.current.kind !== 'local' ? here.current.home.name : 'this home'} yet</h1>
             <p>Add a project on the host and it shows here.</p>
           </main>
         </div>

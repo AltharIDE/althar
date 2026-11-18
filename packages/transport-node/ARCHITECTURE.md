@@ -1,6 +1,6 @@
 # @althar/transport-node — Architecture
 
-Owner: repository maintainers. Depends on `@althar/contracts` and Effect only.
+Owner: repository maintainers. Depends on `@althar/contracts`, Effect and `ws`; TLS/HTTP and stream ownership use Node APIs.
 Consumed by the runtime's socket compatibility exports, Linux host and CLI.
 No Electron, database or provider dependency belongs here.
 
@@ -19,7 +19,7 @@ sequenceDiagram
     Home-->>Client: Same identity + home-scoped history position
     Client->>Home: Normal versioned queries, commands and WatchFrom
     Client--xSSH: Quit / EOF / cancellation
-    Note over Home: Host owns sessions; work continues
+    Note over Home: Host owns sessions, work continues
 ```
 
 `streamPort` owns separate byte streams or a socket. It uses the existing
@@ -53,3 +53,31 @@ OS-user boundary, not worker isolation or a paired-device credential. The
 bridge must never elevate that authority. Protected desktop enrollment,
 multiplayer grants, relay transport, filesystem/preview channels and worker
 leases remain separate work.
+
+## Direct HTTPS/WSS
+
+`https.ts` accepts canonical HTTPS origins only. Bootstrap requests are bounded
+at 16 KiB, follow no redirects and have a ten-second deadline. The operator's
+code supplies the home certificate and its SPKI pin out of band. Node verifies
+the certificate chain against its normal roots and that certificate. The
+home key pin authenticates the peer independently of the certificate's DNS
+name. HTTP and WebSocket requests wait for certificate and key verification.
+A renewal can reconnect with the same key and a chain the client still
+trusts. Replacing a self-signed certificate with another self-signed
+certificate requires pairing again.
+
+`pairing.ts` generates an Ed25519 software key, proves possession against the
+invitation/home/name/key, and validates the returned connection-only device.
+Codes are bounded, canonical base64url with explicit protocol/API versions.
+Private keys remain with the caller and never reach a home. Software storage
+is not proof of human approval.
+
+`webSocket.ts` signs a fresh HTTP challenge and presents its one-use proof in
+the WSS upgrade header. The runtime authenticates before upgrade, so large
+RPC frames are accepted only on authenticated connections. Binary WebSocket
+streams reuse the private socket's wire codec, framing and queue budgets.
+Compression is off; clock-driven ping/pong detects half-open peers. The caller
+checks the authenticated identity, API version and RPC identity before commands.
+`untilPortCloses` releases connection-owned RPC layers and subscriptions while
+admitted commands remain owned by the runtime. Commands are not replayed on
+reconnect; the shared checked history positions remain required.

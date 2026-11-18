@@ -1,3 +1,4 @@
+import type { HttpsHomeTarget } from '@althar/transport-node'
 import type { ClientIdentity } from '@althar/contracts'
 
 /** Connection settings only. Credentials stay with system OpenSSH; these are never person-authority device keys. */
@@ -8,13 +9,13 @@ export interface SshHomeTarget {
   readonly configFile?: string
   readonly port?: number
 }
-export interface RemoteHome {
+export type RemoteHome = {
   readonly id: string
   readonly name: string
   readonly homeId: string
-  readonly ssh: SshHomeTarget
-}
-export type WindowHome = { readonly kind: 'local' } | { readonly kind: 'ssh'; readonly home: RemoteHome }
+} & ({ readonly ssh: SshHomeTarget; readonly https?: never } | { readonly https: HttpsHomeTarget; readonly ssh?: never })
+export type SshRemoteHome = Extract<RemoteHome, { readonly ssh: SshHomeTarget }>
+export type WindowHome = { readonly kind: 'local' } | { readonly kind: 'ssh' | 'https'; readonly home: RemoteHome }
 export interface HomeState {
   readonly current: WindowHome
   readonly connection: 'local' | 'connecting' | 'connected' | 'disconnected'
@@ -60,6 +61,8 @@ export interface HomesOverview {
 export interface HomesHost {
   readonly state: () => Promise<HomeState>
   readonly list: () => Promise<ReadonlyArray<RemoteHome>>
+  readonly pairingInfo?: (code: string) => Promise<{ origin: string; homeId: string; expiresAt: number }>
+  readonly pair?: (code: string, name: string) => Promise<void>
   readonly overview: () => Promise<HomesOverview>
   readonly inspect: (target: SshHomeTarget) => Promise<CheckedHome>
   readonly connect: (checkId: string, name: string) => Promise<void>
@@ -89,7 +92,8 @@ export const isHomeState = (value: unknown): value is HomeState => {
   const state = value as Partial<HomeState>
   return (
     state.current !== undefined &&
-    (state.current.kind === 'local' || (state.current.kind === 'ssh' && typeof state.current.home?.homeId === 'string')) &&
+    (state.current.kind === 'local' ||
+      ((state.current.kind === 'ssh' || state.current.kind === 'https') && typeof state.current.home?.homeId === 'string')) &&
     ['local', 'connecting', 'connected', 'disconnected'].includes(state.connection ?? '')
   )
 }

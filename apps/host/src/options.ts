@@ -1,3 +1,4 @@
+import type { NetworkConfiguration } from './network'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
@@ -6,6 +7,11 @@ import { HostError } from './errors'
 export const USAGE = `Usage: althar-host <command> [options]
 
 Commands:
+  configure-network  Configure opt-in direct HTTPS/WSS access; restart to apply
+  disable-network  Disable direct access on the next restart
+  pair             Print a single-use, five-minute device pairing code
+  devices          List this home's registered client devices
+  revoke-device    Revoke a connection device immediately
   init             Initialize a private profile and a separate encryption key
   serve            Run the home until stopped
   status           Check the running home's private API
@@ -18,6 +24,13 @@ Commands:
   package-release  Assemble and sign a release (release CI only)
 
 Options:
+  --origin <https-origin>    Address clients use to reach this home
+  --listen-address <ip>      Bind address (default: 127.0.0.1)
+  --listen-port <port>       HTTPS/WSS port (default: 6769)
+  --tls-certificate <file>   Private RSA/ECDSA PEM certificate file
+  --tls-key <file>           Matching PEM key outside profile/worktrees
+  --after <dev_id>           Read the next page of devices
+  --device-id <dev_id>       Connection device to revoke
   --profile <dir>             Host profile (default: XDG data/althar-host)
   --worktrees <dir>           Task worktrees (default: <profile>/worktrees)
   --key-file <file>           Separate 32-byte master key; never a project file
@@ -44,6 +57,11 @@ setup and distributed workers are separate features.`
 
 export interface HostOptions {
   readonly command:
+    | 'configure-network'
+    | 'disable-network'
+    | 'pair'
+    | 'devices'
+    | 'revoke-device'
     | 'init'
     | 'serve'
     | 'status'
@@ -61,6 +79,9 @@ export interface HostOptions {
     | 'prepare-update'
     | 'help'
     | 'version'
+  readonly network?: NetworkConfiguration
+  readonly deviceAfter?: string
+  readonly revokeDeviceId?: string
   readonly profile: string
   readonly worktrees: string
   readonly worktreesExplicit: boolean
@@ -107,6 +128,13 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   const releaseKeys: string[] = []
   let command: HostOptions['command'] | undefined
   const values = new Set([
+    '--origin',
+    '--listen-address',
+    '--listen-port',
+    '--tls-certificate',
+    '--tls-key',
+    '--device-id',
+    '--after',
     '--home-id',
     '--client-api-version',
     '--profile',
@@ -124,6 +152,11 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     '--controller-pid',
   ])
   const commands = new Set([
+    'configure-network',
+    'disable-network',
+    'pair',
+    'devices',
+    'revoke-device',
     'connect-stdio',
     'init',
     'serve',
@@ -169,6 +202,11 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     } else if (commands.has(arg) && command === undefined) {
       // Membership above is the complete command list; the explicit switch keeps the public union checked.
       switch (arg) {
+        case 'configure-network':
+        case 'disable-network':
+        case 'pair':
+        case 'devices':
+        case 'revoke-device':
         case 'init':
         case 'serve':
         case 'status':
@@ -221,6 +259,22 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     return invalid('Release packaging options require package-release.')
   if (flags.has('--controller-pid') && command !== 'recover-update' && command !== 'recover-locked')
     return invalid('The controller process option is internal to managed service startup.')
+  if (
+    ['--origin', '--listen-address', '--listen-port', '--tls-certificate', '--tls-key'].some((flag) => flags.has(flag)) &&
+    command !== 'configure-network'
+  )
+    return invalid('Network settings require configure-network.')
+  if (flags.has('--after') && (command !== 'devices' || !/^dev_[0-9a-f]{32}$/.test(flags.get('--after') ?? '')))
+    return invalid('--after requires devices and a device id from the previous page.')
+  if (flags.has('--device-id') && command !== 'revoke-device') return invalid('--device-id requires revoke-device.')
+  if (command === 'revoke-device' && !/^dev_[0-9a-f]{32}$/.test(flags.get('--device-id') ?? ''))
+    return invalid('Choose a device id from althar-host devices.')
+  if (command === 'configure-network') {
+    if (!flags.has('--origin') || !flags.has('--tls-certificate') || !flags.has('--tls-key'))
+      return invalid('configure-network requires --origin, --tls-certificate and --tls-key.')
+    const port = Number(flags.get('--listen-port') ?? '6769')
+    if (!Number.isSafeInteger(port) || port < 1 || port > 65535) return invalid('Use a listen port from 1 to 65535.')
+  }
   const serviceName = flags.get('--service-name') ?? 'althar-host'
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,59}$/.test(serviceName))
     return invalid('Use 1–60 letters, numbers, hyphens or underscores for the service name.')
@@ -240,6 +294,20 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   const keyValue = flags.get('--key-file') ?? delivered ?? join(config, 'althar-host', 'master-key')
   return {
     command,
+    ...(command !== 'configure-network'
+      ? {}
+      : {
+          network: {
+            version: 1 as const,
+            origin: flags.get('--origin') ?? '',
+            address: flags.get('--listen-address') ?? '127.0.0.1',
+            port: Number(flags.get('--listen-port') ?? '6769'),
+            certificate: resolve(flags.get('--tls-certificate') ?? ''),
+            key: resolve(flags.get('--tls-key') ?? ''),
+          },
+        }),
+    ...(flags.has('--after') ? { deviceAfter: flags.get('--after') ?? '' } : {}),
+    ...(flags.has('--device-id') ? { revokeDeviceId: flags.get('--device-id') ?? '' } : {}),
     profile,
     worktrees: resolve(flags.get('--worktrees') ?? join(profile, 'worktrees')),
     worktreesExplicit: flags.has('--worktrees'),

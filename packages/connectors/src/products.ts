@@ -13,6 +13,7 @@ import type { KnownHosts } from './links'
 import type { CodeHost, Product, Service, Tracker } from './model'
 import { jiraCloudSiteOf } from './servers'
 import { accessTrello, makeTrello } from './trello'
+import { accessClickUp, makeClickUp } from './clickup'
 
 /*
  * Every product Althar connects to: its name, where its hosted service
@@ -326,6 +327,27 @@ export const products: Readonly<Record<Product, ProductInfo>> = {
     },
     make: (options) => ({ tracker: makeTrello(options) }),
     access: accessTrello,
+  },
+  clickup: {
+    product: 'clickup',
+    service: 'clickup',
+    name: 'ClickUp',
+    host: false,
+    tracker: true,
+    hosted: { webUrl: 'https://app.clickup.com', apiUrl: 'https://api.clickup.com/api/v2' },
+    selfHosted: false,
+    apiFor: () => 'https://api.clickup.com/api/v2',
+    // ClickUp's OAuth takes a client secret, which a desktop app can't keep: a personal token, pasted.
+    browser: null,
+    token: {
+      kind: 'key',
+      needs: null,
+      page: () => 'https://app.clickup.com/settings/apps',
+      settings: () => 'https://app.clickup.com/settings/apps',
+      prefixes: ['pk_'],
+    },
+    make: (options) => ({ tracker: makeClickUp(options) }),
+    access: accessClickUp,
   },
 }
 

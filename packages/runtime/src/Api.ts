@@ -1,3 +1,4 @@
+import { DevicePairings } from './DevicePairings'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
@@ -95,6 +96,7 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
+  linksIssues,
   Policies,
   type ProjectRules,
   repositoryFilesOf,
@@ -313,6 +315,13 @@ export const handlers = apiLayer(
       role: sender.kind,
     }
     const identities = yield* ClientIdentities
+    const pairings = yield* DevicePairings
+    const connectionAdmin = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
+        ? effect
+        : Effect.fail(
+            new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }),
+          )
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
     const sql = yield* SqlClient.SqlClient
@@ -676,6 +685,7 @@ export const handlers = apiLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        linkIssues: linksIssues(rules),
         afterMergeReview: afterMergeReviewOf(rules),
         repositoryFiles: repositoryFilesOf(rules),
       }
@@ -854,7 +864,9 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      ListClientDevices: (options) => identities.list(options),
+      IssueDevicePairing: ({ tokenHash }) => connectionAdmin(pairings.issue(tokenHash)),
+      RevokeConnectionDevice: ({ deviceId }) => connectionAdmin(pairings.revokeConnection(deviceId)),
+      ListClientDevices: (options) => connectionAdmin(identities.list(options)),
       RegisterClientDevice: ({ name, publicKey, role }) => identities.register({ name, publicKey, role }),
       RevokeClientDevice: ({ deviceId }) => identities.revoke(deviceId),
       WatchFrom: ({ position }) =>

@@ -1,3 +1,4 @@
+import { PairingInvitation, PairingTokenHash } from './pairing'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { AcpCatalog, AcpConnection } from './agentCatalog'
 import { AttentionEvent } from './attention'
@@ -960,7 +961,17 @@ export const ChangeTarget = Schema.Literals(['upstream', 'fork', 'upstream_branc
 export type ChangeTarget = typeof ChangeTarget.Type
 
 /** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
-export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export const Product = Schema.Literals([
+  'github',
+  'gitlab',
+  'bitbucket_cloud',
+  'bitbucket_dc',
+  'linear',
+  'jira_cloud',
+  'jira_dc',
+  'trello',
+  'clickup',
+])
 export type Product = typeof Product.Type
 
 /**
@@ -1279,6 +1290,8 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved along with it: to its tracker's In Progress as it starts, In Review and Done with its pull request. */
   moveIssues: Schema.Boolean,
+  /** Whether a task's pull request is linked on its issue as it opens: an attachment, a remote link, or a comment on ClickUp. */
+  linkIssues: Schema.Boolean,
   /** What a small change's review after it merges brings back to the person: only major findings, any, or no review at all. */
   afterMergeReview: AfterMergeRule,
   /** Whether skill and OpenSpec files may be written to, committed in, or pushed from the project's repositories; each off unless turned on. */
@@ -1352,7 +1365,7 @@ export const ConnectionSummary = Schema.Struct({
 export type ConnectionSummary = typeof ConnectionSummary.Type
 
 /** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
-export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello', 'clickup'])
 export type Service = typeof Service.Type
 
 /** A product a person can connect, and how they sign in to it. */
@@ -4794,6 +4807,9 @@ export const AttentionApi = RpcGroup.make(
 ).middleware(ClientAuthority)
 
 const socketCalls = new Set<string>([
+  'IssueDevicePairing',
+  'ListClientDevices',
+  'RevokeConnectionDevice',
   'GetConnectionInfo',
   'Status',
   'ListProjects',
@@ -4861,6 +4877,8 @@ const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, ma
 
 const ConnectionApi = RpcGroup.make(
   call('GetConnectionInfo', {}, ConnectionInfo),
+  command('IssueDevicePairing', { tokenHash: PairingTokenHash }, PairingInvitation),
+  command('RevokeConnectionDevice', { deviceId: ClientDeviceId }, Schema.Void),
   call('ListClientDevices', ClientListOptions.fields, ClientPage),
   command(
     'RegisterClientDevice',
@@ -5902,6 +5920,7 @@ const WorkApi = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      linkIssues: Schema.optional(Schema.Boolean),
       afterMergeReview: Schema.optional(AfterMergeRule),
       repositoryFiles: Schema.optional(RepositoryFilesSetting),
       /** What the person changed of what leads' sandboxes let through, each list whole. */

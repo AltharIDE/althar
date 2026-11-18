@@ -197,6 +197,7 @@
 .done {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 /* Connect a home: a home not here yet */
