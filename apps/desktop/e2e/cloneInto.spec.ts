@@ -55,7 +55,7 @@ test('clones a repository from GitHub into a project that has one, GitHub connec
 
     // Cloned where the person keeps code, and joined: on this Mac beside meridian.
     const here = section.getByRole('list', { name: /^On / })
-    await expect(here.getByRole('button', { name: 'More for api' })).toBeVisible({ timeout: 30_000 })
+    await expect(here.getByRole('button', { name: 'More for api' })).toBeVisible()
     await expect(here.getByText(/\/code\/api/)).toBeVisible()
     expect(existsSync(join(home, 'code', 'api', 'README.md'))).toBe(true)
     expect(git(join(home, 'code', 'api'), 'remote', 'get-url', 'origin')).toBe(api)
