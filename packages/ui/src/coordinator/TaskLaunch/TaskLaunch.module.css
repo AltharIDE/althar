@@ -153,14 +153,10 @@
     background-size 340ms var(--ease-out),
     color 240ms var(--ease-out);
 }
-/* Discarded while it was drafted: it stays where it was, quieter, its title struck through. */
+/* Discarded before it began: it stays where it was, quieter. */
 .discarded .roster,
 .discarded .title {
   opacity: 0.6;
-}
-.discarded .title {
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
 }
 .struck {
   color: var(--t-3);
