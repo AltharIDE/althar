@@ -21,7 +21,7 @@ describe('Help me fix it', () => {
     expect(said).toContain('“Mobile on iOS simulator”')
     expect(said).toContain('exit code 65')
     expect(said).toContain('error: no such module Foo')
-    expect(helpPrompt(run)).toContain('Output')
+    expect(helpPrompt(run)).toContain('no longer kept')
     expect(tailOf(Array.from({ length: 100 }, (_, n) => `l${n}`).join('\n')).split('\n')).toHaveLength(40)
   })
 
@@ -55,6 +55,11 @@ describe('Help me fix it', () => {
     const { result } = renderHook(() => useHelpMeFix(key, false, noRef))
     await act(async () => result.current.help(run, () => Promise.reject(new Error('gone'))))
     expect(result.current.suggestion).toBe(helpPrompt(run))
+    // A card kept past a restart: the output is gone, and the prompt says so, with the line the card kept.
+    expect(helpPrompt({ ...run, ended: { ...run.ended, last: 'Error: Port 5173 is already in use' } })).toContain(
+      'no longer kept; the last line it printed was: Error: Port 5173 is already in use',
+    )
+    expect(helpPrompt(run)).not.toContain('Output on its run card')
   })
 
   it('in the real composer: grey for Tab, taken into the field by Tab, and never sent', async () => {

@@ -32,7 +32,7 @@ export const helpPrompt = (run: Fix, tail?: string) => {
   const how = code == null ? 'failed' : `failed with exit code ${code}`
   const out =
     tail === undefined || tail.trim() === ''
-      ? 'Its output is under Output on its run card in this thread.'
+      ? `Its output is no longer kept${run.ended?.last == null ? '' : `; the last line it printed was: ${run.ended.last}`}. Run it again to see it.`
       : `The end of its output:\n\`\`\`\n${tail}\n\`\`\``
   return `Help me fix it: ${called} ${how}. ${out}\nFind out why and fix it.`
 }
