@@ -28,3 +28,5 @@ bun run test:interop
 Edit the schema under `proto` and regenerate the checked-in TypeScript bindings.
 Cargo generates Rust bindings during the build using the locked compiler
 dependency. CI checks that regeneration produces the checked-in output.
+Once the schema is on main, CI compares it with the base revision and rejects
+changes that would break existing bindings or wire compatibility.

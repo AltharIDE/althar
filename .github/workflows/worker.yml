@@ -40,6 +40,19 @@ jobs:
       - run: cargo clippy --locked -p althar-worker --all-targets -- -D warnings
       - run: cargo test --locked -p althar-worker
       - run: cargo build --locked -p althar-worker --example worker_hello
+      - name: Check Protobuf compatibility
+        env:
+          BASE: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE"
+          if git cat-file -e "$BASE:packages/worker-protocol/buf.yaml" 2>/dev/null; then
+            baseline="$(mktemp -d "$RUNNER_TEMP/worker-protocol.XXXXXXXX")"
+            git archive "$BASE" packages/worker-protocol | tar -x -C "$baseline"
+            cd packages/worker-protocol
+            bun x --no-install buf breaking --against "$baseline/packages/worker-protocol"
+          else
+            echo "This change introduces the first worker protocol schema."
+          fi
       - working-directory: packages/worker-protocol
         run: |
           bun run generate
