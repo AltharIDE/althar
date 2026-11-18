@@ -264,6 +264,8 @@ describe('presets', () => {
       const sql = yield* SqlClient.SqlClient
       const instance = yield* Instance
       yield* callTool(coordinator, 'draft_task', { title: 'Explore the team view' })
+      // Codex's models known first, as the coordinator reads them before naming one.
+      yield* until(callTool(coordinator, 'list_models', {}), (said) => said.includes('OpenAI\n- Large'))
       const said = yield* callTool(coordinator, 'propose_plan', {
         task: 'explore-the-team-view',
         lead: { agent: 'codex', model: 'large' },
@@ -285,6 +287,32 @@ describe('presets', () => {
       yield* (yield* Plans).change(row?.id ?? '', led, instance.personId, 'draft')
       yield* until(cards(projectId), (all) => all[0]?.plan?.end === 'draft')
       assert.strictEqual((yield* cards(projectId))[0]?.plan?.preset, 'Change')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('keep on its card the plan a task was discarded with, held before it began, naming its preset', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* opened(working)
+      yield* callTool(coordinator, 'draft_task', { title: 'Explore the roles' })
+      yield* until(callTool(coordinator, 'list_models', {}), (said) => said.includes('OpenAI\n- Large'))
+      yield* callTool(coordinator, 'propose_plan', {
+        task: 'explore-the-roles',
+        lead: { agent: 'codex', model: 'large' },
+        review: null,
+        preset: 'Prototype',
+      })
+      yield* callTool(coordinator, 'hold_task', { task: 'explore-the-roles' })
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'held')
+      yield* callTool(coordinator, 'settle_task', { task: 'explore-the-roles', how: 'discard', why: 'one task, not five' })
+      const [card] = yield* until(cards(projectId), (all) => all[0]?.discarded === true)
+      assert.strictEqual(card?.phase, 'settled')
+      assert.strictEqual(card?.plan?.preset, 'Prototype')
+      // Its team as planned, not open seats.
+      assert.isString(card?.plan?.steps[0]?.agentId)
+      assert.isNull(card?.plan?.startsAt)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 

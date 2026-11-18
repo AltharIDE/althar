@@ -2527,7 +2527,11 @@ export class Queries extends Context.Service<
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
-            LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1)
+            -- Its plan; discarded before it began, the one it was discarded with, which discarding declined: its card keeps it.
+            LEFT JOIN task_plans p ON p.id = (
+              SELECT id FROM task_plans
+              WHERE task_id = k.id AND (state IN ('proposed', 'accepted') OR (k.state = 'abandoned' AND state = 'declined'))
+              ORDER BY state IN ('proposed', 'accepted') DESC, proposed_at DESC LIMIT 1)
             LEFT JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
             WHERE k.id = ${taskId}`
           if (task === undefined) return undefined
