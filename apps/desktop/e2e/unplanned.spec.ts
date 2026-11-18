@@ -42,6 +42,12 @@ test('a draft whose plan never came says so, offers to plan or discard it, and l
     await still(page)
     await page.screenshot({ path: 'test-results/unplanned-1-no-plan.png', animations: 'disabled' })
 
+    // Plan it asks the coordinator, in the person's words; its turn over with still no plan, Plan it is offered again.
+    await conversation.getByRole('button', { name: 'Plan it' }).click()
+    await expect(conversation.getByText(/^Plan “Explore the team view” \(explore-the-team-view\)/)).toBeVisible()
+    await expect(conversation.getByRole('button', { name: 'Plan it' })).toBeVisible()
+    await expect(conversation.getByText('No plan yet')).toBeVisible()
+
     // Discarded from its card: it says so at once, and it leaves Up next.
     await conversation.getByRole('button', { name: 'Discard' }).click()
     await expect(conversation.getByText('Discarded', { exact: true })).toBeVisible()

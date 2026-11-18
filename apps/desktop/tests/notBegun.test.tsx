@@ -11,7 +11,7 @@ import { Card, type CardActions } from '../src/renderer/features/project/Card'
 import { DraftingCard } from '../src/renderer/features/project/DraftingCard'
 import { agents, card, fakeClient } from './fixtures'
 import { withServices } from './render'
-import { planStillAsked } from '../src/renderer/shared/planIt'
+import { planAskIn, planIt, planStillAsked } from '../src/renderer/shared/planIt'
 
 /*
  * A task that never began says where it stands, wherever the person sees it:
@@ -103,15 +103,38 @@ describe('Plan it, asked', () => {
   const askedAt = Date.parse(NOW)
   const at = (seconds: number) => new Date(askedAt + seconds * 1000).toISOString()
 
-  it('is on its way until the coordinator turn that took the ask is over', () => {
-    // A turn still going when it was asked: the ask waits for the next.
-    expect(planStillAsked(askedAt, at(-30), null)).toBe(true)
-    expect(planStillAsked(askedAt, at(-30), at(5))).toBe(true)
-    // The turn that took it, begun since, still going.
-    expect(planStillAsked(askedAt, at(6), at(5))).toBe(true)
-    // Over: where no plan came, Plan it is offered again.
-    expect(planStillAsked(askedAt, at(6), at(40))).toBe(false)
-    expect(planStillAsked(askedAt, null, null)).toBe(true)
+  // The session as the runtime gives it (Sessions.running): its turn's start only while it runs, its last end kept.
+  const running = (endedAt: string | null) => ({ turnRunning: true, turnStartedAt: at(1), turnEndedAt: endedAt })
+  const idle = (endedAt: string | null) => ({ turnRunning: false, turnStartedAt: null, turnEndedAt: endedAt })
+  const task = { title: 'Explore the team', slug: 'explore-the-team' }
+  const message = (state: 'queued' | 'delivered' | 'withdrawn', text = planIt(task)) =>
+    ({
+      id: `m-${state}`,
+      sequence: 1,
+      agentId: null,
+      createdAt: NOW,
+      kind: 'user_message',
+      content: { text, links: [], pictures: [], files: [] },
+      input: { state, interrupting: false },
+    }) as const
+
+  it('is on its way until the coordinator turn that took the ask is over, as its session goes from running to idle', () => {
+    // Sent, not in the thread yet: on its way.
+    expect(planStillAsked(askedAt, planAskIn([], task), idle(at(-60)))).toBe(true)
+    // Waiting behind a turn still going when it was asked, which then ends: the ask waits its own.
+    expect(planStillAsked(askedAt, planAskIn([message('queued')], task), running(null))).toBe(true)
+    expect(planStillAsked(askedAt, planAskIn([message('queued')], task), idle(at(5)))).toBe(true)
+    // Taken by a turn still going.
+    expect(planStillAsked(askedAt, planAskIn([message('delivered')], task), running(at(5)))).toBe(true)
+    // Taken, and just delivered: the turn that took it not begun yet, the last that ended before the ask.
+    expect(planStillAsked(askedAt, planAskIn([message('delivered')], task), idle(at(-60)))).toBe(true)
+    // That turn over, and the session idle, its start gone: where no plan came, Plan it is offered again.
+    expect(planStillAsked(askedAt, planAskIn([message('delivered')], task), idle(at(40)))).toBe(false)
+    // Taken back before the coordinator had it: no ask.
+    expect(planStillAsked(askedAt, planAskIn([message('withdrawn')], task), running(null))).toBe(false)
+    // Only its own words count, the newest so worded.
+    expect(planAskIn([message('delivered', 'Something else')], task)).toBeUndefined()
+    expect(planAskIn([message('delivered'), message('queued')], task)?.state).toBe('queued')
   })
 
   it('is offered again on both cards once the ask is no longer on its way', () => {
