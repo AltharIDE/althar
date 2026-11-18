@@ -1,0 +1,49 @@
+name: worker
+
+on:
+  workflow_call:
+  pull_request:
+    paths:
+      - 'apps/worker/**'
+      - 'packages/worker-protocol/**'
+      - 'packages/testing/**'
+      - '.github/workflows/worker.yml'
+      - '.bun-version'
+      - '.node-version'
+      - 'bun.lock'
+      - 'package.json'
+      - 'vite.config.ts'
+      - 'lint/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Rust worker protocol
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile --ignore-scripts --filter althar --filter @althar/worker-protocol
+      - run: rustup show
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked -p althar-worker --all-targets -- -D warnings
+      - run: cargo test --locked -p althar-worker
+      - run: cargo build --locked -p althar-worker --example worker_hello
+      - working-directory: packages/worker-protocol
+        run: |
+          bun run generate
+          test -z "$(git status --short -- src/gen)" || { git status --short -- src/gen; git diff -- src/gen; exit 1; }
+          bun run check
+          bun run test
+          bun run test:interop
