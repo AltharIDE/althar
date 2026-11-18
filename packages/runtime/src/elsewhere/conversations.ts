@@ -85,9 +85,20 @@ const parse = (line: string): Record<string, unknown> | null => {
   }
 }
 
+/** The text of each block of `content` of one of `types` (any, where null), each trimmed: blocks with none left out. */
+const textsOf = (content: unknown, types: ReadonlyArray<string> | null): ReadonlyArray<string> =>
+  (Array.isArray(content) ? content : []).flatMap((block) => {
+    const one = record(block)
+    const said = text(one?.['text'])
+    return said === null || (types !== null && !types.includes(String(one?.['type']))) ? [] : [said]
+  })
+
 /** A conversation's title from its first words: their first line, cut short. */
 export const titleFrom = (words: string) => {
-  const line = words.trim().split('\n')[0]?.trim() ?? ''
+  const line = words
+    .trim()
+    .replace(/\n[\s\S]*/, '')
+    .trim()
   return line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line
 }
 
@@ -107,24 +118,17 @@ const claudePrompt = (entry: Record<string, unknown>): string | null => {
   const origin = record(entry['origin'])
   if (origin !== null && origin['kind'] !== undefined && origin['kind'] !== 'human') return null
   const content = record(entry['message'])?.['content']
-  let said: string | null = null
-  if (typeof content === 'string') said = content
-  else if (Array.isArray(content)) {
-    if (content.some((block) => record(block)?.['type'] === 'tool_result')) return null
-    said = content.flatMap((block) => (record(block)?.['type'] === 'text' ? (text(record(block)?.['text']) ?? []) : [])).join('\n\n')
-  }
-  if (said === null || said.trim() === '' || NOT_SAID.test(said)) return null
-  const query = /^\s*<user_query>([\s\S]*)<\/user_query>\s*$/.exec(said)
-  return (query?.[1] ?? said).trim() || null
+  if (Array.isArray(content) && content.some((block) => record(block)?.['type'] === 'tool_result')) return null
+  const said = typeof content === 'string' ? content : textsOf(content, ['text']).join('\n\n')
+  if (said.trim() === '' || NOT_SAID.test(said)) return null
+  return said.replace(/^\s*<user_query>([\s\S]*)<\/user_query>\s*$/, '$1').trim() || null
 }
 
 /** The text of a Claude Code `assistant` record, its thinking and tool calls left out. */
 const claudeReply = (entry: Record<string, unknown>): string | null => {
   if (entry['type'] !== 'assistant' || entry['isSidechain'] === true || entry['isMeta'] === true) return null
   const content = record(entry['message'])?.['content']
-  if (typeof content === 'string') return text(content)
-  if (!Array.isArray(content)) return null
-  const said = content.flatMap((block) => (record(block)?.['type'] === 'text' ? (text(record(block)?.['text']) ?? []) : [])).join('\n\n')
+  const said = typeof content === 'string' ? content.trim() : textsOf(content, ['text']).join('\n\n')
   return said === '' ? null : said
 }
 
@@ -241,7 +245,7 @@ const linesOf = (named: string) => {
 
 /** A Claude Code session whole, as the conversation it was: the person's prompts and the agent's replies, in order. */
 export const claudeTranscript = async (file: string): Promise<ReadonlyArray<Message>> => {
-  const messages: Array<Message & { id?: string }> = []
+  const messages: Array<Message & { id?: string | null }> = []
   for await (const line of linesOf(file)) {
     const entry = parse(line)
     if (entry === null) continue
@@ -254,11 +258,11 @@ export const claudeTranscript = async (file: string): Promise<ReadonlyArray<Mess
     const reply = claudeReply(entry)
     if (reply === null) continue
     // Claude Code writes each block of a reply as a record of its own, sharing its message's id: one reply.
-    const id = text(record(entry['message'])?.['id']) ?? undefined
+    const id = text(record(entry['message'])?.['id'])
     const last = messages.at(-1)
-    if (last !== undefined && last.role === 'agent' && (id === undefined || last.id === id)) {
+    if (last !== undefined && last.role === 'agent' && (id === null || last.id === id)) {
       messages[messages.length - 1] = { ...last, text: `${last.text}\n\n${reply}` }
-    } else messages.push({ role: 'agent', text: reply, at, ...(id === undefined ? {} : { id }) })
+    } else messages.push({ role: 'agent', text: reply, at, id })
   }
   return messages.map(({ role, text: said, at }) => ({ role, text: said, at }))
 }
@@ -413,14 +417,12 @@ export const codexTranscript = async (file: string): Promise<ReadonlyArray<Messa
     if (payload === null) continue
     if (entry['type'] === 'event_msg') {
       const type = payload['type']
-      if (type === 'user_message' && text(payload['message']) !== null)
-        events.push({ role: 'person', text: text(payload['message']) ?? '', at })
-      else if (type === 'agent_message' && text(payload['message']) !== null)
-        events.push({ role: 'agent', text: text(payload['message']) ?? '', at })
+      const message = text(payload['message'])
+      if (type === 'user_message' && message !== null) events.push({ role: 'person', text: message, at })
+      else if (type === 'agent_message' && message !== null) events.push({ role: 'agent', text: message, at })
       else if (type === 'item_completed') {
         const item = record(payload['item'])
-        const content = Array.isArray(item?.['content']) ? item['content'] : []
-        const said = content.flatMap((part) => text(record(part)?.['text']) ?? []).join('\n\n')
+        const said = textsOf(item?.['content'], null).join('\n\n')
         if (said === '') continue
         if (item?.['type'] === 'UserMessage') events.push({ role: 'person', text: said, at })
         if (item?.['type'] === 'AgentMessage') events.push({ role: 'agent', text: said, at })
@@ -428,14 +430,7 @@ export const codexTranscript = async (file: string): Promise<ReadonlyArray<Messa
     } else if (entry['type'] === 'response_item' && payload['type'] === 'message') {
       // Only where it has no events: an older rollout, whose messages are what the model saw.
       const role = payload['role']
-      const content = Array.isArray(payload['content']) ? payload['content'] : []
-      const said = content
-        .flatMap((part) => {
-          const one = record(part)
-          return (one?.['type'] === 'input_text' || one?.['type'] === 'output_text') && text(one['text']) !== null
-            ? [text(one['text']) ?? '']
-            : []
-        })
+      const said = textsOf(payload['content'], ['input_text', 'output_text'])
         .filter((part) => !INJECTED.test(part))
         .join('\n\n')
       if (said === '') continue

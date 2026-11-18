@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
@@ -18,6 +18,8 @@ import { FolderCleanup } from '../src/FolderCleanup'
 import { Folders } from '../src/Folders'
 import { Instance } from '../src/Instance'
 import { Secrets } from '../src/Secrets'
+
+import { claudeFolder } from '../src/elsewhere/conversations'
 
 import { computer, digest, gitIn, PHRASE, sessionIds } from './elsewhereFixtures'
 import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
@@ -301,6 +303,127 @@ describe('bringing in other tools’ work', () => {
           (yield* chats()).map((one) => one.id),
           [...again.asides],
         )
+      }),
+    ),
+  )
+
+  it.live('brings a conversation had in a worktree after it came in into its task, and says what was picked and isn’t there', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, machine, sql } = yield* connectedTo()
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const lima = found.worktrees.find((one) => one.path === machine.worktrees.conductor)
+        // Without steps of its own, the task is planned as the project's lead would plan it.
+        const first = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [lima?.key ?? ''],
+          setups: [],
+          conversations: [],
+          steps: [],
+        })
+        assert.strictEqual(first.tasks.length, 1)
+        assert.strictEqual(first.histories, 1)
+        const later = '55555555-5555-4555-8555-555555555555'
+        writeFileSync(
+          join(machine.home, '.claude', 'projects', claudeFolder(machine.worktrees.conductor), `${later}.jsonl`),
+          [
+            {
+              type: 'user',
+              cwd: machine.worktrees.conductor,
+              timestamp: '2026-11-13T09:00:00.000Z',
+              message: { content: 'One more thing' },
+            },
+            { type: 'assistant', timestamp: '2026-11-13T09:00:04.000Z', message: { id: 'm', content: [{ type: 'text', text: 'Done.' }] } },
+          ]
+            .map((one) => JSON.stringify(one))
+            .join('\n'),
+        )
+        const items = () =>
+          Effect.map(
+            sql(
+              (sql) =>
+                sql<{
+                  kind: string
+                }>`SELECT i.kind FROM thread_items i JOIN threads t ON t.id = i.thread_id WHERE t.task_id = ${first.tasks[0] ?? ''} ORDER BY i.rowid`,
+            ),
+            (rows) => rows.map((row) => row.kind),
+          )
+        const before = yield* items()
+        const second = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [],
+          setups: ['setup:conductor:/nowhere'],
+          conversations: [`claude_code:${later}`, 'claude_code:gone'],
+          steps,
+        })
+        assert.deepStrictEqual([second.tasks, second.asides, second.histories], [[], [], 1])
+        // Its own line saying where it came from, then what was said, after what came in with the worktree.
+        assert.deepStrictEqual((yield* items()).slice(before.length), ['notice', 'user_message', 'agent_message'])
+        assert.deepStrictEqual(second.failed, [
+          { key: 'setup:conductor:/nowhere', why: 'It isn’t in the repository any more.' },
+          { key: 'claude_code:gone', why: 'It isn’t on this computer any more.' },
+        ])
+        const [said] = yield* missedIn(sql, project.id)
+        assert.deepStrictEqual(
+          said?.missed.map((one) => (one as { name: string }).name),
+          ['Something picked', 'Something picked'],
+        )
+      }),
+    ),
+  )
+
+  it.live('brings a worktree made by hand in with its conversations, the latest of a long one, and one with nothing said', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, machine, sql } = yield* connectedTo()
+        const day = join(machine.home, '.codex', 'sessions', '2026', '11', '14')
+        mkdirSync(day, { recursive: true })
+        const rollout = (id: string, lines: ReadonlyArray<unknown>) =>
+          writeFileSync(
+            join(day, `rollout-2026-11-14T10-00-00-${id}.jsonl`),
+            [{ type: 'session_meta', payload: { id, cwd: machine.worktrees.hand, source: 'cli' } }, ...lines]
+              .map((one) => JSON.stringify(one))
+              .join('\n'),
+          )
+        const long = '019a0000-0000-7000-8000-0000000000a1'
+        rollout(
+          long,
+          Array.from({ length: 1_300 }, (_, n) => ({
+            timestamp: new Date(Date.UTC(2026, 10, 14, 10) + n * 1000).toISOString(),
+            type: 'event_msg',
+            payload: n % 2 === 0 ? { type: 'user_message', message: `Ask ${n}` } : { type: 'agent_message', message: `Answer ${n}` },
+          })),
+        )
+        rollout('019a0000-0000-7000-8000-0000000000a2', [])
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const hand = found.worktrees.find((one) => one.path === machine.worktrees.hand)
+        assert.strictEqual(hand?.tool, 'hand')
+        assert.lengthOf(hand?.conversations ?? [], 2)
+        const brought = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [hand?.key ?? ''],
+          setups: [],
+          conversations: [],
+          steps,
+        })
+        assert.strictEqual(brought.histories, 2)
+        const items = yield* sql(
+          (sql) => sql<{ kind: string; content: string }>`
+            SELECT i.kind, i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id WHERE t.task_id = ${brought.tasks[0] ?? ''} ORDER BY i.rowid`,
+        )
+        const notices = items.flatMap((item) =>
+          item.kind === 'notice' ? [JSON.parse(item.content) as { title: string; description: string | null }] : [],
+        )
+        assert.strictEqual(notices[0]?.title, 'Brought in: a worktree made by hand')
+        // Only the latest of it, saying how much was left out; it has no start of its own, so no date.
+        assert.deepStrictEqual(
+          notices.slice(1).map((one) => one.description),
+          ['600 prompts · the 100 earliest left out'],
+        )
+        assert.strictEqual(items.filter((item) => item.kind === 'agent_message').length, 600)
       }),
     ),
   )
