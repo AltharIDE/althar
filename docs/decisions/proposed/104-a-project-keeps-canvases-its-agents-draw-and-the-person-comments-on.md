@@ -404,6 +404,11 @@ reach nothing of Althar's:
 
 - **It is a `WebContentsView`** that the main process owns, laid over the
   workbench as a page is (ADR-100).
+  - **It steps aside as a page does.** While a dialog, menu, popover or
+    lightbox of the window is over its place, the window draws a picture of
+    the canvas there and the view is hidden (`still` and `cover`, from the
+    same `useCovered` the page uses), so what opens over it draws on top;
+    it comes back as that closes.
   - **Settings.** It has no preload; sandbox and context isolation are on;
     Node and the `webview` tag are off.
   - **Process.** It is a process of its own, so it never shares the

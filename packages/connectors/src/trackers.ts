@@ -11,6 +11,7 @@ import {
   type TrackerCapabilities,
 } from './model'
 import { TRELLO_TRACKING } from './trello'
+import { CLICKUP_TRACKING } from './clickup'
 
 /*
  * What each tracker Althar connects to can find and change, from the
@@ -25,6 +26,7 @@ export const TRACKERS = [
   { name: 'Linear', products: ['linear'], capabilities: LINEAR_TRACKING },
   { name: 'Jira', products: ['jira_cloud', 'jira_dc'], capabilities: JIRA_TRACKING },
   { name: 'Trello', products: ['trello'], capabilities: TRELLO_TRACKING },
+  { name: 'ClickUp', products: ['clickup'], capabilities: CLICKUP_TRACKING },
   { name: 'GitHub', products: ['github'], capabilities: GITHUB_TRACKING },
   { name: 'GitLab', products: ['gitlab'], capabilities: GITLAB_TRACKING },
 ] as const satisfies ReadonlyArray<{

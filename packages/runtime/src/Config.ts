@@ -18,6 +18,7 @@ import {
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
+import type { PressureReading } from './resourcePressure'
 import { Copilot } from './Copilot'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
@@ -53,6 +54,11 @@ export interface RuntimeOptions {
   readonly worktreeRoot: string
   /** The profile and the logs, which About › Storage measures beside the worktrees; without them it says it can't. */
   readonly storage?: { readonly profile: string; readonly logs: string }
+  /**
+   * Where other tools keep their work (`Elsewhere.ts`): the person's home and the variables the tools read, such as
+   * `CODEX_HOME`. Without it, the person's own, as this process has them.
+   */
+  readonly elsewhere?: { readonly home: string; readonly env: Readonly<Record<string, string | undefined>> }
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
   /**
@@ -258,6 +264,13 @@ export interface IdleOptions {
 }
 
 export interface BusyOptions {
+  /** Automatic pressure-aware admission; false for a test that is not about this host's load. */
+  readonly pressure?:
+    | false
+    | {
+        readonly read?: Effect.Effect<PressureReading, unknown>
+        readonly every?: Duration.Duration
+      }
   /** The machine the default is worked out from: this one, as Node says it, unless a test says. */
   readonly machine?: Machine
   /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */

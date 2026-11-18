@@ -323,7 +323,7 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
         ),
         tool(
           'read_issue_attachments',
-          'Reads issue attachments: Linear Resources, Jira attachment fields, or Trello attachments. GitHub and GitLab attach files through comments, so those return full comment pages containing the links, with source=comments. Follow the returned continuation. Linked Linear documents use list_linear_resource.',
+          'Reads issue attachments: Linear Resources, Jira attachment fields, Trello attachments, or a ClickUp task with its attachments. GitHub and GitLab attach files through comments, so those return full comment pages containing the links, with source=comments. Follow the returned continuation. Linked Linear documents use list_linear_resource.',
           { issue: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 100 } },
           ['issue'],
           (input, access) =>
@@ -334,6 +334,9 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
                 return serialize(yield* found.api.request({ path: `/issue/${encodeURIComponent(found.issue.ref)}?fields=attachment` }))
               if (found.connection.product === 'trello')
                 return serialize(yield* found.api.request({ path: `/cards/${encodeURIComponent(found.issue.id)}/attachments` }))
+              // ClickUp gives a task's attachments with the task.
+              if (found.connection.product === 'clickup')
+                return serialize(yield* found.api.request({ path: `/task/${encodeURIComponent(found.issue.id)}` }))
               if (found.connection.product === 'github' || found.connection.product === 'gitlab')
                 return JSON.stringify({
                   source: 'comments',
@@ -350,7 +353,7 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
         ),
         tool(
           'upload_issue_attachment',
-          'Uploads a file from this conversation’s working folder to an issue: Linear Resources, Jira/Trello attachments, or a linked comment on GitHub/GitLab. GitHub Enterprise Server has no supported upload endpoint. path is local, media_type is its MIME type (application/octet-stream by default), at most 5 MiB. Requires the person’s word; the receipt records the filename and digest, never file bytes or credentials.',
+          'Uploads a file from this conversation’s working folder to an issue: Linear Resources, Jira/Trello/ClickUp attachments, or a linked comment on GitHub/GitLab. GitHub Enterprise Server has no supported upload endpoint. path is local, media_type is its MIME type (application/octet-stream by default), at most 5 MiB. Requires the person’s word; the receipt records the filename and digest, never file bytes or credentials.',
           { issue: { type: 'string' }, path: { type: 'string' }, media_type: { type: 'string' }, ...wordInput },
           ['issue', 'path'],
           (input, access) =>
@@ -372,7 +375,7 @@ export class IntegrationTools extends Context.Service<IntegrationTools, { readon
                 request,
                 found.api
                   .uploadAttachment(
-                    ['linear', 'trello'].includes(found.connection.product) ? found.issue.id : found.issue.ref,
+                    ['linear', 'trello', 'clickup'].includes(found.connection.product) ? found.issue.id : found.issue.ref,
                     filename,
                     request.mediaType,
                     bytes,

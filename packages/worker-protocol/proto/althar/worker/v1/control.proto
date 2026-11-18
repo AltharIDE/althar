@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package althar.worker.v1;
+
+// The worker initiates the stream. Authentication belongs to the transport;
+// a worker ID in a message is only a claim to check against that identity.
+service WorkerControlService {
+  rpc Connect(stream WorkerFrame) returns (stream HomeFrame);
+}
+
+message WorkerFrame {
+  oneof payload {
+    WorkerHello hello = 1;
+  }
+}
+
+message HomeFrame {
+  oneof payload {
+    HomeHello hello = 1;
+  }
+}
+
+// The first worker frame declares an inclusive range of supported versions.
+// Both endpoints reject zero, inverted ranges and unsupported selections.
+message WorkerHello {
+  string worker_id = 1;
+  uint32 min_version = 2;
+  uint32 max_version = 3;
+}
+
+// The first home frame binds this stream to one authenticated, negotiated session.
+message HomeHello {
+  string home_id = 1;
+  string worker_id = 2;
+  string session_id = 3;
+  uint32 version = 4;
+}

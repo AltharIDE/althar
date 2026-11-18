@@ -212,3 +212,35 @@ describe('a task’s parts where it has little or several kinds of work', () => 
     expect(done).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('a task’s issues as parts', () => {
+  const issue = (product: 'linear' | 'github', key: string, ref = key) => ({
+    product,
+    ref,
+    key,
+    title: `Work for ${key}`,
+    url: `https://example.com/${key}`,
+    status: { name: 'Todo', category: 'todo' as const },
+    priority: null,
+    container: null,
+  })
+
+  it('is a part for each issue it came from, on any tracker, the first with the id one issue always had', () => {
+    const parts = partsOf(
+      thread({
+        issue: issue('linear', 'DEV-211'),
+        fromIssues: [issue('linear', 'DEV-211'), { ...issue('github', '#37', 'meridian/api#37'), partOf: true }],
+      }),
+      actions(),
+    )
+    expect(parts.filter((part) => part.id.startsWith('issue')).map((part) => [part.id, part.name])).toEqual([
+      ['issue', 'DEV-211'],
+      ['issue:github:meridian/api#37', '#37'],
+    ])
+  })
+
+  it('is its one issue from a runtime that sends no list', () => {
+    const parts = partsOf(thread({ issue: issue('linear', 'DEV-211') }), actions())
+    expect(parts.filter((part) => part.id.startsWith('issue')).map((part) => part.name)).toEqual(['DEV-211'])
+  })
+})

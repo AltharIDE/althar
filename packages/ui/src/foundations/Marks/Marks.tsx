@@ -22,15 +22,19 @@ export function BrandMark({ brand, size = 14, className }: BrandMarkProps) {
   return (
     <svg
       className={cx(s.mark, className)}
-      viewBox="0 0 24 24"
+      viewBox={drawing.viewBox ?? '0 0 24 24'}
       width={size}
       height={size}
       fillRule={drawing.evenOdd ? 'evenodd' : 'nonzero'}
+      // A tool's own mark may be drawn with an outline: in its units, or in screen pixels where it is fine-lined.
+      {...(drawing.stroke === undefined && drawing.weight === undefined
+        ? {}
+        : { stroke: 'currentColor', strokeWidth: drawing.weight ?? drawing.stroke, strokeLinejoin: 'round' as const })}
       aria-hidden="true"
       focusable="false"
     >
       {drawing.paths.map((p, i) => (
-        <path key={i} d={p.d} opacity={p.opacity} />
+        <path key={i} d={p.d} opacity={p.opacity} vectorEffect={drawing.weight === undefined ? undefined : 'non-scaling-stroke'} />
       ))}
     </svg>
   )

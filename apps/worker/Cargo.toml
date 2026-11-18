@@ -1,0 +1,14 @@
+[package]
+name = "althar-worker"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+prost = "=0.14.6"
+
+[build-dependencies]
+prost-build = "=0.14.6"
+protoc-bin-vendored = "=3.3.0"

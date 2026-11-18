@@ -1,0 +1,33 @@
+{
+  "name": "@althar/worker-protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The versioned Protobuf contract between an Althar home and its execution workers.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "buf generate && vp fmt src/gen",
+    "check": "buf lint && vp check",
+    "test": "vp test run",
+    "test:interop": "node --test --test-concurrency=1 integration/worker-handshake.ts"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.17.0"
+  },
+  "devDependencies": {
+    "@althar/testing": "workspace:*",
+    "@bufbuild/buf": "1.75.0",
+    "@bufbuild/protoc-gen-es": "2.17.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
+    "vite-plus": "1.6.0",
+    "vitest": "5.1.0"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  }
+}

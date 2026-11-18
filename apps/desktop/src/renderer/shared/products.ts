@@ -16,6 +16,7 @@ const PRODUCTS: Readonly<Record<Product, { readonly name: string; readonly brand
   jira_cloud: { name: 'Jira', brand: Brand.Jira },
   jira_dc: { name: 'Jira', brand: Brand.Jira },
   trello: { name: 'Trello', brand: Brand.Trello },
+  clickup: { name: 'ClickUp', brand: Brand.ClickUp },
 }
 
 export const productName = (product: Product): string => PRODUCTS[product].name

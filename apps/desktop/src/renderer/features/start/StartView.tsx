@@ -11,6 +11,7 @@ import {
   Menu,
   MenuItem,
   modKey,
+  OtherTools,
   primaryDown,
   RepositoryPick,
   type RuntimeEntry,
@@ -19,6 +20,7 @@ import {
 } from '@althar/ui'
 import { Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
+import { useHomeState } from '../homes/useHomes'
 import { brandOf, pinnedOf } from '../../shared/agents'
 import { reads } from '../../data/reads'
 import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
@@ -36,9 +38,13 @@ import { useConnections } from '../connections/useConnections'
 import { hostsCode, serviceOf, serviceOfProduct } from '../connections/ways'
 import { BareBar } from '../tabs/TabsFrame'
 import s from './Start.module.css'
+import { useElsewhere } from '../elsewhere/useElsewhere'
 import { useFirstProject } from './useFirstProject'
 import type { StartModel } from './useStart'
 import { markToured, toured, useWelcoming, welcome } from './welcome'
+
+/** The longest the welcome waits, as its project is made, to know whether other tools left anything to bring in. */
+const LOOK_MOST = 4_000
 
 /*
  * Where the window starts. On a first run, the kit's Welcome: a short tour
@@ -196,10 +202,28 @@ export function StartView({
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
+  const { client, host } = useServices()
+  const here = useHomeState(host.homes)
   const welcoming = useWelcoming()
   // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong; and the
   // welcome while it is on show, over the project made on its way.
   const first = welcoming || (model.projects !== null && model.projects.length === 0) || (model.projects === null && model.error !== null)
+
+  if (client.connection !== undefined) {
+    if (model.projects === null) return <HomePending />
+    if (model.projects.length === 0)
+      return (
+        <div className={s.window}>
+          <BareBar />
+          <main className={s.remoteEmpty}>
+            <Icon name="home" size={28} className={s.remoteGlyph} />
+            <h1>No projects on {here !== null && here.current.kind !== 'local' ? here.current.home.name : 'this home'} yet</h1>
+            <p>Add a project on the host and it shows here.</p>
+          </main>
+        </div>
+      )
+    return home()
+  }
 
   if (first) return <First model={model} accounts={accounts} onProject={onProject} />
 
@@ -314,11 +338,15 @@ function First({
   const way =
     madeWay ?? draft?.way ?? (codeHosts.length > 0 && project.candidates !== null && project.candidates.length === 0 ? 'clone' : 'folder')
   const folderWay = way === 'folder'
+  // What other tools left in its folders: read as it is made, so its step is there, or isn't, as the welcome moves on.
+  const elsewhere = useElsewhere(services.client, null)
   const make = () =>
     void (
       folderWay || draft === null ? project.make() : draftActions(services).create(inkOf(draft, []), { publish: null, tracker: null })
-    ).then((one) => {
+    ).then(async (one) => {
       if (one === null) return
+      // Never long: a look that takes more than a moment leaves the step out rather than hold the welcome up.
+      await Promise.race([elsewhere.load(one.id), new Promise((done) => setTimeout(done, LOOK_MOST))])
       setMadeWay(way)
       // Made, its draft stays on show, as what it was made from, until the welcome goes; it has no tab of its own.
       if (draft !== null) store.change(draft.id, (now) => ({ ...now, made: true }))
@@ -452,6 +480,16 @@ function First({
                 </>
               ),
             })}
+        {...(made !== null && elsewhere.tiles.length > 0
+          ? {
+              bring: {
+                content: <OtherTools tiles={elsewhere.tiles} picked={elsewhere.picked} onPick={elsewhere.onPick} />,
+                go: elsewhere.go,
+                // Brought in behind the welcome: it moves on at once, and the board shows each task as it comes.
+                onGo: () => void elsewhere.bring(made.id),
+              },
+            }
+          : {})}
         hostConnected={hostConnected}
         // Issues are a step only where a tracker can be connected; until the list is read, as though one can.
         {...(trackersOffered ? { trackers: <ConnectionsView model={connections} only="trackers" /> } : {})}

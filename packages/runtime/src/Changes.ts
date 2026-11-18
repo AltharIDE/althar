@@ -163,7 +163,9 @@ import {
   titleWords,
   unsettledLine,
   withDescribed,
+  withIssues,
   commitsWord,
+  type PullRequestIssue,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { retitleTask, TITLE_LENGTH } from './taskTitle'
@@ -171,7 +173,7 @@ import { type Answers, answersOf, followUpBody, followUpWords } from './followUp
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { FastLane } from './fastLane'
-import { Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
+import { linksIssues, Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { guardPush } from './repositoryGuard'
 import { pushDetailOf, pushFailureOf } from './pushFailure'
 import { Sessions } from './Sessions'
@@ -733,6 +735,17 @@ interface HereRow {
   readonly opened: number
 }
 
+/** An issue a task came from, as its pull requests name and link it. */
+interface IssueLinkRow {
+  readonly id: string
+  readonly product: Product
+  readonly key: string
+  readonly url: string
+  readonly ref: string
+  readonly connectionId: string | null
+  readonly partOf: number
+}
+
 interface LinkRow {
   readonly id: string
   readonly projectId: ProjectId
@@ -756,6 +769,14 @@ export class Changes extends Context.Service<
      * Call within exclusive(taskId): git checkout and its workspace update must stay together before branch discovery reads them.
      */
     publish(input: PublishInput): Effect.Effect<Published, unknown>
+    /**
+     * Brings the task's open pull requests in line with the issues it comes
+     * from now, as one added or switched to only part of: each description
+     * Althar wrote names them in its issue lines, the rest of it as it was,
+     * and each tracker links its issue back. In the background; what can't
+     * be done is logged, and nothing fails.
+     */
+    issuesChanged(taskId: string): Effect.Effect<void>
     /**
      * Whether its lead built nothing: it has a branch, with no commits on it, nothing uncommitted but evidence, and no pull
      * request open or merged (one closed with nothing left counts); false where a branch can't be read. Such a change has
@@ -1298,7 +1319,7 @@ export class Changes extends Context.Service<
        */
       const bodyFor = (
         threadId: string,
-        issue: { readonly key: string; readonly url: string; readonly sameHost: boolean; readonly partOf?: boolean } | null,
+        issue: ReadonlyArray<PullRequestIssue>,
         repository: { readonly slug: string; readonly template: string | null },
         since: string | null = null,
         review: { readonly seal: string | null; readonly details: string | null; readonly note?: string | null } | null = null,
@@ -1941,21 +1962,11 @@ export class Changes extends Context.Service<
           yield* settle
           if (input.end === 'none') return { kind: 'pushed', branch: task.branch, left } as const
           const draft = input.end === 'draft' && host.capabilities.drafts
-          const [issueLink] = yield* sql<{
-            id: string
-            product: Product
-            key: string
-            url: string
-            ref: string
-            connectionId: string | null
-            partOf: number
-          }>`
-            SELECT id, product, key, url, ref, connection_id, part_of FROM external_links WHERE task_id = ${input.taskId} AND kind = 'issue' LIMIT 1`
-          // A link's spelling of the repository may differ in case from the host's, which GitHub and GitLab don't mind.
-          const sameHost =
-            issueLink !== undefined &&
-            issueLink.product === host.product &&
-            issueLink.ref.toLowerCase().startsWith(`${path.join('/').toLowerCase()}#`)
+          const issueLinks = yield* issueLinksOf(input.taskId)
+          const sameHostOf = sameHostAs(host.product, path)
+          // Its title carries the first one's key, as its branch does; its description names each.
+          const [issueLink] = issueLinks
+          const sameHost = issueLink !== undefined && sameHostOf(issueLink)
           // The team's conventions, as the task's worktree has them now, under the person's own rule for titles.
           const conventions = yield* conventionsAt(task.path, end)
           const rule = ruleOf('title', (yield* (yield* Policies).current(input.projectId)).rules.titlePattern)
@@ -1974,7 +1985,7 @@ export class Changes extends Context.Service<
           })
           const body = yield* bodyFor(
             task.threadId,
-            issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost, partOf: issueLink.partOf === 1 },
+            issueLinks.map((link) => ({ key: link.key, url: link.url, sameHost: sameHostOf(link), partOf: link.partOf === 1 })),
             { slug: task.slug, template: conventions.template?.text ?? null },
             next?.openedAt ?? null,
             yield* reviewFor({ runId: input.runId, workspaceId: task.workspaceId, cwd: task.path, end, github: host.product === 'github' }),
@@ -2085,29 +2096,9 @@ export class Changes extends Context.Service<
               return id
             }),
           )
-          // The issue it came from gets a link to it, where its tracker has links.
-          if (issueLink !== undefined && issueLink.connectionId !== null && !sameHost)
-            yield* Effect.gen(function* () {
-              const adapters = yield* connections.adapters(issueLink.connectionId ?? '')
-              const tracker = adapters.tracker
-              if (tracker === undefined || !tracker.capabilities.links) return
-              const issue = yield* tracker.issue(issueLink.ref)
-              yield* outward({
-                projectId: input.projectId,
-                subject: { type: 'external_link', id: issueLink.id },
-                target: `${tracker.product}:${issueLink.key}`,
-                operation: 'link_issue',
-                key: `link_issue:${issueLink.id}:${opened.url}`,
-                request: { url: opened.url },
-                retryable: true,
-                perform: Effect.as(tracker.link(issue, { url: opened.url, title: `${nameOf(snapshot)}: ${opened.title}` }), true),
-                encode: () => true,
-                // Linked once, by this or its lead's link_pull_request, which shares its key: its receipt answers.
-                decode: () => true,
-              })
-            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not link the pull request to its issue', cause)))
-          // Its issue, moved on to review.
-          if (issueLink !== undefined) yield* follow(input.taskId, 'opened', snapshot)
+          yield* linkIssues(input.projectId, issueLinks, sameHostOf, { url: opened.url, title: `${nameOf(snapshot)}: ${opened.title}` })
+          // Its issues, moved on to review.
+          if (issueLinks.length > 0) yield* follow(input.taskId, 'opened', snapshot)
           yield* touchCard(input.taskId)
           yield* news(input.taskId)
           wakeNow(input.taskId)
@@ -2118,6 +2109,96 @@ export class Changes extends Context.Service<
             change: { ...snapshot, linkId, product: host.product, listening: row?.listening === 1 },
             left,
           } as const
+        })
+
+      /**
+       * Each issue a task came from gets a link to its pull request, where
+       * its tracker has links: one on the pull request's own host links
+       * itself. Each once, by this or its lead's link_pull_request, which
+       * shares its key; one tracker that can't leaves the others linked.
+       */
+      const linkIssues = (
+        projectId: ProjectId,
+        issueLinks: ReadonlyArray<IssueLinkRow>,
+        sameHostOf: (link: IssueLinkRow) => boolean,
+        change: { readonly url: string; readonly title: string },
+      ) =>
+        Effect.gen(function* () {
+          // Not where the project's rules say not to link issues (on unless the person turned it off).
+          if (!linksIssues((yield* (yield* Policies).current(projectId)).rules)) return
+          yield* linkEach(issueLinks, sameHostOf, change, projectId)
+        })
+
+      const linkEach = (
+        issueLinks: ReadonlyArray<IssueLinkRow>,
+        sameHostOf: (link: IssueLinkRow) => boolean,
+        change: { readonly url: string; readonly title: string },
+        projectId: ProjectId,
+      ) =>
+        Effect.forEach(
+          issueLinks.filter((linked) => linked.connectionId !== null && !sameHostOf(linked)),
+          (linked) =>
+            Effect.gen(function* () {
+              const adapters = yield* connections.adapters(linked.connectionId ?? '')
+              const tracker = adapters.tracker
+              if (tracker === undefined || !tracker.capabilities.links) return
+              const issue = yield* tracker.issue(linked.ref)
+              yield* outward({
+                projectId,
+                subject: { type: 'external_link', id: linked.id },
+                target: `${tracker.product}:${linked.key}`,
+                operation: 'link_issue',
+                key: `link_issue:${linked.id}:${change.url}`,
+                request: { url: change.url },
+                retryable: true,
+                perform: Effect.as(tracker.link(issue, change), true),
+                encode: () => true,
+                // Linked once, by this or its lead's link_pull_request, which shares its key: its receipt answers.
+                decode: () => true,
+              })
+            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not link the pull request to its issue', cause))),
+          { discard: true },
+        )
+
+      /** Each issue a task came from, as a pull request names and links it, in the order they were tied to it. */
+      const issueLinksOf = (taskId: string) =>
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<IssueLinkRow>`
+            SELECT id, product, key, url, ref, connection_id, part_of FROM external_links WHERE task_id = ${taskId} AND kind = 'issue'
+            ORDER BY created_at, rowid`,
+        )
+
+      /** Whether an issue lives on a pull request's own host and repository, which links its key by itself; case aside, as hosts don't mind it. */
+      const sameHostAs =
+        (product: Product, repository: ReadonlyArray<string>) => (link: { readonly product: Product; readonly ref: string }) =>
+          link.product === product && link.ref.toLowerCase().startsWith(`${repository.join('/').toLowerCase()}#`)
+
+      const issuesChanged = (taskId: string) =>
+        Effect.gen(function* () {
+          const issueLinks = yield* issueLinksOf(taskId)
+          for (const link of yield* linksOf(taskId)) {
+            if (link.connectionId === null) continue
+            const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(link.snapshot)))
+            if (seen === undefined || seen.state !== 'open') continue
+            yield* Effect.gen(function* () {
+              const host = (yield* connections.adapters(link.connectionId ?? '')).host
+              if (host === undefined) return
+              const repository = yield* host.repository(seen.repository)
+              const now = yield* host.change(repository, seen.number)
+              if (now.state !== 'open') return
+              const sameHostOf = sameHostAs(link.product, seen.repository)
+              // Only a description Althar wrote: someone's own, on one the task was attached to, stays theirs.
+              if ((yield* lastSetBody(link, seen.url)) !== null) {
+                const body = withIssues(
+                  now.body,
+                  issueLinks.map((one) => ({ key: one.key, url: one.url, sameHost: sameHostOf(one), partOf: one.partOf === 1 })),
+                )
+                if (!sameDescription(body, now.body)) yield* editOnHost(link, { snapshot: seen, host, repository, now }, { body })
+              }
+              yield* linkIssues(link.projectId, issueLinks, sameHostOf, { url: seen.url, title: `${nameOf(seen)}: ${now.title}` })
+            }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not bring a pull request in line with its issues', cause)))
+          }
         })
 
       /** The open pull request a repository of the task was attached to, as its record and link keep it: the one its work goes to now. */
@@ -2640,13 +2721,15 @@ export class Changes extends Context.Service<
         readonly toward: string | null
         readonly state: string
         readonly kind: string | null
+        /** The tool that made its folder, where Althar didn't (Elsewhere.ts): never removed, committed in or switched by Althar. */
+        readonly madeBy: string | null
       }
       const changesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<ChangeRow>`
             SELECT w.id, w.project_id, (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id,
-              w.binding_id, w.name, w.path, w.branch, w.base_commit, w.toward, w.state, w.kind
+              w.binding_id, w.name, w.path, w.branch, w.base_commit, w.toward, w.state, w.kind, w.made_by
             FROM workspaces w WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
               AND w.reviewing IS NULL AND w.state IN ('ready', 'away')
             ORDER BY w.created_at, w.rowid`
@@ -2656,6 +2739,10 @@ export class Changes extends Context.Service<
         return all.find((one) => (one.name ?? '').toLowerCase() === wanted || one.branch.toLowerCase() === wanted)
       }
       const changeWords = (one: Pick<ChangeRow, 'name' | 'branch'>) => (one.name === null ? 'the task’s first change' : `“${one.name}”`)
+      const madeElsewhere = (one: Pick<ChangeRow, 'name' | 'branch'>) =>
+        new ToolRefused({
+          message: `${changeWords(one)} is in a folder another tool made, which Althar leaves where it is: its branch stays the task's, and the folder is that tool's to remove.`,
+        })
       const commitLeftIn = (path: string, message: string) =>
         Effect.gen(function* () {
           if ((yield* uncommittedFiles(path)).length === 0) return false
@@ -2731,6 +2818,8 @@ export class Changes extends Context.Service<
             return yield* new ToolRefused({
               message: `Name the change of the task's to keep ${changeWords(from)} together with: one in the same repository.`,
             })
+          // Joining takes the folder of the change joined away.
+          if (from.madeBy !== null) return yield* madeElsewhere(from)
           for (const one of [from, into])
             if ((yield* pulledOf(one.id)).length > 0)
               return yield* new ToolRefused({
@@ -2795,6 +2884,7 @@ export class Changes extends Context.Service<
             return yield* new ToolRefused({ message: `The task has no change “${asked}” here.` })
           if (row.kind === 'checkout')
             return yield* new ToolRefused({ message: `${changeWords(row)} works Local: move it to a worktree first.` })
+          if (row.madeBy !== null) return yield* madeElsewhere(row)
           const others = all.filter((one) => one.id !== row.id && one.state === 'ready')
           // The folder another change left, as the lead made this branch there: it goes back to that change, clean or not at all.
           const left = all.find((one) => one.id !== row.id && one.state === 'away' && one.path === row.path)
@@ -2863,6 +2953,7 @@ export class Changes extends Context.Service<
           if (row === undefined) return yield* new ToolRefused({ message: 'The task has no worktree here to remove.' })
           if (all.length > 1) return yield* new ToolRefused({ message: 'The task has several changes: name the one to drop.' })
           if (row.kind === 'checkout') return yield* new ToolRefused({ message: 'The task works Local: move it to a worktree first.' })
+          if (row.madeBy !== null) return yield* madeElsewhere(row)
           const committed = yield* commitLeftIn(row.path, 'Work in progress, as the task’s worktree was removed')
           const base = row.baseCommit ?? (yield* commitOf(row.path, 'HEAD'))
           yield* git(row.path, 'switch', '--quiet', '--detach', base)
@@ -4422,7 +4513,7 @@ export class Changes extends Context.Service<
           const conventions = where === undefined ? null : yield* conventionsAt(where.path, 'HEAD')
           const rule = ruleOf('title', (yield* (yield* Policies).current(link.projectId)).rules.titlePattern)
           const [issue] = yield* sql<{ product: Product; key: string; ref: string }>`
-            SELECT product, key, ref FROM external_links WHERE task_id = ${link.taskId} AND kind = 'issue' LIMIT 1`
+            SELECT product, key, ref FROM external_links WHERE task_id = ${link.taskId} AND kind = 'issue' ORDER BY created_at, rowid LIMIT 1`
           const sameHost =
             issue !== undefined &&
             issue.product === link.product &&
@@ -4439,11 +4530,13 @@ export class Changes extends Context.Service<
           })
         })
 
-      /** The issue's key the task came from, which the naming puts in a title: null where it came from none. */
+      /** The key of the (first) issue the task came from, which the naming puts in a title: null where it came from none. */
       const issueKeyOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [issue] = yield* sql<{ key: string }>`SELECT key FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' LIMIT 1`
+          const [issue] = yield* sql<{
+            key: string
+          }>`SELECT key FROM external_links WHERE task_id = ${taskId} AND kind = 'issue' ORDER BY created_at, rowid LIMIT 1`
           return issue?.key ?? null
         })
 
@@ -7757,7 +7850,8 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const rows = (yield* sql<{ id: string; projectId: ProjectId; path: string; heldAt: string | null }>`
               SELECT id, project_id, path, held_at FROM workspaces WHERE task_id = ${taskId}
-                AND (${heads === undefined ? 1 : 0} = 1 OR (device_id = ${instance.deviceId} AND access = 'write' AND state = 'ready' AND reviewing IS NULL))`).filter(
+                AND device_id = ${instance.deviceId} AND access = 'write'
+                AND (${heads === undefined ? 1 : 0} = 1 OR (state = 'ready' AND reviewing IS NULL))`).filter(
             (row) => (only === undefined || only.includes(row.id)) && (heads === undefined || heads[row.id] !== undefined),
           )
           for (const row of rows) {
@@ -9423,6 +9517,15 @@ export class Changes extends Context.Service<
 
       return Changes.of({
         publish: (input) => provide(publish(input)),
+        issuesChanged: (taskId) =>
+          Effect.asVoid(
+            Effect.forkIn(
+              provide(locked(taskId)(issuesChanged(taskId))).pipe(
+                Effect.catchCause((cause) => Effect.logWarning('Could not bring a task’s pull requests in line with its issues', cause)),
+              ),
+              scope,
+            ),
+          ),
         nothingBuilt: (taskId) => provide(nothingBuiltOf(taskId)),
         unshipped: (taskId, options) => provide(unshippedOf(taskId, options?.kept === true)),
         inHands: (taskId) => provide(handsOf(taskId)),

@@ -80,7 +80,7 @@ export const SCENE = {
         <b>what you already use.</b>
       </>
     ),
-    lead: 'Code on GitHub, GitLab or Bitbucket. Issues in Linear, Jira or Trello. Anything else through an MCP server. Connect each once, and every agent can use it.',
+    lead: 'Code on GitHub, GitLab or Bitbucket. Issues in Linear, Jira, Trello or ClickUp. Anything else through an MCP server. Connect each once, and every agent can use it.',
   },
   edge: {
     title: (

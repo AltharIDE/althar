@@ -21,9 +21,9 @@ import type { Lanes } from '../board/lanes'
  */
 
 export const text = {
-  /** The tracker its tasks name, by the key their issues share, else by its name: MER issues, Trello cards. */
+  /** The tracker its tasks name, by the key their issues share, else by its name: MER issues, Trello cards, ClickUp tasks. */
   issues: (tracker: Pick<Tracker, 'product' | 'key'>) =>
-    `${tracker.key ?? productName(tracker.product)} ${tracker.product === 'trello' ? 'cards' : 'issues'}`,
+    `${tracker.key ?? productName(tracker.product)} ${tracker.product === 'trello' ? 'cards' : tracker.product === 'clickup' ? 'tasks' : 'issues'}`,
   /** What opening a repository or tracker part says it does: Open on GitHub, Open on Linear. */
   openOn: (where: string) => `Open on ${where}`,
   moreTrackers: (n: number) => `+${n} more`,
@@ -107,9 +107,9 @@ const workspaceOf = (issue: NonNullable<BoardTask['issue']>, list: ConnectionLis
 export const trackersOf = (tasks: ReadonlyArray<BoardTask>, list: ConnectionList | null): Tracker[] => {
   const trackers = new Set(list?.products.filter((product) => product.tracker && !product.host).map((product) => product.product) ?? [])
   const counted = new Map<string, Omit<Tracker, 'connections'> & { n: number; through: Map<string, number> }>()
-  for (const task of tasks) {
-    const issue = task.issue
-    if (issue === null || !trackers.has(issue.product)) continue
+  // Each issue a task came from, on whichever tracker.
+  for (const issue of tasks.flatMap((task) => task.fromIssues ?? (task.issue === null ? [] : [task.issue]))) {
+    if (!trackers.has(issue.product)) continue
     const key = /^([A-Z][A-Z0-9_]*)-\d+$/.exec(issue.key)?.[1] ?? null
     const at = hostNameOf(issue.url)
     // Another workspace on the same server is another tracker, though a team there shares the key.

@@ -75,6 +75,7 @@ import type {
   TaskCardContent,
 } from './thread'
 import { setupStanding } from './thread'
+import { NotBroughtInOf } from '../features/elsewhere/NotBroughtInOf'
 import { ReviewOfferOf } from '../features/team/ReviewOfferOf'
 import s from './ThreadBlocks.module.css'
 import { duration, lineOf, spentWords } from './turnTime'
@@ -403,6 +404,8 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'notice':
       // A review a lead offered: its line asks, with its buttons, and says what came of it once answered.
       if (part.offer?.kind === 'review') return <ReviewOfferOf offer={part.offer} ask={part.text} />
+      // What didn't come in from other tools: each by name and why, with Try again.
+      if (part.offer?.kind === 'bring_in') return <NotBroughtInOf offer={part.offer} title={part.text} />
       // A turn that failed reads as a problem; the thread's last one has its ways out beside it (ThreadBlocks, TaskThread).
       if (part.tone === 'error') return <FailedTurn text={part.text} detail={part.detail} failure={part.failure} />
       return (
@@ -769,7 +772,11 @@ export function ThreadBlocks({
       case 'offer':
         return (
           <div key={block.id} className={s.offer}>
-            <ReviewOfferOf offer={block.offer} ask={block.text} />
+            {block.offer.kind === 'review' ? (
+              <ReviewOfferOf offer={block.offer} ask={block.text} />
+            ) : (
+              <NotBroughtInOf offer={block.offer} title={block.text} />
+            )}
           </div>
         )
       case 'step':

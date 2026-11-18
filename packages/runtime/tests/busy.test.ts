@@ -590,6 +590,43 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
+  it.live('retries a queue source that could not be read, even without another wake', () =>
+    Effect.gen(function* () {
+      const busy = yield* Busy
+      let reads = 0
+      let available = false
+      let started = false
+      const waiter: Waiter = {
+        taskId: 'waiting-after-read-error',
+        order: 'underway',
+        since: '2026-01-01T00:00:00.000Z',
+        start: Effect.sync(() => {
+          started = true
+        }),
+      }
+      yield* busy.queue(
+        Effect.suspend(() => {
+          reads++
+          return available ? Effect.succeed(started ? [] : [waiter]) : Effect.fail('temporarily unavailable')
+        }),
+      )
+      yield* until(
+        Effect.sync(() => reads),
+        (count) => count > 0,
+      )
+      // Let any startup wakes drain, then check that the timer still retries the failed source.
+      yield* Effect.sleep('200 millis')
+      const before = reads
+      yield* Effect.sleep('200 millis')
+      assert.isAbove(reads, before)
+      available = true
+      yield* until(
+        Effect.sync(() => started),
+        (value) => value,
+      )
+    }).pipe(Effect.provide(machine(1, ':memory:', { every: Duration.millis(50) }))),
+  )
+
   it.live('keep a task’s place between its own steps: its review goes on, ahead of a task that waited longer', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
@@ -1249,6 +1286,29 @@ describe('Agents at once, across a restart', () => {
         assert.lengthOf(yield* sessionsOn(first.threadId), sessions)
         assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
       }).pipe(Effect.provide(machine(1, file)))
+    }),
+  )
+
+  it.live('let a wait for a place an earlier Althar left on an idle lead go after a restart, with places free', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const before = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const { projectId } = yield* opened
+        const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+        yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+        yield* idle(first.threadId)
+        // As an earlier Althar left it, holding a turn for a usage limit as a wait for a place, the words it held taken back since.
+        yield* sql`UPDATE threads SET waits_for_place = ${new Date().toISOString()} WHERE id = ${first.threadId}`
+        return { projectId, first }
+      }).pipe(Effect.provide(machine(2, file)))
+
+      yield* Effect.gen(function* () {
+        const { projectId, first } = before
+        // Places free: its lead starts again and takes one, and its card stops saying it waits for an agent.
+        yield* until(waitsOn(first.threadId), (since) => since === null)
+        yield* until(cardOf(projectId, first.taskId), (card) => card?.queued === null)
+      }).pipe(Effect.provide(machine(2, file)))
     }),
   )
 

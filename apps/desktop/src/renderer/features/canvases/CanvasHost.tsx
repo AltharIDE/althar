@@ -10,6 +10,7 @@ import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 import { canvasPlace, gather } from '../../shared/comments'
 import { ago } from '../../shared/time'
+import { useCovered } from '../browser/cover'
 
 /*
  * One of the project's canvases beside a conversation (ADR-104), on its
@@ -261,5 +262,51 @@ function CanvasPage({
   }, [views, threadId, projectId, canvasId, version, manifest, panel])
   // Closed, or another kind shown in its place, the view goes with its process.
   useEffect(() => () => views?.close(threadId), [views, threadId])
-  return <CanvasPagePlace ref={setPlace} canvas={canvasId} />
+
+  // Something of the window's own over its place (a dialog, a menu, a lightbox) would open under the view: a picture of the
+  // canvas shows in its place and the view steps aside, as the page's does (ADR-100).
+  const covered = useCovered(panel, () => document.getElementById('root'))
+  const [still, setStill] = useState<string | null>(null)
+  // Whether the view should be aside now: a picture that finishes drawing after what was over it went must not hide it again.
+  const aside = useRef(false)
+  useLayoutEffect(() => {
+    aside.current = covered
+  }, [covered])
+  useEffect(() => {
+    if (views === undefined) return
+    let live = true
+    if (covered) {
+      void views
+        .still(threadId)
+        .catch(() => null)
+        .then((picture) => {
+          if (!live) return
+          // With no picture to show, the view steps aside all the same: what is over it must show.
+          if (picture === null) void views.cover(threadId, true)
+          setStill(picture)
+        })
+      return () => {
+        live = false
+      }
+    }
+    void views.cover(threadId, false)
+    // The picture goes once the view is back over it, so nothing between blinks.
+    const frame = requestAnimationFrame(() => setStill(null))
+    return () => {
+      live = false
+      cancelAnimationFrame(frame)
+    }
+  }, [views, threadId, covered])
+  // Closing or leaving, the view comes back for whoever shows it next.
+  useEffect(() => () => void views?.cover(threadId, false), [views, threadId])
+  return (
+    <CanvasPagePlace
+      ref={setPlace}
+      canvas={canvasId}
+      still={still}
+      onStill={() => {
+        if (aside.current) void views?.cover(threadId, true)
+      }}
+    />
+  )
 }

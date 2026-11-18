@@ -86,6 +86,7 @@ export const projectRules: ProjectRulesView = {
   branchPattern: null,
   titlePattern: null,
   moveIssues: true,
+  linkIssues: true,
   afterMergeReview: 'major',
   repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
@@ -721,7 +722,7 @@ export const items = {
       section: 'althar/plans-and-reviews',
       title: 'Plans and reviews',
       project: null,
-      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5' }],
+      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5', changes: ['Review rounds: 3 → 5'] }],
       by: { kind: 'coordinator', taskId: null, title: null },
       loosens: false,
       words: null,
@@ -1082,13 +1083,15 @@ export const agentTools: AgentTools = {
 
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
-  const watching: Array<number | undefined> = []
+  const watching: Array<number | import('@althar/contracts').FeedPosition | undefined> = []
   const starts = new Set<() => void>()
   const client: Client = {
     status: vi.fn(async () => status),
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
+    lookElsewhere: vi.fn(async () => ({ worktrees: [], setups: [], conversations: [] })),
+    bringIn: vi.fn(async () => ({ tasks: [], asides: [], setups: 0, histories: 0, failed: [] })),
     placeRepository: vi.fn(async (_grant: string, name: string) => ({
       name: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,

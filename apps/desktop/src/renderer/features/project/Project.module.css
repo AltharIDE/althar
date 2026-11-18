@@ -142,3 +142,7 @@
 .firstConnections {
   margin-top: 8px;
 }
+/* a bringing in from other tools the runtime never got, said as the runtime's own lines are */
+.unsent {
+  margin-top: 8px;
+}

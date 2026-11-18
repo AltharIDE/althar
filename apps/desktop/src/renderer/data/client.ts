@@ -1,4 +1,14 @@
-import type { SearchDocuments } from '@althar/contracts'
+import {
+  API_VERSION,
+  socketCanCall,
+  type BroughtIn,
+  type ClientIdentity,
+  type ConnectionInfo,
+  type Elsewhere,
+  type FeedPosition,
+  type SearchDocuments,
+} from '@althar/contracts'
+import { checkedPosition, checkedWatch } from './checkedWatch'
 import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
 
 import {
@@ -125,11 +135,11 @@ import { RpcClient } from 'effect/rpc'
  * Effect inside; what it hands the view models is plain promises and a
  * subscription, so they stay ordinary React hooks.
  *
- * Every command gets an id here. When a command's answer doesn't come back
+ * Every command gets an id here. On a local connection, when its answer doesn't come back
  * (the runtime didn't answer, rather than said no), it is tried once more
  * with the same id, and the runtime answers the retry from the first one's
- * receipt instead of doing it twice. `watch` picks up from the last change it
- * heard when its stream breaks.
+ * receipt instead of doing it twice. Remote commands are sent once and never replayed automatically.
+ * A local `watch` picks up after a broken stream; remote watches use checked home positions.
  */
 
 /** What may change of a project's rules at once: any of it. */
@@ -146,11 +156,22 @@ export type OnePress =
   | { readonly attentionId: string; readonly action: OnePressAction }
 
 export interface Client {
+  readonly connection?: ConnectionInfo
   /** The runtime's version and the agents on this Mac; `recheck` asks each agent again rather than trust the last minute's answer. */
   readonly status: (options?: { readonly recheck?: boolean }) => Promise<Status>
   readonly listProjects: () => Promise<ProjectList>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
+  /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
+  readonly lookElsewhere: (at: { readonly projectId: string } | { readonly grant: string }) => Promise<Elsewhere>
+  /** Brings in what was picked of it, by its keys: worktrees as tasks held Up next on `steps`, setups, conversations. */
+  readonly bringIn: (input: {
+    readonly projectId: string
+    readonly worktrees: ReadonlyArray<string>
+    readonly setups: ReadonlyArray<string>
+    readonly conversations: ReadonlyArray<string>
+    readonly steps: ReadonlyArray<PlanStep>
+  }) => Promise<BroughtIn>
   /** Where a new repository named after `name` would go in the folder a grant names, read without making it; refused where it can't. */
   readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
   /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
@@ -560,7 +581,8 @@ export interface Client {
   /** Says to the coordinator, as the person, that issues are filed and changed at once from now on, or wait on a card first: from an issue card in a thread. */
   readonly preferIssueCards: (threadId: string, atOnce: boolean) => Promise<void>
   /** Whether a task does only part of its issue, so its merge comments on it and leaves it open. */
-  readonly setTaskIssuePart: (taskId: string, partOf: boolean) => Promise<void>
+  /** Whether a task does only part of an issue it came from: the one named by its ref, or its first. */
+  readonly setTaskIssuePart: (taskId: string, partOf: boolean, issue?: string) => Promise<void>
   /** Changes a review the lead drafted, before it is posted: its verdict, its summary, which comments are kept and what they say. */
   readonly changeReviewDraft: (
     draftId: string,
@@ -804,7 +826,12 @@ export interface Client {
    * listening, at first and again after it broke, when what streams only to
    * those listening (an agent's words, a command's output) may have been missed.
    */
-  readonly watch: (listener: (event: WatchEvent) => void, since?: number, onWatching?: () => void) => () => void
+  readonly watch: (
+    listener: (event: WatchEvent) => void,
+    since?: number | FeedPosition,
+    onWatching?: () => void,
+    onReset?: () => void,
+  ) => () => void
   readonly close: () => Promise<void>
 }
 
@@ -912,7 +939,7 @@ const RETRY_AFTER = Duration.millis(300)
 const REWATCH_AFTER = Duration.seconds(1)
 
 /** A command, under one id however often it is tried: once more when the runtime didn't answer, never when it said no. */
-const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Promise<A> => {
+const retryingCommand = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Promise<A> => {
   const commandId = newCommandId()
   return settle(
     Effect.catchCause(run(commandId), (cause) => {
@@ -923,18 +950,64 @@ const command = <A>(run: (commandId: string) => Effect.Effect<A, unknown>): Prom
 }
 
 /** Connects to the runtime over a port, and keeps the connection until `close`. */
-export const connect = async (port: DomMessagePort): Promise<Client> => {
+export const connect = async (port: DomMessagePort, expected?: ClientIdentity): Promise<Client> => {
   const scope = await Effect.runPromise(Scope.make())
-  const api = await Effect.runPromise(
+  const rawApi = await Effect.runPromise(
     Effect.gen(function* () {
       const protocol = yield* Layer.build(clientProtocol(domPort(port)))
       return yield* RpcClient.make(Api, untraced).pipe(Effect.provideContext(protocol))
-    }).pipe(Scope.provide(scope)),
+    }).pipe(
+      Scope.provide(scope),
+      Effect.onError(() => Scope.close(scope, Exit.void)),
+    ),
   )
+  let connection: ConnectionInfo | undefined
+  try {
+    if (expected !== undefined) {
+      connection = await settle(rawApi.GetConnectionInfo({}).pipe(Effect.timeout('10 seconds')))
+      if (connection.apiVersion !== API_VERSION)
+        throw new ApiError({
+          reason: 'ApiVersionMismatch',
+          message: 'This home and app use different API versions.',
+          clientVersion: API_VERSION,
+          runtimeVersion: connection.apiVersion,
+        })
+      if (
+        expected.role !== 'socket' ||
+        connection.identity.role !== 'socket' ||
+        connection.identity.homeId !== expected.homeId ||
+        connection.identity.actorId !== expected.actorId ||
+        connection.identity.deviceId !== expected.deviceId
+      )
+        throw new ApiError({ reason: 'AuthenticationFailed', message: 'This connection changed its expected home or authority.' })
+      checkedPosition(connection.position, expected.homeId)
+    }
+  } catch (error) {
+    await Effect.runPromise(Scope.close(scope, Exit.void))
+    throw error
+  }
+  const command =
+    expected === undefined ? retryingCommand : <A>(run: (id: string) => Effect.Effect<A, unknown>) => settle(run(newCommandId()))
+  const api =
+    expected === undefined
+      ? rawApi
+      : new Proxy(rawApi, {
+          get(target, tag, receiver): unknown {
+            if (typeof tag === 'string' && tag in target && !socketCanCall(tag))
+              return () =>
+                Effect.fail(
+                  new ApiError({ reason: 'PersonRequired', message: 'This connection cannot do that. Use a trusted person client.' }),
+                )
+            return Reflect.get(target, tag, receiver)
+          },
+        })
   return {
+    ...(connection === undefined ? {} : { connection }),
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    lookElsewhere: (at) => settle(api.LookElsewhere(at)),
+    bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
     makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
     prepareFolder: (grant, path) =>
@@ -1143,7 +1216,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     applyIssueChanges: (changesId) => command((commandId) => api.ApplyIssueChanges({ commandId, changesId })),
     discardIssueChanges: (changesId) => command((commandId) => api.DiscardIssueChanges({ commandId, changesId })),
     preferIssueCards: (threadId, atOnce) => command((commandId) => api.PreferIssueCards({ commandId, threadId, atOnce })),
-    setTaskIssuePart: (taskId, partOf) => command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf })),
+    setTaskIssuePart: (taskId, partOf, issue) =>
+      command((commandId) => api.SetTaskIssuePart({ commandId, taskId, partOf, ...(issue === undefined ? {} : { issue }) })),
     changeReviewDraft: (draftId, edit) => command((commandId) => api.ChangeReviewDraft({ commandId, draftId, ...edit })),
     postReviewDraft: (draftId) => command((commandId) => api.PostReviewDraft({ commandId, draftId })),
     discardReviewDraft: (draftId) => command((commandId) => api.DiscardReviewDraft({ commandId, draftId })),
@@ -1268,8 +1342,21 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     dropMove: (taskId) => command((commandId) => api.DropMove({ commandId, taskId })),
     workToward: (taskId, toward) => command((commandId) => api.WorkToward({ commandId, taskId, toward })),
     handOverHeld: (input) => command((commandId) => api.HandOverHeld({ commandId, ...input })),
-    watch: (listener, since, onWatching) => {
-      let cursor = since
+    watch: (listener, since, onWatching, onReset) => {
+      if (expected !== undefined) {
+        const position = checkedPosition(since, expected.homeId)
+        const watching = checkedWatch(
+          { watch: (position) => api.WatchFrom({ position }), snapshot: () => api.ListProjects() },
+          expected.homeId,
+          position,
+          listener,
+          onWatching,
+          onReset,
+        )
+        const fiber = Effect.runFork(Effect.catchCause(watching, () => Scope.close(scope, Exit.void)))
+        return () => void Effect.runFork(Fiber.interrupt(fiber))
+      }
+      let cursor = typeof since === 'number' ? since : since?.cursor
       // A stream that ends or breaks starts again from the last change heard, so nothing in between is missed.
       // Said once the watch's request has gone, a moment after it starts, so a read made then comes after it on the port.
       const started = Effect.sync(() => void setTimeout(() => onWatching?.(), 0))
@@ -1294,13 +1381,26 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
 }
 
 /** The port the preload hands the page, once the main process has made it. */
-export const receivePort = (target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window): Promise<DomMessagePort> =>
-  new Promise((resolve) => {
+export const receivePort = (
+  target: Pick<Window, 'addEventListener' | 'removeEventListener'> = window,
+  signal?: AbortSignal,
+): Promise<DomMessagePort> =>
+  new Promise((resolve, reject) => {
+    const aborted = () => {
+      target.removeEventListener('message', onMessage)
+      reject(new Error('The connection was cancelled.'))
+    }
+    if (signal?.aborted === true) {
+      reject(new Error('The connection was cancelled.'))
+      return
+    }
     const onMessage = (event: MessageEvent) => {
       const port = event.ports[0]
       if (event.data !== 'althar:port' || port === undefined) return
       target.removeEventListener('message', onMessage)
+      signal?.removeEventListener('abort', aborted)
       resolve(port)
     }
     target.addEventListener('message', onMessage)
+    signal?.addEventListener('abort', aborted, { once: true })
   })
