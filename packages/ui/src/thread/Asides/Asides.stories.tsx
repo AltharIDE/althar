@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
+import { TaskFace } from '../TaskFace/TaskFace'
+import { Thread } from '../Thread/Thread'
 import { type Aside, AsideMoves, AsideTabs } from './Asides'
 
 const ASIDES: readonly Aside[] = [
@@ -193,4 +195,43 @@ export const Moves: StoryObj<typeof AsideMoves> = {
       <AsideMoves onMakeTask={fn()} note="Asked 4m ago" />
     </div>
   ),
+}
+
+const WORDS = Array.from(
+  { length: 14 },
+  (_, n) => `Message ${n + 1}: the retry back-off waits twice as long after each failed call, up to a minute, then gives up.`,
+)
+
+/** The bar over a conversation: a column the height of the pane, the thread scrolling under it. */
+function OverThread() {
+  return (
+    <div style={{ height: 420, display: 'flex', flexDirection: 'column', background: 'var(--paper)' }}>
+      <AsideTabs mark={<HalftoneMark size={15} rise={false} />} asides={ASIDES} older={OLDER} current={null} onPick={fn()} onNew={fn()} />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <TaskFace under composer={<p style={{ margin: 0, padding: 12, color: 'var(--t-3)' }}>Message…</p>}>
+          <Thread label="Conversation">
+            {WORDS.map((words) => (
+              <p key={words} style={{ margin: 0 }}>
+                {words}
+              </p>
+            ))}
+          </Thread>
+        </TaskFace>
+      </div>
+    </div>
+  )
+}
+
+/** At the top of the thread, nothing has scrolled under the bar: no shadow. */
+export const OverTheThread: Story = { render: () => <OverThread /> }
+
+/** Scrolled, the thread passes under the bar, which takes a light shadow along its lower edge. */
+export const OverTheThreadScrolled: Story = {
+  render: () => <OverThread />,
+  play: async ({ canvasElement }) => {
+    const scroller = canvasElement.querySelector<HTMLElement>('[class*="scroll"]:not([class*="scrollArea"])')
+    if (scroller === null) throw new Error('no scroller')
+    scroller.scrollTop = 200
+    await waitFor(() => expect(canvasElement.querySelector('[data-scrolled]')).not.toBeNull())
+  },
 }

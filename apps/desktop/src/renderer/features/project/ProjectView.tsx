@@ -1045,7 +1045,7 @@ export function ProjectView({
                         failed={asideMoves.failed === null ? null : <AsideMoveFailed moves={asideMoves} className={s.failure} />}
                       />
                     ) : aside.kind === 'new' ? (
-                      <TaskFace className={s.face} composer={composer}>
+                      <TaskFace className={s.face} composer={composer} under>
                         <Thread label={asidesText.newPlaceholder}>
                           <LiveBlocks
                             source={newAside}
@@ -1061,6 +1061,7 @@ export function ProjectView({
                         <TaskFace
                           className={s.face}
                           composer={composer}
+                          under
                           // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
                           {...(both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
                         >
