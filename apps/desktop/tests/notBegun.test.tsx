@@ -20,7 +20,7 @@ import { planAskIn, planIt, planStillAsked } from '../src/renderer/shared/planIt
  * so, and leaves Up next.
  */
 
-const NOW = '2026-11-18T10:00:00.000Z'
+const NOW = '2026-01-15T10:00:00.000Z'
 
 const draft = (more: Partial<Draft> = {}): Draft => ({
   key: 'draft_1',
@@ -217,7 +217,7 @@ describe("a task's card in the thread, never begun", () => {
 
   it('says a task discarded once at work was discarded, not that it is ready', () => {
     withServices(
-      <Card card={card({ phase: 'settled', discarded: true, startedAt: '2026-11-18T09:00:00.000Z' })} actions={actions()} />,
+      <Card card={card({ phase: 'settled', discarded: true, startedAt: '2026-01-15T09:00:00.000Z' })} actions={actions()} />,
       fakeClient().client,
     )
     expect(screen.getByText('Discarded')).toBeTruthy()
@@ -229,7 +229,7 @@ describe('the board', () => {
   const task = (more: Partial<BoardTask>): BoardTask => ({
     ...card(),
     state: 'open',
-    createdAt: '2026-11-18T09:00:00.000Z',
+    createdAt: '2026-01-15T09:00:00.000Z',
     settledAt: null,
     changed: null,
     here: [],
@@ -246,7 +246,7 @@ describe('the board', () => {
       state: 'draft',
       plan: null,
       unplanned: true,
-      stopped: { by: null, at: '2026-11-18T09:30:00.000Z' },
+      stopped: { by: null, at: '2026-01-15T09:30:00.000Z' },
     })
     const lanes = lanesOf({ cursor: 1, tasks: [unplanned], calls: [], settledTotal: 0 })
     withServices(
