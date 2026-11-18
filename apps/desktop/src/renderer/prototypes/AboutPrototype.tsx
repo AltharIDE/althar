@@ -8,15 +8,20 @@ import {
   Button,
   CrashReports,
   Icon,
+  KeepAwake,
   LinkButton,
   Logo,
   Path,
   Segmented,
   SettingGroup,
+  SettingSwitch,
   SettingList,
   SettingRow,
   SettingsLayout,
   SettingsNav,
+  TaskFolders,
+  type FolderWait,
+  taskFoldersText,
   Switch,
   UsageData,
   storageSize,
@@ -25,6 +30,7 @@ import { type KeyboardEvent, StrictMode, useEffect, useRef, useState } from 'rea
 import { createRoot } from 'react-dom/client'
 
 import { GROUPS, sectionText } from '../features/settings/sections'
+import { text as settingsText } from '../features/settings/text'
 import s from './AboutPrototype.module.css'
 
 type Direction = 'a' | 'b' | 'c' | 'd' | 'e' | 'f'
@@ -119,6 +125,8 @@ export function AboutPrototype() {
   const [removed, setRemoved] = useState<ReadonlyArray<string>>([])
   const [lastRemoved, setLastRemoved] = useState<ReadonlyArray<string> | null>(null)
   const [cleanupOpen, setCleanupOpen] = useState(false)
+  const [section, setSection] = useState<'about' | 'this-mac'>('about')
+  const [flash, setFlash] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
   const [measured, setMeasured] = useState(false)
   const [updateChecked, setUpdateChecked] = useState(false)
@@ -188,6 +196,7 @@ export function AboutPrototype() {
     const key = event.key.toLowerCase()
     if (DIRECTIONS.some((one) => one.id === key)) {
       event.preventDefault()
+      setSection('about')
       setDirection(key as Direction)
     } else if (key === 't') {
       event.preventDefault()
@@ -206,6 +215,11 @@ export function AboutPrototype() {
     measured,
     remove,
     removeMany,
+    freeUpSpace: () => {
+      setNotice(null)
+      setSection('this-mac')
+      setFlash((was) => was + 1)
+    },
     updateChecked,
     onCheck: checkForUpdates,
     onReport: report,
@@ -219,23 +233,26 @@ export function AboutPrototype() {
     // oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the prototype's direction keys stay inside its own page
     <section ref={root} className={s.prototype} aria-label="About Althar prototype" onKeyDown={onKeyDown} tabIndex={-1}>
       <SettingsLayout
-        section={`about-${direction}`}
-        title="About Althar"
+        section={section === 'about' ? `about-${direction}` : section}
+        title={sectionText[section].title}
         side={
           <SettingsNav
             label="Settings"
             groups={GROUPS.map((group) => group.map((id) => ({ id, ...sectionText[id] })))}
-            value="about"
-            onChange={() => setNotice('This prototype keeps About Althar open.')}
+            value={section}
+            onChange={(id) =>
+              id === 'about' || id === 'this-mac' ? setSection(id) : setNotice('This prototype has About Althar and Work on this Mac.')
+            }
           />
         }
       >
-        {direction === 'a' && <Proportion {...shared} />}
-        {direction === 'b' && <Reclaim {...shared} />}
-        {direction === 'c' && <Quiet {...shared} />}
-        {direction === 'd' && <Disk {...shared} />}
-        {direction === 'e' && <Finished {...shared} />}
-        {direction === 'f' && <Tiles {...shared} />}
+        {section === 'this-mac' && <ThisMac {...shared} flash={flash} />}
+        {section === 'about' && direction === 'a' && <Proportion {...shared} />}
+        {section === 'about' && direction === 'b' && <Reclaim {...shared} />}
+        {section === 'about' && direction === 'c' && <Quiet {...shared} />}
+        {section === 'about' && direction === 'd' && <Disk {...shared} />}
+        {section === 'about' && direction === 'e' && <Finished {...shared} />}
+        {section === 'about' && direction === 'f' && <Tiles {...shared} />}
       </SettingsLayout>
 
       {notice !== null && (
@@ -289,6 +306,8 @@ interface DirectionProps {
   measured: boolean
   remove: (id: string) => void
   removeMany: (ids: ReadonlyArray<string>) => void
+  /** Takes the person to Work on this Mac's task folders. */
+  freeUpSpace: () => void
   updateChecked: boolean
   onCheck: () => void
   onReport: () => void
@@ -694,8 +713,8 @@ function Tiles(props: DirectionProps) {
               </span>
               <span className={s.tileActions}>
                 {lead && (
-                  <Button size="small" onClick={() => props.setCleanupOpen(!props.cleanupOpen)}>
-                    {props.cleanupOpen ? 'Done' : 'Free up space…'}
+                  <Button size="small" trailingIcon="arrow" onClick={props.freeUpSpace}>
+                    Free up space
                   </Button>
                 )}
                 <ShowButton compact place={one} onShow={() => props.show(one)} />
@@ -703,7 +722,6 @@ function Tiles(props: DirectionProps) {
             </div>
           ))}
         </div>
-        {props.cleanupOpen && <Cleanup folders={props.folders} onRemove={props.remove} />}
       </SettingGroup>
       <SettingGroup title="Help improve Althar" note="Anonymous. Never your code or any name.">
         <div className={s.privacyPair}>
@@ -733,6 +751,86 @@ function PairSwitch({ title, on, onChange }: { title: string; on: boolean; onCha
       <span>{title}</span>
       <Switch checked={on} onChange={onChange} label={title} />
     </label>
+  )
+}
+
+const KIND: Record<string, 'merged' | 'done'> = { Merged: 'merged', Closed: 'done' }
+const WHEN: Record<string, string> = { billing: '2 days ago', linux: 'yesterday', docs: '5 days ago' }
+
+/**
+ * Work on this Mac as Settings has it, from the kit's own rows, with the real
+ * task folders row: where About Althar's Free up space goes, scrolled to and
+ * lit for a moment so the person sees where they landed.
+ */
+function ThisMac(props: DirectionProps & { flash: number }) {
+  const [wait, setWait] = useState<FolderWait>('smart')
+  const [awake, setAwake] = useState(true)
+  const [battery, setBattery] = useState(false)
+  const [load, setLoad] = useState(true)
+  const [login, setLogin] = useState(true)
+  const [freed, setFreed] = useState<number | null>(null)
+  const list = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (props.flash === 0) return
+    const title = [...(list.current?.querySelectorAll('span') ?? [])].find((one) => one.textContent === taskFoldersText.title)
+    const row = title?.parentElement?.parentElement
+    if (row === undefined || row === null) return
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    row.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
+    const lit = s.flash ?? ''
+    row.classList.add(s.flashable ?? '', lit)
+    const off = window.setTimeout(() => row.classList.remove(lit), 1100)
+    return () => window.clearTimeout(off)
+  }, [props.flash])
+
+  const goes = props.folders
+    .filter((one) => one.done !== null)
+    .map((one) => ({
+      id: one.id,
+      title: one.title,
+      kind: KIND[one.done ?? 'Merged'] ?? 'done',
+      when: WHEN[one.id] ?? 'today',
+      bytes: one.bytes,
+    }))
+  const gone = INITIAL_FOLDERS.reduce((sum, one) => sum + one.bytes, 0) - props.taskBytes
+
+  return (
+    <div ref={list}>
+      <SettingList>
+        <KeepAwake
+          on={awake}
+          onChange={setAwake}
+          onBattery={battery}
+          onBatteryChange={setBattery}
+          text={{ title: settingsText.awakeTitle, note: settingsText.awakeNote }}
+        />
+        <SettingSwitch title={settingsText.loadTitle} glyph={<Icon name="load" size={15} />} checked={load} onChange={setLoad} />
+        <SettingSwitch
+          title={settingsText.atLoginTitle}
+          note={settingsText.atLoginNote}
+          glyph={<Icon name="automation" size={15} />}
+          checked={login}
+          onChange={setLogin}
+        />
+        <TaskFolders
+          wait={wait}
+          onWait={setWait}
+          disk={{ total: DISK_BYTES, used: DISK_BYTES - DISK_FREE - gone }}
+          goes={goes}
+          held={[]}
+          onCleanUp={() => {
+            setFreed(goes.reduce((sum, one) => sum + one.bytes, 0))
+            props.removeMany(goes.map((one) => one.id))
+          }}
+          onRemove={(id) => {
+            setFreed(goes.find((one) => one.id === id)?.bytes ?? null)
+            props.remove(id)
+          }}
+          freed={freed}
+        />
+      </SettingList>
+    </div>
   )
 }
 
