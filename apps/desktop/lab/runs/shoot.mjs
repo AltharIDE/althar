@@ -19,7 +19,6 @@ const type = async (page, field, command, ms) => {
   await wait(page, ms)
 }
 const shell = 'input[aria-label^="Terminal in"]'
-const composerShell = 'input[aria-label^="Command in"]'
 /** The failed run, a terminal where it ran, and its lockfile brought up to date. */
 const fixIt = async (page, field = shell) => {
   await terminalHere(page)
@@ -30,47 +29,46 @@ const fixIt = async (page, field = shell) => {
 
 const W = 1280
 const N = 880
+const tab = (page, name) => page.getByRole('tab', { name }).first().click()
+const lineItem = (page, name) =>
+  page.locator('[data-lab-window] footer[aria-label="Runs and terminals"] button', { hasText: name }).first().click()
 const shots = [
   // Today: Run's list, and what a run printed in a console over its card.
   ['0-today-list', 'd=today', W, runList],
   ['0-today-console', 'd=today', W, console_],
-  // A · Beside.
-  ['a1-failed', 'd=a', W, console_],
-  ['a2-terminal', 'd=a', W, async (page) => (await console_(page), await fixIt(page))],
+  // B · Along the foot.
+  ['b-rest', 'd=b', W, async () => {}],
+  ['b-raised', 'd=b', W, async (page) => tab(page, /iOS/)],
+  ['b-terminal', 'd=b', W, async (page) => (await tab(page, /iOS/), await fixIt(page))],
+  ['b-many-dark', 'd=b&scene=many&theme=dark', W, async (page) => tab(page, /iOS/)],
+  ['b-narrow-many', 'd=b&scene=many', N, async () => {}],
+  // B1 · A status line, and its drawer.
+  ['1-rest', 'd=b1', W, async () => {}],
+  ['1-raised', 'd=b1', W, async (page) => lineItem(page, /iOS/)],
+  ['1-terminal', 'd=b1', W, async (page) => (await lineItem(page, /iOS/), await fixIt(page))],
+  ['1-many-dark', 'd=b1&scene=many&theme=dark', W, async (page) => lineItem(page, /Storybook/)],
+  ['1-narrow', 'd=b1', N, async (page) => lineItem(page, /iOS/)],
+  // B2 · Under the conversation.
+  ['2-rest', 'd=b2', W, async () => {}],
+  ['2-raised', 'd=b2', W, async (page) => tab(page, /iOS/)],
+  ['2-terminal', 'd=b2', W, async (page) => (await tab(page, /iOS/), await fixIt(page))],
+  ['2-many-dark', 'd=b2&scene=many&theme=dark', W, async (page) => tab(page, /iOS/)],
+  ['2-narrow', 'd=b2', N, async (page) => tab(page, /iOS/)],
+  // B3 · Only when called.
+  ['3-rest', 'd=b3', W, async () => {}],
+  ['3-raised', 'd=b3', W, console_],
+  ['3-split', 'd=b3', W, async (page) => (await console_(page), await fixIt(page))],
   [
-    'a3-again',
-    'd=a',
+    '3-whole-dark',
+    'd=b3&scene=many&theme=dark',
     W,
     async (page) => {
       await console_(page)
       await fixIt(page)
-      await page.locator('[data-workbench] aside button[aria-haspopup]').first().click()
-      await page.getByRole('menuitem', { name: /iOS/ }).click()
-      await page.locator('[data-workbench] button', { hasText: 'Run again' }).click()
-      await wait(page, 1200)
+      await page.locator('[data-lab-window] button[aria-label="The whole screen"]').click()
     },
   ],
-  ['a4-list', 'd=a', W, runList],
-  [
-    'a5-menu-many',
-    'd=a&scene=many',
-    W,
-    async (page) => (await console_(page), await page.locator('[data-workbench] aside button[aria-haspopup]').first().click()),
-  ],
-  ['a6-dark', 'd=a&theme=dark', W, async (page) => (await console_(page), await fixIt(page))],
-  ['a7-narrow', 'd=a', N, console_],
-  ['a8-quiet', 'd=a&scene=quiet', W, runList],
-  // B · Along the foot.
-  ['b1-rest', 'd=b', W, async () => {}],
-  ['b2-raised', 'd=b', W, async (page) => page.getByRole('tab', { name: /iOS/ }).click()],
-  ['b3-terminal', 'd=b', W, async (page) => (await page.getByRole('tab', { name: /iOS/ }).click(), await fixIt(page))],
-  ['b4-many-dark', 'd=b&scene=many&theme=dark', W, async (page) => page.getByRole('tab', { name: /iOS/ }).click()],
-  ['b5-narrow-many', 'd=b&scene=many', N, async () => {}],
-  // C · In the thread.
-  ['c1-failed', 'd=c', W, async () => {}],
-  ['c2-terminal', 'd=c', W, async (page) => fixIt(page, composerShell)],
-  ['c3-dark', 'd=c&theme=dark', W, async (page) => fixIt(page, composerShell)],
-  ['c4-narrow', 'd=c', N, async (page) => fixIt(page, composerShell)],
+  ['3-narrow', 'd=b3', N, async (page) => (await console_(page), await fixIt(page))],
   // D · A tab of its own.
   ['d1-tab', 'd=d', W, async () => {}],
   ['d2-failed', 'd=d', W, console_],

@@ -1,4 +1,4 @@
-/* The four directions' own places, in the kit's tokens. */
+/* The directions' own places, in the kit's tokens. */
 
 .faint {
   color: var(--t-4);
@@ -16,53 +16,6 @@
   min-width: 0;
   font-size: 12px;
   white-space: nowrap;
-}
-
-/* ── A · Beside: the workbench's panel ─────────────────────────────── */
-.besidePanel {
-  /* the run's own sheet, as a page beside the conversation is */
-  background: var(--paper);
-}
-.besideHead {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-  margin-left: -8px;
-}
-.switcher {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 7px;
-  font-size: 13.5px;
-  font-weight: 550;
-  color: var(--t-1);
-  transition: background var(--fast) var(--ease);
-}
-.switcher:hover,
-.switcher[aria-expanded='true'] {
-  background: var(--line);
-}
-.switcher:focus-visible {
-  outline: 1.5px solid var(--signal);
-  outline-offset: -1.5px;
-}
-.switcherName {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.besideBody {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  padding-top: 4px;
 }
 
 /* ── B · Along the foot: a band, raised into a panel ───────────────── */
@@ -161,97 +114,251 @@
   min-height: 0;
 }
 
-/* ── C · In the thread: a run unfolded under its card, and the person's commands ── */
-.threadRun {
-  display: flex;
-  flex-direction: column;
-}
-.unfolded > article {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.unfold {
-  display: flex;
-  flex-direction: column;
-  border-radius: 0 0 var(--r-lg) var(--r-lg);
-  background: var(--n-1);
-  box-shadow: inset 0 0 0 1px var(--line-2);
-  margin-top: -1px;
-  overflow: hidden;
-}
-.unfoldOut {
-  max-height: 188px;
-  border-top: 1px solid var(--line);
-}
-/* no fill of its own: the frame's edge is an inset shadow, under what is in it */
-.unfoldMoves {
-  padding-left: 6px;
-}
-.ran {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.ranSaid {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-}
-.ranWhere {
-  font: 11px var(--mono);
-  color: var(--t-3);
-}
-.ranCommand {
-  max-width: min(78%, 540px);
-  padding: 8px 14px;
-  border-radius: 16px 16px 5px 16px;
-  background: var(--you-bubble);
-  font: 12.5px/1.5 var(--mono);
-  color: var(--t-1);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.ranSign {
-  color: var(--t-3);
-  user-select: none;
-}
-.ranOut {
-  position: relative;
-}
-.ranStop {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-}
-
-/* the composer's terminal face: the composer's own footprint, a prompt in it */
-.shellLine {
+/* ── B1 · A status line, and the drawer it raises ─────────────────── */
+/* the window's own edge, in its chrome's colour: words in a row, not tabs */
+.line {
+  flex: none;
   display: flex;
   align-items: center;
+  gap: 2px;
+  padding: 0 4px 0 6px;
+  border-top: 1px solid var(--line-2);
+  background: var(--chrome);
+  font-size: 11.5px;
+}
+.lineItem {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  min-height: 52px;
-  padding: 8px 8px 8px 8px;
-  border-radius: 16px;
+  flex: none;
+  max-width: 320px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--r);
+  color: var(--t-2);
+  transition: background var(--fast) var(--ease);
+}
+.lineItem:hover,
+.lineChosen {
+  background: var(--line);
+  color: var(--t-1);
+}
+.lineItem:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
+}
+.lineName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lineEnd {
+  flex: none;
+}
+/* floats over the window's lower part: nothing under it moves */
+.drawer {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  z-index: calc(var(--z-float) + 1);
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--r-lg);
   background: var(--paper);
   box-shadow:
     0 0 0 1px var(--line-2),
     var(--lift-2);
 }
-.shellSign {
-  font: 13px var(--mono);
-  color: var(--t-3);
+.drawer > :last-child {
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  overflow: clip;
 }
-.shellInput {
+.drawerHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.footTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: 13px/1.5 var(--mono);
+}
+
+/* ── B2 · Under the conversation: the band as the conversation's own ── */
+.underFoot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line-2);
+  background: var(--n-1);
+}
+.underRaised {
+  height: min(360px, 52%);
+  background: var(--paper);
+}
+.underBand {
+  padding: 0 6px 0 8px;
+}
+.underRaised .band {
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+}
+/* a column's width: its tabs give way, names first, rather than the row running off its end */
+.underTabs .trayTab {
+  flex: 0 1 auto;
+  min-width: 72px;
+}
+.underTabs .trayPress {
+  flex: 1;
+}
+
+/* ── B3 · Only when called: a panel to work in ──────────────────────── */
+.called {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line-2);
+  background: var(--n-1);
+}
+/* the whole of the project's screen, under its header */
+.whole {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: calc(var(--z-float) + 1);
+}
+.calledHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 8px 0 14px;
+  flex: none;
+}
+.calledBody {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(180px, 22%, 236px);
+  gap: 8px;
+  padding: 0 8px 8px;
+}
+.calledMain {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+.calledPane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+  overflow: hidden;
+}
+.calledPaneHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.calledList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.listGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.listItem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: none;
+  min-width: 0;
+  height: 30px;
+  border-radius: 8px;
+  transition: background var(--fast) var(--ease);
+}
+.listItem:hover {
+  background: var(--line);
+}
+.listItem.chosen {
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+}
+/* the terminal opened beside a run, under it */
+.nested {
+  margin-left: 16px;
+}
+.listPress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border-radius: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--t-2);
+}
+.chosen .listPress {
   color: var(--t-1);
-  caret-color: var(--t-1);
-  outline: none;
+}
+.listPress:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
+}
+.listName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.listState {
+  flex: none;
+  font-size: 11px;
+}
+.listNew {
+  flex: none;
+  height: 30px;
+  border-radius: 8px;
+  color: var(--t-3);
+  transition: background var(--fast) var(--ease);
+}
+.listNew:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+.listNew .listName {
+  font-weight: 400;
 }
 
 /* ── D · A tab of its own: the window, under its tabs ──────────────── */
@@ -351,8 +458,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .switcher,
   .trayTab,
+  .lineItem,
+  .listItem,
+  .listNew,
   .screenTab {
     transition: none;
   }

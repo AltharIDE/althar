@@ -11,10 +11,8 @@ import { defineConfig, type Plugin } from 'vite-plus'
  *
  * - what the project's screen, Run's list and the window's tabs take from the
  *   kit comes through ui.ts: Run's list gains "Open a terminal", the
- *   conversation's composer gains its shell (C), the tabs gain the terminal's
- *   own (D);
- * - the project's screen takes its thread host from host.tsx, whose
- *   workbench holds a run or a terminal beside the conversation (A);
+ *   conversation's face gains its runs under it (B2), the tabs gain the
+ *   terminal's own (D);
  * - the project's screen takes the run's card in its thread from RunOf.tsx,
  *   which opens a run's output where the direction keeps it.
  */
@@ -30,7 +28,6 @@ const seam = (): Plugin => ({
   resolveId(source, importer) {
     const from = importer?.split('?')[0] ?? ''
     if (source === '@althar/ui' && kitFor.has(from)) return join(here, 'ui.ts')
-    if (from === projectView && source === '../../shared/ThreadHost') return join(here, 'host.tsx')
     if (from === projectView && source === '../../shared/RunOf') return join(here, 'RunOf.tsx')
     return null
   },

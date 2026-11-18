@@ -1,16 +1,18 @@
 import { useSyncExternalStore } from 'react'
 
 /*
- * What the lab's bar picks: the direction (0 today's, A–D), the world it
+ * What the lab's bar picks: the direction (0 today's, B along the foot and
+ * its three spin-offs on 1–3, D a tab of its own), the world it
  * opens on (quiet, a failed run, many), a narrow window, and the theme. Kept
  * in the address, so a reload or a screenshot opens on the same.
  */
 
 export const DIRECTIONS = [
   { key: 'today', kbd: '0', label: 'Today' },
-  { key: 'a', kbd: 'A', label: 'Beside' },
   { key: 'b', kbd: 'B', label: 'Along the foot' },
-  { key: 'c', kbd: 'C', label: 'In the thread' },
+  { key: 'b1', kbd: '1', label: 'A status line' },
+  { key: 'b2', kbd: '2', label: 'Under the conversation' },
+  { key: 'b3', kbd: '3', label: 'Only when called' },
   { key: 'd', kbd: 'D', label: 'A tab of its own' },
 ] as const
 export type Direction = (typeof DIRECTIONS)[number]['key']
@@ -31,7 +33,7 @@ export interface LabState {
 
 const params = new URLSearchParams(window.location.search)
 let state: LabState = {
-  d: DIRECTIONS.find((one) => one.key === params.get('d'))?.key ?? 'a',
+  d: DIRECTIONS.find((one) => one.key === params.get('d'))?.key ?? 'b',
   scene: SCENES.find((one) => one.key === params.get('scene'))?.key ?? 'failed',
   narrow: params.get('narrow') === '1',
   dark: params.get('theme') === 'dark',

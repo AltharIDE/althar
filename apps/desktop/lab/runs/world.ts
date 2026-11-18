@@ -172,18 +172,14 @@ export interface Shell {
   cwd: string
   entries: Entry[]
   history: string[]
-  /** The conversation's own (C): what is typed in it goes in the thread. */
-  readonly inThread: boolean
   /** Lines cleared from view stay in the entries, but the view starts after them. */
   clearedAt: number
 }
 
 export type Focus = { readonly kind: 'run'; readonly id: string } | { readonly kind: 'shell'; readonly id: string }
 
-/** The coordinator's thread, as the lab adds to it: a run's card where it was started, and each command typed in its terminal. */
-export type Said =
-  | { readonly kind: 'run'; readonly id: string; readonly at: number }
-  | { readonly kind: 'entry'; readonly id: string; readonly at: number }
+/** The coordinator's thread, as the lab adds to it: a run's card where it was started. */
+export type Said = { readonly kind: 'run'; readonly id: string; readonly at: number }
 
 interface State {
   runs: Run[]
@@ -194,11 +190,12 @@ interface State {
   /** What a direction shows: the run or terminal open, and whether its place is open at all. */
   focus: Focus | null
   open: boolean
-  /** D: the terminal's tab is among the window's, and has the window; a terminal opened beside a run there, by the run. */
+  /** B3: its panel over the whole of the project's screen, not only its foot. */
+  whole: boolean
+  /** D: the terminal's tab is among the window's, and has the window. */
   tab: { shown: boolean; current: boolean }
+  /** D and B3: a terminal opened from a run, by the run, shown beside it. */
   pairs: Record<string, string>
-  /** C: the conversation's composer is its terminal. */
-  shellMode: boolean
 }
 
 let state: State
@@ -288,13 +285,12 @@ const playedOut = (runnableId: string, minutesAgo: number, endedAgo: number | nu
   return run
 }
 
-const newShell = (folder: Folder, inThread = false): Shell => ({
+const newShell = (folder: Folder): Shell => ({
   id: nextId('sh'),
   folder,
   cwd: '',
   entries: [],
   history: [],
-  inThread,
   clearedAt: 0,
 })
 
@@ -308,9 +304,9 @@ const seed = (scene: Scene): State => {
     fixed: false,
     focus: null,
     open: false,
+    whole: false,
     tab: { shown: false, current: false },
     pairs: {},
-    shellMode: false,
   }
   if (scene === 'quiet') return base
   const storybook = playedOut('r_storybook', 12, null)
@@ -350,7 +346,7 @@ const perform = (shell: Shell, entry: Entry, played: Play) => {
     played.effect?.(world)
     if (played.cwd !== undefined) shell.cwd = played.cwd
     if (played.folder !== undefined) shell.folder = played.folder
-    emit(shell.inThread)
+    emit()
   })
 }
 
@@ -384,6 +380,7 @@ export const world = {
     // One already going there goes on; one that ended is replaced.
     const going = state.runs.find((one) => one.runnableId === runnableId && one.ended === null)
     if (going !== undefined) return going
+    const was = state.runs.find((one) => one.runnableId === runnableId)
     state.runs = state.runs.filter((one) => one.runnableId !== runnableId)
     const run: Run = {
       id: nextId('run'),
@@ -398,10 +395,16 @@ export const world = {
     }
     state.runs = [...state.runs, run]
     state.said = [...state.said, { kind: 'run', id: run.id, at: run.startedAt }]
+    // Run again: the terminal opened beside the one it replaces stays beside it.
+    const beside = was === undefined ? undefined : state.pairs[was.id]
+    if (was !== undefined && beside !== undefined) {
+      const { [was.id]: _, ...rest } = state.pairs
+      state.pairs = { ...rest, [run.id]: beside }
+    }
     play(run)
     const d = lab.get().d
     // Where the direction keeps a run, it shows there as it starts.
-    if (d === 'a' || d === 'b') {
+    if (d !== 'today' && d !== 'd') {
       state.focus = { kind: 'run', id: run.id }
       state.open = true
     }
@@ -449,20 +452,6 @@ export const world = {
     }
     emit()
   },
-  /** The conversation's own terminal (C), in the project's folder of the repository where things last went wrong. */
-  threadShell: (folder?: Folder): Shell => {
-    const kept = state.shells.find((one) => one.inThread)
-    if (kept !== undefined) {
-      if (folder !== undefined) {
-        kept.folder = folder
-        kept.cwd = ''
-      }
-      return kept
-    }
-    const shell = newShell(folder ?? projectFolder('althar-mobile'), true)
-    state.shells = [...state.shells, shell]
-    return shell
-  },
   /** Types a command into a terminal and presses Enter. */
   exec: (shellId: string, typed: string) => {
     const shell = world.shell(shellId)
@@ -476,14 +465,9 @@ export const world = {
       return
     }
     if (played.close === true) {
-      if (shell.inThread) {
-        state.shellMode = false
-        emit()
-      } else world.closeShell(shellId)
+      world.closeShell(shellId)
       return
     }
-    // An empty line in the conversation's terminal says nothing in the thread.
-    if (shell.inThread && command === '') return
     const entry: Entry = {
       id: nextId('cmd'),
       command,
@@ -495,8 +479,7 @@ export const world = {
       running: true,
     }
     shell.entries = [...shell.entries, entry]
-    if (shell.inThread) state.said = [...state.said, { kind: 'entry', id: entry.id, at: entry.at }]
-    emit(shell.inThread)
+    emit()
     perform(shell, entry, played)
   },
   /** Ctrl+C on what runs in a terminal. */
@@ -507,7 +490,7 @@ export const world = {
     entry.lines.push('^C')
     entry.exit = 130
     entry.running = false
-    emit(true)
+    emit()
   },
   /** bun install brought the lockfile up to date: the next iOS run gets past it. */
   fix: () => {
@@ -522,6 +505,12 @@ export const world = {
   },
   hide: () => {
     state.open = false
+    state.whole = false
+    emit()
+  },
+  /** B3: its panel over the whole project's screen, or back to its foot. */
+  setWhole: (whole: boolean) => {
+    state.whole = whole
     emit()
   },
   setOpen: (open: boolean) => {
@@ -535,12 +524,6 @@ export const world = {
   },
   closeTab: () => {
     state.tab = { shown: false, current: false }
-    emit()
-  },
-  /** C: the composer as its terminal, or back to a message. */
-  setShellMode: (on: boolean, folder?: Folder) => {
-    if (on) world.threadShell(folder)
-    state.shellMode = on
     emit()
   },
 }

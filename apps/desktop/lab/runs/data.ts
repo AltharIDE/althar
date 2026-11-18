@@ -151,44 +151,26 @@ const launchOf = (run: Run): Launch => ({
 
 const launches = (): Launch[] => world.get().runs.map(launchOf)
 
-/** A run's card, and in C a command typed in the conversation, as the runtime keeps them in the thread. */
+/** A run's card, as the runtime keeps it in the thread where it was started. */
 const saidItems = (): ThreadItem[] =>
   world.get().said.flatMap((said, n): ThreadItem[] => {
     const base = { id: `said_${n}`, sequence: 100 + n, createdAt: iso(said.at), agentId: null, kind: 'run' as const }
-    if (said.kind === 'run') {
-      const run = world.run(said.id)
-      if (run === undefined) return []
-      return [
-        {
-          ...base,
-          content: {
-            launchId: run.id,
-            taskId: null,
-            runnableId: run.runnableId,
-            name: run.name,
-            where: run.folder.branch,
-            command: run.command,
-            url: run.url,
-            startedAt: iso(run.startedAt),
-            ended:
-              run.ended === null ? null : { at: iso(run.ended.at), code: run.ended.code, stopped: run.ended.stopped, last: run.ended.last },
-          },
-        } as ThreadItem,
-      ]
-    }
-    const entry = world.entry(said.id)
-    if (entry === undefined) return []
+    const run = world.run(said.id)
+    if (run === undefined) return []
     return [
       {
         ...base,
         content: {
-          launchId: entry.id,
+          launchId: run.id,
           taskId: null,
-          where: entry.folder.repository,
-          command: entry.command,
-          url: null,
-          startedAt: iso(entry.at),
-          ended: entry.running ? null : { at: iso(entry.at), code: entry.exit, stopped: entry.exit === 130, last: null },
+          runnableId: run.runnableId,
+          name: run.name,
+          where: run.folder.branch,
+          command: run.command,
+          url: run.url,
+          startedAt: iso(run.startedAt),
+          ended:
+            run.ended === null ? null : { at: iso(run.ended.at), code: run.ended.code, stopped: run.ended.stopped, last: run.ended.last },
         },
       } as ThreadItem,
     ]

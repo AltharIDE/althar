@@ -113,7 +113,7 @@ export function TabScreen() {
     return () => seen.disconnect()
   }, [d, state.tab.current])
   if (d !== 'd' || !state.tab.current) return null
-  const shells = state.shells.filter((one) => !one.inThread)
+  const shells = state.shells
   const paired = new Set(Object.values(state.pairs))
   const loose = shells.filter((one) => !paired.has(one.id))
   const focus: Focus | null =

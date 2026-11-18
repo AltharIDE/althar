@@ -13,9 +13,11 @@ import { ServicesProvider } from '../../src/renderer/data/services'
 import { makeRouter } from '../../src/renderer/router'
 import { fakeHost } from '../../tests/fixtures'
 import { Tray } from './Below'
+import { CalledPanel } from './Called'
 import { ALTHAR, makeClient, TABS } from './data'
 import { TabScreen } from './OwnTab'
 import { DIRECTIONS, lab, SCENES, useLab } from './state'
+import { StatusLine } from './StatusLine'
 import { toggleTerminal } from './terminal'
 import { world } from './world'
 import s from './lab.module.css'
@@ -23,7 +25,8 @@ import s from './lab.module.css'
 /*
  * The runs and terminal lab (README.md): the desktop app's window, whole, in
  * the browser, on made-up data, with the page's bar under it. The bar swaps
- * where a run and a terminal live in place (0 today's, A–D, with keys too),
+ * where a run and a terminal live in place (0 today's, B along the foot and
+ * its spin-offs 1–3, D a tab of its own, with keys too),
  * opens the world on a scene (Q nothing ran, F a run failed, M many), narrows
  * the window to the app's narrowest (N), and turns the theme (T).
  */
@@ -122,6 +125,8 @@ function Lab() {
               <RouterProvider router={router} />
             </div>
             <Tray />
+            <StatusLine />
+            <CalledPanel />
             <TabScreen />
           </ServicesProvider>
         </div>

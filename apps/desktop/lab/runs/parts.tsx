@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import {
   Button,
@@ -73,12 +73,14 @@ export const sinceOf = (at: number) => {
   return minutes < 1 ? 'now' : minutes < 60 ? `${minutes}m` : `${Math.round(minutes / 60)}h`
 }
 
-/** A run's state in words: on its way, where it answers, how long it has run, or how it ended. */
-export function RunState({ run, short = false }: { run: Run; short?: boolean }) {
+/** A run's state in words: on its way, where it answers, how long it has run, or how it ended. `inPress`: in a button already, its address is words, not a link. */
+export function RunState({ run, short = false, inPress = false }: { run: Run; short?: boolean; inPress?: boolean }) {
   const phase = phaseOf(run)
   if (phase === 'starting') return <span className={s.quiet}>{text.starting}</span>
   if (phase === 'running')
-    return run.url !== null ? (
+    return run.url !== null && inPress ? (
+      <span className={s.addressWords}>{addressOf(run.url)}</span>
+    ) : run.url !== null ? (
       <LinkButton className={s.address} aria-label={text.open(addressOf(run.url))} onClick={() => window.open(run.url ?? '', '_blank')}>
         {addressOf(run.url)}
         {!short && <Icon name="external" size={10} />}
@@ -330,7 +332,7 @@ export function ShellView({ shell, className, autoFocus = true }: { shell: Shell
 
 /** A terminal's name, as a list of them says it: its repository, or the task whose worktree it is in; numbered where two share one. */
 export const shellName = (shell: Shell, shells: ReadonlyArray<Shell>) => {
-  const same = shells.filter((one) => !one.inThread && one.folder.path === shell.folder.path)
+  const same = shells.filter((one) => one.folder.path === shell.folder.path)
   const n = same.indexOf(shell)
   const name = shell.folder.task ?? shell.folder.repository
   return same.length > 1 && n > 0 ? `${name} ${n + 1}` : name
@@ -355,3 +357,62 @@ export const Gap = () => <span className={s.gap} />
 export const Row = ({ children, className }: { children: ReactNode; className?: string }) => (
   <div className={cx(s.row, className)}>{children}</div>
 )
+
+/**
+ * The top edge of something raised from the window's foot, to drag it taller
+ * or shorter; ↑ ↓ move it a step, and a double click puts it back. The kit's
+ * ResizeHandle does a column's width; this is its height's.
+ */
+export function HeightEdge({
+  value,
+  min,
+  max,
+  onChange,
+  onReset,
+  label,
+}: {
+  value: number
+  min: number
+  max: number
+  onChange: (height: number) => void
+  onReset?: () => void
+  label: string
+}) {
+  const drag = useRef<{ readonly y: number; readonly height: number } | null>(null)
+  const clamp = (height: number) => Math.round(Math.min(Math.max(height, min), Math.max(min, max)))
+  const end = (event: PointerEvent<HTMLDivElement>) => {
+    drag.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+  return (
+    <div
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label={label}
+      aria-valuenow={clamp(value)}
+      aria-valuemin={min}
+      aria-valuemax={Math.max(min, max)}
+      tabIndex={0}
+      className={s.heightEdge}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return
+        event.preventDefault()
+        event.currentTarget.setPointerCapture(event.pointerId)
+        drag.current = { y: event.clientY, height: value }
+      }}
+      onPointerMove={(event) => {
+        const from = drag.current
+        if (from !== null) onChange(clamp(from.height + from.y - event.clientY))
+      }}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onKeyDown={(event) => {
+        const by = event.key === 'ArrowUp' ? 16 : event.key === 'ArrowDown' ? -16 : 0
+        if (by === 0) return
+        event.preventDefault()
+        onChange(clamp(value + by))
+      }}
+      onDoubleClick={onReset}
+    />
+  )
+}
