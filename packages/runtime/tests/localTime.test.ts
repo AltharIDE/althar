@@ -156,6 +156,32 @@ describe('a lead', () => {
       }).pipe(Effect.provide(runtime(':memory:', {}, { zone: () => ZONE }))),
     ),
   )
+
+  it.effect('is told the time again when the turn after the gap that carried it never reached it, as offline', () => {
+    const down: { now: 'offline' | undefined } = { now: undefined }
+    return fromInstant(
+      Date.parse('2026-11-18T08:05:00Z'),
+      Effect.gen(function* () {
+        const { task: created } = yield* task()
+        yield* (yield* Sessions).start({ threadId: created.threadId, agentId: 'codex' })
+        yield* prompts(created.threadId, 1)
+        // Back after the gap, the turn that tells it the time fails before its agent's service answers it.
+        yield* TestClock.adjust(TIME_AGAIN_AFTER)
+        down.now = 'offline'
+        yield* say(created.threadId, 'two')
+        const lost = (yield* prompts(created.threadId, 2))[1] ?? ''
+        assert.isTrue(lost.startsWith('(It is now Wednesday 18 November 2026, 17:35, Asia/Kolkata'))
+        // A minute later, the same day and zone and no gap since that turn ended: what it was never told goes with the retry.
+        down.now = undefined
+        yield* TestClock.adjust(Duration.minutes(1))
+        yield* say(created.threadId, 'three')
+        const retried = (yield* prompts(created.threadId, 3))[2] ?? ''
+        assert.isTrue(retried.startsWith("(It is now Wednesday 18 November 2026, 17:36, Asia/Kolkata on the person's computer.)\n\n"))
+        assert.include(retried, 'two')
+        assert.isTrue(retried.endsWith('three'))
+      }).pipe(Effect.provide(runtime(':memory:', { connection: () => down.now }, { zone: () => ZONE }))),
+    )
+  })
 })
 
 describe('the coordinator', () => {

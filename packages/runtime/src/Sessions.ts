@@ -2638,9 +2638,10 @@ export class Sessions extends Context.Service<
           )
           // A brief the agent never read goes with the next turn: refused, or out of usage before it began.
           // A compaction left the brief where it was.
+          // So does the time it was told first, after a gap: its turn has ended since, so it isn't owed it by the gap any more.
           if ((prevented || refused || held) && !compacting) {
             running.brief = brief
-            running.timeTold = timeBefore
+            running.timeTold = timeNews === null ? timeBefore : undefined
           }
           // Refused, its prompt never went: what it spent before is the turn's that tries again.
           if (refused) running.before = spent
