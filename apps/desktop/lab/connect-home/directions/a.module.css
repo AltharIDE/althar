@@ -1,0 +1,330 @@
+/* A · The drawing: the Welcome's dotted board, this computer and the home joined by a line drawn as the connection stands. */
+
+.board {
+  display: grid;
+  grid-template-columns: auto minmax(96px, 1fr) minmax(0, 312px);
+  align-items: center;
+  min-height: 132px;
+  margin-bottom: 20px;
+  padding: 26px 22px;
+  border-radius: 12px;
+  background-color: var(--n-2);
+  background-image: radial-gradient(circle, var(--line-2) 0.8px, transparent 1.2px);
+  background-size: 14px 14px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: min-height var(--move) var(--ease-move);
+}
+.board[data-stage='intro'] {
+  min-height: 176px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.card:not([data-home]) {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+/* the home, before it's found: drawn in pencil, waiting to be inked */
+.card[data-home] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--line-3);
+  mask-image: none;
+  transition:
+    background var(--enter) var(--ease-out),
+    box-shadow var(--enter) var(--ease-out),
+    transform var(--move) var(--ease-move);
+}
+.card[data-home]:not([data-found]) {
+  outline: 1.5px dashed var(--line-3);
+  outline-offset: -1.5px;
+  box-shadow: none;
+}
+.card[data-home][data-found] {
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-2);
+}
+.board[data-stage='refused'] .card[data-home] {
+  outline-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.glyph {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--well);
+  color: var(--t-2);
+}
+.card[data-home]:not([data-found]) .glyph {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-4);
+}
+.words {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.name {
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.where {
+  overflow: hidden;
+  font: 400 11.5px/15px var(--mono);
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.name[data-empty],
+.where[data-empty] {
+  color: var(--t-4);
+  font-weight: 500;
+}
+.live {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+
+/* what is found, unfolding under the name: its identity */
+.reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--move) var(--ease-move),
+    opacity var(--enter) var(--ease-out);
+}
+.reveal[data-on] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.revealInner {
+  min-height: 0;
+  overflow: hidden;
+}
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.homeId {
+  flex: 1;
+  min-width: 0;
+  font: 400 10.5px/16px var(--mono);
+  color: var(--t-2);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.copyId {
+  flex: none;
+}
+.shelf {
+  display: flex;
+  gap: 10px;
+  margin: 12px 0 2px 40px;
+}
+
+/* the line between them */
+.wire {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 40px;
+  min-width: 0;
+  margin: 0 -1px;
+}
+.how {
+  position: absolute;
+  top: 0;
+  font: 400 10.5px/12px var(--mono);
+  color: var(--t-4);
+  white-space: nowrap;
+}
+.line {
+  position: absolute;
+  inset: 14px 0 auto;
+  width: 100%;
+  height: 12px;
+  overflow: visible;
+}
+.line line {
+  stroke: var(--t-4);
+  stroke-width: 1.25;
+  stroke-dasharray: 3 4;
+  transition: stroke var(--enter) var(--ease-out);
+}
+.board[data-stage='checking'] .line line {
+  stroke: var(--live);
+  animation: march 900ms linear infinite;
+}
+.board[data-stage='found'] .line line {
+  stroke: var(--t-3);
+  stroke-dasharray: none;
+}
+.board[data-stage='connecting'] .line line,
+.board[data-stage='connected'] .line line,
+.board[data-stage='intro'] .line line {
+  stroke: color-mix(in srgb, var(--live) 40%, transparent);
+  stroke-dasharray: none;
+}
+.board[data-stage='connected'] .line line {
+  stroke: var(--live);
+}
+.board[data-stage='refused'] .line line {
+  stroke: var(--danger);
+  stroke-dasharray: none;
+}
+/* work travelling along it */
+.line .comet,
+.board .line .comet {
+  stroke: var(--live);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 10 300;
+  animation: travel 1300ms var(--ease) infinite;
+}
+.node {
+  position: absolute;
+  top: 10px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 99px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  color: var(--t-2);
+  opacity: 0;
+  transform: scale(var(--scale-pop));
+  transition:
+    opacity var(--enter) var(--ease-out),
+    transform var(--enter) var(--ease-out);
+}
+.board[data-stage='checking'] .node,
+.board[data-stage='refused'] .node,
+.board[data-stage='connected'] .node {
+  opacity: 1;
+  transform: none;
+}
+.board[data-stage='refused'] .node {
+  background: var(--danger);
+  box-shadow: none;
+  color: var(--paper);
+}
+.board[data-stage='connected'] .node {
+  background: var(--live);
+  box-shadow: none;
+  color: var(--paper);
+}
+@keyframes march {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+@keyframes travel {
+  from {
+    stroke-dashoffset: 10;
+  }
+  to {
+    stroke-dashoffset: -110;
+  }
+}
+
+/* under the drawing */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: arrive var(--enter) var(--ease-out) both;
+}
+.method {
+  align-self: flex-start;
+  min-width: 220px;
+}
+.note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.intro {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 2px;
+  animation: arrive var(--enter) var(--ease-out) both;
+}
+.lede {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--t-1);
+}
+.copy {
+  max-width: 500px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+.need {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+@keyframes arrive {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board,
+  .card[data-home],
+  .reveal,
+  .node {
+    transition: none;
+  }
+  .line line,
+  .line .comet {
+    animation: none;
+  }
+  .line .comet {
+    display: none;
+  }
+}

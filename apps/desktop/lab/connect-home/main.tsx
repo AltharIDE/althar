@@ -3,88 +3,54 @@ import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
-import { StrictMode, useEffect } from 'react'
+import { StrictMode, useEffect, useState, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Button } from '@althar/ui'
 
-import type { CheckedHome, HomesHost } from '../../src/homes'
 import { ConnectHome } from '../../src/renderer/features/homes/ConnectHome'
+import { useFlow, type Method } from './flow'
+import { failNext, homes } from './host'
+import { DrawingDirection } from './directions/a'
+import { SetupDirection } from './directions/b'
+import { HostSideDirection } from './directions/c'
+import s from './lab.module.css'
 
 /*
- * The Connect a home lab (README.md): the app's own dialog, on a home host
- * that answers as each scene needs, driven to that scene as a person would
- * type and press. ?scene= picks it, ?theme=dark draws it dark.
+ * The Connect a home lab (README.md): directions for the dialog, each made
+ * of the kit's components and the app's own connection form, on a home host
+ * that answers after a while (F fails its next answer). The bar swaps the
+ * direction in place (0 as built, A–C, with keys), the way of connecting
+ * (P, S), and whether this is the person's first home (I). ?s= drives the
+ * dialog to a scene, for shooting.
  */
 
-const scenes = [
-  'ssh',
-  'ssh-options',
-  'ssh-checking',
-  'ssh-refused',
-  'ssh-checked',
-  'ssh-connecting',
-  'ssh-failed',
-  'pair',
-  'pair-checked',
-  'pair-refused',
-  'pair-pairing',
+const DIRECTIONS = [
+  { key: '0', label: 'As built' },
+  { key: 'a', label: 'The drawing' },
+  { key: 'b', label: 'The setup' },
+  { key: 'c', label: 'The host side' },
 ] as const
-type Scene = (typeof scenes)[number]
+type Direction = (typeof DIRECTIONS)[number]['key']
 
 const params = new URLSearchParams(location.search)
-const scene: Scene = scenes.find((one) => one === params.get('scene')) ?? 'ssh'
+const scene = params.get('s')
 document.documentElement.dataset.theme = params.get('theme') === 'dark' ? 'dark' : 'light'
 
-const homeId = 'home_01a1c4f39e2b7d5a80c6e1f42b9d3a77'
-const checked: CheckedHome = {
-  checkId: 'lab-check',
-  homeId,
-  hostDeviceId: `dev_${'3'.repeat(32)}`,
-  version: 'lab',
-  apiVersion: 1,
-  target: 'deploy@vps.example.com',
+const read = () => {
+  const now = new URLSearchParams(location.search)
+  return {
+    d: (DIRECTIONS.find((one) => one.key === now.get('d'))?.key ?? 'a') as Direction,
+    m: (now.get('m') === 'ssh' ? 'ssh' : 'pair') as Method,
+    first: now.get('first') === '1',
+  }
 }
-const never = () => new Promise<never>(() => undefined)
-const nothing = async () => {}
-
-const homes: HomesHost = {
-  state: async () => ({ current: { kind: 'local' }, connection: 'local' }),
-  list: async () => [],
-  overview: async () => ({ homes: [], windows: { local: 'local' }, projects: {}, opened: {} }),
-  inspect: async () => {
-    if (scene === 'ssh-checking') return never()
-    if (scene === 'ssh-refused')
-      throw new Error('ssh: Could not resolve hostname vps.example.com: nodename nor servname provided, or not known.')
-    return checked
-  },
-  connect: async () => {
-    if (scene === 'ssh-connecting') return never()
-    throw new Error('This home check expired. Check the host again.')
-  },
-  save: nothing,
-  open: nothing,
-  rename: nothing,
-  change: nothing,
-  forget: nothing,
-  restore: nothing,
-  cancelCheck: nothing,
-  reconnect: nothing,
-  report: () => undefined,
-  onState: () => () => {},
-  onOverview: () => () => {},
-  onOpen: () => () => {},
-  onProject: () => () => {},
-  pairingInfo: async () => {
-    if (scene === 'pair-refused') throw new Error('This pairing code has expired. Run althar-host pair on the host for a new one.')
-    return { origin: 'https://vps.example.com:6769', homeId, expiresAt: Date.now() + 10 * 60_000 }
-  },
-  pair: async () => never(),
-}
+type State = ReturnType<typeof read>
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 const input = (label: string) => {
-  const field = [...document.querySelectorAll('label')].find((one) => one.textContent?.trim().startsWith(label))
+  const field = [...document.querySelectorAll('label')].find((one) => one.textContent?.trim() === label)
   const id = field?.getAttribute('for')
-  return (id === null || id === undefined ? field?.querySelector('input') : document.getElementById(id)) as HTMLInputElement | null
+  return (id === null || id === undefined ? null : document.getElementById(id)) as HTMLInputElement | null
 }
 const type = (label: string, value: string) => {
   const field = input(label)
@@ -92,52 +58,141 @@ const type = (label: string, value: string) => {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(field, value)
   field.dispatchEvent(new Event('input', { bubbles: true }))
 }
-const press = (name: string) => {
-  const button = [...document.querySelectorAll('button, [role=radio]')].find((one) => one.textContent?.trim() === name)
-  if (!(button instanceof HTMLElement)) throw new Error(`No button ${name}`)
+const find = (name: string) =>
+  [...document.querySelectorAll('[role=dialog] button, [role=dialog] [role=radio]')].find(
+    (one) => one.textContent?.trim() === name || one.getAttribute('aria-label') === name,
+  )
+const press = (name: string, must = true) => {
+  const button = find(name)
+  if (!(button instanceof HTMLElement)) {
+    if (must) throw new Error(`No button ${name}`)
+    return
+  }
   button.click()
 }
 
 /** Drives the dialog to the scene, as a person would. */
-const drive = async () => {
-  await wait(150)
-  if (scene.startsWith('ssh')) {
-    press('SSH')
-    await wait(80)
-    if (scene === 'ssh') return
+const drive = async ({ m, first }: State) => {
+  await wait(200)
+  if (scene === null || (first && scene === 'intro')) return
+  const step = () => wait(90)
+  if (m === 'ssh') press('SSH', false)
+  else press('Pairing code', false)
+  await step()
+  if (scene === 'form') return
+  if (m === 'ssh') {
     type('SSH host', 'deploy@vps.example.com')
-    await wait(30)
-    if (scene === 'ssh-options') {
+    await step()
+    if (scene === 'draft') return
+    if (scene === 'options') {
       press('Connection options')
-      await wait(60)
+      await step()
       type('Port', '2222')
       return
     }
     press('Check host')
-    await wait(80)
-    if (scene === 'ssh-connecting' || scene === 'ssh-failed') {
+    await step()
+    if (scene === 'connecting' || scene === 'failed') {
       press('Connect')
-      await wait(80)
+      await step()
     }
     return
   }
-  if (scene === 'pair') return
   type('Pairing code', 'k7Qp-3xWm-9fTa')
-  await wait(80)
-  if (scene === 'pair-refused') return
-  type('Name', 'VPS')
-  await wait(30)
-  if (scene === 'pair-pairing') press('Pair and open')
+  await step()
+  press('Continue', false)
+  await step()
+  if (scene === 'connecting' || scene === 'failed') {
+    press('Pair and open')
+    await step()
+  }
+}
+
+function Dialogs({ state, onClose }: { state: State; onClose: () => void }) {
+  const flow = useFlow(homes, onClose, state.m)
+  if (state.d === '0') return <ConnectHome homes={homes} onClose={onClose} />
+  if (state.d === 'a') return <DrawingDirection flow={flow} first={state.first} onClose={onClose} />
+  if (state.d === 'b') return <SetupDirection flow={flow} first={state.first} onClose={onClose} />
+  return <HostSideDirection flow={flow} first={state.first} onClose={onClose} />
 }
 
 let driven = false
 function Lab() {
+  const [state, setStateNow] = useState(read)
+  const [open, setOpen] = useState(true)
+  const [round, setRound] = useState(0)
+  const failing = useSyncExternalStore(failNext.subscribe, failNext.get)
+  const set = (next: Partial<State>) => {
+    const merged = { ...state, ...next }
+    const url = new URLSearchParams(location.search)
+    url.set('d', merged.d)
+    url.set('m', merged.m)
+    if (merged.first) url.set('first', '1')
+    else url.delete('first')
+    history.replaceState(null, '', `?${url.toString()}`)
+    setStateNow(merged)
+    setOpen(true)
+    setRound((was) => was + 1)
+  }
   useEffect(() => {
     if (driven) return
     driven = true
-    void drive().then(() => document.body.setAttribute('data-driven', ''))
-  }, [])
-  return <ConnectHome homes={homes} onClose={() => undefined} />
+    void drive(state).then(() => document.body.setAttribute('data-driven', ''))
+  }, [state])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
+      if (typing || event.metaKey || event.ctrlKey || event.altKey) return
+      const key = event.key.toLowerCase()
+      const direction = DIRECTIONS.find((one) => one.key === key)
+      if (direction !== undefined) return set({ d: direction.key })
+      if (key === 'p') return set({ m: 'pair' })
+      if (key === 's') return set({ m: 'ssh' })
+      if (key === 'i') return set({ first: !state.first })
+      if (key === 'f') return failNext.set(!failNext.get())
+      if (key === 'r') return set({})
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+  return (
+    <div className={s.lab}>
+      <div className={s.window}>
+        {!open && (
+          <div className={s.closed}>
+            <Button onClick={() => set({})}>Connect a home…</Button>
+          </div>
+        )}
+        {open && <Dialogs key={`${state.d}-${state.m}-${state.first}-${round}`} state={state} onClose={() => setOpen(false)} />}
+      </div>
+      <div className={s.bar} role="toolbar" aria-label="Directions">
+        {DIRECTIONS.map((one) => (
+          <button key={one.key} type="button" aria-pressed={state.d === one.key} onClick={() => set({ d: one.key })}>
+            <kbd>{one.key.toUpperCase()}</kbd>
+            {one.label}
+          </button>
+        ))}
+        <span className={s.rule} />
+        <button type="button" aria-pressed={state.m === 'pair'} onClick={() => set({ m: 'pair' })}>
+          <kbd>P</kbd>Pairing code
+        </button>
+        <button type="button" aria-pressed={state.m === 'ssh'} onClick={() => set({ m: 'ssh' })}>
+          <kbd>S</kbd>SSH
+        </button>
+        <span className={s.rule} />
+        <button type="button" aria-pressed={state.first} onClick={() => set({ first: !state.first })}>
+          <kbd>I</kbd>First home
+        </button>
+        <span className={s.gap} />
+        <button type="button" aria-pressed={failing} onClick={() => failNext.set(!failing)}>
+          <kbd>F</kbd>Fail next answer
+        </button>
+        <button type="button" onClick={() => set({})}>
+          <kbd>R</kbd>Start over
+        </button>
+      </div>
+    </div>
+  )
 }
 
 createRoot(document.getElementById('root')!).render(

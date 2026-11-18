@@ -4,57 +4,59 @@ import { join } from 'node:path'
 import { chromium } from '@playwright/test'
 
 /*
- * Shoots each scene of the Connect a home lab (README.md), headless, at 1×, light and dark, into lab/connect-home/shots:
+ * Shoots the Connect a home lab (README.md), headless, at 1×, into lab/connect-home/shots: each direction's scenes, the
+ * dialog alone, and a sheet of each direction's scenes side by side.
  *
- *   node lab/connect-home/shoot.ts <name> [scene…]
+ *   node lab/connect-home/shoot.ts <name> [direction…]     directions: 0 a b c
  *
- * With the lab running (Connect a home lab, on port 6141).
+ * With the lab running (Connect a home lab, on port 6141). THEME=dark draws them dark.
  */
 
 const [name = 'shot', ...asked] = process.argv.slice(2)
-const scenes =
-  asked.length > 0
-    ? asked
-    : [
-        'ssh',
-        'ssh-options',
-        'ssh-checking',
-        'ssh-refused',
-        'ssh-checked',
-        'ssh-connecting',
-        'ssh-failed',
-        'pair',
-        'pair-checked',
-        'pair-refused',
-        'pair-pairing',
-      ]
+const directions = asked.length > 0 ? asked : ['0', 'a', 'b', 'c']
+const theme = process.env.THEME ?? 'light'
+const SCENES = [
+  { label: 'First home', m: 'pair', s: 'intro', first: true },
+  { label: 'Pairing code', m: 'pair', s: 'form' },
+  { label: 'Code read', m: 'pair', s: 'found' },
+  { label: 'Code refused', m: 'pair', s: 'refused' },
+  { label: 'SSH host typed', m: 'ssh', s: 'draft' },
+  { label: 'Checking', m: 'ssh', s: 'checking' },
+  { label: 'Unreachable', m: 'ssh', s: 'refused' },
+  { label: 'Found, to compare', m: 'ssh', s: 'found' },
+  { label: 'Connecting', m: 'ssh', s: 'connecting' },
+] as const
 const out = join(import.meta.dirname, 'shots')
 mkdirSync(out, { recursive: true })
 const browser = await chromium.launch()
-for (const theme of ['light', 'dark'])
-  for (const scene of scenes) {
-    const page = await browser.newPage({ viewport: { width: 640, height: 640 }, deviceScaleFactor: 1 })
-    page.on('pageerror', (error) => console.error(`${scene}:`, error.message))
-    await page.goto(`http://localhost:${process.env.LAB_PORT ?? '6141'}/?scene=${scene}&theme=${theme}`)
+for (const d of directions) {
+  const files: Array<{ label: string; file: string }> = []
+  for (const scene of SCENES) {
+    if (d === '0' && scene.s === 'intro') continue
+    const page = await browser.newPage({ viewport: { width: 1000, height: 760 }, deviceScaleFactor: 1 })
+    page.on('pageerror', (error) => console.error(`${d} ${scene.s}:`, error.message))
+    const first = 'first' in scene ? '&first=1' : ''
+    await page.goto(`http://localhost:${process.env.LAB_PORT ?? '6141'}/?d=${d}&m=${scene.m}&s=${scene.s}${first}&theme=${theme}`)
     await page.waitForSelector('body[data-driven]')
-    await page.waitForTimeout(500)
-    await page.getByRole('dialog').screenshot({ path: join(out, `${name}-${scene}-${theme}.png`) })
+    await page.waitForTimeout(scene.s === 'intro' ? 3800 : 900)
+    const file = join(out, `${name}-${d}-${scene.m}-${scene.s}-${theme}.png`)
+    await page.getByRole('dialog').screenshot({ path: file })
+    files.push({ label: scene.label, file })
     await page.close()
   }
-// A sheet of each appearance's scenes, side by side, for looking at them all at once.
-for (const theme of ['light', 'dark']) {
   const page = await browser.newPage({ viewport: { width: 1600, height: 400 }, deviceScaleFactor: 1 })
-  const cells = scenes
-    .map((scene) => {
-      const data = readFileSync(join(out, `${name}-${scene}-${theme}.png`)).toString('base64')
-      return `<figure><figcaption>${scene}</figcaption><img src="data:image/png;base64,${data}"></figure>`
-    })
+  const width = d === 'c' ? 520 : 400
+  const cells = files
+    .map(
+      ({ label, file }) =>
+        `<figure><figcaption>${label}</figcaption><img src="data:image/png;base64,${readFileSync(file).toString('base64')}"></figure>`,
+    )
     .join('')
   await page.setContent(
-    `<style>body{margin:0;padding:16px;background:${theme === 'dark' ? '#222' : '#ddd'};font:12px sans-serif;color:${theme === 'dark' ? '#eee' : '#222'};display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}figure{margin:0}img{display:block;width:400px}</style>${cells}`,
+    `<style>body{margin:0;padding:16px;background:${theme === 'dark' ? '#222' : '#ddd'};font:12px sans-serif;color:${theme === 'dark' ? '#eee' : '#222'};display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}figure{margin:0}img{display:block;width:${width}px}</style>${cells}`,
   )
-  await page.screenshot({ path: join(out, `${name}-sheet-${theme}.png`), fullPage: true })
+  await page.screenshot({ path: join(out, `${name}-${d}-sheet-${theme}.png`), fullPage: true })
   await page.close()
 }
 await browser.close()
-process.stdout.write(`${scenes.length * 2} shots in ${out}\n`)
+process.stdout.write(`${directions.join(', ')} shot in ${out}\n`)

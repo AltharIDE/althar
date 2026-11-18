@@ -1,0 +1,63 @@
+/* The page: a quiet window behind the dialog, and the lab's bar along the bottom, over the dialog's veil. */
+.lab {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100vh;
+  background: var(--n-2);
+}
+.window {
+  position: relative;
+  min-height: 0;
+}
+.closed {
+  display: grid;
+  place-items: center;
+  height: 100%;
+}
+.bar {
+  position: relative;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line-2);
+  background: var(--n-1);
+  font-size: 12px;
+  pointer-events: auto;
+}
+.bar button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  color: var(--t-2);
+}
+.bar button:hover {
+  background: var(--line);
+  color: var(--t-1);
+}
+.bar button[aria-pressed='true'] {
+  background: var(--paper);
+  color: var(--t-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.bar kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t-4);
+}
+.rule {
+  width: 1px;
+  height: 16px;
+  margin: 0 8px;
+  background: var(--line-2);
+}
+.gap {
+  flex: 1;
+}

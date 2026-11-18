@@ -1,16 +1,21 @@
 # The Connect a home lab
 
-The app's own Connect a home dialog (`ConnectHome`, with `PairHome`'s pairing step), on a home host that answers as each scene needs, driven to that scene as a person would type and press. No runtime, no Electron. It is the dialog's story: every state of it, light and dark, in one place.
+Directions for the Connect a home dialog, each made of the kit's components and the app's own connection form (`useConnect`), on a home host that answers after a believable while. No runtime, no Electron.
 
 ```bash
 cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/connect-home/vite.config.ts
 ```
 
-At `http://localhost:6141`. `?scene=` picks the state: `ssh`, `ssh-options`, `ssh-checking`, `ssh-refused`, `ssh-checked`, `ssh-connecting`, `ssh-failed`, `pair`, `pair-checked`, `pair-refused`, `pair-pairing`; `?theme=dark` draws it dark.
+At `http://localhost:6141`. The bar along the bottom, or its keys, swaps in place:
 
-`shoot.ts` shoots each scene's dialog headless at 1×, light and dark, with a sheet of them all, into `lab/connect-home/shots` (git ignores it), with the lab running (Chromium can't start in an agent's sandbox on a Mac; run it outside):
+- **0** the dialog as built; **A** the drawing; **B** the setup; **C** the host side
+- **P** / **S** pairing code or SSH; **I** a first home, with its intro
+- **F** fails the host's next answer; **R** starts over
+
+The fake host takes about a second to check a host and to connect. Any host works; any pairing code reads.
+
+`shoot.ts` shoots each direction's scenes headless at 1× (`?s=` drives the dialog to each), and a sheet of them, into `lab/connect-home/shots` (git ignores it), with the lab running. Chromium can't start in an agent's sandbox on a Mac; run it outside:
 
 ```bash
-node lab/connect-home/shoot.ts after              # every scene
-node lab/connect-home/shoot.ts after ssh-checked  # one
+node lab/connect-home/shoot.ts dir a b c       # THEME=dark for dark
 ```
