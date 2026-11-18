@@ -90,7 +90,7 @@ const drive = async ({ m, first }: State) => {
     await step()
     type('SSH host', 'deploy@vps.example.com')
     await step()
-    press('Check host')
+    press('Set it up')
     return
   }
   if (m === 'ssh') press('SSH', false)

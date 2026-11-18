@@ -69,10 +69,13 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
   const dropped = useRef(false)
   const offline = useRef(scenario === 'offline')
   const sending = useRef(false)
+  // The target this setup's steps were done for: another typed after a failure starts it over.
+  const startedFor = useRef('')
+  // Logged in as root: Althar made the home its own user, and connects as it from then on.
+  const [madeUser, setMadeUser] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
-  const typed = flow.ssh.target.trim() || (scenario === 'root' ? 'root@vps.example.com' : 'deploy@vps.example.com')
-  const target = scenario === 'root' ? `root@${TARGET_HOST(typed)}` : typed
+  const target = flow.ssh.target.trim() || (scenario === 'root' ? 'root@vps.example.com' : 'deploy@vps.example.com')
   const login = target.includes('@') ? target.split('@')[0]! : 'deploy'
   const host = TARGET_HOST(target)
   const say = (line: string) => setLog((was) => [...was, line])
@@ -128,9 +131,14 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
         say('Linux 6.8.0 x86_64 · systemd 255 · 21 GB free · git 2.43')
         // As root, the home gets a user of its own, althar, as its README says: tasks never run as root.
         if (login === 'root') {
+          const own = `althar@${host}`
           say('useradd --create-home --shell /bin/bash althar')
           say('Copied your SSH key to ~althar/.ssh/authorized_keys')
           say('loginctl enable-linger althar')
+          say(`$ ssh ${own}  (from here on: the home is althar's)`)
+          startedFor.current = own
+          setMadeUser(true)
+          flow.ssh.setTarget(own)
         }
         run(2)
       })
@@ -203,6 +211,7 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
 
   const stepState = (step: number): StepState => {
     if (step === 5) {
+      // identity: read once the setup is done, by the form's own check
       if (phase !== 'done') return 'later'
       if (flow.stage === 'found' || flow.stage === 'connecting' || flow.stage === 'connected') return 'done'
       if (flow.stage === 'refused') return 'failed'
@@ -228,12 +237,32 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
     /** Under way, where the form holds still. */
     busy: phase === 'running' || phase === 'reconnecting' || (phase === 'done' && flow.stage === 'checking'),
     start: () => {
+      startedFor.current = flow.ssh.target.trim()
       setLog([])
       run(0)
     },
     retry: () => {
+      // Another server typed since it failed: what was done was done there, so it starts over here.
+      if (flow.ssh.target.trim() !== startedFor.current) {
+        startedFor.current = flow.ssh.target.trim()
+        trusted.current = false
+        dropped.current = false
+        offline.current = scenario === 'offline'
+        sending.current = false
+        setUpload(false)
+        setProgress(0)
+        setWarning(null)
+        setMadeUser(false)
+        setLog([])
+        return run(0)
+      }
       say(`(trying again from: ${STEPS[at]?.label ?? ''})`)
       run(at)
+    },
+    /** Set up, but its identity couldn't be read: reads it again; the setup itself stands. */
+    reread: () => {
+      say('(reading its identity again)')
+      flow.submit()
     },
     resume: () => {
       say('(resuming: the server has what it had)')
@@ -241,7 +270,7 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
     },
     login,
     /** Logged in as root: the home runs as a user of its own, althar. */
-    own: login === 'root',
+    own: madeUser,
     trust: () => {
       trusted.current = true
       say(`Trusted ${host} (${FINGERPRINT}), kept in ~/.ssh/known_hosts`)

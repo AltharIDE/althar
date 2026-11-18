@@ -79,7 +79,7 @@ export function DrawingDirection({
     ? view === 'form'
       ? flow.stage
       : view
-    : install.phase === 'failed'
+    : install.phase === 'failed' || (install.phase === 'done' && flow.stage === 'refused')
       ? 'refused'
       : install.phase === 'running' || install.phase === 'reconnecting' || install.phase === 'done'
         ? 'checking'
@@ -97,6 +97,7 @@ export function DrawingDirection({
       if (install.phase === 'failed' && install.problem?.retry) return install.retry()
       if (install.phase === 'trust') return install.trust()
       if (install.phase === 'stopped') return install.resume()
+      if (install.phase === 'done' && flow.stage === 'refused') return install.reread()
       return
     }
     flow.submit()
@@ -145,7 +146,13 @@ export function DrawingDirection({
                   busy={run?.busy === true || (install.phase === 'done' && flow.stage === 'checking')}
                   disabled={run?.busy === true || (run === null && flow.ssh.target.trim() === '')}
                 >
-                  {run === null ? (install.phase === 'done' ? 'Reading its identity…' : 'Set it up') : run.primary}
+                  {run === null
+                    ? install.phase !== 'done'
+                      ? 'Set it up'
+                      : flow.stage === 'refused'
+                        ? 'Try again'
+                        : 'Reading its identity…'
+                    : run.primary}
                 </Button>
               )}
             </>
