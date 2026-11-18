@@ -31,6 +31,19 @@ const SERVER = `require('node:http').createServer((_, res) => res.end('meridian'
 
 const WATCH = Number.parseInt(process.env.ALTHAR_STILL_FOR ?? '', 10) || 60_000
 
+/**
+ * Lets `span` go by on the page's own clock. The span is what the spec watches for, not a guess at how long something
+ * takes: nothing is awaited but time itself.
+ */
+const watchFor = async (page: Page, span: number) => {
+  const end = (await page.evaluate(() => performance.now())) + span
+  await page.waitForFunction((end) => performance.now() >= end, end)
+}
+
+/** Two frames drawn, so what was just styled is laid out and the thread has kept its place. */
+const drawn = (page: Page) =>
+  page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))))
+
 interface Heard {
   /** Each animation that started in the thread, and on what. */
   readonly animations: string[]
@@ -93,7 +106,6 @@ const listen = (page: Page, changing: string) =>
   }, changing)
 
 test('a still coordinator thread stays still for a minute', async () => {
-  test.setTimeout(WATCH + 180_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
   // A dev server to run, as the person runs theirs: while it runs, the thread's clocks tick each second.
@@ -130,22 +142,25 @@ test('a still coordinator thread stays still for a minute', async () => {
       await say(page, `Question number ${i} about the project?`)
       await expect(shown(page, `Question number ${i} about the project?`).first()).toBeVisible()
     }
-    // Settled: the replies are in, the task has gone its way, and what came in has come in.
-    await page.waitForTimeout(8_000)
+    await expect(page.getByRole('article', { name: 'Coordinator' }).filter({ hasText: 'Question number 12' }).last()).toBeVisible()
+    // Settled: the replies are in, the first task has finished, and nothing is still moving in.
+    await expect(page.locator('article[data-task="tidy-the-readme"]')).toContainText('Did the task.')
     await still(page)
     // A card that grows as its task moves on, as a card does when a line comes under its title: here, once it isn't at work.
     await page.addStyleTag({ content: 'article[data-task]:not([class*="running"]) { padding-bottom: 40px !important; }' })
-    await page.waitForTimeout(1_000)
+    await drawn(page)
+    await still(page)
     const card = page.locator('article[data-task="keep-working-on-the-docs"]')
     await expect(card).toHaveClass(/running/)
     // Above the view, while what is in view is the person's last questions and their answers.
     const above = () => card.evaluate((one) => one.getBoundingClientRect().bottom < 0)
-    expect(await above()).toBe(true)
+    await expect.poll(above).toBe(true)
+    await still(page)
     await listen(page, 'article[data-task="keep-working-on-the-docs"]')
-    await page.waitForTimeout(WATCH / 3)
+    await watchFor(page, WATCH / 3)
     writeFileSync(done, '')
     await expect(card).not.toHaveClass(/running/)
-    await page.waitForTimeout((2 * WATCH) / 3)
+    await watchFor(page, (2 * WATCH) / 3)
     const heard = await page.evaluate(() => (window as unknown as { heard: Heard }).heard)
     expect(heard).toEqual({ animations: [], moves: [] })
   } finally {
