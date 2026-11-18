@@ -37,6 +37,7 @@ A few import seams in `vite.config.ts` give the app's files the lab's parts (`se
 ```bash
 node lab/whole-team/shoot.mjs        # every moment
 node lab/whole-team/shoot.mjs c d1   # those whose names start so
+node lab/whole-team/record.mjs       # C as a GIF, board to merged (needs ffmpeg)
 ```
 
 Delete the lab once a direction is picked to build, before building it.

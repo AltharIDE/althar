@@ -2,7 +2,7 @@ import { BoardCard as RealCard, NextRow as RealRow, NextStep, NextSteps } from '
 import type { ComponentProps } from 'react'
 
 import { MAYA_TITLE, TEAM_TASKS } from '../data'
-import { useLab } from '../state'
+import { lab, useLab } from '../state'
 import { Whose } from './team'
 
 /*
@@ -32,7 +32,7 @@ export function BoardCard(props: ComponentProps<typeof RealCard>) {
       foot={whose}
       next={
         <NextSteps>
-          <NextStep signal onPress={props.onOpen}>
+          <NextStep signal onPress={() => lab.set({ m: 1 })}>
             Look and approve
           </NextStep>
         </NextSteps>
