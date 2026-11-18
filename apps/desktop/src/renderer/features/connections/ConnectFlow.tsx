@@ -119,6 +119,8 @@ export const text = {
   madeOn: (host: string) => `Made on ${host}`,
   linearKey: 'A personal API key',
   linearLine: 'Made in Linear’s settings',
+  clickupToken: 'A personal API token',
+  clickupLine: 'Made in ClickUp’s settings, under Apps',
   trelloKey: 'A Power-Up key and a token',
   trelloLine: 'A key of yours on Trello, then a token you allow for it',
   serverLine: (project: string) => `${project}’s server, from its remote`,
@@ -182,9 +184,11 @@ export const text = {
   makeAtlassian: 'Make an Atlassian API token',
   makeNewAtlassian: 'Make a new API token',
   makeLinear: 'Make a key in Linear',
+  makeClickUp: 'Make a token in ClickUp',
   open: (where: string) => `Open ${where}’s token page`,
   openAtlassian: 'Open Atlassian’s API tokens',
   openLinear: 'Open Linear’s settings',
+  openClickUp: 'Open ClickUp’s Apps settings',
   openAccessTokens: (host: string) => `Open ${host}’s access tokens`,
   githubFilled: (owner: string | undefined) => (owner === undefined ? 'Opens filled in.' : `Opens filled in, for ${owner}.`),
   classicFilled: 'Opens with the repo and workflow scopes ticked.',
@@ -207,6 +211,7 @@ export const text = {
   jiraSteps: ['Create API token.', 'Name it Althar, and set when it runs out: a year at most.', 'Create, then copy it.'],
   jiraServerSteps: ['Create token, named Althar.', 'Set when it runs out.', 'Create, then copy it.'],
   linearSteps: ['Under Personal API keys, New key: name it Althar.', 'Create, then copy it.'],
+  clickupSteps: ['Under API Token, Generate.', 'Copy the token, which starts pk_.'],
   scopesToTick: 'The scopes to tick',
   waitingClipboard: 'Waiting for a token on the clipboard',
   pasteMyself: 'Paste it myself',
@@ -242,7 +247,9 @@ export const text = {
       ? 'An Atlassian token'
       : product === 'linear'
         ? 'A Linear key'
-        : `A ${service} token`,
+        : product === 'clickup'
+          ? 'A ClickUp token'
+          : `A ${service} token`,
 
   /* what it can do */
   canDo: (service: string) => `What ${service} lets Althar do`,
@@ -284,14 +291,23 @@ export const text = {
           : 'Read checks and a failed job’s log',
     issues: 'Read issues and comment on them',
     read: (product: Product) =>
-      product === 'trello' ? 'Reads your boards' : product === 'linear' ? 'Reads your workspace’s issues' : 'Reads its issues',
-    comment: (product: Product) => (product === 'trello' ? 'Comments on cards' : 'Comments on issues'),
+      product === 'trello'
+        ? 'Reads your boards'
+        : product === 'linear'
+          ? 'Reads your workspace’s issues'
+          : product === 'clickup'
+            ? 'Reads your workspaces’ tasks'
+            : 'Reads its issues',
+    comment: (product: Product) =>
+      product === 'trello' ? 'Comments on cards' : product === 'clickup' ? 'Comments on tasks' : 'Comments on issues',
     move: (product: Product) =>
       product === 'trello'
         ? 'Moves cards between lists'
         : product === 'linear'
           ? 'Moves an issue’s status'
-          : 'Moves them through their workflow',
+          : product === 'clickup'
+            ? 'Moves a task’s status'
+            : 'Moves them through their workflow',
     account: (product: Product, service: string, hosted: boolean) =>
       product === 'bitbucket_cloud' || product === 'jira_cloud'
         ? 'Your Atlassian account'
@@ -300,7 +316,7 @@ export const text = {
           : 'Your account there',
   },
   counted: (product: Product, count: number) => {
-    const noun = product === 'trello' ? 'board' : product === 'linear' ? 'team' : 'project'
+    const noun = product === 'trello' ? 'board' : product === 'linear' ? 'team' : product === 'clickup' ? 'workspace' : 'project'
     return count === 1 ? `1 ${noun}` : `${count} ${noun}s`
   },
   why: {
@@ -408,6 +424,8 @@ const tokenWords = (way: Way, model: ConnectModel): { readonly title: string; re
       return { title: text.atlassianToken, line: text.atlassianLine }
     case 'linear':
       return { title: text.linearKey, line: text.linearLine }
+    case 'clickup':
+      return { title: text.clickupToken, line: text.clickupLine }
     default:
       return { title: text.makeToken, line: text.tokenPage(way.product === 'github' ? 'GitHub' : host) }
   }
@@ -442,6 +460,8 @@ const stepTitle = (model: ConnectModel, step: StepKind, way: Way): string => {
           return model.again === null ? text.makeAtlassian : text.makeNewAtlassian
         case 'linear':
           return text.makeLinear
+        case 'clickup':
+          return text.makeClickUp
         case 'github':
           return text.makeOn(host === 'github.com' ? 'GitHub' : host)
         default:
@@ -471,6 +491,7 @@ const NEEDS: Readonly<Record<Product, ReadonlyArray<AccessLine['need']>>> = {
   jira_cloud: ['site', 'account', 'read', 'comment', 'move'],
   jira_dc: ['site', 'account', 'read', 'comment', 'move'],
   trello: ['key', 'account', 'read', 'comment', 'move'],
+  clickup: ['account', 'read', 'comment', 'move'],
 }
 
 /** The lines a product's check has, in its order, before the service has said anything: no server on a hosted service, no reach where no repositories are known. */
@@ -954,6 +975,7 @@ const ANSWERS_AS: Readonly<Record<Product, string>> = {
   jira_cloud: 'Jira Cloud',
   jira_dc: 'Jira Data Center',
   trello: 'Trello',
+  clickup: 'ClickUp',
 }
 
 const GITHUB_PERMISSIONS = [
@@ -1055,6 +1077,14 @@ function MakeBody({
           {waitingForToken(watched)}
         </>
       )
+    case 'clickup':
+      return (
+        <>
+          {openPage(text.openClickUp)}
+          <ConnectSteps items={text.clickupSteps} />
+          {waitingForToken(watched)}
+        </>
+      )
     case 'trello':
       return null
   }
@@ -1071,6 +1101,7 @@ function PasteBody({ model, product, service }: { model: ConnectModel; product: 
     jira_cloud: 'ATATT…',
     linear: 'lin_api_…',
     trello: 'ATTA…',
+    clickup: 'pk_…',
   } as const
   const placeholder = product in prefix ? prefix[product as keyof typeof prefix] : undefined
   return (

@@ -13,7 +13,7 @@ import type {
 import { Delivery, headingOf, oneLine, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
-import { isSending, messageMove } from './items'
+import { isSending, locallyReading, messageMove } from './items'
 import { took } from './time'
 import { type Spent, spentOf, turnOfItems } from './turnTime'
 
@@ -588,6 +588,8 @@ export interface ThreadSource {
    * not a queue, though the agent may still be starting to read it.
    */
   readonly reading?: boolean
+  /** A locally sent first message is starting an absent session. */
+  readonly readingLocally?: boolean
   /** When the agent's last turn ended, by the runtime's clock: a message delivered before it was answered, if with nothing. */
   readonly turnEnded?: string | null
   /** When the newest of what comes before these items was written, where they are the last stretch of a longer thread. */
@@ -785,10 +787,18 @@ export const blocksOf = (
     switch (item.kind) {
       case 'user_message': {
         // What waits its turn shows in the composer's queue, where it can be edited or taken back; what was taken back is gone.
-        if (item.input?.state === 'withdrawn' || (queue && item.input?.state === 'queued' && !item.input.interrupting)) continue
+        if (
+          item.input?.state === 'withdrawn' ||
+          (queue &&
+            item.input?.state === 'queued' &&
+            !item.input.interrupting &&
+            item.input.claimed !== true &&
+            !(source.readingLocally === true && locallyReading(item)))
+        )
+          continue
         // Being read now, it is the agent's already, in the store's word a moment later.
         const delivery =
-          item.input?.state === 'queued' && (item.input.interrupting || source.reading !== true)
+          item.input?.state === 'queued' && item.input.claimed !== true && (item.input.interrupting || source.reading !== true)
             ? item.input.interrupting
               ? Delivery.Interrupting
               : Delivery.Queued

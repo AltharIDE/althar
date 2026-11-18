@@ -62,7 +62,17 @@ import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { coordinatorRow, forgetItems } from './chatView'
 import { type Accepting, acceptingOf } from './admission'
 import { checkpointBeforeTurn, checkpointAfterTurn, recoverTurnUndo, undoConversation, undoTarget, canUndoTask } from './turnUndo'
-import { dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
+import {
+  coordinatorRecord,
+  dueForHandover,
+  dueForLeadHandover,
+  HANDED_OVER,
+  notesSection,
+  type Recent,
+  roomFor,
+  shrinks,
+  TOOK_OVER,
+} from './handover'
 import { notesOf } from './notes'
 import {
   AlreadyDelivered,
@@ -78,7 +88,7 @@ import {
   type UnknownAgent,
 } from './errors'
 import { Instance } from './Instance'
-import { Limits } from './Limits'
+import { backWords, Limits } from './Limits'
 import { PlanUsage } from './PlanUsage'
 import { PAGE_VIEW_BRIEF } from './PageTools'
 import { Live } from './Live'
@@ -89,6 +99,7 @@ import { Questions } from './Questions'
 import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
 import { teamLeadOf } from './teamLead'
+import { isBack, type StandIn, standInOf } from './standIn'
 import { BETWEEN_AGENTS_MS } from './needsYou'
 import { guardEnv, guardHolds } from './pushGuard'
 import { change, fact, timestamp } from './records'
@@ -97,6 +108,8 @@ import { withRole } from './roles'
 import { git, PUSHED } from './git'
 import { evidenceFolderOf, MERGE_REVIEW, mergeCopyOf, reviewCopyOf } from './reviewCopy'
 import { LAST_MESSAGE_COORDINATOR, LAST_MESSAGE_LEAD, LAST_MESSAGE_REVIEWER } from './lastMessage'
+import { timeAgain, timeAgainLine, timeLine, type TimeTold } from './localTime'
+import { localZone } from './slots'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
@@ -429,6 +442,11 @@ interface Running {
   turnRunning: boolean
   /** A failed delivery waits for an explicit retry, new words, or its account's reset; queued input alone is not work. */
   deliveryHeld: 'transient' | 'usage_limit' | 'recovery' | null
+  /**
+   * Held for `usage_limit`: its account out until when, as last read. Kept here only, never as the thread's wait for a place
+   * (`waits_for_place`): its task's card says it waits for the reset, not for an agent.
+   */
+  usageOut?: { readonly agentId: string; readonly accountId: string; readonly until: string } | undefined
   /** Queued recovery may deliver fresh input, but cannot retry input that an earlier session already dispatched. */
   blockedInputs: ReadonlySet<string> | undefined
   /** The failed turn whose input waits, so a later person message can resume even when it arrived as that turn ended. */
@@ -483,6 +501,11 @@ interface Running {
   turnHeads?: ReadonlyArray<{ readonly name: string; readonly path: string; readonly head: string }> | undefined
   /** When its last turn ended, in milliseconds; null before its first. */
   turnEndedAt: number | null
+  /**
+   * A lead's or the coordinator's: when it was last told the person's local date and time, and in which zone (localTime.ts);
+   * undefined before its brief, or since a compaction, which may have left it out.
+   */
+  timeTold?: TimeTold | undefined
   /**
    * Who leads it from its next turn, where the person or a tool changed that while it worked or waited (`changeLead`): taken up
    * between turns, as what is said to it next is delivered, never in one.
@@ -827,6 +850,8 @@ export class Sessions extends Context.Service<
       readonly effort?: string
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
+      /** Who it stands in for, where Althar started it in place of the lead the task was given (standIn.ts). */
+      readonly standsIn?: StandIn
     }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /**
      * Starts the agent last on the thread again, on the model and effort it
@@ -941,6 +966,11 @@ export class Sessions extends Context.Service<
       readonly model?: string
       readonly effort?: string
     }): Effect.Effect<'later' | 'same' | 'none'>
+    /**
+     * The lead a session stands in for takes the thread back from its next turn (standIn.ts), where that session still leads
+     * and stands in, and nothing was chosen for it since: whether it was queued.
+     */
+    giveBack(input: { readonly threadId: string; readonly sessionId: string }): Effect.Effect<boolean>
     /** Hands the thread to another agent: a new session, briefed with the thread so far (ADR-005). */
     switchAgent(input: {
       readonly threadId: string
@@ -951,6 +981,8 @@ export class Sessions extends Context.Service<
       readonly said?: string
       /** What the loop dealt with by switching, for the home: an agent's usage limit, or a step gone quiet. */
       readonly about?: 'limit' | 'stall'
+      /** The step attempt it hands on, for a stall: the new lead stands in until that is over (standIn.ts). */
+      readonly attemptId?: string
       /** What the person said with it, and any images and files: the new agent's first turn, after its brief, and never the old one's. */
       readonly message?: {
         readonly envelope: CommandEnvelope
@@ -1005,6 +1037,8 @@ export class Sessions extends Context.Service<
         readonly background: ReadonlyArray<ShownLeftRunning>
         /** Who leads from its next turn, where `changeLead` changed that. */
         readonly nextLead?: { readonly agentId: string; readonly model?: string; readonly effort?: string }
+        /** Its queued turn waits for its account's usage limit to reset: which agent and account, and until when. */
+        readonly usageOut?: { readonly agentId: string; readonly accountId: string; readonly until: string }
       }>
     >
     /**
@@ -1201,6 +1235,8 @@ export class Sessions extends Context.Service<
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
       const trailsFor = Duration.toMillis((yield* RuntimeConfig).idle?.trails ?? TRAILS_FOR)
+      // The zone the person's local time is told in: the computer's, as its clock says now (localTime.ts).
+      const zoneOf = runtimeConfig.zone ?? localZone
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
@@ -1214,6 +1250,7 @@ export class Sessions extends Context.Service<
             prior.started_at DESC, prior.rowid DESC LIMIT 1)
         JOIN user_inputs i ON i.thread_id = t.id AND i.state = 'queued'
         WHERE t.kind IN ('coordinator', 'task') AND p.archived_at IS NULL
+          AND t.waits_for_place IS NULL
           AND NOT EXISTS (SELECT 1 FROM helpers h WHERE h.thread_id = t.id)
           AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.id = t.task_id AND k.state = 'abandoned')
           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.state IN ('running', 'suspended'))
@@ -1677,7 +1714,8 @@ export class Sessions extends Context.Service<
 
       /** Records a new session, still starting, on the account it runs on. */
       /** A session, starting; on the model asked for, so it is named by it from the first. */
-      const createSession = (thread: ThreadContext, agentId: string, account: Account, model?: string) =>
+      /** `standsIn`: who it stands in for, where a usage limit handed it the thread (standIn.ts). */
+      const createSession = (thread: ThreadContext, agentId: string, account: Account, model?: string, standsIn?: StandIn) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessionId = yield* newId(Ids.providerSession)
@@ -1697,7 +1735,12 @@ export class Sessions extends Context.Service<
                 ...(model === undefined ? {} : { model }),
                 startedAt: yield* timestamp,
               })}`
-              yield* sessionFact(thread, sessionId, 1, 'provider_session.starting', { agentId, accountId: account.id })
+              yield* sessionFact(thread, sessionId, 1, 'provider_session.starting', {
+                agentId,
+                accountId: account.id,
+                // On the given lead's own agent, a lead given no model of its own has none to go back to: it doesn't stand in.
+                ...(standsIn === undefined || (standsIn.agentId === agentId && standsIn.model === null) ? {} : { standsIn }),
+              })
             }),
           )
           return sessionId
@@ -1823,6 +1866,18 @@ export class Sessions extends Context.Service<
           return waiting !== undefined
         })
 
+      /** What the thread says as the lead a session stood in for takes it back from it. */
+      const backSaid = (standsIn: StandIn, standIn: Running) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [on] = yield* sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE id = ${standIn.sessionId}`
+          return backWords({
+            given: yield* limits.named(standsIn.agentId, standsIn.model, standsIn.accountId),
+            standIn: yield* limits.named(standIn.entry.definition.id, on?.model ?? null, standIn.account.id),
+            ...(standsIn.why === undefined ? {} : { why: standsIn.why }),
+          })
+        }).pipe(Effect.orElseSucceed(() => undefined))
+
       /** Pending intent has a feed revision of its own; it never changes what the agent has actually accepted. */
       const setLeadChoice = (
         running: Running,
@@ -1921,7 +1976,21 @@ export class Sessions extends Context.Service<
         previous: Running,
         next: { readonly agentId: string; readonly model?: string; readonly effort?: string },
       ): Effect.Effect<void, never, Store> =>
-        switchAgent({ threadId: previous.thread.threadId, ...next }).pipe(
+        Effect.gen(function* () {
+          // The lead a stand-in stood in for, taking the thread back as Althar queued it (`giveBack`): said now it does.
+          const standing = Option.getOrUndefined(
+            yield* standInOf(previous.sessionId).pipe(Effect.orElseSucceed(() => Option.none<StandIn>())),
+          )
+          const back =
+            standing !== undefined && standing.agentId === next.agentId && (next.model === undefined || next.model === standing.model)
+              ? yield* backSaid(standing, previous)
+              : undefined
+          return yield* switchAgent({
+            threadId: previous.thread.threadId,
+            ...next,
+            ...(back === undefined ? {} : { said: back, about: standing?.why === 'stall' ? ('stall' as const) : ('limit' as const) }),
+          })
+        }).pipe(
           Effect.catchCause((cause) =>
             Effect.andThen(
               Effect.logWarning('Could not hand a lead to the agent it was changed to', cause),
@@ -2168,7 +2237,21 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          const added = [setUp, asked === null ? null : sentWithWords(asked)].filter((said) => said !== null && said !== '')
+          // A lead and the coordinator are told the person's local date, time and zone from the computer's clock as the turn is
+          // made, not as the session started (the coordinator's brief waits for the person's first words): once, in the brief,
+          // and again first in the turn after a long gap, a new day or a compaction (localTime.ts).
+          const knowsTime = thread.role === 'coordinator' || (thread.role === 'task' && thread.helper === undefined)
+          const timeNow = yield* Clock.currentTimeMillis
+          const zone = zoneOf()
+          const timeBefore = running.timeTold
+          const timeNews =
+            knowsTime && brief === undefined && !compacting && timeAgain(timeBefore, running.turnEndedAt, timeNow, zone)
+              ? timeAgainLine(timeNow, zone)
+              : null
+          const withTime = (news: string | null) => (timeNews === null ? news : news === null ? timeNews : `${timeNews}\n\n${news}`)
+          const added = [setUp, asked === null ? null : sentWithWords(asked), knowsTime ? timeLine(timeNow, zone) : null].filter(
+            (said) => said !== null && said !== '',
+          )
           const briefed = brief === undefined || added.length === 0 ? brief : { ...brief, text: [brief.text, ...added].join('\n\n') }
           // The coordinator is told what became of its plans in its models' names, which are read first: asking an agent may take a while.
           const named =
@@ -2179,7 +2262,7 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          let prompt = compacting ? COMPACT : asTold(running.entry.definition, promptFor(inputs, briefed, becameWork))
+          let prompt = compacting ? COMPACT : asTold(running.entry.definition, promptFor(inputs, briefed, withTime(becameWork)))
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -2206,7 +2289,7 @@ export class Sessions extends Context.Service<
                       Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
                     ),
                   )
-                  prompt = asTold(running.entry.definition, promptFor(inputs, briefed, news))
+                  prompt = asTold(running.entry.definition, promptFor(inputs, briefed, withTime(news)))
                 }
                 const at = yield* timestamp
                 yield* sql`INSERT INTO turn_deliveries ${sql.insert({
@@ -2270,7 +2353,8 @@ export class Sessions extends Context.Service<
           if (!compacting) {
             running.brief = undefined
             running.waitsForWords = undefined
-          }
+            if (knowsTime && (brief !== undefined || timeNews !== null)) running.timeTold = { at: timeNow, zone }
+          } else running.timeTold = undefined
           running.turnRunning = true
           running.turnStartedAt = yield* Clock.currentTimeMillis
           const ready = running.turnStartedAt - readying
@@ -2606,7 +2690,11 @@ export class Sessions extends Context.Service<
           )
           // A brief the agent never read goes with the next turn: refused, or out of usage before it began.
           // A compaction left the brief where it was.
-          if ((prevented || refused || held) && !compacting) running.brief = brief
+          // So does the time it was told first, after a gap: its turn has ended since, so it isn't owed it by the gap any more.
+          if ((prevented || refused || held) && !compacting) {
+            running.brief = brief
+            running.timeTold = timeNews === null ? timeBefore : undefined
+          }
           // Refused, its prompt never went: what it spent before is the turn's that tries again.
           if (refused) running.before = spent
           running.retryBrief = state === 'failed' && !compacting ? brief : undefined
@@ -2815,6 +2903,17 @@ export class Sessions extends Context.Service<
           }),
         ).pipe(Effect.orElseSucceed(() => true))
 
+      /** Its queued turn waits for its account's reset, until `out.until`: its card says so once it begins to, and then each time the reset moves. */
+      const heldForUsage = (running: Running, out: { readonly agentId: string; readonly accountId: string; readonly until: string }) =>
+        Effect.suspend(() => {
+          const said = running.usageOut
+          running.usageOut = { agentId: out.agentId, accountId: out.accountId, until: out.until }
+          return running.thread.role === 'coordinator' ||
+            (said?.until === out.until && said.accountId === out.accountId && said.agentId === out.agentId)
+            ? Effect.void
+            : Effect.ignore(run(touchTask(running.thread.taskId)))
+        })
+
       /** Delivers queued input, one turn at a time, until the session stops. */
       const deliveries = (running: Running) =>
         Effect.forever(
@@ -2856,6 +2955,7 @@ export class Sessions extends Context.Service<
             if (running.deliveryHeld === 'usage_limit') {
               const out = yield* run(limits.outAccount(running.account.id))
               if (Option.isSome(out)) {
+                yield* heldForUsage(running, out.value)
                 yield* Effect.sleep(
                   Duration.millis(Math.min(1000, Math.max(1, Date.parse(out.value.until) - (yield* Clock.currentTimeMillis)))),
                 )
@@ -2863,6 +2963,11 @@ export class Sessions extends Context.Service<
                 return
               }
               running.deliveryHeld = null
+              // Back in usage: its card no longer says it waits for the reset.
+              if (running.usageOut !== undefined) {
+                running.usageOut = undefined
+                if (thread.role !== 'coordinator') yield* Effect.ignore(run(touchTask(thread.taskId)))
+              }
             }
             // A turn that couldn't be delivered is kept to that turn: the next message wakes the loop again.
             if (thread.role === 'coordinator')
@@ -2885,8 +2990,11 @@ export class Sessions extends Context.Service<
               )
             if (yield* compactsNext(running)) return yield* delivered(running.delivering.withPermits(1)(deliver(running)))
             // News can start a stopped session outside a workflow step. Keep its input queued until
-            // this account has usage again, before asking Busy for a place. The thread marker also
-            // lets Busy restore this wait after a restart.
+            // this account has usage again, before asking Busy for a place. That wait is the account's,
+            // not a place's: it stays off the thread's `waits_for_place`, which says an agent is
+            // waited for (its card would say "Waiting", the agents busy, with places free), and
+            // which only Busy keeps and lets go. After a restart its queued input starts its agent
+            // again (`recoverQueued`), and the wait is found again here.
             const inWorkflow = yield* run(
               Effect.gen(function* () {
                 const sql = yield* SqlClient.SqlClient
@@ -2899,15 +3007,7 @@ export class Sessions extends Context.Service<
             const out = inWorkflow ? Option.none() : yield* run(limits.outAccount(running.account.id))
             if (Option.isSome(out)) {
               running.deliveryHeld = 'usage_limit'
-              yield* run(
-                Effect.gen(function* () {
-                  const sql = yield* SqlClient.SqlClient
-                  const changed = yield* sql<{
-                    id: string
-                  }>`UPDATE threads SET waits_for_place = ${yield* timestamp} WHERE id = ${thread.threadId} AND waits_for_place IS NULL RETURNING id`
-                  if (changed.length > 0) yield* touchTask(thread.taskId)
-                }),
-              )
+              yield* heldForUsage(running, out.value)
               yield* Effect.sleep(
                 Duration.millis(Math.min(1000, Math.max(1, Date.parse(out.value.until) - (yield* Clock.currentTimeMillis)))),
               )
@@ -3800,6 +3900,8 @@ export class Sessions extends Context.Service<
         readonly effort?: string
         readonly accountId?: string
         readonly recovering?: string
+        /** Who it stands in for, as the session it starts again after did. */
+        readonly standsIn?: StandIn
       }) =>
         exclusive(
           input.threadId,
@@ -3847,10 +3949,19 @@ export class Sessions extends Context.Service<
                 AND EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
                   WHERE di.user_input_id = i.id AND d.delivered_at IS NOT NULL)`).map((one) => one.id),
                   )
-            const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
-            const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
+            // The coordinator's brief reads the project's records and its copies, and nothing of the session: it is written while
+            // the agent starts, which takes longer, so the person's first words to it wait for neither twice.
+            const briefing = thread.role === 'coordinator' ? yield* Effect.forkChild(briefFor(thread, { kind: 'start' })) : undefined
+            const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, input.standsIn).pipe(
+              Effect.onError(() => (briefing === undefined ? Effect.void : Fiber.interrupt(briefing))),
+            )
+            const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort).pipe(
+              Effect.onError(() => (briefing === undefined ? Effect.void : Fiber.interrupt(briefing))),
+            )
             // Every session starts from a brief (ADR-005), even the first on a task.
-            const brief = yield* briefFor(thread, { kind: 'start' }).pipe(beforeTakingOver(connected))
+            const brief = yield* (briefing === undefined ? briefFor(thread, { kind: 'start' }) : Fiber.join(briefing)).pipe(
+              beforeTakingOver(connected),
+            )
             return yield* activate(
               connected,
               {
@@ -4135,14 +4246,17 @@ export class Sessions extends Context.Service<
       const asideState = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [row] = yield* sql<{ aside: number | null; unsaid: number | null }>`
-            SELECT k.shelf IS 'scratch' AND EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state != 'replaced'
-                AND json_extract(p.parameters, '$.aside') = 1) AS aside,
+          const [row] = yield* sql<{ aside: number | null; brought: number | null; unsaid: number | null }>`
+            SELECT k.shelf IS 'scratch' AND (EXISTS (SELECT 1 FROM task_plans p WHERE p.task_id = k.id AND p.state != 'replaced'
+                AND json_extract(p.parameters, '$.aside') = 1)
+                -- Or a conversation brought in from another tool (Elsewhere.ts), an aside with no plan of its own.
+                OR EXISTS (SELECT 1 FROM brought_in i WHERE i.task_id = k.id AND i.kind = 'conversation')) AS aside,
+              EXISTS (SELECT 1 FROM brought_in i WHERE i.task_id = k.id AND i.kind = 'conversation') AS brought,
               (k.request IS NULL OR trim(k.request) = '') AND NOT EXISTS (SELECT 1 FROM user_inputs u
                 JOIN threads t ON t.id = u.thread_id AND t.kind = 'task' WHERE t.task_id = k.id) AS unsaid
             FROM tasks k WHERE k.id = ${taskId}`
           const aside = row?.aside === 1
-          return { aside, unsaid: aside && row?.unsaid === 1 }
+          return { aside, brought: row?.brought === 1, unsaid: aside && row?.unsaid === 1 }
         })
 
       /** The thread so far, for a brief, oldest first, within the prompt's budget: what waits in its queue the turn says itself. */
@@ -4275,6 +4389,8 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const [first] = thread.repositories
           const errands = yield* errandLines(thread.projectId, thread.taskId)
+          // A conversation brought in from another tool carries on here: its first session reads it, as a fresh one would.
+          const { brought } = yield* asideState(thread.taskId)
           return [
             why.kind === 'start'
               ? "You are an aside of this project's coordinator, in Althar: a quick chat the person opened beside their conversation with the coordinator, off the board. Answer what they ask, in your reply, as briefly as it allows; a greeting gets a greeting back. Your reply is the answer: there is no step to finish, no report, and no finish_step or evidence to give."
@@ -4289,7 +4405,10 @@ export class Sessions extends Context.Service<
             `read_turn gives this turn’s byPerson and message ids; only their message from the window or a paired device, or an open errand’s recorded next step, may authorize an asked-for tool.${errands.length === 0 ? '' : ` Open errands concerning it:\n${errands.join('\n')}`}`,
             ...(yield* Effect.map(notesOf(thread.projectId), (notes) => (notes.length === 0 ? [] : [notesSection(notes)]))),
             STANDING_DICTATED,
-            ...(why.kind === 'start' ? [] : yield* threadSoFar(thread.threadId)),
+            ...(brought && why.kind === 'start'
+              ? ['This conversation was brought in from another tool, where the person had it: carry it on from where it stands.']
+              : []),
+            ...(why.kind === 'start' && !brought ? [] : yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
         })
 
@@ -4649,45 +4768,58 @@ export class Sessions extends Context.Service<
           Effect.orElseSucceed((): WorksIn => 'worktree'),
         )
 
-      /** The coordinator's brief: its role, the project's notes, and the thread so far. */
-      const coordinatorBrief = (thread: CoordinatorThread) =>
-        Effect.gen(function* () {
-          const notes = yield* notesOf(thread.projectId)
-          return [
-            ...coordinatorRole(thread, yield* projectWorksIn(thread.projectId), yield* projectTowards(thread.projectId)),
-            `Open errands:\n${(yield* errandLines(thread.projectId)).join('\n') || 'None.'}`,
-            ...(notes.length === 0 ? [] : [notesSection(notes)]),
-            ...(yield* threadSoFar(thread.threadId)),
-          ].join('\n\n')
-        })
-
       /** Names models by what each agent says of them, or by their ids where that can't be read. */
       const byId: ModelNamer = (step) => step.model ?? `${step.agentId}'s default model`
 
       /**
-       * A fresh coordinator session's brief, when Althar hands the
-       * conversation over (ADR-031): its role, then what it takes over, from
-       * the records rather than the raw thread. And how many tasks are open.
+       * A coordinator session's brief (ADR-031): its role, then the record
+       * of the project and the conversation, the same for every session it
+       * starts, on opening the project or taking over from another agent or a
+       * full context. Only how much of the conversation it carries word for
+       * word differs: a session handed a full context over carries its last
+       * few messages, any other as much of the thread as a brief holds. And
+       * how many tasks are open.
        */
-      const handoverBrief = (thread: CoordinatorThread) =>
+      const coordinatorRecordOf = (thread: CoordinatorThread, recent: Recent) =>
         Effect.gen(function* () {
           const modelOf = yield* modelNamer.pipe(
             Effect.catchCause((cause) =>
               Effect.as(Effect.logWarning('Could not read the models to name for the coordinator', cause), byId),
             ),
           )
-          const record = yield* handoverRecord({
-            projectId: thread.projectId,
-            threadId: thread.threadId,
-            modelOf,
-            working: (threadId) => threads.get(threadId)?.turnRunning === true,
-          })
-          const worksIn = yield* projectWorksIn(thread.projectId)
-          return {
-            text: [...coordinatorRole(thread, worksIn, yield* projectTowards(thread.projectId)), ...record.sections].join('\n\n'),
-            open: record.open,
-          }
+          const [role, record] = yield* Effect.all(
+            [
+              Effect.map(Effect.all([projectWorksIn(thread.projectId), projectTowards(thread.projectId)]), ([worksIn, towards]) =>
+                coordinatorRole(thread, worksIn, towards),
+              ),
+              coordinatorRecord({
+                projectId: thread.projectId,
+                threadId: thread.threadId,
+                modelOf,
+                working: (threadId) => threads.get(threadId)?.turnRunning === true,
+                copies: thread.folder.repositories,
+                recent,
+              }),
+            ],
+            { concurrency: 'unbounded' },
+          )
+          return { role, record }
         })
+
+      /** The coordinator's brief as a session starts: its role, the record, and as much of the thread as a brief holds. */
+      const coordinatorBrief = (thread: CoordinatorThread) =>
+        Effect.map(coordinatorRecordOf(thread, { budget: PROMPT_BUDGET }), ({ role, record }) => [...role, ...record.sections].join('\n\n'))
+
+      /**
+       * A fresh coordinator session's brief, when Althar hands the
+       * conversation over (ADR-031): its role, that it took over, then the
+       * record with the last few messages. And how many tasks are open.
+       */
+      const handoverBrief = (thread: CoordinatorThread) =>
+        Effect.map(coordinatorRecordOf(thread, HANDED_OVER), ({ role, record }) => ({
+          text: [...role, TOOK_OVER, ...record.sections].join('\n\n'),
+          open: record.open,
+        }))
 
       /**
        * Hands the thread to another agent. The new agent is started first; only
@@ -4697,6 +4829,48 @@ export class Sessions extends Context.Service<
        * switch is queued once the old one has stopped, so it is the new one's
        * first turn, after the brief, and never the old one's.
        */
+      /**
+       * Who a session Althar hands the thread to, for a usage limit or a step gone without its report, stands in for: the lead
+       * the previous one stood in for, where it did, on the same terms; else the previous one itself, as it ran, until its
+       * reset or the end of the step it failed (`attemptId`). None where it is the same lead again (started afresh, or on
+       * another of its accounts) or the one it stood in for taking the thread back.
+       */
+      const standInFor = (
+        previous: Running,
+        projectId: string,
+        agentId: string,
+        model: string | undefined,
+        why: 'limit' | 'stall',
+        attemptId: string | undefined,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [was] = yield* sql<{ model: string | null; effort: string | null }>`
+            SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
+          const kept = Option.getOrUndefined(yield* standInOf(previous.sessionId))
+          const given = kept ?? {
+            agentId: previous.entry.definition.id,
+            model: was?.model ?? null,
+            effort: was?.effort ?? null,
+            accountId: previous.account.id,
+          }
+          if (given.agentId === agentId && (model === undefined || model === given.model)) return undefined
+          if (kept !== undefined) return kept
+          if (why === 'stall') return { ...given, until: null, why, ...(attemptId === undefined ? {} : { attemptId }) } satisfies StandIn
+          const out = yield* given.accountId === null ? limits.out(given.agentId, projectId) : limits.outAccount(given.accountId)
+          if (Option.isSome(out)) return { ...given, until: out.value.until } satisfies StandIn
+          // Handed on while only nearly out, it isn't out at all: it is back once its window resets, not at once.
+          const low = yield* limits.nearlyOut(given.agentId, projectId, given.model ?? undefined)
+          const until =
+            Option.getOrUndefined(low)?.resetsAt ??
+            new Date((yield* Clock.currentTimeMillis) + Duration.toMillis(Duration.hours(1))).toISOString()
+          return { ...given, until, why: 'low' } satisfies StandIn
+        })
+
+      /** Whether the lead a session stands in for is back: its usage again, or the step it failed over (standIn.ts). */
+      const backFrom = (standsIn: StandIn, projectId: string) =>
+        isBack(standsIn, (one) => (one.accountId === null ? limits.out(one.agentId, projectId) : limits.outAccount(one.accountId)))
+
       const switchAgent = (input: {
         readonly threadId: string
         readonly agentId: string
@@ -4704,6 +4878,7 @@ export class Sessions extends Context.Service<
         readonly effort?: string
         readonly said?: string
         readonly about?: 'limit' | 'stall'
+        readonly attemptId?: string
         readonly accountId?: string
         readonly message?: {
           readonly envelope: CommandEnvelope
@@ -4733,10 +4908,26 @@ export class Sessions extends Context.Service<
               ...accountOf(input),
               ...(input.model === undefined ? {} : { model: input.model }),
             })
+            // Another agent or model takes the thread, not the same one on another of its accounts: always said in the window.
+            const [was] =
+              previous === undefined
+                ? []
+                : yield* (yield* SqlClient.SqlClient)<{ model: string | null }>`
+                    SELECT model FROM provider_sessions WHERE id = ${previous.sessionId}`
+            const moved =
+              previous === undefined ||
+              previous.entry.definition.id !== entry.definition.id ||
+              (input.model !== undefined && input.model !== was?.model)
+            // A usage limit or a failed step hands the lead on for a while: the new one stands in for the lead the task was given,
+            // which takes it back. Chosen (no `about`), it leads as chosen.
+            const standsIn =
+              input.about !== undefined && previous !== undefined
+                ? yield* standInFor(previous, thread.projectId, entry.definition.id, input.model, input.about, input.attemptId)
+                : undefined
             // Starting a replacement can take arbitrarily long. Future input belongs to it from here, while the old turn may finish.
             if (previous !== undefined) previous.handover = 'under_way'
             return yield* Effect.gen(function* () {
-              const sessionId = yield* createSession(thread, entry.definition.id, account, input.model)
+              const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, standsIn)
               const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
               const brief = yield* Effect.gen(function* () {
                 if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
@@ -4746,7 +4937,8 @@ export class Sessions extends Context.Service<
                   title:
                     input.said ??
                     (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
-                  ...(input.about === undefined ? {} : { about: input.about }),
+                  // Another model takes the thread: always shown, whatever made the switch (never a silent one).
+                  ...(input.about === undefined ? {} : { about: input.about, ...(moved ? { handover: true } : {}) }),
                 })
                 if (input.message !== undefined)
                   yield* send({
@@ -4843,7 +5035,9 @@ export class Sessions extends Context.Service<
               previous.handover = 'left'
               return yield* Queue.offer(previous.wake, undefined)
             }
-            const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model)
+            // Started afresh, a stand-in still stands in for the lead it was given.
+            const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId))
+            const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model, standsIn)
             const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
             yield* Effect.andThen(
               stopRunning(previous, { state: 'superseded', by: sessionId }),
@@ -4924,8 +5118,17 @@ export class Sessions extends Context.Service<
       const startLast = (threadId: string, recovering?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null; startedAt: string }>`
-            SELECT s.agent_id, s.model, s.effort, s.started_at FROM provider_sessions s WHERE s.thread_id = ${threadId}
+          const [last] = yield* sql<{
+            id: string
+            projectId: ProjectId
+            agentId: string
+            accountId: string | null
+            model: string | null
+            effort: string | null
+            startedAt: string
+          }>`
+            SELECT s.id, s.project_id, s.agent_id, s.account_id, s.model, s.effort, s.started_at FROM provider_sessions s
+            WHERE s.thread_id = ${threadId}
             ORDER BY (SELECT max(f.sequence) FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id) DESC,
               s.started_at DESC, s.rowid DESC LIMIT 1`
           if (last === undefined) return false
@@ -4952,12 +5155,39 @@ export class Sessions extends Context.Service<
                   changed.at,
                   threads.get(threadId),
                 )
+          // The last lead stood in for the one a usage limit stopped (standIn.ts): that one leads again where it has usage again,
+          // after a stop or a restart too; else the stand-in carries on standing in.
+          const standing =
+            on.agentId === last.agentId && on.model === last.model ? Option.getOrUndefined(yield* standInOf(last.id)) : undefined
+          // Queued back by `giveBack` before the stop, it is still standing in: the given lead starts, as it would have.
+          if (standing !== undefined && (yield* backFrom(standing, last.projectId))) {
+            yield* start({
+              threadId,
+              agentId: standing.agentId,
+              ...(recovering === undefined ? {} : { recovering }),
+              ...(standing.model === null ? {} : { model: standing.model }),
+              ...(standing.effort === null ? {} : { effort: standing.effort }),
+            })
+            yield* addItem({ projectId: last.projectId, threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: backWords({
+                given: yield* limits.named(standing.agentId, standing.model, standing.accountId),
+                standIn: yield* limits.named(last.agentId, last.model, last.accountId),
+                ...(standing.why === undefined ? {} : { why: standing.why }),
+              }),
+              about: standing.why === 'stall' ? 'stall' : 'limit',
+              handover: true,
+            })
+            return true
+          }
           yield* start({
             threadId,
             agentId: on.agentId,
             ...(recovering === undefined ? {} : { recovering }),
             ...(on.model === null ? {} : { model: on.model }),
             ...(on.effort == null ? {} : { effort: on.effort }),
+            ...(standing === undefined ? {} : { standsIn: standing }),
           })
           return true
         })
@@ -5242,6 +5472,46 @@ export class Sessions extends Context.Service<
               )
             }).pipe(Effect.orDie),
           ),
+        giveBack: (input) =>
+          run(
+            Effect.gen(function* () {
+              const running = threads.get(input.threadId)
+              if (running === undefined) return false
+              const sql = yield* SqlClient.SqlClient
+              // One transaction: the stand-in still the lead, still standing in, and nothing chosen for it since, as the lead given
+              // back is queued; a choice made meanwhile (chooseLead, changeLead) is never overwritten. No `choice` is recorded, so
+              // the stand-in stays one until the given lead has started (`takeOver`), and a stop or restart before still gives it back.
+              const queued = yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  if (running.stopping || running.sessionId !== input.sessionId || running.handover !== 'none') return undefined
+                  if (threads.get(input.threadId) !== running || running.nextLead !== undefined) return undefined
+                  const standsIn = Option.getOrUndefined(yield* standInOf(input.sessionId))
+                  if (standsIn === undefined) return undefined
+                  const next = {
+                    agentId: standsIn.agentId,
+                    ...(standsIn.model === null ? {} : { model: standsIn.model }),
+                    ...(standsIn.effort === null ? {} : { effort: standsIn.effort }),
+                  }
+                  return (yield* setLeadChoice(running, next, { onlyIfEmpty: true })) ? standsIn : undefined
+                }),
+              )
+              if (queued === undefined) return false
+              // The same agent on its own model again is set between turns, with no hand-over to say it: said here.
+              if (queued.agentId === running.entry.definition.id) {
+                const said = yield* backSaid(queued, running)
+                if (said !== undefined)
+                  yield* addItem({ projectId: running.thread.projectId, threadId: input.threadId }, 'notice', {
+                    source: 'runtime',
+                    severity: 'info',
+                    title: said,
+                    about: queued.why === 'stall' ? 'stall' : 'limit',
+                    handover: true,
+                  })
+                yield* Effect.forkIn(run(applyLead(running)), sessionsScope)
+              }
+              return true
+            }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not give a lead back', cause), false))),
+          ),
         switchAgent: (input) => run(switchAgent(input)),
         moved: (threadId) =>
           Effect.sync(() => {
@@ -5265,6 +5535,8 @@ export class Sessions extends Context.Service<
           exclusive(
             threadId,
             Effect.suspend(() => {
+              // A stop also cancels startup recovery that has not yet acquired this thread's lock.
+              for (const one of recovery) if (one.threadId === threadId) recoveryInputs.delete(one.inputId)
               const running = threads.get(threadId)
               return running === undefined
                 ? Effect.fail(new NoSession({ threadId }))
@@ -5293,6 +5565,7 @@ export class Sessions extends Context.Service<
                   stopping: running.stopping,
                   background: [...running.background.values()].map(shownOf),
                   ...(running.nextLead === undefined ? {} : { nextLead: running.nextLead }),
+                  ...(running.deliveryHeld === 'usage_limit' && running.usageOut !== undefined ? { usageOut: running.usageOut } : {}),
                 })
           }),
         askPermission: (threadId, request) =>

@@ -6,6 +6,7 @@ import {
   choiceKey,
   EditRunnable,
   type ListedRunnable,
+  Room,
   RunButton,
   runButtonText,
   Runnables,
@@ -16,6 +17,7 @@ import {
   type RunTargetRun,
 } from '@althar/ui'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 
 import { messageOf, type RunRef } from '../../data/client'
@@ -24,7 +26,8 @@ import { useServices } from '../../data/services'
 import { addressOf } from '../../shared/running'
 import { useWorkToward } from '../../shared/useWorkToward'
 import { ago, running } from '../../shared/time'
-import { type RunsModel, useRuns } from './useRuns'
+import { openCoordinator } from '../../shared/openCoordinator'
+import { askInDraft, type RunsModel, useRuns } from './useRuns'
 import { usePageOpener } from '../browser/opener'
 
 /*
@@ -233,12 +236,18 @@ export interface RunDialogsModel {
   readonly showing: RunDialog
   /** Opens one, or closes them with null: each says only what went wrong in it, and adding reads the repository's scripts. */
   readonly show: (next: RunDialog) => void
+  /**
+   * Asks the coordinator to work out what the project runs: its conversation, at once, the ask in its composer unsent,
+   * after what the person had written there, for them to change or send. Any dialog open closes.
+   */
+  readonly ask: () => void
 }
 
 /** The dialogs for what a project runs, wherever they open from: Run's list, or the project's settings. */
 export const useRunDialogs = (projectId: string, runnables: ReadonlyArray<Runnable> | null = null): RunDialogsModel => {
   const runs = useRuns({ projectId, runnables })
   const [showing, setShowing] = useState<RunDialog>(null)
+  const navigate = useNavigate()
   return {
     runs,
     showing,
@@ -246,6 +255,12 @@ export const useRunDialogs = (projectId: string, runnables: ReadonlyArray<Runnab
       runs.dismissError()
       setShowing(next)
       if (next?.kind === 'add') void runs.readScripts()
+    },
+    ask: () => {
+      setShowing(null)
+      askInDraft(projectId)
+      openCoordinator(projectId)
+      void navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Talk } })
     },
   }
 }
@@ -272,7 +287,7 @@ export function RunDialogs({
 }) {
   const { client } = useServices()
   const repositories = (useQuery(reads(client).repositories(projectId)).data ?? []).map((one) => one.name)
-  const { runs: model, showing, show } = dialogs
+  const { runs: model, showing, show, ask } = dialogs
   const close = () => show(null)
   const error = model.error === null ? {} : { error: model.error }
   // As the person left them: one removed gone at once.
@@ -305,11 +320,8 @@ export function RunDialogs({
           onAddScripts={async (picked) => {
             if (await model.keepScripts((fresh ?? []).filter((script) => picked.includes(scriptId(script))))) close()
           }}
-          // Said in the coordinator's thread at once; where it couldn't be, asked again here, saying why.
-          onAsk={() => {
-            model.ask(() => show({ kind: 'add', way: 'ask' }))
-            close()
-          }}
+          // In the coordinator's composer, unsent: the person changes or sends it there.
+          onAsk={ask}
           onClose={close}
           busy={model.busy}
           {...error}
@@ -360,6 +372,7 @@ export const listedOf = (one: Runnable): ListedRunnable => ({
   ...(one.name === null ? {} : { name: one.name }),
   command: one.command,
   about: `${one.repository} · ${runButtonText.from[one.from]}`,
+  from: one.from,
 })
 
 /** What the repositories offer, as the picker lists it: each one's pull requests, then its branches, saying which repository where there are several. */
@@ -698,7 +711,8 @@ export function Runs({
             if (launch !== undefined) onClear(launch.id)
           }
         }}
-        onAdd={(way) => dialogs.show({ kind: 'add', way })}
+        // Asking needs no dialog: it goes straight to the coordinator's composer.
+        onAdd={(way) => (way === 'ask' ? dialogs.ask() : dialogs.show({ kind: 'add', way }))}
         onEdit={() => dialogs.show({ kind: 'list' })}
       />
       <RunDialogs projectId={projectId} project={project} runnables={runnables} dialogs={dialogs} afterEdit={{ kind: 'list' }} />

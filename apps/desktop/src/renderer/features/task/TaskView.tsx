@@ -57,7 +57,7 @@ import { draftKey, draftOf as draftNow, setDraftDictated, useSetDraft } from '..
 import { DraftComposer } from '../../shared/DraftComposer'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
-import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, readingLocallyOf, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
@@ -85,6 +85,7 @@ import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { localText } from '../../shared/local'
 import { LocalPlace } from '../../shared/LocalPlace'
+import { StandInPlace } from '../../shared/StandInPlace'
 import { wayOutText } from '../../shared/WayOut'
 import { listeningText, listeningOf, useHeard, waitOf } from './behind'
 import { ChangesCard } from '../../shared/ChangesCard'
@@ -469,12 +470,13 @@ function LiveRounds({
           items: snapshot.items,
           turnRunning: session?.turnRunning ?? false,
           turnStarted: session?.turnStartedAt ?? null,
-          reading: readingNow(session, pending, snapshot.task.queued !== null || snapshot.task.waits !== null),
+          reading: readingNow(session, pending, snapshot.task.queued !== null || snapshot.task.waits !== null, snapshot.accepting),
+          readingLocally: readingLocallyOf(session, snapshot.accepting, snapshot.task.queued !== null || snapshot.task.waits !== null),
           turnEnded: session?.turnEndedAt ?? null,
           // What the person asked for, which opens the thread above, is what the lead's first turn answers.
           openedAt: snapshot.task.request === null || snapshot.earlier ? null : snapshot.task.startedAt,
           worktree: snapshot.task.worktree,
-          queue: queueShown(session, pending, snapshot.accepting),
+          queue: queueShown(session, pending, snapshot.accepting, snapshot.items),
           outputs: printed,
           turns: turnsById(snapshot.turns),
         },
@@ -839,7 +841,8 @@ export function TaskView({
   const busy = session?.turnRunning ?? false
   // A step that waits on the person: its call, not the thread, has the ways on.
   const stuckOpen = snapshot.attention.some((request) => request.kind === 'stuck')
-  const queue = queueShown(session, model.pending, snapshot?.accepting)
+  const queue = queueShown(session, model.pending, snapshot?.accepting, snapshot.items)
+  const readingLocally = readingLocallyOf(session, snapshot.accepting, snapshot.task.queued !== null || snapshot.task.waits !== null)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
   // What its lead left running, and what Althar runs of it itself (ADR-096); a run's output is in its card.
@@ -873,6 +876,8 @@ export function TaskView({
   // Its lead changed from its next turn, by the picker, the team dialog or a tool: the picker shows who leads it then, and so does the header.
   const pending: Choice | null = session === null || !session.held ? null : upcomingOn(session)
   // What the person just picked, shown until the runtime has it (or has refused it): at once, before anything is asked of the agent.
+  // Handed the task by a usage limit, the lead stands in for the one the task was given, which takes it back at its reset.
+  const standIn = session?.held === true && waiting === null && moving === null && pending === null ? (session.standsIn ?? null) : null
   const choice =
     session === null || !session.held
       ? chosen
@@ -948,7 +953,7 @@ export function TaskView({
   // A queued message goes back in the composer to be changed, and out of the queue, at once. One the lead had already read
   // comes back where it was, the line saying why, and the composer goes back to what it held, unless written in since.
   const edit = (id: string) => {
-    const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
+    const said = queuedOf(snapshot.items, queue, readingLocally).find((message) => message.id === id)
     // One whose images or files wouldn't fit beside those waiting stays in the queue, and the composer says why.
     if (said === undefined || !images.fits(said)) return
     let was: string | null = null
@@ -981,7 +986,7 @@ export function TaskView({
   // again, at once. One the lead has already read stays as it was; one Althar didn't take goes back in the composer, as one
   // taken back to edit does.
   const sendQueuedNow = (id: string) => {
-    const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
+    const said = queuedOf(snapshot.items, queue, readingLocally).find((message) => message.id === id)
     if (said === undefined) return
     model.sendQueuedNow(id, said.text, outgoingOf(said), () => {
       setDraft((current) => withQueued(current, said.text))
@@ -1355,7 +1360,7 @@ export function TaskView({
         onRemoveComment={(id) => drop(kept, id)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
-        queued={queuedOf(snapshot.items, queue)}
+        queued={queuedOf(snapshot.items, queue, readingLocally)}
         onEditQueued={edit}
         onSendQueuedNow={sendQueuedNow}
         onUnqueue={(id) => void model.takeBack(id)}
@@ -1375,6 +1380,14 @@ export function TaskView({
                 value={choice}
                 onChange={choose}
                 {...(teamed === null ? {} : { onTeam: () => setChangingTeam(true) })}
+              />
+            )}
+            {standIn !== null && (
+              <StandInPlace
+                given={named(standIn.agentId, standIn.model).name}
+                until={standIn.until}
+                why={standIn.why}
+                onPutBack={() => choose({ agentId: standIn.agentId, model: standIn.model, effort: standIn.effort })}
               />
             )}
             {/* Where it works, as Codex says it under its composer: Local, in the person's own checkout (ADR-096). */}
@@ -1732,6 +1745,8 @@ export function TaskView({
                   <TaskFace
                     className={s.face}
                     composer={composer}
+                    // An aside sits under the conversation bar, which shades the thread scrolled beneath it.
+                    under={embedded}
                     // A document the lead wrote, or a file it names, opens beside the thread on its workbench; a document follows its edits.
                     // An aside's, in the coordinator's narrow pane, has no room for one.
                     {...(embedded

@@ -1,3 +1,4 @@
+import { PairingInvitation, PairingTokenHash } from './pairing'
 import { Context, Effect, Layer, Schema } from 'effect'
 import { AcpCatalog, AcpConnection } from './agentCatalog'
 import { AttentionEvent } from './attention'
@@ -14,6 +15,7 @@ import {
 } from './identities'
 
 import { CanvasDetail, CanvasKind, CanvasSummary, CanvasText, SentCanvasComment } from './canvases'
+import { BroughtIn, Elsewhere } from './elsewhere'
 import { MESSAGE_FILES } from './files'
 import { AutomationCard, AutomationDefinition, AutomationSnapshot, AutomationsSnapshot, FromAutomation } from './automations'
 import { MESSAGE_IMAGES } from './pictures'
@@ -959,7 +961,17 @@ export const ChangeTarget = Schema.Literals(['upstream', 'fork', 'upstream_branc
 export type ChangeTarget = typeof ChangeTarget.Type
 
 /** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
-export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export const Product = Schema.Literals([
+  'github',
+  'gitlab',
+  'bitbucket_cloud',
+  'bitbucket_dc',
+  'linear',
+  'jira_cloud',
+  'jira_dc',
+  'trello',
+  'clickup',
+])
 export type Product = typeof Product.Type
 
 /**
@@ -1278,6 +1290,8 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved along with it: to its tracker's In Progress as it starts, In Review and Done with its pull request. */
   moveIssues: Schema.Boolean,
+  /** Whether a task's pull request is linked on its issue as it opens: an attachment, a remote link, or a comment on ClickUp. */
+  linkIssues: Schema.Boolean,
   /** What a small change's review after it merges brings back to the person: only major findings, any, or no review at all. */
   afterMergeReview: AfterMergeRule,
   /** Whether skill and OpenSpec files may be written to, committed in, or pushed from the project's repositories; each off unless turned on. */
@@ -1351,7 +1365,7 @@ export const ConnectionSummary = Schema.Struct({
 export type ConnectionSummary = typeof ConnectionSummary.Type
 
 /** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
-export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello', 'clickup'])
 export type Service = typeof Service.Type
 
 /** A product a person can connect, and how they sign in to it. */
@@ -1898,6 +1912,8 @@ export const UserMessageItem = Schema.Struct({
     Schema.Struct({
       state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']),
       interrupting: Schema.Boolean,
+      /** A turn has taken this input, even if delivery to the agent is still pending. */
+      claimed: Schema.optional(Schema.Boolean),
       /** Some of its words came from dictation: the agent was told it may have been misheard. Taken back, it goes back to the composer so. */
       dictated: Schema.optional(Schema.Boolean),
     }),
@@ -2084,9 +2100,11 @@ export const NoticeItem = Schema.Struct({
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
      * work, what the coordinator relayed, or its task's folder going or coming
-     * back, a line across the thread (ADR-056).
+     * back, a line across the thread (ADR-056). What was brought in from another
+     * tool, and where from, is Althar's own line (`brought`, workspaces-and-runs,
+     * "Bringing in other tools' work").
      */
-    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder'])),
+    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'brought'])),
     /** A task the line is about, which it links to: one this task's lead started (ADR-097), once. */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /**
@@ -2112,18 +2130,31 @@ export const NoticeItem = Schema.Struct({
     ),
     /**
      * What the line offers: a review a lead or the coordinator offered a task whose work turned real with none
-     * (`offer_review`), by its reviewer, which Add puts on and No thanks turns down for good. (A preset is offered on its
-     * task's card, `presetOffer`, not here.)
+     * (`offer_review`), by its reviewer, which Add puts on and No thanks turns down for good; or, in the project's
+     * conversation, what was picked to bring in from other tools and didn't come in, each by name and why, with what
+     * Try again brings in again (`BringIn`, twice as once). (A preset is offered on its task's card, `presetOffer`, not here.)
      */
     offer: Schema.optional(
-      Schema.Struct({
-        kind: Schema.Literal('review'),
-        projectId: Schema.String,
-        taskId: Schema.String,
-        agentId: Schema.String,
-        model: Schema.NullOr(Schema.String),
-        effort: Schema.optional(Schema.NullOr(Schema.String)),
-      }),
+      Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal('review'),
+          projectId: Schema.String,
+          taskId: Schema.String,
+          agentId: Schema.String,
+          model: Schema.NullOr(Schema.String),
+          effort: Schema.optional(Schema.NullOr(Schema.String)),
+        }),
+        Schema.Struct({
+          kind: Schema.Literal('bring_in'),
+          projectId: Schema.String,
+          /** What didn't come in, by name, and why. */
+          missed: Schema.Array(Schema.Struct({ name: Schema.String, why: Schema.String })),
+          /** What trying again would bring in: empty where nothing that failed could come in on another try. */
+          worktrees: Schema.Array(Schema.String),
+          setups: Schema.Array(Schema.String),
+          conversations: Schema.Array(Schema.String),
+        }),
+      ]),
     ),
     /**
      * For an agent's turn that failed: why, as the runtime classes it
@@ -2733,6 +2764,12 @@ export const TaskCard = Schema.Struct({
    * shows it, while it is open, and + opens it again rather than another. Absent otherwise.
    */
   unsaid: Schema.optional(Schema.Boolean),
+  /**
+   * An aside's answer, as its card in the coordinator's thread shows it: its lead's latest report, or, where the person asked
+   * it more since, its lead's first line after they did. What its lead says after reporting (that Althar has the summary, say)
+   * isn't its answer. Absent for a task on the board, and for an aside with neither yet.
+   */
+  answer: Schema.optional(Schema.String),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**
@@ -3618,6 +3655,22 @@ export const SessionSummary = Schema.Struct({
   /** Who leads the thread from its next turn, where that was changed while it worked or waited; absent or null otherwise. */
   nextLead: Schema.optional(
     Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), effort: Schema.NullOr(Schema.String) })),
+  ),
+  /**
+   * The lead it stands in for, where Althar handed the thread to it: who the task was given, why (its usage ran out, it was
+   * nearly out, or it ended a step without its report), and when that one is back and takes over again (null: once the step
+   * is done). Absent or null where it leads as chosen.
+   */
+  standsIn: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        agentId: Schema.String,
+        model: Schema.NullOr(Schema.String),
+        effort: Schema.NullOr(Schema.String),
+        until: Schema.NullOr(Schema.String),
+        why: Schema.optional(Schema.Literals(['limit', 'low', 'stall'])),
+      }),
+    ),
   ),
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
@@ -4778,6 +4831,9 @@ export const AttentionApi = RpcGroup.make(
 ).middleware(ClientAuthority)
 
 const socketCalls = new Set<string>([
+  'IssueDevicePairing',
+  'ListClientDevices',
+  'RevokeConnectionDevice',
   'GetConnectionInfo',
   'Status',
   'ListProjects',
@@ -4845,6 +4901,8 @@ const limit = Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 0, ma
 
 const ConnectionApi = RpcGroup.make(
   call('GetConnectionInfo', {}, ConnectionInfo),
+  command('IssueDevicePairing', { tokenHash: PairingTokenHash }, PairingInvitation),
+  command('RevokeConnectionDevice', { deviceId: ClientDeviceId }, Schema.Void),
   call('ListClientDevices', ClientListOptions.fields, ClientPage),
   command(
     'RegisterClientDevice',
@@ -4886,6 +4944,35 @@ const ProjectApi = RpcGroup.make(
    * root inside the folder chosen, where it is one of several found there.
    */
   command('PrepareFolder', { grant: Schema.String, path: Schema.optional(Schema.String) }, PreparedFolder),
+  /**
+   * What other tools left for a project's repositories on this computer
+   * (docs/decisions/workspaces-and-runs.md, "Bringing in other tools' work"):
+   * their worktrees, the setups they keep, and Claude Code's and Codex's
+   * conversations there, each with what it became where it was brought in
+   * already. Read only: nothing of another tool's changes. Of a project, or
+   * of a folder the person chose (`grant`), before its project is made: the
+   * keys are the same, so what is picked there is brought in once it is.
+   */
+  call('LookElsewhere', { projectId: Schema.optional(Schema.String), grant: Schema.optional(Schema.String) }, Elsewhere),
+  /**
+   * Brings in what the person picked, by the keys LookElsewhere gave: each
+   * worktree as a task in place, its plan held on `steps` until they start
+   * it, with the conversations that ran in it as its history; each setup as
+   * its repository's; each other conversation as an aside. What was brought
+   * in before is found, never made twice; one that can't come in says why,
+   * and the rest come in all the same.
+   */
+  command(
+    'BringIn',
+    {
+      projectId: Schema.String,
+      worktrees: Schema.Array(Schema.String),
+      setups: Schema.Array(Schema.String),
+      conversations: Schema.Array(Schema.String),
+      steps: Schema.Array(PlanStep),
+    },
+    BroughtIn,
+  ),
   /** Every repository a code host's connection reaches, last pushed to first. */
   call('ListHostRepositories', { connectionId: Schema.String }, Schema.Array(HostRepository)),
   /** Where a code host's connection can make a repository: its account first, then its organizations, groups or workspaces. */
@@ -5857,6 +5944,7 @@ const WorkApi = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      linkIssues: Schema.optional(Schema.Boolean),
       afterMergeReview: Schema.optional(AfterMergeRule),
       repositoryFiles: Schema.optional(RepositoryFilesSetting),
       /** What the person changed of what leads' sandboxes let through, each list whole. */

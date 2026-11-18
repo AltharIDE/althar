@@ -1,3 +1,5 @@
+import { configureNetwork, disableNetwork } from './network'
+import { issuePairing, listConnectionDevices, revokeConnectionDevice } from './pairing'
 import { join } from 'node:path'
 
 import { Cause, Effect, Option } from 'effect'
@@ -25,6 +27,7 @@ import { verifyBundledPrograms } from './updates/preflight'
 import { configureUpdates, type SetupDependencies } from './updates/setup'
 import { controllerAlive, loadInstallation, processStamp, readReceipt, updateError } from './updates/store'
 import { databasePermit } from './updates/reservation'
+import { configureWorkers, workerCertificate, workerOperation } from './workers'
 
 export interface HostIO extends ServiceCommands {
   readonly stdio?: BridgeStreams
@@ -74,6 +77,68 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
               ),
       })
     switch (options.command) {
+      case 'configure-network': {
+        const configured = yield* configuredHome(options)
+        const network = yield* configureNetwork(configured)
+        return yield* out(network, `Direct access configured: ${network.origin}\nRestart the host explicitly to apply this setting.`)
+      }
+      case 'disable-network': {
+        const configured = yield* configuredHome(options)
+        yield* disableNetwork(configured.profile)
+        return yield* out({ enabled: false }, 'Direct access disabled for the next start. Restart the host to close its listener.')
+      }
+      case 'configure-workers':
+      case 'disable-workers': {
+        const configured = yield* configuredHome(options)
+        const result = yield* configureWorkers(configured, options.workerConfiguration)
+        return yield* out(result, `Worker listener ${result.enabled ? 'configured' : 'disabled'}. Restart the home to apply this setting.`)
+      }
+      case 'enroll-worker': {
+        const configured = yield* configuredHome(options)
+        const workerId = yield* workerOperation(configured.profile, async (store) =>
+          store.enroll(await workerCertificate(options.workerCertificate ?? '')),
+        )
+        return yield* out({ workerId }, `Enrolled worker ${workerId}`)
+      }
+      case 'revoke-worker': {
+        const configured = yield* configuredHome(options)
+        yield* workerOperation(configured.profile, (store) => store.revoke(options.workerId ?? ''))
+        return yield* out({ workerId: options.workerId, revoked: true }, 'Worker certificate revoked')
+      }
+      case 'worker-run': {
+        const configured = yield* configuredHome(options)
+        const attemptId = yield* workerOperation(configured.profile, (store) => store.enqueue(options.workerId ?? ''))
+        return yield* out({ attemptId, state: 'queued' }, `Diagnostic queued as ${attemptId}`)
+      }
+      case 'worker-result': {
+        const configured = yield* configuredHome(options)
+        const result = yield* workerOperation(configured.profile, (store) => store.result(options.workerAttemptId ?? ''))
+        return yield* out(
+          result,
+          `${result.attemptId} ${result.state}${result.output === null ? '' : `\n${JSON.stringify(result.output)}`}`,
+        )
+      }
+      case 'pair': {
+        const configured = yield* configuredHome(options)
+        const invitation = yield* issuePairing(configured)
+        return yield* out(invitation, `Home: ${invitation.homeId}\nPairing code (single use, expires in five minutes):\n${invitation.code}`)
+      }
+      case 'devices': {
+        const page = yield* listConnectionDevices(options)
+        return yield* out(
+          page,
+          page.clients
+            .map((device) => `${device.deviceId}  ${device.name}  ${device.role}  ${device.revokedAt === null ? 'active' : 'revoked'}`)
+            .join('\n') + (page.next === null ? '' : `\nMore devices: run devices --after ${page.next}`),
+        )
+      }
+      case 'revoke-device': {
+        yield* revokeConnectionDevice(options)
+        return yield* out(
+          { deviceId: options.revokeDeviceId, revoked: true },
+          'Device access revoked. Its live connections close; work already admitted may finish.',
+        )
+      }
       case 'connect-stdio':
         return yield* serveStdio(
           options.profile,
@@ -256,7 +321,10 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
                   catch: storageFailure,
                 })
               }
-              yield* out({ state: 'ready', ...ready }, `Home ready: ${ready.homeId}`)
+              yield* out(
+                { state: 'ready', ...ready },
+                `Home ready: ${ready.homeId}${ready.workerPort === undefined ? '' : `\nWorker listener on port ${ready.workerPort}`}`,
+              )
             }),
           hostDependencies,
         )

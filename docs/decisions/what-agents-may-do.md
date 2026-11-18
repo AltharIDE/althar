@@ -406,8 +406,12 @@ names a section and a setting as the screens' addresses do
   from marks on each setting, not the agent.
 - **Tightening, and every other change, goes at once.** Asking more can be
   undone, and the person sees it.
-- **Each change is a line in the agent's thread,** with what it was, what it
-  is now, and Undo. A change is recorded as the agent's, with the person's
+- **Each change is a line in the agent's thread,** saying what changed, and
+  Undo. A list or an object is diffed, never printed: `Turned on Kimi K3.1 Pro
+  in OpenCode`, `Default effort for Claude Opus 5.5: high → xhigh`, and
+  several changes fold to a count with each one a press away. The answer to
+  the agent and Settings' "changed by" read the same way (`settingWords.ts`).
+  A change is recorded as the agent's, with the person's
   words where it acted on them.
 - **The person's alone:** signing out, removing a connection or an account,
   leaving a repository out and taking the project out of Althar, on their
@@ -441,3 +445,4 @@ Anything else that blocks, refuses or asks is a bug.
 - 8 Nov 2026: the limits sweep (#696) built: every command reaches the rules inside the sandbox too, the network is open to every role, `gh` and `glab` are read as git is, an unreadable command runs beside a Never, and screenshots draw any http or https page.
 - 10 Nov 2026: an outside author's code runs only as far as the person says with Run it, safely (install scripts off, offline) or trusted fully, and a setting can answer how far, never whether ([reviews](reviews.md#run-it)).
 - 10 Nov 2026: Run it built, and Stop running it ([reviews § Run it](reviews.md#run-it)).
+- 18 Nov 2026: a settings change's line, and the answer to the agent, say what changed in plain words, never a list or object's JSON.

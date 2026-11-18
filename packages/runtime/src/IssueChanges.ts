@@ -240,10 +240,11 @@ const PACED_FROM = 10
 /**
  * How long applying waits between one issue and the next on a tracker, in a
  * batch that big: GitHub asks a second between writes (its secondary limits),
- * Trello allows a hundred calls in ten seconds a token, and Jira Cloud counts
+ * Trello allows a hundred calls in ten seconds a token, ClickUp a hundred a
+ * minute on most of its plans, and Jira Cloud counts
  * calls' cost a while; the others' limits hold a batch at once.
  */
-const PACE: Readonly<Partial<Record<Product, number>>> = { github: 1_000, trello: 150, jira_cloud: 100 }
+const PACE: Readonly<Partial<Record<Product, number>>> = { github: 1_000, trello: 150, clickup: 600, jira_cloud: 100 }
 
 /** How long a tracker that asks Althar to wait is waited for, in a batch, before its issue is said not to have changed. */
 const WAITED = 60_000
@@ -1328,7 +1329,7 @@ export class IssueChanges extends Context.Service<
         ),
         tool(
           'link_pull_request',
-          'Links this task’s pull request to the issue it came from, at once, where its tracker takes links (Linear, Jira, Trello); GitHub and GitLab link a pull request that names the issue already. Althar links it itself as it opens it: for one opened another way, or one that wasn’t linked.',
+          'Links this task’s pull request to the issue it came from, at once, where its tracker takes links (Linear, Jira, Trello; ClickUp by a comment on the task) and the project links them; GitHub and GitLab link a pull request that names the issue already. Althar links it itself as it opens it: for one opened another way, or one that wasn’t linked.',
           { type: 'object', properties: {} },
           (access) => linkTool(access),
         ),

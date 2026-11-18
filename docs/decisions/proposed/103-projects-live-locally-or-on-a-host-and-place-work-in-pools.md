@@ -1,6 +1,6 @@
 # ADR-103: A project lives locally or on a host, and places its work across its pools
 
-> The wider design remains a proposal. The shared API and host foundations below are built; the transport and language choices accepted on 16 Nov are recorded as decided, not built in [Foundations](../foundations.md#remote-connections-and-native-workers-decided-not-built). Other proposed decisions would fold into [Foundations § Where the runtime runs, and who may reach it](../foundations.md#where-the-runtime-runs-and-who-may-reach-it).
+> The wider design remains a proposal. The shared API and host foundations below are built; the transport and language choices accepted on 16 Nov are recorded with their delivery status in [Foundations](../foundations.md#remote-connections-and-native-workers). Other proposed decisions would fold into [Foundations § Where the runtime runs, and who may reach it](../foundations.md#where-the-runtime-runs-and-who-may-reach-it).
 
 - **Status:** Proposed
 - **Date:** 2026-11-07
@@ -454,8 +454,26 @@ multiplayer permission model. Pricing and entitlements remain separate.
 bridge and CLI attach through the private socket or system OpenSSH with
 socket authority, expected home/API checks and checked feed positions.
 [Desktop SSH attachment #982](https://github.com/AltharIDE/althar/pull/982)
-is in review as of 16 Nov, not merged. It does not provide protected device
-enrollment or person-only approvals.
+merged on 17 Nov with socket authority.
+
+**Connection-only direct access implemented, 16 Nov 2026:** opt-in HTTPS/WSS,
+operator-issued five-minute invitations, encrypted desktop keys, paired-device
+reconnect and immediate revocation now use the shared API. The first desktop
+path retains socket authority: it cannot approve permissions, enroll trusted
+approval devices or use desktop-local files/previews. A pin in the operator's
+code authenticates a private TLS endpoint; changing the TLS key needs pairing
+again. Invitations end on restart, while registrations remain durable. Host
+setup/certificate provisioning, protected approvals and real provider/VPS
+validation remain release work.
+
+**Native worker diagnostic:** [the Protobuf foundation](https://github.com/AltharIDE/althar/pull/1026)
+merged on 18 Nov. The opt-in Linux home listener authenticates a worker
+using mutual TLS and a durable enrollment. The home can issue a single
+fenced start grant for a fixed diagnostic. The worker journals the start
+and result, and the home persists a replayed result or records an unknown
+outcome after an interrupted attempt. The
+[operator guide](../../../apps/host/README.md#native-worker-diagnostic)
+covers certificate and journal setup.
 
 The next two slices can be developed independently against the existing
 home. Deliver direct connectivity first for the client path; neither slice
@@ -465,10 +483,12 @@ transport and language choices.
 ```mermaid
 flowchart TD
     Existing[Built: shared API and persistent Node home]
-    Existing --> Direct[Next client slice: HTTPS/WSS and reviewed device pairing]
-    Existing --> Worker[Next execution slice: Rust worker and Protobuf contract]
-    Direct --> Personal[Usable personal remote project]
-    Worker --> Personal
+    Existing --> Direct[HTTPS/WSS delivered; trusted approval enrollment pending]
+    Existing --> Worker[Built: enrolled Rust worker and recoverable diagnostic]
+    Direct --> Approval[Protected owner keys and approval recovery]
+    Worker --> Commands[Project work, isolation and process-tree cancellation]
+    Approval --> Personal[Usable personal remote project]
+    Commands --> Personal
     Personal --> Pools[Several assigned workers and local testing]
     Personal --> Hosted[Managed home: lifecycle, backups and recovery]
     Pools --> Cloud[Isolated managed compute]
@@ -478,27 +498,21 @@ flowchart TD
     Hosted -. Separate authorization work .-> Multiplayer[Organization and project collaboration]
 ```
 
-1. **Direct home connection and device lifecycle.** Add HTTPS/WSS adapters
-   to the existing API, with TLS/server identity, authenticated attachment,
-   explicit origin policy, bounded frames/queues, timeouts and checked-feed
-   reconnect. Support a private-network endpoint and a directly reachable
-   HTTPS endpoint without requiring Tailscale, SSH or a relay account. Pair
-   once with a home-bound, expiring, single-use challenge; reconnect and
-   revoke a device. Review initial owner enrollment, protected key storage,
-   recovery and approval provenance before granting person authority. Keep
-   clients that cannot meet that boundary at socket authority. Prove a
-   revoked connection stops, an unpaired process cannot answer an ask, and
-   reconnect neither loses history silently nor replays an external action.
-2. **One native worker execution path.** Add a pinned Rust workspace,
-   canonical Protobuf schemas and reproducible TypeScript/Rust bindings.
-   Validate gRPC as the first transport candidate. Enroll one authenticated
-   worker and run one real command from the Node home with a durable
-   attempt/lease/fencing record, a worker journal and bounded streamed
-   output. Prove process-tree cancellation, dropped acknowledgements,
-   reconnect replay, stale attempts, worker/home restart reconciliation and
-   explicit unknown outcomes for unconfirmed external effects. Capture the
-   warm/cold and memory baseline described above. Do not start with a broad
-   rewrite of provider adapters, a new scheduler or managed sandbox fleet.
+1. **Finish trusted client enrollment.** Direct HTTPS/WSS, connection-only
+   pairing, bounded streams, revocation and checked-feed reconnect are now
+   implemented. Keep software-key clients at socket authority. Before
+   granting person authority, review initial owner enrollment, protected key
+   storage, recovery and approval provenance, and validate them on supported
+   clients. Prove an unpaired process cannot answer an ask and reconnect
+   cannot replay an external action. Direct transport alone does not close
+   this approval-security gate.
+2. **Extend the native worker execution path to project work.** Build on
+   the locked Rust toolchain, shared Protobuf bindings and authenticated
+   diagnostic. Add project-scoped authorization, renewable leases, bounded
+   live logs, and process-tree cancellation with reconciliation of
+   unconfirmed external effects. Add automated enrollment and a signed
+   worker artifact. Capture the warm/cold and memory baseline described
+   above with real project setup and provider startup.
 3. **One usable personal remote project.** Connect the client and worker
    paths. Co-locate a personal Linux home and worker initially; create a
    remote project and clone its repositories rather than silently moving a

@@ -10,6 +10,7 @@ import { makeJiraCloud, makeJiraDataCenter } from '../../src/jira'
 import { makeLinear } from '../../src/linear'
 import { products } from '../../src/products'
 import { makeTrello } from '../../src/trello'
+import { makeClickUp } from '../../src/clickup'
 import { hostContract, trackerContract } from '../contract'
 
 /*
@@ -278,5 +279,20 @@ describe.skipIf(trelloKey === '' || trelloToken === '' || trelloCard === '')('Tr
       credential: Effect.succeed({ kind: 'app', key: trelloKey, token: trelloToken }),
     }),
     ref: trelloCard,
+  })
+})
+
+const clickupToken = env('ALTHAR_CLICKUP_TOKEN')
+const clickupTask = env('ALTHAR_CLICKUP_TASK')
+describe.skipIf(clickupToken === '' || clickupTask === '')('ClickUp', () => {
+  trackerContract({
+    name: 'ClickUp',
+    tracker: makeClickUp({
+      fetch,
+      apiUrl: products.clickup.apiFor('https://app.clickup.com'),
+      webUrl: 'https://app.clickup.com',
+      credential: Effect.succeed({ kind: 'key', token: clickupToken }),
+    }),
+    ref: clickupTask,
   })
 })

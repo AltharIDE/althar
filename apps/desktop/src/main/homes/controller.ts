@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { API_VERSION, ClientDeviceId, ClientIdentity, HomeId } from '@althar/contracts'
+import { API_VERSION, ClientDeviceId, ClientIdentity, HomeId, PAIRING_CODE_MAX_LENGTH } from '@althar/contracts'
 import { Schema } from 'effect'
 
 import type { CheckedHome, HomeProjects, HomeState, HomesOverview, RemoteHome, SshHomeTarget, WindowHome } from '../../homes'
@@ -32,6 +32,7 @@ interface WindowState {
 }
 export interface HomeControllerOptions {
   readonly store: ReturnType<typeof homeStore>
+  readonly pair?: (code: string, name: string, signal: AbortSignal) => Promise<RemoteHome>
   readonly inspect: (target: SshHomeTarget, signal: AbortSignal) => Promise<HostStatus>
   readonly open: (home: WindowHome, projectId?: string) => void
   readonly changed: (owner: number, state: HomeState) => void
@@ -56,6 +57,7 @@ const FORGOTTEN_FOR = 30_000
 export const homeController = ({
   store,
   inspect,
+  pair,
   open,
   changed,
   overviewChanged = () => {},
@@ -92,8 +94,8 @@ export const homeController = ({
   const resaved = (home: RemoteHome) => {
     for (const [owner, one] of windows) {
       const { current } = one.state
-      if (current.kind === 'ssh' && current.home.id === home.id)
-        update(owner, { ...one.state, current: { kind: 'ssh', home } }, one.generation)
+      if (current.kind !== 'local' && current.home.id === home.id)
+        update(owner, { ...one.state, current: { kind: home.https === undefined ? 'ssh' : 'https', home } }, one.generation)
     }
   }
   const checkOf = (owner: number, checkId: unknown) => {
@@ -146,8 +148,29 @@ export const homeController = ({
       available()
       if (windows.has(owner)) throw new Error('This window already belongs to a home.')
       windows.set(owner, { state: { current: home, connection: home.kind === 'local' ? 'local' : 'connecting' }, generation: 0, page: 0 })
-      if (home.kind === 'ssh') opening(home.home)
+      if (home.kind !== 'local') opening(home.home)
       overviewChanged()
+    },
+    pair: async (owner: number, code: unknown, name: unknown) => {
+      available()
+      const label = homeName(name)
+      if (pair === undefined || typeof code !== 'string' || code.length > PAIRING_CODE_MAX_LENGTH || !windows.has(owner))
+        throw new Error('Use a pairing code from the host in an open Althar window.')
+      if (activeInspections.size >= 8) throw new Error('Several homes are being connected. Try again shortly.')
+      cancelCheck(owner)
+      const page = windows.get(owner)?.page
+      const stop = new AbortController()
+      inspecting.set(owner, stop)
+      activeInspections.add(stop)
+      try {
+        const home = await pair(code, label, stop.signal)
+        await store.save(home)
+        overviewChanged()
+        if (accepting && !stop.signal.aborted && windows.get(owner)?.page === page) open({ kind: 'https', home })
+      } finally {
+        activeInspections.delete(stop)
+        if (inspecting.get(owner) === stop) inspecting.delete(owner)
+      }
     },
     inspect: async (owner: number, value: unknown): Promise<CheckedHome> => {
       available()
@@ -187,7 +210,7 @@ export const homeController = ({
       // Saving settings may outlive its window, but cannot open a replacement window after the caller closed.
       if (accepting && windows.get(owner)?.page === page) {
         opening(home)
-        open({ kind: 'ssh', home })
+        open({ kind: home.https === undefined ? 'ssh' : 'https', home })
       }
     },
     /** A checked home saved beside the others, as Manage homes offers for a host with another home on it: no window opens. */
@@ -216,7 +239,7 @@ export const homeController = ({
       if (home === undefined) throw new Error('This saved home was forgotten. Check its host to connect again.')
       if (accepting && windows.get(owner)?.page === page) {
         opening(home)
-        open({ kind: 'ssh', home }, projectId)
+        open({ kind: home.https === undefined ? 'ssh' : 'https', home }, projectId)
       }
     },
     rename: async (owner: number, id: unknown, name: unknown) => {
@@ -266,23 +289,28 @@ export const homeController = ({
     begin: (owner: number): { readonly home: RemoteHome; readonly generation: number } => {
       available()
       const previous = windows.get(owner)
-      if (previous?.state.current.kind !== 'ssh') throw new Error('This window uses its local runtime.')
+      if (previous === undefined || previous.state.current.kind === 'local') throw new Error('This window uses its local runtime.')
       const generation = previous.generation + 1
       update(owner, { current: previous.state.current, connection: 'connecting' }, generation)
       return { home: previous.state.current.home, generation }
     },
     connected: (owner: number, generation: number, value: unknown): boolean => {
       const previous = windows.get(owner)
-      if (!accepting || previous === undefined || previous.generation !== generation || previous.state.current.kind !== 'ssh') return false
+      if (!accepting || previous === undefined || previous.generation !== generation || previous.state.current.kind === 'local')
+        return false
       const identity = Schema.decodeUnknownSync(ClientIdentity)(value)
-      if (identity.homeId !== previous.state.current.home.homeId || identity.role !== 'socket')
+      if (
+        identity.homeId !== previous.state.current.home.homeId ||
+        identity.role !== 'socket' ||
+        (previous.state.current.home.https !== undefined && identity.deviceId !== previous.state.current.home.https.deviceId)
+      )
         throw new Error('The home returned an unexpected identity or authority.')
       update(owner, { current: previous.state.current, connection: 'connected', identity }, generation)
       return true
     },
-    disconnected: (owner: number, generation: number, problem = 'The home disconnected. Its work continues; reconnect to carry on.') => {
+    disconnected: (owner: number, generation: number, problem = 'The home disconnected. Reconnect to see its latest state.') => {
       const previous = windows.get(owner)
-      if (previous === undefined || previous.generation !== generation || previous.state.current.kind !== 'ssh') return
+      if (previous === undefined || previous.generation !== generation || previous.state.current.kind === 'local') return
       update(owner, { current: previous.state.current, connection: 'disconnected', problem }, generation)
     },
     isCurrent: (owner: number, generation: number) => accepting && windows.get(owner)?.generation === generation,

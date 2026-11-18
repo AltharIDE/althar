@@ -93,6 +93,10 @@ export const windowWords = (room: Pick<Room, 'kind' | 'label'>): string => {
 export const roomWords = (room: Room, now: number, reset = true): string =>
   `${Math.floor(room.leftPercent)}% of its ${windowWords(room)} left${!reset || room.resetsAt === null ? '' : `, until ${whenWords(room.resetsAt, now)}`}`
 
+/** Who a thread names in a handover: the model, on its agent, where the model is known (both can change); else the agent. */
+export const whoWords = (who: { readonly agent: string; readonly model: string | null }): string =>
+  who.model === null ? who.agent : `${who.model} on ${who.agent}`
+
 /**
  * What a thread says when a new step steers clear of an agent that is nearly
  * out: who has how little left, until when, and what Althar does: who takes
@@ -109,9 +113,9 @@ export const lowWords = (input: {
   const step = input.step === undefined ? undefined : outStep[input.step]
   const work = step?.work ?? 'the step'
   if (input.to !== undefined)
-    return `${input.from} has ${roomWords(input.room, input.now)}. ${input.to.agent} takes ${work} instead${
-      input.to.model === null ? '' : `, on ${input.to.model}`
-    }${input.to.ownWork === true && (input.step === 'implement' || input.step === 'review') ? ', with the review by the same maker' : ''}.`
+    return `${input.from} has ${roomWords(input.room, input.now)}. ${whoWords(input.to)} takes ${work} instead${
+      input.to.ownWork === true && (input.step === 'implement' || input.step === 'review') ? ', with the review by the same maker' : ''
+    }.`
   const back = input.room.resetsAt === null ? `until ${input.from} has room again` : `until ${whenWords(input.room.resetsAt, input.now)}`
   return `${input.from} has ${roomWords(input.room, input.now, false)}. ${capitalized(work)} ${step?.waits ?? 'waits'} ${back}.`
 }
@@ -155,8 +159,11 @@ export const outWords = (input: {
   readonly now: number
   /** The step it was on; none outside one. */
   readonly step?: keyof typeof outStep
-  /** Who takes over, on which model; `ownWork` where the review and implementation use the same maker. */
-  readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean }
+  /**
+   * Who takes over, on which model; `ownWork` where the review and implementation use the same maker; `standsIn` where it
+   * leads only until the one out is back, which takes it back then.
+   */
+  readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean; readonly standsIn?: boolean }
   readonly waits?: 'step' | 'message'
   /** The project moves work on, but no other model was free to take it. */
   readonly nothingFree?: boolean
@@ -165,8 +172,8 @@ export const outWords = (input: {
   const out = `${input.from} ran out of usage${step === undefined ? '' : ` ${step.during}`}`
   const back = input.resetsAt === null ? null : whenWords(input.resetsAt, input.now)
   if (input.to !== undefined)
-    return `${out}${back === null ? '' : `, until ${back}`}. ${input.to.agent} takes ${step === undefined ? '' : `${step.work} `}over${
-      input.to.model === null ? '' : `, on ${input.to.model}`
+    return `${out}${back === null ? '' : `, until ${back}`}. ${whoWords(input.to)} takes ${step === undefined ? '' : `${step.work} `}over${
+      input.to.standsIn === true ? (back === null ? ` until ${input.from} is back` : ' until then') : ''
     }${input.to.ownWork === true && (input.step === 'implement' || input.step === 'review') ? ', with the review by the same maker' : ''}.`
   if (input.waits === undefined) return `${out}${back === null ? '' : `, until ${back}`}.`
   const until = back === null ? `until ${input.from} is back` : `until ${back}`
@@ -174,6 +181,19 @@ export const outWords = (input: {
   const waits = `${step?.work ?? 'the step'} ${step?.waits ?? 'waits'}`
   return input.nothingFree === true ? `${out}. No other model is free: ${waits} ${until}.` : `${out}. ${capitalized(waits)} ${until}.`
 }
+
+/**
+ * What a thread says when the lead a task was given takes the thread back from the one that stood in for it: it has
+ * usage again, or the step it ended without its report is over.
+ */
+export const backWords = (input: {
+  readonly given: { readonly agent: string; readonly model: string | null }
+  readonly standIn: { readonly agent: string; readonly model: string | null }
+  readonly why?: 'limit' | 'low' | 'stall'
+}): string =>
+  input.why === 'stall'
+    ? `The step ${whoWords(input.standIn)} took over is done: ${whoWords(input.given)} leads again.`
+    : `${whoWords(input.given)} has usage again and takes over again from ${whoWords(input.standIn)}.`
 
 /**
  * What a thread says when a step's agent ended twice without its report (once

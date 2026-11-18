@@ -3668,6 +3668,26 @@ describe('a task', () => {
     expect(await screen.findByRole('button', { name: 'Lead: Claude Sonnet Low' })).toBeTruthy()
   })
 
+  it('says whose place a lead a usage limit handed the task to holds, until when, and puts that one back when pressed', async () => {
+    const base = thread()
+    const until = isoAfter(2 * 60 * 60 * 1000)
+    const standing = {
+      ...base,
+      session: { ...base.session!, standsIn: { agentId: 'codex', model: 'gpt-5.2-codex', effort: null, until } },
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => standing) })
+    withServices(<Task />, client)
+    const chip = await screen.findByRole('button', { name: 'For gpt-5.2-codex' })
+    act(() => chip.focus())
+    expect((await screen.findByRole('tooltip')).textContent).toBe(
+      `gpt-5.2-codex ran out of usage and leads again at ${clock(until)}. Press to put it back now.`,
+    )
+    // Pressed, the lead the task was given is picked again, at once, to take over with what is said next.
+    await userEvent.click(chip)
+    expect(screen.getByRole('button', { name: /^Lead: gpt-5\.2-codex/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'For gpt-5.2-codex' })).toBeNull()
+  })
+
   it('goes back to the model it was on, and says why, where the agent won’t take the pick', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () => thread()),
@@ -3729,11 +3749,9 @@ describe('a task', () => {
     // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, how many are busy and how many run at a time.
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
       status: TaskStatus.Queued,
-      state: 'Waiting: 4 of 4 agents busy on this Mac',
+      state: 'Waiting · 4 agents busy',
     })
-    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe(
-      'Waiting: 6 agents busy on this Mac, 2 at a time',
-    )
+    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe('Waiting · 6 agents busy, 2 at a time')
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     // Under way with no session yet, between agents or on its way, as its card on the board says: working, not stopped.
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Running, state: 'Working' })

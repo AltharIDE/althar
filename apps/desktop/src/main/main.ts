@@ -91,6 +91,7 @@ import {
 import { appMenu, PAGE, windowOptions } from './windowOptions'
 import {
   keyringIsSafe,
+  protectConnectionCredential,
   keyringUnavailable,
   passwordStore,
   sealFailure,
@@ -191,6 +192,12 @@ app.setName('Althar')
 // Off a Mac Electron draws the application menu's bar at the top of every window, frameless or not; the menu is kept for its accelerators (appMenu), and its bar is hidden here (windowOptions.ts, ADR-019).
 if (process.platform !== 'darwin') app.on('browser-window-created', (_event, window) => window.setMenuBarVisibility(false))
 
+// Playwright supplies a basic password store and a mock macOS keychain before main loads. Native credential tests must
+// use the actual OS service; packaged builds contain neither this switch nor the test environment override.
+if (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_NATIVE_KEYRING === '1') {
+  app.commandLine.removeSwitch('password-store')
+  app.commandLine.removeSwitch('use-mock-keychain')
+}
 // Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
 const store = passwordStore(process.argv, process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
 if (store !== null) app.commandLine.appendSwitch('password-store', store)
@@ -488,6 +495,7 @@ let bridge: Bridge | undefined
 const mine = (contents: WebContents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents)
 
 const homes = startHomeConnections({
+  protect: (sealing, value) => protectConnectionCredential(sealing, value, safeStorage, process.platform, portal),
   profile: locations().profile,
   entry: join(here, '../connection/connection.js'),
   mine,
@@ -495,7 +503,7 @@ const homes = startHomeConnections({
     const existing = [...windows].find((window) => {
       if (window.isDestroyed()) return false
       const current = homes.state(window.webContents.id).current
-      return home.kind === 'local' ? current.kind === 'local' : current.kind === 'ssh' && current.home.homeId === home.home.homeId
+      return home.kind === 'local' ? current.kind === 'local' : current.kind !== 'local' && current.home.id === home.home.id
     })
     if (existing !== undefined) {
       existing.show()
@@ -515,7 +523,7 @@ const localWindows = () =>
   new Set([...windows].filter((window) => !window.isDestroyed() && homes.state(window.webContents.id).current.kind === 'local'))
 const handleLocal: typeof ipcMain.handle = (channel, listener) =>
   ipcMain.handle(channel, (event, ...args) => {
-    if (homes.state(event.sender.id).current.kind === 'ssh') throw new Error(localServicesUnavailable)
+    if (homes.state(event.sender.id).current.kind !== 'local') throw new Error(localServicesUnavailable)
     return listener(event, ...args)
   })
 const showHomes = () => {
@@ -938,14 +946,14 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const remote = homes.state(window.webContents.id).current.kind === 'ssh'
+    const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
     if (allowed !== null) openOutside(allowed)
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {
     event.preventDefault()
-    const remote = homes.state(window.webContents.id).current.kind === 'ssh'
+    const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
     if (allowed !== null) openOutside(allowed)
   })

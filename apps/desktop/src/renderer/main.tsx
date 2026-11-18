@@ -112,7 +112,7 @@ function WindowContent() {
       />
     )
   // A home's window, until it first connects: its name, and how connecting goes; where it couldn't, why, and Try again.
-  if (home?.current.kind === 'ssh' && opened === null && window.althar.homes !== undefined)
+  if (home !== null && home.current.kind !== 'local' && opened === null && window.althar.homes !== undefined)
     return <HomeOpening host={window.althar} homes={window.althar.homes} home={home.current.home} problem={failed} />
   if (failed !== null) return <FailedOpen reason={failed} />
   return (

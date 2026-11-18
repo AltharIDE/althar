@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package althar.worker.v1;
+
+// The worker initiates the stream. Authentication belongs to the transport;
+// a worker ID in a message is only a claim to check against that identity.
+service WorkerControlService {
+  rpc Connect(stream WorkerFrame) returns (stream HomeFrame);
+}
+
+message WorkerFrame {
+  oneof payload {
+    WorkerHello hello = 1;
+    DiagnosticClaim diagnostic_claim = 2;
+    DiagnosticResult diagnostic_result = 3;
+  }
+}
+
+message HomeFrame {
+  oneof payload {
+    HomeHello hello = 1;
+    DiagnosticOffer diagnostic_offer = 2;
+    DiagnosticStart diagnostic_start = 3;
+  }
+}
+
+// The first worker frame declares an inclusive range of supported versions.
+// Both endpoints reject zero, inverted ranges and unsupported selections.
+message WorkerHello {
+  string worker_id = 1;
+  uint32 min_version = 2;
+  uint32 max_version = 3;
+  bool accepts_diagnostics = 4;
+}
+
+// The first home frame binds this stream to one authenticated, negotiated session.
+message HomeHello {
+  string home_id = 1;
+  string worker_id = 2;
+  string session_id = 3;
+  uint32 version = 4;
+  bool supports_diagnostics = 5;
+}
+
+// A lease of zero requests reconciliation without granting a new start.
+message DiagnosticOffer {
+  string attempt_id = 1;
+  string fence = 2;
+  uint32 claimable_for_ms = 3;
+}
+
+message DiagnosticClaim {
+  string attempt_id = 1;
+  string fence = 2;
+}
+
+// A home persists the claim before sending this once. Zero means reconcile.
+message DiagnosticStart {
+  string attempt_id = 1;
+  string fence = 2;
+  uint32 run_for_ms = 3;
+}
+
+enum DiagnosticOutcome {
+  DIAGNOSTIC_OUTCOME_UNSPECIFIED = 0;
+  DIAGNOSTIC_OUTCOME_SUCCEEDED = 1;
+  DIAGNOSTIC_OUTCOME_FAILED = 2;
+  DIAGNOSTIC_OUTCOME_UNKNOWN = 3;
+}
+
+message DiagnosticResult {
+  string attempt_id = 1;
+  string fence = 2;
+  DiagnosticOutcome outcome = 3;
+  bytes output = 4;
+}

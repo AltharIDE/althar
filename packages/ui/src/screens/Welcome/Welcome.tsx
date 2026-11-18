@@ -40,6 +40,7 @@ import s from './Welcome.module.css'
  * Then the setup, one thing a step: the agents on this computer, signed in
  * or not, with the one thing each needs, and those it could have; the first
  * project, of a folder chosen or the repositories found, found by typing;
+ * what other tools left in its folders, to bring in, where they left anything;
  * where its code is, for pull requests; and a tracker, for issues. Only the
  * project is needed: a project can be made with no agent ready, and the code
  * host and the tracker can wait. The project is made on its step, so the
@@ -51,12 +52,12 @@ import s from './Welcome.module.css'
  * or `still`, every scene arrives finished.
  */
 
-/** Where the welcome is: the tour's four pages, then the setup's four steps. */
-export type WelcomeStep = 'projects' | 'coordinator' | 'makers' | 'review' | 'agents' | 'project' | 'code' | 'issues'
+/** Where the welcome is: the tour's four pages, then the setup's steps, bringing in other tools' work only where it found some. */
+export type WelcomeStep = 'projects' | 'coordinator' | 'makers' | 'review' | 'agents' | 'project' | 'bring' | 'code' | 'issues'
 
 type TourStep = 'projects' | 'coordinator' | 'makers' | 'review'
 const TOUR: readonly TourStep[] = ['projects', 'coordinator', 'makers', 'review']
-const SETUP: readonly WelcomeStep[] = ['agents', 'project', 'code', 'issues']
+const SETUP: readonly WelcomeStep[] = ['agents', 'project', 'bring', 'code', 'issues']
 const SCENES: Record<TourStep, ComponentType<SceneProps>> = {
   projects: ProjectScene,
   coordinator: CoordinatorScene,
@@ -111,6 +112,8 @@ export interface WelcomeText {
     /** Make the project, with nothing ticked. */
     nothing: string
   }
+  /** What other tools left in the project's folders, brought in: its worktrees, setup and conversations. */
+  bring: { label: string; title: string; line: string; notNow: string }
   code: { label: string; title: string; line: string; go: string; notNow: string }
   issues: { label: string; title: string; line: string; open: (project: string) => string; theProject: string }
   /** The live region, as each step arrives. */
@@ -169,6 +172,12 @@ export const welcomeText: WelcomeText = {
     make: 'Make the project',
     makeKbd: modKey(keys.return),
     nothing: 'Tick a repository, or choose a folder.',
+  },
+  bring: {
+    label: 'Bring in',
+    title: 'Already under way',
+    line: 'What other tools left in its folders. Nothing there changes.',
+    notNow: 'Not now',
   },
   code: {
     label: 'Code',
@@ -232,6 +241,11 @@ export interface WelcomeProps extends Pick<RuntimesProps, 'onSignIn' | 'onCancel
   error?: { readonly step: 'agents' | 'project'; readonly said: ReactNode }
   /** Asks the agents again, after their list couldn't be read: beside the agents' error. */
   onRecheck?: () => void
+  /**
+   * After the project is made: what other tools left in its folders, to bring in, with its main button. Without it, as
+   * where nothing was found, the step is left out.
+   */
+  bring?: { readonly content: ReactNode; readonly go: string | null; readonly onGo: () => void }
   /** The code hosts, to connect one: the consumer's list, and its walk in. */
   /** Where its code is. Without it, as for a clone that came from its host, the step is left out. */
   hosts?: ReactNode
@@ -274,6 +288,7 @@ export function Welcome({
   made = false,
   error,
   onRecheck,
+  bring,
   hosts,
   hostConnected = false,
   trackers,
@@ -285,7 +300,10 @@ export function Welcome({
   ...rows
 }: WelcomeProps) {
   const t = { ...welcomeText, ...text }
-  const setup = SETUP.filter((one) => (one !== 'issues' || trackers !== undefined) && (one !== 'code' || hosts !== undefined))
+  const setup = SETUP.filter(
+    (one) =>
+      (one !== 'issues' || trackers !== undefined) && (one !== 'code' || hosts !== undefined) && (one !== 'bring' || bring !== undefined),
+  )
   const steps: readonly WelcomeStep[] = toured ? setup : [...TOUR, ...setup]
   const [chosen, setStep] = useControlled<WelcomeStep>(stepProp, defaultStep ?? steps[0] ?? 'agents', onStepChange)
   const step: WelcomeStep = steps.includes(chosen) ? chosen : (steps[0] ?? 'agents')
@@ -374,7 +392,19 @@ export function Welcome({
     setNothing(false)
     onCreate()
   }
-  const main = mainOf(step, { t, ready, hostConnected, name, next, make, onOpen, creating, last: at === steps.length - 1, made })
+  const main = mainOf(step, {
+    t,
+    ready,
+    hostConnected,
+    name,
+    next,
+    make,
+    onOpen,
+    creating,
+    last: at === steps.length - 1,
+    made,
+    ...(bring === undefined ? {} : { bring }),
+  })
   const title = isTour(step) ? t.tour[step].title : step === 'project' && over ? t.project.over : t[step].title
 
   return (
@@ -472,6 +502,7 @@ export function Welcome({
               )}
             </>
           )}
+          {step === 'bring' && bring?.content}
           {step === 'code' && hosts}
           {step === 'issues' && trackers}
           {said !== null && !unread && problem(false)}
@@ -525,6 +556,7 @@ function mainOf(
     /** The last step: it opens the project. */
     readonly last: boolean
     readonly made: boolean
+    readonly bring?: WelcomeProps['bring']
   },
 ): Main {
   const open = { label: w.t.issues.open(w.name.trim() === '' ? w.t.issues.theProject : w.name.trim()), act: w.onOpen }
@@ -541,6 +573,16 @@ function mainOf(
       // Made, with no step after it, as a clone with no tracker to connect: it opens.
       if (w.made && w.last) return open
       return { label: w.t.project.make, act: w.make, busy: w.creating, kbd: w.t.project.makeKbd }
+    case 'bring': {
+      const bring = w.bring
+      const go = () => {
+        bring?.onGo()
+        if (w.last) w.onOpen()
+        else w.next()
+      }
+      if (bring?.go == null) return w.last ? open : { label: w.t.bring.notNow, act: w.next, quiet: true }
+      return { label: bring.go, act: go }
+    }
     case 'code':
       if (w.last) return open
       return w.hostConnected ? { label: w.t.code.go, act: w.next } : { label: w.t.code.notNow, act: w.next, quiet: true }

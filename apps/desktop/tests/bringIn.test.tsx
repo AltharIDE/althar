@@ -1,0 +1,394 @@
+import { screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+
+import { ApiError, type BroughtIn, type Elsewhere, type FolderReading } from '@althar/contracts'
+
+import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
+import { NotBroughtInOf } from '../src/renderer/features/elsewhere/NotBroughtInOf'
+import { unsent, unsentFrom } from '../src/renderer/features/elsewhere/unsent'
+import { UnsentBringIn } from '../src/renderer/features/elsewhere/UnsentBringIn'
+import { picked, picksOf, tilesOf, words } from '../src/renderer/features/elsewhere/tiles'
+import { merged } from '../src/renderer/features/elsewhere/useElsewhere'
+import { StartView } from '../src/renderer/features/start/StartView'
+import { useStart } from '../src/renderer/features/start/useStart'
+import { fakeClient, fakeHost } from './fixtures'
+import { withServices } from './render'
+import { seenTheTour, toTheProject } from './welcome'
+
+/*
+ * Bringing in other tools' work (docs/decisions/workspaces-and-runs.md, "Bringing in other tools' work"): what was found,
+ * as the kit's tiles show it, and the welcome's step that brings it in once the project is made, with nothing taken at
+ * first and the welcome moving on at once.
+ */
+
+const NOW = new Date('2026-11-17T12:00:00.000Z')
+
+const FOUND: Elsewhere = {
+  worktrees: [
+    {
+      key: 'worktree:/h/conductor/workspaces/meridian/lima',
+      tool: 'conductor',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      path: '/Users/ada/conductor/workspaces/meridian/lima',
+      branch: 'feature/lima',
+      name: 'lima',
+      uncommitted: 3,
+      unpushed: 2,
+      ahead: 2,
+      pullRequest: { number: 812, url: 'https://github.com/acme/meridian/pull/812' },
+      archived: false,
+      lastAt: '2026-11-17T10:00:00.000Z',
+      conversations: ['claude_code:s2'],
+      taskId: null,
+    },
+    {
+      key: 'worktree:/h/orca/workspaces/meridian/fix',
+      tool: 'orca',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      path: '/Users/ada/orca/workspaces/meridian/fix',
+      branch: null,
+      name: 'Flaky login test',
+      uncommitted: 0,
+      unpushed: 0,
+      ahead: 0,
+      pullRequest: null,
+      archived: true,
+      lastAt: '2026-11-10T10:00:00.000Z',
+      conversations: [],
+      taskId: null,
+    },
+    { ...FOUND_BROUGHT() },
+  ],
+  setups: [
+    {
+      key: 'setup:conductor:/m',
+      tool: 'conductor',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      file: 'conductor.json',
+      commands: ['bun install'],
+      copy: [],
+      current: false,
+    },
+    {
+      key: 'setup:orca:/m',
+      tool: 'orca',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      file: 'orca.yaml',
+      commands: ['pnpm i\npnpm build'],
+      copy: [],
+      current: false,
+    },
+    {
+      key: 'setup:t_three_code:/m',
+      tool: 't_three_code',
+      repositoryId: 'b1',
+      repository: 'meridian',
+      file: 't3.json',
+      commands: ['bun install'],
+      copy: [],
+      current: true,
+    },
+  ],
+  conversations: [
+    {
+      key: 'claude_code:s1',
+      agent: 'claude_code',
+      title: 'Gyroscope fixture',
+      startedAt: '2026-11-17T11:00:00.000Z',
+      lastAt: '2026-11-17T11:30:00.000Z',
+      prompts: 4,
+      worktree: null,
+      taskId: null,
+    },
+    {
+      key: 'claude_code:s2',
+      agent: 'claude_code',
+      title: 'Lima export',
+      startedAt: '2026-11-17T09:00:00.000Z',
+      lastAt: null,
+      prompts: null,
+      worktree: 'worktree:/h/conductor/workspaces/meridian/lima',
+      taskId: null,
+    },
+    {
+      key: 'codex:t1',
+      agent: 'codex',
+      title: 'Rename to compass',
+      startedAt: '2026-11-12T10:00:00.000Z',
+      lastAt: '2026-11-12T10:10:00.000Z',
+      prompts: null,
+      worktree: null,
+      taskId: 'task_x',
+    },
+  ],
+}
+
+function FOUND_BROUGHT() {
+  return {
+    key: 'worktree:/h/.t3/worktrees/meridian/t3',
+    tool: 't_three_code' as const,
+    repositoryId: 'b1',
+    repository: 'meridian',
+    path: '/Users/ada/.t3/worktrees/meridian/t3',
+    branch: 't3/1a2b',
+    name: 'Dark mode',
+    uncommitted: 0,
+    unpushed: null,
+    ahead: 1,
+    pullRequest: null,
+    archived: false,
+    lastAt: null,
+    conversations: [],
+    taskId: 'task_brought',
+  }
+}
+
+describe('what other tools left, as tiles', () => {
+  it('has a tile for each tool with anything new, in order, and leaves out what came in already', () => {
+    const tiles = tilesOf(FOUND, NOW)
+    expect(tiles.map((tile) => tile.id)).toEqual(['conductor', 'orca', 'claude_code'])
+    const conductor = tiles[0]
+    expect(conductor?.size).toBe('1 worktree')
+    expect(conductor?.groups.map((group) => [group.title, group.items.map((item) => item.key)])).toEqual([
+      ['Worktrees', ['worktree:/h/conductor/workspaces/meridian/lima']],
+      ['Setup', ['setup:conductor:/m']],
+      ['Conversations', []],
+    ])
+    expect(conductor?.groups[0]?.items[0]?.at).toBe('2h ago')
+    // Orca's is detached, archived there, and its setup comes with its tile; T3 Code's setup is the repository's already.
+    expect(tiles[1]?.groups[1]?.items[0]?.title).toBe('Orca’s setup')
+    // An agent's tile counts its conversations, the newest first, one that ran in a worktree saying which.
+    const claude = tiles[2]
+    expect(claude?.size).toBe('2 conversations')
+    expect(claude?.groups[2]?.items.map((item) => [item.title, item.where])).toEqual([
+      ['Gyroscope fixture', '4 prompts'],
+      ['Lima export', 'in lima'],
+    ])
+  })
+
+  it('takes one setup for a repository, and counts what the picks bring in', () => {
+    const one = picked(FOUND, new Set(), ['setup:conductor:/m'], true)
+    const other = picked(FOUND, one, ['setup:orca:/m', 'worktree:/h/conductor/workspaces/meridian/lima'], true)
+    expect([...other].toSorted()).toEqual(['setup:orca:/m', 'worktree:/h/conductor/workspaces/meridian/lima'])
+    expect(picksOf(FOUND, other)).toEqual({
+      worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+      setups: ['setup:orca:/m'],
+      conversations: [],
+    })
+    expect([...picked(FOUND, other, ['setup:orca:/m'], false)]).toEqual(['worktree:/h/conductor/workspaces/meridian/lima'])
+    expect(words.bring(1, 1, 2)).toBe('Bring in 1 worktree, 1 setup and 2 conversations')
+    expect(words.bring(0, 0, 1)).toBe('Bring in 1 conversation')
+    expect(words.bring(0, 0, 0)).toBeNull()
+    expect(words.andThen('Bring in 1 worktree')).toBe('Then bring in 1 worktree.')
+  })
+
+  it('reads several folders as one, each thing once', () => {
+    const both = merged([FOUND, { worktrees: FOUND.worktrees.slice(0, 1), setups: [], conversations: FOUND.conversations }])
+    expect(both.worktrees).toHaveLength(3)
+    expect(both.conversations).toHaveLength(3)
+  })
+})
+
+function Start({ onProject = vi.fn() }: { onProject?: (id: string) => void }) {
+  const start = useStart()
+  return <StartView model={start} accounts={useAccountSignIn(start)} onProject={onProject} home={() => null} />
+}
+
+const reading: FolderReading = {
+  kind: 'repository',
+  name: 'meridian',
+  repositories: [{ path: '/w/meridian', folder: null, name: 'meridian', branch: 'main', remote: null }],
+  project: null,
+}
+
+describe('the welcome’s step for what other tools left', () => {
+  it('comes after the project with nothing taken, and brings in what a press took as the welcome goes on', async () => {
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => reading),
+      lookElsewhere: vi.fn(async () => FOUND),
+    })
+    seenTheTour()
+    withServices(<Start />, client, fakeHost())
+    await toTheProject()
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
+    await screen.findByRole('list', { name: 'Repositories for the project' })
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    expect(await screen.findByRole('heading', { name: 'Already under way' })).toBeTruthy()
+    expect(client.lookElsewhere).toHaveBeenCalledWith({ projectId: expect.any(String) })
+    // Nothing taken: its button lets it be.
+    expect(screen.getByRole('button', { name: 'Not now' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /^Conductor/ }))
+    const go = screen.getByRole('button', { name: 'Bring in 1 worktree and 1 setup' })
+    await userEvent.click(go)
+    await waitFor(() =>
+      expect(client.bringIn).toHaveBeenCalledWith({
+        projectId: expect.any(String),
+        worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+        setups: ['setup:conductor:/m'],
+        conversations: [],
+        steps: [],
+      }),
+    )
+    // On to the next step at once.
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Already under way' })).toBeNull())
+  })
+
+  it('goes on at once though bringing in is refused, leaving the project’s conversation to say so', async () => {
+    const unhandled: Array<unknown> = []
+    const note = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', note)
+    const asked: Array<string> = []
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => reading),
+      lookElsewhere: vi.fn(async () => FOUND),
+      // Not a mock, which would handle what it returns itself: refused, as the runtime gone would.
+      bringIn: (input: { readonly projectId: string }) => {
+        asked.push(input.projectId)
+        return Promise.reject(new Error('The runtime went away.'))
+      },
+    })
+    seenTheTour()
+    withServices(<Start />, client, fakeHost())
+    await toTheProject()
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
+    await screen.findByRole('list', { name: 'Repositories for the project' })
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    await screen.findByRole('heading', { name: 'Already under way' })
+    await userEvent.click(screen.getByRole('button', { name: /^Conductor/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Bring in 1 worktree and 1 setup' }))
+    // Refused, and caught: nothing is left unhandled, and the welcome has gone on.
+    await waitFor(() => expect(asked).toHaveLength(1))
+    await new Promise((settled) => setTimeout(settled, 50))
+    process.off('unhandledRejection', note)
+    expect(unhandled).toEqual([])
+    // The runtime never got it, so the window keeps what was picked, for the project's conversation to say with Try again.
+    expect(unsent.of(asked[0] ?? '')).toMatchObject({ names: expect.arrayContaining(['lima']), worktrees: [expect.any(String)] })
+    unsent.reset()
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Already under way' })).toBeNull())
+  })
+
+  it('isn’t a step where other tools left nothing', async () => {
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => reading),
+    })
+    seenTheTour()
+    withServices(<Start />, client, fakeHost())
+    await toTheProject()
+    await userEvent.click(await screen.findByRole('button', { name: /Choose a folder/ }))
+    await screen.findByRole('list', { name: 'Repositories for the project' })
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    await waitFor(() => expect(client.lookElsewhere).toHaveBeenCalled())
+    // Straight on to where its code is.
+    expect(await screen.findByRole('heading', { name: 'Pull requests' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Already under way' })).toBeNull()
+  })
+})
+
+describe('what didn’t come in, in the project’s conversation', () => {
+  const offer = {
+    kind: 'bring_in' as const,
+    projectId: 'p1',
+    missed: [
+      { name: 'lima', why: 'Its branch is “Checkout retry”’s already.' },
+      { name: '“Codex conversation”', why: 'Nothing was said in it.' },
+    ],
+    worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+    setups: [],
+    conversations: [],
+  }
+  const title = 'Not everything picked from other tools came in'
+
+  it('says each by name and why, and Try again brings in again what another try could, said under way at once', async () => {
+    let answer: (value: BroughtIn) => void = () => {}
+    const { client } = fakeClient({ bringIn: vi.fn(() => new Promise<BroughtIn>((resolve) => (answer = resolve))) })
+    withServices(<NotBroughtInOf offer={offer} title={title} />, client, fakeHost())
+    expect(screen.getByText(title)).toBeTruthy()
+    expect(screen.getByText('Nothing was said in it.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(screen.getByText('Trying again…')).toBeTruthy()
+    expect(client.bringIn).toHaveBeenCalledWith({
+      projectId: 'p1',
+      worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+      setups: [],
+      conversations: [],
+      steps: [],
+    })
+    answer({ tasks: ['t1'], asides: [], setups: 0, histories: 0, failed: [] })
+    expect(await screen.findByText('Tried again.')).toBeTruthy()
+  })
+
+  it('stands again, with why, where trying again was refused', async () => {
+    const { client } = fakeClient({ bringIn: vi.fn(async () => Promise.reject(new Error('gone'))) })
+    withServices(<NotBroughtInOf offer={offer} title={title} />, client, fakeHost())
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText(/runtime didn't answer/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+
+  it('offers nothing to try again where no other try could bring it in', () => {
+    const { client } = fakeClient()
+    withServices(<NotBroughtInOf offer={{ ...offer, worktrees: [] }} title={title} />, client, fakeHost())
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+})
+
+describe('a bringing in the runtime never got, in the project’s conversation', () => {
+  const kept = {
+    projectId: 'p1',
+    names: ['lima', 'Conductor’s setup for meridian'],
+    worktrees: ['worktree:/h/conductor/workspaces/meridian/lima'],
+    setups: ['setup:conductor:meridian'],
+    conversations: [],
+    why: "Althar's runtime didn't answer. If it keeps happening, restart Althar.",
+  }
+
+  it('says what was picked and why it didn’t go, and goes once Try again goes through', async () => {
+    unsent.keep(kept)
+    let answer: (value: BroughtIn) => void = () => {}
+    const { client } = fakeClient({ bringIn: vi.fn(() => new Promise<BroughtIn>((resolve) => (answer = resolve))) })
+    withServices(<UnsentBringIn projectId="p1" />, client, fakeHost())
+    expect(screen.getByText('Nothing picked from other tools came in')).toBeTruthy()
+    expect(screen.getByText('lima')).toBeTruthy()
+    expect(screen.getByText(/runtime didn't answer/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(screen.getByText('Trying again…')).toBeTruthy()
+    expect(client.bringIn).toHaveBeenCalledWith({
+      projectId: 'p1',
+      worktrees: kept.worktrees,
+      setups: kept.setups,
+      conversations: [],
+      steps: [],
+    })
+    answer({ tasks: ['t1'], asides: [], setups: 1, histories: 0, failed: [] })
+    await waitFor(() => expect(screen.queryByText('Nothing picked from other tools came in')).toBeNull())
+    expect(unsent.of('p1')).toBeUndefined()
+  })
+
+  it('stands, with why, where another try doesn’t go either, and is kept past the screen', async () => {
+    unsent.keep(kept)
+    const { client } = fakeClient({ bringIn: vi.fn(async () => Promise.reject(new ApiError({ reason: 'conflict', message: 'Not now.' }))) })
+    withServices(<UnsentBringIn projectId="p1" />, client, fakeHost())
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('Not now.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+    expect(unsentFrom(JSON.stringify({ p1: unsent.of('p1') }))).toEqual({ p1: { ...kept, why: 'Not now.' } })
+    unsent.reset()
+  })
+
+  it('says nothing for another project, or where nothing was kept', () => {
+    unsent.keep(kept)
+    const { client } = fakeClient()
+    withServices(<UnsentBringIn projectId="p2" />, client, fakeHost())
+    expect(screen.queryByText('Nothing picked from other tools came in')).toBeNull()
+    unsent.reset()
+    expect(unsentFrom('not json')).toEqual({})
+  })
+})

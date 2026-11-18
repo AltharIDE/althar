@@ -123,6 +123,23 @@ describe('complete issue discussions', () => {
     }),
   )
 
+  it.effect('continues ClickUp from the oldest comment of a full page, and refuses a cursor it didn’t give', () =>
+    Effect.gen(function* () {
+      const full = Array.from({ length: 25 }, (_, n) => ({ id: `c${n}`, comment_text: 'Full text', date: String(2000 - n) }))
+      const { api, sent } = at('clickup', 'https://api.clickup.com/api/v2', [
+        ['GET', 'https://api.clickup.com/api/v2/task/abc/comment', { json: { comments: full } }],
+        ['GET', 'https://api.clickup.com/api/v2/task/abc/comment?start=1976&start_id=c24', { json: { comments: [full[0]] } }],
+      ])
+      assert.strictEqual((yield* readIssueDiscussion('clickup', api, { id: 'abc', ref: 'abc' })).next, '1976:c24')
+      assert.isNull((yield* readIssueDiscussion('clickup', api, { id: 'abc', ref: 'abc' }, { cursor: '1976:c24' })).next)
+      assert.strictEqual(
+        (yield* Effect.flip(readIssueDiscussion('clickup', api, { id: 'abc', ref: 'abc' }, { cursor: 'later' }))).reason,
+        'rejected',
+      )
+      assert.lengthOf(sent, 2)
+    }),
+  )
+
   it.effect('addresses edits and native replies rather than posting a new root comment', () =>
     Effect.gen(function* () {
       const issue = { id: 'i', ref: 'a/b#12' }
@@ -142,6 +159,11 @@ describe('complete issue discussions', () => {
         (yield* issueCommentRequest('trello', { id: 'card', ref: 'card' }, 'Edited', { id: 'c' })).path,
         '/cards/card/actions/c/comments',
       )
+      assert.deepStrictEqual(yield* issueCommentRequest('clickup', { id: 'abc', ref: 'abc' }, 'Edited', { id: '90' }), {
+        method: 'PUT',
+        path: '/comment/90',
+        body: { comment_text: 'Edited' },
+      })
     }),
   )
 })

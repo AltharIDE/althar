@@ -1,3 +1,4 @@
+import { standInOf } from './standIn'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
@@ -338,6 +339,7 @@ interface ItemRow {
   /** The model its turn ran on, as the turn was given; null where no agent wrote it or it wasn't recorded. */
   readonly model?: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
+  readonly inputClaimed?: number
   readonly disposition: string | null
   /** For a message the person said: some of it was dictated. */
   readonly dictated?: number | null
@@ -619,7 +621,7 @@ const decodeNoticeOffer = Schema.decodeUnknownOption(NoticeItem.fields.content.f
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 const decodeRules = Schema.decodeUnknownOption(MergeRules)
 
-const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
+const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello', 'clickup'] as const
 
 /**
  * A stored item as the contract has it: each kind with its own content. A
@@ -656,6 +658,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             : {
                 state: row.inputState,
                 interrupting: row.disposition === 'interrupt_and_continue',
+                ...(row.inputClaimed === 1 ? { claimed: true } : {}),
                 ...(row.dictated === 1 ? { dictated: true } : {}),
               },
       }
@@ -722,8 +725,10 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       }
     }
     case 'notice': {
-      // Quota belongs in Plan usage. Blocking work keeps its actionable task state.
-      if (text(content, 'source') === 'runtime' && text(content, 'about') === 'limit') return undefined
+      // Quota belongs in Plan usage, and blocking work keeps its actionable task state; but a handover to another model is
+      // always said, where it happens: who ran out, who took over, until when (never a silent switch).
+      if (text(content, 'source') === 'runtime' && text(content, 'about') === 'limit' && field(content, 'handover') !== true)
+        return undefined
       const severity = text(content, 'severity')
       const description = text(content, 'description')
       const role = text(content, 'role')
@@ -1320,6 +1325,8 @@ export class Queries extends Context.Service<
               -- so an earlier round would take the name of the model it moved to. Else the session's, as before.
               COALESCE(d.model, s.model) AS model,
               u.state AS input_state, u.disposition, u.dictated, i.created_at,
+              EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries td ON td.id = di.delivery_id
+                WHERE di.user_input_id = u.id AND td.state IN ('pending', 'delivered')) AS input_claimed,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
@@ -1385,6 +1392,8 @@ export class Queries extends Context.Service<
             ? options.find((option) => field(option, 'id') === definition?.definition.options.model)
             : undefined
           const values = field(modelOption, 'values')
+          // Handed the thread by a usage limit, it stands in for the lead the task was given, which takes over again at its reset.
+          const standsIn = Option.getOrUndefined(yield* standInOf(session.id))
           return {
             id: session.id,
             agentId: session.agentId,
@@ -1414,6 +1423,16 @@ export class Queries extends Context.Service<
                     effort: running.value.nextLead.effort ?? null,
                   }
                 : null,
+            standsIn:
+              standsIn === undefined
+                ? null
+                : {
+                    agentId: standsIn.agentId,
+                    model: standsIn.model,
+                    effort: standsIn.effort,
+                    until: standsIn.until,
+                    ...(standsIn.why === undefined ? {} : { why: standsIn.why }),
+                  },
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
             background: Option.isSome(running) && running.value.sessionId === session.id ? running.value.background : [],
           }
@@ -2544,8 +2563,8 @@ export class Queries extends Context.Service<
             FROM threads h WHERE h.project_id = ${task.projectId} AND h.kind = 'coordinator' LIMIT 1`
           const madeInTurn = madeIn?.madeInTurn ?? 0
           const madeInOpenTurn = madeIn?.madeInOpenTurn ?? 0
-          const [latest] = yield* sql<{ content: string }>`
-            SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
+          const [latest] = yield* sql<{ content: string; sequence: number }>`
+            SELECT content, sequence FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
           // A conflict round: its lead is at work on it, though between turns, or it is the person's now.
           const round = yield* (yield* Changes).conflictStanding(taskId)
@@ -2595,6 +2614,15 @@ export class Queries extends Context.Service<
               ((askedOf?.told === 1 ||
                 (askedOf?.takenSince != null && stillAsked(askedOf.takenSince, yield* nowFor(askedOf.takenSince, ASKED_MS), ASKED_MS))) &&
                 Option.isSome(lead)))
+          // A turn of its lead or reviewer, outside any step, waits for its account's usage limit to reset (Sessions.ts): held for
+          // the limit, as a step would be, never waiting for a place, however many agents are at work.
+          const usageOut = busy
+            ? undefined
+            : [lead, reviewer].flatMap((session) =>
+                Option.isSome(session) && session.value.usageOut !== undefined ? [session.value.usageOut] : [],
+              )[0]
+          const usageWaits: HeldForLimit | null =
+            usageOut === undefined ? null : { agentId: usageOut.agentId, accountId: usageOut.accountId, until: usageOut.until }
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
           // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
@@ -2608,7 +2636,9 @@ export class Queries extends Context.Service<
           // Held for a usage limit or the connection, or for its checkout, none of its agents in a turn, it goes on by itself:
           // up next too.
           const paused =
-            !queued && !busy && (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable' || waitsForCheckout !== null)
+            !queued &&
+            !busy &&
+            (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable' || waitsForCheckout !== null || usageWaits !== null)
           const unshipped =
             after.length === 0
               ? null
@@ -2668,6 +2698,26 @@ export class Queries extends Context.Service<
                   by: lastSaid.kind === 'user_message' ? ('person' as const) : ('lead' as const),
                   said: (lastSaid.text ?? '').trim().split('\n')[0]?.slice(0, 200) ?? '',
                 }
+          // An aside's answer: its lead's latest report, unless the person asked it more since, when it is what its lead said
+          // after they last did. Words its lead adds after reporting, with nothing asked between, only acknowledge the report.
+          const [since] =
+            task.shelf === 'scratch'
+              ? yield* sql<{ askedAt: number | null; text: string | null }>`
+                  SELECT u.sequence AS askedAt, (SELECT json_extract(a.content, '$.text') FROM thread_items a
+                    WHERE a.thread_id = ${task.threadId} AND a.kind = 'agent_message' AND a.sequence > u.sequence
+                      AND trim(coalesce(json_extract(a.content, '$.text'), '')) != ''
+                    ORDER BY a.sequence DESC LIMIT 1) AS text
+                  FROM (SELECT max(sequence) AS sequence FROM thread_items
+                    WHERE thread_id = ${task.threadId} AND kind = 'user_message') u`
+              : []
+          const reported = latest === undefined ? '' : text(parse(latest.content), 'summary').trim()
+          const askedSince = since?.askedAt != null && (latest === undefined || since.askedAt > latest.sequence)
+          const answer =
+            task.shelf !== 'scratch'
+              ? undefined
+              : askedSince || reported === ''
+                ? (since?.text ?? '').trim().split('\n')[0]?.slice(0, 400) || (reported === '' ? undefined : reported)
+                : reported
           // An aside opened with + whose person hasn't said anything in it yet: its lead waits for their first words.
           const [unsaid] =
             task.shelf === 'scratch' && exchange === undefined
@@ -2972,6 +3022,7 @@ export class Queries extends Context.Service<
             ...(task.issueDrafts + task.issueChanges > 0 ? { issues: { drafts: task.issueDrafts, changes: task.issueChanges } } : {}),
             ...(exchange === undefined ? {} : { latest: exchange }),
             ...(unsaid?.unsaid === 1 ? { unsaid: true } : {}),
+            ...(answer === undefined ? {} : { answer }),
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step:
               task.step ??
@@ -2985,7 +3036,8 @@ export class Queries extends Context.Service<
                     ? 'conflict'
                     : roundChecks && !busy
                       ? 'checks_running'
-                      : seeing || fixing?.open === true
+                      : // Only while its lead is on them: failing checks it was never told are nobody's yet (`untold`).
+                        (seeing && fixing?.untold !== true) || fixing?.onIt === true
                         ? busy || !checksRun
                           ? 'checks'
                           : 'checks_running'
@@ -3009,7 +3061,7 @@ export class Queries extends Context.Service<
             ...(task.local > 0 ? { local: true } : {}),
             ...(waitsForCheckout === null ? {} : { waitsForCheckout }),
             ...(task.toward === null ? {} : { toward: task.toward }),
-            waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
+            waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : usageWaits,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             ...(externalWait === undefined
               ? {}

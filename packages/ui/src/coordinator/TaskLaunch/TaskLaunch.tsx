@@ -499,6 +499,8 @@ export interface TaskLaunchProps {
    * which takes it out of the line until it is started.
    */
   queued?: string
+  /** Hover on that line: which tasks hold the agents. */
+  queuedTitle?: string
   defaultHeld?: boolean
   onHeldChange?: (held: boolean) => void
   /** No row for what happens when the work is done, where tasks end on their branch. */
@@ -570,6 +572,7 @@ export function TaskLaunch({
   startsAt,
   held: heldProp,
   queued,
+  queuedTitle,
   defaultHeld = false,
   onHeldChange,
   hideEnd = false,
@@ -959,7 +962,7 @@ export function TaskLaunch({
               {estimate !== undefined && footNote !== undefined && ' · '}
               {footNote}
             </span>
-            <span className={s.when} role="status">
+            <span className={s.when} role="status" {...(queuedTitle === undefined ? {} : { title: queuedTitle })}>
               {queued}
             </span>
             <Button variant="quiet" onClick={() => setHeld(true)}>

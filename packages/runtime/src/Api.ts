@@ -1,3 +1,4 @@
+import { DevicePairings } from './DevicePairings'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
@@ -95,6 +96,7 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
+  linksIssues,
   Policies,
   type ProjectRules,
   repositoryFilesOf,
@@ -164,6 +166,7 @@ import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolR
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
+import { Elsewhere } from './Elsewhere'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
@@ -303,6 +306,7 @@ export const handlers = apiLayer(
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const canvases = yield* Canvases
+    const elsewhere = yield* Elsewhere
     const instance = yield* Instance
     const identity = (yield* CurrentClient) ?? {
       homeId: instance.homeId,
@@ -311,6 +315,13 @@ export const handlers = apiLayer(
       role: sender.kind,
     }
     const identities = yield* ClientIdentities
+    const pairings = yield* DevicePairings
+    const connectionAdmin = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
+        ? effect
+        : Effect.fail(
+            new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }),
+          )
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
     const sql = yield* SqlClient.SqlClient
@@ -675,6 +686,7 @@ export const handlers = apiLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        linkIssues: linksIssues(rules),
         afterMergeReview: afterMergeReviewOf(rules),
         repositoryFiles: repositoryFilesOf(rules),
       }
@@ -853,7 +865,9 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      ListClientDevices: (options) => identities.list(options),
+      IssueDevicePairing: ({ tokenHash }) => connectionAdmin(pairings.issue(tokenHash)),
+      RevokeConnectionDevice: ({ deviceId }) => connectionAdmin(pairings.revokeConnection(deviceId)),
+      ListClientDevices: (options) => connectionAdmin(identities.list(options)),
       RegisterClientDevice: ({ name, publicKey, role }) => identities.register({ name, publicKey, role }),
       RevokeClientDevice: ({ deviceId }) => identities.revoke(deviceId),
       WatchFrom: ({ position }) =>
@@ -902,6 +916,28 @@ export const handlers = apiLayer(
           }),
         ),
       ListProjects: () => api(queries.projects),
+      LookElsewhere: ({ projectId, grant }) =>
+        api(
+          Effect.map(
+            grant !== undefined ? Effect.flatMap(folders.path(grant), (path) => elsewhere.lookIn(path)) : elsewhere.look(projectId ?? ''),
+            (found) => ({
+              worktrees: [...found.worktrees],
+              setups: [...found.setups],
+              conversations: [...found.conversations],
+            }),
+          ),
+        ),
+      BringIn: ({ commandId, projectId, worktrees, setups, conversations, steps }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.bring_in', { projectId, worktrees, setups, conversations }, commandId)
+              const brought = yield* elsewhere.bringIn({ envelope: said, projectId, worktrees, setups, conversations, steps })
+              return { ...brought, tasks: [...brought.tasks], asides: [...brought.asides], failed: [...brought.failed] }
+            }),
+          ),
+        ),
       ReadFolder: ({ grant }) =>
         api(
           Effect.gen(function* () {
