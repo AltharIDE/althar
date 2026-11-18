@@ -98,6 +98,8 @@ import { withRole } from './roles'
 import { git, PUSHED } from './git'
 import { evidenceFolderOf, MERGE_REVIEW, mergeCopyOf, reviewCopyOf } from './reviewCopy'
 import { LAST_MESSAGE_COORDINATOR, LAST_MESSAGE_LEAD, LAST_MESSAGE_REVIEWER } from './lastMessage'
+import { timeAgain, timeAgainLine, timeLine, type TimeTold } from './localTime'
+import { localZone } from './slots'
 import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import { bringBackFor } from './bringBack'
@@ -489,6 +491,11 @@ interface Running {
   turnHeads?: ReadonlyArray<{ readonly name: string; readonly path: string; readonly head: string }> | undefined
   /** When its last turn ended, in milliseconds; null before its first. */
   turnEndedAt: number | null
+  /**
+   * A lead's or the coordinator's: when it was last told the person's local date and time, and in which zone (localTime.ts);
+   * undefined before its brief, or since a compaction, which may have left it out.
+   */
+  timeTold?: TimeTold | undefined
   /**
    * Who leads it from its next turn, where the person or a tool changed that while it worked or waited (`changeLead`): taken up
    * between turns, as what is said to it next is delivered, never in one.
@@ -1218,6 +1225,8 @@ export class Sessions extends Context.Service<
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
       const trailsFor = Duration.toMillis((yield* RuntimeConfig).idle?.trails ?? TRAILS_FOR)
+      // The zone the person's local time is told in: the computer's, as its clock says now (localTime.ts).
+      const zoneOf = runtimeConfig.zone ?? localZone
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
@@ -2218,7 +2227,21 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          const added = [setUp, asked === null ? null : sentWithWords(asked)].filter((said) => said !== null && said !== '')
+          // A lead and the coordinator are told the person's local date, time and zone from the computer's clock as the turn is
+          // made, not as the session started (the coordinator's brief waits for the person's first words): once, in the brief,
+          // and again first in the turn after a long gap, a new day or a compaction (localTime.ts).
+          const knowsTime = thread.role === 'coordinator' || (thread.role === 'task' && thread.helper === undefined)
+          const timeNow = yield* Clock.currentTimeMillis
+          const zone = zoneOf()
+          const timeBefore = running.timeTold
+          const timeNews =
+            knowsTime && brief === undefined && !compacting && timeAgain(timeBefore, running.turnEndedAt, timeNow, zone)
+              ? timeAgainLine(timeNow, zone)
+              : null
+          const withTime = (news: string | null) => (timeNews === null ? news : news === null ? timeNews : `${timeNews}\n\n${news}`)
+          const added = [setUp, asked === null ? null : sentWithWords(asked), knowsTime ? timeLine(timeNow, zone) : null].filter(
+            (said) => said !== null && said !== '',
+          )
           const briefed = brief === undefined || added.length === 0 ? brief : { ...brief, text: [brief.text, ...added].join('\n\n') }
           // The coordinator is told what became of its plans in its models' names, which are read first: asking an agent may take a while.
           const named =
@@ -2229,7 +2252,7 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          let prompt = compacting ? COMPACT : asTold(running.entry.definition, promptFor(inputs, briefed, becameWork))
+          let prompt = compacting ? COMPACT : asTold(running.entry.definition, promptFor(inputs, briefed, withTime(becameWork)))
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -2256,7 +2279,7 @@ export class Sessions extends Context.Service<
                       Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
                     ),
                   )
-                  prompt = asTold(running.entry.definition, promptFor(inputs, briefed, news))
+                  prompt = asTold(running.entry.definition, promptFor(inputs, briefed, withTime(news)))
                 }
                 const at = yield* timestamp
                 yield* sql`INSERT INTO turn_deliveries ${sql.insert({
@@ -2320,7 +2343,8 @@ export class Sessions extends Context.Service<
           if (!compacting) {
             running.brief = undefined
             running.waitsForWords = undefined
-          }
+            if (knowsTime && (brief !== undefined || timeNews !== null)) running.timeTold = { at: timeNow, zone }
+          } else running.timeTold = undefined
           running.turnRunning = true
           running.turnStartedAt = yield* Clock.currentTimeMillis
           const ready = running.turnStartedAt - readying
@@ -2656,7 +2680,11 @@ export class Sessions extends Context.Service<
           )
           // A brief the agent never read goes with the next turn: refused, or out of usage before it began.
           // A compaction left the brief where it was.
-          if ((prevented || refused || held) && !compacting) running.brief = brief
+          // So does the time it was told first, after a gap: its turn has ended since, so it isn't owed it by the gap any more.
+          if ((prevented || refused || held) && !compacting) {
+            running.brief = brief
+            running.timeTold = timeNews === null ? timeBefore : undefined
+          }
           // Refused, its prompt never went: what it spent before is the turn's that tries again.
           if (refused) running.before = spent
           running.retryBrief = state === 'failed' && !compacting ? brief : undefined
