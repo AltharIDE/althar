@@ -381,6 +381,33 @@ describe('a task’s parts', () => {
         await waitFor(() => expect(popover.queryByText('In the merge queue')).toBeNull())
         expect(popover.getByRole('button', { name: 'Merge' })).toBeTruthy()
       })
+
+      it('is out of its queue as soon as a read says the queue took it out, once a read has said it was in', async () => {
+        const { merge, answers } = held()
+        let read: ChangeSummary = bound
+        const getThread = vi.fn(async () => snapshot({ task: { ...base.task, changes: [read] } }))
+        const { client } = fakeClient({ getThread, merge })
+        const services = servicesFor(client)
+        render(
+          <ServicesProvider value={services}>
+            <Task />
+          </ServicesProvider>,
+        )
+        const popover = await parts()
+        await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
+        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        // The host has it in its queue, and a read says so.
+        read = { ...bound, queued: true }
+        act(() => answers[0]!.resolve())
+        await waitFor(() => expect(getThread.mock.calls.length).toBeGreaterThan(2))
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
+        // Then the queue takes it out, well within the time a merge may take to land: the read says where it stands.
+        read = bound
+        await act(() => services.cache.invalidateQueries())
+        expect(await popover.findByRole('button', { name: 'Merge' })).toBeTruthy()
+        expect(popover.queryByText('In the merge queue')).toBeNull()
+        expect(popover.queryByText('Merging', said)).toBeNull()
+      })
     })
 
     /** Outputs of the same task, pressing through the model its header reads. */
