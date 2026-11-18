@@ -39,7 +39,7 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked -p althar-worker --all-targets -- -D warnings
       - run: cargo test --locked -p althar-worker
-      - run: cargo build --locked -p althar-worker --example worker_hello
+      - run: cargo build --locked -p althar-worker --examples
       - name: Check Protobuf compatibility
         env:
           BASE: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}

@@ -3,6 +3,8 @@
 use prost::Message;
 use std::{error::Error, fmt};
 
+pub mod grpc;
+
 pub mod wire {
     include!(concat!(env!("OUT_DIR"), "/althar.worker.v1.rs"));
 }
@@ -70,6 +72,14 @@ pub fn accept_home_hello(
         return Err(HandshakeError::OversizedFrame);
     }
     let frame = wire::HomeFrame::decode(bytes).map_err(|_| HandshakeError::InvalidFrame)?;
+    accept_home_frame(frame, home_id, worker_id)
+}
+
+fn accept_home_frame(
+    frame: wire::HomeFrame,
+    home_id: &str,
+    worker_id: &str,
+) -> Result<wire::HomeHello, HandshakeError> {
     let Some(wire::home_frame::Payload::Hello(hello)) = frame.payload else {
         return Err(HandshakeError::InvalidFrame);
     };
