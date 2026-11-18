@@ -119,7 +119,12 @@ export interface SetupDependencies {
 }
 const finishSetup = async (options: HostOptions, commands: ServiceCommands, execute: UpdateExecutor = executeUpdate) => {
   const installed = await readPrivate(join(options.unitDirectory, `${options.serviceName}.service`), 65_536)
-  if (installed === null || !installed.toString().includes(unitQuote(join(options.updateRoot, 'launcher')))) {
+  const unit = installed?.toString()
+  if (
+    unit === undefined ||
+    !unit.includes(unitQuote(join(options.updateRoot, 'launcher'))) ||
+    /^LoadCredential(?:Encrypted)?="/m.test(unit)
+  ) {
     await Effect.runPromise(installService({ ...options, installation: options.updateRoot, start: false }, commands))
   }
   const units = renderUpdateUnits(options)
