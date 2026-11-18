@@ -223,6 +223,43 @@ describe('failed checks alone', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('reach the lead though the look that heard them failed before it told the lead', () => {
+    const { working, bare } = hosted()
+    let broken = false
+    let tripped = false
+    const github = hostOf(bare, (sha) => {
+      if (!broken || holdsFix(bare, sha)) return PASSED
+      // The look that first reads them failing can't run them again, and its host goes away before it reads the rest of the
+      // pull request, as PR #1007's did: it kept that they failed, and that it told the lead, and ended before it did.
+      if (!tripped) {
+        tripped = true
+        github.failNext('rerun', 'unreachable')
+        github.failNext('activity', 'unreachable')
+      }
+      return FAILED
+    })
+    return Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened(working, '[lead:fix]')
+      const sql = yield* SqlClient.SqlClient
+      broken = true
+      // The next look hears nothing new of the checks, but finds the lead never told: told now, it fixes them, and the fix goes up.
+      yield* until(given(threadId), (all) => all.some((body) => body.startsWith('Checks failed on PR #1: test.')))
+      const [failedAt] = yield* sql<{ at: string }>`
+        SELECT observed_at AS at FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.outcome') = 'failed' LIMIT 1`
+      const [toldAt] = yield* sql<{ at: string }>`
+        SELECT min(accepted_at) AS at FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE 'Checks failed on PR #1%'`
+      // Told on a later look than the one that heard them failing: the one that heard them ended before it told the lead.
+      assert.isTrue(github.calls.filter((method) => method === 'activity').length > 0)
+      assert.isTrue((toldAt?.at ?? '') > (failedAt?.at ?? ''))
+      yield* until(
+        Effect.sync(() => [holdsFix(bare, 'althar/add-a-retry')]),
+        ([fixed]) => fixed === true,
+      )
+      yield* until(cardOf(projectId).pipe(Effect.map((one) => [one])), ([one]) => one?.change?.checks?.outcome === 'passed')
+      assert.strictEqual((yield* given(threadId)).filter((body) => body.startsWith('Checks failed')).length, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('keep the card under way while the rest still run, some failed already', () => {
     const { working, bare } = hosted()
     let checks: Checks = PASSED

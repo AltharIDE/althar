@@ -161,6 +161,7 @@ import {
   spentLine,
   standing,
   titleWords,
+  unreachedLine,
   unsettledLine,
   withDescribed,
   withIssues,
@@ -559,6 +560,13 @@ export interface Fixing {
   readonly running: boolean
   /** While so, the checks on its head fail: its lead is told them, or at them, so it is under way, not the person's (DEV-173). */
   readonly withLead: boolean
+  /**
+   * The checks on its head fail and are its lead's, but nothing has reached its thread since: a look that ended before it told
+   * the lead, or a message that never went. Nobody is on them until the next look tells the lead or hands them to the person.
+   */
+  readonly untold: boolean
+  /** A run of failures its lead is really on: open, and told, or the checks on its fix running. */
+  readonly onIt: boolean
   /** Why the checks that fail on its head are the person's, as its card says: its lead's words, or that its tries are spent. */
   readonly why: string | null
   /** Its tries spent: a failure now is the person's, not its lead's. */
@@ -5038,6 +5046,7 @@ export class Changes extends Context.Service<
             pushedAt: string | null
             hasChecks: number
             spokenAt: string | null
+            reachedAt: string
           }>`
             SELECT l.id, l.snapshot,
               (SELECT ended_at FROM runs WHERE task_id = k.id AND (plan_id IS NOT NULL OR created_at <= l.created_at)
@@ -5048,7 +5057,13 @@ export class Changes extends Context.Service<
                 AND c.kind = 'checks' WHERE e.project_id = l.project_id AND e.kind = 'change'
                 AND json_extract(e.snapshot, '$.repository') = json_extract(l.snapshot, '$.repository')) AS has_checks,
               (SELECT max(i.accepted_at) FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id JOIN threads h ON h.id = i.thread_id
-                WHERE h.task_id = k.id AND a.kind = 'person') AS spoken_at
+                WHERE h.task_id = k.id AND a.kind = 'person') AS spoken_at,
+              max(
+                coalesce((SELECT max(i.accepted_at) FROM user_inputs i JOIN threads h ON h.id = i.thread_id
+                  WHERE h.task_id = k.id AND h.kind = 'task'), ''),
+                coalesce((SELECT max(d.requested_at) FROM turn_deliveries d JOIN threads h ON h.id = d.thread_id
+                  WHERE h.task_id = k.id AND h.kind = 'task'), '')
+              ) AS reached_at
             FROM tasks k JOIN external_links l ON l.task_id = k.id AND l.kind = 'change'
             WHERE k.id = ${taskId} AND k.state = 'open' AND json_extract(l.snapshot, '$.state') = 'open' AND l.listening = 1`
           // A card kept from this is worked out again once each one's checks have had their moment to show (standsOn.ts).
@@ -5113,6 +5128,16 @@ export class Changes extends Context.Service<
                   Math.max(link.endedAt === null ? 0 : Date.parse(link.endedAt), link.pushedAt === null ? 0 : Date.parse(link.pushedAt)) <
                   checksAppear
               const failing = outcome === 'failed' && (snapshot.checks?.failed ?? 0) > 0
+              // Failing on its head and its lead's, but nothing reached its thread since they last failed: a look at the pull request
+              // that ended before it told the lead, or a message that never went. Not under way, whatever the card would say; the
+              // next look tells the lead, or hands them to the person (`tellUntold`).
+              const failedAt = failing
+                ? said.findLast((one) => one.kind === 'checks' && one.outcome === 'failed' && one.sha === head)?.at
+                : undefined
+              const unreached = open && failedAt !== undefined && link.reachedAt < failedAt
+              // On the card, once the look that heard them has had its moment to tell the lead: never the person's between.
+              const untold =
+                unreached && failedAt !== undefined && (yield* nowFor(failedAt, TELLS_WITHIN)) - Date.parse(failedAt) >= TELLS_WITHIN
               // Whether the person said anything on the task since its head's checks were first seen: what the lead commits may be for
               // that, and waits for their push.
               const seenAt = head === null ? undefined : said.find((one) => one.kind !== 'pushed' && one.sha === head)?.at
@@ -5147,6 +5172,8 @@ export class Changes extends Context.Service<
                 stopped,
                 failing,
                 spoken,
+                untold,
+                unreached,
                 running: open && (outcome === 'running' || appearing),
                 goes,
                 why: !failing
@@ -5165,6 +5192,12 @@ export class Changes extends Context.Service<
             }),
           )
         })
+
+      /**
+       * How long the look that heard checks fail has to tell the lead, or run them again, before the card says nobody is on them
+       * (`untold`): it reads their logs and asks the host first.
+       */
+      const TELLS_WITHIN = Duration.toMillis(Duration.minutes(1))
 
       /** Where the checks that failed on one of a task's pull requests stand (`fixesOf`): null where it isn't open, or its task settled. */
       const fixingOn = (link: LinkRow) => Effect.map(fixesOf(link.taskId), (all) => all.find((one) => one.linkId === link.id) ?? null)
@@ -5735,6 +5768,10 @@ export class Changes extends Context.Service<
             addressed || (after.state === 'open' && alone && !rounds && !forShip),
             after.state === 'open' ? 'turn' : 'note',
           )
+          // Failing checks its lead was to see through but was never told, as when an earlier look heard them and ended before it
+          // told the lead: told now, or handed to the person, never neither.
+          if (now.state === 'open' && !held && failedNow === null && !rerunning && !rounds && !forShip)
+            yield* tellUntold(link, name, host, repository, now.target || repository.defaultBranch)
           if (now.state === 'open' && !held)
             yield* bringTogether(link, now.headSha, now.url).pipe(
               Effect.catchCause((cause) =>
@@ -7479,6 +7516,47 @@ export class Changes extends Context.Service<
             left.push({ link, snapshot, told })
           }
           return left
+        })
+
+      /**
+       * Failing checks on a pull request's head that are its lead's to see
+       * through (ADR-070), with nothing on its thread since they failed
+       * (`untold`): a look at the pull request heard them, kept that it told
+       * the lead, and ended before it did, so the next look heard nothing new
+       * and the lead was never told, nor the person. Its lead is told now,
+       * started again if it must be; where that fails, they are the
+       * person's, with a line saying so. Never neither.
+       */
+      const tellUntold = (link: LinkRow, name: string, host: CodeHost, repository: Repository, base: string) =>
+        Effect.gen(function* () {
+          const fixing = yield* fixingOn(link)
+          if (fixing === null || !fixing.unreached || fixing.running) return
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ snapshot: string; url: string }>`
+            SELECT snapshot, json_extract(snapshot, '$.url') AS url FROM external_links WHERE id = ${link.id}`
+          if (row === undefined) return
+          const snapshot = yield* decodeSnapshot(row.snapshot)
+          const sum = snapshot.checks
+          if (sum == null || sum.sha !== snapshot.headSha || sum.outcome !== 'failed') return
+          const told = yield* Effect.gen(function* () {
+            const failed = yield* failedOn(link, host, repository)
+            const logs = failed?.logs ?? []
+            const reran = yield* ranAgain(link, sum.sha)
+            const workspace = yield* worktreeOf(link.taskId, row.url).pipe(Effect.orElseSucceed(() => undefined))
+            const branch = workspace === undefined ? null : yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
+            yield* heard(link, 'checks_told', `told:${sum.sha}${reran?.again ?? ''}`, { sha: sum.sha, branch })
+            yield* tellLead(
+              link,
+              [checksForLeadAlone({ ...sum, list: sum.list ?? [] }, name, logs, FIX_ROUNDS - fixing.failed + 1, base)],
+              true,
+            )
+            return true
+          }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not tell the lead its checks failed', cause), false)))
+          if (told) return
+          const why = unreachedLine(sum.failing)
+          yield* heard(link, 'checks_handed', `handed:${sum.sha}:${yield* timestamp}`, { sha: sum.sha, why })
+          yield* sayOn(link, why)
+          yield* touchCard(link.taskId)
         })
 
       /*
@@ -9537,7 +9615,9 @@ export class Changes extends Context.Service<
                 : {
                     open: all.some((one) => one.open),
                     running: all.some((one) => one.running),
-                    withLead: all.some((one) => one.open && one.failing),
+                    withLead: all.some((one) => one.open && one.failing && !one.untold),
+                    untold: all.some((one) => one.untold),
+                    onIt: all.some((one) => one.open && !one.untold),
                     why: all.find((one) => one.why !== null)?.why ?? null,
                     spent: all.some((one) => one.given),
                     failuresGo: all.some((one) => one.goes),
