@@ -1743,6 +1743,8 @@ export function TaskView({
                   <TaskFace
                     className={s.face}
                     composer={composer}
+                    // An aside sits under the conversation bar, which shades the thread scrolled beneath it.
+                    under={embedded}
                     // A document the lead wrote, or a file it names, opens beside the thread on its workbench; a document follows its edits.
                     // An aside's, in the coordinator's narrow pane, has no room for one.
                     {...(embedded
