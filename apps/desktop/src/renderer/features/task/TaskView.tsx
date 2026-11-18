@@ -993,6 +993,9 @@ export function TaskView({
   }
 
   const issue = snapshot.task.issue
+  // Each issue it came from, on any trackers: from a runtime before, its one issue.
+  const fromIssues =
+    snapshot.task.fromIssues ?? (issue === null ? [] : [{ ...issue, ...(snapshot.task.issuePartOf === true ? { partOf: true } : {}) }])
   // What it can do as a whole, where it stands, as the runtime says: each in its menu only when it applies.
   const can = (action: TaskAction) => snapshot.task.actions.includes(action)
   const { planId } = snapshot.task
@@ -1428,27 +1431,61 @@ export function TaskView({
   )
 
   // What opens the thread, over its rounds, and what closes it, under them: drawn by the task, not again as its rounds are.
+  // Whether its work ends in a merge: a task that ends with its branch alone merges nothing, unless a pull request is open for it already.
+  const merges =
+    snapshot.task.state !== 'done' &&
+    snapshot.task.state !== 'abandoned' &&
+    snapshot.task.kind !== 'plain' &&
+    snapshot.task.kind !== 'review' &&
+    (snapshot.task.end !== 'none' || snapshot.task.changes.some((one) => one.state === 'open'))
   const opening = (
     <>
-      {issue !== null && !snapshot.earlier && (
-        <div className={s.issue}>
-          <Issue
-            mark={productBrand(issue.product)}
-            source={productName(issue.product)}
-            id={issue.key}
-            tone={issue.product === 'linear' ? 'linear' : 'plain'}
-            title={issue.title}
-            href={issue.url}
-            status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
-            {...(issue.priority === null || issue.priority.level === 'none'
-              ? {}
-              : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
-            {...(issue.container === null ? {} : { meta: issue.container })}
-          />
-          {/* Whether the task does all of its issue, so its merge closes it, or only part, so its merge leaves it open. */}
-          {snapshot.task.state !== 'done' && snapshot.task.state !== 'abandoned' && (
-            <IssuePart id={issue.key} partOf={snapshot.task.issuePartOf === true} onChange={(partOf) => void model.setIssuePart(partOf)} />
-          )}
+      {fromIssues.length > 0 && !snapshot.earlier && (
+        <div className={s.issues}>
+          {fromIssues.map((issue) => {
+            // The task's tie to it names it alone: two trackers may share its key.
+            const tie = issue.link ?? `${issue.product}:${issue.ref}`
+            return (
+              <div key={tie} className={s.issue}>
+                {/* A task with a merge says at its issue's foot whether that closes it or leaves it open. */}
+                {merges ? (
+                  <IssuePart
+                    id={issue.key}
+                    partOf={issue.partOf === true}
+                    onChange={(partOf) => void model.setIssuePart(partOf, issue.link ?? issue.ref)}
+                  >
+                    <Issue
+                      mark={productBrand(issue.product)}
+                      source={productName(issue.product)}
+                      id={issue.key}
+                      tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                      title={issue.title}
+                      href={issue.url}
+                      status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                      {...(issue.priority === null || issue.priority.level === 'none'
+                        ? {}
+                        : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                      {...(issue.container === null ? {} : { meta: issue.container })}
+                    />
+                  </IssuePart>
+                ) : (
+                  <Issue
+                    mark={productBrand(issue.product)}
+                    source={productName(issue.product)}
+                    id={issue.key}
+                    tone={issue.product === 'linear' ? 'linear' : 'plain'}
+                    title={issue.title}
+                    href={issue.url}
+                    status={{ state: issueStatus(issue.status.category), label: issue.status.name }}
+                    {...(issue.priority === null || issue.priority.level === 'none'
+                      ? {}
+                      : { priority: { level: issuePriority(issue.priority.level), label: issue.priority.name } })}
+                    {...(issue.container === null ? {} : { meta: issue.container })}
+                  />
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
       <EarlierTurns

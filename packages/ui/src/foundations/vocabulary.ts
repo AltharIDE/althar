@@ -15,6 +15,7 @@ export enum SourceKind {
   Jira = 'jira',
   Confluence = 'confluence',
   Trello = 'trello',
+  ClickUp = 'clickup',
   Opsgenie = 'opsgenie',
   Statuspage = 'statuspage',
   Loom = 'loom',

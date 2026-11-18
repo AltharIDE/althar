@@ -14,7 +14,7 @@ Use the smallest design that supports current behavior. Add an abstraction when 
 
 ### Types and boundaries
 
-Write hand-authored application, package, test, configuration, and script code in TypeScript (`.ts` or `.tsx`) with strict compiler settings, except the Rust worker supervisor and sandbox execution agent decided in [Foundations](docs/decisions/foundations.md#remote-connections-and-native-workers-decided-not-built). Their versioned worker wire contract is Protobuf, with generated TypeScript and Rust bindings. This does not authorize rewriting the home or desktop in Rust. Avoid `any`, unchecked casts, non-null assertions, and suppression comments. If one is necessary, explain the invariant and keep it local.
+Write hand-authored application, package, test, configuration, and script code in TypeScript (`.ts` or `.tsx`) with strict compiler settings, except the Rust worker supervisor and sandbox execution agent decided in [Foundations](docs/decisions/foundations.md#remote-connections-and-native-workers). Their versioned worker wire contract is Protobuf, with generated TypeScript and Rust bindings. This does not authorize rewriting the home or desktop in Rust. Avoid `any`, unchecked casts, non-null assertions, and suppression comments. If one is necessary, explain the invariant and keep it local.
 
 Validate untrusted values at runtime, including files, network responses, provider output, and persisted data. Types alone do not validate them.
 

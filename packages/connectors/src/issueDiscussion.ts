@@ -109,6 +109,24 @@ export const readIssueDiscussion = (
       const last = comments.at(-1)?.['id']
       return { comments, next: comments.length === limit && typeof last === 'string' ? last : null }
     }
+    if (product === 'clickup') {
+      // Newest first, a page of 25 at a time; the next page starts from the oldest of this one, by its date and id.
+      const [date, id] = options.cursor === undefined ? [] : options.cursor.split(':')
+      if (options.cursor !== undefined && (date === undefined || id === undefined || !/^\d+$/.test(date)))
+        return yield* fail(product, 'Invalid discussion cursor.')
+      const answer = yield* api.request({
+        path: `/task/${encodeURIComponent(issue.id)}/comment${date === undefined || id === undefined ? '' : `?start=${date}&start_id=${encodeURIComponent(id)}`}`,
+      })
+      const { comments } = yield* decode(product, Schema.Struct({ comments: Records }), answer.body)
+      const last = comments.at(-1)
+      return {
+        comments,
+        next:
+          comments.length >= 25 && typeof last?.['date'] === 'string' && typeof last['id'] === 'string'
+            ? `${last['date']}:${last['id']}`
+            : null,
+      }
+    }
     return yield* fail(product, 'This connection has no issue discussion API.')
   })
 
@@ -167,5 +185,6 @@ export const issueCommentRequest = (
         path: `/cards/${encodeURIComponent(issue.id)}/actions/${encodeURIComponent(id)}/comments`,
         body: { text: body },
       }
+    if (product === 'clickup') return { method: 'PUT', path: `/comment/${encodeURIComponent(id)}`, body: { comment_text: body } }
     return yield* fail(product, 'This connection has no issue comment API.')
   })

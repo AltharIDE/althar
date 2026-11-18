@@ -178,7 +178,7 @@ suite use, and a contract suite that runs against the fake in CI and against
 real accounts on demand, as the agents' does.
 
 Both models were laid against all six services before any adapter was
-written. A model whose terms only one service has is a sign it is that
+written; ClickUp, the seventh, fit the tracker's model without changing it. A model whose terms only one service has is a sign it is that
 service's model.
 
 ### Every service alike
@@ -570,22 +570,26 @@ for the task or the project, beside Resolve now.
 
 ### Trackers
 
-| | Linear | Jira (Cloud, Data Center) | Trello | GitHub and GitLab issues | The model |
-|---|---|---|---|---|---|
-| Where issues live | Team (key `MER`), project, cycle | Project (key), board, sprint, epic | Board, list | Repository or project | A container, by the tracker's name for it |
-| Key | `MER-231` | `PROJ-123` | Card short link | `#123` | The tracker's key |
-| Text | Markdown | ADF (Cloud), wiki markup (Data Center) | Markdown | Markdown | Markdown; the Jira adapters convert |
-| Status | The team's states, typed: triage, backlog, unstarted, started, completed, canceled | Statuses in To Do, In Progress, Done; changed by a transition, which may need fields | The card's list | Open or closed with a reason; GitLab's statuses in five categories | The tracker's name, and a category: triage, backlog, to do, started, done, cancelled |
-| Linking a PR | An attachment; Linear's Git integration links branches named with the key | A remote link; the development panel needs Jira's own Git apps, by key | An attachment | A reference | A link, and the key in the branch and the PR's title |
-| Filing an issue | `issueCreate` in a team; labels by name, the team's or the workspace's | `POST /issue` in a project, as its Task type (else the first that isn't a sub-task); labels without spaces | A card on a list, with the board's labels by name | An issue on a repository; the host makes labels it lacks (GitHub only for someone who can push) | `create` in a container from `containers`; labels the tracker can't take are left off |
+| | Linear | Jira (Cloud, Data Center) | Trello | ClickUp | GitHub and GitLab issues | The model |
+|---|---|---|---|---|---|---|
+| Where issues live | Team (key `MER`), project, cycle | Project (key), board, sprint, epic | Board, list | Workspace, space, folder, list | Repository or project | A container, by the tracker's name for it |
+| Key | `MER-231` | `PROJ-123` | Card short link | A custom id (`DEV-12`) where its workspace gives them, else its own id | `#123` | The tracker's key |
+| Text | Markdown | ADF (Cloud), wiki markup (Data Center) | Markdown | Markdown descriptions; plain-text comments | Markdown | Markdown; the Jira adapters convert |
+| Status | The team's states, typed: triage, backlog, unstarted, started, completed, canceled | Statuses in To Do, In Progress, Done; changed by a transition, which may need fields | The card's list | The list's statuses, each of a type: open, custom, done, closed | Open or closed with a reason; GitLab's statuses in five categories | The tracker's name, and a category: triage, backlog, to do, started, done, cancelled |
+| Linking a PR | An attachment; Linear's Git integration links branches named with the key | A remote link; the development panel needs Jira's own Git apps, by key | An attachment | A comment on the task, once: ClickUp has no link to attach | A reference | A link, and the key in the branch and the PR's title |
+| Filing an issue | `issueCreate` in a team; labels by name, the team's or the workspace's | `POST /issue` in a project, as its Task type (else the first that isn't a sub-task); labels without spaces | A card on a list, with the board's labels by name | A task on a list, with its space's tags by name | An issue on a repository; the host makes labels it lacks (GitHub only for someone who can push) | `create` in a container from `containers`; labels the tracker can't take are left off |
 
 - **Status by category.** Althar asks for a category, and the adapter
   picks the tracker's state. A Jira transition that needs fields becomes a
   call for the person. Trello's lists are mapped by the person, once per
-  board. Althar moves an issue to In Progress as its task's first step
+  board. ClickUp's statuses are read by their type, then their name: open is
+  to do, custom is started, done and closed are done, and a name that says
+  cancelled is cancelled, since ClickUp has no type for it. Althar moves an issue to In Progress as its task's first step
   starts (Linear: the team's first `started` state; Jira: the first
   transition offered into the In Progress category; Trello: the top of the
-  board's first open list named Doing or In progress), once, and leaves one
+  board's first open list named Doing or In progress; ClickUp: the list's
+  first custom status named for work under way, else its first custom
+  status), once, and leaves one
   already started, done or cancelled as it is. GitHub's and GitLab's issues
   have no standard In Progress and are left alone. A
   project's rules can turn it off. As the task's pull request opens, Althar
@@ -593,6 +597,10 @@ for the task or the project, beside Resolve now.
   task's thread; as it merges, to close it as done, on a card in the
   coordinator's thread (the task settles). Both follow the same rule, and
   are cards like any change to an issue ("Changing issues", below).
+- **Linking the pull request on its issue** follows the project's rule too,
+  "Link pull requests on their issues" (`linkIssues`), on unless the person
+  turns it off. On ClickUp the link is a comment on the task, so turning it
+  off is how a team keeps those comments out.
 - **The key goes in the branch and the PR's title,** so the trackers' own
   Git integrations link them. Field ownership (above) decides whether
   Althar also moves a status those integrations move.
@@ -753,23 +761,23 @@ Leads and the coordinator change issues that already exist
 
 What each tracker changes:
 
-| | Linear | Jira | Trello | GitHub issues | GitLab issues |
-|---|---|---|---|---|---|
-| Status | The team's states | A transition offered now; one that needs fields fails in Jira's words | The board's lists | Open, closed as done or not planned | Open or closed |
-| Priority | Yes | Yes | No priorities | No priorities | No priorities |
-| Assignees | One | One | Members, several | Several | Several |
-| Labels, title, description | Yes | Yes | Labels, name, description | Yes | Yes |
-| Project | Its project | No: Jira's own Move | No: its board | A Projects board | No: where it lives |
-| Milestone | Its project's milestone (of the project it goes in) | A fix version, added beside its others | No | Its milestone | Its milestone |
-| Cycle | Its cycle | No: sprints are a board's | No | No | No: iterations are a paid group's |
-| Parent | Its parent | Its parent | No | Its parent issue (set, not read or taken out) | No: epics are a paid group's |
-| Estimate | Points | No: story points are a site's own field | No | No | Its weight |
-| Type | No: a label says | Its issue type | No | Its issue type (an organisation's) | Issue, incident, test case, task |
-| Components | No | Yes | No | No | No |
-| Due date | Yes | Yes | Yes | No | Yes |
-| Set as it is filed | All but labels' names it hasn't | Assignee, fix version, parent, type, components, due | Members, due | Assignees, milestone, type | Assignees, milestone, weight, type, due |
-| Comment | Yes | Yes | Yes | Yes | Yes |
-| Link a pull request | An attachment | A remote link | An attachment | No: a PR that names the issue links it | No: as GitHub |
+| | Linear | Jira | Trello | ClickUp | GitHub issues | GitLab issues |
+|---|---|---|---|---|---|---|
+| Status | The team's states | A transition offered now; one that needs fields fails in Jira's words | The board's lists | The list's statuses | Open, closed as done or not planned | Open or closed |
+| Priority | Yes | Yes | No priorities | Yes: urgent, high, normal, low | No priorities | No priorities |
+| Assignees | One | One | Members, several | Several | Several | Several |
+| Labels, title, description | Yes | Yes | Labels, name, description | Its space's tags, name, description | Yes | Yes |
+| Project | Its project | No: Jira's own Move | No: its board | No: its list | A Projects board | No: where it lives |
+| Milestone | Its project's milestone (of the project it goes in) | A fix version, added beside its others | No | No | Its milestone | Its milestone |
+| Cycle | Its cycle | No: sprints are a board's | No | No: sprints are lists of their own | No | No: iterations are a paid group's |
+| Parent | Its parent | Its parent | No | Its parent, as a subtask (not taken out: ClickUp can't) | Its parent issue (set, not read or taken out) | No: epics are a paid group's |
+| Estimate | Points | No: story points are a site's own field | No | Its sprint points, where its space has them on | No | Its weight |
+| Type | No: a label says | Its issue type | No | Its task type (a workspace's, or ClickUp's own Task) | Its issue type (an organisation's) | Issue, incident, test case, task |
+| Components | No | Yes | No | No | No | No |
+| Due date | Yes | Yes | Yes | Yes | No | Yes |
+| Set as it is filed | All but labels' names it hasn't | Assignee, fix version, parent, type, components, due | Members, due | Assignees, due, status, parent | Assignees, milestone, type | Assignees, milestone, weight, type, due |
+| Comment | Yes | Yes | Yes | Yes, as plain text | Yes | Yes |
+| Link a pull request | An attachment | A remote link | An attachment | A comment on the task | No: a PR that names the issue links it | No: as GitHub |
 
 Where a tracker hasn't a field, its tool says so in its words ([ADR-082](../decisions/foundations.md#a-feature-ships-for-every-service-that-can-have-it)).
 Not covered yet: Jira's sprints, story points and transition screens with
@@ -819,6 +827,11 @@ Each adapter turns the query into its tracker's own search:
 - **Trello:** its search's operators (`label:`, `list:`, `member:me`),
   or a list's cards, or the account's; status, assignee and when it changed
   are narrowed by Althar, and paged over what the search gave.
+- **ClickUp:** a list's tasks, or each workspace's, by tags (`tags[]`), the
+  account's own (`assignees[]`) and when they changed (`date_updated_gt`),
+  newest change first, ten pages of a hundred at most; words, status,
+  assignee and priority are narrowed by Althar after, since ClickUp's v2
+  API has no search by words. Tasks by key are read one by one.
 
 What each tracker searches by is in its `capabilities.finds`: by its own
 search (`search`), or by Althar after it (`after`), when a page can hold
@@ -963,7 +976,7 @@ flowchart LR
   board, project or repository; not Jira's statuses or labels, each
   issue's own). A card of ten or more applies one issue after another, a
   pause between them on a tracker whose limits ask it (GitHub a second,
-  Trello 150 ms, Jira Cloud 100 ms); a tracker that says to wait, and for
+  Trello 150 ms, ClickUp 600 ms, Jira Cloud 100 ms); a tracker that says to wait, and for
   how long, up to a minute, is waited for, and asked once more.
 - **Never filed:** leads draft issues only when the person asks, as before.
 
@@ -1118,6 +1131,7 @@ whether it gives a token without one:
 | Linear | OAuth with PKCE, back to a loopback address | n/a |
 | Jira | A pasted scoped API token (Atlassian's OAuth needs a secret) | A pasted personal access token |
 | Trello | Althar's Power-Up key, and a user token from Trello's authorize page | n/a |
+| ClickUp | A pasted personal token (`pk_`), sent as it is (ClickUp's OAuth needs a secret) | n/a |
 
 A pasted token is the fallback everywhere, including for an organisation
 that won't install the GitHub App.

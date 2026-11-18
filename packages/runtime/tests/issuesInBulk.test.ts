@@ -236,7 +236,7 @@ describe('issues in bulk', () => {
       assert.deepStrictEqual(labelled, ['Card0001'])
       // Each tool says what each tracker can, in the table the trackers' capabilities make.
       const described = new Map((yield* toolsOf(lead)).map((tool) => [tool.name, tool.description]))
-      assert.include(findTable(), '| priority | yes | yes | no | no | no |')
+      assert.include(findTable(), '| priority | yes | yes | no | Althar | no | no |')
       assert.include(described.get('find_issues'), findTable())
       assert.include(changeTable(), '| assignees | one | one | several | several | several |')
       assert.include(described.get('change_issue'), changeTable())

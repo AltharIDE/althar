@@ -263,7 +263,15 @@ const stdio = async (
   const scope = Effect.runSync(Scope.make())
   const child = await Effect.runPromise(
     spawnNative(
-      { command: server.command, args: server.args, env: { ...server.env, ...(env.ALTHAR_WORK ? { ALTHAR_WORK: env.ALTHAR_WORK } : {}) } },
+      {
+        command: server.command,
+        args: server.args,
+        env: {
+          ...server.env,
+          ...(env.ALTHAR_WORK ? { ALTHAR_WORK: env.ALTHAR_WORK } : {}),
+          ...(env.ALTHAR_WORKER ? { ALTHAR_WORKER: env.ALTHAR_WORKER } : {}),
+        },
+      },
       cwd,
       hooks,
     ).pipe(Scope.provide(scope)),

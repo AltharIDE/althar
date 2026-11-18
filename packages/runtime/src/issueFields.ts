@@ -83,11 +83,13 @@ export const gapOf = (product: Product, field: IssueField): string => {
     case 'project':
       return product === 'trello'
         ? 'a Trello card’s project is its board'
-        : jira(product)
-          ? 'Jira moves an issue to another project only by its own Move'
-          : product === 'gitlab'
-            ? 'a GitLab issue’s project is where it lives: moving it is GitLab’s own Move'
-            : `${name} has no project for an issue`
+        : product === 'clickup'
+          ? 'a ClickUp task’s project is its list'
+          : jira(product)
+            ? 'Jira moves an issue to another project only by its own Move'
+            : product === 'gitlab'
+              ? 'a GitLab issue’s project is where it lives: moving it is GitLab’s own Move'
+              : `${name} has no project for an issue`
     case 'milestone':
       return product === 'trello' ? 'a Trello card has no milestone' : `${name} has no milestone for an issue`
     case 'cycle':
@@ -95,7 +97,9 @@ export const gapOf = (product: Product, field: IssueField): string => {
         ? 'Jira’s sprints belong to its boards: Althar can’t set one yet'
         : product === 'gitlab'
           ? 'GitLab’s iterations are a group’s, on its paid tiers: Althar can’t set one yet'
-          : `only Linear has cycles`
+          : product === 'clickup'
+            ? 'ClickUp’s sprints are lists of their own: Althar can’t set one yet'
+            : `only Linear has cycles`
     case 'parent':
       return product === 'gitlab'
         ? 'GitLab’s epics are a group’s, on its paid tiers: Althar can’t set one yet'

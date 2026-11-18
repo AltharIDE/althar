@@ -128,7 +128,7 @@ describe('a running change’s card', () => {
     })
     const shown = runningCardOf(waiting, NOW, () => '')
     expect(shown.status).toBe(TaskStatus.Queued)
-    expect(shown.why).toBe('4 of 4 agents busy on this Mac')
+    expect(shown.why).toBe('4 agents busy')
     expect(shown.at).toBeUndefined()
     expect(shown.track).toBeUndefined()
     expect(shown.object).toBeUndefined()
@@ -574,7 +574,7 @@ describe('the dock, for each', () => {
     const { docked } = dock(board([queued]), { kind: 'task', id: 'q' })
     const shown = await docked()
     expect(shown.getByText('Up next')).toBeTruthy()
-    expect(shown.getByText(/4 of 4 agents busy/)).toBeTruthy()
+    expect(shown.getByText(/4 agents busy/)).toBeTruthy()
   })
 
   it('accepts a pull request with no checks and no head its host said, as the dock showed it', async () => {

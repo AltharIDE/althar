@@ -645,7 +645,12 @@ describe('accounts', () => {
       const launched = Object.entries(launches.filter(({ agentId }) => agentId === 'codex').at(-1)?.env ?? {}).filter(
         ([key]) => !/^(GIT_CONFIG_|ALTHAR_(GUARD_PASS|GUARD_REPOSITORIES|GUARD_REMOTES|TASK_BRANCH|DEFAULT_BRANCHES)$)/.test(key),
       )
+      const sqlWorker = yield* SqlClient.SqlClient
+      const [worker] = yield* sqlWorker<{
+        id: string
+      }>`SELECT id FROM provider_sessions WHERE thread_id = ${ran.threadId} AND account_id = ${work.id} ORDER BY started_at DESC LIMIT 1`
       assert.deepStrictEqual(Object.fromEntries(launched), {
+        ALTHAR_WORKER: worker?.id ?? '',
         FAKE_HOME: workFolder,
         ALTHAR_WORK: `task:${ran.taskId}`,
       })

@@ -139,6 +139,7 @@ const demo = {
   jira_cloud: fake('jira_cloud', 'balazs@northwind.io'),
   jira_dc: fake('jira_dc', 'balazs'),
   trello: fake('trello', 'balazsk'),
+  clickup: fake('clickup', 'balazs'),
 } satisfies Record<Product, ReturnType<typeof makeFakeService>>
 
 /** Linear's other workspace, which a key with `halyard` in it signs in to. */

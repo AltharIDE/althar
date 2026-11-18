@@ -166,3 +166,33 @@ export const sealFailure = (type: 'seal' | 'open', error: unknown): { readonly e
   error: error instanceof Error ? error.message : String(error),
   ...(type === 'open' ? { unreadable: true } : {}),
 })
+
+/** Same OS sealing policy for saved remote connection keys; this does not attest human approval. */
+export const protectConnectionCredential = async (
+  sealing: boolean,
+  value: string,
+  storage: SafeStorageLike,
+  platform: NodeJS.Platform = process.platform,
+  portal = false,
+): Promise<string> => {
+  if (portal) {
+    const reply = await sealWithPortal(sealing, value, storage, platform)
+    if ('value' in reply) return reply.value
+    throw new Error(reply.error)
+  }
+  const backend = platform === 'linux' ? storage.getSelectedStorageBackend() : 'keychain'
+  if (!storage.isEncryptionAvailable() || !keyringIsSafe(platform, backend))
+    throw new Error('Unlock the system keyring before pairing this home. Connection keys cannot be saved here safely yet.')
+  try {
+    if (sealing) {
+      const encrypted = storage.encryptString(value)
+      if (platform === 'linux' && !sealedBySyncKeyring(encrypted)) throw new Error('No keyring seal')
+      return encrypted.toString('base64')
+    }
+    const encrypted = Buffer.from(value, 'base64')
+    if (platform === 'linux' && !sealedBySyncKeyring(encrypted)) throw new Error('No keyring seal')
+    return storage.decryptString(encrypted)
+  } catch {
+    throw new Error('This connection key could not be opened by the system keyring. Unlock it or pair the home again.')
+  }
+}

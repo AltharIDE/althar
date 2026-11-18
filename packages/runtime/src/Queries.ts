@@ -619,7 +619,7 @@ const decodeNoticeOffer = Schema.decodeUnknownOption(NoticeItem.fields.content.f
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 const decodeRules = Schema.decodeUnknownOption(MergeRules)
 
-const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
+const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello', 'clickup'] as const
 
 /**
  * A stored item as the contract has it: each kind with its own content. A
@@ -2014,6 +2014,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const links = yield* sql<{
+            id: string
             kind: string
             product: string
             ref: string
@@ -2024,11 +2025,11 @@ export class Queries extends Context.Service<
             connectionId: string | null
             partOf: number
           }>`
-            SELECT kind, product, ref, key, url, snapshot, listening, connection_id, part_of FROM external_links WHERE task_id = ${taskId}
+            SELECT id, kind, product, ref, key, url, snapshot, listening, connection_id, part_of FROM external_links WHERE task_id = ${taskId}
             ORDER BY created_at`
-          const issueRow = links.find((link) => link.kind === 'issue')
-          const issue = ((): IssueSummary | null => {
-            if (issueRow === undefined) return null
+          const issueRows = links.filter((link) => link.kind === 'issue')
+          const issueRow = issueRows[0]
+          const summaryOf = (issueRow: (typeof links)[number]): IssueSummary | null => {
             const kept = parse(issueRow.snapshot)
             const product = PRODUCTS.find((candidate) => candidate === issueRow.product)
             if (product === undefined) return null
@@ -2056,7 +2057,15 @@ export class Queries extends Context.Service<
                 priority === null || priority === undefined ? null : { level: text(priority, 'level'), name: text(priority, 'name') },
               container: text(kept, 'container') || null,
             }
-          })()
+          }
+          // Each issue it came from, on any trackers, in the order they were tied to it: the first is the one a task always had.
+          const issues = issueRows.flatMap((row) => {
+            const summary = summaryOf(row)
+            return summary === null
+              ? []
+              : [{ ...summary, ...(row.partOf === 1 ? { partOf: true } : {}), link: row.id, connectionId: row.connectionId }]
+          })
+          const issue = issueRow === undefined ? null : summaryOf(issueRow)
           // Where the project's rules push its leads' commits on their own, whether those here wait for the person, and why (ADR-072).
           const pushing = links.some((link) => link.kind === 'change') ? yield* Effect.flatMap(Changes, (all) => all.pushing(taskId)) : null
           // How its screenshots stand on each open pull request whose host takes them (ADR-077).
@@ -2144,6 +2153,7 @@ export class Queries extends Context.Service<
             issueConnection: issueRow?.connectionId ?? null,
             // It does only part of its issue: its merge comments rather than closing it.
             ...(issueRow?.partOf === 1 ? { issuePartOf: true } : {}),
+            fromIssues: issues,
             changes,
           }
         })
@@ -2391,6 +2401,7 @@ export class Queries extends Context.Service<
         links?: {
           readonly issue: IssueSummary | null
           readonly issueConnection: string | null
+          readonly fromIssues: ReadonlyArray<IssueSummary & { readonly link: string; readonly connectionId: string | null }>
           readonly changes: ReadonlyArray<ChangeSummary>
         },
         /** Read only for how it stands, as a task waiting for it says: without what it waits for in turn. */
@@ -2584,6 +2595,15 @@ export class Queries extends Context.Service<
               ((askedOf?.told === 1 ||
                 (askedOf?.takenSince != null && stillAsked(askedOf.takenSince, yield* nowFor(askedOf.takenSince, ASKED_MS), ASKED_MS))) &&
                 Option.isSome(lead)))
+          // A turn of its lead or reviewer, outside any step, waits for its account's usage limit to reset (Sessions.ts): held for
+          // the limit, as a step would be, never waiting for a place, however many agents are at work.
+          const usageOut = busy
+            ? undefined
+            : [lead, reviewer].flatMap((session) =>
+                Option.isSome(session) && session.value.usageOut !== undefined ? [session.value.usageOut] : [],
+              )[0]
+          const usageWaits: HeldForLimit | null =
+            usageOut === undefined ? null : { agentId: usageOut.agentId, accountId: usageOut.accountId, until: usageOut.until }
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
           // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
@@ -2597,7 +2617,9 @@ export class Queries extends Context.Service<
           // Held for a usage limit or the connection, or for its checkout, none of its agents in a turn, it goes on by itself:
           // up next too.
           const paused =
-            !queued && !busy && (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable' || waitsForCheckout !== null)
+            !queued &&
+            !busy &&
+            (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable' || waitsForCheckout !== null || usageWaits !== null)
           const unshipped =
             after.length === 0
               ? null
@@ -2639,7 +2661,7 @@ export class Queries extends Context.Service<
           // under way, its lead on its way, never stopped. Its first turn waits for the setup.
           const settingUp = task.turns === 0 && task.settingUp !== null
           const unstarted = task.turns === 0 && (task.planState === 'accepted' || task.runState === 'running')
-          const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
+          const { issue, issueConnection, fromIssues: issues, changes } = links ?? (yield* linksOf(taskId))
           // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // A chat's latest exchange, as Scratch lists it: who said it, when, and its first line.
@@ -2937,6 +2959,18 @@ export class Queries extends Context.Service<
                     url: issue.url,
                     ...(issueConnection === null ? {} : { connectionId: issueConnection }),
                   },
+            // Several, each shown: one alone is `issue`'s.
+            ...(issues.length > 1
+              ? {
+                  fromIssues: issues.map((one) => ({
+                    product: one.product,
+                    key: one.key,
+                    title: one.title,
+                    url: one.url,
+                    ...(one.connectionId === null ? {} : { connectionId: one.connectionId }),
+                  })),
+                }
+              : {}),
             // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
             change: shown,
             earlier: changes.filter((candidate) => candidate !== shown).toReversed(),
@@ -2986,7 +3020,7 @@ export class Queries extends Context.Service<
             ...(task.local > 0 ? { local: true } : {}),
             ...(waitsForCheckout === null ? {} : { waitsForCheckout }),
             ...(task.toward === null ? {} : { toward: task.toward }),
-            waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
+            waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : usageWaits,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             ...(externalWait === undefined
               ? {}

@@ -66,6 +66,12 @@
   border-bottom: 1px solid var(--line);
 }
 
+/* The issues a task came from, heading its thread: each with whether the task does all of it. */
+.issues {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
 /* The issue a task came from, heading its thread. */
 .issue {
   display: flex;

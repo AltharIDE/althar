@@ -246,6 +246,7 @@ export const ConnectionProduct = Schema.Literals([
   'jira_cloud',
   'jira_dc',
   'trello',
+  'clickup',
 ])
 export type ConnectionProduct = typeof ConnectionProduct.Type
 

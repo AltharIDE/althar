@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, type IpcMainEvent, type WebContents } from 'electron'
+import { BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
 
 import { rectOf } from '../browser/ipc'
 import type { CanvasTarget, Canvases } from './views'
@@ -27,7 +27,7 @@ export const targetOf = (value: unknown): CanvasTarget | null => {
 export const keyOf = (value: unknown): string | null => (typeof value === 'string' && ID('thr').test(value) ? value : null)
 
 export const handleCanvases = (canvases: Canvases, mine: (contents: WebContents) => boolean) => {
-  const from = (event: IpcMainEvent) => {
+  const from = (event: IpcMainEvent | IpcMainInvokeEvent) => {
     if (!mine(event.sender)) throw new Error('Only Althar’s own windows show its canvases.')
     const window = BrowserWindow.fromWebContents(event.sender)
     if (window === null) throw new Error('No window asked.')
@@ -44,6 +44,16 @@ export const handleCanvases = (canvases: Canvases, mine: (contents: WebContents)
     from(event)
     const conversation = keyOf(key)
     if (conversation !== null) canvases.close(conversation)
+  })
+  ipcMain.handle('althar:canvas-still', (event, key: unknown) => {
+    from(event)
+    const conversation = keyOf(key)
+    return conversation === null ? null : canvases.still(conversation)
+  })
+  ipcMain.handle('althar:canvas-cover', (event, key: unknown, covered: unknown) => {
+    from(event)
+    const conversation = keyOf(key)
+    if (conversation !== null) canvases.cover(conversation, covered === true)
   })
   ipcMain.on('althar:canvas-reload', (event, key: unknown) => {
     from(event)

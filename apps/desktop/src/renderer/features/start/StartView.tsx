@@ -19,6 +19,7 @@ import {
 } from '@althar/ui'
 import { Welcome, type WelcomeStep, welcomeText } from '@althar/ui/screens'
 
+import { useHomeState } from '../homes/useHomes'
 import { brandOf, pinnedOf } from '../../shared/agents'
 import { reads } from '../../data/reads'
 import { hostChoices, PutOnHost, thingOn } from '../../shared/PutOnHost'
@@ -196,10 +197,28 @@ export function StartView({
   /** The home, once there are projects. */
   home: () => ReactNode
 }) {
+  const { client, host } = useServices()
+  const here = useHomeState(host.homes)
   const welcoming = useWelcoming()
   // With no project, or none read because the runtime didn't answer, the first screen, which says what went wrong; and the
   // welcome while it is on show, over the project made on its way.
   const first = welcoming || (model.projects !== null && model.projects.length === 0) || (model.projects === null && model.error !== null)
+
+  if (client.connection !== undefined) {
+    if (model.projects === null) return <HomePending />
+    if (model.projects.length === 0)
+      return (
+        <div className={s.window}>
+          <BareBar />
+          <main className={s.remoteEmpty}>
+            <Icon name="home" size={28} className={s.remoteGlyph} />
+            <h1>No projects on {here !== null && here.current.kind !== 'local' ? here.current.home.name : 'this home'} yet</h1>
+            <p>Add a project on the host and it shows here.</p>
+          </main>
+        </div>
+      )
+    return home()
+  }
 
   if (first) return <First model={model} accounts={accounts} onProject={onProject} />
 

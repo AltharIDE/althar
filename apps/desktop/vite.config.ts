@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => ({
         'src/renderer/root.ts',
         'src/renderer/features/*/route.tsx',
       ],
-      reporter: ['text', 'html'],
+      reporter: ['text', 'html', 'json'],
       // Checked when a test fails too, so a run that only quarantined tests fail still gates on it (@althar/testing).
       reportOnFailure: true,
       thresholds: { lines: 90, branches: 90 },

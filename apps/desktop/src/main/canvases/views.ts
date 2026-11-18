@@ -86,6 +86,8 @@ export const canvasNavigation = (address: string, target: CanvasTarget): 'go' | 
 export const startCanvases = (options: CanvasesOptions) => {
   const views = new Map<string, View>()
   const prepared = new Set<string>()
+  /* The conversations whose canvas has something of the window's own over its place (ADR-100). Kept apart from the views, so a view made anew (another project's canvas) is still aside while it is. */
+  const covered = new Set<string>()
 
   /** The manifest a host's version is shown at, in any view: only what a window opened is served. */
   const opened = (host: string, version: number) => {
@@ -145,6 +147,7 @@ export const startCanvases = (options: CanvasesOptions) => {
       },
     })
     view.setBackgroundColor('#ffffff')
+    view.setVisible(!covered.has(key))
     const one: View = { key, window, view, target, shown: false }
     guard(one, view.webContents)
     views.set(key, one)
@@ -182,6 +185,7 @@ export const startCanvases = (options: CanvasesOptions) => {
       height: Math.round(panel.height * zoom),
     })
     if (!one.shown) window.contentView.addChildView(one.view)
+    one.view.setVisible(!covered.has(key))
     one.shown = true
   }
 
@@ -194,10 +198,27 @@ export const startCanvases = (options: CanvasesOptions) => {
     if (!one.view.webContents.isDestroyed()) one.view.webContents.close()
   }
 
+  /** A picture of the canvas as it shows, for the window to show in its place while something of its own is over it. */
+  const still = async (key: string): Promise<string | null> => {
+    const one = views.get(key)
+    if (one === undefined || !one.shown || one.view.webContents.isDestroyed()) return null
+    // The compositor can have nothing to give: the window then hides the view with no picture.
+    const picture = await one.view.webContents.capturePage().catch(() => null)
+    return picture === null || picture.isEmpty() ? null : `data:image/jpeg;base64,${picture.toJPEG(82).toString('base64')}`
+  }
+
+  /** Hides the view while something of the window's is over it, and shows it again after. */
+  const cover = (key: string, over: boolean) => {
+    if (over) covered.add(key)
+    else covered.delete(key)
+    const one = views.get(key)
+    if (one !== undefined) one.view.setVisible(!over)
+  }
+
   /** Loads the shown version again, as it was published: for a canvas that drew itself into a corner. */
   const reload = (key: string) => views.get(key)?.view.webContents.reload()
 
-  return { show, close, reload, opened }
+  return { show, close, reload, still, cover, opened }
 }
 
 export type Canvases = ReturnType<typeof startCanvases>

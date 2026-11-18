@@ -2784,6 +2784,8 @@ export class Runs extends Context.Service<
               SELECT commit_sha FROM workspace_snapshots WHERE workspace_id = ${worktree.id} AND node_attempt_id = ${last.id}
               ORDER BY taken_at DESC, rowid DESC LIMIT 1`
             if (read?.commitSha == null) return null
+            // Untracked files do not appear in git diff, so their size and paths are unknown here.
+            if ((yield* git(worktree.path, 'ls-files', '--others', '--exclude-standard', '-z')) !== '') return null
             const listed = yield* git(worktree.path, '-c', 'core.quotePath=false', 'diff', '--numstat', read.commitSha)
             for (const line of listed.split('\n').filter((one) => one !== '')) {
               const [added, removed, path] = line.split('\t')
