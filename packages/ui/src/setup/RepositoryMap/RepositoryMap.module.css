@@ -181,9 +181,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.role {
-  flex: none;
-  margin-left: auto;
+/* The branch its new tasks work toward: said quietly, a picker once pointed at. */
+.toward {
+  min-width: 0;
+  margin-left: -6px;
+}
+
+/* A card that wasn't there: a clone, a folder added. It settles in from above as its wire draws. */
+.arrives {
+  animation: arrives var(--slow) var(--ease-out) both;
+}
+@keyframes arrives {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.985);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arrives {
+    animation: none;
+  }
 }
 
 /* A folder being read: an outline, until its repositories are known. */

@@ -1493,6 +1493,8 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   setProjectTracker: 'project/code.tracker',
   setRepository: 'project/code.repositories',
   addRepositories: 'person: adding a repository is the person’s (project/code says so)',
+  cloneRepository: 'person: cloning a repository into the project is adding one, the person’s (project/code says so)',
+  prepareFolder: 'person: gives a repository cloned into the project its first commit, as part of adding it, the person’s',
   leaveOutRepository: 'person: leaving a repository out is the person’s (project/code says so)',
   // project/rules
   setProjectRules: 'project/rules.never',

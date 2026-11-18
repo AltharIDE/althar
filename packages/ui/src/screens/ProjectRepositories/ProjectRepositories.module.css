@@ -20,6 +20,10 @@
 .over .drop {
   color: var(--t-1);
 }
+.body {
+  display: grid;
+  min-width: 0;
+}
 .map {
   margin-top: 8px;
 }
