@@ -1,14 +1,18 @@
-import { writeFileSync } from 'node:fs'
+import { once } from 'node:events'
+import { copyFileSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { join } from 'node:path'
 
 import { assert, it } from '@effect/vitest'
 import { Agents } from '@althar/runtime'
 import { until } from '@althar/testing/effect'
+import { DiagnosticOutcome } from '@althar/worker-protocol'
 import { Effect, Fiber, Layer } from 'effect'
 
 import { workerCertificates } from '../../../packages/worker-protocol/integration/worker-certificates'
 import { runCommand } from '../src/commands'
 import { parseOptions } from '../src/options'
+import { openWorkerStore } from '../src/workerStore'
 import { temporary } from './support'
 
 it.live('provisions a scoped listener and durable worker enrollment through local operator commands', () =>
@@ -27,6 +31,7 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
       const command = (...tokens: string[]) => runCommand(parseOptions([...tokens, ...args], {}, root), io, dependencies)
       const last = () => JSON.parse(output.at(-1) ?? '{}') as Record<string, string>
       yield* command('init', '--json')
+      const homeId = last().homeId ?? ''
       const credentials = ['--worker-ca', certificates('home-ca.pem'), '--tls-certificate', certificates('home.pem')]
       const wrongKey = yield* Effect.flip(command('configure-workers', ...credentials, '--tls-key', certificates('enrolled.key')))
       assert.strictEqual(wrongKey._tag, 'HostError')
@@ -42,6 +47,16 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
         ),
       )
       assert.strictEqual(invalidAuthority._tag, 'HostError')
+      const privateCopy = join(profile, 'unsafe-worker.key')
+      copyFileSync(certificates('home.key'), privateCopy)
+      for (const bad of [
+        [...credentials, '--tls-key', privateCopy],
+        [...credentials, '--tls-key', certificates('home.key'), '--listen-address', 'not-an-ip'],
+        ['--worker-ca', certificates('missing.pem'), '--tls-certificate', certificates('home.pem'), '--tls-key', certificates('home.key')],
+      ]) {
+        const error = yield* Effect.flip(command('configure-workers', ...bad))
+        assert.strictEqual(error._tag, 'HostError')
+      }
       yield* command('configure-workers', ...credentials, '--tls-key', certificates('home.key'), '--listen-port', '0')
       const invalidEnrollment = yield* Effect.flip(command('enroll-worker', '--worker-certificate', certificates('home-ca.pem')))
       assert.strictEqual(invalidEnrollment._tag, 'HostError')
@@ -58,8 +73,30 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
       const attemptId = last().attemptId ?? ''
       yield* command('worker-result', '--attempt-id', attemptId)
       assert.include(output.at(-1) ?? '', 'queued')
-      yield* command('revoke-worker', '--worker-id', workerId)
+      const store = yield* Effect.promise(() => openWorkerStore(profile, homeId))
+      try {
+        const offer = store.next(workerId)
+        assert.isDefined(offer)
+        if (!offer) throw new Error('The diagnostic was not offered')
+        assert.isAbove(store.claim(workerId, attemptId, offer.fence), 0)
+        assert.isTrue(
+          store.complete(workerId, {
+            $typeName: 'althar.worker.v1.DiagnosticResult',
+            attemptId,
+            fence: offer.fence,
+            outcome: DiagnosticOutcome.FAILED,
+            output: Buffer.from('diagnostic unavailable\n'),
+          }),
+        )
+      } finally {
+        store.close()
+      }
       yield* command('worker-result', '--attempt-id', attemptId)
+      assert.include(output.at(-1) ?? '', '"diagnostic unavailable\\n"')
+      yield* command('worker-run', '--worker-id', workerId, '--json')
+      const revokedAttempt = last().attemptId ?? ''
+      yield* command('revoke-worker', '--worker-id', workerId)
+      yield* command('worker-result', '--attempt-id', revokedAttempt)
       assert.include(output.at(-1) ?? '', 'unknown')
       yield* Fiber.interrupt(listener)
       yield* command('disable-workers')
@@ -71,6 +108,23 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
       )
       assert.notInclude(output.join(''), 'workerPort')
       yield* Fiber.interrupt(disabled)
+
+      const reserved = yield* Effect.acquireRelease(
+        Effect.promise(async () => {
+          const socket = createServer()
+          const ready = once(socket, 'listening')
+          socket.listen(0, '127.0.0.1')
+          await ready
+          return socket
+        }),
+        (socket) => Effect.promise(() => new Promise<void>((resolve) => socket.close(() => resolve()))),
+      )
+      const busy = reserved.address()
+      if (busy === null || typeof busy === 'string') throw new Error('Expected a reserved worker port')
+      yield* command('configure-workers', ...credentials, '--tls-key', certificates('home.key'), '--listen-port', String(busy.port))
+      const conflict = yield* Effect.flip(command('serve'))
+      assert.strictEqual(conflict._tag, 'HostError')
+      if (conflict._tag === 'HostError') assert.strictEqual(conflict.code, 'HostUnavailable')
 
       writeFileSync(join(profile, 'workers.json'), 'invalid configuration', { mode: 0o600 })
       const malformed = yield* Effect.flip(command('serve'))

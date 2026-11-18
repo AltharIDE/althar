@@ -93,9 +93,12 @@ export const listenWorkers = (options: HostOptions, homeId: string) =>
                 store.close()
               },
             }
-          } catch (error) {
+          } catch {
             store.close()
-            throw error
+            throw new HostError({
+              code: 'HostUnavailable',
+              message: 'Could not start the worker listener. Check its certificate files, address and port.',
+            })
           }
         } finally {
           tls.privateKeyPem.fill(0)
