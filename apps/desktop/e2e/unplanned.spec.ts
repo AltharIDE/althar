@@ -91,6 +91,9 @@ test('a held Prototype plan and a draft with no plan, both discarded by the coor
     const next = work.getByRole('region', { name: 'Up next' })
     await expect(next.getByText('Explore the roles')).toBeVisible()
     await expect(next.getByText('No plan yet')).toBeVisible()
+    // Both cards in sight, the held plan's first.
+    const roles = conversation.getByText('Explore the roles', { exact: true }).first()
+    await roles.evaluate((title) => title.scrollIntoView({ block: 'start' }))
     await still(page)
     await page.screenshot({ path: 'test-results/unplanned-3-held-and-unplanned.png', animations: 'disabled' })
 
@@ -104,6 +107,7 @@ test('a held Prototype plan and a draft with no plan, both discarded by the coor
     await expect(next.getByText('Explore the team')).toHaveCount(0)
     await expect(next.getByText(/Held\. Starts when you say/)).toHaveCount(0)
     await expect(next.getByRole('button', { name: 'Resume' })).toHaveCount(0)
+    await roles.evaluate((title) => title.scrollIntoView({ block: 'start' }))
     await still(page)
     await page.screenshot({ path: 'test-results/unplanned-4-both-discarded.png', animations: 'disabled' })
   } finally {
