@@ -189,9 +189,14 @@ const laid = (tasks: ReadonlyArray<BoardTask>, plans: ReadonlyArray<BoardTask>, 
 
 const plansOf = (lanes: Lanes) => lanes.next.slice(lanes.continuing + lanes.free, lanes.next.length - lanes.paused)
 
-/** The lanes, with each ready task in `merging` at work, merging, until it settles. */
-export const lanesOf = (board: BoardSnapshot, merging: ReadonlySet<string> = new Set()): Lanes => {
-  const every = asMerging(board.tasks, merging)
+/** The lanes, with each ready task in `merging` at work, merging or in its merge queue, until it settles. */
+export const lanesOf = (
+  board: BoardSnapshot,
+  merging: ReadonlySet<string> = new Set(),
+  /** Of those, the tasks going into their merge queue, in it from just after the press. */
+  queuing: ReadonlySet<string> = new Set(),
+): Lanes => {
+  const every = asMerging(board.tasks, merging, queuing)
   // A chat stays off the lanes, but for a call of its that waits on the person, and once it is settled.
   const scratch = every.filter(isAside)
   const tasks = every.filter((task) => !isAside(task))

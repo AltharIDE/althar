@@ -365,9 +365,9 @@ export function ProjectView({
   // Beside the conversation, its asides are there; the board alone keeps them behind its chip.
   const talkShown = shownOf(room).talk
   const { lanes, boardLanes } = useMemo(() => {
-    const all = seen === null ? null : lanesOf(seen, board.merging)
+    const all = seen === null ? null : lanesOf(seen, board.merging, board.queuing)
     return { lanes: all, boardLanes: all === null || !talkShown ? all : { ...all, scratch: NO_TASKS } }
-  }, [seen, board.merging, talkShown])
+  }, [seen, board.merging, board.queuing, talkShown])
   const yours = lanes === null ? 0 : yoursOf(lanes)
   // An abandoned task's pull request left open, closed from its row.
   const closing = useClosePullRequests()
