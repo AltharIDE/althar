@@ -161,6 +161,7 @@ import {
   spentLine,
   standing,
   titleWords,
+  unreachedLine,
   unsettledLine,
   withDescribed,
   withIssues,
@@ -559,6 +560,14 @@ export interface Fixing {
   readonly running: boolean
   /** While so, the checks on its head fail: its lead is told them, or at them, so it is under way, not the person's (DEV-173). */
   readonly withLead: boolean
+  /**
+   * The checks on its head fail and are its lead's, but its lead doesn't have the message that they failed: a look that ended
+   * before it told the lead, or a message waiting for a lead that never started. Nobody is on them until the next look tells
+   * the lead or hands them to the person.
+   */
+  readonly untold: boolean
+  /** A run of failures its lead is really on: open, and told, or the checks on its fix running. */
+  readonly onIt: boolean
   /** Why the checks that fail on its head are the person's, as its card says: its lead's words, or that its tries are spent. */
   readonly why: string | null
   /** Its tries spent: a failure now is the person's, not its lead's. */
@@ -5113,6 +5122,16 @@ export class Changes extends Context.Service<
                   Math.max(link.endedAt === null ? 0 : Date.parse(link.endedAt), link.pushedAt === null ? 0 : Date.parse(link.pushedAt)) <
                   checksAppear
               const failing = outcome === 'failed' && (snapshot.checks?.failed ?? 0) > 0
+              // Failing on its head and its lead's, but its lead doesn't have the message that they failed (`toldSince`): a look at the
+              // pull request that ended before it told the lead, or a message waiting for a lead that never started. Nobody is on
+              // them; the next look tells the lead, or hands them to the person (`tellUntold`).
+              const failedAt = failing
+                ? said.findLast((one) => one.kind === 'checks' && one.outcome === 'failed' && one.sha === head)?.at
+                : undefined
+              const unreached = open && failedAt !== undefined && !(yield* toldSince(link.id, failedAt))
+              // On the card, once the look that heard them has had its moment to tell the lead: never the person's between.
+              const untold =
+                unreached && failedAt !== undefined && (yield* nowFor(failedAt, TELLS_WITHIN)) - Date.parse(failedAt) >= TELLS_WITHIN
               // Whether the person said anything on the task since its head's checks were first seen: what the lead commits may be for
               // that, and waits for their push.
               const seenAt = head === null ? undefined : said.find((one) => one.kind !== 'pushed' && one.sha === head)?.at
@@ -5147,6 +5166,8 @@ export class Changes extends Context.Service<
                 stopped,
                 failing,
                 spoken,
+                untold,
+                unreached,
                 running: open && (outcome === 'running' || appearing),
                 goes,
                 why: !failing
@@ -5164,6 +5185,55 @@ export class Changes extends Context.Service<
               }
             }),
           )
+        })
+
+      /**
+       * How long the look that heard checks fail has to tell the lead, or run them again, before the card says nobody is on them
+       * (`untold`): it reads their logs and asks the host first.
+       */
+      const TELLS_WITHIN = Duration.toMillis((yield* RuntimeConfig).checksTold ?? Duration.minutes(1))
+
+      /**
+       * Whether its lead has the message that the checks on this pull request failed, sent since `since`: taken up by a turn, or
+       * waiting for the session that is running. Not anything else said on the thread, nor a message waiting for a lead whose
+       * session never started.
+       */
+      const toldSince = (linkId: string, since: string) =>
+        Effect.gen(function* () {
+          const rows = yield* checksSent(linkId, since)
+          if (rows.some((row) => row.state === 'delivered')) return true
+          const queued = rows.find((row) => row.state === 'queued')
+          return queued !== undefined && Option.isSome(yield* sessions.running(queued.threadId))
+        })
+
+      /** The messages that told a task's lead the checks on this pull request failed, since `since` (`tellLead`), and where each is. */
+      const checksSent = (linkId: string, since = '') =>
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ id: string; threadId: string; projectId: string; state: string }>`
+            SELECT i.id, i.thread_id, i.project_id, i.state FROM observations o JOIN user_inputs i ON i.id = json_extract(o.payload, '$.inputId')
+            WHERE o.subject_type = 'external_link' AND o.subject_id = ${linkId} AND o.kind = 'checks_sent' AND o.observed_at >= ${since}
+            ORDER BY o.observed_at`,
+        )
+
+      /**
+       * Checks handed to the person are theirs: a message that told the lead to fix them, waiting still for its next turn, is
+       * withdrawn, so a lead started later for something else doesn't take it up and push a fix of its own.
+       */
+      const withdrawChecks = (linkId: string) =>
+        Effect.gen(function* () {
+          for (const one of yield* checksSent(linkId)) {
+            if (one.state !== 'queued' && one.state !== 'noted') continue
+            const revision = yield* change('user_inputs', one.id, { state: 'withdrawn' })
+            yield* fact({
+              projectId: one.projectId as ProjectId,
+              aggregateType: 'user_input',
+              aggregateId: one.id,
+              revision,
+              type: 'user_input.withdrawn',
+              actorId: instance.systemId,
+            })
+          }
         })
 
       /** Where the checks that failed on one of a task's pull requests stand (`fixesOf`): null where it isn't open, or its task settled. */
@@ -5298,24 +5368,29 @@ export class Changes extends Context.Service<
        */
       const tellLead = (link: LinkRow, parts: ReadonlyArray<string>, wake = false, how: 'turn' | 'note' = 'turn') =>
         Effect.gen(function* () {
-          if (parts.length === 0) return
+          if (parts.length === 0) return true
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string; state: string }>`
             SELECT t.id, k.state FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.task_id = ${link.taskId} AND t.kind = 'task'`
-          if (thread === undefined || !['open', 'done'].includes(thread.state)) return
+          if (thread === undefined || !['open', 'done'].includes(thread.state)) return false
           const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(link.snapshot)))
           const note = how === 'note' || thread.state === 'done' || seen?.state === 'merged' || seen?.state === 'closed'
           const running = Option.isSome(yield* sessions.running(thread.id))
           // A note is kept whatever: the lead reads it with its next turn, in this session or the next.
-          if (!running && !wake && !note) return
-          yield* sessions.send({
+          if (!running && !wake && !note) return false
+          const sent = yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: thread.id, heard: link.id }, undefined, instance.systemId),
             threadId: thread.id,
             body: parts.join('\n\n'),
             quiet: true,
             note,
           })
-          if (!running && !note) yield* sessions.startLast(thread.id)
+          // Which message told it this pull request's checks failed, by this link, not its words: another repository's pull
+          // request can have the same number (`toldSince`), and a hand-off withdraws it (`withdrawChecks`).
+          if (parts.some((part) => part.startsWith('Checks failed')))
+            yield* heard(link, 'checks_sent', `sent:${sent.inputId}`, { inputId: sent.inputId })
+          // Whether its lead takes it: one with no session to start again from doesn't.
+          return running || note || (yield* sessions.startLast(thread.id))
         })
 
       /**
@@ -5735,6 +5810,10 @@ export class Changes extends Context.Service<
             addressed || (after.state === 'open' && alone && !rounds && !forShip),
             after.state === 'open' ? 'turn' : 'note',
           )
+          // Failing checks its lead was to see through but was never told, as when an earlier look heard them and ended before it
+          // told the lead: told now, or handed to the person, never neither.
+          if (now.state === 'open' && !held && failedNow === null && !rerunning && !rounds && !forShip)
+            yield* tellUntold(link, name, host, repository, now.target || repository.defaultBranch)
           if (now.state === 'open' && !held)
             yield* bringTogether(link, now.headSha, now.url).pipe(
               Effect.catchCause((cause) =>
@@ -7479,6 +7558,58 @@ export class Changes extends Context.Service<
             left.push({ link, snapshot, told })
           }
           return left
+        })
+
+      /**
+       * Failing checks on a pull request's head that are its lead's to see
+       * through (ADR-070), with nothing on its thread since they failed
+       * (`untold`): a look at the pull request heard them, kept that it told
+       * the lead, and ended before it did, so the next look heard nothing new
+       * and the lead was never told, nor the person. Its lead is told now,
+       * started again if it must be; where that fails, they are the
+       * person's, with a line saying so. Never neither.
+       */
+      const tellUntold = (link: LinkRow, name: string, host: CodeHost, repository: Repository, base: string) =>
+        Effect.gen(function* () {
+          const fixing = yield* fixingOn(link)
+          if (fixing === null || !fixing.unreached || fixing.running) return
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ snapshot: string; url: string }>`
+            SELECT snapshot, json_extract(snapshot, '$.url') AS url FROM external_links WHERE id = ${link.id}`
+          if (row === undefined) return
+          const snapshot = yield* decodeSnapshot(row.snapshot)
+          const sum = snapshot.checks
+          if (sum == null || sum.sha !== snapshot.headSha || sum.outcome !== 'failed') return
+          const told = yield* Effect.gen(function* () {
+            // Told already, its message waiting for a lead whose session never started, or went: started again for it, not told twice.
+            const waiting = (yield* checksSent(link.id)).find((one) => one.state === 'queued')
+            if (waiting !== undefined) {
+              return Option.isSome(yield* sessions.running(waiting.threadId)) || (yield* sessions.startLast(waiting.threadId))
+            }
+            const failed = yield* failedOn(link, host, repository)
+            const logs = failed?.logs ?? []
+            const reran = yield* ranAgain(link, sum.sha)
+            const workspace = yield* worktreeOf(link.taskId, row.url).pipe(Effect.orElseSucceed(() => undefined))
+            const branch = workspace === undefined ? null : yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
+            yield* heard(link, 'checks_told', `told:${sum.sha}${reran?.again ?? ''}`, { sha: sum.sha, branch })
+            return yield* tellLead(
+              link,
+              [checksForLeadAlone({ ...sum, list: sum.list ?? [] }, name, logs, FIX_ROUNDS - fixing.failed + 1, base)],
+              true,
+            )
+          }).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not tell the lead its checks failed', cause), false)))
+          if (told) return
+          // The person's, with the line saying so, or neither: kept together, so a hand-off is never left without its line.
+          const why = unreachedLine(sum.failing)
+          const at = yield* timestamp
+          yield* sql.withTransaction(
+            Effect.all([
+              heard(link, 'checks_handed', `handed:${sum.sha}:${at}`, { sha: sum.sha, why }),
+              withdrawChecks(link.id),
+              sayOn(link, why),
+            ]),
+          )
+          yield* touchCard(link.taskId)
         })
 
       /*
@@ -9537,7 +9668,9 @@ export class Changes extends Context.Service<
                 : {
                     open: all.some((one) => one.open),
                     running: all.some((one) => one.running),
-                    withLead: all.some((one) => one.open && one.failing),
+                    withLead: all.some((one) => one.open && one.failing && !one.untold),
+                    untold: all.some((one) => one.untold),
+                    onIt: all.some((one) => one.open && !one.untold),
                     why: all.find((one) => one.why !== null)?.why ?? null,
                     spent: all.some((one) => one.given),
                     failuresGo: all.some((one) => one.goes),

@@ -15,6 +15,7 @@ import { hostNameOf, partsOf, trackersOf, trackerUrlOf } from '../src/renderer/f
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { keys } from '../src/renderer/data/reads'
+import { locallyReading, queuedOf, queueShown, readingLocallyOf } from '../src/renderer/shared/items'
 import {
   card,
   change,
@@ -280,6 +281,28 @@ describe('the Talk room’s model, once the thread is read', () => {
     expect(await act(async () => result.current.say('Plan it', null))).toBe(true)
     expect(client.startSession).not.toHaveBeenCalled()
     expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Plan it', disposition: 'after_current' })
+  })
+
+  it('releases an accepted idle send when no coordinator session appears, even before its stored copy arrives', async () => {
+    const { client, emit, result } = read({ accepting: 'now', session: null })
+    await waitFor(() => expect(result.current.coordinator).not.toBeNull())
+    expect(await act(async () => result.current.say('No session', null))).toBe(true)
+    const optimistic = result.current.coordinator!.items.at(-1)!
+    expect(locallyReading(optimistic)).toBe(true)
+    await waitFor(() => expect(locallyReading(optimistic)).toBe(false))
+    await waitFor(() => expect(result.current.coordinator?.items.at(-1)).toMatchObject({ input: { claimed: false } }))
+    const stored = { ...items.you('No session', { state: 'queued', interrupting: false }), id: 'not-started', sequence: 1 }
+    vi.mocked(client.getThreadItem).mockResolvedValue(stored)
+    act(() => emit(changed('thread_item', stored.id, 'thc', 'p1')))
+    await waitFor(() => expect(result.current.coordinator?.items.some((item) => item.id === stored.id)).toBe(true))
+    const head = result.current.coordinator!
+    expect(
+      queuedOf(
+        head.items,
+        queueShown(head.session, result.current.pending, head.accepting, head.items),
+        readingLocallyOf(head.session, head.accepting),
+      ).map((item) => item.text),
+    ).toEqual(['No session'])
   })
 
   it('shows a dictated message as dictated while it is on its way, and takes back nothing still on its way', async () => {

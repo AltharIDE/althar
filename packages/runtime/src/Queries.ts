@@ -339,6 +339,7 @@ interface ItemRow {
   /** The model its turn ran on, as the turn was given; null where no agent wrote it or it wasn't recorded. */
   readonly model?: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
+  readonly inputClaimed?: number
   readonly disposition: string | null
   /** For a message the person said: some of it was dictated. */
   readonly dictated?: number | null
@@ -657,6 +658,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             : {
                 state: row.inputState,
                 interrupting: row.disposition === 'interrupt_and_continue',
+                ...(row.inputClaimed === 1 ? { claimed: true } : {}),
                 ...(row.dictated === 1 ? { dictated: true } : {}),
               },
       }
@@ -1323,6 +1325,8 @@ export class Queries extends Context.Service<
               -- so an earlier round would take the name of the model it moved to. Else the session's, as before.
               COALESCE(d.model, s.model) AS model,
               u.state AS input_state, u.disposition, u.dictated, i.created_at,
+              EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries td ON td.id = di.delivery_id
+                WHERE di.user_input_id = u.id AND td.state IN ('pending', 'delivered')) AS input_claimed,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
@@ -2559,8 +2563,8 @@ export class Queries extends Context.Service<
             FROM threads h WHERE h.project_id = ${task.projectId} AND h.kind = 'coordinator' LIMIT 1`
           const madeInTurn = madeIn?.madeInTurn ?? 0
           const madeInOpenTurn = madeIn?.madeInOpenTurn ?? 0
-          const [latest] = yield* sql<{ content: string }>`
-            SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
+          const [latest] = yield* sql<{ content: string; sequence: number }>`
+            SELECT content, sequence FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
           // A conflict round: its lead is at work on it, though between turns, or it is the person's now.
           const round = yield* (yield* Changes).conflictStanding(taskId)
@@ -2694,6 +2698,26 @@ export class Queries extends Context.Service<
                   by: lastSaid.kind === 'user_message' ? ('person' as const) : ('lead' as const),
                   said: (lastSaid.text ?? '').trim().split('\n')[0]?.slice(0, 200) ?? '',
                 }
+          // An aside's answer: its lead's latest report, unless the person asked it more since, when it is what its lead said
+          // after they last did. Words its lead adds after reporting, with nothing asked between, only acknowledge the report.
+          const [since] =
+            task.shelf === 'scratch'
+              ? yield* sql<{ askedAt: number | null; text: string | null }>`
+                  SELECT u.sequence AS askedAt, (SELECT json_extract(a.content, '$.text') FROM thread_items a
+                    WHERE a.thread_id = ${task.threadId} AND a.kind = 'agent_message' AND a.sequence > u.sequence
+                      AND trim(coalesce(json_extract(a.content, '$.text'), '')) != ''
+                    ORDER BY a.sequence DESC LIMIT 1) AS text
+                  FROM (SELECT max(sequence) AS sequence FROM thread_items
+                    WHERE thread_id = ${task.threadId} AND kind = 'user_message') u`
+              : []
+          const reported = latest === undefined ? '' : text(parse(latest.content), 'summary').trim()
+          const askedSince = since?.askedAt != null && (latest === undefined || since.askedAt > latest.sequence)
+          const answer =
+            task.shelf !== 'scratch'
+              ? undefined
+              : askedSince || reported === ''
+                ? (since?.text ?? '').trim().split('\n')[0]?.slice(0, 400) || (reported === '' ? undefined : reported)
+                : reported
           // An aside opened with + whose person hasn't said anything in it yet: its lead waits for their first words.
           const [unsaid] =
             task.shelf === 'scratch' && exchange === undefined
@@ -2998,6 +3022,7 @@ export class Queries extends Context.Service<
             ...(task.issueDrafts + task.issueChanges > 0 ? { issues: { drafts: task.issueDrafts, changes: task.issueChanges } } : {}),
             ...(exchange === undefined ? {} : { latest: exchange }),
             ...(unsaid?.unsaid === 1 ? { unsaid: true } : {}),
+            ...(answer === undefined ? {} : { answer }),
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step:
               task.step ??
@@ -3011,7 +3036,8 @@ export class Queries extends Context.Service<
                     ? 'conflict'
                     : roundChecks && !busy
                       ? 'checks_running'
-                      : seeing || fixing?.open === true
+                      : // Only while its lead is on them: failing checks it was never told are nobody's yet (`untold`).
+                        (seeing && fixing?.untold !== true) || fixing?.onIt === true
                         ? busy || !checksRun
                           ? 'checks'
                           : 'checks_running'

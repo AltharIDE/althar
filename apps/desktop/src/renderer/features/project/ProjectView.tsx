@@ -1,5 +1,6 @@
 import { MessageMotion } from '../../shared/MessageMotion'
 import { useSearchReveal } from '../finder/revealSearch'
+import { useCoordinatorWanted } from '../../shared/openCoordinator'
 import { reveal } from '../task/reveal'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
@@ -36,7 +37,7 @@ import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, draftOf as draftNow, setDraftDictated, useSetDraft } from '../../shared/drafts'
 import { DraftComposer } from '../../shared/DraftComposer'
 import { pillOf, runIdOf } from '../../shared/running'
-import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, readingLocallyOf, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
@@ -99,8 +100,10 @@ import {
   AskInAside,
   asidesText,
   COORDINATOR,
+  opensInPlace,
   useAsideMoves,
   useAsides,
+  withOpenAside,
 } from './Asides'
 import { coordinatorSigned } from '../../shared/signed'
 import { ChangesCard, type ChangesActions } from '../../shared/ChangesCard'
@@ -520,20 +523,31 @@ export function ProjectView({
   // "Help me fix it" on a failed run: a prompt for the composer, unsent.
   const helpMe = useHelpMeFix(draftOf, busy, voice.inputRef)
   const steers = useSendMidTurn()?.to === 'steer'
-  const queue = queueShown(session, model.pending, coordinator?.accepting)
+  const queue = queueShown(session, model.pending, coordinator?.accepting, coordinator?.items)
   // What the coordinator's thread is drawn from, kept while its items and its turn are: its words streaming, its commands
   // printing and its clock ticking draw the thread alone (LiveBlocks), not the project.
   const coordinatorItems = coordinator?.items
   const turnStarted = session?.turnStartedAt ?? null
   const turnEnded = session?.turnEndedAt ?? null
-  const reading = readingNow(session, model.pending)
+  const reading = readingNow(session, model.pending, false, coordinator?.accepting)
+  const readingLocally = readingLocallyOf(session, coordinator?.accepting)
   const turns = coordinator?.turns
   const coordinatorSource = useMemo(
     () =>
       coordinatorItems === undefined
         ? null
-        : { items: coordinatorItems, turnRunning: busy, turnStarted, reading, turnEnded, worktree: null, queue, turns: turnsById(turns) },
-    [coordinatorItems, busy, turnStarted, reading, turnEnded, queue, turns],
+        : {
+            items: coordinatorItems,
+            turnRunning: busy,
+            turnStarted,
+            reading,
+            readingLocally,
+            turnEnded,
+            worktree: null,
+            queue,
+            turns: turnsById(turns),
+          },
+    [coordinatorItems, busy, turnStarted, reading, readingLocally, turnEnded, queue, turns],
   )
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
@@ -560,6 +574,11 @@ export function ProjectView({
     moves: asideMoves,
   })
   const aside = asides.open
+  // Words put in the coordinator's composer from elsewhere (Run's Ask): its own conversation shows, over any aside.
+  useCoordinatorWanted(about, () => {
+    asides.back()
+    setRoom(Room.Talk)
+  })
   // A new aside's thread: what the coordinator's composer quotes into it, with no turn of its own yet.
   const asideItems = asides.items
   const newAside = useMemo(() => ({ items: asideItems, turnRunning: false, worktree: null }), [asideItems])
@@ -593,6 +612,10 @@ export function ProjectView({
     onCreateBranch: (planId, steps, end, repositoryId, branch) =>
       void model.changePlanToNewBranch(planId, steps, end, repositoryId, branch),
     onOpen: onTask,
+    // An aside opens where its pill does, over the coordinator's conversation, waiting on the person or not; one that left
+    // Scratch, or was cleared, opens as a task.
+    onOpenAside: (taskId, threadId) =>
+      (seen?.tasks ?? NO_TASKS).some((one) => one.taskId === taskId && opensInPlace(one)) ? asides.pick(taskId) : onTask(threadId),
     onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // Every waiting card has the same holders, so only the newest says them.
@@ -693,7 +716,7 @@ export function ProjectView({
   // Out of the queue and in the composer at once; one the coordinator had already read comes back where it was, said why,
   // and the composer goes back to what it held, unless written in since.
   const edit = (id: string) => {
-    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
+    const said = queuedOf(coordinator?.items ?? [], queue, readingLocally).find((message) => message.id === id)
     // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
     if (said === undefined || !images.fits(said)) return
     let was: string | null = null
@@ -719,7 +742,7 @@ export function ProjectView({
   // A queued message goes to the coordinator now, interrupting it, rather than when it is done: out of the queue, and said
   // again, at once. One it has already read stays as it was; one Althar didn't take goes back in the composer.
   const sendQueuedNow = (id: string) => {
-    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
+    const said = queuedOf(coordinator?.items ?? [], queue, readingLocally).find((message) => message.id === id)
     if (said === undefined) return
     model.sayQueuedNow(id, said.text, outgoingOf(said), () => {
       setDraft((current) => withQueued(current, said.text))
@@ -812,7 +835,7 @@ export function ProjectView({
         onRemoveComment={(id) => drop(draftOf, id)}
         {...(busy && talkingTo.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy && talkingTo.kind !== 'new'}
-        queued={talkingTo.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue)}
+        queued={talkingTo.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue, readingLocally)}
         onEditQueued={edit}
         onSendQueuedNow={sendQueuedNow}
         onUnqueue={(id) => void model.takeBack(id)}
@@ -1024,7 +1047,7 @@ export function ProjectView({
                       <Now ticking every={ticking ? SECOND : MINUTE}>
                         {(now) => (
                           <AsidesBar
-                            scratch={lanes.scratch}
+                            scratch={withOpenAside(lanes.scratch, aside, seen?.tasks ?? NO_TASKS)}
                             open={aside}
                             first={asides.first}
                             title={asides.title}

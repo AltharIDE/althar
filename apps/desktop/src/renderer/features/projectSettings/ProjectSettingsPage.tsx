@@ -167,6 +167,8 @@ function SectionBody({
           runnables={runnables}
           repositories={repositories}
           worktrees={model.project?.worktrees ?? null}
+          {...(model.rules === null ? {} : { worksIn: model.rules.worksIn })}
+          onWorksIn={() => onSection('tasks')}
         />
       )
     case 'notes':

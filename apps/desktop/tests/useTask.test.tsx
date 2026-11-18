@@ -10,6 +10,7 @@ import { doing } from '../src/renderer/features/task/actions'
 import { presses, settleText, type TaskModel, useTask } from '../src/renderer/features/task/useTask'
 import { change, changed, fakeClient, items, snapshot } from './fixtures'
 import { servicesFor } from './render'
+import { queuedOf, queueShown, readingLocallyOf } from '../src/renderer/shared/items'
 
 /*
  * A task's view model on its own, for what its screen can't press on cue:
@@ -148,6 +149,26 @@ describe('opening the task’s first or next pull request', () => {
 })
 
 describe('what a task hears', () => {
+  it('puts an accepted message in the queue if its lead never starts, even while start is pending', async () => {
+    const { client, emit, result, unmount } = reading({ session: null, accepting: 'now' })
+    vi.mocked(client.startSession).mockImplementation(() => never<string>())
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    act(() => void result.current.send('No lead', { agentId: 'codex', model: null, effort: null }))
+    await waitFor(() => expect(client.startSession).toHaveBeenCalled())
+    const stored = { ...items.you('No lead', { state: 'queued', interrupting: false }), id: 'not-started-task', sequence: 1 }
+    vi.mocked(client.getThreadItem).mockResolvedValue(stored)
+    act(() => emit(changed('thread_item', stored.id, 'th1', 'p1')))
+    await waitFor(() => expect(result.current.snapshot?.items.some((item) => item.id === stored.id)).toBe(true))
+    await waitFor(() => {
+      const head = result.current.snapshot!
+      expect(head.items.find((item) => item.id === stored.id)).toMatchObject({ input: { claimed: false } })
+      const shown = queueShown(head.session, result.current.pending, head.accepting, head.items)
+      expect(queuedOf(head.items, shown, readingLocallyOf(head.session, head.accepting)).map((item) => item.text)).toEqual(['No lead'])
+    })
+    expect(result.current.pending).toBe(true)
+    unmount()
+  })
+
   it('keeps its launches where the project’s runs that changed are another project’s', async () => {
     const launch = {
       id: 'proc_1',
