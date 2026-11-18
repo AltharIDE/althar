@@ -314,12 +314,15 @@ export class TaskActions extends Context.Service<
             projectId: ProjectId
             threadId: string
             change: number
+            pullOpen: number
             reviews: number
             answered: number
           }>`
             SELECT k.id, k.slug, k.title, k.project_id, t.id AS thread_id,
               CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
                 THEN 0 ELSE 1 END AS change,
+              EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change'
+                AND coalesce(json_extract(l.snapshot, '$.state'), 'open') = 'open') AS pull_open,
               EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews,
               ${sql.unsafe(answeredIn('k'))} AS answered
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
@@ -529,8 +532,9 @@ export class TaskActions extends Context.Service<
                 : nothing(`${task.slug} can’t be marked done yet: it is still at work, or something on it waits on the person.`)
             }
             case 'keep': {
-              if (task.change === 1)
-                return nothing(`${task.slug} is a change: it waits on its pull request, not in Needs you, so there is nothing to keep.`)
+              // Any kind keeps, a prototype or a chat ending on its branch included; one with its pull request open waits on that.
+              if (task.pullOpen === 1)
+                return nothing(`${task.slug} has its pull request open: it waits on that, to merge or close, so there is nothing to keep.`)
               if (standing.state !== 'open') return nothing(`${task.slug} is settled already.`)
               return (yield* tasks.keep({ envelope: yield* said('task.keep'), taskId: task.id }))
                 ? did(`Kept ${task.slug} for later: out of Needs you as it is, under Kept for later. Writing to it brings it back.`)

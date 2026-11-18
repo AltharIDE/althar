@@ -240,9 +240,9 @@ export class Tasks extends Context.Service<
       readonly clear?: boolean
     }): Effect.Effect<boolean, unknown>
     /**
-     * Keeps a finished task that isn't a change for later, as the person said:
-     * out of Needs you as it is, with nothing stopped, not settled. A quick
-     * task or a review, open. The person writing to it brings it back
+     * Keeps a finished task for later, as the person said: out of Needs you
+     * as it is, with nothing stopped, not settled. Any kind, open, with no
+     * pull request of its own open. The person writing to it brings it back
      * (`bringBack`). Whether it was kept now.
      */
     keep(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<boolean, unknown>
@@ -728,13 +728,14 @@ export class Tasks extends Context.Service<
           const at = yield* timestamp
           const kept = yield* sql.withTransaction(
             Effect.gen(function* () {
-              const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; change: number }>`
+              const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; open: number }>`
                 SELECT k.project_id, k.state, k.kept_at,
-                  -- A quick task, or a review: a change waits on the person in its own way.
-                  CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
-                    THEN 0 ELSE 1 END AS change
+                  -- Any kind keeps, a prototype or a chat ending on its branch included: only a pull request of its own still open
+                  -- waits on the person in its own way, to accept.
+                  EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change'
+                    AND coalesce(json_extract(l.snapshot, '$.state'), 'open') = 'open') AS open
                 FROM tasks k WHERE k.id = ${input.taskId}`
-              if (task === undefined || task.state !== 'open' || task.keptAt !== null || task.change === 1) return false
+              if (task === undefined || task.state !== 'open' || task.keptAt !== null || task.open === 1) return false
               const revision = yield* change('tasks', input.taskId, { keptAt: at })
               yield* fact({
                 projectId: task.projectId,
