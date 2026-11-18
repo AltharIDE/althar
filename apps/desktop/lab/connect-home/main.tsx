@@ -11,6 +11,7 @@ import { ConnectHome } from '../../src/renderer/features/homes/ConnectHome'
 import { useFlow, type Method } from './flow'
 import { failNext, homes } from './host'
 import { DrawingDirection } from './directions/a'
+import { SCENARIOS, type Scenario } from './directions/install'
 import s from './lab.module.css'
 
 /*
@@ -38,6 +39,7 @@ const read = () => {
     d: (DIRECTIONS.find((one) => one.key === now.get('d'))?.key ?? 'a') as Direction,
     m: (now.get('m') === 'ssh' ? 'ssh' : 'pair') as Method,
     first: now.get('first') === '1',
+    x: (SCENARIOS.find((one) => one.key === now.get('x'))?.key ?? 'ok') as Scenario,
   }
 }
 type State = ReturnType<typeof read>
@@ -126,8 +128,10 @@ const drive = async ({ m, first }: State) => {
 function Dialogs({ state, onClose }: { state: State; onClose: () => void }) {
   const flow = useFlow(homes, onClose, state.m)
   if (state.d === '0') return <ConnectHome homes={homes} onClose={onClose} />
-  return <DrawingDirection flow={flow} first={state.first} onClose={onClose} />
+  return <DrawingDirection flow={flow} first={state.first} scenario={state.x} onClose={onClose} />
 }
+
+const next = (x: Scenario) => SCENARIOS[(SCENARIOS.findIndex((one) => one.key === x) + 1) % SCENARIOS.length]!.key
 
 let driven = false
 function Lab() {
@@ -140,6 +144,7 @@ function Lab() {
     const url = new URLSearchParams(location.search)
     url.set('d', merged.d)
     url.set('m', merged.m)
+    url.set('x', merged.x)
     if (merged.first) url.set('first', '1')
     else url.delete('first')
     history.replaceState(null, '', `?${url.toString()}`)
@@ -163,6 +168,7 @@ function Lab() {
       if (key === 's') return set({ m: 'ssh' })
       if (key === 'i') return set({ first: !state.first })
       if (key === 'f') return failNext.set(!failNext.get())
+      if (key === 'x') return set({ x: next(state.x) })
       if (key === 'r') return set({})
     }
     window.addEventListener('keydown', onKey)
@@ -176,7 +182,7 @@ function Lab() {
             <Button onClick={() => set({})}>Connect a home…</Button>
           </div>
         )}
-        {open && <Dialogs key={`${state.d}-${state.m}-${state.first}-${round}`} state={state} onClose={() => setOpen(false)} />}
+        {open && <Dialogs key={`${state.d}-${state.m}-${state.first}-${state.x}-${round}`} state={state} onClose={() => setOpen(false)} />}
       </div>
       <div className={s.bar} role="toolbar" aria-label="Directions">
         {DIRECTIONS.map((one) => (
@@ -195,6 +201,10 @@ function Lab() {
         <span className={s.rule} />
         <button type="button" aria-pressed={state.first} onClick={() => set({ first: !state.first })}>
           <kbd>I</kbd>First home
+        </button>
+        <span className={s.rule} />
+        <button type="button" aria-pressed={state.x !== 'ok'} onClick={() => set({ x: next(state.x) })}>
+          <kbd>X</kbd>Setup: {SCENARIOS.find((one) => one.key === state.x)?.label}
         </button>
         <span className={s.gap} />
         <button type="button" aria-pressed={failing} onClick={() => failNext.set(!failing)}>

@@ -444,51 +444,6 @@
   text-decoration-color: currentColor;
 }
 
-/* installing over SSH, as the check goes */
-.steps {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: -4px 0 0;
-  padding: 10px 12px;
-  border-radius: 10px;
-  list-style: none;
-  background: var(--n-2);
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-.steps li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  line-height: 18px;
-  color: var(--t-2);
-  transition: color var(--enter) var(--ease-out);
-}
-.steps li[data-state='later'] {
-  color: var(--t-4);
-}
-.steps li[data-state='done'] {
-  color: var(--t-3);
-}
-.tick {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 99px;
-  box-shadow: inset 0 0 0 1px var(--line-2);
-}
-.steps li[data-state='done'] .tick {
-  background: var(--live);
-  box-shadow: none;
-  color: var(--paper);
-}
-.steps li[data-state='now'] .tick {
-  box-shadow: none;
-}
-
 /*
  * One page becoming the next (morph in a.tsx): the dialog's box takes its new height, its title and buttons ride
  * with it, the drawing and its two cards move as one, and what's under the drawing crosses over: the old page leaves
@@ -600,7 +555,6 @@
 @media (prefers-reduced-motion: reduce) {
   .board,
   .route,
-  .steps li,
   .card[data-home],
   .reveal,
   .node {

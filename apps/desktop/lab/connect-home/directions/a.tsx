@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import { Button, Code, CopyButton, Dialog, Icon, LiveDot, ProjectInk, ProjectMark, Spinner } from '@althar/ui'
 
 import type { Flow } from '../flow'
+import { InstallDone, installActions, InstallSteps, type Scenario, useInstall } from './install'
 import { Chunked, CodeField, HostField, LaterProblem, MethodSwitch, NameField, Options } from './parts'
 import s from './a.module.css'
 
@@ -38,12 +39,40 @@ const SAMPLE = [
   { id: 'prj_atlas', ink: ProjectInk.Indigo },
 ]
 
-export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: boolean; onClose: () => void }) {
-  const [view, setView] = useState<View>(first ? 'intro' : 'form')
+export function DrawingDirection({
+  flow,
+  first,
+  scenario = 'ok',
+  onClose,
+}: {
+  flow: Flow
+  first: boolean
+  scenario?: Scenario
+  onClose: () => void
+}) {
+  // Reopened after Althar quit midway through setting a home up: it opens where that stopped.
+  const reopened = scenario === 'resume'
+  const [view, setView] = useState<View>(first && !reopened ? 'intro' : 'form')
   const [route, setRoute] = useState<Route>('ssh')
-  // Came through setup over SSH: checking the host is where Althar installs it.
-  const [installs, setInstalls] = useState(false)
-  const stage = view === 'form' ? flow.stage : view
+  // Came through setup over SSH: Althar installs it there, as a run of steps (install.tsx).
+  const [installs, setInstalls] = useState(reopened)
+  const install = useInstall(flow, scenario)
+  useEffect(() => {
+    if (!reopened) return
+    flow.setMethod('ssh')
+    flow.ssh.setTarget('deploy@vps.example.com')
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- once, as it opens
+  }, [])
+  const installing = view === 'form' && installs && flow.method === 'ssh' && install.phase !== 'idle' && flow.found === null
+  const stage = !installing
+    ? view === 'form'
+      ? flow.stage
+      : view
+    : install.phase === 'failed'
+      ? 'refused'
+      : install.phase === 'running' || install.phase === 'reconnecting' || install.phase === 'done'
+        ? 'checking'
+        : 'draft'
   const go = () => {
     if (view === 'intro') return morph(() => setView('setup'))
     if (view === 'setup')
@@ -52,8 +81,16 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
         setInstalls(route === 'ssh')
         setView('form')
       })
+    if (installs && flow.method === 'ssh' && flow.found === null) {
+      if (install.phase === 'idle') return flow.ssh.target.trim() === '' ? undefined : install.start()
+      if (install.phase === 'failed' && install.problem?.retry) return install.retry()
+      if (install.phase === 'trust') return install.trust()
+      if (install.phase === 'stopped') return install.resume()
+      return
+    }
     flow.submit()
   }
+  const run = installs && flow.method === 'ssh' && flow.found === null ? installActions(install) : null
   const back = () => morph(() => setView(first ? 'intro' : 'form'))
   const title = view === 'intro' ? 'Your first home' : view === 'setup' ? 'Set up a home' : 'Connect a home'
   return (
@@ -61,12 +98,32 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
       title={title}
       width={660}
       className={s.dialog}
-      holding={flow.busy}
+      holding={flow.busy || install.busy}
+      tall={installing}
       onClose={onClose}
       onBack={view === 'setup' ? back : undefined}
       onSubmit={go}
       actions={
-        view === 'form' ? (
+        view === 'form' && installs && flow.method === 'ssh' && flow.found === null ? (
+          <>
+            {run?.secondary === 'Stop' ? <Button onClick={install.stop}>Stop</Button> : <Button onClick={onClose}>Cancel</Button>}
+            {run !== null && run.other !== undefined && (
+              <Button variant={run.primary === null ? 'signal' : undefined} onClick={run.other.act}>
+                {run.other.label}
+              </Button>
+            )}
+            {(run === null || run.primary !== null) && (
+              <Button
+                type="submit"
+                variant="signal"
+                busy={run?.busy === true || (install.phase === 'done' && flow.stage === 'checking')}
+                disabled={run?.busy === true || (run === null && flow.ssh.target.trim() === '')}
+              >
+                {run === null ? (install.phase === 'done' ? 'Reading its identity…' : 'Set it up') : run.primary}
+              </Button>
+            )}
+          </>
+        ) : view === 'form' ? (
           <>
             <Button onClick={onClose}>Cancel</Button>
             {flow.action}
@@ -110,12 +167,17 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
         {view === 'setup' && <Setup route={route} onRoute={(next) => morph(() => setRoute(next))} />}
         {view === 'form' && (
           <div className={s.form} key="form">
-            <MethodSwitch flow={flow} className={s.method} onChange={(next) => morph(() => flow.setMethod(next))} />
+            {!installing && install.phase !== 'done' && (
+              <MethodSwitch flow={flow} className={s.method} onChange={(next) => morph(() => flow.setMethod(next))} />
+            )}
             {flow.method === 'ssh' ? (
               <HostField
                 flow={flow}
+                readOnly={install.phase !== 'idle' && install.phase !== 'failed'}
                 focus={!first}
-                help={installs ? 'Althar installs and starts althar-host there, where it isn’t yet.' : undefined}
+                help={
+                  installs && install.phase === 'idle' ? 'Althar installs and starts althar-host there, where it isn’t yet.' : undefined
+                }
               />
             ) : (
               <CodeField
@@ -131,20 +193,26 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
                 }
               />
             )}
-            {installs && flow.method === 'ssh' && flow.stage === 'checking' && <Installing where={flow.where} />}
-            {flow.method === 'ssh' && flow.found === null && flow.stage !== 'checking' && <Options flow={flow} />}
+            {installs && flow.method === 'ssh' && install.phase !== 'idle' && flow.found === null && <InstallSteps install={install} />}
+            {flow.method === 'ssh' && flow.found === null && flow.stage !== 'checking' && install.phase === 'idle' && (
+              <Options flow={flow} />
+            )}
             {flow.found !== null && (
               <>
-                <p className={s.note}>
-                  {flow.method === 'ssh' ? (
-                    <>
-                      {installs && 'It’s running there now. '}On the host, <Code>althar-host status</Code> prints the same identity. Connect
-                      only if it does.
-                    </>
-                  ) : (
-                    'Tasks and conversations are available. Approvals need a trusted device.'
-                  )}
-                </p>
+                {installs && flow.method === 'ssh' && install.phase === 'done' ? (
+                  // Althar made this home itself, over a key you trusted: there's no identity to compare.
+                  <InstallDone install={install} />
+                ) : (
+                  <p className={s.note}>
+                    {flow.method === 'ssh' ? (
+                      <>
+                        On the host, <Code>althar-host status</Code> prints the same identity. Connect only if it does.
+                      </>
+                    ) : (
+                      'Tasks and conversations are available. Approvals need a trusted device.'
+                    )}
+                  </p>
+                )}
                 <NameField flow={flow} />
               </>
             )}
@@ -246,28 +314,6 @@ function RouteCard({
         <span className={s.routeLine}>{line}</span>
       </span>
     </button>
-  )
-}
-
-const STEPS = ['Reaching the server', 'Installing althar-host', 'Starting its service', 'Reading its identity']
-
-/** Setting the home up over SSH, as the check goes: each step ticks as it's done. */
-function Installing({ where }: { where: string }) {
-  const [at, setAt] = useState(new URLSearchParams(location.search).has('s') ? 2 : 0)
-  useEffect(() => {
-    if (at >= STEPS.length - 1) return
-    const timer = setTimeout(() => setAt((was) => was + 1), 320)
-    return () => clearTimeout(timer)
-  }, [at])
-  return (
-    <ol className={s.steps} aria-live="polite" aria-label={`Setting up ${where}`}>
-      {STEPS.map((step, index) => (
-        <li key={step} data-state={index < at ? 'done' : index === at ? 'now' : 'later'}>
-          <span className={s.tick}>{index < at ? <Icon name="check" size={10} /> : index === at ? <Spinner size="small" /> : null}</span>
-          {step}
-        </li>
-      ))}
-    </ol>
   )
 }
 

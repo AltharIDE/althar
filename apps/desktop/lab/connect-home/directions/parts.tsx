@@ -42,7 +42,17 @@ export function Labelled({ label, htmlFor, children, under }: { label: string; h
   )
 }
 
-export function HostField({ flow, focus = true, help }: { flow: Flow; focus?: boolean; help?: ReactNode }) {
+export function HostField({
+  flow,
+  focus = true,
+  help,
+  readOnly = false,
+}: {
+  flow: Flow
+  focus?: boolean
+  help?: ReactNode
+  readOnly?: boolean
+}) {
   const id = useId()
   const problem = flow.method === 'ssh' ? flow.problem : null
   return (
@@ -55,7 +65,7 @@ export function HostField({ flow, focus = true, help }: { flow: Flow; focus?: bo
         id={id}
         value={flow.ssh.target}
         invalid={problem !== null}
-        readOnly={flow.stage === 'connecting'}
+        readOnly={readOnly || flow.stage === 'connecting'}
         placeholder="user@host, or a Host from your SSH config"
         spellCheck={false}
         autoComplete="off"
