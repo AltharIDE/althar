@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import { bumpRevision, Ledger } from '@althar/persistence-sqlite'
 import { cleanUp, removeFully, spawnOwned } from '@althar/provider-adapters'
-import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Schema, Scope } from 'effect'
+import { Clock, Context, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
@@ -1145,15 +1145,16 @@ export class Launches extends Context.Service<
       /**
        * What becomes of a run a task kept once its worktrees went: `keep` where every file it names is on its repository's
        * default branch, as fetched or here, or where what it needs can't be told for sure; `drop` where it names none, or one
-       * that isn't there; `later` where its repository can't be read here now (on another device, its folder or branch
-       * missing), to look again as Althar next starts.
+       * its branch, read, doesn't have; `later` where its repository, its branch or a folder it runs in can't be read here
+       * now (on another device, missing, or git failing), to look again as Althar next starts.
        */
       const fateOf = (binding: Binding | undefined, command: string, within: string | null) =>
         Effect.gen(function* () {
           const named = filesNamed(command, within)
           if (named === null) return 'keep' as const
-          // A folder outside the repository it runs in: gone, it can't run; there, what it needs there can't be told.
-          if (named.outside.length > 0) return named.outside.every((folder) => existsSync(folder)) ? ('keep' as const) : ('drop' as const)
+          // A folder outside the repository it runs in: there, what it needs there can't be told; not here, it may be another
+          // device's, so it waits for one that has it.
+          if (named.outside.length > 0) return named.outside.every((folder) => existsSync(folder)) ? ('keep' as const) : ('later' as const)
           if (named.files.length === 0) return 'drop' as const
           if (binding === undefined || !existsSync(binding.repository)) return 'later' as const
           const { remote, base } = yield* startOf({
@@ -1171,14 +1172,27 @@ export class Launches extends Context.Service<
             )
               refs.push(ref)
           if (refs.length === 0) return 'later' as const
-          // Its branch read, a file it can't find there isn't there.
+          // Its branch read, a file it lists nothing for isn't there; where git can't list it, it can't be told yet.
           for (const ref of refs) {
-            const holds = yield* Effect.forEach(named.files, (file) => git(binding.repository, 'cat-file', '-e', `${ref}:${file}`), {
-              discard: true,
-            }).pipe(
-              Effect.as(true),
-              Effect.orElseSucceed(() => false),
-            )
+            let holds = true
+            for (const file of named.files) {
+              const listed = yield* git(
+                binding.repository,
+                '--literal-pathspecs',
+                'ls-tree',
+                '-z',
+                '--name-only',
+                '--full-tree',
+                ref,
+                '--',
+                file,
+              ).pipe(Effect.option)
+              if (Option.isNone(listed)) return 'later' as const
+              if (listed.value === '') {
+                holds = false
+                break
+              }
+            }
             if (holds) return 'keep' as const
           }
           return 'drop' as const

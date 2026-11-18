@@ -353,15 +353,19 @@ whoever changes it later. One whose command names files that are all on its
 repository's default branch (its config merged, say) still runs as kept
 there, and belongs to the project from then on; so does one whose files can't
 be told for sure, read as the shell reads it (what the shell works out, such
-as `$HOME`, or a `cd` out of the repository). A command that names no file,
+as `"$CONFIG"`, or a `cd` out of the repository). A command that names no file,
 only a port or a script's name, is taken as the task's own and goes: the
-person keeps it back by hand. Where its repository can't be read on this
-device now, it waits for the next look, as Althar starts. Only a run still as
+person keeps it back by hand. Where its repository, its branch or a folder
+it runs in can't be read on this device now, or git fails reading it, it
+waits for the next look, as Althar starts: only a file the branch, read, lacks
+drops it. Only a run still as
 it was read goes, so one the person changes meanwhile stays, and two sweeps
 at once drop it, and say so, once. Runs kept before a run remembered its task
-are linked to it only where the project's threads name one task: the leads'
-`keep_run` calls that set its command, else the run its task started as it was
-kept. Those of tasks already cleaned up go as Althar starts.
+are linked to it only on evidence of that run: each `project.runnable_kept`
+line that set its name, command and repository, paired with the leads'
+`keep_run` calls it answered, all of one task; else the run its task started,
+by its id, as it was kept. A command kept in two repositories isn't taken for
+the other's. Those of tasks already cleaned up go as Althar starts.
 
 Before a run, a copy with nothing installed is set up first.
 

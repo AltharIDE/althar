@@ -51,6 +51,10 @@ describe('the files a kept run names', () => {
   it("can't tell what the shell works out, a quote never closed, or a cd out of the repository", () => {
     assert.isNull(filesNamed('node "$LAB/run.js"'))
     assert.isNull(filesNamed('node lab/*.js'))
+    // A variable's name alone looks like no file, yet it may be one.
+    assert.isNull(filesNamed('node "$SCRIPT"'))
+    assert.isNull(filesNamed('cd apps/desktop && vp dev --config "$CONFIG"'))
+    assert.isNull(filesNamed('vp dev --config=$CONFIG'))
     assert.isNull(filesNamed('node "lab/run.js'))
     assert.isNull(filesNamed('cd $HOME && node a.js'))
     assert.isNull(filesNamed('cd .. && node a.js'))

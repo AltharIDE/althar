@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -596,6 +596,20 @@ describe('what a project runs', () => {
       yield* callTool(leadOf(working), 'keep_run', { name: 'Kit', command: 'node kit.js' })
       yield* ran(working, 'Kit')
       yield* called(other, elsewhere.projectId, 'node kit.js')
+      // Kit's call, and then the same command kept in a second repository of the project, with no call of its own: the
+      // call answers Kit's line, not the second's, so it says nothing of whose that one is.
+      const instance = yield* Instance
+      const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+      yield* called(working, projectId, 'node kit.js')
+      const second = `repo_${hex()}`
+      yield* sql`INSERT INTO repository_bindings (id, project_id, slug, role, display_name, created_at)
+        SELECT ${second}, project_id, 'second', role, 'Second', created_at FROM repository_bindings WHERE project_id = ${projectId} LIMIT 1`
+      const keptAt = new Date().toISOString()
+      yield* sql`INSERT INTO runnables (id, project_id, binding_id, name, command, position, kept_by_actor_id, created_at)
+        VALUES (${`rnbl_${hex()}`}, ${projectId}, ${second}, 'Kit B', 'node kit.js', (SELECT max(position) + 1 FROM runnables), ${instance.systemId}, ${keptAt})`
+      yield* sql`INSERT INTO record_events (id, project_id, aggregate_type, aggregate_id, aggregate_revision, type, payload, actor_id, occurred_at)
+        VALUES (${`evt_${hex()}`}, ${projectId}, 'project', ${projectId}, 1, 'project.runnable_kept',
+          ${JSON.stringify({ name: 'Kit B', command: 'node kit.js', repository: 'Second' })}, ${instance.systemId}, ${keptAt})`
       // Shared: kept long before another task ran it. Twice: two tasks' leads kept the same command.
       yield* callTool(leadOf(gone), 'keep_run', { name: 'Shared', command: 'node shared.js' })
       yield* sql`UPDATE runnables SET created_at = ${new Date(Date.now() - 600_000).toISOString()} WHERE name = 'Shared'`
@@ -613,10 +627,12 @@ describe('what a project runs', () => {
         [
           ['Lab', gone.taskId],
           ['Kit', working.taskId],
+          ['Kit B', null],
           ['Shared', null],
           ['Twice', null],
         ],
       )
+      yield* sql`DELETE FROM runnables WHERE name = 'Kit B'`
       // Once its worktree went, Althar starting drops what its task kept, and nothing of a task still at work.
       yield* sql`UPDATE workspaces SET state = 'cleaned' WHERE task_id = ${gone.taskId}`
       assert.deepStrictEqual(yield* launches.dropCleanedUp(), ['Lab'])
@@ -635,7 +651,8 @@ describe('what a project runs', () => {
         const projects = yield* Projects
         const instance = yield* Instance
         const sql = yield* SqlClient.SqlClient
-        const { projectId } = yield* open(twoServers())
+        const path = twoServers()
+        const { projectId } = yield* open(path)
         const gone = yield* projects.createTask({
           envelope: yield* Runtime.envelope('task.create', { title: 'Draft a lab' }),
           projectId,
@@ -653,6 +670,23 @@ describe('what a project runs', () => {
           base: string | null
         }>`SELECT id, default_base_ref AS base FROM repository_bindings WHERE project_id = ${projectId}`
         yield* sql`UPDATE repository_bindings SET default_base_ref = 'not-fetched' WHERE id = ${binding?.id ?? ''}`
+        assert.deepStrictEqual(yield* launches.dropCleanedUp(), [])
+        assert.isTrue((yield* tasksOf).every((row) => row.taskId === gone.taskId))
+        // Its branch is there, but git can't read what it holds (its tree lost): that isn't a file missing, so it waits too.
+        const out = (...args: ReadonlyArray<string>) => execFileSync('git', args, { cwd: path, encoding: 'utf8' }).trim()
+        const blob = out('hash-object', '-w', '--stdin', '--path', 'lost.js')
+        const tree = execFileSync('git', ['mktree'], {
+          cwd: path,
+          encoding: 'utf8',
+          input: `100644 blob ${blob}\tlost-${Date.now()}.js\n`,
+        }).trim()
+        const lost = execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit-tree', tree, '-m', 'lost'], {
+          cwd: path,
+          encoding: 'utf8',
+        }).trim()
+        out('update-ref', 'refs/heads/lost', lost)
+        rmSync(join(path, '.git', 'objects', tree.slice(0, 2), tree.slice(2)))
+        yield* sql`UPDATE repository_bindings SET default_base_ref = 'lost' WHERE id = ${binding?.id ?? ''}`
         assert.deepStrictEqual(yield* launches.dropCleanedUp(), [])
         assert.isTrue((yield* tasksOf).every((row) => row.taskId === gone.taskId))
         yield* sql`UPDATE repository_bindings SET default_base_ref = ${binding?.base ?? null} WHERE id = ${binding?.id ?? ''}`

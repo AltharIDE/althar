@@ -488,6 +488,8 @@ describe('a task whose folder was removed', () => {
       yield* callTool(lead, 'keep_run', { name: 'Drafting lab', command: 'node lab/drafting.js' })
       yield* callTool(lead, 'keep_run', { name: 'Merged lab', command: 'cd lab && node merged.js' })
       yield* callTool(lead, 'keep_run', { name: 'Spaced lab', command: 'node "lab/my lab.js"' })
+      // A variable's name looks like no file, yet the shell may make it one on the default branch: it stays.
+      yield* callTool(lead, 'keep_run', { name: 'Config lab', command: 'vp dev --config "$CONFIG"' })
       yield* callTool(lead, 'keep_run', { name: 'Storybook 6136', command: 'npm run storybook -- --port 6136' })
       yield* callTool(lead, 'keep_run', { name: 'Notes', command: 'node lab/notes.js' })
       yield* callTool(leadOf(other.taskId, other.threadId), 'keep_run', { name: 'Other lab', command: 'node lab/other.js' })
@@ -517,6 +519,7 @@ describe('a task whose folder was removed', () => {
         [
           ['Merged lab', 'agent'],
           ['Spaced lab', 'agent'],
+          ['Config lab', 'agent'],
           ['Notes', 'person'],
           ['Other lab', 'agent'],
           ['Mine', 'person'],

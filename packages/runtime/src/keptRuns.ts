@@ -155,10 +155,11 @@ export const filesNamed = (command: string, within: string | null = null): Named
     // In a folder outside the repository, what it names there is that folder's.
     if (outsideAt !== null) continue
     for (const word of words) {
+      // What the shell works out (`"$CONFIG"`, `lab/*.ts`) may be any file, whatever it looks like unexpanded.
+      if (word.dynamic) return null
       // `--config=lab/x.ts` names what follows the `=`.
       const value = word.text.startsWith('-') && word.text.includes('=') ? word.text.slice(word.text.indexOf('=') + 1) : word.text
       if (!fileLike(value) || posix.isAbsolute(value)) continue
-      if (word.dynamic) return null
       const path = posix.join(folder, value)
       if (path === '..' || path.startsWith('../')) continue
       files.add(path)
