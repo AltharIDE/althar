@@ -150,8 +150,7 @@ const declared = (context, node, name) => {
     const definition = variable.defs.at(-1)?.node
     if (definition === undefined) return undefined
     if (definition.type === 'FunctionDeclaration') return definition
-    if (definition.type === 'VariableDeclarator' && definition.init !== null && FUNCTIONS.has(definition.init.type))
-      return definition.init
+    if (definition.type === 'VariableDeclarator' && definition.init !== null && FUNCTIONS.has(definition.init.type)) return definition.init
     return undefined
   }
   return undefined
@@ -209,7 +208,7 @@ export const pressAtOnce = defineRule({
         }
         if (handler.type !== 'ArrowFunctionExpression' && handler.type !== 'FunctionExpression') return
         const how = waitsFirst(handler.body)
-        if (how !== undefined) return void context.report({ node, messageId: 'waits', data: { name: node.name.name, how } })
+        if (how !== undefined) return context.report({ node, messageId: 'waits', data: { name: node.name.name, how } })
         const called = onlyCall(handler.body)
         const through = called === undefined ? undefined : waitsOf(handler, called)
         if (through !== undefined)

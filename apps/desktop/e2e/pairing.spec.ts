@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -54,11 +54,13 @@ const portNumber = () =>
     })
   })
 
-// Off CI on a Mac this would use the person's real login keychain, and with the test's temporary HOME macOS finds none and
-// pops a "Keychain Not Found" dialog on their screen. CI's runner has a disposable keychain, so it runs there.
+// On a Mac the native keyring is the person's login keychain; with the test's temporary HOME macOS finds none and pops a
+// "Keychain Not Found" dialog. So it runs only where the workflow made a disposable keychain and named it in
+// ALTHAR_E2E_ISOLATED_KEYCHAIN (desktop.yml's native pairing job), never on CI=true alone.
+const isolatedKeychain = process.env.ALTHAR_E2E_ISOLATED_KEYCHAIN
 test.skip(
-  process.platform === 'darwin' && process.env.CI !== 'true',
-  "Needs the real macOS keychain: runs on CI only, so no dialog appears on a person's Mac",
+  process.platform === 'darwin' && (isolatedKeychain === undefined || isolatedKeychain === '' || !existsSync(isolatedKeychain)),
+  "Needs a disposable macOS keychain (ALTHAR_E2E_ISOLATED_KEYCHAIN), which only the native pairing CI job makes: it never touches a person's login keychain",
 )
 
 test('pairs a desktop with a separate HTTPS home, reconnects after restart and loses access immediately on revocation', async () => {
@@ -110,7 +112,9 @@ test('pairs a desktop with a separate HTTPS home, reconnects after restart and l
     ALTHAR_NATIVE_KEYRING: '1',
     // macOS resolves the logged-in user's keychain through its home. Keep that OS context on the isolated CI runner;
     // launch still supplies this test's own profile, worktrees and provider home.
-    ...(process.platform === 'darwin' && process.env.CI === 'true' && process.env.HOME !== undefined ? { HOME: process.env.HOME } : {}),
+    ...(process.platform === 'darwin' && isolatedKeychain !== undefined && process.env.HOME !== undefined
+      ? { HOME: process.env.HOME }
+      : {}),
   }
   let {
     electronApp,

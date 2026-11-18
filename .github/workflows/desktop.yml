@@ -193,6 +193,8 @@ jobs:
           security unlock-keychain -p "$password" "$keychain"
           security list-keychains -d user -s "$keychain"
           security default-keychain -d user -s "$keychain"
+          # The spec runs its native macOS part only where this is set.
+          echo "ALTHAR_E2E_ISOLATED_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
           # Grant this test's real Electron binary access to its own fixture secret, avoiding an unattended consent dialog.
           electron="$(node -p 'require("electron")')"
           # The unpackaged binary may initialize OSCrypt under its bundle name before JS applies the app name.
