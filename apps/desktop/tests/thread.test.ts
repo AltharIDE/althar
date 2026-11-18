@@ -15,7 +15,7 @@ import {
   verbFor,
   verbs,
 } from '../src/renderer/shared/thread'
-import { sending, settled } from '../src/renderer/shared/items'
+import { mergeItems, queuedOf, queueShown, readingNow, releaseSending, sending, settled } from '../src/renderer/shared/items'
 import { card, items, NOW } from './fixtures'
 
 const at = () => 'just now'
@@ -178,6 +178,42 @@ describe('a thread as blocks', () => {
     ])
     // With no agent to take it, what waits is in the queue too.
     expect(shown(false, true)).toEqual(shown(true))
+  })
+
+  it('keeps an idle send in the thread through acceptance, claim, and delivery, while later sends wait', () => {
+    const sent = sending([], { text: 'Hello', queued: false, interrupting: false })
+    const optimistic = sent.items[0]!
+    const stored = { ...items.you('Hello', { state: 'queued', interrupting: false }), id: 'stored', sequence: 1 }
+    const claimed = { ...stored, input: { state: 'queued' as const, interrupting: false, claimed: true } }
+    const delivered = { ...stored, input: { state: 'delivered' as const, interrupting: false } }
+    const states = [
+      { item: optimistic, session: null, sending: true, accepting: 'now' as const },
+      { item: stored, session: null, sending: false, accepting: 'now' as const },
+      { item: stored, session: { turnRunning: false, held: false, state: 'starting' }, sending: false, accepting: 'now' as const },
+      { item: claimed, session: { turnRunning: true, held: true, state: 'active' }, sending: false, accepting: 'queued' as const },
+      { item: delivered, session: { turnRunning: true, held: true, state: 'active' }, sending: false, accepting: 'queued' as const },
+    ]
+    mergeItems(sent.items, [stored])
+    for (const state of states) {
+      const queue = queueShown(state.session, state.sending, state.accepting)
+      const reading = readingNow(state.session, state.sending, false, state.accepting)
+      const readingLocally = state.session === null && state.accepting === 'now'
+      expect(queuedOf([state.item], queue, readingLocally)).toEqual([])
+      expect(
+        blocksOf(
+          { ...source([state.item]), turnRunning: state.session?.turnRunning ?? false, queue, reading, readingLocally },
+          new Map(),
+          at,
+        ),
+      ).toContainEqual(expect.objectContaining({ kind: 'you', text: 'Hello', delivery: Delivery.Delivered }))
+    }
+    const waiting = items.you('Later', { state: 'queued', interrupting: false })
+    expect(queuedOf([claimed, waiting], true).map((item) => item.text)).toEqual(['Later'])
+    expect(queueShown(null, false, 'queued')).toBe(true)
+    expect(readingNow(null, false, true, 'now')).toBe(false)
+    expect(queuedOf([waiting], true, true)).toHaveLength(1)
+    releaseSending(sent.id)
+    expect(queuedOf([stored], true, true)).toHaveLength(1)
   })
 
   it('runs a plan step and a tool call only while their turn does', () => {

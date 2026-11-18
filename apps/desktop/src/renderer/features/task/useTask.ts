@@ -32,7 +32,7 @@ import {
 } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
-import { isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { isSending, mergeItems, newestReads, queueShown, releaseSending, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { headsOf } from '../../shared/mergeHere'
 import { commitsToShip } from '../../shared/shipping'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
@@ -776,7 +776,7 @@ export const useTask = (threadId: string): TaskModel => {
   const shown = (
     text: string,
     disposition: 'after_current' | 'interrupt_and_continue',
-    action: (accepted: () => void) => Promise<unknown>,
+    action: (accepted: (reading?: boolean) => void) => Promise<unknown>,
     images: Outgoing | undefined,
     // Behind a turn running it waits its turn; handed to another agent, it is that one's first.
     queued = disposition === 'interrupt_and_continue' || queueShown(snapshot?.session ?? null, true, snapshot?.accepting),
@@ -795,8 +795,12 @@ export const useTask = (threadId: string): TaskModel => {
       return { ...current, items: next.items }
     })
     let accepted = false
-    const accept = () => {
+    const accept = (reading = true) => {
       accepted = true
+      if (!reading) {
+        releaseSending(id)
+        setSnapshot((current) => ({ ...current }))
+      }
     }
     return act(async () => {
       try {
@@ -804,6 +808,10 @@ export const useTask = (threadId: string): TaskModel => {
         accept()
       } catch (failure) {
         if (!accepted) setSnapshot((current) => ({ ...current, items: unsent(current.items, id, text) }))
+        else {
+          releaseSending(id)
+          setSnapshot((current) => ({ ...current }))
+        }
         throw failure
       }
     }, presses.send).then(() => accepted)
@@ -877,7 +885,7 @@ export const useTask = (threadId: string): TaskModel => {
           // Queued first, so the lead that starts reads it in its first turn rather than after one of its own.
           await client.send({ threadId, body, disposition: 'after_current', ...sentWith(images) })
           // Althar has it now: a lead that doesn't start is said, and what was said waits in the queue for the next.
-          accepted()
+          accepted(start !== undefined || snapshot?.session?.held === true)
           if (start === undefined || snapshot === null) return
           // Reopened, it stands where it was, which only the runtime knows: read again.
           const actions = reopening ? (await client.getThread(threadId, { limit: 0 })).task.actions : snapshot.task.actions

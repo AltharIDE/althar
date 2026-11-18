@@ -24,6 +24,10 @@ export const isSending = (id: string) => id.startsWith(SENDING)
  */
 const moves = new Map<string, string>()
 export const messageMove = (item: ThreadItem): string => moves.get(item.id) ?? `message:${item.id}`
+// The window's idle-send guess follows the message when the store's copy replaces it.
+const reading = new Set<string>()
+export const releaseSending = (id: string) => reading.delete(`message:${id}`)
+export const locallyReading = (item: ThreadItem) => reading.has(messageMove(item))
 
 /** A message the window shows the moment it is sent, after what it holds, until the store's copy arrives. */
 export const sending = (
@@ -44,6 +48,7 @@ export const sending = (
 ): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
   sent += 1
   const id = `${SENDING}${sent}`
+  if (!message.queued) reading.add(`message:${id}`)
   const item: ThreadItem = {
     id,
     kind: 'user_message',
@@ -74,6 +79,7 @@ export const sending = (
  * instead, so what shows is what was sent.
  */
 export const unsent = (items: ReadonlyArray<ThreadItem>, id: string, text: string): ReadonlyArray<ThreadItem> => {
+  releaseSending(id)
   if (items.some((item) => item.id === id)) return items.filter((item) => item.id !== id)
   const other = items.find((item) => isSending(item.id) && item.kind === 'user_message' && item.content.text === text)
   return other === undefined ? items : items.filter((item) => item.id !== other.id)
@@ -110,6 +116,7 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
         byId.delete(copy.id)
       }
     }
+    if (item.kind === 'user_message' && item.input?.state !== 'queued') reading.delete(messageMove(item))
     byId.set(item.id, item)
   }
   return [...byId.values()].toSorted((a, b) => a.sequence - b.sequence)
@@ -212,7 +219,11 @@ export const readingNow = (
   session: { readonly turnRunning: boolean; readonly held: boolean; readonly state: string } | null,
   sending: boolean,
   kept = false,
-): boolean => !kept && session?.turnRunning !== true && (sending || session?.held === true || session?.state === 'starting')
+  accepting?: 'now' | 'queued',
+): boolean =>
+  !kept &&
+  session?.turnRunning !== true &&
+  (sending || session?.held === true || session?.state === 'starting' || (session === null && accepting === 'now'))
 
 /**
  * What waits its turn, oldest first, in the composer where the person can
@@ -223,6 +234,7 @@ export const readingNow = (
 export const queuedOf = (
   items: ReadonlyArray<ThreadItem>,
   shown: boolean,
+  readingLocally = false,
 ): ReadonlyArray<{
   readonly id: string
   readonly move?: string
@@ -237,7 +249,11 @@ export const queuedOf = (
   !shown
     ? []
     : items.flatMap((item) =>
-        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
+        item.kind === 'user_message' &&
+        item.input?.state === 'queued' &&
+        !item.input.interrupting &&
+        item.input.claimed !== true &&
+        !(readingLocally && locallyReading(item))
           ? [
               {
                 id: item.id,
