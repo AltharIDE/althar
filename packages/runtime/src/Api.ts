@@ -80,6 +80,7 @@ import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
+import { Terminals } from './Terminals'
 import { LeftBehind } from './LeftBehind'
 import { localTasksIn } from './local'
 import { MachineLoad } from './MachineLoad'
@@ -279,6 +280,7 @@ export const handlers = apiLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const terminals = yield* Terminals
     const leftBehind = yield* LeftBehind
     const fetches = yield* Fetches
     const machine = yield* MachineLoad
@@ -1128,6 +1130,7 @@ export const handlers = apiLayer(
                 yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
                 // And what it runs stops, with no project left to stop it from.
                 yield* launches.stopAll(projectId)
+                yield* terminals.closeAll(projectId)
                 // What its Local tasks' agents left running in their checkouts, as a server outside their group, stops as a settled task's does.
                 yield* Effect.forEach(local, (taskId) => leftBehind.settled(taskId), { discard: true })
               })
@@ -2593,6 +2596,27 @@ export const handlers = apiLayer(
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
+      OpenTerminal: ({ commandId, ...input }) =>
+        once(
+          commandId,
+          api(
+            terminals.open({
+              id: input.id,
+              projectId: input.projectId,
+              taskId: input.taskId,
+              cols: input.cols,
+              rows: input.rows,
+              ...(input.launchId === undefined ? {} : { launchId: input.launchId }),
+            }),
+          ),
+        ),
+      ListTerminals: ({ projectId }) => api(terminals.ofProject(projectId)),
+      AttachTerminal: ({ id }) =>
+        Stream.mapError(terminals.attach(id), (error) => new ApiError({ reason: 'NotFound', message: `No terminal ${error.id}.` })),
+      // Each key as it is pressed: straight to the shell, not through the call log a command keeps.
+      WriteTerminal: ({ id, data }) => api(terminals.write(id, data)),
+      ResizeTerminal: ({ id, cols, rows }) => api(terminals.resize(id, cols, rows)),
+      CloseTerminal: ({ commandId, id }) => once(commandId, api(terminals.close(id))),
       Watch: ({ since, deltas }) => Stream.merge(changes(since), streaming(deltas === true)),
     }
     return implemented
