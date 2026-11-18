@@ -370,10 +370,19 @@ describe('failed checks alone', () => {
   it.live('go to the person with a line where the lead can’t be started to be told them', () => {
     const { working, bare } = hosted()
     let held = false
+    // Only the head the failure is staged on fails: none before it, nor what the lead commits after, so no fix of its own,
+    // nor its turns ending with them failing, race the hand-off.
+    let failing: string | undefined
     const gate = Effect.runSync(Deferred.make<void>())
-    const github = hostOf(bare, () => FAILED, undefined, {
-      waitsFor: (method) => (held && method === 'change' ? Deferred.await(gate) : Effect.void),
-    })
+    const github = hostOf(
+      bare,
+      (sha) => {
+        if (held && failing === undefined) failing = sha
+        return sha === failing ? FAILED : PASSED
+      },
+      undefined,
+      { waitsFor: (method) => (held && method === 'change' ? Deferred.await(gate) : Effect.void) },
+    )
     return Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const { projectId, taskId, threadId } = yield* opened(working, '[lead:fix]')
