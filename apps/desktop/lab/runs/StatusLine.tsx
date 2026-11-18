@@ -6,7 +6,7 @@ import { type Foot, FootBody, FootEnd, FootTitle, same, useFoot } from './Below'
 import { cx, HeightEdge, helpMeFix, RunMark, RunState, shellName, text } from './parts'
 import { useLab } from './state'
 import { openTerminal } from './terminal'
-import { world } from './world'
+import { phaseOf, world } from './world'
 import s from './directions.module.css'
 
 /*
@@ -37,7 +37,9 @@ function Line({ foot }: { foot: Foot }) {
         >
           <RunMark run={one} />
           <span className={s.lineName}>{one.name}</span>
-          <RunState run={one} short inPress />
+          <span className={cx(s.lineState, phaseOf(one) === 'running' && s.lineAddress)}>
+            <RunState run={one} short inPress />
+          </span>
         </button>
       ))}
       {foot.shells.map((one) => (

@@ -48,6 +48,7 @@ const shots = [
   ['1-terminal', 'd=b1', W, async (page) => (await lineItem(page, /iOS/), await fixIt(page))],
   ['1-many-dark', 'd=b1&scene=many&theme=dark', W, async (page) => lineItem(page, /Storybook/)],
   ['1-narrow', 'd=b1', N, async (page) => lineItem(page, /iOS/)],
+  ['1-narrow-many', 'd=b1&scene=many', N, async () => {}],
   // B2 · Under the conversation.
   ['2-rest', 'd=b2', W, async () => {}],
   ['2-raised', 'd=b2', W, async (page) => tab(page, /iOS/)],

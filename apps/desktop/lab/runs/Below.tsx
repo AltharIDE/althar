@@ -180,8 +180,8 @@ export function FootTitle({ foot }: { foot: Foot }) {
   )
 }
 
-/** What a raised one shows: a run's output, ending in a failed one's ways out, or the terminal. */
-export function FootBody({ foot, onHelp }: { foot: Foot; onHelp?: (run: Run) => void }) {
+/** What a raised one shows: a run's output, ending in a failed one's ways out, or the terminal, headed by its folder where the band has no room for it. */
+export function FootBody({ foot, onHelp, folderHead = false }: { foot: Foot; onHelp?: (run: Run) => void; folderHead?: boolean }) {
   const { run, shell, failed } = foot
   return (
     <div className={s.trayBody}>
@@ -192,6 +192,17 @@ export function FootBody({ foot, onHelp }: { foot: Foot; onHelp?: (run: Run) => 
           onTerminal={() => openTerminal(run.folder)}
           {...(onHelp === undefined ? {} : { onHelp: () => onHelp(run) })}
         />
+      )}
+      {shell !== undefined && folderHead && (
+        <div className={s.bodyHead}>
+          <FolderMenu
+            folder={shell.folder}
+            onPick={(folder) => {
+              const next = world.openShell(folder)
+              world.show({ kind: 'shell', id: next.id })
+            }}
+          />
+        </div>
       )}
       {shell !== undefined && <ShellView key={shell.id} shell={shell} />}
     </div>

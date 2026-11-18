@@ -21,9 +21,9 @@ function ConversationFoot() {
     <section className={cx(s.underFoot, foot.raised && s.underRaised)} aria-label="Runs and terminals">
       <div className={cx(s.band, s.underBand)}>
         <FootTabs foot={foot} className={s.underTabs} />
-        <FootEnd foot={foot} />
+        <FootEnd foot={foot} folder={false} />
       </div>
-      {foot.raised && <FootBody foot={foot} />}
+      {foot.raised && <FootBody foot={foot} folderHead />}
     </section>
   )
 }

@@ -121,6 +121,8 @@
   display: flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
+  overflow: hidden;
   padding: 0 4px 0 6px;
   border-top: 1px solid var(--line-2);
   background: var(--chrome);
@@ -130,7 +132,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 56px;
   max-width: 320px;
   height: 22px;
   padding: 0 8px;
@@ -148,9 +151,21 @@
   outline-offset: -1.5px;
 }
 .lineName {
+  min-width: 2.5em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.lineState {
+  flex: none;
+  white-space: nowrap;
+}
+/* where it answers gives way first; how a failed one ended doesn't */
+.lineAddress {
+  flex: 0 12 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .lineEnd {
   flex: none;
@@ -214,9 +229,20 @@
 .underTabs .trayTab {
   flex: 0 1 auto;
   min-width: 72px;
+  overflow: hidden;
 }
 .underTabs .trayPress {
   flex: 1;
+  overflow: hidden;
+}
+/* a terminal's folder, over it, where the column's band has no room for it */
+.bodyHead {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
 }
 /* where it answers gives way first; how a failed one ended doesn't */
 .underTabs .trayAddress {
