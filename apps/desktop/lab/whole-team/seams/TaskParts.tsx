@@ -14,7 +14,8 @@ export function TaskHeader<F extends string>(props: ComponentProps<typeof RealHe
   const { d, m } = useLab()
   if (props.title !== MAYA_TITLE) return <RealHeader {...props} />
   // Ana, on Maya's change: it is Maya's ask of Ana, not Ana's own work to accept.
-  if (whoIsHere() === 'ana') return <RealHeader {...props} state={m === 2 ? 'Merged' : 'Maya asks you'} />
+  if (whoIsHere() === 'ana')
+    return <RealHeader {...props} {...(m === 2 ? { state: 'Merged', status: TaskStatus.Done } : { state: 'Maya asks you' })} />
   const sent = d === 'b' && m === 2
   return (
     <>

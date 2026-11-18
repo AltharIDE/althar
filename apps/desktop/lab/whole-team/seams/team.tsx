@@ -318,7 +318,7 @@ export function Evidence({ narrow = false }: { narrow?: boolean }) {
       </header>
       {merged ? (
         <p className={s.merged}>
-          <Icon name="check" size={13} /> Merged. Maya’s Althar reads it on GitHub and settles the task.
+          <Icon name="check" size={13} /> Maya’s Althar reads it from GitHub and settles the task there.
         </p>
       ) : (
         <blockquote className={s.quote}>For someone’s first day on an empty project. Words only.</blockquote>
