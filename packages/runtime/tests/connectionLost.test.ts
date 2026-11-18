@@ -1,5 +1,5 @@
 import type { ProjectId } from '@althar/domain'
-import { recorded } from '@althar/provider-adapters/testing'
+import { type FakeAgentOptions, holds, recorded, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -284,6 +284,56 @@ describe('a coordinator turn whose connection is lost', () => {
       assert.lengthOf(kept, 1)
       // Its last turn answered, there is nothing to try again.
       assert.isFalse(yield* sessions.tryAgain(threadId))
+    }).pipe(Effect.provide(layer))
+  })
+})
+
+describe('a lead’s turn after its plan whose connection is lost', () => {
+  it.live('ends failed with its Try again, its task never following up, and Try again sends it again', () => {
+    const controls: Array<Parameters<NonNullable<FakeAgentOptions['sessionControls']>>[0]> = []
+    const held = holds()
+    const layer = Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', { holds: held, sessionControls: (one) => controls.push(one) })))
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      // Its plan done, its lead still on it: the person writes to it from the window, a turn outside any step.
+      const task = yield* planned('claude-code')
+      yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${task.taskId}`, ([run]) => run?.state === 'succeeded')
+      const [session] = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId} AND state = 'active'`
+      assert.isDefined(session, 'its lead stays on it after its plan')
+      yield* until(
+        Effect.map(queries.thread(task.threadId), (snapshot) => [snapshot.task?.phase]),
+        ([phase]) => phase === 'ready',
+      )
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: task.threadId,
+        body: scenarios.slow,
+        disposition: 'after_current',
+        sender: { kind: 'window' },
+      })
+      yield* until(items(task.threadId), (all) => all.some((item) => item.kind === 'agent_message' && item.content.text === 'Starting'))
+      assert.strictEqual((yield* queries.thread(task.threadId)).task?.phase, 'running')
+      // Claude Code says the connection to Claude was lost, and ends the turn with it, as on the task this was found on.
+      yield* Effect.promise(() => controls.at(-1)!.lose())
+      held.open(scenarios.slow)
+      const ended = yield* until(turnsOf(task.threadId), (all) => all.at(-1)?.state === 'failed')
+      assert.strictEqual(ended.at(-1)?.errorClass, 'transient')
+      const notice = yield* until(notices(task.threadId), (all) => all.includes("Fake claude-code couldn't answer."))
+      assert.include(notice, "Fake claude-code couldn't answer.")
+      // The turn is over, failed: its card and header are the person's again, not following up, and Try again is offered.
+      const snapshot = yield* queries.thread(task.threadId)
+      assert.isFalse(snapshot.task?.followUp, 'a failed turn is not its lead following up')
+      assert.strictEqual(snapshot.task?.phase, 'ready')
+      assert.isTrue(snapshot.retryable)
+      // What the person said is kept for it, and Try again sends it again, in the same session.
+      const count = ended.length
+      assert.isTrue(yield* sessions.tryAgain(task.threadId))
+      const retried = yield* until(turnsOf(task.threadId), (all) => all[count]?.state === 'completed')
+      assert.include(retried[count]?.prompt ?? '', scenarios.slow)
+      const kept = yield* sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId}`
+      assert.lengthOf(kept, 1)
     }).pipe(Effect.provide(layer))
   })
 })

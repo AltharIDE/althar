@@ -2592,7 +2592,9 @@ export class Queries extends Context.Service<
           // What the person asked of its lead, its turn not begun yet: Fix it on a review after a merge, which says so from the
           // moment it is answered until the turn that takes it is over (its folder coming back, its lead starting, are on the
           // way meanwhile); or a message waiting for a lead that holds a session. Under way, as the turn is, so a merged task
-          // is never settled, nor stopped, in the moment between the asking and the turn.
+          // is never settled, nor stopped, in the moment between the asking and the turn. Words kept from a turn that failed, as
+          // on a lost connection outside any step, wait for Try again or the person's next message, not for a turn: the turn is
+          // over, failed, and says so with its Try again. Only a usage limit's go again by themselves, once it resets.
           const [askedOf] = yield* sql<{ fixSince: string | null; told: number; takenSince: string | null }>`
             SELECT
               (SELECT r.updated_at FROM merge_reviews r WHERE r.task_id = ${taskId} AND r.state = 'fixing'
@@ -2600,7 +2602,9 @@ export class Queries extends Context.Service<
                   AND d.ended_at IS NOT NULL AND d.ended_at >= r.updated_at)
                 ORDER BY r.updated_at DESC LIMIT 1) AS fix_since,
               EXISTS (SELECT 1 FROM user_inputs i WHERE i.thread_id = ${task.threadId} AND i.state = 'queued'
-                AND i.sender_kind IN ('window', 'paired_device')) AS told,
+                AND i.sender_kind IN ('window', 'paired_device')
+                AND NOT EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+                  WHERE di.user_input_id = i.id AND d.state = 'failed' AND coalesce(d.error_class, '') <> 'usage_limit')) AS told,
               (SELECT d.requested_at FROM turn_deliveries d WHERE d.thread_id = ${task.threadId} AND d.origin = 'person'
                 AND d.state IN ('pending', 'delivered') AND d.ended_at IS NULL
                 ORDER BY d.requested_at DESC LIMIT 1) AS taken_since
