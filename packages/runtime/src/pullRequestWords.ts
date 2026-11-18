@@ -634,7 +634,6 @@ export const baseChecksForLead = (sum: ChecksSum, base: string, logs: ReadonlyAr
     ...logs,
   ].join('\n\n')
 
-/** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */
 /**
  * Bots the project doesn't trust, left out of a reading of the pull request
  * (code-hosts § Review and triage bots): the review and triage bots by name, the person's to trust;
@@ -651,6 +650,7 @@ export const quietBotsLine = (reviewers: ReadonlyArray<string>, others: number) 
     .filter((line) => line !== '')
     .join(' ')
 
+/** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */
 export const outsidersLine = (count: number) =>
   `${count === 1 ? 'One comment' : `${count} comments`} from people who can't write to the repository ${count === 1 ? 'is' : 'are'} left out. On a public repository anyone can comment; the person reads them and passes on what matters.`
 

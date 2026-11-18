@@ -40,6 +40,8 @@ describe('the review and triage bots Althar recognises', () => {
 
   it('names a bot it doesn’t recognise from its account, and trusts by account whatever the case', () => {
     expect(botName('codecov[bot]')).toBe('Codecov')
+    // An account with no name before its [bot] keeps the account as its name.
+    expect(botName('[bot]')).toBe('[bot]')
     expect(trusts(['CodeRabbitAI[bot]'], 'coderabbitai[bot]')).toBe(true)
     expect(trusts([], 'coderabbitai[bot]')).toBe(false)
   })
