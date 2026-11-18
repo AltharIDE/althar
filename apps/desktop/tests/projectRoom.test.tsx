@@ -289,7 +289,7 @@ describe('the Talk room’s model, once the thread is read', () => {
     expect(await act(async () => result.current.say('No session', null))).toBe(true)
     const optimistic = result.current.coordinator!.items.at(-1)!
     expect(locallyReading(optimistic)).toBe(true)
-    await waitFor(() => expect(locallyReading(optimistic)).toBe(false), { timeout: 5000 })
+    await waitFor(() => expect(locallyReading(optimistic)).toBe(false))
     await waitFor(() => expect(result.current.coordinator?.items.at(-1)).toMatchObject({ input: { claimed: false } }))
     const stored = { ...items.you('No session', { state: 'queued', interrupting: false }), id: 'not-started', sequence: 1 }
     vi.mocked(client.getThreadItem).mockResolvedValue(stored)

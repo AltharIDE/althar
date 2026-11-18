@@ -159,15 +159,12 @@ describe('what a task hears', () => {
     vi.mocked(client.getThreadItem).mockResolvedValue(stored)
     act(() => emit(changed('thread_item', stored.id, 'th1', 'p1')))
     await waitFor(() => expect(result.current.snapshot?.items.some((item) => item.id === stored.id)).toBe(true))
-    await waitFor(
-      () => {
-        const head = result.current.snapshot!
-        expect(head.items.find((item) => item.id === stored.id)).toMatchObject({ input: { claimed: false } })
-        const shown = queueShown(head.session, result.current.pending, head.accepting, head.items)
-        expect(queuedOf(head.items, shown, readingLocallyOf(head.session, head.accepting)).map((item) => item.text)).toEqual(['No lead'])
-      },
-      { timeout: 5000 },
-    )
+    await waitFor(() => {
+      const head = result.current.snapshot!
+      expect(head.items.find((item) => item.id === stored.id)).toMatchObject({ input: { claimed: false } })
+      const shown = queueShown(head.session, result.current.pending, head.accepting, head.items)
+      expect(queuedOf(head.items, shown, readingLocallyOf(head.session, head.accepting)).map((item) => item.text)).toEqual(['No lead'])
+    })
     expect(result.current.pending).toBe(true)
     unmount()
   })
