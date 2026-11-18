@@ -997,13 +997,16 @@ export class Runs extends Context.Service<
      * Changes who leads and who reviews a task, at any time (a task is a conversation plus parts: every part changes either way,
      * on the person's word). The lead changes from its next turn, never in the one it is in; the reviewer until its review round
      * starts, from the next round during one, and once a review of it ran or it merged, from what ships next. A review added
-     * before the work ships where its plan read it only after the merge (the fast lane) reads it before now. Says what it
-     * changed, for its caller to say in the task's thread. Refused only for an abandoned task.
+     * before the work ships where its plan read it only after the merge (the fast lane) reads it before now. A review added
+     * where its work is up in an open pull request reads that pull request's head at once, unless `atShip`: a task stepped back
+     * into a change, whose lead builds it now, has it read at its next Ship. Says what it changed, for its caller to say in the
+     * task's thread. Refused only for an abandoned task.
      */
     changeTeam(input: {
       readonly taskId: string
       readonly steps: ReadonlyArray<PlanStep>
       readonly actorId: ActorId
+      readonly atShip?: boolean | undefined
     }): Effect.Effect<TeamChanged, unknown>
     /**
      * Opens the round a quick task made a change after its last run ended
@@ -1453,6 +1456,8 @@ export class Runs extends Context.Service<
                   return 'The branch has no commits to propose, so nothing was pushed.'
                 case 'branch':
                   return "It isn't on a code host Althar knows, so it ends on its branch."
+                case 'kept':
+                  return `It ends on its branch here: ${one.pullRequest} stays as it is, and nothing more goes to it until it ends in a pull request again.`
               }
             })()
             const said = one.left.length === 0 ? did : `${did} Left out what the lead didn't commit: ${filesLine(one.left)}.`
@@ -3639,8 +3644,14 @@ export class Runs extends Context.Service<
           const only = shipping?.only
           // A review added after the work went up has nothing to send: it is over once settled.
           const reviewOnly = shipping?.reviewOnly === true
-          // Nor one whose task came to stay here as it shipped: what waited waits for the next Ship.
-          const stays = shipping?.stays === true
+          // Nor one whose task came to stay here as it shipped: what waited waits for the next Ship. Nor one that ends with its branch
+          // while its pull request stands open (a change stepped back to prototyping): pushing the branch would send its work there,
+          // so it waits on the branch until the task ends in a pull request again, and that one carries on.
+          const kept =
+            end === 'none'
+              ? (yield* changes.ofTask(run.taskId).pipe(Effect.orElseSucceed(() => []))).filter((one) => one.state === 'open')
+              : []
+          const stays = shipping?.stays === true || kept.length > 0
           // A new pull request opens as far as its route goes: a draft for a push, ready for review beyond. One admitted before
           // routes opens as the plan ends.
           const far = farOf(shipping)
@@ -3746,7 +3757,16 @@ export class Runs extends Context.Service<
           const said = {
             step: 'publish',
             round: 0,
-            summary: summary === '' ? (stays ? 'Kept here: nothing went up.' : reviewOnly ? 'Reviewed.' : 'Shipped.') : summary,
+            summary:
+              summary === ''
+                ? kept.length > 0
+                  ? `Kept on its branch here: ${kept.map((one) => `${one.words.short} ${one.words.prefix}${one.number}`).join(' and ')} ${kept.length === 1 ? 'stays' : 'stay'} as it is, and nothing more goes to it until it ends in a pull request again.`
+                  : stays
+                    ? 'Kept here: nothing went up.'
+                    : reviewOnly
+                      ? 'Reviewed.'
+                      : 'Shipped.'
+                : summary,
             ...(published === undefined ? {} : openedOf(published)),
           }
           const attempt = { id: attemptId, nodeId }
@@ -8749,7 +8769,14 @@ export class Runs extends Context.Service<
           yield* touchCard(input.taskId)
           // A review added where its run is over, or at its ending, has no round to come in it: where its work is up in an open
           // pull request, it reads the head now; where it isn't, Ship reviews it before sending it up.
-          if (reviewChanges && reviews && !reviewed && reviewWhen === 'now' && pulls.some((one) => one.state === 'open')) {
+          if (
+            reviewChanges &&
+            reviews &&
+            !reviewed &&
+            reviewWhen === 'now' &&
+            input.atShip !== true &&
+            pulls.some((one) => one.state === 'open')
+          ) {
             const [last] = yield* sql<{ state: string; late: number }>`
               SELECT r.state, EXISTS (SELECT 1 FROM nodes n WHERE n.execution_id = e.id AND n.node_key = 'publish') AS late
               FROM runs r JOIN workflow_executions e ON e.run_id = r.id WHERE r.task_id = ${input.taskId}

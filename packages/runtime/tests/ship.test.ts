@@ -386,13 +386,14 @@ describe('talking to a lead once its plan is done', () => {
       )
       // "Make it a chat", on the person's word to its lead: its review stops, and the Ship it was in ends as a chat does.
       const said = yield* callTool(yield* leadOf(task), 'change_part', { part: 'preset', preset: 'Chat', why: 'the person asked' })
-      assert.match(said, /made it a Chat: no review, nothing going up until it ships, PR #1 closed, its branch staying/)
+      assert.match(said, /made it a Chat: no review, nothing going up until it ships, PR #1 stays open as it is/)
       yield* until(runsOf(task.taskId), (all) => all.every((run) => run.state !== 'running'))
-      // Nothing went up: not the commit that waited, nor a pull request; the one it had is closed, and what waited still waits.
+      // Nothing went up: not the commit that waited, nor a pull request; the one it had stays open as it was, and what waited
+      // still waits.
       assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
       assert.deepStrictEqual(
         github.changes.map((one) => one.state),
-        ['closed'],
+        ['open'],
       )
       assert.isNotNull(yield* heldAt(task.taskId))
       assert.strictEqual((yield* results(task.threadId)).at(-1)?.summary, 'Kept here: nothing went up.')
@@ -467,6 +468,91 @@ describe('talking to a lead once its plan is done', () => {
       assert.isUndefined(shipped?.held)
     }).pipe(Effect.provide(runtimeWith(github)))
   })
+
+  it.live(
+    'steps a change with an open pull request back into prototyping and on into a change again, on one task, branch and pull request',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const runs = yield* Runs
+        const task = yield* opened(working)
+        const lead = yield* leadOf(task)
+        const pushed = git(bare, 'rev-parse', BRANCH)
+        const reviewed = git(task.path, 'rev-parse', 'HEAD')
+        const reviews = () =>
+          Effect.map(
+            sql<{ n: number }>`
+            SELECT count(*) AS n FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.taskId} AND n.node_key = 'review' AND a.state <> 'cancelled'`,
+            ([row]) => row?.n ?? 0,
+          )
+        const before = yield* reviews()
+
+        // "Let's step back and prototype this": the same task, in place. No review, so its card's track drops the step; its pull
+        // request stays open as it is, and nothing more goes to it.
+        const back = yield* callTool(lead, 'change_part', { part: 'preset', preset: 'Prototype', why: 'the person asked' })
+        assert.match(back, /made it a Prototype: no review, ending with its branch, PR #1 stays open as it is, and nothing more goes to it/)
+        assert.notInclude(back, 'closed')
+        assert.deepStrictEqual(
+          github.changes.map((one) => one.state),
+          ['open'],
+        )
+        const [prototyping] = yield* until(cards(task.projectId), (all) =>
+          (all[0]?.plan?.steps ?? []).every((step) => step.key !== 'review' || step.skipped),
+        )
+        assert.strictEqual(prototyping?.change?.number, 1)
+        assert.lengthOf(yield* runsOf(task.taskId), 1)
+
+        // Prototyping on the same branch: what the lead commits stays here, and the person's Ship sends nothing to the pull request.
+        yield* say(task.threadId, 'Try a flatter panel. [lead:commit]')
+        yield* answered(task.threadId, task.turns + 1)
+        yield* until(heldAt(task.taskId), (at) => at !== null)
+        const prototyped = git(task.path, 'rev-parse', 'HEAD')
+        assert.notStrictEqual(prototyped, reviewed)
+        yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+        yield* until(runsOf(task.taskId), (all) => all.length === 2 && all.every((run) => run.state !== 'running'))
+        const kept = (yield* results(task.threadId)).at(-1)?.summary
+        assert.match(typeof kept === 'string' ? kept : '', /PR #1 stays as it is, and nothing more goes to it/)
+        assert.strictEqual(git(bare, 'rev-parse', BRANCH), pushed)
+        assert.strictEqual(yield* reviews(), before)
+
+        // The person picks a direction: a change again, on the same task. Its review comes back, to read what its lead builds at
+        // Ship rather than the pull request's old head now, and the same pull request carries on.
+        const on = yield* callTool(lead, 'change_part', { part: 'preset', preset: 'Change', why: 'the person picked a direction' })
+        assert.match(on, /made it a Change: reviewer set to .+, ending in a draft pull request, its work goes on in PR #1 again/)
+        const [changed] = yield* until(cards(task.projectId), (all) =>
+          (all[0]?.plan?.steps ?? []).some((step) => step.key === 'review' && !step.skipped),
+        )
+        assert.strictEqual(changed?.change?.number, 1)
+        assert.strictEqual(yield* reviews(), before)
+
+        yield* say(task.threadId, 'Build direction A. [lead:commit]')
+        yield* answered(task.threadId, task.turns + 2)
+        yield* until(heldAt(task.taskId), (at) => at !== null)
+        yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
+        // One review, over everything since the last: the prototype's commits and the build both.
+        const [brief] = yield* until(
+          sql<{ body: string }>`
+          SELECT i.body FROM user_inputs i JOIN threads t ON t.id = i.thread_id
+          WHERE t.task_id = ${task.taskId} AND t.kind = 'step' AND i.body LIKE 'More to review. The person ships%'`,
+          (rows) => rows.length === 1,
+        )
+        assert.include(brief?.body, `git diff ${reviewed.slice(0, 12)}`)
+        // Then up to the same pull request: no other opens.
+        yield* until(
+          Effect.sync(() => [git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD')] as const),
+          ([there, here]) => there === here && there !== pushed,
+        )
+        assert.deepStrictEqual(
+          github.changes.map((one) => [one.number, one.state]),
+          [[1, 'open']],
+        )
+        const [card] = yield* until(cards(task.projectId), (all) => all[0]?.held === undefined && all[0]?.phase === 'ready')
+        assert.strictEqual(card?.change?.number, 1)
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+  )
 })
 
 /** The lead of a task's thread, as its tools are called. */

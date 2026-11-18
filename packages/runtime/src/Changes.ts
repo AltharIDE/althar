@@ -342,6 +342,11 @@ export type PublishedOne =
     | { readonly kind: 'nothing' }
     /** Left on its branch: in a task of several repositories, one on no code host Althar knows. */
     | { readonly kind: 'branch' }
+    /**
+     * Kept on its branch here: it ends with its branch while a pull request stands open from it (a change stepped back to a
+     * prototype), so nothing went to that pull request, which stays as it is until the task ends in one again.
+     */
+    | { readonly kind: 'kept'; readonly pullRequest: string }
   ) & { readonly left: ReadonlyArray<string>; readonly repository: string }
 
 /** What publishing did in each of the task's repositories, the project's first first. */
@@ -1877,6 +1882,10 @@ export class Changes extends Context.Service<
           // project says now: switching where a fork's work goes moves only its next ones (ADR-085). So does one opened from a
           // fork before its clone's remotes were renamed for the repository it came from.
           const standing = next === undefined ? yield* openFrom(input.taskId, task.workspaceId, task.branch) : undefined
+          // Ending with its branch while its pull request stands open (a change stepped back to prototyping): pushing the branch
+          // would send its work to that pull request, so nothing goes up; the work waits on its branch here until it ends in one again.
+          if (input.end === 'none' && standing !== undefined && standing.state === 'open')
+            return { kind: 'kept', pullRequest: `${standing.words.short} ${standing.words.prefix}${standing.number}`, left: [] } as const
           if (standing !== undefined) {
             repository = samePath(standing.repository, repository.path) ? repository : yield* host.repository(standing.repository)
             own = yield* branchRepositoryOf(input.taskId, host, repository, task.path, {
