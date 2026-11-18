@@ -39,6 +39,7 @@ Options:
   --after <dev_id>           Read the next page of devices
   --device-id <dev_id>       Connection device to revoke
   --worker-ca <file>        Trusted worker certificate authority for configure-workers
+  --worker-relay <file>     Private JSON link for an outbound worker relay
   --worker-certificate <file>  Worker client certificate for enroll-worker
   --worker-id <wrk_id>      Worker for worker-run or revoke-worker
   --attempt-id <watt_id>    Diagnostic for worker-result
@@ -156,6 +157,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     '--tls-key',
     '--device-id',
     '--worker-ca',
+    '--worker-relay',
     '--worker-certificate',
     '--worker-id',
     '--attempt-id',
@@ -305,6 +307,8 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   if (flags.has('--origin') && command !== 'configure-network') return invalid('--origin requires configure-network.')
   if (flags.has('--worker-ca') !== (command === 'configure-workers'))
     return invalid('configure-workers requires --worker-ca, --tls-certificate and --tls-key.')
+  const workerRelay = flags.get('--worker-relay')
+  if (workerRelay !== undefined && command !== 'configure-workers') return invalid('--worker-relay requires configure-workers.')
   if (flags.has('--worker-certificate') !== (command === 'enroll-worker')) return invalid('enroll-worker requires --worker-certificate.')
   const workerId = flags.get('--worker-id')
   if (command === 'worker-run' || command === 'revoke-worker') {
@@ -374,6 +378,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
             ca: resolve(flags.get('--worker-ca') ?? ''),
             certificate: resolve(flags.get('--tls-certificate') ?? ''),
             key: resolve(flags.get('--tls-key') ?? ''),
+            ...(workerRelay === undefined ? {} : { relay: resolve(workerRelay) }),
           },
         }
       : {}),

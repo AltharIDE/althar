@@ -11,7 +11,8 @@ use rustix::fs::OFlags;
 use tokio::{io::AsyncReadExt, process::Command, sync::mpsc, time::Instant};
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::grpc::{WorkerEnrollment, client};
+use crate::grpc::{WorkerEnrollment, control_client, endpoint};
+use crate::relay::{WorkerRelay, relay_channel};
 use crate::wire::{
     DiagnosticClaim, DiagnosticOffer, DiagnosticOutcome, DiagnosticResult, HomeFrame, WorkerFrame,
 };
@@ -255,12 +256,26 @@ pub async fn run_diagnostic(
     enrollment: WorkerEnrollment<'_>,
     journal: &DiagnosticJournal,
 ) -> Result<Option<DiagnosticResult>, Failure> {
+    run_diagnostic_with_transport(address, enrollment, journal, None).await
+}
+
+pub async fn run_diagnostic_with_transport(
+    address: &str,
+    enrollment: WorkerEnrollment<'_>,
+    journal: &DiagnosticJournal,
+    relay: Option<&WorkerRelay<'_>>,
+) -> Result<Option<DiagnosticResult>, Failure> {
     let mut hello = worker_hello(enrollment.worker_id)?;
     if let Some(worker_frame::Payload::Hello(hello)) = &mut hello.payload {
         hello.accepts_diagnostics = true;
     }
     tokio::time::timeout(Duration::from_secs(25), async {
-        let mut client = client(address, &enrollment).await?;
+        let endpoint = endpoint(address, &enrollment)?;
+        let channel = match relay {
+            Some(relay) => relay_channel(endpoint, relay).await?,
+            None => endpoint.connect().await?,
+        };
+        let mut client = control_client(channel);
         let (send, receive) = mpsc::channel(2);
         send.send(hello).await?;
         let mut reply = client.connect(ReceiverStream::new(receive)).await?.into_inner();

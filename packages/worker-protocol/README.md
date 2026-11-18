@@ -41,6 +41,75 @@ sequenceDiagram
 See the [host operator guide](../../apps/host/README.md#native-worker-diagnostic)
 for credential configuration and command invocation.
 
+## Outbound worker relay
+
+Run the relay on a machine both endpoints can reach. The home and worker
+each open a WSS connection. The relay pairs the two connections for a route
+and forwards the existing gRPC TLS records. The worker still verifies its
+home certificate, and the home still requires an enrolled worker
+certificate. The identity used in the worker's HTTPS argument is the
+**home certificate name**. The relay URL identifies the separately
+authenticated WSS endpoint.
+
+Provision a gateway certificate and key and give both endpoints the gateway
+CA. Keep this separate from the home and worker certificate setup. As the
+operator, create an expiring test route from a private directory.
+
+```sh
+umask 077
+node --input-type=module <<'JS'
+import { createHash, randomBytes } from 'node:crypto'
+import { writeFileSync } from 'node:fs'
+const id = 'wrl_' + randomBytes(16).toString('hex')
+const home = randomBytes(32).toString('base64url')
+const worker = randomBytes(32).toString('base64url')
+const digest = (token) => createHash('sha256').update(token).digest('hex')
+const create = (file, value) => writeFileSync(file, value, { flag: 'wx', mode: 0o600 })
+create('home-token', home)
+create('worker-token', worker)
+create('routes.json', JSON.stringify([{
+  id, homeDigest: digest(home), workerDigest: digest(worker),
+  expiresAt: Date.now() + 3600_000,
+}]))
+process.stdout.write(id + '\n')
+JS
+```
+
+On the gateway, start the service from this package with the TLS files
+and `routes.json`. Keep them private. The route supports one active tunnel
+at a time and expires within 24 hours. The gateway stores token digests.
+Deliver each private token file to its role on a secure channel.
+
+```sh
+bun run start:relay 0.0.0.0 7443 /private/relay.pem /private/relay.key /private/routes.json
+```
+
+On the home, create a mode 0600 link file with absolute paths and the
+route ID printed above. Configure the ordinary worker listener with
+`configure-workers --worker-relay /private/home-link.json` alongside the
+existing TLS options, bind it to loopback, and restart the home.
+
+```json
+{
+  "url": "wss://relay.example:7443/v1/worker-relay/<route-id>/home",
+  "tokenFile": "/private/home-token",
+  "caFile": "/private/relay-ca.pem"
+}
+```
+
+On the worker, add the following to the ordinary diagnostic invocation.
+Use the same route ID and the original home certificate name in the
+positional HTTPS argument.
+
+```sh
+--relay "wss://relay.example:7443/v1/worker-relay/$ROUTE_ID/worker" \
+  /private/worker-token /private/relay-ca.pem
+```
+
+This operator path uses file-based route provisioning. Account linking,
+pool authorization, hosted allocation and desktop-home integration are
+subsequent product work.
+
 From the repository root, use the pinned Bun and Rust toolchains:
 
 ```sh

@@ -4,6 +4,7 @@ import { isIP } from 'node:net'
 import { isAbsolute, join } from 'node:path'
 
 import { bindWorkerHandshake, workerCertificateFingerprint } from '@althar/worker-protocol/grpc'
+import { connectHomeRelay, validateHomeRelay } from '@althar/worker-protocol/relay'
 import { Effect, Schema } from 'effect'
 
 import { HostError, storageFailure } from './errors'
@@ -21,6 +22,7 @@ const Configuration = Schema.Struct({
   ca: Schema.String,
   certificate: Schema.String,
   key: Schema.String,
+  relay: Schema.optional(Schema.String),
 })
 export type WorkerConfiguration = typeof Configuration.Type
 
@@ -31,6 +33,40 @@ const invalid = () =>
       'Workers need an IP listen address, a certificate authority, and a matching private TLS certificate and key outside project workspaces',
   })
 const configurationPath = (profile: string) => join(profile, 'workers.json')
+const RelayLink = Schema.Struct({ url: Schema.String, tokenFile: Schema.String, caFile: Schema.String })
+
+const relayFiles = async (options: HostOptions, path: string | undefined) => {
+  if (path === undefined) return undefined
+  try {
+    if (!isAbsolute(path) || insidePath(options.worktrees, await realpath(path))) throw invalid()
+    const config = await readPrivate(path, 4096, true)
+    if (config === null) throw invalid()
+    const link = Schema.decodeUnknownSync(RelayLink)(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(config)))
+    if (
+      !isAbsolute(link.caFile) ||
+      !isAbsolute(link.tokenFile) ||
+      insidePath(options.worktrees, await realpath(link.caFile)) ||
+      insidePath(options.worktrees, await realpath(link.tokenFile))
+    )
+      throw invalid()
+    const ca = await readPrivate(link.caFile, 65536, true)
+    if (ca === null) throw invalid()
+    const secret = await readPrivate(link.tokenFile, 128, true)
+    if (secret === null) throw invalid()
+    try {
+      const relay = { ca, token: secret.toString('utf8').trim(), url: link.url }
+      validateHomeRelay(relay)
+      return relay
+    } finally {
+      secret.fill(0)
+    }
+  } catch {
+    throw new HostError({
+      code: 'InvalidConfig',
+      message: 'Choose a private worker relay link and credentials outside project workspaces.',
+    })
+  }
+}
 
 const tlsFiles = async (options: HostOptions, config: WorkerConfiguration) => {
   if (!isIP(config.address) || ![config.ca, config.certificate, config.key].every(isAbsolute)) throw invalid()
@@ -57,6 +93,7 @@ export const configureWorkers = (options: HostOptions, config: WorkerConfigurati
     try: async () => {
       const files = config === undefined ? undefined : await tlsFiles(options, config)
       try {
+        await relayFiles(options, config?.relay)
         await writePrivate(configurationPath(options.profile), JSON.stringify(config ?? null), true)
       } finally {
         files?.privateKeyPem.fill(0)
@@ -75,25 +112,32 @@ export const listenWorkers = (options: HostOptions, homeId: string) =>
         const raw: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
         if (raw === null) return undefined
         const config = Schema.decodeUnknownSync(Configuration)(raw)
+        const relay = await relayFiles(options, config.relay)
         const tls = await tlsFiles(options, config)
         try {
           const store = await openWorkerStore(options.profile, homeId)
+          let listener: Awaited<ReturnType<typeof bindWorkerHandshake>> | undefined
           try {
             const ip = config.address.includes(':') ? `[${config.address}]` : config.address
-            const listener = await bindWorkerHandshake(`${ip}:${config.port}`, {
+            const bound = await bindWorkerHandshake(`${ip}:${config.port}`, {
               homeId,
               ...tls,
               workerForCertificate: store.workerForCertificate,
               diagnostics: store,
             })
+            listener = bound
+            const target = config.address === '0.0.0.0' ? '127.0.0.1' : config.address === '::' ? '::1' : config.address
+            const stopRelay = relay === undefined ? undefined : connectHomeRelay(relay, { host: target, port: bound.port })
             return {
-              port: listener.port,
+              port: bound.port,
               close: () => {
-                listener.close()
+                stopRelay?.()
+                bound.close()
                 store.close()
               },
             }
           } catch {
+            listener?.close()
             store.close()
             throw new HostError({
               code: 'HostUnavailable',

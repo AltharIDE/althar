@@ -238,3 +238,7 @@ connections and at the next message on an existing stream. A replacement
 certificate gets a fresh enrollment. Use `disable-workers` and restart the
 home to close the listener. The worker requires its own release artifact
 and rollout before it can participate in managed updates.
+
+Use the [outbound worker relay](../../packages/worker-protocol/README.md#outbound-worker-relay)
+when the worker and home can each reach a gateway and the home's worker
+listener is private.
