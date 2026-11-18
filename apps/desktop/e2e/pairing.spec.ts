@@ -54,6 +54,13 @@ const portNumber = () =>
     })
   })
 
+// Off CI on a Mac this would use the person's real login keychain, and with the test's temporary HOME macOS finds none and
+// pops a "Keychain Not Found" dialog on their screen. CI's runner has a disposable keychain, so it runs there.
+test.skip(
+  process.platform === 'darwin' && process.env.CI !== 'true',
+  "Needs the real macOS keychain: runs on CI only, so no dialog appears on a person's Mac",
+)
+
 test('pairs a desktop with a separate HTTPS home, reconnects after restart and loses access immediately on revocation', async () => {
   const root = mkdtempSync(join(tmpdir(), 'althar-pairing-e2e-'))
   chmodSync(root, 0o700)
