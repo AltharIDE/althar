@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { flushSync } from 'react-dom'
 import { Button, Code, CopyButton, Dialog, Icon, LiveDot, ProjectInk, ProjectMark, Spinner } from '@althar/ui'
 
 import type { Flow } from '../flow'
-import { InstallDone, installActions, InstallSteps, type Scenario, useInstall } from './install'
+import { InstallChip, InstallDone, installActions, InstallSteps, type Scenario, useInstall } from './install'
 import { Chunked, CodeField, HostField, LaterProblem, MethodSwitch, NameField, Options } from './parts'
 import s from './a.module.css'
 
@@ -43,11 +44,21 @@ export function DrawingDirection({
   flow,
   first,
   scenario = 'ok',
+  shown = true,
+  chipIn = null,
+  onHide,
+  onShow,
   onClose,
 }: {
   flow: Flow
   first: boolean
   scenario?: Scenario
+  /** Open over the window; hidden while a setup goes on without it, its chip saying where it's got to. */
+  shown?: boolean
+  /** Where the window's homes chip sits, for the chip of a setup under way. */
+  chipIn?: Element | null
+  onHide?: () => void
+  onShow?: () => void
   onClose: () => void
 }) {
   // Reopened after Althar quit midway through setting a home up: it opens where that stopped.
@@ -85,142 +96,159 @@ export function DrawingDirection({
       if (install.phase === 'idle') return flow.ssh.target.trim() === '' ? undefined : install.start()
       if (install.phase === 'failed' && install.problem?.retry) return install.retry()
       if (install.phase === 'trust') return install.trust()
+      if (install.phase === 'root') return install.answerRoot(true)
       if (install.phase === 'stopped') return install.resume()
       return
     }
     flow.submit()
   }
   const run = installs && flow.method === 'ssh' && flow.found === null ? installActions(install) : null
+  // A setup under way, or waiting on you, outlives the dialog: closing it hides it, and the chip brings it back.
+  const underWay =
+    installs && flow.method === 'ssh' && install.phase !== 'idle' && flow.stage !== 'connecting' && flow.stage !== 'connected'
+  const hide = () => (underWay && onHide !== undefined ? onHide() : onClose())
+  const cancel = () => {
+    install.stop()
+    onClose()
+  }
   const back = () => morph(() => setView(first ? 'intro' : 'form'))
   const title = view === 'intro' ? 'Your first home' : view === 'setup' ? 'Set up a home' : 'Connect a home'
+  const chip =
+    underWay &&
+    chipIn !== null &&
+    createPortal(<InstallChip install={install} found={flow.found !== null} onShow={() => onShow?.()} />, chipIn)
+  if (!shown) return chip
   return (
-    <Dialog
-      title={title}
-      width={660}
-      className={s.dialog}
-      holding={flow.busy || install.busy}
-      tall={installing}
-      onClose={onClose}
-      onBack={view === 'setup' ? back : undefined}
-      onSubmit={go}
-      actions={
-        view === 'form' && installs && flow.method === 'ssh' && flow.found === null ? (
-          <>
-            {run?.secondary === 'Stop' ? <Button onClick={install.stop}>Stop</Button> : <Button onClick={onClose}>Cancel</Button>}
-            {run !== null && run.other !== undefined && (
-              <Button variant={run.primary === null ? 'signal' : undefined} onClick={run.other.act}>
-                {run.other.label}
+    <>
+      {chip}
+      <Dialog
+        title={title}
+        width={660}
+        className={s.dialog}
+        holding={flow.busy || install.busy}
+        tall={installing}
+        onClose={hide}
+        onBack={view === 'setup' ? back : undefined}
+        onSubmit={go}
+        actions={
+          view === 'form' && installs && flow.method === 'ssh' && flow.found === null ? (
+            <>
+              {run?.secondary === 'Stop' ? <Button onClick={install.stop}>Stop</Button> : <Button onClick={cancel}>Cancel</Button>}
+              {run !== null && run.other !== undefined && (
+                <Button variant={run.primary === null ? 'signal' : undefined} onClick={run.other.act}>
+                  {run.other.label}
+                </Button>
+              )}
+              {(run === null || run.primary !== null) && (
+                <Button
+                  type="submit"
+                  variant="signal"
+                  busy={run?.busy === true || (install.phase === 'done' && flow.stage === 'checking')}
+                  disabled={run?.busy === true || (run === null && flow.ssh.target.trim() === '')}
+                >
+                  {run === null ? (install.phase === 'done' ? 'Reading its identity…' : 'Set it up') : run.primary}
+                </Button>
+              )}
+            </>
+          ) : view === 'form' ? (
+            <>
+              <Button onClick={onClose}>Cancel</Button>
+              {flow.action}
+            </>
+          ) : (
+            <>
+              <Button onClick={onClose}>{view === 'intro' ? 'Not now' : 'Cancel'}</Button>
+              <Button type="submit" variant="signal">
+                {view === 'intro' ? 'Set one up' : route === 'ssh' ? 'Continue' : 'Paste its code'}
               </Button>
-            )}
-            {(run === null || run.primary !== null) && (
-              <Button
-                type="submit"
-                variant="signal"
-                busy={run?.busy === true || (install.phase === 'done' && flow.stage === 'checking')}
-                disabled={run?.busy === true || (run === null && flow.ssh.target.trim() === '')}
-              >
-                {run === null ? (install.phase === 'done' ? 'Reading its identity…' : 'Set it up') : run.primary}
-              </Button>
-            )}
-          </>
-        ) : view === 'form' ? (
-          <>
-            <Button onClick={onClose}>Cancel</Button>
-            {flow.action}
-          </>
-        ) : (
-          <>
-            <Button onClick={onClose}>{view === 'intro' ? 'Not now' : 'Cancel'}</Button>
-            <Button type="submit" variant="signal">
-              {view === 'intro' ? 'Set one up' : route === 'ssh' ? 'Continue' : 'Paste its code'}
-            </Button>
-          </>
-        )
-      }
-    >
-      <div className={s.board} data-stage={stage}>
-        <div className={s.card} data-here="">
-          <span className={s.glyph}>
-            <Icon name="computer" size={15} />
-          </span>
-          <span className={s.words}>
-            <span className={s.name}>This computer</span>
-            <span className={s.where}>Can sleep</span>
-          </span>
+            </>
+          )
+        }
+      >
+        <div className={s.board} data-stage={stage}>
+          <div className={s.card} data-here="">
+            <span className={s.glyph}>
+              <Icon name="computer" size={15} />
+            </span>
+            <span className={s.words}>
+              <span className={s.name}>This computer</span>
+              <span className={s.where}>Can sleep</span>
+            </span>
+          </div>
+          <Wire
+            stage={stage}
+            how={view === 'intro' ? 'always on' : (view === 'setup' ? route === 'ssh' : flow.method === 'ssh') ? 'ssh' : 'https'}
+          />
+          <HomeCard flow={flow} view={view} />
         </div>
-        <Wire
-          stage={stage}
-          how={view === 'intro' ? 'always on' : (view === 'setup' ? route === 'ssh' : flow.method === 'ssh') ? 'ssh' : 'https'}
-        />
-        <HomeCard flow={flow} view={view} />
-      </div>
-      <div className={s.body}>
-        {view === 'intro' && (
-          <div className={s.intro}>
-            <h3 className={s.lede}>Work that keeps going while this computer sleeps</h3>
-            <p className={s.copy}>
-              A home is a computer that runs Althar for you, such as a server that stays on. Its tasks run there, and you open its projects
-              from here, each in a window of its own.
-            </p>
-          </div>
-        )}
-        {view === 'setup' && <Setup route={route} onRoute={(next) => morph(() => setRoute(next))} />}
-        {view === 'form' && (
-          <div className={s.form} key="form">
-            {!installing && install.phase !== 'done' && (
-              <MethodSwitch flow={flow} className={s.method} onChange={(next) => morph(() => flow.setMethod(next))} />
-            )}
-            {flow.method === 'ssh' ? (
-              <HostField
-                flow={flow}
-                readOnly={install.phase !== 'idle' && install.phase !== 'failed'}
-                focus={!first}
-                help={
-                  installs && install.phase === 'idle' ? 'Althar installs and starts althar-host there, where it isn’t yet.' : undefined
-                }
-              />
-            ) : (
-              <CodeField
-                flow={flow}
-                focus={!first}
-                help={
-                  <>
-                    On the home, <Code>althar-host pair</Code> prints one.{' '}
-                    <button type="button" className={s.link} onClick={() => morph(() => setView('setup'))}>
-                      Not set up yet?
-                    </button>
-                  </>
-                }
-              />
-            )}
-            {installs && flow.method === 'ssh' && install.phase !== 'idle' && flow.found === null && <InstallSteps install={install} />}
-            {flow.method === 'ssh' && flow.found === null && flow.stage !== 'checking' && install.phase === 'idle' && (
-              <Options flow={flow} />
-            )}
-            {flow.found !== null && (
-              <>
-                {installs && flow.method === 'ssh' && install.phase === 'done' ? (
-                  // Althar made this home itself, over a key you trusted: there's no identity to compare.
-                  <InstallDone install={install} />
-                ) : (
-                  <p className={s.note}>
-                    {flow.method === 'ssh' ? (
-                      <>
-                        On the host, <Code>althar-host status</Code> prints the same identity. Connect only if it does.
-                      </>
-                    ) : (
-                      'Tasks and conversations are available. Approvals need a trusted device.'
-                    )}
-                  </p>
-                )}
-                <NameField flow={flow} />
-              </>
-            )}
-            <LaterProblem flow={flow} />
-          </div>
-        )}
-      </div>
-    </Dialog>
+        <div className={s.body}>
+          {view === 'intro' && (
+            <div className={s.intro}>
+              <h3 className={s.lede}>Work that keeps going while this computer sleeps</h3>
+              <p className={s.copy}>
+                A home is a computer that runs Althar for you, such as a server that stays on. Its tasks run there, and you open its
+                projects from here, each in a window of its own.
+              </p>
+            </div>
+          )}
+          {view === 'setup' && <Setup route={route} onRoute={(next) => morph(() => setRoute(next))} />}
+          {view === 'form' && (
+            <div className={s.form} key="form">
+              {!installing && install.phase !== 'done' && (
+                <MethodSwitch flow={flow} className={s.method} onChange={(next) => morph(() => flow.setMethod(next))} />
+              )}
+              {flow.method === 'ssh' ? (
+                <HostField
+                  flow={flow}
+                  readOnly={install.phase !== 'idle' && install.phase !== 'failed'}
+                  focus={!first}
+                  help={
+                    installs && install.phase === 'idle' ? 'Althar installs and starts althar-host there, where it isn’t yet.' : undefined
+                  }
+                />
+              ) : (
+                <CodeField
+                  flow={flow}
+                  focus={!first}
+                  help={
+                    <>
+                      On the home, <Code>althar-host pair</Code> prints one.{' '}
+                      <button type="button" className={s.link} onClick={() => morph(() => setView('setup'))}>
+                        Not set up yet?
+                      </button>
+                    </>
+                  }
+                />
+              )}
+              {installs && flow.method === 'ssh' && install.phase !== 'idle' && flow.found === null && <InstallSteps install={install} />}
+              {flow.method === 'ssh' && flow.found === null && flow.stage !== 'checking' && install.phase === 'idle' && (
+                <Options flow={flow} />
+              )}
+              {flow.found !== null && (
+                <>
+                  {installs && flow.method === 'ssh' && install.phase === 'done' ? (
+                    // Althar made this home itself, over a key you trusted: there's no identity to compare.
+                    <InstallDone install={install} />
+                  ) : (
+                    <p className={s.note}>
+                      {flow.method === 'ssh' ? (
+                        <>
+                          On the host, <Code>althar-host status</Code> prints the same identity. Connect only if it does.
+                        </>
+                      ) : (
+                        'Tasks and conversations are available. Approvals need a trusted device.'
+                      )}
+                    </p>
+                  )}
+                  <NameField flow={flow} />
+                </>
+              )}
+              <LaterProblem flow={flow} />
+            </div>
+          )}
+        </div>
+      </Dialog>
+    </>
   )
 }
 

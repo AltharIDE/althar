@@ -125,10 +125,35 @@ const drive = async ({ m, first }: State) => {
   }
 }
 
-function Dialogs({ state, onClose }: { state: State; onClose: () => void }) {
+function Dialogs({
+  state,
+  shown,
+  chipIn,
+  onHide,
+  onShow,
+  onClose,
+}: {
+  state: State
+  shown: boolean
+  chipIn: Element | null
+  onHide: () => void
+  onShow: () => void
+  onClose: () => void
+}) {
   const flow = useFlow(homes, onClose, state.m)
   if (state.d === '0') return <ConnectHome homes={homes} onClose={onClose} />
-  return <DrawingDirection flow={flow} first={state.first} scenario={state.x} onClose={onClose} />
+  return (
+    <DrawingDirection
+      flow={flow}
+      first={state.first}
+      scenario={state.x}
+      shown={shown}
+      chipIn={chipIn}
+      onHide={onHide}
+      onShow={onShow}
+      onClose={onClose}
+    />
+  )
 }
 
 const next = (x: Scenario) => SCENARIOS[(SCENARIOS.findIndex((one) => one.key === x) + 1) % SCENARIOS.length]!.key
@@ -137,6 +162,9 @@ let driven = false
 function Lab() {
   const [state, setStateNow] = useState(read)
   const [open, setOpen] = useState(true)
+  // Closed while setting a home up: it goes on, on the window's chip, until that brings it back.
+  const [shown, setShown] = useState(true)
+  const [chipIn, setChipIn] = useState<HTMLElement | null>(null)
   const [round, setRound] = useState(0)
   const failing = useSyncExternalStore(failNext.subscribe, failNext.get)
   const set = (next: Partial<State>) => {
@@ -150,6 +178,7 @@ function Lab() {
     history.replaceState(null, '', `?${url.toString()}`)
     setStateNow(merged)
     setOpen(true)
+    setShown(true)
     setRound((was) => was + 1)
   }
   useEffect(() => {
@@ -177,12 +206,22 @@ function Lab() {
   return (
     <div className={s.lab}>
       <div className={s.window}>
-        {!open && (
-          <div className={s.closed}>
-            <Button onClick={() => set({})}>Connect a home…</Button>
-          </div>
+        {/* the window's bar, with its homes chip at the end: a setup under way shows there */}
+        <div className={s.titlebar}>
+          <span ref={setChipIn} className={s.chipSlot} />
+        </div>
+        {(!open || !shown) && <div className={s.closed}>{!open && <Button onClick={() => set({})}>Connect a home…</Button>}</div>}
+        {open && (
+          <Dialogs
+            key={`${state.d}-${state.m}-${state.first}-${state.x}-${round}`}
+            state={state}
+            shown={shown}
+            chipIn={chipIn}
+            onHide={() => setShown(false)}
+            onShow={() => setShown(true)}
+            onClose={() => setOpen(false)}
+          />
         )}
-        {open && <Dialogs key={`${state.d}-${state.m}-${state.first}-${state.x}-${round}`} state={state} onClose={() => setOpen(false)} />}
       </div>
       <div className={s.bar} role="toolbar" aria-label="Directions">
         {DIRECTIONS.map((one) => (

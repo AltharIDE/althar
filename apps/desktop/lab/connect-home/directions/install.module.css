@@ -127,29 +127,17 @@
   background: var(--t-4);
 }
 
-/* the host's key, the first time: to compare, then trust */
-.ask,
-.problem {
+/* under a step: a question for the person (AskCard), or where it failed (Problem) and what to do */
+.ask {
+  margin-top: 6px;
+}
+.failed {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 6px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--paper);
-  box-shadow:
-    inset 0 0 0 1px var(--line-2),
-    var(--lift-card);
+  margin-top: 4px;
 }
-.askTitle,
-.problemTitle {
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 18px;
-  color: var(--t-1);
-}
-.askBody,
-.problemBody {
+.note {
   font-size: 12px;
   line-height: 1.5;
   color: var(--t-2);
@@ -166,38 +154,11 @@
   font: 500 11.5px/16px var(--mono);
   color: var(--t-1);
 }
-.problem[data-tone='danger'] {
-  box-shadow:
-    inset 3px 0 0 var(--danger),
-    inset 0 0 0 1px var(--line-2),
-    var(--lift-card);
-}
-.problem[data-tone='danger'] .problemTitle {
-  color: var(--danger);
-}
-.problem[data-tone='warn'] {
-  margin-top: 0;
-  box-shadow:
-    inset 3px 0 0 var(--t-3),
-    inset 0 0 0 1px var(--line-2);
-}
-.command {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  margin-top: 2px;
-  padding: 4px 4px 4px 12px;
-  border-radius: 8px;
-  background: var(--term);
-}
-.command code {
-  flex: 1;
-  min-width: 0;
-  overflow-x: auto;
-  font: 500 12px/20px var(--mono);
-  color: var(--term-t1);
-  white-space: nowrap;
+
+/* on the homes chip, while it waits on the person: violet, like every ask */
+.chipAsk {
+  font-weight: 500;
+  color: var(--signal);
 }
 
 /* what it ran */
@@ -246,4 +207,7 @@
   .bar > span {
     transition: none;
   }
+}
+:global([data-ask]) svg {
+  color: var(--signal);
 }

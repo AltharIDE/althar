@@ -9,10 +9,26 @@
   position: relative;
   min-height: 0;
 }
+.window {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 40px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+}
+.chipSlot {
+  display: inline-flex;
+  min-width: 0;
+}
 .closed {
   display: grid;
   place-items: center;
-  height: 100%;
 }
 .bar {
   position: relative;
