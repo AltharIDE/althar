@@ -1,7 +1,7 @@
 import type { Launch } from '@althar/contracts'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { Runs } from '../src/renderer/features/runs/Runs'
 import { fakeClient, runnables } from './fixtures'
@@ -34,6 +34,9 @@ const screenOf = (launches: ReadonlyArray<Launch>, onRun: () => Promise<boolean>
 )
 
 describe('a run pressed before the runtime shows its launch', () => {
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }))
+  afterEach(() => vi.useRealTimers())
+
   it('says starting, with nothing to stop, however long its launch takes to show, until it shows', async () => {
     const onRun = vi.fn(() => Promise.resolve(true))
     const services = servicesFor(fakeClient().client)
@@ -43,7 +46,7 @@ describe('a run pressed before the runtime shows its launch', () => {
     expect(onRun).toHaveBeenCalledTimes(1)
     // Its start has answered, and a refresh is still pending: no launch yet, and still starting.
     await act(async () => {
-      await new Promise((done) => setTimeout(done, 2_000))
+      await vi.advanceTimersByTimeAsync(5_000)
     })
     const list = within(screen.getByRole('dialog'))
     expect(list.getByText('Starting…')).toBeTruthy()
@@ -51,7 +54,7 @@ describe('a run pressed before the runtime shows its launch', () => {
     // Its launch shows: that tells it.
     rerender(<ServicesProvider value={services}>{screenOf([launch], onRun)}</ServicesProvider>)
     expect(await list.findByRole('button', { name: 'Stop Storybook' })).toBeTruthy()
-  }, 15_000)
+  })
 
   it('lets go at once where its start was refused', async () => {
     const onRun = vi.fn(() => Promise.resolve(false))
