@@ -38,12 +38,17 @@ describe('issue file uploads', () => {
         assert.isTrue(sent.filter((one) => one.bytes !== undefined).every((one) => one.redirect === 'manual'))
       }),
     )
-  for (const product of ['jira_cloud', 'jira_dc', 'trello'] as const)
+  for (const product of ['jira_cloud', 'jira_dc', 'trello', 'clickup'] as const)
     it.effect(`uploads a multipart file with the existing ${product} credential and no redirects`, () =>
       Effect.gen(function* () {
         const root =
-          product === 'trello' ? 'https://api.trello.com/1' : `https://jira.test/rest/api/${product === 'jira_cloud' ? '3' : '2'}`
-        const path = product === 'trello' ? '/cards/DEV-1/attachments' : '/issue/DEV-1/attachments'
+          product === 'trello'
+            ? 'https://api.trello.com/1'
+            : product === 'clickup'
+              ? 'https://api.clickup.com/api/v2'
+              : `https://jira.test/rest/api/${product === 'jira_cloud' ? '3' : '2'}`
+        const path =
+          product === 'trello' ? '/cards/DEV-1/attachments' : product === 'clickup' ? '/task/DEV-1/attachment' : '/issue/DEV-1/attachments'
         const { fetch, sent } = stubFetch([['POST', root + path, { json: [{ id: 'attachment', filename: 'report.txt' }] }]])
         const api = makeServiceApi(product, {
           apiUrl: root,
@@ -59,7 +64,9 @@ describe('issue file uploads', () => {
         assert.include(new TextDecoder().decode(sent[0]?.bytes), 'Report bytes')
         assert.strictEqual(sent[0]?.redirect, 'manual')
         assert.include(sent[0]?.headers.authorization ?? '', 'test-token')
-        if (product !== 'trello') assert.strictEqual(sent[0]?.headers['x-atlassian-token'], 'no-check')
+        if (product !== 'trello' && product !== 'clickup') assert.strictEqual(sent[0]?.headers['x-atlassian-token'], 'no-check')
+        // ClickUp takes the file as its attachment field.
+        if (product === 'clickup') assert.include(new TextDecoder().decode(sent[0]?.bytes), 'name="attachment"')
         assert.notInclude(sent[0]?.url ?? '', 'test-token')
       }),
     )

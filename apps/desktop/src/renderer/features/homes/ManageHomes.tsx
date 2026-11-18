@@ -4,7 +4,8 @@ import { Button, Dialog, Icon, IconButton, ListMotion, LiveDot, Menu, MenuItem, 
 import type { HomeProjects, HomeState, HomesHost, HomesOverview, RemoteHome } from '../../../homes'
 import { kitInk } from '../../shared/inks'
 import { ConnectionFields, useEdit } from './EditConnection'
-import { homeProblem, keyOf, type Liveness, livenessOf, openedAgo } from './useHomes'
+import { Identity } from './ConnectHome'
+import { homeProblem, homesUi, keyOf, type Liveness, livenessOf, openedAgo } from './useHomes'
 import s from './ManageHomes.module.css'
 
 /*
@@ -123,12 +124,14 @@ const useSaved = (homes: HomesHost, overview: HomesOverview | null) => {
       setProblem(null)
       clearTimeout(timer.current)
       timer.current = setTimeout(() => setLast(null), UNDO_FOR)
-      pending.current = homes.forget(home.id).catch((error: unknown) => {
-        if (!live.current) return
-        unhide(home.id)
-        setLast(null)
-        setProblem(homeProblem(error))
-      })
+      pending.current = pending.current
+        .then(() => homes.forget(home.id))
+        .catch((error: unknown) => {
+          if (!live.current) return
+          unhide(home.id)
+          setLast(null)
+          setProblem(homeProblem(error))
+        })
     },
     undo: () => {
       if (last === null) return
@@ -153,7 +156,7 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
   const [editing, setEditing] = useState<Editing>(null)
   const list = useRef<HTMLUListElement>(null)
   useQuietFocus(list)
-  const ownKey = here?.current.kind === 'ssh' ? here.current.home.homeId : 'local'
+  const ownKey = here !== null && here.current.kind !== 'local' ? here.current.home.homeId : 'local'
   const open = (id: string, projectId?: string) => {
     onClose()
     void saved
@@ -162,7 +165,18 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
       .catch(() => undefined)
   }
   return (
-    <Dialog title="Homes" width={600} tall onClose={onClose} actions={<Button onClick={onClose}>Done</Button>}>
+    <Dialog
+      title="Homes"
+      width={600}
+      tall
+      onClose={onClose}
+      onEscapeKeyDown={(event) => {
+        if (editing === null) return
+        event.preventDefault()
+        setEditing(null)
+      }}
+      actions={<Button onClick={onClose}>Done</Button>}
+    >
       <ListMotion within={list} enter="grow">
         <ul className={s.homes} ref={list}>
           <li data-move="local" className={s.home}>
@@ -226,7 +240,8 @@ export function ManageHomes({ homes, overview, here, onClose, onConnect }: Manag
 const statusOf = (home: RemoteHome, live: Liveness, here: HomeState | null, overview: HomesOverview | null) => {
   if (live === 'down') return 'Disconnected'
   if (live === 'connecting') return 'Connecting…'
-  if (live === 'live') return here?.current.kind === 'ssh' && here.current.home.homeId === home.homeId ? 'This window' : 'Open'
+  if (live === 'live')
+    return here !== null && here.current.kind !== 'local' && here.current.home.homeId === home.homeId ? 'This window' : 'Open'
   return openedAgo(overview?.opened[home.id])
 }
 
@@ -252,7 +267,7 @@ function Home({
   onForget: () => void
 }) {
   const live = livenessOf(overview, home)
-  const own = here?.current.kind === 'ssh' && here.current.home.homeId === home.homeId
+  const own = here !== null && here.current.kind !== 'local' && here.current.home.homeId === home.homeId
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return
@@ -273,8 +288,8 @@ function Home({
               {home.name}
             </span>
           )}
-          <span className={s.host} title={home.ssh.target} role={copied ? 'status' : undefined}>
-            {copied ? 'Identity copied' : home.ssh.target}
+          <span className={s.host} title={home.ssh?.target ?? home.https?.origin ?? ''} role={copied ? 'status' : undefined}>
+            {copied ? 'Identity copied' : (home.ssh?.target ?? home.https?.origin ?? '')}
           </span>
         </span>
         <span className={s.status} data-down={live === 'down' || undefined}>
@@ -338,6 +353,7 @@ function NameField({ name, onDone }: { name: string; onDone: (name: string | nul
       value={value}
       maxLength={120}
       aria-label="Name"
+      data-own-escape
       spellCheck={false}
       // oxlint-disable-next-line jsx-a11y/no-autofocus -- Rename was pressed to type the name; the field takes the keys.
       autoFocus
@@ -407,6 +423,25 @@ function Shelf({
 
 /** A home's connection, changed in place of its projects: checked before it's kept, with its identity beneath. */
 function Connection({ home, homes, onDone }: { home: RemoteHome; homes: HomesHost; onDone: () => void }) {
+  if (home.ssh === undefined)
+    return (
+      <div className={s.edit}>
+        <p>To change this secure connection, pair a new connection with a code from the host.</p>
+        <Identity homeId={home.homeId} />
+        <div className={s.done}>
+          <Button size="small" variant="quiet" onClick={onDone}>
+            Close
+          </Button>
+          <Button size="small" onClick={() => homesUi.set({ dialog: 'connect' })}>
+            Pair a new connection…
+          </Button>
+        </div>
+      </div>
+    )
+  return <SshConnection home={home} homes={homes} onDone={onDone} />
+}
+
+function SshConnection({ home, homes, onDone }: { home: import('../../../homes').SshRemoteHome; homes: HomesHost; onDone: () => void }) {
   const edit = useEdit(homes, home)
   return (
     <div className={s.edit}>

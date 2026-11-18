@@ -130,7 +130,8 @@ const answerAt = (fetch: Fetch, service: Service, base: string): Effect.Effect<{
       }
       case 'linear':
       case 'trello':
-        // Neither runs on a company's own server.
+      case 'clickup':
+        // None runs on a company's own server.
         return null
     }
   })

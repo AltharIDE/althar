@@ -34,7 +34,7 @@ function HomesMenu({
 }) {
   const { menu } = useHomesUi()
   const saved = overview?.homes ?? []
-  const remote = here.current.kind === 'ssh' ? here.current.home : null
+  const remote = here.current.kind !== 'local' ? here.current.home : null
   // A window on a home since forgotten stays on it: the menu still names it, as this window's.
   const listed: ReadonlyArray<RemoteHome> = remote !== null && !saved.some((home) => home.id === remote.id) ? [remote, ...saved] : saved
   const hint = (home: RemoteHome | 'local') => {
@@ -58,7 +58,7 @@ function HomesMenu({
           <MenuItem
             icon="reload"
             {...(here.problem === undefined ? {} : { description: here.problem })}
-            onSelect={() => void homes.reconnect()}
+            onSelect={() => void homes.reconnect().catch(() => undefined)}
           >
             Reconnect
           </MenuItem>
@@ -66,7 +66,7 @@ function HomesMenu({
         </>
       )}
       <MenuGroup label="Homes">
-        <MenuItem lead={<Icon name="computer" />} hint={hint('local')} onSelect={() => void homes.open('local')}>
+        <MenuItem lead={<Icon name="computer" />} hint={hint('local')} onSelect={() => void homes.open('local').catch(() => undefined)}>
           This computer
         </MenuItem>
         {listed.map((home) => (
@@ -74,8 +74,8 @@ function HomesMenu({
             key={home.id}
             lead={<Icon name="home" />}
             hint={hint(home)}
-            description={<span className={s.target}>{home.ssh.target}</span>}
-            onSelect={() => void homes.open(home.id)}
+            description={<span className={s.target}>{home.ssh?.target ?? home.https?.origin ?? ''}</span>}
+            onSelect={() => void homes.open(home.id).catch(() => undefined)}
           >
             {home.name}
           </MenuItem>
@@ -133,8 +133,8 @@ export function Chip({ homes }: { homes: HomesHost }) {
             type="button"
             className={s.chip}
             data-down={down || undefined}
-            title={home.ssh.target}
-            aria-label={`${home.name}, ${down ? 'disconnected' : connecting ? 'reconnecting' : 'over SSH'}. Homes`}
+            title={home.ssh?.target ?? home.https?.origin ?? ''}
+            aria-label={`${home.name}, ${down ? 'disconnected' : connecting ? 'reconnecting' : home.https === undefined ? 'over SSH' : 'connected'}. Homes`}
           >
             {connecting ? <Spinner size="small" /> : <Icon name={down ? 'unlinked' : 'home'} size={13} />}
             <span className={s.chipName}>{home.name}</span>

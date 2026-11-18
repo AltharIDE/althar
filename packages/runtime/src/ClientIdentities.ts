@@ -36,6 +36,7 @@ interface Registration {
 export class ClientIdentities extends Context.Service<
   ClientIdentities,
   {
+    lookup(deviceId: string): Effect.Effect<RegisteredClient | undefined, ApiError>
     register(input: Registration): Effect.Effect<RegisteredClient, ApiError>
     list(input?: ClientListOptions): Effect.Effect<ClientPage, ApiError>
     revoke(deviceId: string): Effect.Effect<void, ApiError>
@@ -201,7 +202,14 @@ export class ClientIdentities extends Context.Service<
           )
           return Deferred.await(signal)
         })
+      const lookup = (deviceId: string) =>
+        Effect.map(find(deviceId), ([row]) => {
+          if (row === undefined) return undefined
+          const { actorId: _actorId, ...client } = row
+          return client
+        }).pipe(Effect.mapError(storageFailed))
       return ClientIdentities.of({
+        lookup,
         register,
         list,
         revoke,

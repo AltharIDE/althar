@@ -90,6 +90,7 @@ test('checks an SSH home, isolates its window and local services, and reconnects
     await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
     const connect = page.getByRole('dialog', { name: 'Connect a home' })
     await expect(connect).toBeVisible()
+    await page.getByRole('radio', { name: 'SSH', exact: true }).click()
     await page.getByLabel('SSH host', { exact: true }).fill('fixture')
     await page.getByRole('button', { name: 'Connection options' }).click()
     await page.getByLabel('Home’s profile on the host', { exact: true }).fill(profile)

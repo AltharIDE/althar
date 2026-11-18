@@ -14,7 +14,12 @@ import type { RemoteHome, WindowHome } from '../src/homes'
 const homeId = `home_${'1'.repeat(32)}`
 const status = { homeId, hostDeviceId: `dev_${'2'.repeat(32)}`, apiVersion: 1, version: 'fixture' }
 const identity = { homeId, actorId: `act_${'3'.repeat(32)}`, deviceId: status.hostDeviceId, role: 'socket' as const }
-const remote = (digit = '4'): RemoteHome => ({ id: `remote_${digit.repeat(32)}`, name: 'VPS', homeId, ssh: { target: 'fixture' } })
+const remote = (digit = '4'): Extract<RemoteHome, { ssh: unknown }> => ({
+  id: `remote_${digit.repeat(32)}`,
+  name: 'VPS',
+  homeId,
+  ssh: { target: 'fixture' },
+})
 const roots: string[] = []
 const temporary = () => {
   const root = mkdtempSync(join(tmpdir(), 'althar-homes-'))
@@ -152,7 +157,7 @@ describe('managing saved homes', () => {
     const same = await at.controller.inspect(1, { target: 'root@fixture.example', port: 2222 })
     await at.controller.change(1, home.id, same.checkId)
     expect((await at.controller.list())[0]!.ssh).toEqual({ target: 'root@fixture.example', port: 2222 })
-    expect(at.controller.begin(2).home.ssh.target).toBe('root@fixture.example')
+    expect(at.controller.begin(2).home.ssh?.target).toBe('root@fixture.example')
     await expect(at.controller.change(1, home.id, same.checkId)).rejects.toThrow('expired')
     homeId = otherHome
     const other = await at.controller.inspect(1, { target: 'another' })

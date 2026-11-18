@@ -173,7 +173,7 @@ import { type Answers, answersOf, followUpBody, followUpWords } from './followUp
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { FastLane } from './fastLane'
-import { Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
+import { linksIssues, Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { guardPush } from './repositoryGuard'
 import { pushDetailOf, pushFailureOf } from './pushFailure'
 import { Sessions } from './Sessions'
@@ -2122,6 +2122,18 @@ export class Changes extends Context.Service<
         issueLinks: ReadonlyArray<IssueLinkRow>,
         sameHostOf: (link: IssueLinkRow) => boolean,
         change: { readonly url: string; readonly title: string },
+      ) =>
+        Effect.gen(function* () {
+          // Not where the project's rules say not to link issues (on unless the person turned it off).
+          if (!linksIssues((yield* (yield* Policies).current(projectId)).rules)) return
+          yield* linkEach(issueLinks, sameHostOf, change, projectId)
+        })
+
+      const linkEach = (
+        issueLinks: ReadonlyArray<IssueLinkRow>,
+        sameHostOf: (link: IssueLinkRow) => boolean,
+        change: { readonly url: string; readonly title: string },
+        projectId: ProjectId,
       ) =>
         Effect.forEach(
           issueLinks.filter((linked) => linked.connectionId !== null && !sameHostOf(linked)),

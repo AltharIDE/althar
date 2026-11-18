@@ -3749,11 +3749,9 @@ describe('a task', () => {
     // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, how many are busy and how many run at a time.
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
       status: TaskStatus.Queued,
-      state: 'Waiting: 4 of 4 agents busy on this Mac',
+      state: 'Waiting · 4 agents busy',
     })
-    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe(
-      'Waiting: 6 agents busy on this Mac, 2 at a time',
-    )
+    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe('Waiting · 6 agents busy, 2 at a time')
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     // Under way with no session yet, between agents or on its way, as its card on the board says: working, not stopped.
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Running, state: 'Working' })

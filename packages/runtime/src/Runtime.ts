@@ -1,3 +1,4 @@
+import { DevicePairings } from './DevicePairings'
 import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
 import { Context, Layer } from 'effect'
 
@@ -114,7 +115,10 @@ export const layer = (options: RuntimeLayerOptions) => {
       Layer.provideMerge(
         Errands.layer.pipe(
           Layer.provideMerge(
-            Layer.mergeAll(ApiCommands.layer, ClientIdentities.layer).pipe(Layer.provideMerge(startupLayer('instance', Instance.layer))),
+            DevicePairings.layer.pipe(
+              Layer.provideMerge(Layer.mergeAll(ApiCommands.layer, ClientIdentities.layer)),
+              Layer.provideMerge(startupLayer('instance', Instance.layer)),
+            ),
           ),
         ),
       ),

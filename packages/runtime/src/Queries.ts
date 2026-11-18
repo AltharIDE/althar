@@ -620,7 +620,7 @@ const decodeNoticeOffer = Schema.decodeUnknownOption(NoticeItem.fields.content.f
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 const decodeRules = Schema.decodeUnknownOption(MergeRules)
 
-const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
+const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello', 'clickup'] as const
 
 /**
  * A stored item as the contract has it: each kind with its own content. A
@@ -2610,6 +2610,15 @@ export class Queries extends Context.Service<
               ((askedOf?.told === 1 ||
                 (askedOf?.takenSince != null && stillAsked(askedOf.takenSince, yield* nowFor(askedOf.takenSince, ASKED_MS), ASKED_MS))) &&
                 Option.isSome(lead)))
+          // A turn of its lead or reviewer, outside any step, waits for its account's usage limit to reset (Sessions.ts): held for
+          // the limit, as a step would be, never waiting for a place, however many agents are at work.
+          const usageOut = busy
+            ? undefined
+            : [lead, reviewer].flatMap((session) =>
+                Option.isSome(session) && session.value.usageOut !== undefined ? [session.value.usageOut] : [],
+              )[0]
+          const usageWaits: HeldForLimit | null =
+            usageOut === undefined ? null : { agentId: usageOut.agentId, accountId: usageOut.accountId, until: usageOut.until }
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
           // Waiting so with none of its agents at work, it is up next (ADR-065): under way, it continues first; before any agent
@@ -2623,7 +2632,9 @@ export class Queries extends Context.Service<
           // Held for a usage limit or the connection, or for its checkout, none of its agents in a turn, it goes on by itself:
           // up next too.
           const paused =
-            !queued && !busy && (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable' || waitsForCheckout !== null)
+            !queued &&
+            !busy &&
+            (task.heldFor === 'usage_limit' || task.heldFor === 'agent_unavailable' || waitsForCheckout !== null || usageWaits !== null)
           const unshipped =
             after.length === 0
               ? null
@@ -3024,7 +3035,7 @@ export class Queries extends Context.Service<
             ...(task.local > 0 ? { local: true } : {}),
             ...(waitsForCheckout === null ? {} : { waitsForCheckout }),
             ...(task.toward === null ? {} : { toward: task.toward }),
-            waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
+            waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : usageWaits,
             ...(task.heldFor === 'agent_unavailable' ? { reconnects: reconnectsOf(task.held) } : {}),
             ...(externalWait === undefined
               ? {}

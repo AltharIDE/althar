@@ -573,12 +573,21 @@ export class Busy extends Context.Service<
         )
 
       /** Everything waiting, from every source, and the turns that wait. */
-      const everything = Effect.map(
+      const readEverything = Effect.map(
         Effect.forEach(sources, (source) =>
-          source.pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what waits for a place', cause), []))),
+          source.pipe(
+            Effect.map((waiters) => ({ waiters, failed: false })),
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning('Could not read what waits for a place', cause), {
+                waiters: [] as ReadonlyArray<Waiter>,
+                failed: true,
+              }),
+            ),
+          ),
         ),
-        (read): ReadonlyArray<Waiter> => [...read.flat(), ...turns.values()],
+        (read) => ({ waiters: [...read.flatMap((one) => one.waiters), ...turns.values()], failed: read.some((one) => one.failed) }),
       )
+      const everything = Effect.map(readEverything, (read) => read.waiters)
 
       /**
        * What waits, in the order it starts: what the person did, then work
@@ -756,8 +765,10 @@ export class Busy extends Context.Service<
        */
       const look = lock.withPermits(1)(
         Effect.gen(function* () {
-          const queue = yield* waiting
-          if (queue.length === 0) return false
+          const read = yield* readEverything
+          const queue = yield* rank(read.waiters)
+          // A failed source may hide waiting work. Keep polling even if all the readable sources are empty.
+          if (queue.length === 0) return read.failed
           const { at: busy, holders } = yield* atWork
           const most = yield* admission
           const tasks = yield* automated
@@ -839,7 +850,7 @@ export class Busy extends Context.Service<
             said = shown
             yield* Effect.forEach(new Set(left), (taskId) => Effect.ignore(provide(touchTask(taskId))), { discard: true })
           }
-          return left.length > 0
+          return left.length > 0 || read.failed
         }),
       )
 

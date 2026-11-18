@@ -52,8 +52,8 @@ export const receiveHomeConnection = async (
       () =>
         stop(
           new Error(
-            state.current.kind === 'ssh'
-              ? 'The home did not connect. Check its service and SSH configuration.'
+            state.current.kind !== 'local'
+              ? 'The home did not connect. Check its service and network connection.'
               : 'The runtime didn’t start.',
           ),
         ),
@@ -65,16 +65,16 @@ export const receiveHomeConnection = async (
     const failed = new Promise<never>((_, reject) => {
       off =
         host.homes?.onState((state) => {
-          if (state.current.kind === 'ssh' && state.connection === 'disconnected')
+          if (state.current.kind !== 'local' && state.connection === 'disconnected')
             reject(new Error(state.problem ?? 'The home disconnected.'))
         }) ?? (() => {})
     })
     state = (await Promise.race([host.homes?.state(), failed, stopped])) ?? state
-    if (state.current.kind === 'ssh' && state.connection === 'disconnected') throw new Error(state.problem ?? 'The home disconnected.')
-    if (state.current.kind === 'ssh') deadline(60_000)
+    if (state.current.kind !== 'local' && state.connection === 'disconnected') throw new Error(state.problem ?? 'The home disconnected.')
+    if (state.current.kind !== 'local') deadline(60_000)
     const port = await Promise.race([given, failed, stopped])
     const home = (await Promise.race([host.homes?.state(), failed, stopped])) ?? state
-    if (home.current.kind === 'ssh' && (home.connection !== 'connected' || home.identity === undefined))
+    if (home.current.kind !== 'local' && (home.connection !== 'connected' || home.identity === undefined))
       throw new Error('The home did not establish a verified connection.')
     opened = true
     return { port, home }

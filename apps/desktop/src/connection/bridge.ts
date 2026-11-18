@@ -1,14 +1,19 @@
 import { emitterPort, type ClientIdentity, type PortLike } from '@althar/contracts'
-import { openSshConnection } from '@althar/transport-node'
+import { openSshConnection, openHttpsConnection, signDeviceMessage, type DeviceKey } from '@althar/transport-node'
 import { Deferred, Effect } from 'effect'
 
 import type { RemoteHome } from '../homes'
 
 /** Runs in a utility process: decoding and copying remote RPC frames never occupies the desktop's main thread. */
-export const bridgeHome = (home: RemoteHome, front: PortLike, ready: (identity: ClientIdentity) => void) =>
+export const bridgeHome = (home: RemoteHome, front: PortLike, ready: (identity: ClientIdentity) => void, key?: DeviceKey) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const connection = yield* openSshConnection({ ...home.ssh, homeId: home.homeId })
+      if (home.https !== undefined && key === undefined)
+        return yield* Effect.fail(new Error('Pair this home again to create a connection key.'))
+      const connection =
+        home.https === undefined
+          ? yield* openSshConnection({ ...home.ssh, homeId: home.homeId })
+          : yield* openHttpsConnection(home.https, (message) => signDeviceMessage(key?.privateKey ?? '', message))
       const done = yield* Deferred.make<void>()
       const end = () => {
         Deferred.doneUnsafe(done, Effect.void)

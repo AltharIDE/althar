@@ -22,10 +22,10 @@ export function HomeOpening({ host, homes, home, problem }: { host: Host; homes:
       <main className={s.openingBody}>
         <Icon name={problem === null ? 'home' : 'unlinked'} size={28} className={s.openingGlyph} />
         <h1 className={s.openingName}>{home.name}</h1>
-        <span className={s.target}>{home.ssh.target}</span>
+        <span className={s.target}>{home.ssh?.target ?? home.https?.origin ?? ''}</span>
         <div className={s.openingState}>
           {problem === null ? (
-            <Working>Connecting over SSH…</Working>
+            <Working>{home.https === undefined ? 'Connecting over SSH…' : 'Connecting securely…'}</Working>
           ) : (
             <>
               <Problem size="small">{problem}</Problem>

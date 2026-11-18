@@ -2513,10 +2513,14 @@ export class Coordinator extends Context.Service<
             type: 'object',
             properties: {
               text: { type: 'string', description: 'Words in its title or description: all of them.' },
-              tracker: { type: 'string', description: 'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab, or a workspace.' },
+              tracker: {
+                type: 'string',
+                description: 'The tracker, by name: Linear, Jira, Trello, ClickUp, GitHub, GitLab, or a workspace.',
+              },
               container: {
                 type: 'string',
-                description: "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list.",
+                description:
+                  "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list, a ClickUp list.",
               },
               state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Open unless said; with keys, all unless said.' },
               mine: {
@@ -2573,12 +2577,12 @@ export class Coordinator extends Context.Service<
             tracker: {
               type: 'string',
               description:
-                'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab; where two connections share a name, as Althar names them, or by site.',
+                'The tracker, by name: Linear, Jira, Trello, ClickUp, GitHub, GitLab; where two connections share a name, as Althar names them, or by site.',
             },
             container: {
               type: 'string',
               description:
-                "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a repository as owner/name.",
+                "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a ClickUp list as Space / Folder / List, a repository as owner/name.",
             },
             labels: { type: 'array', items: { type: 'string' }, description: 'Labels the tracker has; Althar says which it left off.' },
             ...fieldSchema,
