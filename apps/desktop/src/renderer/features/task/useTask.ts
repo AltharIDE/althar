@@ -848,14 +848,15 @@ export const useTask = (threadId: string): TaskModel => {
     merging,
     mergeRefused: error === null ? null : mergeFailed,
     mergeStanding: (url) => {
-      const pressing = pressedMerges.get(url) ?? pressedByUrl.get(url)
+      // The window's record first, once it has the press: it says when the press is answered and it goes into its queue.
+      const pressing = pressedByUrl.get(url) ?? pressedMerges.get(url)
+      const unaddressed = snapshot !== null && shownChange?.url === url && windowMerges.unaddressed.has(snapshot.task.id)
       return mergeStandingOf(
         snapshot?.task.changes.find((change) => change.url === url),
-        merging === url ||
-          pressing !== undefined ||
-          // A merge pressed without its address, on a screen that knew only the task: its shown pull request's.
-          (snapshot !== null && shownChange?.url === url && windowMerges.unaddressed.has(snapshot.task.id)),
+        // A merge pressed without its address, on a screen that knew only the task: its shown pull request's.
+        merging === url || pressing !== undefined || unaddressed,
         pressing === 'bypass',
+        pressing === 'queue' || (unaddressed && windowMerges.queuing.has(snapshot.task.id)),
       )
     },
     mergeAwaits: (url) =>

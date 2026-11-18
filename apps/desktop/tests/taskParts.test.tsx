@@ -7,6 +7,7 @@ import { useTask } from '../src/renderer/features/task/useTask'
 import { change, fakeClient, items, snapshot } from './fixtures'
 import type { ChangeSummary } from '@althar/contracts'
 import { ServicesProvider } from '../src/renderer/data/services'
+import { ApiError } from '@althar/contracts'
 import { useMerge } from '../src/renderer/data/merges'
 import { servicesFor, withServices } from './render'
 
@@ -346,6 +347,40 @@ describe('a task’s parts', () => {
       expect(popover.getByText('Merging', said)).toBeTruthy()
       expect(popover.getAllByRole('button', { name: 'Merge' })).toHaveLength(1)
       expect(merge).toHaveBeenCalledOnce()
+    })
+
+    describe('going into its branch’s merge queue', () => {
+      // Its branch merges through a queue, as its host said: Merge puts it there. Every read of it says open, never queued.
+      const bound = change({ ...second, needs: [{ kind: 'merge_queue', state: 'met' }] })
+      const one = vi.fn(async () => snapshot({ task: { ...base.task, changes: [bound] } }))
+
+      it('is in its queue just after Merge answers the press, before the host has answered or any read says so', async () => {
+        const { merge } = held()
+        const { client } = fakeClient({ getThread: one, merge })
+        withServices(<Task />, client)
+        const popover = await parts()
+        await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
+        // The press, answered at once where it was made.
+        expect(await popover.findByText('Merging', said)).toBeTruthy()
+        // Then into the queue, the host still holding the merge and every read still saying open, not queued.
+        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        expect(merge).toHaveBeenCalledOnce()
+        expect(popover.queryByText('Merging', said)).toBeNull()
+        expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
+      })
+
+      it('is the person’s again, saying why, where the host refuses it', async () => {
+        const { merge, answers } = held()
+        const { client } = fakeClient({ getThread: one, merge })
+        withServices(<Task />, client)
+        const popover = await parts()
+        await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
+        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        act(() => answers[0]!.reject(new ApiError({ reason: 'ConnectorFailed', message: 'The merge queue refused it.' })))
+        expect(await screen.findByText('The merge queue refused it.')).toBeTruthy()
+        await waitFor(() => expect(popover.queryByText('In the merge queue')).toBeNull())
+        expect(popover.getByRole('button', { name: 'Merge' })).toBeTruthy()
+      })
     })
 
     /** Outputs of the same task, pressing through the model its header reads. */
