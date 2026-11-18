@@ -20,7 +20,7 @@ import { NotFound, TaskRefused } from './errors'
 import { bringBack as bringFoldersBack } from './bringBack'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
-import { answeredIn, issueCardsWaiting, quickIn } from './kinds'
+import { answeredIn, issueCardsWaiting, keepWaitsIn, quickIn } from './kinds'
 import { Launches } from './Launches'
 import { Plans } from './Plans'
 import { touchQuestion } from './Questions'
@@ -730,10 +730,9 @@ export class Tasks extends Context.Service<
             Effect.gen(function* () {
               const [task] = yield* sql<{ projectId: ProjectId; state: string; keptAt: string | null; open: number }>`
                 SELECT k.project_id, k.state, k.kept_at,
-                  -- Any kind keeps, a prototype or a chat ending on its branch included: only a pull request of its own still open
-                  -- waits on the person in its own way, to accept.
-                  EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change'
-                    AND coalesce(json_extract(l.snapshot, '$.state'), 'open') = 'open') AS open
+                  -- Any kind keeps, a prototype or a chat ending on its branch included: only a pull request of its own still open,
+                  -- or commits held for Ship, wait on the person in their own ways (accepting, Ship).
+                  ${sql.unsafe(keepWaitsIn('k'))} AS open
                 FROM tasks k WHERE k.id = ${input.taskId}`
               if (task === undefined || task.state !== 'open' || task.keptAt !== null || task.open === 1) return false
               const revision = yield* change('tasks', input.taskId, { keptAt: at })

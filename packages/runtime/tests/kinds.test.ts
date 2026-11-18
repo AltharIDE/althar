@@ -412,12 +412,35 @@ describe('settling a task that isn’t a change', () => {
       // Its pull request open, it waits on that: nothing to keep.
       assert.isFalse(yield* keep(opened.taskId))
       assert.isNull((yield* row(opened.taskId)).keptAt)
+      // Commits of it held for Ship wait on Ship: nothing to keep while they do.
+      const [worktree] = yield* sql<{ id: string }>`SELECT id FROM workspaces WHERE task_id = ${sketch.taskId} LIMIT 1`
+      assert.isDefined(worktree)
+      yield* sql`UPDATE workspaces SET held_at = ${at} WHERE id = ${worktree!.id}`
+      assert.isFalse(yield* keep(sketch.taskId))
+      yield* sql`UPDATE workspaces SET held_at = NULL WHERE id = ${worktree!.id}`
       // Ending on its branch, with nothing of it open on a host: kept for later, out of Needs you, open still.
       assert.isTrue(yield* keep(sketch.taskId))
       assert.deepInclude(yield* row(sketch.taskId), { state: 'open' })
       assert.strictEqual((yield* cardOnce(sketch.taskId, (card) => card.phase === 'kept')).kind, 'change')
       assert.isNotNull((yield* row(sketch.taskId)).keptAt)
       assert.strictEqual((yield* queries.card(opened.taskId)).phase, 'ready')
+      // A pull request of it opening after it was kept: it is ready again, to accept, not a kept row.
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'5'.repeat(32)}`,
+        projectId: project.projectId,
+        taskId: sketch.taskId,
+        connectionId: null,
+        product: 'github',
+        kind: 'change',
+        externalId: '9',
+        ref: '9',
+        key: '9',
+        url: 'https://github.com/acme/app/pull/9',
+        snapshot: JSON.stringify({ number: 9, title: 'Tabs', url: 'https://github.com/acme/app/pull/9', state: 'open', draft: false }),
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      assert.strictEqual((yield* cardOnce(sketch.taskId, (card) => card.phase !== 'kept')).phase, 'ready')
     }).pipe(Effect.provide(withQueries())),
   )
 
