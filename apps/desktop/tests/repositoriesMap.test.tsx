@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError, type ConnectionList, type HostRepository, type ProjectRepository } from '@althar/contracts'
-import { Brand, ChangeTarget, HostReach, RepositoryRole } from '@althar/ui'
+import { Brand, ChangeTarget, HostReach } from '@althar/ui'
 
 import type { Opening } from '../src/renderer/features/connections/ConnectDialog'
 import { ForkOffer, useForkOffer } from '../src/renderer/features/repositories/ForkOffer'
@@ -25,7 +25,7 @@ describe('a repository on the map', () => {
   it('says where it is, inside a repository too, and nothing of a place or branch it hasn’t', () => {
     expect(entryOf({ ...api, folder: 'packages/sdk' })).toMatchObject({ where: '~/code/meridian-api/packages/sdk' })
     const away = entryOf({ ...api, path: null, branch: null, host: null })
-    expect(away).toEqual({ id: 'repo_api', name: 'meridian-api', role: RepositoryRole.Service, tasks: 1 })
+    expect(away).toEqual({ id: 'repo_api', name: 'meridian-api', tasks: 1 })
   })
 
   it('names a remote with no page to open, on a host Althar doesn’t know', () => {
@@ -78,6 +78,26 @@ describe('a project’s repositories part', () => {
     expect(onConnect).toHaveBeenCalledWith({ service: 'gitlab' })
   })
 
+  it('changes the branch a repository’s new tasks work toward from its card, saying what that changes, at once', async () => {
+    // The runtime keeps what it's told.
+    let kept: string | null = null
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
+      getRepositories: vi.fn(async () => [{ ...api, defaultBranch: 'main', workToward: kept, branches: ['main', 'release/2.4'] }]),
+      setRepository: vi.fn(async (change: { workToward?: string | null }) => {
+        kept = change.workToward ?? null
+      }),
+    })
+    withServices(<Part connections={connectionList} onConnect={vi.fn()} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Branch new tasks in meridian-api work toward: main' }))
+    expect(await screen.findByText(/New tasks start from this branch and open their pull requests into it/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('option', { name: /release\/2\.4/ }))
+    expect(await screen.findByRole('button', { name: 'Branch new tasks in meridian-api work toward: release/2.4' })).toBeTruthy()
+    await waitFor(() =>
+      expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'repo_api', workToward: 'release/2.4' }),
+    )
+  })
+
   it('names the project’s worktrees where they are made', async () => {
     const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })) })
     withServices(<Part connections={null} onConnect={vi.fn()} />, client)
@@ -123,12 +143,13 @@ describe('a repository cloned into a project that has some', () => {
     const rows = await panel.findAllByRole('button', { name: /^Clone [a-z]/ })
     // meridian/api is the project's already.
     expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(['Clone meridian/mobile'])
-    expect(await screen.findByText('Into ~/code')).toBeTruthy()
     await userEvent.click(rows[0]!)
-    await userEvent.click(screen.getByRole('button', { name: 'Clone' }))
-    // Put away at once, the clone waiting where it goes.
-    expect(screen.queryByRole('region', { name: 'Clone a repository' })).toBeNull()
-    expect(await screen.findByText('~/code/mobile')).toBeTruthy()
+    // Where it lands, on the row chosen.
+    expect(await panel.findByText('~/code/mobile')).toBeTruthy()
+    await userEvent.click(panel.getByRole('button', { name: 'Clone' }))
+    // Put away at once, folding away, the clone waiting where it goes.
+    expect(screen.getByRole('button', { name: 'Clone a repository' }).getAttribute('aria-expanded')).toBe('false')
+    expect(await within(screen.getByRole('list', { name: /^On / })).findByText('~/code/mobile')).toBeTruthy()
     expect(host.clonePlace).toHaveBeenCalled()
     await waitFor(() =>
       expect(client.cloneRepository).toHaveBeenCalledWith('grant_code', {
@@ -144,11 +165,14 @@ describe('a repository cloned into a project that has some', () => {
   it('clones one a URL names, into a folder the person chooses', async () => {
     const { client, host } = opened()
     await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Change: Into ~/code' }))
-    expect(await screen.findByText('Into ~/elsewhere')).toBeTruthy()
-    expect(host.pickClonePlace).toHaveBeenCalled()
     await userEvent.type(screen.getByRole('searchbox'), 'https://gitlab.com/someone/elsewhere.git')
     await userEvent.click(await screen.findByRole('button', { name: 'Clone someone/elsewhere' }))
+    expect(await screen.findByText('~/code/elsewhere')).toBeTruthy()
+    // Another folder, from beside Clone: the row says it lands there now.
+    await userEvent.click(screen.getByRole('button', { name: 'Choose where it goes' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Another folder…' }))
+    expect(await screen.findByText('~/elsewhere/elsewhere')).toBeTruthy()
+    expect(host.pickClonePlace).toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Clone' }))
     await waitFor(() =>
       expect(client.cloneRepository).toHaveBeenCalledWith('grant_elsewhere', { url: 'https://gitlab.com/someone/elsewhere.git' }),
@@ -208,7 +232,7 @@ describe('a repository cloned into a project that has some', () => {
     const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
     await waitFor(() => expect(opening.client.readFolder).toHaveBeenCalledWith('grant_found_mobile'))
     await userEvent.click(await panel.findByRole('button', { name: 'Clone meridian/mobile' }))
-    expect(panel.getByText('Into ~/code')).toBeTruthy()
+    expect(panel.getByText('~/code/mobile')).toBeTruthy()
     await userEvent.click(panel.getByRole('button', { name: 'Clone' }))
     await waitFor(() =>
       expect(opening.client.cloneRepository).toHaveBeenCalledWith('grant_code', {
@@ -224,8 +248,8 @@ describe('a repository cloned into a project that has some', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Clone a repository' }))
     const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
     await userEvent.click(await panel.findByRole('button', { name: 'Add meridian/mobile' }))
-    expect(panel.getByText('~/code/mobile')).toBeTruthy()
-    expect(panel.queryByText('Into ~/code')).toBeNull()
+    expect(panel.getByText('At ~/code/mobile')).toBeTruthy()
+    expect(panel.queryByRole('button', { name: 'Choose where it goes' })).toBeNull()
     await userEvent.type(panel.getByRole('searchbox'), 'https://github.com/meridian/mobile')
     await userEvent.click(await panel.findByRole('button', { name: /meridian\/mobile$/ }))
     await userEvent.click(panel.getByRole('button', { name: 'Add' }))
@@ -240,8 +264,8 @@ describe('a repository cloned into a project that has some', () => {
     const panel = within(await screen.findByRole('region', { name: 'Clone a repository' }))
     await userEvent.type(panel.getByRole('searchbox'), 'https://github.com/someone/mobile')
     await userEvent.click(await panel.findByRole('button', { name: 'Add someone/mobile' }))
-    expect(panel.getByText('~/code/mobile')).toBeTruthy()
-    expect(panel.queryByText('Into ~/code')).toBeNull()
+    expect(panel.getByText('At ~/code/mobile')).toBeTruthy()
+    expect(panel.queryByRole('button', { name: 'Choose where it goes' })).toBeNull()
     await userEvent.click(panel.getByRole('button', { name: 'Add' }))
     await waitFor(() => expect(opening.client.addRepositories).toHaveBeenCalledWith('p1', 'grant_found_mobile'))
     expect(opening.client.cloneRepository).not.toHaveBeenCalled()

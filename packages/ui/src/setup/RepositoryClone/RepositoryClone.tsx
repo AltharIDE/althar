@@ -4,24 +4,29 @@ import type { RootProps } from '../../lib/props'
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
-import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Menu, MenuItem } from '../../primitives/Menu/Menu'
+import { SplitButton } from '../../primitives/SplitButton/SplitButton'
+import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { type HostedRepository, type ProjectSetupText, type SetupHost, SetupRepositories } from '../ProjectSetup/ProjectSetup'
 import s from './RepositoryClone.module.css'
 
 /*
  * A repository cloned into a project that has some already: one of the
  * person's own on the code hosts connected, found as it is typed, or one a
- * pasted URL names; then where it goes, the usual place unless they choose
- * another, and Clone. One on this computer already is added from where it
- * is, not cloned again. A host not connected yet connects in place, in the
- * room the list had, as a new project's does.
+ * pasted URL names; then Clone. It lies flat in the section, between
+ * hairlines, with no box of its own. Where it lands shows on the row
+ * chosen, the usual place unless another is chosen from beside Clone. One
+ * on this computer already is added from where it is, not cloned again. A
+ * host not connected yet connects in place, in the room the list had, as a
+ * new project's does.
  */
 
 export interface RepositoryCloneText {
   title: string
-  into: (where: string) => string
-  chooseWhere: string
-  change: string
+  /** Beside Clone: the menu of where it lands. */
+  where: string
+  /** In it: another folder, through the system's picker. */
+  elsewhere: string
   cancel: string
   clone: string
   add: string
@@ -30,9 +35,8 @@ export interface RepositoryCloneText {
 
 export const repositoryCloneText: RepositoryCloneText = {
   title: 'Clone a repository',
-  into: (where) => `Into ${where}`,
-  chooseWhere: 'Choose where it goes',
-  change: 'Change',
+  where: 'Choose where it goes',
+  elsewhere: 'Another folder…',
   cancel: 'Cancel',
   clone: 'Clone',
   add: 'Add',
@@ -95,11 +99,13 @@ export function RepositoryClone({
   const walking = connecting !== undefined && connecting !== null
   const picked = chosen === null ? undefined : pasted?.id === chosen ? pasted : (repositories ?? []).find((one) => one.id === chosen)
   const here = picked?.here ?? null
+  // Where the one chosen lands: in the place shown, under its name.
+  const landing = picked === undefined || here !== null || where === null ? null : `${where}/${picked.name}`
   return (
     <section className={cx(s.clone, className)} aria-label={t.title} {...rest}>
-      <Heading level={headingLevel} className={s.title}>
-        {t.title}
-      </Heading>
+      <VisuallyHidden>
+        <Heading level={headingLevel}>{t.title}</Heading>
+      </VisuallyHidden>
       <SetupRepositories
         hosts={hosts}
         repositories={repositories}
@@ -112,41 +118,43 @@ export function RepositoryClone({
         onChoose={onChoose}
         onConnect={onConnect}
         {...(connecting === undefined ? {} : { connecting })}
+        landing={landing}
         height={height}
         {...(t.list === undefined ? {} : { text: t.list })}
       />
       {!walking && (
         <div className={s.foot}>
-          <p className={s.where}>
-            {here !== null ? (
-              <span className={s.mono} title={here}>
-                {here}
-              </span>
-            ) : where === null ? (
-              <LinkButton onClick={onWhere}>{t.chooseWhere}</LinkButton>
-            ) : (
-              <>
-                <span title={where}>{t.into(where)}</span>
-                <LinkButton onClick={onWhere} aria-label={`${t.change}: ${t.into(where)}`}>
-                  {t.change}
-                </LinkButton>
-              </>
-            )}
-          </p>
-          <span className={s.actions}>
-            <Button size="small" variant="quiet" onClick={onCancel}>
-              {t.cancel}
+          <Button size="small" variant="quiet" onClick={onCancel}>
+            {t.cancel}
+          </Button>
+          {here !== null ? (
+            <Button size="small" variant="signal" icon="plus" onClick={onClone}>
+              {t.add}
             </Button>
-            <Button
+          ) : (
+            <SplitButton
               size="small"
               variant="signal"
-              icon={here === null ? 'download' : 'plus'}
+              icon="download"
               disabled={picked === undefined}
               onClick={onClone}
+              moreLabel={t.where}
+              menu={(trigger) => (
+                <Menu label={t.where} trigger={trigger} align="end">
+                  {where !== null && (
+                    <MenuItem icon="check" onSelect={() => undefined}>
+                      {where}
+                    </MenuItem>
+                  )}
+                  <MenuItem icon="folder" onSelect={onWhere}>
+                    {t.elsewhere}
+                  </MenuItem>
+                </Menu>
+              )}
             >
-              {here === null ? t.clone : t.add}
-            </Button>
-          </span>
+              {t.clone}
+            </SplitButton>
+          )}
         </div>
       )}
     </section>

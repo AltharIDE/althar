@@ -55,7 +55,8 @@ export const Default: Story = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement)
     await expect(page.getByRole('button', { name: 'Clone' })).toBeDisabled()
-    await expect(page.getByText('Into ~/code')).toBeVisible()
+    // Nothing says where until one is chosen.
+    await expect(page.queryByText(/^~\/code\//)).toBeNull()
   },
 }
 
@@ -65,15 +66,19 @@ export const Chosen: Story = {
     const page = within(canvasElement)
     await userEvent.type(page.getByRole('searchbox'), 'mobile')
     await userEvent.click(page.getByRole('button', { name: 'Clone meridian/meridian-mobile' }))
+    // Where it lands, on its row, in place of when it was pushed.
+    await expect(page.getByText('~/code/meridian-mobile')).toBeVisible()
     await userEvent.click(page.getByRole('button', { name: 'Clone' }))
     await expect(args.onClone).toHaveBeenCalledOnce()
   },
 }
 
-/** Where it goes, changed: the person is asked. */
+/** Where it goes, changed from beside Clone: the person is asked. */
 export const ChangingWhere: Story = {
+  args: { chosen: 'gh:meridian/web' },
   play: async ({ args, canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Change: Into ~/code' }))
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Choose where it goes' }))
+    await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Another folder…' }))
     await expect(args.onWhere).toHaveBeenCalledOnce()
   },
 }
@@ -92,7 +97,7 @@ export const OnThisComputer: Story = {
   play: async ({ canvasElement }) => {
     const page = within(canvasElement)
     await expect(page.getByRole('button', { name: 'Add' })).toBeEnabled()
-    await expect(page.queryByText('Into ~/code')).toBeNull()
+    await expect(page.queryByRole('button', { name: 'Choose where it goes' })).toBeNull()
   },
 }
 

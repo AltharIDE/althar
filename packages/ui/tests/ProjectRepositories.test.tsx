@@ -13,7 +13,6 @@ describe('a project’s repositories', () => {
         project="Meridian"
         repositories={MAP_MERIDIAN}
         hosts={MAP_HOSTS}
-        onRoleChange={() => {}}
         onTargetChange={() => {}}
         text={{ note: 'Where its tasks work.' }}
       />,

@@ -1,9 +1,10 @@
-import type { ReactNode } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 
 import { cx } from '../../lib/cx'
 import { useDragOver } from '../../lib/dragOver'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
+import { Disclosure, Fold } from '../../primitives/Fold/Fold'
 import { below, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Problem } from '../../primitives/Problem/Problem'
 import { EmptyState } from '../../setup/EmptyState/EmptyState'
@@ -21,8 +22,12 @@ import s from './ProjectRepositories.module.css'
  * With none, and none being read, what will be here and how one gets here
  * stand in the map's place, under the way to add one. Beside adding a
  * folder, one can be cloned: the screen gives what chooses it (`cloning`),
- * shown over the map until it is cloned or put away.
+ * which opens above the map as everything opens, and folds away as it is
+ * cloned or put away.
  */
+
+/** How long what chose one is kept after it is put away, for it to fold away rather than vanish: the kit's --fold, and a little. */
+const FOLDED = 400
 
 export interface ProjectRepositoriesText {
   title: string
@@ -61,7 +66,8 @@ export type ProjectRepositoriesProps = RootProps<
     | 'hosts'
     | 'reading'
     | 'worktrees'
-    | 'onRoleChange'
+    | 'onTowardChange'
+    | 'onTowardCreate'
     | 'onTargetChange'
     | 'onLeaveOut'
     | 'onOpen'
@@ -103,7 +109,8 @@ export function ProjectRepositories({
   hosts,
   reading,
   worktrees,
-  onRoleChange,
+  onTowardChange,
+  onTowardCreate,
   onTargetChange,
   onLeaveOut,
   onOpen,
@@ -114,6 +121,15 @@ export function ProjectRepositories({
 }: ProjectRepositoriesProps) {
   const t = { ...projectRepositoriesText, ...text }
   const { over, handlers } = useDragOver(onDrop)
+  // What chooses one, kept while it folds away once it's put away.
+  const open = cloning != null
+  const [kept, setKept] = useState<ReactNode>(cloning)
+  if (open && kept !== cloning) setKept(cloning)
+  useEffect(() => {
+    if (open) return undefined
+    const gone = window.setTimeout(() => setKept(null), FOLDED)
+    return () => window.clearTimeout(gone)
+  }, [open])
   return (
     <SettingGroup
       title={t.title}
@@ -147,31 +163,39 @@ export function ProjectRepositories({
       {...rest}
     >
       {error !== undefined && <Problem>{error}</Problem>}
-      {cloning != null && <div className={s.cloning}>{cloning}</div>}
-      {repositories.length === 0 && (reading === undefined || reading.length === 0) ? (
-        <EmptyState
-          icon="folder"
-          title={t.none}
-          line={onClone === undefined ? t.noneLine : t.noneLineClone}
-          headingLevel={below(headingLevel)}
-        />
-      ) : (
-        <RepositoryMap
-          repositories={repositories}
-          hosts={hosts}
-          onRoleChange={onRoleChange}
-          onTargetChange={onTargetChange}
-          headingLevel={below(headingLevel)}
-          text={{ leaveOut: t.leaveOut(project), ...mapText }}
-          className={s.map}
-          {...(reading === undefined ? {} : { reading })}
-          {...(worktrees === undefined ? {} : { worktrees })}
-          {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
-          {...(onOpen === undefined ? {} : { onOpen })}
-          {...(onConnect === undefined ? {} : { onConnect })}
-          {...(putOnHost === undefined ? {} : { putOnHost })}
-        />
-      )}
+      <div className={s.body}>
+        {/* Always there where one can be cloned, so it opens as everything does, rather than appearing. */}
+        {onClone !== undefined && (
+          <Disclosure open={open}>
+            <Fold bleed={false}>{open ? cloning : kept}</Fold>
+          </Disclosure>
+        )}
+        {repositories.length === 0 && (reading === undefined || reading.length === 0) ? (
+          <EmptyState
+            icon="folder"
+            title={t.none}
+            line={onClone === undefined ? t.noneLine : t.noneLineClone}
+            headingLevel={below(headingLevel)}
+          />
+        ) : (
+          <RepositoryMap
+            repositories={repositories}
+            hosts={hosts}
+            {...(onTowardChange === undefined ? {} : { onTowardChange })}
+            {...(onTowardCreate === undefined ? {} : { onTowardCreate })}
+            onTargetChange={onTargetChange}
+            headingLevel={below(headingLevel)}
+            text={{ leaveOut: t.leaveOut(project), ...mapText }}
+            className={s.map}
+            {...(reading === undefined ? {} : { reading })}
+            {...(worktrees === undefined ? {} : { worktrees })}
+            {...(onLeaveOut === undefined ? {} : { onLeaveOut })}
+            {...(onOpen === undefined ? {} : { onOpen })}
+            {...(onConnect === undefined ? {} : { onConnect })}
+            {...(putOnHost === undefined ? {} : { putOnHost })}
+          />
+        )}
+      </div>
     </SettingGroup>
   )
 }

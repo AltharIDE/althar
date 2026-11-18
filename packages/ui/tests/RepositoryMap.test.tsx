@@ -16,7 +16,6 @@ const map = (more: Partial<RepositoryMapProps> = {}) => {
   const props: RepositoryMapProps = {
     repositories: MAP_MERIDIAN,
     hosts: MAP_HOSTS,
-    onRoleChange: () => {},
     onTargetChange: () => {},
     ...more,
   }

@@ -1,9 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { useState } from 'react'
 import { expect, fireEvent, fn, userEvent, within } from 'storybook/test'
 
 import { device } from '../../foundations/device'
 import { CLONE_HOSTS, CLONE_REPOSITORIES, MAP_HALYARD, MAP_HOSTS, MAP_MERIDIAN } from '../../fixtures/setup'
 import { RepositoryClone } from '../../setup/RepositoryClone/RepositoryClone'
+import type { MapRepository, ReadingFolder } from '../../setup/RepositoryMap/RepositoryMap'
 import { States } from '../../storybook/States'
 import { ProjectRepositories } from './ProjectRepositories'
 
@@ -24,7 +26,8 @@ const meta = {
     repositories: MAP_MERIDIAN,
     hosts: MAP_HOSTS,
     worktrees: '~/Althar/meridian',
-    onRoleChange: fn(),
+    onTowardChange: fn(),
+    onTowardCreate: fn(),
     onTargetChange: fn(),
     onLeaveOut: fn(),
     onOpen: fn(),
@@ -87,6 +90,71 @@ export const Cloning: Story = {
     await expect(page.getByRole('button', { name: 'Clone a repository' })).toHaveAttribute('aria-expanded', 'true')
   },
 }
+
+/** All of it, to try: Clone a repository opens the panel, a row chosen says where it lands, Clone folds it away and the clone settles onto the map, then joins. */
+function Live(args: Parameters<typeof ProjectRepositories>[0]) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [chosen, setChosen] = useState<string | null>(null)
+  const [where, setWhere] = useState('~/code')
+  const [repositories, setRepositories] = useState<readonly MapRepository[]>(MAP_MERIDIAN.slice(0, 2))
+  const [reading, setReading] = useState<readonly ReadingFolder[]>([])
+  const offered = CLONE_REPOSITORIES.filter((one) => !repositories.some((have) => have.remote?.path === `${one.owner}/${one.name}`))
+  const put = () => {
+    setOpen(false)
+    setQuery('')
+    setChosen(null)
+  }
+  const clone = () => {
+    const one = offered.find((each) => each.id === chosen)
+    if (one === undefined) return
+    const at = one.here ?? `${where}/${one.name}`
+    put()
+    setReading([{ id: `clone:${one.id}`, name: one.name, where: at }])
+    window.setTimeout(() => {
+      setReading([])
+      setRepositories((now) => [
+        ...now,
+        {
+          id: one.id,
+          name: one.name,
+          where: at,
+          branch: 'main',
+          toward: { branch: 'main', defaultBranch: 'main', branches: ['main'] },
+          tasks: 0,
+          remote: { host: 'github', path: `${one.owner}/${one.name}` },
+        },
+      ])
+    }, 2200)
+  }
+  return (
+    <ProjectRepositories
+      {...args}
+      repositories={repositories}
+      reading={reading}
+      onClone={() => (open ? put() : setOpen(true))}
+      cloning={
+        open ? (
+          <RepositoryClone
+            hosts={CLONE_HOSTS}
+            repositories={offered}
+            query={query}
+            onQuery={setQuery}
+            chosen={chosen}
+            onChoose={setChosen}
+            onConnect={fn()}
+            where={where}
+            onWhere={() => setWhere((now) => (now === '~/code' ? '~/Projects' : '~/code'))}
+            onClone={clone}
+            onCancel={put}
+          />
+        ) : null
+      }
+    />
+  )
+}
+
+export const Try: Story = { render: (args) => <Live {...args} /> }
 
 /** Cloned: being cloned, it waits on the left as a folder being read does, until it joins them. */
 export const ClonedJoining: Story = {

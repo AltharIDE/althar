@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useCallback, useRef, useState } from 'react'
 
-import type { ChangeTarget, ProjectRepository, RepositoryRole } from '@althar/contracts'
+import type { ChangeTarget, ProjectRepository } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { keys, reads } from '../../data/reads'
@@ -13,7 +13,7 @@ import type { CloneChoice } from '../../shared/hostRepositories'
 /*
  * A project's repositories screen's view model: its repositories as this
  * Mac has them, where each one's work goes, and each change kept at once. A
- * role or a pull request target shows at once and is put right if the
+ * pull request target shows at once and is put right if the
  * runtime says no. A folder picked or dropped is read first, so the page
  * shows what is being added while it is; adding and leaving out read the
  * repositories, and the projects, again, so the tabs and the home have them
@@ -50,7 +50,6 @@ export interface RepositoriesModel {
   /** A folder is being added. */
   readonly adding: boolean
   readonly error: string | null
-  readonly setRole: (repositoryId: string, role: RepositoryRole) => void
   readonly setTarget: (repositoryId: string, target: ChangeTarget) => void
   readonly leaveOut: (repositoryId: string) => Promise<void>
   /** Asks for a folder, and adds the repositories at it. */
@@ -83,7 +82,7 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
 
   /** Shows a change to one repository at once, keeps it, and reads them again either way. */
   const change = useCallback(
-    (repositoryId: string, set: Partial<Pick<ProjectRepository, 'role'>> & { readonly target?: ChangeTarget }) => {
+    (repositoryId: string, set: { readonly target?: ChangeTarget }) => {
       setError(null)
       cache.setQueryData<ReadonlyArray<ProjectRepository>>(key, (now) =>
         now?.map((repository) =>
@@ -91,7 +90,6 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
             ? repository
             : {
                 ...repository,
-                ...(set.role === undefined ? {} : { role: set.role }),
                 ...(set.target === undefined || repository.fork === null ? {} : { fork: { ...repository.fork, target: set.target } }),
               },
         ),
@@ -100,7 +98,6 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
         .setRepository({
           projectId,
           repositoryId,
-          ...(set.role === undefined ? {} : { role: set.role }),
           ...(set.target === undefined ? {} : { changeTarget: set.target }),
         })
         .catch((failure: unknown) => setError(messageOf(failure)))
@@ -210,7 +207,6 @@ export const useRepositories = (projectId: string): RepositoriesModel => {
     reading,
     adding: waiting > 0,
     error,
-    setRole: (repositoryId, role) => change(repositoryId, { role }),
     setTarget: (repositoryId, target) => change(repositoryId, { target }),
     leaveOut: (repositoryId) => doing(() => client.leaveOutRepository(projectId, repositoryId)),
     add: async () => addGranted(await host.pickFolder('project')),

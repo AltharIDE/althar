@@ -47,7 +47,7 @@ test('clones a repository from GitHub into a project that has one, GitHub connec
     await panel.getByRole('button', { name: 'Done', exact: true }).click()
 
     await panel.getByRole('button', { name: 'Clone meridian/api' }).click()
-    await expect(panel.getByText('Into ~/code')).toBeVisible()
+    await expect(panel.getByText('~/code/api')).toBeVisible()
     await still(page)
     await section.screenshot({ path: 'test-results/clone-into-01-chosen.png', scale: 'css' })
     await panel.getByRole('button', { name: 'Clone', exact: true }).click()
