@@ -6,6 +6,8 @@ use std::{error::Error, fmt};
 #[cfg(target_os = "linux")]
 pub mod diagnostic;
 pub mod grpc;
+#[cfg(target_os = "linux")]
+pub mod relay;
 
 pub mod wire {
     include!(concat!(env!("OUT_DIR"), "/althar.worker.v1.rs"));

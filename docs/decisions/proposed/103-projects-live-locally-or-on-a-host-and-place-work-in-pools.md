@@ -332,10 +332,12 @@ the worker's loopback MCP gateway exposes only that session's tools.
 
 Keep worker connection and enrollment separate from that execution
 protocol. The personal-host diagnostic dials a reachable home and verifies
-its certificate with mutual TLS. For managed workers, prototype an outbound
-connection from each side to a narrow execution gateway so a desktop home
-behind NAT can dispatch work. Reuse the Protobuf execution messages, their
-version and capability negotiation, and the journal and replay rules.
+its certificate with mutual TLS. An operator-provisioned relay carries
+the same encrypted connection over two outbound WSS links, and the home
+can keep its worker port on loopback. Reuse that transport for the
+desktop home and eventual managed workers. The Protobuf execution
+messages, capability negotiation, journal and replay rules apply to each
+route. See the [outbound worker relay guide](../../../packages/worker-protocol/README.md#outbound-worker-relay).
 Verify both application identities and their grants across the gateway.
 Bind a managed worker credential to its allocation, home and expiry, then
 bind each start to the home-issued project, attempt, fence and execution
