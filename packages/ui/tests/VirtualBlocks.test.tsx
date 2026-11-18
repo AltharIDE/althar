@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
-import { useCallback, useRef } from 'react'
+import { Component, type ReactNode, useCallback, useRef } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { bringItemIntoView, virtualThreadIn } from '../src/lib/virtual'
@@ -211,6 +211,39 @@ describe('a thread drawn only near the view', () => {
     await frame()
     expect(topOf('item-290')).toBe(was)
     expect(scrolled).toBe(302 * 100 - VIEW - 100 - 1000)
+  })
+
+  it('following the bottom, keeps what is in view where it was as the commit ends when a block above it grows', async () => {
+    // Where the last block stands as each commit ends, as what moves a message in place (ListMotion) reads it, around the list.
+    const read: number[] = []
+    class Reads extends Component<{ children: ReactNode }> {
+      override componentDidUpdate() {
+        read.push(topOf('item-299'))
+      }
+      override render() {
+        return this.props.children
+      }
+    }
+    const list = blocks(0, 300)
+    const { rerender } = render(
+      <Reads>
+        <Column list={list} />
+      </Reads>,
+    )
+    await frame()
+    const was = topOf('item-299')
+    const above = list.findIndex((one) => shows(one.id))
+    expect(topOf(list[above]!.id)).toBeLessThan(0)
+    // A block drawn above the view grows as the thread is drawn again: a task's card with a new line under its title.
+    rerender(
+      <Reads>
+        <Column list={list.map((one, i) => (i === above ? { ...one, h: 140 } : one))} />
+      </Reads>,
+    )
+    expect(read).toEqual([was])
+    await frame()
+    expect(topOf('item-299')).toBe(was)
+    expect(scrolled).toBe(columnOf().height - VIEW)
   })
 
   it('leaves the bottom a little at a time, as a trackpad scrolls, without being pulled back to it', async () => {
