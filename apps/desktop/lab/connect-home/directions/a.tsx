@@ -96,7 +96,6 @@ export function DrawingDirection({
       if (install.phase === 'idle') return flow.ssh.target.trim() === '' ? undefined : install.start()
       if (install.phase === 'failed' && install.problem?.retry) return install.retry()
       if (install.phase === 'trust') return install.trust()
-      if (install.phase === 'root') return install.answerRoot(true)
       if (install.phase === 'stopped') return install.resume()
       return
     }

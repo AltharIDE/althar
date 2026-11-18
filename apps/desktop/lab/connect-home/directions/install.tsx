@@ -47,15 +47,13 @@ const TARGET_HOST = (target: string) => target.split('@').at(-1) || target
 const FINGERPRINT = 'SHA256:q7Tf3kVxN2mWc9hZp1RaLd8yGs4uEoBi6tJ0nKvYw5M'
 
 export const useInstall = (flow: Flow, scenario: Scenario) => {
-  const [phase, setPhase] = useState<'idle' | 'running' | 'trust' | 'root' | 'failed' | 'stopped' | 'reconnecting' | 'done'>(
+  const [phase, setPhase] = useState<'idle' | 'running' | 'trust' | 'failed' | 'stopped' | 'reconnecting' | 'done'>(
     scenario === 'resume' ? 'stopped' : 'idle',
   )
   const [at, setAt] = useState<number>(scenario === 'resume' ? 2 : 0)
   const [progress, setProgress] = useState(scenario === 'resume' ? 0.42 : 0)
   const [problem, setProblem] = useState<Trouble | null>(null)
   const [warning, setWarning] = useState<Trouble | null>(null)
-  // Logged in as root: whether Althar makes the home its own user, althar (null until asked).
-  const [own, setOwn] = useState<boolean | null>(null)
   const [upload, setUpload] = useState(false)
   const [log, setLog] = useState<string[]>(
     scenario === 'resume'
@@ -88,7 +86,7 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
   }
 
   /** Runs the step at `step`, then the next, as the scenario has them go. */
-  const run = (step: number, asked = own) => {
+  const run = (step: number) => {
     setAt(step)
     setPhase('running')
     setProblem(null)
@@ -128,11 +126,8 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
           })
         }
         say('Linux 6.8.0 x86_64 · systemd 255 · 21 GB free · git 2.43')
-        if (login === 'root' && asked === null) {
-          say('Logged in as root')
-          return setPhase('root')
-        }
-        if (asked === true) {
+        // As root, the home gets a user of its own, althar, as its README says: tasks never run as root.
+        if (login === 'root') {
           say('useradd --create-home --shell /bin/bash althar')
           say('Copied your SSH key to ~althar/.ssh/authorized_keys')
           say('loginctl enable-linger althar')
@@ -245,13 +240,8 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
       run(at)
     },
     login,
-    own,
-    /** Logged in as root: make the home its own user (true), or keep root. */
-    answerRoot: (make: boolean) => {
-      setOwn(make)
-      say(make ? '(making a user for the home: althar)' : '(keeping root, as asked)')
-      run(1, make)
-    },
+    /** Logged in as root: the home runs as a user of its own, althar. */
+    own: login === 'root',
     trust: () => {
       trusted.current = true
       say(`Trusted ${host} (${FINGERPRINT}), kept in ~/.ssh/known_hosts`)
@@ -279,8 +269,7 @@ const STEPS: Array<{ id: StepId; label: string }> = [
 export function InstallSteps({ install }: { install: Install }) {
   const detail = (index: number, state: StepState) => {
     if (index === 0 && state === 'done') return install.target
-    if (index === 1 && state === 'done')
-      return `Linux · x64 · systemd · 21 GB free${install.own === true ? ' · made the user althar' : install.own === false ? ' · as root' : ''}`
+    if (index === 1 && state === 'done') return `Linux · x64 · systemd · 21 GB free${install.own ? ' · made the user althar for it' : ''}`
     if (index === 2 && state === 'now' && install.phase === 'reconnecting')
       return 'Connection dropped. Reconnecting; it goes on there meanwhile'
     if (index === 2 && state === 'now')
@@ -309,7 +298,7 @@ export function InstallSteps({ install }: { install: Install }) {
                   <Icon name="check" size={10} />
                 ) : state === 'failed' ? (
                   <Icon name="close" size={10} />
-                ) : state === 'now' && (install.phase === 'trust' || install.phase === 'root') ? (
+                ) : state === 'now' && install.phase === 'trust' ? (
                   <Icon name="lock" size={10} />
                 ) : state === 'now' ? (
                   <Spinner size="small" />
@@ -332,14 +321,6 @@ export function InstallSteps({ install }: { install: Install }) {
                     <span className={s.note}>
                       On the server, <Code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</Code> prints it. Your provider’s console shows
                       it too.
-                    </span>
-                  </AskCard>
-                )}
-                {state === 'now' && install.phase === 'root' && (
-                  <AskCard icon="terminal" kicker="Logged in as root" what="Make the home its own user?" className={s.ask}>
-                    <span className={s.note}>
-                      Althar makes the user <Code>althar</Code>, gives it your SSH key and keeps its service running after you log out.
-                      Tasks then run as althar, not root, and what they do stays in its home folder.
                     </span>
                   </AskCard>
                 )}
@@ -399,12 +380,6 @@ export function installActions(install: Install) {
   switch (install.phase) {
     case 'trust':
       return { primary: 'Trust and continue', secondary: 'Cancel' as const }
-    case 'root':
-      return {
-        primary: 'Make the user althar',
-        other: { label: 'Keep root', act: () => install.answerRoot(false) },
-        secondary: 'Cancel' as const,
-      }
     case 'failed':
       return { primary: install.problem?.retry ? 'Try again' : null, other: install.problem?.other, secondary: 'Cancel' as const }
     case 'stopped':
@@ -426,7 +401,7 @@ export function InstallDone({ install }: { install: Install }) {
           <Icon name="check" size={10} />
         </span>
         althar-host 0.14.2 is running on {install.host}
-        {install.own === true && ' as althar'}
+        {install.own && ' as althar'}
         {install.warning === null ? ', and starts with it.' : '.'}
       </p>
       {install.warning !== null && <LeftToDo warning={install.warning} />}
@@ -436,7 +411,7 @@ export function InstallDone({ install }: { install: Install }) {
 
 /**
  * A setup going on with its dialog closed, on the window's homes chip: where it's got to, and a press brings the dialog
- * back as it is. It's the person's to answer where it waits (its key, root), red where it stopped on a trouble.
+ * back as it is. It's the person's to answer where it waits (its key), red where it stopped on a trouble.
  */
 export function InstallChip({ install, found, onShow }: { install: Install; found: boolean; onShow: () => void }) {
   const step = STEPS[install.at]?.label ?? ''
@@ -444,7 +419,7 @@ export function InstallChip({ install, found, onShow }: { install: Install; foun
     ? (['check', 'Ready to connect', 'quiet'] as const)
     : install.phase === 'failed'
       ? (['problem', 'Setup stopped', 'down'] as const)
-      : install.phase === 'trust' || install.phase === 'root'
+      : install.phase === 'trust'
         ? (['answer', 'Needs you', 'ask'] as const)
         : install.phase === 'stopped'
           ? (['pause', 'Paused', 'quiet'] as const)
