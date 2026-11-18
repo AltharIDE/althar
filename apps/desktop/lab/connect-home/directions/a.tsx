@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Button, Code, CopyButton, Dialog, Icon, LiveDot, ProjectInk, ProjectMark, Spinner } from '@althar/ui'
 
 import type { Flow } from '../flow'
@@ -22,6 +23,15 @@ type Route = 'ssh' | 'line'
 const INSTALL = 'curl -fsSL https://althar.dev/home | sh'
 const DOCS = 'https://althar.dev/docs/homes'
 
+/**
+ * One page of the dialog becoming another as a morph: the dialog takes its new height, the drawing and its cards move
+ * with it, and what's under the drawing crosses over (a.module.css names each). At once where motion is reduced.
+ */
+const morph = (change: () => void) => {
+  if (typeof document.startViewTransition !== 'function' || matchMedia('(prefers-reduced-motion: reduce)').matches) return change()
+  document.startViewTransition(() => flushSync(change))
+}
+
 const SAMPLE = [
   { id: 'prj_meridian', ink: ProjectInk.Clay },
   { id: 'prj_ledger', ink: ProjectInk.Moss },
@@ -35,21 +45,25 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
   const [installs, setInstalls] = useState(false)
   const stage = view === 'form' ? flow.stage : view
   const go = () => {
-    if (view === 'intro') return setView('setup')
-    if (view === 'setup') {
-      flow.setMethod(route === 'ssh' ? 'ssh' : 'pair')
-      setInstalls(route === 'ssh')
-      return setView('form')
-    }
+    if (view === 'intro') return morph(() => setView('setup'))
+    if (view === 'setup')
+      return morph(() => {
+        flow.setMethod(route === 'ssh' ? 'ssh' : 'pair')
+        setInstalls(route === 'ssh')
+        setView('form')
+      })
     flow.submit()
   }
+  const back = () => morph(() => setView(first ? 'intro' : 'form'))
   const title = view === 'intro' ? 'Your first home' : view === 'setup' ? 'Set up a home' : 'Connect a home'
   return (
     <Dialog
       title={title}
       width={660}
+      className={s.dialog}
       holding={flow.busy}
       onClose={onClose}
+      onBack={view === 'setup' ? back : undefined}
       onSubmit={go}
       actions={
         view === 'form' ? (
@@ -59,9 +73,7 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
           </>
         ) : (
           <>
-            <Button onClick={view === 'intro' ? onClose : () => setView(first ? 'intro' : 'form')}>
-              {view === 'intro' ? 'Not now' : 'Back'}
-            </Button>
+            <Button onClick={onClose}>{view === 'intro' ? 'Not now' : 'Cancel'}</Button>
             <Button type="submit" variant="signal">
               {view === 'intro' ? 'Set one up' : route === 'ssh' ? 'Continue' : 'Paste its code'}
             </Button>
@@ -70,13 +82,13 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
       }
     >
       <div className={s.board} data-stage={stage}>
-        <div className={s.card}>
+        <div className={s.card} data-here="">
           <span className={s.glyph}>
             <Icon name="computer" size={15} />
           </span>
           <span className={s.words}>
             <span className={s.name}>This computer</span>
-            {view === 'intro' && <span className={s.where}>Can sleep</span>}
+            <span className={s.where}>Can sleep</span>
           </span>
         </div>
         <Wire
@@ -85,59 +97,61 @@ export function DrawingDirection({ flow, first, onClose }: { flow: Flow; first: 
         />
         <HomeCard flow={flow} view={view} />
       </div>
-      {view === 'intro' && (
-        <div className={s.intro}>
-          <h3 className={s.lede}>Work that keeps going while this computer sleeps</h3>
-          <p className={s.copy}>
-            A home is a computer that runs Althar for you, such as a server that stays on. Its tasks run there, and you open its projects
-            from here, each in a window of its own.
-          </p>
-        </div>
-      )}
-      {view === 'setup' && <Setup route={route} onRoute={setRoute} />}
-      {view === 'form' && (
-        <div className={s.form} key="form">
-          <MethodSwitch flow={flow} className={s.method} />
-          {flow.method === 'ssh' ? (
-            <HostField
-              flow={flow}
-              focus={!first}
-              help={installs ? 'Althar installs and starts althar-host there, where it isn’t yet.' : undefined}
-            />
-          ) : (
-            <CodeField
-              flow={flow}
-              focus={!first}
-              help={
-                <>
-                  On the home, <Code>althar-host pair</Code> prints one.{' '}
-                  <button type="button" className={s.link} onClick={() => setView('setup')}>
-                    Not set up yet?
-                  </button>
-                </>
-              }
-            />
-          )}
-          {installs && flow.method === 'ssh' && flow.stage === 'checking' && <Installing where={flow.where} />}
-          {flow.method === 'ssh' && flow.found === null && flow.stage !== 'checking' && <Options flow={flow} />}
-          {flow.found !== null && (
-            <>
-              <p className={s.note}>
-                {flow.method === 'ssh' ? (
+      <div className={s.body}>
+        {view === 'intro' && (
+          <div className={s.intro}>
+            <h3 className={s.lede}>Work that keeps going while this computer sleeps</h3>
+            <p className={s.copy}>
+              A home is a computer that runs Althar for you, such as a server that stays on. Its tasks run there, and you open its projects
+              from here, each in a window of its own.
+            </p>
+          </div>
+        )}
+        {view === 'setup' && <Setup route={route} onRoute={(next) => morph(() => setRoute(next))} />}
+        {view === 'form' && (
+          <div className={s.form} key="form">
+            <MethodSwitch flow={flow} className={s.method} onChange={(next) => morph(() => flow.setMethod(next))} />
+            {flow.method === 'ssh' ? (
+              <HostField
+                flow={flow}
+                focus={!first}
+                help={installs ? 'Althar installs and starts althar-host there, where it isn’t yet.' : undefined}
+              />
+            ) : (
+              <CodeField
+                flow={flow}
+                focus={!first}
+                help={
                   <>
-                    {installs && 'It’s running there now. '}On the host, <Code>althar-host status</Code> prints the same identity. Connect
-                    only if it does.
+                    On the home, <Code>althar-host pair</Code> prints one.{' '}
+                    <button type="button" className={s.link} onClick={() => morph(() => setView('setup'))}>
+                      Not set up yet?
+                    </button>
                   </>
-                ) : (
-                  'Tasks and conversations are available. Approvals need a trusted device.'
-                )}
-              </p>
-              <NameField flow={flow} />
-            </>
-          )}
-          <LaterProblem flow={flow} />
-        </div>
-      )}
+                }
+              />
+            )}
+            {installs && flow.method === 'ssh' && flow.stage === 'checking' && <Installing where={flow.where} />}
+            {flow.method === 'ssh' && flow.found === null && flow.stage !== 'checking' && <Options flow={flow} />}
+            {flow.found !== null && (
+              <>
+                <p className={s.note}>
+                  {flow.method === 'ssh' ? (
+                    <>
+                      {installs && 'It’s running there now. '}On the host, <Code>althar-host status</Code> prints the same identity. Connect
+                      only if it does.
+                    </>
+                  ) : (
+                    'Tasks and conversations are available. Approvals need a trusted device.'
+                  )}
+                </p>
+                <NameField flow={flow} />
+              </>
+            )}
+            <LaterProblem flow={flow} />
+          </div>
+        )}
+      </div>
     </Dialog>
   )
 }
@@ -177,7 +191,7 @@ function Setup({ route, onRoute }: { route: Route; onRoute: (next: Route) => voi
               $
             </span>
             <code className={s.command}>{INSTALL}</code>
-            <CopyButton value={INSTALL} className={s.termCopy} />
+            <CopyButton value={INSTALL} tone="onDark" className={s.termCopy} />
           </div>
           <ol className={s.ticks}>
             <li>Installs althar-host and starts it as a service</li>

@@ -7,12 +7,20 @@ import s from './parts.module.css'
 
 /* The fields every direction asks for, as the app has them: what changes between directions is round them. */
 
-export function MethodSwitch({ flow, className }: { flow: Flow; className?: string }) {
+export function MethodSwitch({
+  flow,
+  className,
+  onChange = flow.setMethod,
+}: {
+  flow: Flow
+  className?: string
+  onChange?: (next: Flow['method']) => void
+}) {
   return (
     <Segmented
       label="Connection method"
       value={flow.method}
-      onChange={flow.setMethod}
+      onChange={onChange}
       className={className}
       options={[
         { value: 'pair', label: 'Pairing code', disabled: flow.busy },

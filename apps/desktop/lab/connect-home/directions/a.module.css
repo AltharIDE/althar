@@ -4,7 +4,7 @@
   display: grid;
   grid-template-columns: auto minmax(96px, 1fr) minmax(0, 312px);
   align-items: center;
-  min-height: 132px;
+  min-height: 156px;
   margin-bottom: 20px;
   padding: 26px 22px;
   border-radius: 12px;
@@ -12,13 +12,6 @@
   background-image: radial-gradient(circle, var(--line-2) 0.8px, transparent 1.2px);
   background-size: 14px 14px;
   box-shadow: inset 0 0 0 1px var(--line);
-  transition: min-height var(--move) var(--ease-move);
-}
-.board[data-stage='intro'] {
-  min-height: 176px;
-}
-.board[data-stage='setup'] {
-  min-height: 112px;
 }
 
 .card {
@@ -272,7 +265,6 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  animation: arrive var(--enter) var(--ease-out) both;
 }
 .method {
   align-self: flex-start;
@@ -289,7 +281,6 @@
   flex-direction: column;
   gap: 8px;
   padding: 0 2px;
-  animation: arrive var(--enter) var(--ease-out) both;
 }
 .lede {
   margin: 0;
@@ -316,7 +307,6 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  animation: arrive var(--enter) var(--ease-out) both;
 }
 .routes {
   display: grid;
@@ -381,7 +371,6 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  animation: arrive var(--enter) var(--ease-out) both;
 }
 .term {
   display: flex;
@@ -500,9 +489,111 @@
   box-shadow: none;
 }
 
-@keyframes arrive {
+/*
+ * One page becoming the next (morph in a.tsx): the dialog's box takes its new height, its title and buttons ride
+ * with it, the drawing and its two cards move as one, and what's under the drawing crosses over: the old page leaves
+ * quickly, the new one arrives once the box has mostly moved.
+ */
+.dialog {
+  view-transition-name: connect-dialog;
+}
+.dialog > :last-child {
+  view-transition-name: connect-actions;
+}
+.dialog > :first-child {
+  view-transition-name: connect-title;
+}
+.board {
+  view-transition-name: connect-board;
+}
+.card[data-here] {
+  view-transition-name: connect-here;
+}
+.card[data-home] {
+  view-transition-name: connect-home;
+}
+.wire {
+  view-transition-name: connect-wire;
+}
+.body {
+  view-transition-name: connect-body;
+}
+:global(::view-transition-group(*)) {
+  animation-duration: var(--move);
+  animation-timing-function: var(--ease-move);
+}
+/* the box itself is drawn by its group, solid paper at every height: its pictures would only fade over each other */
+:global(::view-transition-group(connect-dialog)) {
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-dialog);
+}
+:global(::view-transition-old(connect-dialog)),
+:global(::view-transition-new(connect-dialog)) {
+  display: none;
+}
+:global(::view-transition-group(connect-body)),
+:global(::view-transition-group(connect-here)),
+:global(::view-transition-group(connect-home)) {
+  overflow: clip;
+  border-radius: 10px;
+}
+:global(::view-transition-group(connect-body)) {
+  border-radius: 0;
+}
+/* the title and the buttons keep their size as they change: drawn as they are, at their start and end, not stretched */
+:global(::view-transition-old(connect-title)),
+:global(::view-transition-new(connect-title)) {
+  inline-size: auto;
+}
+:global(::view-transition-old(connect-actions)),
+:global(::view-transition-new(connect-actions)) {
+  inset-inline: auto 0;
+  inline-size: auto;
+}
+/* what changes words goes, then comes: never two at once */
+:global(::view-transition-old(connect-title)),
+:global(::view-transition-old(connect-actions)),
+:global(::view-transition-old(connect-wire)) {
+  animation: 100ms var(--ease-out) both page-out;
+}
+:global(::view-transition-new(connect-title)),
+:global(::view-transition-new(connect-actions)),
+:global(::view-transition-new(connect-wire)) {
+  animation: 200ms var(--ease-out) 80ms both fade-in;
+}
+/* the drawing and its cards are the same paper before and after: they cross over, solid throughout */
+:global(::view-transition-old(connect-board)),
+:global(::view-transition-new(connect-board)),
+:global(::view-transition-old(connect-here)),
+:global(::view-transition-new(connect-here)),
+:global(::view-transition-old(connect-home)),
+:global(::view-transition-new(connect-home)) {
+  animation-duration: 240ms;
+}
+/* under the drawing: the old page leaves quickly, the new one arrives once the box has mostly moved */
+:global(::view-transition-old(connect-body)) {
+  animation: 120ms var(--ease-out) both page-out;
+}
+:global(::view-transition-new(connect-body)) {
+  animation: 260ms var(--ease-out) 110ms both page-in;
+}
+@keyframes fade-in {
   from {
     opacity: 0;
+  }
+}
+@keyframes page-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
   }
 }
 
