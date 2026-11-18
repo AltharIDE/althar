@@ -369,7 +369,8 @@ describe('the project’s bar', () => {
     const aside = {
       ...card(),
       state: 'open' as const,
-      createdAt: '2026-11-11T11:00:00.000Z',
+      // Fresh against the real clock: an aside left over a week folds into "older" and loses its tab.
+      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
       settledAt: null,
       changed: null,
       here: [],
