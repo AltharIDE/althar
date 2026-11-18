@@ -34,7 +34,7 @@ test('frees a finished preview’s place, names the live holder, and starts wait
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await startTask(page, 'Add a retry to checkout', '[lead:wait]')
     await expect(page.getByRole('article', { name: 'Add a retry to checkout', exact: true })).toContainText('Running')
-    await expect(page.getByText(/^Waiting: /)).toHaveCount(0)
+    await expect(page.getByText(/^Waiting · /)).toHaveCount(0)
     await startTask(page, 'Tidy checkout tests', '[lead:finish]')
     await expect(page.getByText(/^Waiting · 1 agent busy$/)).toBeVisible()
 
@@ -48,7 +48,7 @@ test('frees a finished preview’s place, names the live holder, and starts wait
     await page.getByRole('menuitem', { name: /Stop the task/ }).click()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await showPanes(page, { conversation: true, board: false })
-    await expect(page.getByText(/^Waiting: /)).toHaveCount(0)
+    await expect(page.getByText(/^Waiting · /)).toHaveCount(0)
     await expect(page.getByText('Ready', { exact: true })).toHaveCount(2)
     await still(page)
     await page.screenshot({ path: 'test-results/places-started.png', scale: 'css', animations: 'disabled' })
