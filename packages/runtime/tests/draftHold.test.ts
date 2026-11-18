@@ -87,3 +87,82 @@ describe('a task held while it was drafted', () => {
     }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 })
+
+/** The coordinator thread's cards, as the window reads them. */
+const cardsOn = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [thread] = yield* sql<{ projectId: string }>`SELECT project_id FROM threads WHERE id = ${threadId}`
+    const snapshot = yield* Effect.orDie((yield* Queries).coordinator(thread?.projectId ?? ''))
+    return snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
+  })
+
+/**
+ * A draft that doesn't go on to be planned says so, rather than sizing for ever: discarded, wherever it was, and with no
+ * plan once its plan's call failed; once the turn is over, its card in the thread says it.
+ */
+describe('a task drafted whose plan never came', () => {
+  it.live('says it was discarded at once, and its card says so once the turn is over', () =>
+    Effect.gen(function* () {
+      const { threadId, coordinator, told, live } = yield* opened(repository())
+      yield* callTool(coordinator, 'draft_task', { title: 'Explore roles', description: 'Who may do what. [lead:finish]' })
+      yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.some((draft) => draft.slug === 'explore-roles'),
+      )
+      yield* callTool(coordinator, 'settle_task', { task: 'explore-roles', how: 'discard', why: 'one task, not five' })
+      const [draft] = yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.some((one) => one.slug === 'explore-roles' && one.discarded === true),
+      )
+      assert.isFalse(draft?.planning)
+      // The turn ends: the live card goes, and the thread's says it was discarded.
+      yield* live.publish({ _tag: 'TurnEnded', threadId, turnId: 'turn', state: 'completed' })
+      const [card] = yield* until(cardsOn(threadId), (cards) => cards.some((one) => one.slug === 'explore-roles'))
+      assert.deepInclude(card, { phase: 'settled', discarded: true })
+      yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.length === 0,
+      )
+    }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
+  it.live('says it has no plan once its plan failed, and its card offers to plan it once the turn is over', () =>
+    Effect.gen(function* () {
+      const { threadId, coordinator, told, live } = yield* opened(repository())
+      yield* callTool(coordinator, 'draft_task', { title: 'Explore the team', description: 'Before multiplayer. [lead:finish]' })
+      // Its plan's call begins and fails, as the coordinator's stream says.
+      const call = (status: 'pending' | 'failed') =>
+        live.publish({
+          _tag: 'Agent',
+          threadId,
+          event:
+            status === 'pending'
+              ? {
+                  _tag: 'ToolCall',
+                  toolCallId: 'p1',
+                  title: 'Propose plan',
+                  kind: 'other',
+                  status,
+                  althar: 'propose_plan',
+                  rawInput: { task: 'explore-the-team' },
+                }
+              : { _tag: 'ToolCallUpdate', toolCallId: 'p1', status },
+        })
+      yield* call('pending')
+      yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.some((one) => one.slug === 'explore-the-team' && one.planning),
+      )
+      yield* call('failed')
+      yield* until(
+        Effect.sync(() => told.drafts),
+        (drafts) => drafts.some((one) => one.slug === 'explore-the-team' && one.unplanned === true && !one.planning),
+      )
+      yield* live.publish({ _tag: 'TurnEnded', threadId, turnId: 'turn', state: 'completed' })
+      const [card] = yield* until(cardsOn(threadId), (cards) => cards.some((one) => one.slug === 'explore-the-team'))
+      assert.deepInclude(card, { unplanned: true, plan: null })
+      assert.isUndefined(card?.discarded)
+    }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+})

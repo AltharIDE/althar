@@ -113,7 +113,7 @@ import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRe
 import { reachedRemote } from './sshHosts'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
-import { partsOfPlan, presetOf, presetOfferOn, presetsIn } from './presets'
+import { partsOfPlan, presetOfferOn, presetOfPlan, presetsIn } from './presets'
 import { Sessions } from './Sessions'
 import { teamLeadsOf } from './teamLead'
 import { spendingOf } from './Spending'
@@ -2915,24 +2915,25 @@ export class Queries extends Context.Service<
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                     ...(field(parameters, 'reviewAfterMerge') === true ? { reviewAfterMerge: true } : {}),
                     // The preset its parts are, which the card's kicker names first (a task is a conversation plus parts).
-                    preset:
-                      field(parameters, 'smallChange') === true
-                        ? 'Small change'
-                        : presetOf(
-                            yield* presetsIn(task.projectId),
-                            partsOfPlan(
-                              {
-                                steps: planned,
-                                end: end ?? null,
-                                here: field(parameters, 'here') === true,
-                                reads: field(parameters, 'reads') === true,
-                                reviewAfterMerge: field(parameters, 'reviewAfterMerge') === true,
-                                worksIn: text(parameters, 'worksIn'),
-                              },
-                              task.shelf,
-                              '',
-                            ),
-                          ),
+                    // The one it was planned from, while its parts keep that preset's shape; else the one they are.
+                    preset: yield* Effect.gen(function* () {
+                      const shape = {
+                        steps: planned,
+                        end: end ?? null,
+                        here: field(parameters, 'here') === true,
+                        reads: field(parameters, 'reads') === true,
+                        reviewAfterMerge: field(parameters, 'reviewAfterMerge') === true,
+                        worksIn: text(parameters, 'worksIn'),
+                      }
+                      const recorded = text(parameters, 'preset')
+                      return presetOfPlan(yield* presetsIn(task.projectId), {
+                        small: field(parameters, 'smallChange') === true,
+                        ...(recorded === '' ? {} : { recorded }),
+                        parts: partsOfPlan(shape, task.shelf, ''),
+                        // Its ending counts where it was chosen: a prototype pointed at a pull request is no prototype.
+                        chosen: partsOfPlan({ ...shape, endChosen: field(parameters, 'endChosen') === true }, task.shelf, ''),
+                      })
+                    }),
                     // Any agent may lead a review: the card offers them all.
                     ...(field(parameters, 'reads') === true
                       ? {}
@@ -3059,6 +3060,12 @@ export class Queries extends Context.Service<
             // Not looked at for a conflict, whatever its host says: why, beside Look again.
             ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
+            ...(task.state === 'abandoned' ? { discarded: true as const } : {}),
+            // Drafted, and its plan didn't come: the person's, to plan or discard, not to resume. Its card is in the thread only
+            // once the turn that drafted it is over, so a card still read as drafting as that turn ends says so too.
+            ...((phase === 'stopped' || phase === 'drafting') && task.state === 'draft' && task.planState === null && task.runState === null
+              ? { unplanned: true as const }
+              : {}),
             automation: yield* fromAutomation(taskId),
             // Its parts, offered to keep as a preset, while they are.
             ...offering(yield* presetOfferOn(task.projectId, taskId)),

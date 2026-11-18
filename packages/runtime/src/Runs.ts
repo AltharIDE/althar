@@ -318,6 +318,8 @@ export const PlanParameters = Schema.Struct({
   ),
   /** A small change starts without a countdown; its size never determines when its reviewer reads it. */
   smallChange: Schema.optional(Schema.Boolean),
+  /** The preset it was planned from, by name: its card names it while its parts still have that preset's shape. */
+  preset: Schema.optional(Schema.String),
   /** Explicitly chosen after-merge timing. Kept for older configured tasks; size no longer sets it. */
   reviewAfterMerge: Schema.optional(Schema.Boolean),
   /**

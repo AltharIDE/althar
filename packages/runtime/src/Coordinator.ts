@@ -2,7 +2,7 @@ import type { MessageSender, SentCanvasComment } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
 import { type ActorId, type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
-import type { Commands, Ledger } from '@althar/persistence-sqlite'
+import { type Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
@@ -12,7 +12,7 @@ import { thisDevice } from './device'
 import { Busy } from './Busy'
 import { Connections } from './Connections'
 import { Errands } from './Errands'
-import { touchCard } from './cards'
+import { postCard, touchCard } from './cards'
 import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
 import { words } from './words'
@@ -88,8 +88,10 @@ import { describe as describePreset, presetsIn } from './presets'
 import {
   callBegan,
   callEnded,
+  discardedDrafts,
   drafted as draftMade,
   heldDraft,
+  plannedAnyway,
   type Drafts,
   inputWritten,
   noDrafts,
@@ -1157,7 +1159,15 @@ export class Coordinator extends Context.Service<
       const followDrafts = (event: LiveEvent) =>
         Effect.gen(function* () {
           if (event._tag === 'TurnEnded') {
-            if (draftsBy.has(event.threadId)) yield* redraft(event.threadId, turnEnded)
+            const drafts = draftsBy.get(event.threadId)
+            if (drafts === undefined) return
+            // A draft whose plan never came keeps a card in the thread once its live one goes: it says it has no plan, or
+            // that it was discarded, and offers to plan or discard it. Posted first, so the thread is never without it.
+            const projectId = yield* coordinatorProject(event.threadId)
+            if (projectId !== null)
+              for (const draft of drafts.drafts)
+                if (draft.taskId !== null && !draft.planned) yield* postCard(projectId as ProjectId, draft.taskId)
+            yield* redraft(event.threadId, turnEnded)
             return
           }
           if (event._tag !== 'Agent') return
@@ -1196,10 +1206,41 @@ export class Coordinator extends Context.Service<
                 )
             }
           }
-          if (call.status === 'completed' || call.status === 'failed')
+          if (call.status === 'completed' || call.status === 'failed') {
+            const ending = draftsBy.get(threadId)?.calls.get(call.toolCallId)
             yield* redraft(threadId, (drafts) => callEnded(drafts, call.toolCallId, call.status === 'completed'))
+            // A plan's call can fail after its plan was proposed (a preset that didn't apply): the plan is in, and its card.
+            const taskId =
+              call.status === 'failed' && ending?.tool === 'propose_plan'
+                ? (draftsBy.get(threadId)?.drafts.find((draft) => draft.key === ending.draft)?.taskId ?? null)
+                : null
+            if (taskId !== null && !(yield* stillDraft(taskId))) yield* redraft(threadId, (drafts) => plannedAnyway(drafts, taskId))
+          }
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not follow a task as it was drafted', cause)))
       yield* Effect.forkScoped(Stream.runForEach(yield* live.subscribe, (event) => provide(followDrafts(event))))
+
+      /*
+       * A task discarded while it is drafted, by the person or by an agent, from anywhere: its draft says so at once, rather
+       * than going on as if it would be planned. Looked at whenever the record grows while anything is being drafted.
+       */
+      const discardedNow = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        for (const [threadId, drafts] of [...draftsBy]) {
+          const ids = drafts.drafts.flatMap((draft) => (draft.taskId === null || draft.discarded ? [] : [draft.taskId]))
+          if (ids.length === 0) continue
+          const gone = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE state = 'abandoned' AND id IN ${sql.in(ids)}`
+          if (gone.length > 0) yield* redraft(threadId, (now) => discardedDrafts(now, new Set(gone.map((one) => one.id))))
+        }
+      }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell a discarded draft', cause)))
+      const grown = yield* (yield* Ledger).listen
+      yield* Effect.forkScoped(
+        Effect.forever(
+          Effect.andThen(
+            grown,
+            Effect.suspend(() => (draftsBy.size === 0 ? Effect.void : provide(discardedNow))),
+          ),
+        ),
+      )
 
       /*
        * Tasks the person held while they were drafted, by task: propose_plan makes their plan held from the start, so

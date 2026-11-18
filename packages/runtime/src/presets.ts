@@ -216,6 +216,24 @@ export const presetOf = (presets: ReadonlyArray<Preset>, parts: PresetParts) =>
   [...presets.filter((one) => !one.builtin), ...presets.filter((one) => one.builtin)].find((one) => alike(one.parts, parts))?.name ??
   'Change'
 
+/** Whether a plan's parts still have a preset's shape: where it works, how it's checked and ends, where it sits, and its kind; whoever leads it. */
+const shaped = (preset: PresetParts, parts: PresetParts) => alike({ ...preset, lead: null, reviewer: null }, parts)
+
+/**
+ * The preset a plan's card names: the one it was planned from (`recorded`), while its parts still have that preset's shape,
+ * whatever models lead and review it; else the one its parts are (`presetOf`). A small change is one by its own mark.
+ */
+export const presetOfPlan = (
+  presets: ReadonlyArray<Preset>,
+  plan: { readonly recorded?: string | undefined; readonly small: boolean; readonly parts: PresetParts; readonly chosen: PresetParts },
+) => {
+  if (plan.small) return 'Small change'
+  const recorded = plan.recorded?.trim().toLowerCase()
+  const named = recorded === undefined ? undefined : presets.find((one) => one.name.toLowerCase() === recorded)
+  if (named !== undefined && named.id !== 'builtin:small-change' && shaped(named.parts, plan.chosen)) return named.name
+  return presetOf(presets, plan.parts)
+}
+
 /** Saves a preset, from a task or as the coordinator offered it: its name, its parts, kept to a project or not. */
 export const savePreset = (input: {
   readonly name: string
