@@ -22,6 +22,9 @@ export const text = {
   notKept: 'Output not kept.',
 }
 
+/** It ended by itself, not well. */
+const runFailed = (run: RunContent) => run.ended !== null && !run.ended.stopped && run.ended.code !== 0
+
 /** How often what a run prints is read again while its console is open. */
 const EVERY = 1_000
 
@@ -34,6 +37,7 @@ export function RunOf({
   threadTask = null,
   onStop,
   onRunAgain,
+  onHelp,
 }: {
   run: RunContent
   /** The task whose thread it is in, if any: its own run there doesn't say where it runs. */
@@ -41,9 +45,12 @@ export function RunOf({
   onStop: (launchId: string) => void
   /** Runs it again, where it ran: the task's, which of the project's runnables, and the branch or pull request, fetched afresh, where the card says. */
   onRunAgain: (taskId: string | null, runnableId: string | null, ref?: RunRef) => void
+  /** Puts a prompt about its failure in the composer, unsent. Without it, a failed run offers no help. */
+  onHelp?: (run: RunContent, output: () => Promise<string | undefined>) => void
 }) {
   const url = run.url
   const opener = usePageOpener()
+  const { client } = useServices()
   const [open, setOpen] = useState(false)
   const output = useRunOutput(run.launchId, open, run.ended === null)
   return (
@@ -53,6 +60,9 @@ export function RunOf({
       {...(run.ended === null
         ? { onStop: () => onStop(run.launchId) }
         : { onRunAgain: () => onRunAgain(run.taskId, run.runnableId ?? null, ...(run.ref == null ? [] : [refOf(run.ref)])) })}
+      {...(onHelp !== undefined && runFailed(run)
+        ? { onHelp: () => onHelp(run, () => client.readLaunchOutput(run.launchId).then((read) => read.text)) }
+        : {})}
       output={output}
       outputOpen={open}
       onOutputOpenChange={setOpen}

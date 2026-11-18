@@ -366,7 +366,8 @@ export interface TaskModel {
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
   /** Runs one of the project's runnables in its worktree, its default without one. */
-  readonly runProject: (runnableId?: string | null) => Promise<void>
+  /** Whether it went: false where the runtime refused it, saying why in the error. */
+  readonly runProject: (runnableId?: string | null) => Promise<boolean>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   readonly dismissError: () => void
@@ -1303,12 +1304,19 @@ export const useTask = (threadId: string): TaskModel => {
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
-    runProject: (runnableId = null) =>
-      act(async () =>
-        snapshot === null
-          ? undefined
-          : client.runProject(snapshot.project.id, snapshot.task.id, threadId, ...(runnableId === null ? [] : [runnableId])),
-      ),
+    runProject: async (runnableId = null) => {
+      let went = true
+      await act(async () => {
+        try {
+          if (snapshot !== null)
+            await client.runProject(snapshot.project.id, snapshot.task.id, threadId, ...(runnableId === null ? [] : [runnableId]))
+        } catch (failure) {
+          went = false
+          throw failure
+        }
+      })
+      return went
+    },
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
     dismissError: () => setError(null),

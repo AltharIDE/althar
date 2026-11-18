@@ -44,6 +44,7 @@ import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn, upcomingOn } from '../../shared/models'
 import { usualLead } from '../automations/lead'
 import { RunOf } from '../../shared/RunOf'
+import { useHelpMeFix } from '../../shared/helpMeFix'
 import { Runs } from '../runs/Runs'
 import { LiveBlocks } from '../../shared/LiveBlocks'
 import { NOTHING_HEARD } from '../../shared/heard'
@@ -519,6 +520,8 @@ export function ProjectView({
   const session = coordinator?.session ?? null
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
+  // "Help me fix it" on a failed run: a prompt for the composer, unsent.
+  const helpMe = useHelpMeFix(draftOf, busy, voice.inputRef)
   const steers = useSendMidTurn()?.to === 'steer'
   const queue = queueShown(session, model.pending, coordinator?.accepting, coordinator?.items)
   // What the coordinator's thread is drawn from, kept while its items and its turn are: its words streaming, its commands
@@ -769,6 +772,7 @@ export function ProjectView({
     <div className={s.composer}>
       <DraftComposer
         draft={draftOf}
+        {...(helpMe.suggestion === undefined ? {} : { suggestion: helpMe.suggestion })}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
@@ -945,7 +949,7 @@ export function ProjectView({
                     runnables={coordinator.runnables}
                     launches={coordinator.launches}
                     now={now}
-                    onRun={(id, taskId) => void model.runProject(taskId, id)}
+                    onRun={(id, taskId) => model.runProject(taskId, id)}
                     onStop={(id) => void model.stopLaunch(id)}
                     onClear={(id) => void model.clearLaunch(id)}
                     onRunRef={model.runRef}
@@ -1137,6 +1141,7 @@ export function ProjectView({
                                     run={run}
                                     onStop={(id) => void model.stopLaunch(id)}
                                     onRunAgain={(taskId, runnableId, ref) => void model.runProject(taskId, runnableId, ref)}
+                                    onHelp={helpMe.help}
                                   />
                                 )}
                                 queued={text.queued}
