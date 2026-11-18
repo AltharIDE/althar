@@ -1,4 +1,14 @@
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+  type Ref,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react'
 
 import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -85,15 +95,16 @@ export interface SettingRowProps {
   /** Under the row, across it: what the row opens, such as a row that depends on it. */
   under?: ReactNode
   className?: string
+  ref?: Ref<HTMLDivElement>
 }
 
 /** One setting: its name and line, and the control at the end. */
-export function SettingRow({ title, note, glyph, mark, indent = false, children, under, className }: SettingRowProps) {
+export function SettingRow({ title, note, glyph, mark, indent = false, children, under, className, ref }: SettingRowProps) {
   const id = useId()
   const ids = { labelledBy: `${id}-t`, ...(note === undefined ? {} : { describedBy: `${id}-n` }) }
   const picture = glyph ?? mark
   return (
-    <div className={cx(s.row, indent && s.indent, picture !== undefined && s.withGlyph, className)}>
+    <div ref={ref} className={cx(s.row, indent && s.indent, picture !== undefined && s.withGlyph, className)}>
       {picture !== undefined && (
         <span className={glyph === undefined ? s.asIs : s.glyph} aria-hidden="true">
           {picture}

@@ -248,6 +248,7 @@ export { Pacer, usePacedText } from './lib/pace'
 
 export * from './setup/Accounts/Accounts'
 export * from './setup/Accounts/AccountSignIn'
+export * from './setup/AboutAlthar/AboutAlthar'
 export * from './setup/AppVersion/AppVersion'
 export * from './setup/AgentTabs/AgentTabs'
 export * from './setup/ModelSwitches/ModelSwitches'

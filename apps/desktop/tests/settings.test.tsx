@@ -10,7 +10,7 @@ import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { SYSTEM_SOUND } from '../src/main/notify'
 import { soundToPutBack } from '../src/renderer/features/settings/QuickCards'
 import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
-import { isSection, type Section, SECTIONS, sectionOf } from '../src/renderer/features/settings/sections'
+import { isSection, type Section, SECTIONS, sectionOf, type SettingsFocus } from '../src/renderer/features/settings/sections'
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { reviewOf } from '../src/renderer/features/settings/useSkills'
 import { useStart } from '../src/renderer/features/start/useStart'
@@ -50,9 +50,19 @@ function Quick({ onSettings = vi.fn() }: { onSettings?: (section: Section | null
 }
 
 /* The Settings tab on a section, as its route has it: the agents asked again as it opens. */
-function Settings({ at = 'agents' }: { at?: Section }) {
-  const [section, setSection] = useState<Section>(at)
-  return <SettingsPage start={useStart({ recheck: true })} section={section} onSection={setSection} />
+function Settings({ at = 'agents', onSection }: { at?: Section; onSection?: (section: Section, focus?: SettingsFocus) => void }) {
+  const [place, setPlace] = useState<{ section: Section; focus?: SettingsFocus }>({ section: at })
+  return (
+    <SettingsPage
+      start={useStart({ recheck: true })}
+      section={place.section}
+      {...(place.focus === undefined ? {} : { focus: place.focus })}
+      onSection={(section, focus) => {
+        onSection?.(section, focus)
+        setPlace(focus === undefined ? { section } : { section, focus })
+      }}
+    />
+  )
 }
 
 const quick = () => screen.findByRole('dialog', { name: 'Quick settings' })
@@ -94,7 +104,7 @@ describe('the quick settings', () => {
       within(panel)
         .getByRole('link', { name: /What’s new/ })
         .getAttribute('href'),
-    ).toBe('https://github.com/AltharIDE/althar/releases/tag/v0.0.0')
+    ).toBe('https://althar.ai/changelog')
 
     // All settings goes to the Settings tab, where it was last, and leaves the panel.
     await userEvent.click(within(panel).getByRole('button', { name: /^All settings/ }))
@@ -745,15 +755,15 @@ describe('the Settings tab', () => {
     expect(screen.getByRole('button', { name: 'Look again' })).toBeTruthy()
   })
 
-  it('says which Althar this is, with its release’s notes', async () => {
+  it('says which Althar this is, in early access, with the website, what’s new there and the Discord server', async () => {
     withServices(<Settings at="about" />, fakeClient().client)
     const page = screen.getByRole('main')
     expect(await within(page).findByText('Althar 0.0.0')).toBeTruthy()
-    expect(
-      within(page)
-        .getByRole('link', { name: /What’s new/ })
-        .getAttribute('href'),
-    ).toBe('https://github.com/AltharIDE/althar/releases/tag/v0.0.0')
+    expect(within(page).getByText('Early access')).toBeTruthy()
+    const href = (name: RegExp) => within(page).getByRole('link', { name }).getAttribute('href')
+    expect(href(/What’s new/)).toBe('https://althar.ai/changelog')
+    expect(href(/Website/)).toBe('https://althar.ai/')
+    expect(href(/Discord/)).toBe('https://discord.gg/QA2g8MwKda')
   })
 
   it('reports a problem from About Althar, only where the app can report', async () => {
@@ -767,15 +777,22 @@ describe('the Settings tab', () => {
     expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Report a problem' })).toBeNull()
   })
 
-  it('shows where Althar keeps its data under About Althar, with sizes, and opens a place in the file manager', async () => {
+  it('shows where Althar keeps its data under About Althar, with sizes and shares, and opens a place in the file manager', async () => {
     const host = fakeHost()
     const { client } = fakeClient()
     withServices(<Settings at="about" />, client, host)
     const main = screen.getByRole('main')
-    expect(await within(main).findByText('/home/me/Althar')).toBeTruthy()
-    expect(within(main).getByText('/home/me/.local/share/althar/logs')).toBeTruthy()
     expect((await within(main).findAllByText('3.0 GB')).length).toBe(3)
-    await userEvent.click(within(main).getByRole('button', { name: /^Show in (Finder|Explorer|Files), Task folders$/ }))
+    expect(within(main).getAllByText('33%').length).toBe(3)
+    const tasks = within(main).getByRole('button', { name: /^Show in (Finder|Explorer|Files), Task folders$/ })
+    // The path is Show's tooltip.
+    expect(tasks.getAttribute('title')).toMatch(/: \/home\/me\/Althar$/)
+    expect(
+      within(main)
+        .getByRole('button', { name: /^Show in (Finder|Explorer|Files), Logs$/ })
+        .getAttribute('title'),
+    ).toMatch(/: \/home\/me\/\.local\/share\/althar\/logs$/)
+    await userEvent.click(tasks)
     expect(host.storage.show).toHaveBeenCalledWith('worktrees')
     await userEvent.click(within(main).getByRole('button', { name: 'Measure again' }))
     await waitFor(() => expect(client.getStorageSize).toHaveBeenCalledWith('profile', true, expect.anything()))
@@ -790,6 +807,39 @@ describe('the Settings tab', () => {
     const main = screen.getByRole('main')
     await userEvent.click(await within(main).findByRole('button', { name: /^Show in (Finder|Explorer|Files), Logs$/ }))
     expect((await within(main).findByRole('alert')).textContent).toBe('Couldn’t open it: No application can open folders')
+    // The path, to copy instead.
+    expect(within(main).getByText('/home/me/.local/share/althar/logs')).toBeTruthy()
+  })
+
+  it('checks for updates from About Althar, as the app menu does, only where the app updates', async () => {
+    let checked: () => void = () => undefined
+    const check = vi.fn(() => new Promise<void>((done) => (checked = done)))
+    const update = {
+      glance: vi.fn(async () => ({ ready: null, working: false, restarting: false, failed: null })),
+      restart: vi.fn(async () => false),
+      check,
+      onChange: () => () => undefined,
+    }
+    withServices(<Settings at="about" />, fakeClient().client, fakeHost({ update }))
+    const main = screen.getByRole('main')
+    await userEvent.click(await within(main).findByRole('button', { name: 'Check for updates' }))
+    expect(check).toHaveBeenCalledOnce()
+    expect(within(main).getByRole('button', { name: 'Checking…' })).toHaveProperty('disabled', true)
+    checked()
+    expect(await within(main).findByRole('button', { name: 'Check for updates' })).toBeTruthy()
+  })
+
+  it('offers no check where the app doesn’t update', async () => {
+    withServices(<Settings at="about" />, fakeClient().client)
+    expect(await within(screen.getByRole('main')).findByText('Althar 0.0.0')).toBeTruthy()
+    expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Check for updates' })).toBeNull()
+  })
+
+  it('takes Free up space to the task folders under Work on this computer', async () => {
+    const onSection = vi.fn()
+    withServices(<Settings at="about" onSection={onSection} />, fakeClient().client)
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: 'Free up space' }))
+    expect(onSection).toHaveBeenCalledWith('this-mac', 'task-folders')
   })
 
   it('sends anonymous usage data until the person turns it off under About Althar, with one line on what it sends', async () => {
@@ -821,7 +871,7 @@ describe('the Settings tab', () => {
     const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
     await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
     expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
-      'What failed, and where. Never your code or any name.',
+      'Anonymous. Never your code or any name.',
     )
     await userEvent.click(crashes)
     expect(host.setPreference).toHaveBeenLastCalledWith('crashReports', false)
