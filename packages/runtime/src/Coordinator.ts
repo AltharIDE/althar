@@ -1118,7 +1118,7 @@ export class Coordinator extends Context.Service<
           const bare: Array<string> = []
           for (const [taskId, slug] of made) if (yield* stillDraft(taskId)) bare.push(slug)
           if (bare.length === 0) return
-          const body = `Althar's news (not the person's word): ${bare.join(', ')} ${bare.length === 1 ? 'is a draft that has' : 'are drafts that have'} no plan, so ${bare.length === 1 ? 'it hasn’t' : 'they haven’t'} started and ${bare.length === 1 ? 'it shows' : 'they show'} to the person as stopped. Your propose_plan did not go through. Call propose_plan for ${bare.length === 1 ? 'it' : 'each'} now, or tell the person that planning failed. Don't say ${bare.length === 1 ? 'it is' : 'they are'} planned.`
+          const body = `Althar's news (not the person's word): ${bare.join(', ')} ${bare.length === 1 ? 'is a draft that has' : 'are drafts that have'} no plan, so ${bare.length === 1 ? 'it hasn’t' : 'they haven’t'} started and ${bare.length === 1 ? 'its card says' : 'their cards say'} so to the person, offering to plan or discard ${bare.length === 1 ? 'it' : 'them'}. Your propose_plan did not go through. Call propose_plan for ${bare.length === 1 ? 'it' : 'each'} now, or tell the person that planning failed. Don't say ${bare.length === 1 ? 'it is' : 'they are'} planned.`
           yield* say({
             envelope: yield* envelope('coordinator.news', {}, undefined, instance.systemId),
             threadId: event.threadId,
