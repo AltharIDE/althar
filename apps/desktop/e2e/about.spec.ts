@@ -85,14 +85,19 @@ test('draws About Althar, and Free up space lands on the task folders, lit and f
       await shoot(page, `about-${scheme}`)
     }
 
-    // A shorter window, kept from here: opened as usual, Work on this computer has Clean up below the fold.
+    // A short window, below its usual least height, kept from here: Work on this computer, read from its top, has
+    // Clean up below the fold, with a row or so to spare (Linux has one row fewer: no opening at login).
     await page.emulateMedia({ colorScheme: 'light' })
-    await sizeWindow(electronApp, page, 1180, 560)
+    await (await electronApp.browserWindow(page)).evaluate((one) => one.setMinimumSize(600, 300))
+    await sizeWindow(electronApp, page, 1180, 360)
     const clean = main.getByRole('button', { name: 'Clean up' })
     await nav()
       .getByRole('button', { name: /^Work on/ })
       .click()
     await expect(clean).toBeAttached()
+    await main.evaluate((at) => {
+      for (let one: Element | null = at; one !== null; one = one.parentElement) one.scrollTop = 0
+    })
     await still(page)
     await expect(clean).not.toBeInViewport()
 
