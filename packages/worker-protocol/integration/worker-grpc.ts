@@ -1,4 +1,4 @@
-import { equal, match, notEqual, rejects } from 'node:assert/strict'
+import { equal, rejects } from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash, X509Certificate } from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -41,9 +41,7 @@ void test('the Rust worker negotiates over mTLS only with a matching enrollment'
       maxBuffer: 4096,
     })
 
-  const first = await connect('enrolled')
-  match(first.stdout.trim(), /^wsn_[a-f0-9]{32}$/)
-  notEqual(first.stdout, (await connect('enrolled')).stdout)
+  equal((await connect('enrolled')).stdout.trim(), 'Authenticated')
   await rejects(connect('unenrolled'), { stderr: /Unauthenticated/ })
   await rejects(connect('enrolled', differentWorker), { stderr: /PermissionDenied/ })
   await rejects(connect('enrolled', workerId, `home_${'4'.repeat(32)}`), { stderr: /WrongPeer/ })

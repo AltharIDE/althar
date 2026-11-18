@@ -12,17 +12,25 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         )
         .into());
     };
-    let hello = probe_home(
-        address,
-        WorkerEnrollment {
-            home_id,
-            worker_id,
-            home_ca_pem: &fs::read(ca)?,
-            worker_certificate_pem: &fs::read(certificate)?,
-            worker_private_key_pem: &fs::read(key)?,
-        },
-    )
-    .await?;
-    println!("{}", hello.session_id);
+    let home_ca = fs::read(ca)?;
+    let certificate = fs::read(certificate)?;
+    let key = fs::read(key)?;
+    let enrollment = || WorkerEnrollment {
+        home_id,
+        worker_id,
+        home_ca_pem: &home_ca,
+        worker_certificate_pem: &certificate,
+        worker_private_key_pem: &key,
+    };
+    let first = probe_home(address, enrollment()).await?;
+    let second = probe_home(address, enrollment()).await?;
+    if first.session_id == second.session_id {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "The home reused a worker session",
+        )
+        .into());
+    }
+    println!("Authenticated");
     Ok(())
 }
