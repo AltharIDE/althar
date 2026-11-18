@@ -450,10 +450,10 @@ const asideStateOf = (card: TaskCardContent): AsideState => {
 /** An aside's card: where it stands, its result or what it is at, and a way in beside the coordinator. */
 function Aside({ card, actions, title }: { card: TaskCardContent; actions: CardActions; title: string }) {
   const state = asideStateOf(card)
-  // Its lead's latest words are the newest thing said in it: after a follow-up they answer it, where its summary is still the
-  // first answer's, so the summary stands only where the lead has said nothing since.
   const said = card.latest?.by === 'lead' ? card.latest.said : undefined
-  const answer = said ?? card.summary ?? undefined
+  // Its answer, by the thread's order: its lead's report, or what it said after the person last asked it more. Its lead's
+  // latest words may only acknowledge the report, so they stand only where there is neither.
+  const answer = card.answer ?? said
   const result = (() => {
     switch (state) {
       case AsideState.Ready:

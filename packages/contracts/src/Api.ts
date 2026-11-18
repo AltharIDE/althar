@@ -2762,6 +2762,12 @@ export const TaskCard = Schema.Struct({
    * shows it, while it is open, and + opens it again rather than another. Absent otherwise.
    */
   unsaid: Schema.optional(Schema.Boolean),
+  /**
+   * An aside's answer, as its card in the coordinator's thread shows it: its lead's latest report, or, where the person asked
+   * it more since, its lead's first line after they did. What its lead says after reporting (that Althar has the summary, say)
+   * isn't its answer. Absent for a task on the board, and for an aside with neither yet.
+   */
+  answer: Schema.optional(Schema.String),
   /** A change ready that built nothing: no commits on its branch and no pull request open or merged. Absent otherwise. */
   nothingBuilt: Schema.optional(Schema.Boolean),
   /**

@@ -53,7 +53,7 @@ describe("an aside's card in the coordinator's thread", () => {
 
   it('puts its result first once it is ready', () => {
     withServices(
-      <Card card={aside({ phase: 'ready', summary: 'It tags from the version.\nMore after.' })} actions={actions()} />,
+      <Card card={aside({ phase: 'ready', answer: 'It tags from the version.\nMore after.' })} actions={actions()} />,
       fakeClient().client,
     )
     expect(screen.getByText('Ready')).toBeTruthy()
@@ -94,24 +94,25 @@ describe("an aside's card in the coordinator's thread", () => {
     expect(screen.queryByText('Implement')).toBeNull()
   })
 
-  it('shows the answer to a follow-up, not the first answer its summary still holds', () => {
+  it('shows its answer, not the words its lead added after reporting it', () => {
     withServices(
       <Card
         card={aside({
           phase: 'ready',
           summary: 'It tags from the version.',
-          latest: { at: '2026-11-18T19:40:00.000Z', by: 'lead', said: 'Yes: a tag pushed by hand starts the same run.' },
+          answer: 'It tags from the version.',
+          latest: { at: '2026-11-18T19:40:00.000Z', by: 'lead', said: 'Althar has your summary. Nothing was built.' },
         })}
         actions={actions()}
       />,
       fakeClient().client,
     )
-    expect(screen.getByText('Yes: a tag pushed by hand starts the same run.')).toBeTruthy()
-    expect(screen.queryByText('It tags from the version.')).toBeNull()
+    expect(screen.getByText('It tags from the version.')).toBeTruthy()
+    expect(screen.queryByText(/Althar has your summary/)).toBeNull()
   })
 
   it('keeps its result when the person keeps it for later', () => {
-    withServices(<Card card={aside({ phase: 'kept', summary: 'It tags from the version.' })} actions={actions()} />, fakeClient().client)
+    withServices(<Card card={aside({ phase: 'kept', answer: 'It tags from the version.' })} actions={actions()} />, fakeClient().client)
     expect(screen.getByText('Kept for later')).toBeTruthy()
     expect(screen.getByText('It tags from the version.')).toBeTruthy()
     expect(screen.queryByText('Stopped')).toBeNull()
@@ -136,7 +137,7 @@ describe("an aside's card in the coordinator's thread", () => {
 
   it('opens as a task does where nothing opens asides in place', async () => {
     const onOpen = vi.fn()
-    withServices(<Card card={aside({ phase: 'ready', summary: 'Done.' })} actions={actions({ onOpen })} />, fakeClient().client)
+    withServices(<Card card={aside({ phase: 'ready', answer: 'Done.' })} actions={actions({ onOpen })} />, fakeClient().client)
     await userEvent.click(screen.getByRole('button', { name: /Open aside/ }))
     expect(onOpen).toHaveBeenCalled()
   })
