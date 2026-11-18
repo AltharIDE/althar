@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffectEvent, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { device } from '../../foundations/device'
 import type { Brand } from '../../foundations/brands/brands'
@@ -362,12 +362,12 @@ export function RepositoryMap({
   // The wires drawn once the map was first measured: any after it draws itself in.
   const known = useRef<Set<string> | null>(null)
   const [wires, setWires] = useState<Wire[]>([])
-  // The cards on the map as it last drew: one not among them arrives, as a clone or a folder added does.
-  const seen = useRef<Set<string> | null>(null)
-  const arrives = (id: string) => seen.current !== null && !seen.current.has(id)
-  useEffect(() => {
-    seen.current = new Set([...repositories.map((one) => one.id), ...reading.map((one) => one.id)])
-  })
+  // The cards on the map, and those that weren't on it before they last changed: they arrive, as a clone or a folder added does.
+  const ids = [...repositories.map((one) => one.id), ...reading.map((one) => one.id)]
+  const drawnKey = ids.join('\n')
+  const [onMap, setOnMap] = useState(() => ({ key: drawnKey, ids: new Set(ids), arrived: new Set<string>() }))
+  if (onMap.key !== drawnKey) setOnMap({ key: drawnKey, ids: new Set(ids), arrived: new Set(ids.filter((id) => !onMap.ids.has(id))) })
+  const arrives = (id: string) => onMap.arrived.has(id)
 
   const hostOf = (id: string) => hosts.find((host) => host.id === id)
   const connected = (id: string) => hostOf(id)?.reach === HostReach.Connected

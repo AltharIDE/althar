@@ -179,3 +179,17 @@ describe('its wires', () => {
     }
   })
 })
+
+describe('a repository that joins', () => {
+  const card = (name: string) => screen.getByText(name, { selector: 'h4, h3, h5, span, strong' }).closest('li')
+
+  it('arrives once it is on the map, the cards already there staying still', () => {
+    const { again } = map({ repositories: MAP_MERIDIAN.slice(0, 2) })
+    // Nothing arrives as the map first draws.
+    expect(document.querySelectorAll('.arrives')).toHaveLength(0)
+    again({ repositories: MAP_MERIDIAN.slice(0, 3) })
+    const joined = MAP_MERIDIAN[2]!
+    expect(card(joined.name)?.classList.contains('arrives')).toBe(true)
+    expect(document.querySelectorAll('.arrives')).toHaveLength(1)
+  })
+})

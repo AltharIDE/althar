@@ -154,6 +154,9 @@ function Live(args: Parameters<typeof ProjectRepositories>[0]) {
   )
 }
 
+/** Choosing one to clone, in the dark. */
+export const CloningDark: Story = { ...Cloning, globals: { theme: 'dark' } }
+
 export const Try: Story = { render: (args) => <Live {...args} /> }
 
 /** Cloned: being cloned, it waits on the left as a folder being read does, until it joins them. */

@@ -78,7 +78,9 @@ export const ChangingWhere: Story = {
   args: { chosen: 'gh:meridian/web' },
   play: async ({ args, canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: 'Choose where it goes' }))
-    await userEvent.click(await within(document.body).findByRole('menuitem', { name: 'Another folder…' }))
+    // The place it lands now, checked, over the way to another.
+    await expect(await within(document.body).findByRole('menuitemradio', { name: '~/code' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(within(document.body).getByRole('menuitem', { name: 'Another folder…' }))
     await expect(args.onWhere).toHaveBeenCalledOnce()
   },
 }

@@ -4,7 +4,7 @@ import type { RootProps } from '../../lib/props'
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
-import { Menu, MenuItem } from '../../primitives/Menu/Menu'
+import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { SplitButton } from '../../primitives/SplitButton/SplitButton'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { type HostedRepository, type ProjectSetupText, type SetupHost, SetupRepositories } from '../ProjectSetup/ProjectSetup'
@@ -25,6 +25,8 @@ export interface RepositoryCloneText {
   title: string
   /** Beside Clone: the menu of where it lands. */
   where: string
+  /** In it, over the place it lands now. */
+  goesIn: string
   /** In it: another folder, through the system's picker. */
   elsewhere: string
   cancel: string
@@ -36,6 +38,7 @@ export interface RepositoryCloneText {
 export const repositoryCloneText: RepositoryCloneText = {
   title: 'Clone a repository',
   where: 'Choose where it goes',
+  goesIn: 'Clones go in',
   elsewhere: 'Another folder…',
   cancel: 'Cancel',
   clone: 'Clone',
@@ -142,9 +145,12 @@ export function RepositoryClone({
               menu={(trigger) => (
                 <Menu label={t.where} trigger={trigger} align="end">
                   {where !== null && (
-                    <MenuItem icon="check" onSelect={() => undefined}>
-                      {where}
-                    </MenuItem>
+                    <>
+                      <MenuRadioGroup label={t.goesIn} value={where} onChange={() => undefined}>
+                        <MenuRadioItem value={where}>{where}</MenuRadioItem>
+                      </MenuRadioGroup>
+                      <MenuSeparator />
+                    </>
                   )}
                   <MenuItem icon="folder" onSelect={onWhere}>
                     {t.elsewhere}
