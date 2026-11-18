@@ -1,0 +1,359 @@
+/* The four directions' own places, in the kit's tokens. */
+
+.faint {
+  color: var(--t-4);
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.gap {
+  flex: 1;
+}
+.headState {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* ── A · Beside: the workbench's panel ─────────────────────────────── */
+.besidePanel {
+  /* the run's own sheet, as a page beside the conversation is */
+  background: var(--paper);
+}
+.besideHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  margin-left: -8px;
+}
+.switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--t-1);
+  transition: background var(--fast) var(--ease);
+}
+.switcher:hover,
+.switcher[aria-expanded='true'] {
+  background: var(--line);
+}
+.switcher:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
+}
+.switcherName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.besideBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding-top: 4px;
+}
+
+/* ── B · Along the foot: a band, raised into a panel ───────────────── */
+.tray {
+  flex: none !important;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line-2);
+  background: var(--n-1);
+}
+.raised {
+  height: min(340px, 42%);
+  background: var(--paper);
+}
+.band {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px 0 10px;
+  flex: none;
+}
+.raised .band {
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+}
+.trayTabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+.trayTab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  max-width: 260px;
+  height: 26px;
+  border-radius: 7px;
+  transition: background var(--fast) var(--ease);
+}
+.trayTab:hover {
+  background: var(--line);
+}
+.trayTab.chosen {
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.trayPress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 10px 0 8px;
+  border-radius: inherit;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.chosen .trayPress {
+  color: var(--t-1);
+}
+.trayPress:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: -1.5px;
+}
+.trayName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.trayState {
+  flex: none;
+  font-size: 11.5px;
+}
+.trayTab > :last-child:not(.trayPress) {
+  margin-right: 2px;
+}
+.trayEnd {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+.trayBody {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── C · In the thread: a run unfolded under its card, and the person's commands ── */
+.threadRun {
+  display: flex;
+  flex-direction: column;
+}
+.unfolded > article {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.unfold {
+  display: flex;
+  flex-direction: column;
+  border-radius: 0 0 var(--r-lg) var(--r-lg);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  margin-top: -1px;
+  overflow: hidden;
+}
+.unfoldOut {
+  max-height: 188px;
+  border-top: 1px solid var(--line);
+}
+/* no fill of its own: the frame's edge is an inset shadow, under what is in it */
+.unfoldMoves {
+  padding-left: 6px;
+}
+.ran {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ranSaid {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+.ranWhere {
+  font: 11px var(--mono);
+  color: var(--t-3);
+}
+.ranCommand {
+  max-width: min(78%, 540px);
+  padding: 8px 14px;
+  border-radius: 16px 16px 5px 16px;
+  background: var(--you-bubble);
+  font: 12.5px/1.5 var(--mono);
+  color: var(--t-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ranSign {
+  color: var(--t-3);
+  user-select: none;
+}
+.ranOut {
+  position: relative;
+}
+.ranStop {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+/* the composer's terminal face: the composer's own footprint, a prompt in it */
+.shellLine {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 52px;
+  padding: 8px 8px 8px 8px;
+  border-radius: 16px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-2);
+}
+.shellSign {
+  font: 13px var(--mono);
+  color: var(--t-3);
+}
+.shellInput {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 13px/1.5 var(--mono);
+  color: var(--t-1);
+  caret-color: var(--t-1);
+  outline: none;
+}
+
+/* ── D · A tab of its own: the window, under its tabs ──────────────── */
+.screen {
+  position: absolute;
+  inset: 0;
+  /* the window's, under its tabs: over the project's screen and what floats on it, under a menu or a dialog */
+  z-index: calc(var(--z-float) + 1);
+  display: flex;
+  flex-direction: column;
+  background: var(--n-1);
+}
+.screenHead {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 44px;
+  padding: 0 12px;
+  flex: none;
+}
+.screenTab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  max-width: 280px;
+  height: 28px;
+  border-radius: 8px;
+  transition: background var(--fast) var(--ease);
+}
+.screenTab:hover {
+  background: var(--line);
+}
+.screenTab.chosen {
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.screenBody {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+.split {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  overflow: hidden;
+}
+.paneHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.paneName {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--t-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.paneMoves {
+  flex: none;
+}
+.screenEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+  font-size: 13px;
+  color: var(--t-3);
+}
+.screenEmpty p {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switcher,
+  .trayTab,
+  .screenTab {
+    transition: none;
+  }
+}
