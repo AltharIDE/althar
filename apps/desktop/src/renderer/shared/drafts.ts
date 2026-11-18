@@ -234,7 +234,23 @@ export const forgetDrafts = () => {
   writing = undefined
   since = null
   unwritten.clear()
+  focusing.clear()
 }
+
+/** The threads whose composer is to take the focus as it next shows: words were put in it for the person to go on with. */
+const focusing = new Set<string>()
+
+/** Asks a thread's composer to take the focus, its caret after the words, as it next shows (`DraftComposer`). */
+export const focusDraft = (key: string) => {
+  focusing.add(key)
+  listeners.get(key)?.forEach((listener) => listener())
+}
+
+/** Whether a thread's composer is asked to take the focus, not yet taken. */
+export const wantsDraftFocus = (key: string) => focusing.has(key)
+
+/** Whether a thread's composer was asked to take the focus: asked once, taken once. */
+export const takeDraftFocus = (key: string) => focusing.delete(key)
 
 /** The key of the coordinator's draft in a project, and of a task's. */
 export const draftKey = {

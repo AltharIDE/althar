@@ -1,11 +1,10 @@
-import type { CoordinatorSnapshot, RepositoryScript, Runnable } from '@althar/contracts'
+import type { RepositoryScript, Runnable } from '@althar/contracts'
 import { useCallback, useState } from 'react'
 
 import { messageOf } from '../../data/client'
 import { useGoneAtOnce } from '../../data/goneAtOnce'
-import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { queueShown, sending, unsent as unsentFrom } from '../../shared/items'
+import { draftKey, focusDraft, setDraftText } from '../../shared/drafts'
 
 /*
  * What a project runs, as one screen keeps it (ADR-044): keeping one,
@@ -14,13 +13,30 @@ import { queueShown, sending, unsent as unsentFrom } from '../../shared/items'
  * says what went wrong if it did; the screens read what the project runs
  * again as the runtime says it changed. One removed is gone at once, until a
  * read without it lands, and back, saying why, where the runtime kept it;
- * the ask shows in the coordinator's thread at once, as its composer shows
- * what is said. Running and stopping are the screen's own.
+ * asking the coordinator puts the words in its composer, unsent, for the
+ * person to change or send. Running and stopping are the screen's own.
  */
 
 /** What the coordinator is asked, in the person's words, to work out what the project runs. */
 export const askText =
-  'Work out what this project runs besides its default, and keep each thing worth running by hand with keep_run: a dev server, Storybook, the app itself, tests in watch mode. Then tell me what you kept.'
+  'Please work out what this project runs besides its default, and keep each thing worth running by hand, such as a dev server, Storybook, the app itself or the tests in watch mode. Then tell me what you kept.'
+
+/** The same, following on from what the person had written already. */
+export const askAfterText = `And p${askText.slice(1)}`
+
+/**
+ * The coordinator's draft with the ask in it: alone in an empty one; on a new line after what the person had written,
+ * never over it; and once, where it is there already.
+ */
+export const withAsk = (draft: string) =>
+  draft.trim() === '' ? askText : draft.includes(askText) || draft.includes(askAfterText) ? draft : `${draft.trimEnd()}\n${askAfterText}`
+
+/** Puts the ask in a project's coordinator's composer, unsent, which takes the focus as it next shows. */
+export const askInDraft = (projectId: string) => {
+  const key = draftKey.coordinator(projectId)
+  setDraftText(key, withAsk)
+  focusDraft(key)
+}
 
 export interface RunsModel {
   /** Keeps one, new or changed: whether it was kept. */
@@ -41,11 +57,6 @@ export interface RunsModel {
   /** The repository's scripts, once read; null until then. */
   readonly scripts: ReadonlyArray<RepositoryScript> | null
   readonly readScripts: () => Promise<void>
-  /**
-   * Asks the coordinator, in the project's conversation, to work out what the project runs: said there at once. Where it
-   * couldn't be, it goes from there, `unsent` is called, to ask again where it was asked, and the error says why.
-   */
-  readonly ask: (unsent?: () => void) => void
   readonly busy: boolean
   readonly error: string | null
   readonly dismissError: () => void
@@ -66,7 +77,7 @@ export function useRuns({
   /** What it runs, in its order, as read; null until then. */
   readonly runnables?: ReadonlyArray<Runnable> | null
 }): RunsModel {
-  const { client, cache } = useServices()
+  const { client } = useServices()
   const gone = useGoneAtOnce(runnables ?? undefined, (one) => one.id)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -111,35 +122,14 @@ export function useRuns({
     shown: gone.shown ?? null,
     order: (ids) => act(() => client.orderRunnables(projectId, ids)),
     scripts,
+    // Read behind the dialog, which says it is reading: nothing in it waits on them but their own list.
     readScripts: async () => {
       setScripts(null)
-      await act(async () => setScripts(await client.getRepositoryScripts(projectId)))
-    },
-    ask: (unsent) => {
-      setError(null)
-      // Said in the coordinator's thread at once, as its composer shows what is said, until the store's copy arrives.
-      let id = ''
-      cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) => {
-        if (current === undefined) return current
-        const next = sending(current.items, {
-          text: askText,
-          queued: queueShown(current.session, true, current.accepting),
-          interrupting: false,
-        })
-        id = next.id
-        return { ...current, items: next.items }
-      })
-      // Its thread as the window holds it, which never changes: read only where it hasn't been.
-      cache
-        .ensureQueryData(reads(client).coordinator(projectId))
-        .then((coordinator) => client.send({ threadId: coordinator.threadId, body: askText, disposition: 'after_current' }))
-        .catch((failure: unknown) => {
-          cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) =>
-            current === undefined ? current : { ...current, items: unsentFrom(current.items, id, askText) },
-          )
-          unsent?.()
-          setError(messageOf(failure))
-        })
+      try {
+        setScripts(await client.getRepositoryScripts(projectId))
+      } catch (failure) {
+        setError(messageOf(failure))
+      }
     },
     busy,
     error,

@@ -49,6 +49,8 @@ export interface RunTargetRun {
   code?: number | null
   /** It was stopped, not ended by itself. */
   stopped?: boolean
+  /** Starting, but no run exists yet: there is nothing to stop. */
+  pending?: boolean
   /** Why it couldn't be fetched, in the runtime's words. */
   why?: string
 }
@@ -137,7 +139,7 @@ export const runButtonText: RunButtonText = {
   emptyLabel: 'Something to run',
   emptyNote: 'Althar runs it itself, with no agent, and shows where it answers.',
   ask: 'Ask the coordinator to work it out',
-  askAbout: 'It reads the repository and keeps what is worth running.',
+  askAbout: 'Writes the request in its composer, for you to change or send.',
   scripts: 'Pick from package.json…',
   scriptsAbout: 'Any of the repository’s scripts.',
   type: 'Type a command…',
@@ -539,8 +541,8 @@ function Line({
     return row({
       glyph: <Spinner size="small" />,
       state: <span className={s.quiet}>{run.state === 'fetching' ? t.fetching : t.starting}</span>,
-      // A fetch can't be stopped; a start can.
-      ...(run.state === 'starting'
+      // A fetch can't be stopped; a start can, once there is one.
+      ...(run.state === 'starting' && run.pending !== true
         ? {
             acts: (
               <ActionButton size="small" aria-label={`${t.stop} ${name}`} onClick={onStop}>

@@ -148,6 +148,21 @@ describe('where a new message goes', () => {
         const after = yield* until(snapshotOf(threadId), (snapshot) => you(snapshot.items, body) !== undefined)
         lands(you(after.items, body), before.accepting)
         assert.strictEqual(after.accepting, 'queued')
+        assert.notStrictEqual(you(after.items, body)?.input?.claimed, true)
+        // A claimed input still recorded as queued during delivery belongs to this turn, not behind it.
+        const sql = yield* SqlClient.SqlClient
+        const [first] = yield* sql<{ id: string }>`SELECT user_input_id AS id FROM turn_delivery_inputs di
+          JOIN turn_deliveries d ON d.id = di.delivery_id WHERE d.thread_id = ${threadId} LIMIT 1`
+        assert.isDefined(first)
+        yield* sql`UPDATE user_inputs SET state = 'queued' WHERE id = ${first!.id}`
+        const duringDelivery = yield* snapshotOf(threadId)
+        assert.isTrue(
+          duringDelivery.items.some(
+            (item) => item.kind === 'user_message' && item.input?.state === 'queued' && item.input.claimed === true,
+          ),
+        )
+        assert.notStrictEqual(you(duringDelivery.items, body)?.input?.claimed, true)
+        yield* sql`UPDATE user_inputs SET state = 'delivered' WHERE id = ${first!.id}`
         held.open(threadId === coordinatorId ? '[answers-after:20s]' : '[lead:wait]')
         yield* until(turns(threadId), (rows) => rows.length >= 1 && rows.every((row) => row.state === 'completed'))
         assert.strictEqual((yield* snapshotOf(threadId)).accepting, 'now')

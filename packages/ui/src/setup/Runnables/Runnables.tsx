@@ -79,7 +79,7 @@ export const addRunnableText: AddRunnableText = {
   noScripts: 'The repository has no package.json scripts that aren’t kept already.',
   ask: 'Ask the coordinator',
   askAbout:
-    'The coordinator reads the repository, keeps what is worth running by hand, and says what it kept in the project’s conversation.',
+    'The request goes in the coordinator’s composer, unsent, after anything you’ve written there, for you to change or send. It reads the repository and keeps what is worth running by hand.',
   cancel: 'Cancel',
   add: (n) => (n > 1 ? `Add ${n}` : 'Add'),
 }
@@ -95,9 +95,10 @@ export interface AddRunnableProps {
   onAdd: (runnable: { name: string | null; command: string; repository: string | null }) => void
   /** Adds the scripts picked, by id. */
   onAddScripts: (ids: readonly string[]) => void
-  /** Asks the coordinator to work out what the project runs. */
+  /** Asks the coordinator to work out what the project runs: in its composer, for the person to send. */
   onAsk: () => void
   onClose: () => void
+  /** Keeping what was typed or picked: the ask waits on nothing. */
   busy?: boolean
   error?: string
   text?: Partial<AddRunnableText>
@@ -128,8 +129,10 @@ export function AddRunnable({
   )
   const count = way === 'scripts' ? picked.length : 1
   const ready = way === 'type' ? command.trim() !== '' : way === 'scripts' ? picked.length > 0 : true
+  // Asking hands the words to the coordinator's composer at once; only keeping one waits.
+  const waiting = busy && way !== 'ask'
   const submit = () => {
-    if (!ready || busy) return
+    if (!ready || waiting) return
     if (way === 'type') onAdd({ name: name.trim() === '' ? null : name.trim(), command: command.trim(), repository })
     else if (way === 'scripts') onAddScripts(picked)
     else onAsk()
@@ -146,7 +149,7 @@ export function AddRunnable({
           <Button type="button" variant="quiet" onClick={onClose}>
             {t.cancel}
           </Button>
-          <Button type="submit" variant="ink" disabled={!ready} busy={busy}>
+          <Button type="submit" variant="ink" disabled={!ready} busy={waiting}>
             {way === 'ask' ? t.ask : t.add(count)}
           </Button>
         </>
@@ -360,7 +363,18 @@ export interface ListedRunnable {
   command: string
   /** Where it runs and who said how, in a line: althar · Added by you. */
   about: string
+  /** Who said how it runs: in a long list, a way to find the person's own. */
+  from?: RunFrom
 }
+
+/** Who said how one runs, as a long list sorts them out: the person, the repository, or an agent (the coordinator's among them). */
+export type RunKind = 'all' | 'person' | 'repository' | 'agents'
+
+const kindOf = (from: RunFrom | undefined): RunKind | null =>
+  from === undefined ? null : from === 'coordinator' || from === 'agent' ? 'agents' : from
+
+/** Past this many, the list is long: it can be searched and sorted by who added each, and shows this many until asked for all. */
+export const LONG_LIST = 8
 
 export interface RunnableListText {
   default: string
@@ -374,6 +388,17 @@ export interface RunnableListText {
   empty: string
   /** Under it: how something gets here. */
   emptyLine: string
+  /** A long list's search. */
+  find: (n: number) => string
+  /** A long list sorted by who added each. */
+  kinds: string
+  kind: Record<RunKind, string>
+  /** What a long list hides until asked. */
+  showAll: (n: number) => string
+  showFewer: string
+  /** Nothing found. */
+  noneFound: string
+  clear: string
 }
 
 export const runnableListText: RunnableListText = {
@@ -385,6 +410,13 @@ export const runnableListText: RunnableListText = {
   remove: (label) => `Remove ${label}`,
   empty: 'Nothing to run yet',
   emptyLine: 'Add a command you start by hand, such as a dev server or the tests, and Run starts it without an agent.',
+  find: (n) => `Find among ${n}`,
+  kinds: 'Who added it',
+  kind: { all: 'All', person: 'Yours', repository: 'Repository', agents: 'Agents' },
+  showAll: (n) => `Show all ${n}`,
+  showFewer: 'Show fewer',
+  noneFound: 'Nothing here matches.',
+  clear: 'Clear',
 }
 
 export interface RunnablesText extends RunnableListText {
@@ -475,17 +507,38 @@ const placeOf = (at: number, { from, to }: Dragged) =>
 export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, error, headingLevel = 3, text }: RunnableListProps) {
   const t = { ...runnableListText, ...text }
   const list = useRef<HTMLOListElement>(null)
+  // A long one: searched, sorted by who added each, and only its first few until all are asked for.
+  const [find, setFind] = useState('')
+  const [kind, setKind] = useState<RunKind>('all')
+  const [all, setAll] = useState(false)
   const [dragged, setDragged] = useState<Dragged | null>(null)
   // The order it was put in shows until the list it is given changes, or says what went wrong, so a row dropped doesn't jump back while it is kept.
   const given = [...runnables.map((one) => one.id), error ?? ''].join('\n')
   const [put, setPut] = useState<{ given: string; ids: readonly string[] } | null>(null)
   const shown = put?.given === given ? put.ids.flatMap((id) => runnables.filter((one) => one.id === id)) : runnables
   const ids = shown.map((one) => one.id)
+  const long = shown.length > LONG_LIST
+  // The kinds there are: sorting by who added each is offered where there are two or more.
+  const kinds = (['person', 'repository', 'agents'] as const).filter((one) => shown.some((it) => kindOf(it.from) === one))
+  const picked = kinds.includes(kind as (typeof kinds)[number]) ? kind : 'all'
+  const words = find.trim().toLowerCase()
+  const narrowed = long && (words !== '' || picked !== 'all')
+  // Each with where it stands in the whole list: the first is the default, wherever it shows.
+  const matching = shown
+    .map((one, index) => ({ one, index }))
+    .filter(
+      ({ one }) =>
+        !narrowed ||
+        ((picked === 'all' || kindOf(one.from) === picked) &&
+          `${one.name ?? ''} ${one.command} ${one.about}`.toLowerCase().includes(words)),
+    )
+  const listed = long && !all ? matching.slice(0, LONG_LIST) : matching
   // Moved with the arrow keys, its grip keeps the focus wherever its row goes.
   const refocus = useRef<string | null>(null)
 
   const order = (from: number, to: number) => {
-    if (to === from || to < 0 || to >= ids.length) return
+    // Only the rows in sight move, so none goes where it can't be seen.
+    if (narrowed || to === from || to < 0 || to >= listed.length) return
     const next = moved(ids, from, to)
     setPut({ given, ids: next })
     onOrder(next)
@@ -493,7 +546,8 @@ export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, 
 
   // A row is picked up by its grip or its words, not by its buttons.
   const pickUp = (event: Press<HTMLLIElement>, from: number) => {
-    if (!event.isPrimary || event.button !== 0 || (event.target as Element).closest('button:not([data-grip]), a') !== null) return
+    if (narrowed || !event.isPrimary || event.button !== 0 || (event.target as Element).closest('button:not([data-grip]), a') !== null)
+      return
     event.preventDefault()
     setDragged({
       pointer: event.pointerId,
@@ -546,15 +600,50 @@ export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, 
   })
 
   const moving = dragged?.lifted === true ? dragged : null
+  const clear = () => {
+    setFind('')
+    setKind('all')
+  }
   return (
     <>
+      {long && (
+        <div className={s.tools}>
+          <Field
+            type="search"
+            aria-label={t.find(shown.length)}
+            placeholder={t.find(shown.length)}
+            className={s.find}
+            value={find}
+            onChange={(event) => setFind(event.target.value)}
+            onKeyDown={(event) => {
+              // Escape clears what was typed first, and leaves a dialog open.
+              if (event.key !== 'Escape' || find === '') return
+              event.preventDefault()
+              event.stopPropagation()
+              setFind('')
+            }}
+          />
+          {kinds.length > 1 && (
+            <Segmented<RunKind>
+              label={t.kinds}
+              value={picked}
+              onChange={setKind}
+              options={(['all', ...kinds] as const).map((value) => ({ value, label: t.kind[value] }))}
+            />
+          )}
+        </div>
+      )}
       {shown.length === 0 ? (
         <EmptyState icon="play" title={t.empty} line={t.emptyLine} headingLevel={headingLevel} />
+      ) : listed.length === 0 ? (
+        <p className={s.none}>
+          {t.noneFound} <LinkButton onClick={clear}>{t.clear}</LinkButton>
+        </p>
       ) : (
-        <ol ref={list} className={cx(s.list, moving !== null && s.sorting)}>
-          {shown.map((one, at) => {
+        <ol ref={list} className={cx(s.list, long && s.dense, moving !== null && s.sorting)}>
+          {listed.map(({ one, index }, at) => {
             const label = one.name ?? one.command
-            const place = moving === null ? at : placeOf(at, moving)
+            const place = moving === null ? index : placeOf(at, moving)
             const lifted = moving?.from === at
             // The one dragged follows the pointer; those it passed make way for it.
             const by = moving === null ? 0 : lifted ? moving.dy : (place - at) * (moving.rows[moving.from]?.height ?? 0)
@@ -565,27 +654,36 @@ export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, 
                 style={by === 0 ? undefined : { transform: `translateY(${by}px)` }}
                 onPointerDown={(event) => pickUp(event, at)}
               >
-                <IconButton
-                  icon="grip"
-                  size="small"
-                  label={t.move(label)}
-                  kbd={t.moveKeys}
-                  tooltipShut={dragged !== null}
-                  className={s.grip}
-                  data-grip={one.id}
-                  onKeyDown={(event) => {
-                    const step = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0
-                    if (step === 0) return
-                    event.preventDefault()
-                    refocus.current = one.id
-                    order(at, at + step)
-                  }}
-                />
-                {/* Named, its name over its command; unnamed, its command alone, as code. */}
+                {/* Searched or sorted, the list isn't in its order: nothing to drag until it is. */}
+                {narrowed ? (
+                  <span className={s.gripless} aria-hidden="true" />
+                ) : (
+                  <IconButton
+                    icon="grip"
+                    size="small"
+                    label={t.move(label)}
+                    kbd={t.moveKeys}
+                    tooltipShut={dragged !== null}
+                    className={s.grip}
+                    data-grip={one.id}
+                    onKeyDown={(event) => {
+                      const step = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0
+                      if (step === 0) return
+                      event.preventDefault()
+                      refocus.current = one.id
+                      order(at, at + step)
+                    }}
+                  />
+                )}
+                {/* Named, its name over its command; unnamed, its command alone, as code. In a long list, where it runs beside its command. */}
                 <span className={s.words}>
                   {one.name !== undefined && <span className={s.name}>{one.name}</span>}
-                  <code className={s.command}>{one.command}</code>
-                  <span className={s.about}>{one.about}</span>
+                  <span className={s.line}>
+                    <code className={s.command} title={one.command}>
+                      {one.command}
+                    </code>
+                    <span className={s.about}>{one.about}</span>
+                  </span>
                 </span>
                 {place === 0 ? (
                   <span className={s.default}>{t.default}</span>
@@ -600,6 +698,13 @@ export function RunnableList({ runnables, onOrder, onDefault, onEdit, onRemove, 
             )
           })}
         </ol>
+      )}
+      {long && matching.length > LONG_LIST && (
+        <p className={s.more}>
+          <LinkButton aria-expanded={all} onClick={() => setAll(!all)}>
+            {all ? t.showFewer : t.showAll(matching.length)}
+          </LinkButton>
+        </p>
       )}
       {error !== undefined && <Problem>{error}</Problem>}
     </>
