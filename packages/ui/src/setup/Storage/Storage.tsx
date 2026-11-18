@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react'
 
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
+import { CopyButton } from '../../primitives/CopyButton/CopyButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { SettingGroup } from '../Preferences/Preferences'
 import s from './Storage.module.css'
@@ -58,6 +59,8 @@ export interface StorageText {
   showLabel: (show: string, place: string) => string
   /** A tile's share of all the places: 81%, or under 1%. */
   share: (fraction: number) => string
+  /** Names a Copy path button: what it does, then the place. */
+  copyPath: (place: string) => string
   /** Where the place that can be freed is freed. */
   freeUp: string
   measureAgain: string
@@ -89,6 +92,7 @@ export const storageText: StorageText = {
   show: 'Show in Files',
   showLabel: (show, place) => `${show}, ${place}`,
   share: (fraction) => (fraction < 0.01 ? '<1%' : `${Math.round(fraction * 100)}%`),
+  copyPath: (place) => `Copy path, ${place}`,
   freeUp: 'Free up space',
   measureAgain: 'Measure again',
 }
@@ -99,12 +103,14 @@ export interface StorageProps {
   onMeasureAgain: () => void
   /** The place that can be freed, by id, and where it is freed: it leads, with Free up space. */
   freeUp?: { readonly id: string; readonly onFreeUp: () => void }
+  /** What Copy path writes to the clipboard with: the browser's by default. */
+  copy?: (text: string) => Promise<void>
   text?: Partial<StorageText>
   /** The title's rank in the page's outline. */
   headingLevel?: ComponentProps<typeof SettingGroup>['headingLevel']
 }
 
-export function Storage({ places, onShow, onMeasureAgain, freeUp, text, headingLevel }: StorageProps) {
+export function Storage({ places, onShow, onMeasureAgain, freeUp, copy, text, headingLevel }: StorageProps) {
   const t = { ...storageText, ...text }
   const measuring = places.some((place) => place.figure.state === 'measuring')
   // A share only once every size is in, and whole: a part, or a lower bound, never shows as a share of the whole.
@@ -144,6 +150,14 @@ export function Storage({ places, onShow, onMeasureAgain, freeUp, text, headingL
                   <Button size="small" trailingIcon="arrow" onClick={freeUp.onFreeUp}>
                     {t.freeUp}
                   </Button>
+                )}
+                {place.path !== '' && (
+                  <CopyButton
+                    ghost
+                    value={place.path}
+                    text={{ copy: t.copyPath(place.title) }}
+                    {...(copy === undefined ? {} : { write: copy })}
+                  />
                 )}
                 <Button
                   size="small"

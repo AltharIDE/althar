@@ -158,3 +158,16 @@ export const ShowFailed: Story = {
     await expect(within(canvasElement).getByText('/home/me/.local/share/althar/logs')).toBeVisible()
   },
 }
+
+/** Copy path, from the keyboard: the whole path goes on the clipboard, and the button says it copied. */
+export const CopyPath: Story = {
+  args: { copy: fn(async () => undefined) },
+  play: async ({ canvasElement, args }) => {
+    const view = within(canvasElement)
+    const button = view.getByRole('button', { name: 'Copy path, Profile' })
+    button.focus()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.copy).toHaveBeenCalledWith('/home/me/.local/share/althar')
+    await expect(await view.findByRole('button', { name: 'Copied' })).toHaveFocus()
+  },
+}

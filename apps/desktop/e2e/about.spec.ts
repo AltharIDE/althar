@@ -85,12 +85,24 @@ test('draws About Althar, and Free up space lands on the task folders, lit and f
       await shoot(page, `about-${scheme}`)
     }
 
-    // Free up space, from the keyboard: the row starts below the fold, comes into view, lit, with Clean up focused.
+    // A shorter window, kept from here: opened as usual, Work on this computer has Clean up below the fold.
     await page.emulateMedia({ colorScheme: 'light' })
+    await sizeWindow(electronApp, page, 1180, 560)
+    const clean = main.getByRole('button', { name: 'Clean up' })
+    await nav()
+      .getByRole('button', { name: /^Work on/ })
+      .click()
+    await expect(clean).toBeAttached()
+    await still(page)
+    await expect(clean).not.toBeInViewport()
+
+    // Free up space, from the keyboard, at the same size: the row comes into view, lit, with Clean up focused.
+    await nav()
+      .getByRole('button', { name: /^About Althar/ })
+      .click()
     await main.getByRole('button', { name: 'Free up space' }).focus()
     await page.keyboard.press('Enter')
     await expect(page.getByRole('heading', { name: `Work on ${THIS_COMPUTER}`, level: 1 })).toBeVisible()
-    const clean = main.getByRole('button', { name: 'Clean up' })
     await expect(clean).toBeFocused()
     await expect(clean).toBeInViewport()
     const lit = page.locator('[class*="glow"]')
