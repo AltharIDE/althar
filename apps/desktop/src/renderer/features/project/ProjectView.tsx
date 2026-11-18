@@ -36,7 +36,7 @@ import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, draftOf as draftNow, setDraftDictated, useSetDraft } from '../../shared/drafts'
 import { DraftComposer } from '../../shared/DraftComposer'
 import { pillOf, runIdOf } from '../../shared/running'
-import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, readingLocallyOf, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
@@ -519,20 +519,31 @@ export function ProjectView({
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
   const steers = useSendMidTurn()?.to === 'steer'
-  const queue = queueShown(session, model.pending, coordinator?.accepting)
+  const queue = queueShown(session, model.pending, coordinator?.accepting, coordinator?.items)
   // What the coordinator's thread is drawn from, kept while its items and its turn are: its words streaming, its commands
   // printing and its clock ticking draw the thread alone (LiveBlocks), not the project.
   const coordinatorItems = coordinator?.items
   const turnStarted = session?.turnStartedAt ?? null
   const turnEnded = session?.turnEndedAt ?? null
-  const reading = readingNow(session, model.pending)
+  const reading = readingNow(session, model.pending, false, coordinator?.accepting)
+  const readingLocally = readingLocallyOf(session, coordinator?.accepting)
   const turns = coordinator?.turns
   const coordinatorSource = useMemo(
     () =>
       coordinatorItems === undefined
         ? null
-        : { items: coordinatorItems, turnRunning: busy, turnStarted, reading, turnEnded, worktree: null, queue, turns: turnsById(turns) },
-    [coordinatorItems, busy, turnStarted, reading, turnEnded, queue, turns],
+        : {
+            items: coordinatorItems,
+            turnRunning: busy,
+            turnStarted,
+            reading,
+            readingLocally,
+            turnEnded,
+            worktree: null,
+            queue,
+            turns: turnsById(turns),
+          },
+    [coordinatorItems, busy, turnStarted, reading, readingLocally, turnEnded, queue, turns],
   )
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
@@ -696,7 +707,7 @@ export function ProjectView({
   // Out of the queue and in the composer at once; one the coordinator had already read comes back where it was, said why,
   // and the composer goes back to what it held, unless written in since.
   const edit = (id: string) => {
-    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
+    const said = queuedOf(coordinator?.items ?? [], queue, readingLocally).find((message) => message.id === id)
     // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
     if (said === undefined || !images.fits(said)) return
     let was: string | null = null
@@ -722,7 +733,7 @@ export function ProjectView({
   // A queued message goes to the coordinator now, interrupting it, rather than when it is done: out of the queue, and said
   // again, at once. One it has already read stays as it was; one Althar didn't take goes back in the composer.
   const sendQueuedNow = (id: string) => {
-    const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
+    const said = queuedOf(coordinator?.items ?? [], queue, readingLocally).find((message) => message.id === id)
     if (said === undefined) return
     model.sayQueuedNow(id, said.text, outgoingOf(said), () => {
       setDraft((current) => withQueued(current, said.text))
@@ -814,7 +825,7 @@ export function ProjectView({
         onRemoveComment={(id) => drop(draftOf, id)}
         {...(busy && talkingTo.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy && talkingTo.kind !== 'new'}
-        queued={talkingTo.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue)}
+        queued={talkingTo.kind === 'new' ? [] : queuedOf(coordinator?.items ?? [], queue, readingLocally)}
         onEditQueued={edit}
         onSendQueuedNow={sendQueuedNow}
         onUnqueue={(id) => void model.takeBack(id)}

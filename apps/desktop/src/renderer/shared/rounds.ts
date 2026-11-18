@@ -226,6 +226,7 @@ export interface RoundSource {
   readonly turnStarted?: string | null
   readonly openedAt?: string | null
   readonly reading?: boolean
+  readonly readingLocally?: boolean
   readonly turnEnded?: string | null
   /** Where each turn's time went, by its id (`turnsById`). */
   readonly turns?: ReadonlyMap<string, TurnTime>
@@ -276,6 +277,7 @@ export const roundsOf = (
         // What opens the thread is answered in its first stretch, when that is all there is yet.
         ...(last && index === 0 && source.openedAt !== undefined ? { openedAt: source.openedAt } : {}),
         ...(last && source.reading !== undefined ? { reading: source.reading } : {}),
+        ...(last && source.readingLocally !== undefined ? { readingLocally: source.readingLocally } : {}),
         ...(last && source.turnEnded !== undefined ? { turnEnded: source.turnEnded } : {}),
         ...(last && index > 0 ? { earlierAt } : {}),
         ...(source.turns === undefined ? {} : { turns: source.turns }),

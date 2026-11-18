@@ -1912,6 +1912,8 @@ export const UserMessageItem = Schema.Struct({
     Schema.Struct({
       state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']),
       interrupting: Schema.Boolean,
+      /** A turn has taken this input, even if delivery to the agent is still pending. */
+      claimed: Schema.optional(Schema.Boolean),
       /** Some of its words came from dictation: the agent was told it may have been misheard. Taken back, it goes back to the composer so. */
       dictated: Schema.optional(Schema.Boolean),
     }),

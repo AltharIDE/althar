@@ -339,6 +339,7 @@ interface ItemRow {
   /** The model its turn ran on, as the turn was given; null where no agent wrote it or it wasn't recorded. */
   readonly model?: string | null
   readonly inputState: 'queued' | 'delivered' | 'superseded' | 'withdrawn' | null
+  readonly inputClaimed?: number
   readonly disposition: string | null
   /** For a message the person said: some of it was dictated. */
   readonly dictated?: number | null
@@ -657,6 +658,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
             : {
                 state: row.inputState,
                 interrupting: row.disposition === 'interrupt_and_continue',
+                ...(row.inputClaimed === 1 ? { claimed: true } : {}),
                 ...(row.dictated === 1 ? { dictated: true } : {}),
               },
       }
@@ -1323,6 +1325,8 @@ export class Queries extends Context.Service<
               -- so an earlier round would take the name of the model it moved to. Else the session's, as before.
               COALESCE(d.model, s.model) AS model,
               u.state AS input_state, u.disposition, u.dictated, i.created_at,
+              EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries td ON td.id = di.delivery_id
+                WHERE di.user_input_id = u.id AND td.state IN ('pending', 'delivered')) AS input_claimed,
               (SELECT d.outcome FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
