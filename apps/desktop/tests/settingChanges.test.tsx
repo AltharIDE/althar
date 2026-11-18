@@ -141,4 +141,35 @@ describe('an agent’s change to a setting', () => {
     withServices(<ChangedBy projectId={null} section="althar/plans-and-reviews" />, client)
     expect(await screen.findByText('The lead of “Review the importer” changed Review rounds just now.')).toBeTruthy()
   })
+
+  it('shows in Settings what the agent moved, in the same words as its line', async () => {
+    const { client } = fakeClient({
+      getSettingChanges: vi.fn(async () => [
+        {
+          section: 'althar/agents',
+          key: 'turnedOff',
+          label: 'Models turned off',
+          by: { kind: 'coordinator' as const, taskId: null, title: null },
+          at: new Date().toISOString(),
+          threadId: 'th-coordinator',
+          changes: ['Turned on Kimi K3.1 Pro in OpenCode', 'Turned off GPT-6 Luna in Codex'],
+        },
+        {
+          section: 'althar/agents',
+          key: 'efforts',
+          label: 'Default efforts',
+          by: { kind: 'coordinator' as const, taskId: null, title: null },
+          at: new Date().toISOString(),
+          threadId: 'th-coordinator',
+          changes: ['Default effort for Claude Opus 5.5: high → xhigh', 'Default effort for GPT-6 Sol: low → high'],
+        },
+      ]),
+    })
+    withServices(<ChangedBy projectId={null} section="althar/agents" />, client)
+    expect(await screen.findByText('The coordinator changed Models turned off and Default efforts just now.')).toBeTruthy()
+    expect(screen.getByText('Turned on Kimi K3.1 Pro in OpenCode')).toBeTruthy()
+    expect(screen.queryByText('Default effort for GPT-6 Sol: low → high')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Show all 4' }))
+    expect(screen.getByText('Default effort for GPT-6 Sol: low → high')).toBeTruthy()
+  })
 })

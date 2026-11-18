@@ -117,5 +117,7 @@ export const SettingChanged = Schema.Struct({
   at: Schema.String,
   /** The thread its line is in, to open from Settings. */
   threadId: Schema.NullOr(Schema.String),
+  /** What the change moved in this setting, in the same plain words its line says; none for one kept before they were. */
+  changes: Schema.optional(Schema.Array(Schema.String)),
 })
 export type SettingChanged = typeof SettingChanged.Type

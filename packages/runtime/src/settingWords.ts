@@ -44,34 +44,52 @@ const wordsOf = (value: unknown): string => {
   return ''
 }
 
-/** One item of a list: a name as it is, a rule as its pattern and what it decides, any other object by its values. */
+/**
+ * One item of a list: a name as it is, a command rule as its scope and what it decides (an exact rule holds for that
+ * command alone, any other for every command that starts with its pattern, so moving between them reads as a change),
+ * any other object by its values.
+ */
 const itemWords = (item: unknown): string => {
   if (isMap(item) && typeof item['pattern'] === 'string' && typeof item['decision'] === 'string')
-    return `${item['pattern']} (${item['decision']})`
+    return item['match'] === 'exact'
+      ? `the command ${item['pattern']}, exactly (${item['decision']})`
+      : `commands starting with ${item['pattern']} (${item['decision']})`
   if (isMap(item)) return Object.values(item).map(wordsOf).join(' ')
   return wordsOf(item)
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
 
 /**
  * What changed between two values of one setting, in words, a line for each thing: an item added to or taken out of a
- * list, a key of an object that moved (down to what it holds), or a plain value's before and after.
+ * list, a key of an object that moved (down to what it holds), or a plain value's before and after. `whole` says the
+ * value given replaces what was there, so a key it leaves out is taken out; otherwise a map names only the keys it
+ * changes, and the rest stay. A map set to none takes out every key it had, and one that was none puts each in.
  */
-export const changesOf = (label: string, before: unknown, after: unknown): ReadonlyArray<string> => {
+export const changesOf = (label: string, before: unknown, after: unknown, whole = false): ReadonlyArray<string> => {
   if (same(before, after)) return []
-  if (Array.isArray(after) && (Array.isArray(before) || before === null || before === undefined)) {
-    const was = (before ?? []) as ReadonlyArray<unknown>
-    const kept = (items: ReadonlyArray<unknown>) => new Set(items.map(itemWords))
-    const wasWords = kept(was)
-    const nowWords = kept(after)
-    return [
-      ...after.filter((one) => !wasWords.has(itemWords(one))).map((one) => `Added ${clip(itemWords(one))} to ${label}`),
-      ...was.filter((one) => !nowWords.has(itemWords(one))).map((one) => `Removed ${clip(itemWords(one))} from ${label}`),
-    ]
+  const none = (value: unknown) => value === null || value === undefined
+  const items = (value: unknown) => (Array.isArray(value) ? (value as ReadonlyArray<unknown>) : [])
+  if (Array.isArray(after) || Array.isArray(before)) {
+    if ((Array.isArray(after) || none(after)) && (Array.isArray(before) || none(before))) {
+      const wasWords = new Set(items(before).map(itemWords))
+      const nowWords = new Set(items(after).map(itemWords))
+      return [
+        ...items(after)
+          .filter((one) => !wasWords.has(itemWords(one)))
+          .map((one) => `Added ${clip(itemWords(one))} to ${label}`),
+        ...items(before)
+          .filter((one) => !nowWords.has(itemWords(one)))
+          .map((one) => `Removed ${clip(itemWords(one))} from ${label}`),
+      ]
+    }
+  } else if ((isMap(after) || none(after)) && (isMap(before) || none(before))) {
+    const was = isMap(before) ? before : {}
+    const now = isMap(after) ? after : {}
+    // None replaces the whole of what was there; a map given whole does too.
+    const keys = [...Object.keys(now), ...(whole || none(after) ? Object.keys(was).filter((key) => !(key in now)) : [])]
+    return keys.flatMap((key) => changesOf(`${label} › ${key}`, was[key], now[key], whole))
   }
-  if (Array.isArray(before) && after === null) return before.map((one) => `Removed ${clip(itemWords(one))} from ${label}`)
-  if (isMap(after) && isMap(before)) return Object.keys(after).flatMap((key) => changesOf(`${label} › ${key}`, before[key], after[key]))
   return [`${label}: ${inWords(before)} → ${inWords(after)}`]
 }
 

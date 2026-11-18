@@ -50,7 +50,22 @@ describe('a list', () => {
           { pattern: 'git push', decision: 'allow', match: 'exact' },
         ],
       ),
-    ).toEqual(['Added git push (allow) to Commands'])
+    ).toEqual(['Added the command git push, exactly (allow) to Commands'])
+  })
+
+  it('says a rule’s scope, and a change of scope alone', () => {
+    const exact = [{ pattern: 'npm publish', decision: 'never', match: 'exact' }]
+    const prefix = [{ pattern: 'npm publish', decision: 'never' }]
+    expect(changesOf('Commands', exact, prefix)).toEqual([
+      'Added commands starting with npm publish (never) to Commands',
+      'Removed the command npm publish, exactly (never) from Commands',
+    ])
+    // With another rule changing beside it, the scope still shows.
+    expect(changesOf('Commands', [...exact, { pattern: 'ls', decision: 'allow' }], [...prefix])).toEqual([
+      'Added commands starting with npm publish (never) to Commands',
+      'Removed the command npm publish, exactly (never) from Commands',
+      'Removed commands starting with ls (allow) from Commands',
+    ])
   })
 })
 
@@ -74,9 +89,28 @@ describe('a map', () => {
     ])
   })
 
-  it('never prints an object where one side has none', () => {
-    const line = changesOf('Ship’s default route', null, { review: true, far: 'merge' })
-    expect(line).toEqual(['Ship’s default route: none → review: on, far: merge'])
+  it('names what a map given whole takes out, with what it puts in', () => {
+    const before = { codex: ['a', 'b'], claude: ['c'], grok: ['d'] }
+    expect(changesOf('Accounts', before, { codex: ['a'], grok: ['d', 'e'] }, true)).toEqual([
+      'Removed b from Accounts › codex',
+      'Added e to Accounts › grok',
+      'Removed c from Accounts › claude',
+    ])
+    // Named in part, the keys it leaves out stay.
+    expect(changesOf('Work toward', before, { codex: ['a'] })).toEqual(['Removed b from Work toward › codex'])
+  })
+
+  it('goes key by key from none to a map and back, and never prints the map', () => {
+    expect(changesOf('Ship’s default route', null, { review: true, far: 'merge' })).toEqual([
+      'Ship’s default route › review: none → on',
+      'Ship’s default route › far: none → merge',
+    ])
+    expect(changesOf('Accounts', { codex: ['a', 'b'], claude: ['c'] }, null, true)).toEqual([
+      'Removed a from Accounts › codex',
+      'Removed b from Accounts › codex',
+      'Removed c from Accounts › claude',
+    ])
+    expect(changesOf('Accounts', null, { codex: ['a'] }, true)).toEqual(['Added a to Accounts › codex'])
   })
 })
 

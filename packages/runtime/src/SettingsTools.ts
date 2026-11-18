@@ -103,6 +103,8 @@ interface Field {
   readonly loosening?: string
   /** What a change to it says, a line for each thing that moved, where the generic diff of its value doesn't say it well. */
   readonly say?: (before: unknown, after: unknown, names: Names) => ReadonlyArray<string>
+  /** A map it takes replaces the whole of what was there, so a key left out is taken out; otherwise a map names only the keys it changes. */
+  readonly whole?: boolean
 }
 
 /** A section of the Settings screens, by its address, with what it holds and how a change to it is made. */
@@ -146,6 +148,23 @@ const stable = (value: unknown): string =>
   ) ?? 'null'
 
 const same = (a: unknown, b: unknown) => stable(a) === stable(b)
+
+/**
+ * Whether a setting still holds what a change left it: its value now is the one given. A map that names only the keys it
+ * changes holds while those keys do, whatever the others became; one given whole, or any other value, holds only as it is.
+ */
+const holds = (field: Field | undefined, now: unknown, given: unknown): boolean => {
+  const map = (value: unknown): value is Values => value !== null && typeof value === 'object' && !Array.isArray(value)
+  if (field?.whole !== true && map(now) && map(given))
+    return Object.entries(given).every(([key, value]) => key in now && same(now[key], value))
+  return same(now, given)
+}
+
+/** A map's keys a change names, as they were: the rest of a map it changes only in part isn't its to put back. */
+const named = (field: Field | undefined, now: unknown, given: unknown): unknown => {
+  const map = (value: unknown): value is Values => value !== null && typeof value === 'object' && !Array.isArray(value)
+  return field?.whole !== true && map(now) && map(given) ? Object.fromEntries(Object.entries(now).filter(([key]) => key in given)) : now
+}
 
 /* ---- How a setting loosens what asks ---- */
 
@@ -214,7 +233,12 @@ const Changing = Schema.Struct({
   message_id: Schema.optional(Schema.String),
 })
 
-const field = (label: string, takes: string, schema: Schema.Top, more: Pick<Field, 'loosens' | 'loosening' | 'say'> = {}): Field => ({
+const field = (
+  label: string,
+  takes: string,
+  schema: Schema.Top,
+  more: Pick<Field, 'loosens' | 'loosening' | 'say' | 'whole'> = {},
+): Field => ({
   label,
   takes,
   schema: schema as unknown as Schema.Codec<unknown, unknown>,
@@ -481,6 +505,7 @@ export class SettingsTools extends Context.Service<
               'Accounts its work runs on',
               'by agent id, the account ids it may use, or null for every account',
               Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+              { whole: true },
             ),
             branchPattern: field('Branch names', 'a pattern, or null for what each repository says', Schema.NullOr(Schema.String)),
             titlePattern: field('Pull request titles', 'a pattern, or null for what each repository says', Schema.NullOr(Schema.String)),
@@ -1013,7 +1038,7 @@ export class SettingsTools extends Context.Service<
           return Object.keys(after).map((key) => {
             const one = section.fields[key]
             const label = one?.label ?? key
-            const lines = one?.say?.(before[key], after[key], names) ?? changesOf(label, before[key], after[key])
+            const lines = one?.say?.(before[key], after[key], names) ?? changesOf(label, before[key], after[key], one?.whole === true)
             return {
               key,
               label,
@@ -1162,9 +1187,12 @@ export class SettingsTools extends Context.Service<
           }
           const current = yield* section.read(access.projectId)
           const before = pick(current, Object.keys(change))
-          const after = Object.fromEntries(Object.entries(change).filter(([key, value]) => !same(before[key], value)))
+          const after = Object.fromEntries(Object.entries(change).filter(([key, value]) => !holds(section.fields[key], before[key], value)))
           if (Object.keys(after).length === 0) return `Nothing changed: ${section.title} is so already.`
-          const moved = pick(before, Object.keys(after))
+          // What was there, for the keys of a map the change names alone: Undo puts those back, and no other key's.
+          const moved = Object.fromEntries(
+            Object.entries(pick(before, Object.keys(after))).map(([key, value]) => [key, named(section.fields[key], value, after[key])]),
+          )
           const by = yield* changerOf(access)
           const loosened = looseningOf(section, moved, after, current)
           const words = loosened.length === 0 ? undefined : yield* wordsOf(access, asked.message_id)
@@ -1229,7 +1257,7 @@ export class SettingsTools extends Context.Service<
           const values = JSON.parse(side === 'before' ? row.before : row.after) as Values
           const projectId = row.projectId ?? (yield* projectOfThread(row.threadId))
           const current = yield* section.read(projectId)
-          return { section, projectId, matches: Object.keys(values).every((key) => same(current[key], values[key])) }
+          return { section, projectId, matches: Object.keys(values).every((key) => holds(section.fields[key], current[key], values[key])) }
         })
       const projectOfThread = (threadId: string) =>
         Effect.gen(function* () {
@@ -1242,6 +1270,16 @@ export class SettingsTools extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<ChangeRow>`SELECT * FROM setting_changes WHERE item_id = ${itemId}`
           return row
+        })
+      /** What a change said of one setting, as its line in the thread did: the same words Settings reads. */
+      const linesOfRow = (row: ChangeRow, key: string) =>
+        Effect.gen(function* () {
+          if (row.itemId === null) return []
+          const sql = yield* SqlClient.SqlClient
+          const [item] = yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE id = ${row.itemId}`
+          if (item === undefined) return []
+          const card = JSON.parse(item.content) as SettingChangeCard
+          return card.moves.find((move) => move.key === key)?.changes ?? []
         })
       const changerOfRow = (row: ChangeRow) =>
         Effect.gen(function* () {
@@ -1319,7 +1357,7 @@ export class SettingsTools extends Context.Service<
                   yield* section.read(projectId ?? (yield* projectOfThread(row.threadId))).pipe(Effect.orElseSucceed(() => ({}))),
                 )
               // Shown only while it stays as the agent left it: changed since, by anyone, it is theirs now.
-              if (!same(currents.get(row.section)?.[key], after[key])) continue
+              if (!holds(section.fields[key], currents.get(row.section)?.[key], after[key])) continue
               found.push({
                 // Where the setting is now, not where it was when the change was recorded (the sections moved on 8 Nov 2026).
                 section: section.id,
@@ -1328,6 +1366,7 @@ export class SettingsTools extends Context.Service<
                 by: yield* changerOfRow(row),
                 at: row.updatedAt,
                 threadId: row.threadId,
+                changes: yield* linesOfRow(row, key),
               })
             }
           }

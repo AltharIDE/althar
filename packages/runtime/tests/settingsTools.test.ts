@@ -471,7 +471,7 @@ describe('each section of the settings, as agents change it', () => {
         section: 'project/running',
         change: { setup: { [name]: { copy: ['.env'], commands: ['bun install'] } } },
       })
-      assert.include(setup, `Setup before each task › ${name}: none → copy: .env`)
+      assert.include(setup, `Added .env to Setup before each task › ${name} › copy`)
       // A pattern already none isn't a change; the rest are, each in words.
       const patterns = yield* callTool(lead, 'change_settings', {
         section: 'project/tasks',
@@ -556,13 +556,37 @@ describe('each section of the settings, as agents change it', () => {
             ],
           },
         }),
-        /^Changed Rules: Added npm publish \(never\) to Commands/,
+        /^Changed Rules: Added commands starting with npm publish \(never\) to Commands/,
       )
       const allowed = yield* callTool(coordinator, 'change_settings', {
         section: 'project/rules',
         change: { commands: [{ pattern: 'npm publish', decision: 'allow' }] },
       })
       assert.match(allowed, /loosens what asks \(the command npm publish, the command rm -rf \/\)/)
+      // The card the person presses says what each rule becomes, its scope included.
+      assert.includeMembers(
+        [...((yield* lines(coordinator.threadId)).at(-1)?.moves[0]?.changes ?? [])],
+        [
+          'Added commands starting with npm publish (allow) to Commands',
+          'Removed commands starting with npm publish (never) from Commands',
+          'Removed the command rm -rf /, exactly (ask) from Commands',
+        ],
+      )
+      // A change of scope alone is a change too, and the card says which way.
+      const wider = yield* callTool(coordinator, 'change_settings', {
+        section: 'project/rules',
+        change: {
+          commands: [
+            { pattern: 'npm publish', decision: 'never' },
+            { pattern: 'rm -rf /', decision: 'ask' },
+          ],
+        },
+      })
+      assert.match(wider, /loosens what asks/)
+      assert.deepStrictEqual((yield* lines(coordinator.threadId)).at(-1)?.moves[0]?.changes, [
+        'Added commands starting with rm -rf / (ask) to Commands',
+        'Removed the command rm -rf /, exactly (ask) from Commands',
+      ])
 
       // Plain settings, each in words: none, a list, and what an agent's accounts are.
       const plain = yield* callTool(coordinator, 'change_settings', {
@@ -575,7 +599,16 @@ describe('each section of the settings, as agents change it', () => {
         change: { usageLimit: 'wait', end: 'ready', onlyAccounts: { codex: ['work'] }, rotateAccounts: true },
       })
       assert.include(going, 'How a task ends: none → ready')
-      assert.include(going, 'Accounts its work runs on: none → codex: work')
+      assert.include(going, 'Added work to Accounts its work runs on › codex')
+      // A map given whole takes out the entry it leaves out, and says so.
+      yield* callTool(coordinator, 'change_settings', {
+        section: 'project/tasks',
+        change: { onlyAccounts: { codex: ['work'], 'claude-code': ['home'] } },
+      })
+      assert.include(
+        yield* callTool(coordinator, 'change_settings', { section: 'project/tasks', change: { onlyAccounts: { codex: ['work'] } } }),
+        'Removed home from Accounts its work runs on › claude-code',
+      )
       // Toward fewer asks, and a file Althar keeps turned on, loosen.
       assert.match(
         yield* callTool(coordinator, 'change_settings', { section: 'project/rules', change: { permissions: 'coordinator' } }),
@@ -639,6 +672,18 @@ describe('each section of the settings, as agents change it', () => {
         /^Changed Agents: Default effort for gpt-test: none → high\./,
       )
       assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/agents' }), '"codex/gpt-test":"high"')
+      // One agent's models alone, while others are in the catalog: its change shows in Settings with its line's words, and
+      // Undo puts back that agent's, whatever the others have become.
+      const settings = yield* SettingsTools
+      assert.include(
+        yield* callTool(coordinator, 'change_settings', { section: 'althar/agents', change: { turnedOff: { codex: ['gpt-6.1-luna'] } } }),
+        'Changed Agents: Turned off gpt-6.1-luna in Fake codex.',
+      )
+      const kept = (yield* settings.changed(null)).find((one) => one.key === 'turnedOff')
+      assert.deepStrictEqual(kept?.changes, ['Turned off gpt-6.1-luna in Fake codex'])
+      yield* settings.undo((yield* lineIds(coordinator.threadId)).at(-1) ?? '')
+      assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/agents' }), '"codex":[]')
+      assert.isUndefined((yield* settings.changed(null)).find((one) => one.key === 'turnedOff'))
       const off = yield* callTool(coordinator, 'change_settings', {
         section: 'althar/agents',
         change: { turnedOff: { 'claude-code': [], codex: ['gpt-6.1-luna'], opencode: [] } },
@@ -700,7 +745,7 @@ describe('each section of the settings, as agents change it', () => {
           section: 'althar/pull-requests',
           change: { shipRoute: { review: true, far: 'push' } },
         }),
-        /^Changed Pull requests: Ship’s default route: /,
+        /^Changed Pull requests: Ship’s default route › /,
       )
       assert.include(yield* callTool(coordinator, 'read_settings', { section: 'althar/pull-requests' }), '"far":"push"')
       assert.match(
@@ -719,7 +764,7 @@ describe('each section of the settings, as agents change it', () => {
       )
       assert.match(
         yield* callTool(coordinator, 'change_settings', { section: 'althar/pull-requests', change: { shipRoute: null } }),
-        /^Changed Pull requests: Ship’s default route: /,
+        /^Changed Pull requests: Ship’s default route › /,
       )
       assert.isUndefined(yield* shipRouteSetting)
       // Althar's own changes show in Settings with no project, the coordinator's by its name.
@@ -938,7 +983,7 @@ describe('settings, at their edges', () => {
         section: 'project/code',
         change: { tracker: { connectionId: ready, container: { id: 'team-1', name: 'Web' } } },
       })
-      assert.match(tracked, /^Changed Code and issues: Tracker: none → /)
+      assert.match(tracked, /^Changed Code and issues: Tracker › connectionId: none → /)
       assert.include(
         yield* callTool(coordinator, 'read_settings', { section: 'project/code' }),
         `- tracker (Tracker): {"connectionId":"${ready}","container":{"id":"team-1","name":"Web"}}`,
