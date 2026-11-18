@@ -1,5 +1,6 @@
 import { MessageMotion } from '../../shared/MessageMotion'
 import { useSearchReveal } from '../finder/revealSearch'
+import { useCoordinatorWanted } from '../../shared/openCoordinator'
 import { reveal } from '../task/reveal'
 import { EarlierTurns } from '../../shared/EarlierTurns'
 import { useQuery } from '@tanstack/react-query'
@@ -570,6 +571,11 @@ export function ProjectView({
     moves: asideMoves,
   })
   const aside = asides.open
+  // Words put in the coordinator's composer from elsewhere (Run's Ask): its own conversation shows, over any aside.
+  useCoordinatorWanted(about, () => {
+    asides.back()
+    setRoom(Room.Talk)
+  })
   // A new aside's thread: what the coordinator's composer quotes into it, with no turn of its own yet.
   const asideItems = asides.items
   const newAside = useMemo(() => ({ items: asideItems, turnRunning: false, worktree: null }), [asideItems])

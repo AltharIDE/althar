@@ -134,7 +134,7 @@ export const runButtonText: RunButtonText = {
   emptyLabel: 'Something to run',
   emptyNote: 'Althar runs it itself, with no agent, and shows where it answers.',
   ask: 'Ask the coordinator to work it out',
-  askAbout: 'It reads the repository and keeps what is worth running.',
+  askAbout: 'Writes the request in its composer, for you to change or send.',
   scripts: 'Pick from package.json…',
   scriptsAbout: 'Any of the repository’s scripts.',
   type: 'Type a command…',
