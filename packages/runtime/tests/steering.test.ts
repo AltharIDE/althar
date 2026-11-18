@@ -194,7 +194,7 @@ describe('a new step on an agent nearly out', () => {
       yield* until(said(task.threadId), (titles) => titles.some((title) => title.includes('takes the review instead')))
       assert.include(
         yield* said(task.threadId),
-        `Fake codex has 1% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Fake opencode takes the review instead, on Small.`,
+        `Fake codex has 1% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Small on Fake opencode takes the review instead.`,
       )
     }).pipe(Effect.provide(withAgents()))
   })
@@ -247,7 +247,7 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
       assert.strictEqual(ready?.lead, 'opencode')
       assert.include(
         yield* said(task.threadId),
-        `Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Fake opencode takes the fixes instead, on Small.`,
+        `Small on Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Small on Fake opencode takes the fixes instead.`,
       )
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
@@ -273,7 +273,7 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
       assert.deepStrictEqual([held?.step, held?.waits?.agentId, held?.waits?.left, held?.waits?.why], ['settle', 'claude-code', 3, 'waits'])
       // The waiting card is recorded before its explanation: wait for the notice itself.
       yield* until(said(task.threadId), (titles) =>
-        titles.some((title) => title.startsWith('Fake claude-code has 3% of its five-hour limit left. The fixes wait until ')),
+        titles.some((title) => title.startsWith('Small on Fake claude-code has 3% of its five-hour limit left. The fixes wait until ')),
       )
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
@@ -397,7 +397,7 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
       assert.isTrue(
         (yield* said(task.threadId)).some((title) =>
           title.endsWith(
-            `has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Fake opencode takes the fixes instead, on Small.`,
+            `has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Small on Fake opencode takes the fixes instead.`,
           ),
         ),
       )
@@ -562,7 +562,7 @@ describe('the words for an agent nearly out', () => {
     assert.strictEqual(roomWords(room, Date.parse('2026-10-03T12:00:00')), '3% of its five-hour limit left')
     assert.strictEqual(
       lowWords({ from: 'Codex', room, now: 0, step: 'review', to: { agent: 'Claude Code', model: 'Claude Sonnet 5.5' } }),
-      'Codex has 3% of its five-hour limit left. Claude Code takes the review instead, on Claude Sonnet 5.5.',
+      'Codex has 3% of its five-hour limit left. Claude Sonnet 5.5 on Claude Code takes the review instead.',
     )
     assert.strictEqual(
       lowWords({ from: 'Codex', room, now: 0, step: 'settle' }),

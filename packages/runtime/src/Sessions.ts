@@ -4769,10 +4769,13 @@ export class Sessions extends Context.Service<
           if (kept !== undefined) return kept
           if (why === 'stall') return { ...given, until: null, why, ...(attemptId === undefined ? {} : { attemptId }) } satisfies StandIn
           const out = yield* given.accountId === null ? limits.out(given.agentId, projectId) : limits.outAccount(given.accountId)
-          const until = Option.isSome(out)
-            ? out.value.until
-            : new Date((yield* Clock.currentTimeMillis) + Duration.toMillis(Duration.hours(1))).toISOString()
-          return { ...given, until } satisfies StandIn
+          if (Option.isSome(out)) return { ...given, until: out.value.until } satisfies StandIn
+          // Handed on while only nearly out, it isn't out at all: it is back once its window resets, not at once.
+          const low = yield* limits.nearlyOut(given.agentId, projectId, given.model ?? undefined)
+          const until =
+            Option.getOrUndefined(low)?.resetsAt ??
+            new Date((yield* Clock.currentTimeMillis) + Duration.toMillis(Duration.hours(1))).toISOString()
+          return { ...given, until, why: 'low' } satisfies StandIn
         })
 
       /** Whether the lead a session stands in for is back: its usage again, or the step it failed over (standIn.ts). */
