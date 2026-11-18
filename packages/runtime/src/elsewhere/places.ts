@@ -1,4 +1,4 @@
-import { join, sep } from 'node:path'
+import { join } from 'node:path'
 
 import type { OtherTool } from '@althar/domain'
 
@@ -64,8 +64,14 @@ export const placesOf = (home: string, env: Readonly<Record<string, string | und
   }
 }
 
-/** Whether `path` is `root` or inside it. */
-export const within = (path: string, root: string) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep)
+/** A path with its separators as `/`: on Windows git says `D:/a` where Node's `join` says `D:\\a`, and both are the same folder. */
+export const slashed = (path: string) => path.replaceAll('\\', '/')
+
+/** Whether `path` is `root` or inside it, whichever separators either is written with. */
+export const within = (path: string, root: string) => {
+  const [at, under] = [slashed(path), slashed(root)]
+  return at === under || at.startsWith(under.endsWith('/') ? under : `${under}/`)
+}
 
 /**
  * The roots a tool keeps worktrees under, beyond its defaults: what its own

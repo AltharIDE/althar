@@ -5,6 +5,7 @@ import { MessageChannel } from 'node:worker_threads'
 
 import { Api, clientProtocol, emitterPort } from '@althar/contracts'
 import { makeFakeService } from '@althar/connectors/testing'
+import { budget } from '@althar/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Context, Duration, Effect, Layer } from 'effect'
 import { RpcClient } from 'effect/rpc'
@@ -223,7 +224,7 @@ describe('bringing in other tools’ work', () => {
           assert.strictEqual(digest(machine.home), before)
         }),
       ),
-    { timeout: 120_000 },
+    budget.large,
   )
 
   it.live('says a conversation with nothing said in it didn’t come in, and brings in the rest', () =>

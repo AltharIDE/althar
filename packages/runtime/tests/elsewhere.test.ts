@@ -9,7 +9,7 @@ import { Effect } from 'effect'
 import { compacted, describeWorktree, taskTitleOf, titleOfBranch } from '../src/Elsewhere'
 import { claudeFolder, claudeTranscript, codexTranscript, titleFrom } from '../src/elsewhere/conversations'
 import { lookAt, statusCount } from '../src/elsewhere/look'
-import { madeBy, placesOf, within } from '../src/elsewhere/places'
+import { madeBy, placesOf, slashed, within } from '../src/elsewhere/places'
 import { setupsIn, tomlKey, withPlaces, yamlScript } from '../src/elsewhere/setups'
 import { isoOf, readCopy } from '../src/elsewhere/stores'
 
@@ -321,7 +321,10 @@ describe('whose', () => {
     assert.strictEqual(of('/r/.claude/worktrees/x'), 'claude_code')
     assert.strictEqual(of('/elsewhere/r-2'), 'hand')
     assert.isFalse(within('/a/bc', '/a/b'))
-    assert.deepStrictEqual(placesOf('/h', {}, 'win32').orca, ['/h/AppData/Roaming/orca', '/h/AppData/Roaming/Orca'])
+    assert.deepStrictEqual(placesOf('/h', {}, 'win32').orca.map(slashed), ['/h/AppData/Roaming/orca', '/h/AppData/Roaming/Orca'])
+    // As git writes a Windows path, and as Node joins one.
+    assert.isTrue(within('D:/a/conductor/workspaces/r/lima', 'D:\\a\\conductor\\workspaces'))
+    assert.isFalse(within('D:/a/conductorish', 'D:\\a\\conductor'))
   })
 
   it('counts what git status lists, a rename once', () => {

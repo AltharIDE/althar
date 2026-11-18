@@ -16,7 +16,7 @@ import { suggestedCoordinator } from './coordinatorChoice'
 import { branchFor, ruleOf } from './conventions'
 import { type Message, transcriptOf } from './elsewhere/conversations'
 import { type FoundConversation, type FoundWorktree, lookAt } from './elsewhere/look'
-import { placesOf, toolNames, within } from './elsewhere/places'
+import { placesOf, slashed, toolNames, within } from './elsewhere/places'
 import { NotFound } from './errors'
 import { git } from './git'
 import { Instance } from './Instance'
@@ -119,7 +119,7 @@ export const titleOfBranch = (branch: string) => {
 /** What a worktree is called as a task: its tool's name for it, unless that is only a folder's name, else its branch in words. */
 export const taskTitleOf = (worktree: Pick<FoundWorktree, 'tool' | 'name' | 'branch' | 'path'>) => {
   const named = worktree.name.trim()
-  const folderOnly = named === '' || named === worktree.path.split('/').at(-1)
+  const folderOnly = named === '' || named === slashed(worktree.path).split('/').at(-1)
   if (!folderOnly || worktree.branch === null) return (named === '' ? 'Work brought in' : named).slice(0, 120)
   return titleOfBranch(worktree.branch).slice(0, 120)
 }

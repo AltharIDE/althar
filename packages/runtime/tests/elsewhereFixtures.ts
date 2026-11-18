@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { zstdCompressSync } from 'node:zlib'
 
@@ -176,7 +176,7 @@ export interface Computer {
 /** A person's computer with `repository` and what six other tools left for it. */
 export const computer = (repository: string, options: { readonly codexState?: boolean } = {}): Computer => {
   const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-home-')))
-  const name = repository.split('/').at(-1) ?? 'repo'
+  const name = basename(repository)
   const worktrees = {
     conductor: join(home, 'conductor', 'workspaces', name, 'lima'),
     orca: join(home, 'orca', 'workspaces', name, 'fix-flaky-login'),
