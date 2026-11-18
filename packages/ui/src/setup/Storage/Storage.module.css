@@ -90,6 +90,17 @@
   color: var(--danger);
 }
 
+/* where Show couldn't open it: the path, to select and copy */
+.path {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  user-select: text;
+  color: var(--t-2);
+}
+
 .actions {
   grid-area: actions;
   display: flex;

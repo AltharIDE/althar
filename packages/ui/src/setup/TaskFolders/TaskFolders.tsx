@@ -331,6 +331,14 @@ export function TaskFolders({
     const off = window.setTimeout(() => setGlow(false), 1100)
     return () => window.clearTimeout(off)
   }, [lit])
+  // Where they landed takes focus too, while it's lit: Clean up, else the list of folders, else the wait. A list
+  // read again as they land can bring Clean up in, which takes it then.
+  const cleanable = goes.length > 0
+  useEffect(() => {
+    if (!glow) return
+    const at = row.current?.querySelector<HTMLElement>('[data-lands]') ?? row.current?.querySelector<HTMLElement>('button, [tabindex="0"]')
+    at?.focus({ preventScroll: true })
+  }, [glow, cleanable])
   const going = total(goes)
   const holding = total(held)
   const width = (n: number) => `${disk === null || disk.total === 0 ? 0 : (Math.max(0, n) / disk.total) * 100}%`
@@ -363,7 +371,7 @@ export function TaskFolders({
                   width={480}
                   padded={false}
                   trigger={
-                    <button type="button" className={s.keys}>
+                    <button type="button" className={s.keys} {...(goes.length > 0 ? {} : { 'data-lands': '' })}>
                       {goes.length > 0 && (
                         <span className={s.key}>
                           <i className={s.hatch} aria-hidden="true" />
@@ -407,7 +415,7 @@ export function TaskFolders({
               <span className={s.grow} />
               {freed !== null && <span>{t.freed(freed)}</span>}
               {goes.length > 0 && (
-                <Button size="small" busy={busy === 'clean'} onClick={onCleanUp}>
+                <Button size="small" busy={busy === 'clean'} onClick={onCleanUp} data-lands="">
                   {t.cleanUp}
                 </Button>
               )}

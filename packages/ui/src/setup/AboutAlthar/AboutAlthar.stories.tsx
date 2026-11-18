@@ -37,11 +37,29 @@ export const Header: Story = {
   },
 }
 
-/** An update ready: its line under the name. Where the app can't report, no Report a problem. */
+/** No update ready: Check for updates under the name, and Checking… while it looks. */
+export const CheckForUpdates: Story = {
+  args: { onCheck: fn() },
+  play: async ({ canvasElement, args }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Check for updates' }))
+    await expect(args.onCheck).toHaveBeenCalledOnce()
+  },
+}
+
+/** A check under way. */
+export const Checking: Story = {
+  args: { onCheck: fn(), checking: true },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Checking…' })).toBeDisabled()
+  },
+}
+
+/** An update ready: its line under the name, in Check for updates' place. Where the app can't report, no Report a problem. */
 export const UpdateWaiting: Story = {
-  args: { update: <UpdateReady version="0.9.1" onRestart={fn()} />, onReport: undefined },
+  args: { update: <UpdateReady version="0.9.1" onRestart={fn()} />, onReport: undefined, onCheck: fn() },
   play: async ({ canvasElement }) => {
     const view = within(canvasElement)
+    await expect(view.queryByRole('button', { name: 'Check for updates' })).toBeNull()
     await expect(view.getByRole('status')).toBeInTheDocument()
     await expect(view.queryByRole('button', { name: 'Report a problem' })).toBeNull()
   },

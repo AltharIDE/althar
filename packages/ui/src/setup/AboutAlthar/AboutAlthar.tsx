@@ -5,14 +5,15 @@ import { Logo } from '../../foundations/Logo/Logo'
 import { cx } from '../../lib/cx'
 import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Switch } from '../../primitives/Switch/Switch'
 import { SettingGroup } from '../Preferences/Preferences'
 import s from './AboutAlthar.module.css'
 
 /*
  * The head of About Althar: Althar's mark, its name and version under a
- * small Early access label, an update ready under them where there is one,
- * and at the end the ways out: the website, what's new there, the community,
+ * small Early access label, an update ready under them where there is one
+ * and Check for updates where there isn't, and at the end the ways out: the website, what's new there, the community,
  * and Report a problem where the app can report. Monochrome: nothing here
  * needs the person.
  */
@@ -25,6 +26,8 @@ export interface AboutHeaderText {
   notes: string
   community: string
   report: string
+  check: string
+  checking: string
 }
 
 export const aboutHeaderText: AboutHeaderText = {
@@ -34,6 +37,8 @@ export const aboutHeaderText: AboutHeaderText = {
   notes: 'What’s new',
   community: 'Discord',
   report: 'Report a problem',
+  check: 'Check for updates',
+  checking: 'Checking…',
 }
 
 export interface AboutHeaderProps {
@@ -47,11 +52,26 @@ export interface AboutHeaderProps {
   community?: string
   /** Report a problem; without it, the app can't report. */
   onReport?: () => void
+  /** Checks for a newer version now, under the name while no update is ready; without it, the app doesn't update. */
+  onCheck?: () => void
+  /** The check asked for is under way. */
+  checking?: boolean
   text?: Partial<AboutHeaderText>
   className?: string
 }
 
-export function AboutHeader({ version, update, website, notes, community, onReport, text, className }: AboutHeaderProps) {
+export function AboutHeader({
+  version,
+  update,
+  website,
+  notes,
+  community,
+  onReport,
+  onCheck,
+  checking = false,
+  text,
+  className,
+}: AboutHeaderProps) {
   const t = { ...aboutHeaderText, ...text }
   return (
     <header className={cx(s.header, className)}>
@@ -59,7 +79,12 @@ export function AboutHeader({ version, update, website, notes, community, onRepo
       <span className={s.words}>
         <span className={s.stage}>{t.stage}</span>
         <strong className={s.name}>{version === undefined ? 'Althar' : t.name(version)}</strong>
-        {update}
+        {update ??
+          (onCheck !== undefined && (
+            <LinkButton onClick={onCheck} disabled={checking}>
+              {checking ? t.checking : t.check}
+            </LinkButton>
+          ))}
       </span>
       <span className={s.ways}>
         <Out href={website}>{t.website}</Out>

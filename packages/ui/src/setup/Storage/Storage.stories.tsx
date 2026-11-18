@@ -82,7 +82,7 @@ export const Measuring: Story = {
   },
 }
 
-/** The walk ran out of time: what it counted so far, said to be a lower bound. */
+/** The walk ran out of time: what it counted so far, said to be a lower bound, and no shares, as the whole isn't known. */
 export const Approximate: Story = {
   args: {
     places: places({
@@ -91,6 +91,7 @@ export const Approximate: Story = {
   },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByText(/41 GB/)).toHaveTextContent('at least 41 GB')
+    await expect(within(canvasElement).queryByText(/%$/)).toBeNull()
   },
 }
 
@@ -105,10 +106,11 @@ export const Unreadable: Story = {
     const view = within(canvasElement)
     await expect(view.getByText(/12 GB/)).toHaveTextContent('at least 12 GB')
     await expect(view.getByText('3 items couldn’t be read')).toBeInTheDocument()
+    await expect(view.queryByText(/%$/)).toBeNull()
   },
 }
 
-/** A folder that isn't there yet, such as task folders before the first task: no size, and nothing to show. */
+/** A folder that isn't there yet, such as task folders before the first task: no size, nothing to show, and nothing to free. */
 export const MissingFolder: Story = {
   args: {
     places: places({
@@ -125,6 +127,7 @@ export const MissingFolder: Story = {
         name: 'Show in Files, Task folders',
       }),
     ).toBeDisabled()
+    await expect(view.queryByRole('button', { name: 'Free up space' })).toBeNull()
   },
 }
 
@@ -143,7 +146,7 @@ export const Sizes: Story = {
   },
 }
 
-/** Show failed, as where no file manager opens: the tile says why. */
+/** Show failed, as where no file manager opens: the tile says why, and gives the path to copy. */
 export const ShowFailed: Story = {
   args: {
     places: places().map((place) => (place.id === 'logs' ? { ...place, problem: 'No application is registered to open folders' } : place)),
@@ -152,5 +155,6 @@ export const ShowFailed: Story = {
     await expect(within(canvasElement).getByRole('alert')).toHaveTextContent(
       'Couldn’t open it: No application is registered to open folders',
     )
+    await expect(within(canvasElement).getByText('/home/me/.local/share/althar/logs')).toBeVisible()
   },
 }

@@ -134,6 +134,23 @@ export const CleanUp: Story = {
   },
 }
 
+/** Sent here from About's Free up space: the row lights for a moment, and Clean up takes focus. */
+export const Lit: Story = {
+  render: () => <Row lit />,
+  play: async ({ canvasElement }) => {
+    const clean = within(canvasElement).getByRole('button', { name: 'Clean up' })
+    await waitFor(() => expect(clean).toHaveFocus())
+  },
+}
+
+/** Sent here with nothing to clean up: the list of what's held takes focus. */
+export const LitHeldOnly: Story = {
+  render: () => <Row lit goes={[]} />,
+  play: async ({ canvasElement }) => {
+    await waitFor(() => expect(canvasElement.ownerDocument.activeElement?.textContent).toMatch(/Held back/))
+  },
+}
+
 /** Just cleaned up: what it freed, measured after; nothing left to clean up but what is held back. */
 export const Freed: Story = {
   render: () => <Row goes={[]} freed={8.7 * GB} />,

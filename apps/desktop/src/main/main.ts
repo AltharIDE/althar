@@ -1172,6 +1172,10 @@ handleLocal('althar:clipboard-token', async () => tokenIn(await clipboard.readTe
 // An update ready to install, as a window shows it (null where the app doesn't update, as in development); and restarting into it, at the person's word, only while no work runs.
 ipcMain.handle('althar:update', () => updates?.glance() ?? null)
 ipcMain.handle('althar:update-restart', () => updates?.restart() ?? false)
+// About's Check for updates: the app menu's check, whose dialog says what it found.
+ipcMain.handle('althar:update-check', async () => {
+  if (updates !== undefined) await checkNow(updates)
+})
 
 // Where Althar shows while the person is in another app, and what this computer has room for: a notch to choose the island by, a tray.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)

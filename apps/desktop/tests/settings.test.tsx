@@ -807,6 +807,32 @@ describe('the Settings tab', () => {
     const main = screen.getByRole('main')
     await userEvent.click(await within(main).findByRole('button', { name: /^Show in (Finder|Explorer|Files), Logs$/ }))
     expect((await within(main).findByRole('alert')).textContent).toBe('Couldn’t open it: No application can open folders')
+    // The path, to copy instead.
+    expect(within(main).getByText('/home/me/.local/share/althar/logs')).toBeTruthy()
+  })
+
+  it('checks for updates from About Althar, as the app menu does, only where the app updates', async () => {
+    let checked: () => void = () => undefined
+    const check = vi.fn(() => new Promise<void>((done) => (checked = done)))
+    const update = {
+      glance: vi.fn(async () => ({ ready: null, working: false, restarting: false, failed: null })),
+      restart: vi.fn(async () => false),
+      check,
+      onChange: () => () => undefined,
+    }
+    withServices(<Settings at="about" />, fakeClient().client, fakeHost({ update }))
+    const main = screen.getByRole('main')
+    await userEvent.click(await within(main).findByRole('button', { name: 'Check for updates' }))
+    expect(check).toHaveBeenCalledOnce()
+    expect(within(main).getByRole('button', { name: 'Checking…' })).toHaveProperty('disabled', true)
+    checked()
+    expect(await within(main).findByRole('button', { name: 'Check for updates' })).toBeTruthy()
+  })
+
+  it('offers no check where the app doesn’t update', async () => {
+    withServices(<Settings at="about" />, fakeClient().client)
+    expect(await within(screen.getByRole('main')).findByText('Althar 0.0.0')).toBeTruthy()
+    expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Check for updates' })).toBeNull()
   })
 
   it('takes Free up space to the task folders under Work on this computer', async () => {

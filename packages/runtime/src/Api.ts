@@ -389,6 +389,7 @@ export const handlers = apiLayer(
       config.storage === undefined
         ? undefined
         : storageSizes({ profile: config.storage.profile, logs: config.storage.logs, worktrees: config.worktreeRoot })
+    const sizesChanged = Effect.sync(() => sizes?.forget('worktrees'))
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
@@ -1445,8 +1446,10 @@ export const handlers = apiLayer(
             ? Effect.succeed<StorageSize>({ state: 'failed' })
             : Effect.promise((signal) => sizes.size(place, refresh, signal).catch(() => ({ state: 'failed' }) as const)),
         ),
-      CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId))),
-      RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, actorId))),
+      // Folders removed (or some, before a failure): the task folders' kept size no longer holds.
+      CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId).pipe(Effect.ensuring(sizesChanged)))),
+      RemoveTaskFolder: ({ commandId, taskId, seen }) =>
+        once(commandId, api(cleanup.remove(taskId, seen, actorId).pipe(Effect.ensuring(sizesChanged)))),
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, actorId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),

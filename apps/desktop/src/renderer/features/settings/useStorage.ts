@@ -34,6 +34,12 @@ const measuringAll = (): Record<StoragePlace, StorageFigure> => ({
 // The figures last seen, by host, so About doesn't flash "measuring…" for what it showed a moment ago.
 const remembered = new WeakMap<object, Record<StoragePlace, StorageFigure>>()
 
+// Places whose last figure no longer holds, as the task folders after some were removed: About measures them anew.
+const changed = new Set<StoragePlace>()
+
+/** A place's size changed, as after its folders were removed: About shows it measuring, not the old figure. */
+export const sizeChanged = (place: StoragePlace) => void changed.add(place)
+
 export const useStorage = (): StorageModel => {
   const { client, host } = useServices()
   const [paths, setPaths] = useState<Partial<Record<StoragePlace, string>>>({})
@@ -43,7 +49,12 @@ export const useStorage = (): StorageModel => {
     const fresh = measuringAll()
     return last === undefined
       ? fresh
-      : { ...fresh, ...Object.fromEntries(Object.entries(last).filter(([, figure]) => figure.state === 'done')) }
+      : {
+          ...fresh,
+          ...Object.fromEntries(
+            Object.entries(last).filter(([place, figure]) => figure.state === 'done' && !changed.has(place as StoragePlace)),
+          ),
+        }
   })
   const [problems, setProblems] = useState<Partial<Record<StoragePlace, string>>>({})
   const keep = useCallback(
@@ -90,6 +101,7 @@ export const useStorage = (): StorageModel => {
       (found) => live && setPaths(found),
       () => {},
     )
+    changed.clear()
     measure(false)
     return () => {
       live = false

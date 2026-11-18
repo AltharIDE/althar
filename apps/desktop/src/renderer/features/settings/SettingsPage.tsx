@@ -782,6 +782,8 @@ function AboutSection({ start, onFreeUp }: { start: StartModel; onFreeUp: () => 
       <AboutHeader
         {...(version === undefined ? {} : { version })}
         {...(update.ready === null ? {} : { update: <UpdateReady {...update.ready} /> })}
+        {...(update.check === undefined ? {} : { onCheck: update.check })}
+        checking={update.checking}
         website={WEBSITE}
         notes={CHANGELOG}
         community={COMMUNITY}

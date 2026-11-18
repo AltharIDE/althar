@@ -107,8 +107,9 @@ export interface StorageProps {
 export function Storage({ places, onShow, onMeasureAgain, freeUp, text, headingLevel }: StorageProps) {
   const t = { ...storageText, ...text }
   const measuring = places.some((place) => place.figure.state === 'measuring')
-  // A share only once every size is in: a part never shows as the whole.
-  const sizes = places.map((place) => (place.figure.state === 'done' ? place.figure.bytes : null))
+  // A share only once every size is in, and whole: a part, or a lower bound, never shows as a share of the whole.
+  const exact = (figure: StorageFigure) => figure.state === 'done' && figure.approximate !== true && (figure.unreadable ?? 0) === 0
+  const sizes = places.map((place) => (place.figure.state === 'done' && exact(place.figure) ? place.figure.bytes : null))
   const whole = sizes.every((bytes) => bytes !== null) ? sizes.reduce<number>((sum, bytes) => sum + (bytes ?? 0), 0) : 0
   // The place that can be freed leads; the rest keep their order.
   const ordered = freeUp === undefined ? places : [...places].sort((a, b) => Number(b.id === freeUp.id) - Number(a.id === freeUp.id))
@@ -131,12 +132,15 @@ export function Storage({ places, onShow, onMeasureAgain, freeUp, text, headingL
               {whole > 0 && place.figure.state === 'done' && <span className={s.share}>{t.share(place.figure.bytes / whole)}</span>}
               <Figure figure={place.figure} t={t} />
               {place.problem !== undefined && (
-                <span className={s.problem} role="alert">
-                  {t.couldntOpen(place.problem)}
+                <span className={s.problem}>
+                  <span role="alert">{t.couldntOpen(place.problem)}</span>
+                  {/* The file manager didn't open: the path, to copy. */}
+                  {place.path !== '' && <span className={s.path}>{place.path}</span>}
                 </span>
               )}
               <span className={s.actions}>
-                {lead && (
+                {/* Nothing to free where the folder isn't there. */}
+                {lead && place.figure.state !== 'missing' && (
                   <Button size="small" trailingIcon="arrow" onClick={freeUp.onFreeUp}>
                     {t.freeUp}
                   </Button>
