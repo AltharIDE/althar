@@ -50,17 +50,22 @@ const ready = async (frames: string | null, plan = '') => {
   return { electronApp, page, answers }
 }
 
-/** Takes frames of `clip` while `taking()`, where `frames` is a folder to keep them in. */
+/** Takes frames of `clip`, where `frames` is a folder to keep them in, until a few past when it is told to stop. */
 const filming = (page: Page, frames: string | null, clip: { x: number; y: number; width: number; height: number } | undefined) => {
-  let taking = frames !== null
+  // The frames go on a moment past what was looked for, for the dot to arrive.
+  const PAST = 25
+  let last = frames === null ? 0 : 60
+  let took = 0
   const taken = (async () => {
-    for (let n = 0; taking && n < 60; n++)
-      await page.screenshot({ path: `${frames}/${String(n).padStart(3, '0')}.png`, scale: 'css', ...(clip === undefined ? {} : { clip }) })
+    for (; took < last; took++)
+      await page.screenshot({
+        path: `${frames}/${String(took).padStart(3, '0')}.png`,
+        scale: 'css',
+        ...(clip === undefined ? {} : { clip }),
+      })
   })()
   return async () => {
-    // The frames go on a moment past it, for the dot to arrive.
-    if (frames !== null) await new Promise((done) => setTimeout(done, 900))
-    taking = false
+    last = Math.min(last, took + PAST)
     await taken
   }
 }
