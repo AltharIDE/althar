@@ -802,15 +802,18 @@ export const StartedByALongTitle: Story = {
   args: {
     ...StartedByALead.args,
     title: "Prototype: redesign the issue switch under a task's issue",
-    startedBy: 'Only-part-of switch sits under the issue, not beside it',
+    startedBy: 'Only-part-of switch sits under the issue, not beside it, and then keeps going on and on',
     onOpenStartedBy: fn(),
   },
-  decorators: [(Story) => <div style={{ width: 300 }}>{Story()}</div>],
+  decorators: [(Story) => <div style={{ width: 220 }}>{Story()}</div>],
   play: async ({ canvasElement }) => {
     const link = within(canvasElement).getByRole('button', { name: /Only-part-of/ })
     await expectOneLine(link.closest('p')!)
     await expect(link.scrollWidth).toBeGreaterThan(link.clientWidth)
-    await expect(link.closest('p')).toHaveAttribute('title', 'Started by Only-part-of switch sits under the issue, not beside it')
+    await expect(link.closest('p')).toHaveAttribute(
+      'title',
+      'Started by Only-part-of switch sits under the issue, not beside it, and then keeps going on and on',
+    )
   },
 }
 
