@@ -344,6 +344,29 @@ by name, and `run_project` runs one by name, or the default without one. The
 list shows who said how: worked out, the person, the coordinator, or an
 agent. It is kept in the store (`runnables`).
 
+**What a task kept goes with its worktree.** One a task's lead keeps is that
+task's: what it runs, such as a prototype's lab, mostly lives only on the
+task's branch. Once every worktree of the task is cleaned up, it is dropped,
+with a `project.runnable_dropped` line in the project's record naming the
+task. Three kinds stay. One the person kept, or changed after, is theirs,
+whoever changes it later. One whose command names files that are all on its
+repository's default branch (its config merged, say) still runs as kept
+there, and belongs to the project from then on; so does one whose files can't
+be told for sure, read as the shell reads it (what the shell works out, such
+as `"$CONFIG"`, or a `cd` out of the repository). A command that names no file,
+only a port or a script's name, is taken as the task's own and goes: the
+person keeps it back by hand. Where its repository, its branch or a folder
+it runs in can't be read on this device now, or git fails reading it, it
+waits for the next look, as Althar starts: only a file the branch, read, lacks
+drops it. Only a run still as
+it was read goes, so one the person changes meanwhile stays, and two sweeps
+at once drop it, and say so, once. Runs kept before a run remembered its task
+are linked to it only on evidence of that run: each `project.runnable_kept`
+line that set its name, command and repository, paired with the leads'
+`keep_run` calls it answered, all of one task; else the run its task started,
+by its id, as it was kept. A command kept in two repositories isn't taken for
+the other's. Those of tasks already cleaned up go as Althar starts.
+
 Before a run, a copy with nothing installed is set up first.
 
 ### Run and where it runs
