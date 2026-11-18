@@ -4407,7 +4407,7 @@ export class Runs extends Context.Service<
         /** What the thread's line says Althar dealt with: a usage limit, or a step gone quiet or without its report. */
         about: 'limit' | 'stall' = 'limit',
         /** The step attempt handed on, where one is: a stand-in for a step without its report leads until it is over. */
-        attemptId?: string,
+        attemptId?: string | null,
       ) =>
         Effect.gen(function* () {
           const { implement } = yield* stepsOf(run)
@@ -4455,7 +4455,7 @@ export class Runs extends Context.Service<
               ...(nextModel == null ? {} : { model: nextModel }),
               ...(nextEffort == null ? {} : { effort: nextEffort }),
               ...(said === undefined ? {} : { said, about }),
-              ...(said === undefined || attemptId === undefined ? {} : { attemptId }),
+              ...(said === undefined || attemptId == null ? {} : { attemptId }),
               ...(nextAccountId === undefined ? {} : { accountId: nextAccountId }),
             })
           }
@@ -7085,7 +7085,7 @@ export class Runs extends Context.Service<
             effort ?? (answer.kind === 'retry' ? answer.effort : undefined),
             accountId,
             about,
-            attemptId ?? undefined,
+            attemptId,
           )
           if (!(yield* resume(sessionId))) return
           if (answer.kind === 'tell')

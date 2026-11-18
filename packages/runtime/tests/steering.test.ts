@@ -19,6 +19,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import type { PlanStep } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
+import { standInOf } from '../src/standIn'
 import { usableModels } from '../src/usableModels'
 import { atReset, items, later, onTestClock, repository, runtime, until } from './support'
 
@@ -229,8 +230,8 @@ const reviewed = <E, R>(reviewer: Holds, lowered: (projectId: string) => Effect.
 const sessionsOn = (threadId: string) =>
   Effect.flatMap(
     SqlClient.SqlClient,
-    (sql) => sql<{ agentId: string; accountId: string }>`
-    SELECT agent_id, account_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at, rowid`,
+    (sql) => sql<{ id: string; agentId: string; accountId: string }>`
+    SELECT id, agent_id, account_id FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at, rowid`,
   )
 
 describe('a settle step on a lead that fell nearly out since it worked', () => {
@@ -253,6 +254,13 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
         (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
         ['claude-code', 'opencode'],
       )
+      // It only stands in, as nearly out, until the window resets: not out at all, the lead given isn't back before then.
+      const [, taker] = yield* sessionsOn(task.threadId)
+      assert.deepInclude(Option.getOrUndefined(yield* standInOf(taker?.id ?? '')) ?? {}, {
+        agentId: 'claude-code',
+        until: resetsAt,
+        why: 'low',
+      })
     }).pipe(Effect.provide(withAgents({ codex: { holds: reviewer } })))
   })
 

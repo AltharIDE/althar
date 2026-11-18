@@ -356,3 +356,106 @@ describe('a step handed on after it ended twice without its report', () => {
     }).pipe(Effect.provide(withAgents({ 'claude-code': { noReport: true } })), onTestClock),
   )
 })
+
+describe('a stand-in on the given lead’s own agent', () => {
+  /** A task whose lead was started as a stand-in, for the lead given on Claude Code: here on its small model, or on `on`. */
+  const standingIn = (
+    given: { readonly model: string | null; readonly why?: 'limit' | 'stall'; readonly until?: number },
+    on: { readonly agentId: string; readonly model: string } = { agentId: 'claude-code', model: 'small' },
+  ) =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const sessions = yield* Sessions
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId as ProjectId,
+        title: 'Prototype a better About screen',
+      })
+      const sessionId = yield* sessions.start({
+        threadId: task.threadId,
+        agentId: on.agentId,
+        model: on.model,
+        standsIn: {
+          agentId: 'claude-code',
+          model: given.model,
+          effort: null,
+          accountId: null,
+          until: given.why === 'stall' ? null : new Date(given.until ?? 0).toISOString(),
+          ...(given.why === undefined ? {} : { why: given.why }),
+        },
+      })
+      return { task, sessionId }
+    })
+
+  it.effect('gives the step’s lead back between turns once the step it took over is over, and says so then', () =>
+    Effect.gen(function* () {
+      yield* knownModels
+      const { task } = yield* standingIn({ model: 'large', why: 'stall' })
+      // No step under way, the given lead is back at once: the same agent goes back to its model, with no hand-over to say it.
+      const lines = yield* until(said(task.threadId), (all) => all.some((line) => line.includes('leads again')))
+      assert.include(lines, 'The step Small on Fake claude-code took over is done: Large on Fake claude-code leads again.')
+      const [lead] = yield* until(leads(task.threadId), (rows) => rows.at(-1)?.model === 'large')
+      assert.deepInclude(lead, { agentId: 'claude-code', model: 'large' })
+    }).pipe(Effect.provide(withAgents({})), onTestClock),
+  )
+
+  it.effect('doesn’t stand in for a lead given no model of its own, which it couldn’t give back', () =>
+    Effect.gen(function* () {
+      yield* knownModels
+      const { task, sessionId } = yield* standingIn({ model: null })
+      // Its agent's default ran out and another of its models carries on: there is nothing to go back to, so nothing is said.
+      assert.isTrue(Option.isNone(yield* standInOf(sessionId)))
+      const sessions = yield* Sessions
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Go on.' })
+      yield* until(replies(task.threadId), (rows) => rows.some((row) => row.content.includes('Go on.')))
+      assert.deepStrictEqual(yield* said(task.threadId), [])
+      assert.deepInclude((yield* leads(task.threadId)).at(-1), { agentId: 'claude-code', model: 'small' })
+    }).pipe(Effect.provide(withAgents({})), onTestClock),
+  )
+
+  it.effect('gives a lead given no model back on its agent alone, from another agent, once it has usage again', () =>
+    Effect.gen(function* () {
+      yield* knownModels
+      const { task } = yield* standingIn({ model: null }, { agentId: 'codex', model: 'small' })
+      const [next] = yield* until(queued(task.threadId), (leads) => leads.length === 1)
+      assert.deepStrictEqual(next, { agentId: 'claude-code' })
+    }).pipe(Effect.provide(withAgents({})), onTestClock),
+  )
+
+  it.effect('gives nothing back at the reset where the person set the stand-in’s model since', () => {
+    const back = later()
+    return Effect.gen(function* () {
+      yield* knownModels
+      const sessions = yield* Sessions
+      const { task, sessionId } = yield* standingIn({ model: 'large', until: back }, { agentId: 'codex', model: 'small' })
+      yield* sessions.setModel({ threadId: task.threadId, model: 'large' })
+      assert.isTrue(Option.isNone(yield* standInOf(sessionId)))
+      yield* atReset(back)
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId: task.threadId, body: 'Go on.' })
+      yield* until(replies(task.threadId), (rows) => rows.some((row) => row.content.includes('Go on.')))
+      assert.deepStrictEqual(yield* queued(task.threadId), [])
+      assert.deepInclude((yield* leads(task.threadId)).at(-1), { agentId: 'codex', model: 'large' })
+      assert.notInclude((yield* said(task.threadId)).join('\n'), 'has usage again')
+    }).pipe(Effect.provide(withAgents({})), onTestClock)
+  })
+
+  it.effect('gives nothing back where nothing runs, or where the lead stands in for no one', () =>
+    Effect.gen(function* () {
+      yield* knownModels
+      const projects = yield* Projects
+      const sessions = yield* Sessions
+      assert.isFalse(yield* sessions.giveBack({ threadId: 'thr_none', sessionId: 'ses_none' }))
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId as ProjectId,
+        title: 'Prototype a better About screen',
+      })
+      const sessionId = yield* sessions.start({ threadId: task.threadId, agentId: 'claude-code', model: 'large' })
+      assert.isFalse(yield* sessions.giveBack({ threadId: task.threadId, sessionId }))
+      assert.isFalse(yield* sessions.giveBack({ threadId: task.threadId, sessionId: 'ses_other' }))
+      assert.deepStrictEqual(yield* queued(task.threadId), [])
+    }).pipe(Effect.provide(withAgents({})), onTestClock),
+  )
+})

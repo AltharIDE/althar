@@ -1711,7 +1711,8 @@ export class Sessions extends Context.Service<
               yield* sessionFact(thread, sessionId, 1, 'provider_session.starting', {
                 agentId,
                 accountId: account.id,
-                ...(standsIn === undefined ? {} : { standsIn }),
+                // On the given lead's own agent, a lead given no model of its own has none to go back to: it doesn't stand in.
+                ...(standsIn === undefined || (standsIn.agentId === agentId && standsIn.model === null) ? {} : { standsIn }),
               })
             }),
           )
