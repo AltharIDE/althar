@@ -11,7 +11,7 @@ import { executeUpdate, systemServices, type UpdateServices } from './execute'
 import type { UpdateExecutor } from './execute'
 import { Effect } from 'effect'
 import { releaseInfo } from './info'
-import { digest, httpsURL, releaseIdentity } from './release'
+import { digest, httpsURL, releaseIdentity, type VerifiedRelease } from './release'
 import {
   contains,
   createInstallationFolders,
@@ -20,6 +20,7 @@ import {
   readHomeId,
   saveState,
   storeBootstrap,
+  storeSigned,
   updateError,
   writeJSON,
   type UpdateConfig,
@@ -114,6 +115,7 @@ export interface SetupDependencies {
   readonly assemble?: typeof assembleBundle
   readonly source?: BundleSource
   readonly execute?: UpdateExecutor
+  readonly signedBootstrap?: VerifiedRelease
 }
 const finishSetup = async (options: HostOptions, commands: ServiceCommands, execute: UpdateExecutor = executeUpdate) => {
   const installed = await readPrivate(join(options.unitDirectory, `${options.serviceName}.service`), 65_536)
@@ -196,7 +198,7 @@ export const configureUpdates = async (given: HostOptions, commands: ServiceComm
   const homeId = readHomeId(join(profile, 'althar.sqlite'))
   const info = releaseInfo()
   const source = dependencies.source ?? { node: commands.node, entry: commands.entry, version: info.version }
-  const id = digest(Buffer.concat([Buffer.from(JSON.stringify(info)), await fs.readFile(source.entry)]))
+  const id = dependencies.signedBootstrap?.id ?? digest(Buffer.concat([Buffer.from(JSON.stringify(info)), await fs.readFile(source.entry)]))
   const target = join(root, 'releases', id)
   try {
     await fs.rm(target, { recursive: true, force: true })
@@ -225,8 +227,9 @@ export const configureUpdates = async (given: HostOptions, commands: ServiceComm
         ? { kind: 'github', repository: 'AltharIDE/althar' }
         : { kind: 'manifest', url: httpsURL(given.updateFeed).href },
   }
-  await storeBootstrap(root, id, info)
-  await saveState(root, { format: 1, current: id, active: id, sequence: 0 })
+  if (dependencies.signedBootstrap === undefined) await storeBootstrap(root, id, info)
+  else await storeSigned(root, dependencies.signedBootstrap)
+  await saveState(root, { format: 1, current: id, active: id, sequence: dependencies.signedBootstrap?.manifest.sequence ?? 0 })
   await pointRelease(root, 'current', id)
   await pointRelease(root, 'active', id)
   await writePrivate(join(root, 'launcher'), renderLauncher(root), true)

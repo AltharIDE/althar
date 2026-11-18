@@ -10,6 +10,7 @@ import { HOST_VERSION, initializeHome, serveHome, type HostDependencies } from '
 import { type HostOptions, USAGE } from './options'
 import { installService, runExternal, type ServiceCommands } from './service'
 import { hostStatus } from './status'
+import { setupHome, setupStatus } from './sshSetup'
 import { serveStdio, type BridgeStreams } from './stdioBridge'
 import {
   commitReadyRelease,
@@ -162,6 +163,12 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
           }),
         )
         return yield* out(result, `Signed host release assembled: ${result.archive}`)
+      }
+      case 'setup':
+        return yield* update(() => setupHome(options, io, io.out, dependencies))
+      case 'setup-status': {
+        const result = yield* update(() => setupStatus(options))
+        return yield* out(result, JSON.stringify(result))
       }
       case 'configure-updates': {
         const configured = yield* configuredHome(options)
