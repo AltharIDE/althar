@@ -512,7 +512,8 @@ export class Connections extends Context.Service<
         shares.set(connectionId, made)
         return made
       }
-      const removing = new Set<string>()
+      /** How many removals of each connection are under way: shares are refused while any is, and taken again once none is. */
+      const removing = new Map<string, number>()
       const writeLock = (connectionId: string) => {
         const known = writing.get(connectionId)
         if (known !== undefined) return known
@@ -1781,27 +1782,32 @@ export class Connections extends Context.Service<
         check: (connectionId) => provide(check(connectionId)),
         remove: (connectionId, actorId) =>
           provide(
-            Effect.suspend(() => {
-              removing.add(connectionId)
-              return sharesOf(connectionId).withPermits(ALL_SHARES)(
-                writeLock(connectionId).withPermits(1)(
-                  Effect.gen(function* () {
-                    const row = yield* rowOf(connectionId)
-                    yield* moveTo(row, 'removed', 'connection.removed', actorId)
-                    yield* secrets.remove(row.credentialRef)
-                    adapterCache.delete(connectionId)
+            Effect.uninterruptibleMask((restore) => {
+              removing.set(connectionId, (removing.get(connectionId) ?? 0) + 1)
+              return restore(
+                sharesOf(connectionId).withPermits(ALL_SHARES)(
+                  writeLock(connectionId).withPermits(1)(
+                    Effect.gen(function* () {
+                      const row = yield* rowOf(connectionId)
+                      yield* moveTo(row, 'removed', 'connection.removed', actorId)
+                      yield* secrets.remove(row.credentialRef)
+                      adapterCache.delete(connectionId)
+                    }),
+                  ),
+                ),
+              ).pipe(
+                Effect.onExit((exit) =>
+                  Effect.sync(() => {
+                    const left = (removing.get(connectionId) ?? 1) - 1
+                    if (left > 0) removing.set(connectionId, left)
+                    else removing.delete(connectionId)
+                    // Its shares are let go only once it is removed: each taken after reads so in its row. A removal stopped or
+                    // failed keeps them, as what holds one still may, and the next removal waits for it.
+                    if (Exit.isSuccess(exit)) shares.delete(connectionId)
                   }),
                 ),
               )
-            }).pipe(
-              // Removed, it stays so in its row, which a share reads; not removed after all, it is there to read through again.
-              Effect.ensuring(
-                Effect.sync(() => {
-                  removing.delete(connectionId)
-                  shares.delete(connectionId)
-                }),
-              ),
-            ),
+            }),
           ),
         whileThere: (connectionId, effect) =>
           sharesOf(connectionId).withPermits(1)(
