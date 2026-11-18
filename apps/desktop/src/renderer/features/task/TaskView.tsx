@@ -57,7 +57,7 @@ import { draftKey, draftOf as draftNow, setDraftDictated, useSetDraft } from '..
 import { DraftComposer } from '../../shared/DraftComposer'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
-import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, readingLocallyOf, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
@@ -471,12 +471,12 @@ function LiveRounds({
           turnRunning: session?.turnRunning ?? false,
           turnStarted: session?.turnStartedAt ?? null,
           reading: readingNow(session, pending, snapshot.task.queued !== null || snapshot.task.waits !== null, snapshot.accepting),
-          readingLocally: session === null && snapshot.accepting === 'now' && snapshot.task.queued === null && snapshot.task.waits === null,
+          readingLocally: readingLocallyOf(session, snapshot.accepting, snapshot.task.queued !== null || snapshot.task.waits !== null),
           turnEnded: session?.turnEndedAt ?? null,
           // What the person asked for, which opens the thread above, is what the lead's first turn answers.
           openedAt: snapshot.task.request === null || snapshot.earlier ? null : snapshot.task.startedAt,
           worktree: snapshot.task.worktree,
-          queue: queueShown(session, pending, snapshot.accepting),
+          queue: queueShown(session, pending, snapshot.accepting, snapshot.items),
           outputs: printed,
           turns: turnsById(snapshot.turns),
         },
@@ -841,8 +841,8 @@ export function TaskView({
   const busy = session?.turnRunning ?? false
   // A step that waits on the person: its call, not the thread, has the ways on.
   const stuckOpen = snapshot.attention.some((request) => request.kind === 'stuck')
-  const queue = queueShown(session, model.pending, snapshot?.accepting)
-  const readingLocally = session === null && snapshot.accepting === 'now' && snapshot.task.queued === null && snapshot.task.waits === null
+  const queue = queueShown(session, model.pending, snapshot?.accepting, snapshot.items)
+  const readingLocally = readingLocallyOf(session, snapshot.accepting, snapshot.task.queued !== null || snapshot.task.waits !== null)
   const listening = listeningOf(snapshot)
   const wait = waitOf(snapshot.task, upNextWords)
   // What its lead left running, and what Althar runs of it itself (ADR-096); a run's output is in its card.

@@ -28,6 +28,19 @@ export const messageMove = (item: ThreadItem): string => moves.get(item.id) ?? `
 const reading = new Set<string>()
 export const releaseSending = (id: string) => reading.delete(`message:${id}`)
 export const locallyReading = (item: ThreadItem) => reading.has(messageMove(item))
+/** Release the guess and update the held items, so the window redraws even when the runtime head is unchanged. */
+export const releasedReadings = (items: ReadonlyArray<ThreadItem>, moves: ReadonlyArray<string>): ReadonlyArray<ThreadItem> => {
+  for (const move of moves) reading.delete(move)
+  return items.map((item) =>
+    moves.includes(messageMove(item)) && item.kind === 'user_message' && item.input !== null && item.input.claimed !== true
+      ? { ...item, input: { ...item.input, claimed: false } }
+      : item,
+  )
+}
+
+/** Whether a locally sent first message can be starting this thread's absent session. */
+export const readingLocallyOf = (session: { readonly turnRunning: boolean } | null, accepting?: 'now' | 'queued', kept = false) =>
+  session === null && accepting === 'now' && !kept
 
 /** A message the window shows the moment it is sent, after what it holds, until the store's copy arrives. */
 export const sending = (
@@ -204,8 +217,24 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
  * in the thread first. A message the runtime has claimed but not begun
  * reading yet is not shown as waiting: the agent is reading it now.
  */
-export const queueShown = (session: { readonly turnRunning: boolean } | null, sending: boolean, accepting?: 'now' | 'queued'): boolean =>
-  (sending && accepting === 'queued') || session?.turnRunning === true || (!sending && session === null)
+export const queueShown = (
+  session: { readonly turnRunning: boolean } | null,
+  sending: boolean,
+  accepting?: 'now' | 'queued',
+  items: ReadonlyArray<ThreadItem> = [],
+): boolean =>
+  (sending && accepting === 'queued') ||
+  session?.turnRunning === true ||
+  (session === null &&
+    (!sending ||
+      items.some(
+        (item) =>
+          item.kind === 'user_message' &&
+          item.input?.state === 'queued' &&
+          !item.input.interrupting &&
+          item.input.claimed !== true &&
+          !locallyReading(item),
+      )))
 
 /**
  * Whether what waits after the agent's last reply is being read now, with

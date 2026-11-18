@@ -15,7 +15,16 @@ import {
   verbFor,
   verbs,
 } from '../src/renderer/shared/thread'
-import { mergeItems, queuedOf, queueShown, readingNow, releaseSending, sending, settled } from '../src/renderer/shared/items'
+import {
+  mergeItems,
+  queuedOf,
+  queueShown,
+  readingLocallyOf,
+  readingNow,
+  releaseSending,
+  sending,
+  settled,
+} from '../src/renderer/shared/items'
 import { card, items, NOW } from './fixtures'
 
 const at = () => 'just now'
@@ -195,9 +204,9 @@ describe('a thread as blocks', () => {
     ]
     mergeItems(sent.items, [stored])
     for (const state of states) {
-      const queue = queueShown(state.session, state.sending, state.accepting)
+      const queue = queueShown(state.session, state.sending, state.accepting, [state.item])
       const reading = readingNow(state.session, state.sending, false, state.accepting)
-      const readingLocally = state.session === null && state.accepting === 'now'
+      const readingLocally = readingLocallyOf(state.session, state.accepting)
       expect(queuedOf([state.item], queue, readingLocally)).toEqual([])
       expect(
         blocksOf(
@@ -211,9 +220,13 @@ describe('a thread as blocks', () => {
     expect(queuedOf([claimed, waiting], true).map((item) => item.text)).toEqual(['Later'])
     expect(queueShown(null, false, 'queued')).toBe(true)
     expect(readingNow(null, false, true, 'now')).toBe(false)
+    expect(readingLocallyOf(null, 'now', true)).toBe(false)
+    expect(readingLocallyOf(null, 'queued')).toBe(false)
+    expect(readingLocallyOf({ turnRunning: false }, 'now')).toBe(false)
     expect(queuedOf([waiting], true, true)).toHaveLength(1)
     releaseSending(sent.id)
     expect(queuedOf([stored], true, true)).toHaveLength(1)
+    expect(queueShown(null, true, 'now', [stored])).toBe(true)
   })
 
   it('runs a plan step and a tool call only while their turn does', () => {

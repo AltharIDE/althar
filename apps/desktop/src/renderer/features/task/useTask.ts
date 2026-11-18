@@ -32,7 +32,8 @@ import {
 } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
-import { isSending, mergeItems, newestReads, queueShown, releaseSending, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { isSending, mergeItems, newestReads, queueShown, releasedReadings, sending, takenBack, unsent, waiting } from '../../shared/items'
+import { useUnstartedSend } from '../../shared/useUnstartedSend'
 import { headsOf } from '../../shared/mergeHere'
 import { commitsToShip } from '../../shared/shipping'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
@@ -565,6 +566,16 @@ export const useTask = (threadId: string): TaskModel => {
     [client, cache, threadId, newest, readItems, held, fail],
   )
 
+  const releaseUnstarted = useCallback(
+    (moves: ReadonlyArray<string>) =>
+      setSnapshot((current) => {
+        if (current.session !== null) return current
+        return { ...current, items: releasedReadings(current.items, moves) }
+      }),
+    [setSnapshot],
+  )
+  useUnstartedSend(snapshot?.session == null, snapshot?.items ?? [], readHead, releaseUnstarted)
+
   /** Whether its pull request at `url` has merged, as the runtime has it now. */
   /** Whether its pull request at `url` has merged, as its host reads it now; merged, the task's head shown says so at once. */
   const landed = async (url: string) => {
@@ -798,8 +809,7 @@ export const useTask = (threadId: string): TaskModel => {
     const accept = (reading = true) => {
       accepted = true
       if (!reading) {
-        releaseSending(id)
-        setSnapshot((current) => ({ ...current }))
+        setSnapshot((current) => ({ ...current, items: releasedReadings(current.items, [`message:${id}`]) }))
       }
     }
     return act(async () => {
@@ -809,8 +819,7 @@ export const useTask = (threadId: string): TaskModel => {
       } catch (failure) {
         if (!accepted) setSnapshot((current) => ({ ...current, items: unsent(current.items, id, text) }))
         else {
-          releaseSending(id)
-          setSnapshot((current) => ({ ...current }))
+          setSnapshot((current) => ({ ...current, items: releasedReadings(current.items, [`message:${id}`]) }))
         }
         throw failure
       }

@@ -36,7 +36,7 @@ import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, draftOf as draftNow, setDraftDictated, useSetDraft } from '../../shared/drafts'
 import { DraftComposer } from '../../shared/DraftComposer'
 import { pillOf, runIdOf } from '../../shared/running'
-import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, readingLocallyOf, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
@@ -517,14 +517,14 @@ export function ProjectView({
   const suggested = coordinator?.suggested ?? null
   const busy = session?.turnRunning ?? false
   const steers = useSendMidTurn()?.to === 'steer'
-  const queue = queueShown(session, model.pending, coordinator?.accepting)
+  const queue = queueShown(session, model.pending, coordinator?.accepting, coordinator?.items)
   // What the coordinator's thread is drawn from, kept while its items and its turn are: its words streaming, its commands
   // printing and its clock ticking draw the thread alone (LiveBlocks), not the project.
   const coordinatorItems = coordinator?.items
   const turnStarted = session?.turnStartedAt ?? null
   const turnEnded = session?.turnEndedAt ?? null
   const reading = readingNow(session, model.pending, false, coordinator?.accepting)
-  const readingLocally = session === null && coordinator?.accepting === 'now'
+  const readingLocally = readingLocallyOf(session, coordinator?.accepting)
   const turns = coordinator?.turns
   const coordinatorSource = useMemo(
     () =>
