@@ -1,0 +1,185 @@
+import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+
+import { expect, test } from '@playwright/test'
+
+import { author, repository } from '../tests/repository'
+import { chooseFolder, launch, openMadeProject, shown, still, toFirstProject } from './support'
+
+/*
+ * Moving to Althar from other tools (docs/decisions/workspaces-and-runs.md, "Bringing in other tools' work"), in the
+ * built app: a repository Conductor and Orca made worktrees of, with Conductor's setup, and Claude Code's conversations
+ * in it and in Conductor's worktree. The welcome's step after the project's shows a tile a tool, nothing taken; one
+ * opens to pick inside; what is taken comes in as the welcome goes on: Conductor's worktree a task held Up next, in its
+ * own folder, its conversation its history, the conversation in the checkout an aside. Nothing of either tool's files
+ * changes. Each state is shot at 1× into the repository's test-results.
+ */
+
+const SHOTS = '../../test-results/bring-in'
+
+const git = (cwd: string, ...args: Array<string>) =>
+  execFileSync('git', args, { cwd, env: { ...process.env, ...author }, encoding: 'utf8' }).trim()
+const write = (path: string, body: string) => {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, body)
+}
+/** Claude Code's folder for a working folder. */
+const claudeFolder = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, '-')
+const session = (cwd: string, id: string, prompt: string, reply: string, title: string) =>
+  [
+    {
+      type: 'user',
+      uuid: 'u1',
+      parentUuid: null,
+      sessionId: id,
+      cwd,
+      gitBranch: 'main',
+      isSidechain: false,
+      timestamp: '2026-11-16T09:00:00.000Z',
+      message: { role: 'user', content: prompt },
+    },
+    {
+      type: 'assistant',
+      uuid: 'a1',
+      parentUuid: 'u1',
+      sessionId: id,
+      cwd,
+      isSidechain: false,
+      timestamp: '2026-11-16T09:00:08.000Z',
+      message: { id: 'm1', role: 'assistant', content: [{ type: 'text', text: reply }] },
+    },
+    { type: 'ai-title', aiTitle: title, sessionId: id },
+  ]
+    .map((one) => JSON.stringify(one))
+    .join('\n')
+
+const digest = (root: string) => {
+  const hash = createHash('sha256')
+  const walk = (at: string) => {
+    for (const name of readdirSync(at).toSorted()) {
+      const path = join(at, name)
+      if (statSync(path).isDirectory()) walk(path)
+      else hash.update(path).update(readFileSync(path))
+    }
+  }
+  walk(root)
+  return hash.digest('hex')
+}
+
+test('other tools’ worktrees, setup and conversations come in on the welcome, each where it belongs, nothing of theirs changed', async () => {
+  // As the file system names it, as git and the agents do: macOS's temporary folder is reached through a link.
+  const home = realpathSync(mkdtempSync(join(tmpdir(), 'althar-e2e-')))
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  const repo = repository(projects)
+  git(home, 'init', '-q', '--bare', join(home, 'origin.git'))
+  git(repo, 'remote', 'add', 'origin', join(home, 'origin.git'))
+  write(join(repo, 'conductor.json'), JSON.stringify({ scripts: { setup: 'bun install' } }))
+  git(repo, 'add', '.')
+  git(repo, 'commit', '-q', '-m', 'Conductor’s setup')
+  git(repo, 'push', '-q', 'origin', 'main')
+  // Conductor's worktree, with a commit not pushed and a file not committed; Orca's, with one edit.
+  const lima = join(home, 'conductor', 'workspaces', 'meridian', 'lima')
+  mkdirSync(dirname(lima), { recursive: true })
+  git(repo, 'worktree', 'add', '-q', '-b', 'feature/checkout-retry', lima)
+  write(join(lima, 'retry.ts'), 'export const retry = 3\n')
+  git(lima, 'add', '.')
+  git(lima, 'commit', '-q', '-m', 'Retry the checkout')
+  write(join(lima, 'notes.md'), 'not yet\n')
+  const orca = join(home, 'orca', 'workspaces', 'meridian', 'fix-flaky-login')
+  mkdirSync(dirname(orca), { recursive: true })
+  git(repo, 'worktree', 'add', '-q', '-b', 'fix/flaky-login', orca)
+  write(join(orca, 'README.md'), '# meridian, edited\n')
+  // Claude Code's conversations: one in Conductor's worktree, one in the checkout.
+  write(
+    join(home, '.claude', 'projects', claudeFolder(lima), '5f0c1a2b-0000-4000-8000-000000000001.jsonl'),
+    session(
+      lima,
+      '5f0c1a2b-0000-4000-8000-000000000001',
+      'Retry the checkout three times before failing',
+      'Done: retry.ts retries three times.',
+      'Checkout retries',
+    ),
+  )
+  write(
+    join(home, '.claude', 'projects', claudeFolder(repo), '5f0c1a2b-0000-4000-8000-000000000002.jsonl'),
+    session(
+      repo,
+      '5f0c1a2b-0000-4000-8000-000000000002',
+      'Why is the gyroscope fixture flaky?',
+      'It rounds too early.',
+      'Gyroscope fixture flaky',
+    ),
+  )
+  const theirs = [join(home, '.claude'), join(home, 'conductor'), join(home, 'orca')].map(digest)
+
+  const { electronApp, page } = await launch(home)
+  try {
+    await toFirstProject(page)
+    await chooseFolder(electronApp, repo)
+    await page.getByRole('button', { name: /Choose a folder/ }).click()
+    await expect(
+      page.getByRole('list', { name: 'Repositories for the project' }).getByRole('checkbox', { checked: true }).first(),
+    ).toBeVisible()
+    await page.getByRole('button', { name: /Make the project/ }).click()
+
+    // The step after the project's: a tile a tool, nothing taken, so its button lets it be.
+    await expect(page.getByRole('heading', { name: 'Already under way', level: 1 })).toBeVisible()
+    const card = page
+      .getByRole('region')
+      .filter({ has: page.getByRole('heading', { name: 'Already under way', level: 1 }) })
+      .first()
+    for (const tool of ['Conductor', 'Orca', 'Claude Code'])
+      await expect(card.getByRole('button', { name: new RegExp(`^${tool}`) })).toBeVisible()
+    await expect(card.getByRole('button', { name: /^Conductor/ })).toContainText('1 worktree')
+    await expect(page.getByRole('button', { name: 'Not now' })).toBeVisible()
+    await still(page)
+    await card.screenshot({ path: `${SHOTS}/found.png`, scale: 'css' })
+
+    // Conductor's opens under its row, its worktree and setup to pick inside.
+    await card.getByRole('button', { name: 'What’s in Conductor' }).click()
+    await expect(card.getByRole('checkbox', { name: /^lima/ })).toBeVisible()
+    await expect(card.getByRole('checkbox', { name: /Conductor’s setup/ })).toBeVisible()
+    await still(page)
+    await card.screenshot({ path: `${SHOTS}/open.png`, scale: 'css' })
+
+    // Take all of Conductor, and one conversation of Claude Code's.
+    await card.getByRole('button', { name: /^Conductor/ }).click()
+    await card.getByRole('button', { name: 'What’s in Claude Code' }).click()
+    await card.getByRole('checkbox', { name: /Gyroscope fixture flaky/ }).click()
+    await still(page)
+    await card.screenshot({ path: `${SHOTS}/taken.png`, scale: 'css' })
+    await page.getByRole('button', { name: 'Bring in 1 worktree, 1 setup and 1 conversation' }).click()
+    await openMadeProject(page)
+
+    // Conductor's worktree is a task held Up next, in Conductor's own folder, its conversation its history.
+    const upNext = page.getByRole('region', { name: 'Up next' }).filter({ visible: true })
+    await expect(upNext.getByText('Held. Starts when you say')).toBeVisible()
+    await still(page)
+    await upNext.screenshot({ path: `${SHOTS}/up-next.png`, scale: 'css' })
+    await upNext.getByRole('button', { name: 'Checkout retry' }).click()
+    await expect(shown(page, 'Brought in from Conductor').first()).toBeVisible()
+    await expect(shown(page, 'Retry the checkout three times before failing').first()).toBeVisible()
+    await expect(shown(page, 'Done: retry.ts retries three times.').first()).toBeVisible()
+    await still(page)
+    await page.screenshot({ path: `${SHOTS}/task.png`, scale: 'css' })
+    // The conversation from the checkout is an aside beside the coordinator's.
+    await page.keyboard.press('Escape')
+    await expect(
+      page
+        .getByRole('tablist', { name: 'Conversations' })
+        .filter({ visible: true })
+        .getByRole('tab', { name: /Gyroscope fixture flaky/ }),
+    ).toBeVisible()
+
+    // The folder is Conductor's, as it was: on its branch, with what it holds; and nothing of either tool's changed.
+    expect(git(lima, 'branch', '--show-current')).toBe('feature/checkout-retry')
+    expect(git(lima, 'status', '--porcelain')).toBe('?? notes.md')
+    expect([join(home, '.claude'), join(home, 'conductor'), join(home, 'orca')].map(digest)).toEqual(theirs)
+  } finally {
+    await electronApp.close()
+  }
+})

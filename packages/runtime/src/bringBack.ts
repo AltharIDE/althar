@@ -1,4 +1,5 @@
 import { existsSync, realpathSync } from 'node:fs'
+import { join } from 'node:path'
 
 import type { ActorId, ProjectId } from '@althar/domain'
 import { Effect, Semaphore } from 'effect'
@@ -7,6 +8,7 @@ import { SqlClient } from 'effect/sql'
 import { TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
 import { branchExists, commitOf, git, restoreDetachedWorktree, restoreWorktree } from './git'
+import { RuntimeConfig } from './Config'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
 import { copyReviewed, reviewOf } from './reviewing'
@@ -22,7 +24,9 @@ import { addItem } from './threads'
  * again. Each is set up again, as a new one is, and the thread says the
  * folder is back, as a line across it. A worktree of Althar's the person
  * deleted by hand comes back the same way, from its branch or where it
- * started; a Local task's folder, the person's own checkout, never does. This
+ * started; one brought in detached from another tool, which that tool
+ * removed, from its last commit, kept as it was brought in (Elsewhere.ts),
+ * in a folder of Althar's own; a Local task's folder, the person's own checkout, never does. This
  * is a module, not a service, so a session can bring its task's folder back
  * before its agent starts in it.
  */
@@ -55,6 +59,14 @@ interface Removed {
   readonly branched: number
   readonly baseCommit: string | null
   readonly repository: string
+  /** The tool that made its folder, where Althar didn't (Elsewhere.ts): gone, it comes back in a folder of Althar's own. */
+  readonly madeBy: string | null
+  /** Where a task's worktree of Althar's own goes: `<root>/<project>/<task>/<repository>`. */
+  readonly projectSlug: string
+  readonly taskSlug: string
+  readonly bindingSlug: string
+  /** An aside brought in from another tool whose copy was never made: made now, as it is first needed, with nothing said. */
+  readonly unmade: number
 }
 
 /** Whether a folder is a checkout of its own, at its top: one put back by hand, rather than whatever else came to be there. */
@@ -82,15 +94,24 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
     // gone: deleted by hand, in Finder or with rm -rf.
     const removed = (yield* sql<Removed>`
       SELECT w.id, w.state = 'cleaned' AS cleaned, w.project_id, w.path, w.access, w.branch, w.branched_at IS NOT NULL AS branched,
-        w.base_commit, l.path AS repository
+        w.base_commit, l.path AS repository, w.made_by, p.slug AS project_slug, k.slug AS task_slug, b.slug AS binding_slug,
+        (w.state = 'ready' AND w.cleaned_at IS NULL AND w.made_by IS NULL AND w.branched_at IS NULL
+          AND EXISTS (SELECT 1 FROM brought_in i WHERE i.task_id = w.task_id AND i.kind = 'conversation')) AS unmade
       FROM workspaces w
+      JOIN tasks k ON k.id = w.task_id
+      JOIN projects p ON p.id = w.project_id
       JOIN repository_bindings b ON b.id = w.binding_id
       JOIN repository_locations l ON l.binding_id = w.binding_id AND l.device_id = ${instance.deviceId}
       WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
         AND (w.state = 'cleaned' OR (w.state = 'ready' AND w.kind IS NULL))
       ORDER BY b.created_at, b.rowid`).filter((one) => one.cleaned === 1 || !existsSync(one.path))
     if (removed.length === 0) return false
-    for (const one of removed) {
+    const config = yield* RuntimeConfig
+    for (const found of removed) {
+      // A folder another tool made and has since removed is that tool's place, never written by Althar: the work comes back
+      // in a folder of Althar's own, from its branch, and is Althar's from then on.
+      const own = found.madeBy !== null && !existsSync(found.path)
+      const one = own ? { ...found, path: join(config.worktreeRoot, found.projectSlug, found.taskSlug, found.bindingSlug) } : found
       // Put back by hand already, it is only marked so; anything else where it goes is never taken for it, nor removed.
       if (existsSync(one.path)) {
         if (!(yield* worktreeAt(one.path))) return yield* new TaskRefused({ taskId, why: 'folder_in_way' })
@@ -100,7 +121,11 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
           if (review === null) return yield* new TaskRefused({ taskId, why: 'branch_gone' })
           yield* copyReviewed(one.repository, one.path, review)
         } else {
-          const kept = one.cleaned === 1 ? yield* commitOf(one.repository, `${KEPT}${one.id}`).pipe(Effect.orElseSucceed(() => null)) : null
+          // Removed by Althar, or detached in a folder another tool made and has since removed: its last commit was kept.
+          const kept =
+            one.cleaned === 1 || found.madeBy !== null
+              ? yield* commitOf(one.repository, `${KEPT}${one.id}`).pipe(Effect.orElseSucceed(() => null))
+              : null
           if (one.branched === 1 && (yield* branchExists(one.repository, one.branch)))
             yield* restoreWorktree(one.repository, one.path, one.branch)
           // Deleted by hand, nothing kept its last commit: with its branch gone too, its work is.
@@ -114,13 +139,15 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
       // A write worktree is set up again, as a new one is: until it is, its task is said to be bringing its folder back, and
       // nothing removes it again. One deleted by hand is marked gone as of now, as one removed is, for both. A review's copy
       // has nothing to set up.
-      const gone = one.cleaned === 1 ? {} : { cleanedAt: yield* timestamp }
+      const gone = one.cleaned === 1 || one.unmade === 1 ? {} : { cleanedAt: yield* timestamp }
       yield* sql.withTransaction(
         Effect.gen(function* () {
           const revision = yield* change(
             'workspaces',
             one.id,
-            one.access === 'write' ? { state: 'ready', setup: null, ...gone } : { state: 'ready', cleanedAt: null },
+            one.access === 'write'
+              ? { state: 'ready', setup: null, ...gone, ...(own ? { path: one.path, madeBy: null } : {}) }
+              : { state: 'ready', cleanedAt: null },
           )
           yield* fact({
             projectId: one.projectId,
@@ -128,14 +155,14 @@ const bringingBack = (taskId: string, actorId: ActorId) =>
             aggregateId: one.id,
             revision,
             type: 'workspace.restored',
-            payload: { removed: one.cleaned === 1 },
+            payload: { removed: one.cleaned === 1, ...(own ? { from: found.path, path: one.path } : {}) },
             actorId,
           })
         }),
       )
     }
     const thread = yield* taskThreadOf(taskId)
-    if (thread !== null)
+    if (thread !== null && removed.some((one) => one.unmade !== 1))
       yield* addItem({ projectId: thread.projectId, threadId: thread.id }, 'notice', {
         source: 'runtime',
         severity: 'info',

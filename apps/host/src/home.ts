@@ -10,6 +10,7 @@ import metadata from '../package.json'
 import { configuredHome } from './configuration'
 import type { HostOptions } from './options'
 import { initializeVault, openVault } from './vault'
+import { listenWorkers } from './workers'
 
 export const HOST_VERSION = metadata.version
 export type HostDependencies = Pick<
@@ -22,6 +23,7 @@ export interface HomeReady {
   readonly apiVersion: number
   readonly version: string
   readonly pid: number
+  readonly workerPort?: number
 }
 
 const runtime = (options: HostOptions, secrets: Layer.Layer<import('@althar/runtime').Secrets>, dependencies: HostDependencies) => {
@@ -88,6 +90,7 @@ export const serveHome = (
           Effect.ensuring(Effect.sync(() => files.key.fill(0))),
         )
       }
+      const worker = yield* listenWorkers(options, instance.homeId)
       const endpoint = yield* listenLocalApi(options.profile).pipe(Effect.provideContext(context))
       yield* ready({
         homeId: endpoint.homeId,
@@ -95,6 +98,7 @@ export const serveHome = (
         apiVersion: API_VERSION,
         version: HOST_VERSION,
         pid: process.pid,
+        ...(worker === undefined ? {} : { workerPort: worker.port }),
       })
       yield* Effect.never
     }),

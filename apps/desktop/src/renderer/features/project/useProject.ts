@@ -28,7 +28,19 @@ import { useOutputs } from '../../shared/useOutputs'
 import { useDrafts } from '../../shared/useDrafts'
 import { useStreamed } from '../../shared/useStreamed'
 import { canPick } from '../../shared/agents'
-import { inView, isSending, mergeItems, newestReads, queueShown, sending, takenBack, unsent, waiting } from '../../shared/items'
+import {
+  inView,
+  isSending,
+  mergeItems,
+  newestReads,
+  queueShown,
+  releasedReadings,
+  sending,
+  takenBack,
+  unsent,
+  waiting,
+} from '../../shared/items'
+import { useUnstartedSend } from '../../shared/useUnstartedSend'
 import { type Choice, moveTo, runningOn, startOf, upcomingOn } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
 
@@ -334,6 +346,16 @@ export const useProject = (projectId: string): ProjectModel => {
       ),
     [client, cache, projectId, newest, readItems, held, fail],
   )
+
+  const releaseUnstarted = useCallback(
+    (moves: ReadonlyArray<string>) =>
+      setCoordinator((current) => {
+        if (current.session !== null) return current
+        return { ...current, items: releasedReadings(current.items, moves) }
+      }),
+    [setCoordinator],
+  )
+  useUnstartedSend(coordinator?.session == null, coordinator?.items ?? NO_ITEMS, readHead, releaseUnstarted)
 
   /** The thread read whole again, as a clear or a forgotten conversation rewrote it: what is held of it before is not kept. */
   const readWhole = useCallback(

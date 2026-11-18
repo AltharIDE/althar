@@ -567,6 +567,10 @@ export const checksGoneForLead = (name: string, failing: ReadonlyArray<string>) 
 export const unsettledLine = (failing: ReadonlyArray<string>, how: 'ended' | 'gone' = 'ended') =>
   `${failingWords(failing)}, and ${how === 'gone' ? "the lead's agent stopped" : 'the lead stopped'}. Tell it what to do.`
 
+/** Why the checks that fail on a change are the person's, as its card says, where Althar couldn't tell its lead they failed. */
+export const unreachedLine = (failing: ReadonlyArray<string>) =>
+  `${failingWords(failing)}, and Althar couldn't tell the lead. Tell it what to do.`
+
 /** Why the checks that fail on a change are the person's, as its card says, where its lead spent its tries and said nothing more. */
 export const spentLine = (failing: ReadonlyArray<string>, tries: number) => `${failingWords(failing)} after ${tries} fixes.`
 

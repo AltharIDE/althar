@@ -344,6 +344,7 @@ export const runtime = (
     readonly checksAppear?: Duration.Duration
     /** How long a change's checks may run before it is the person's; 45 minutes unless a test says. */
     readonly checksStuck?: Duration.Duration
+    readonly checksTold?: Duration.Duration
     /** How long a publish step that may pass waits before it is tried again; none at all unless a test says. */
     readonly publishAgain?: Duration.Duration
     /** How long a task is under way after its agent went or its lead's turn ended; none at all unless a test says. */
@@ -390,6 +391,8 @@ export const runtime = (
     readonly page?: RuntimeOptions['page']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
+    /** The zone leads and the coordinator are told the person's local time in; the computer's unless a test says. */
+    readonly zone?: RuntimeOptions['zone']
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
     readonly disk?: RuntimeOptions['disk']
     /** Whether agents' services answer, and how long a step waits to try one again; no service answers any test unless it says. */
@@ -420,6 +423,7 @@ export const runtime = (
     ...(more.mergeLineEvery === undefined ? {} : { mergeLineEvery: more.mergeLineEvery }),
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
+    ...(more.checksTold === undefined ? {} : { checksTold: more.checksTold }),
     publishAgain: more.publishAgain ?? Duration.zero,
     ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
@@ -444,6 +448,7 @@ export const runtime = (
     ...(more.skills === undefined ? {} : { skills: more.skills }),
     busy: { machine: ROOMY, pressure: false, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
+    ...(more.zone === undefined ? {} : { zone: more.zone }),
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
     // No test reaches a real service: one asked about answers, as it would online, unless the test says.
     connectivity: { answers: () => Effect.succeed(true), ...more.connectivity },

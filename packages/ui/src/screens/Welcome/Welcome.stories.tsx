@@ -6,6 +6,7 @@ import { FIRST_RUN, NONE_READY } from '../../fixtures/setup'
 import { Brand } from '../../foundations/brands/brands'
 import { RuntimeState } from '../../foundations/vocabulary'
 import { Connections, type ServiceConnection, type ServiceOption } from '../../setup/Connections/Connections'
+import { OtherTools, type OtherToolTile } from '../../setup/OtherTools/OtherTools'
 import { CrashReportsLine } from '../../setup/Preferences/Preferences'
 import type { RepositoryChoice } from '../../setup/RepositoryPick/RepositoryPick'
 import type { RuntimeEntry } from '../../setup/Runtimes/Runtimes'
@@ -257,6 +258,68 @@ export const ProjectFailed: Story = {
     picked: ['meridian'],
     error: { step: 'project', said: '~/Projects/meridian is no longer there.' },
   },
+}
+
+/* What Conductor and Claude Code left for meridian, as the welcome finds it once the project is made. */
+const LEFT: OtherToolTile[] = [
+  {
+    id: 'conductor',
+    name: 'Conductor',
+    brand: Brand.Conductor,
+    size: '2 worktrees',
+    fact: '3 files not committed',
+    groups: [
+      {
+        title: 'Worktrees',
+        items: [
+          { key: 'lima', title: 'Lima', at: '2h ago', facts: ['3 files not committed'] },
+          { key: 'oslo', title: 'Oslo', at: 'Tue' },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'claude_code',
+    name: 'Claude Code',
+    brand: Brand.ClaudeCode,
+    size: '4 conversations',
+    fact: 'Last worked on 40m ago',
+    groups: [{ title: 'Conversations', items: [{ key: 'c1', title: 'Gyroscope fixture failing on CI', at: '40m ago' }] }],
+  },
+]
+
+function Bringing(props: Partial<WelcomeProps>) {
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
+  return (
+    <Welcome
+      {...(props as WelcomeProps)}
+      bring={{
+        content: (
+          <OtherTools
+            tiles={LEFT}
+            picked={picked}
+            onPick={(keys, on) =>
+              setPicked((now) => {
+                const next = new Set(now)
+                for (const key of keys)
+                  if (on) next.add(key)
+                  else next.delete(key)
+                return next
+              })
+            }
+          />
+        ),
+        go: picked.size === 0 ? null : `Bring in ${picked.size}`,
+        onGo: fn(),
+      }}
+    />
+  )
+}
+
+/** What other tools left in its folders, once the project is made: nothing taken, so its button lets it be. */
+export const Bring: Story = {
+  args: { toured: true, defaultStep: 'bring', picked: ['meridian'], made: true },
+  render: (args) => <Bringing {...args} />,
 }
 
 /** Where its code is: the host its remote names says so; going on without one is the lesser choice. */

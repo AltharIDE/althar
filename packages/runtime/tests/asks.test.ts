@@ -152,7 +152,10 @@ describe('what the lead is given shows where it reads it', () => {
         ['agent_message', 'Claude AI usage limit reached|1759075200'],
       ])
       assert.strictEqual(shown[3]?.[0], 'notice')
-      assert.match(shown[3]?.[1] ?? '', /^Fake claude-code ran out of usage, until .+\. Fake codex takes over, on Small\.$/)
+      assert.match(
+        shown[3]?.[1] ?? '',
+        /^Small on Fake claude-code ran out of usage, until .+\. Small on Fake codex takes over until then\.$/,
+      )
       assert.deepStrictEqual(shown[4], [
         'agent_message',
         'echo: You are taking over a task from Fake claude-code, in the same worktree. Its record so far is below.',

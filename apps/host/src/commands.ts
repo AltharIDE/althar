@@ -27,6 +27,7 @@ import { verifyBundledPrograms } from './updates/preflight'
 import { configureUpdates, type SetupDependencies } from './updates/setup'
 import { controllerAlive, loadInstallation, processStamp, readReceipt, updateError } from './updates/store'
 import { databasePermit } from './updates/reservation'
+import { configureWorkers, workerCertificate, workerOperation } from './workers'
 
 export interface HostIO extends ServiceCommands {
   readonly stdio?: BridgeStreams
@@ -85,6 +86,37 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
         const configured = yield* configuredHome(options)
         yield* disableNetwork(configured.profile)
         return yield* out({ enabled: false }, 'Direct access disabled for the next start. Restart the host to close its listener.')
+      }
+      case 'configure-workers':
+      case 'disable-workers': {
+        const configured = yield* configuredHome(options)
+        const result = yield* configureWorkers(configured, options.workerConfiguration)
+        return yield* out(result, `Worker listener ${result.enabled ? 'configured' : 'disabled'}. Restart the home to apply this setting.`)
+      }
+      case 'enroll-worker': {
+        const configured = yield* configuredHome(options)
+        const workerId = yield* workerOperation(configured.profile, async (store) =>
+          store.enroll(await workerCertificate(options.workerCertificate ?? '')),
+        )
+        return yield* out({ workerId }, `Enrolled worker ${workerId}`)
+      }
+      case 'revoke-worker': {
+        const configured = yield* configuredHome(options)
+        yield* workerOperation(configured.profile, (store) => store.revoke(options.workerId ?? ''))
+        return yield* out({ workerId: options.workerId, revoked: true }, 'Worker certificate revoked')
+      }
+      case 'worker-run': {
+        const configured = yield* configuredHome(options)
+        const attemptId = yield* workerOperation(configured.profile, (store) => store.enqueue(options.workerId ?? ''))
+        return yield* out({ attemptId, state: 'queued' }, `Diagnostic queued as ${attemptId}`)
+      }
+      case 'worker-result': {
+        const configured = yield* configuredHome(options)
+        const result = yield* workerOperation(configured.profile, (store) => store.result(options.workerAttemptId ?? ''))
+        return yield* out(
+          result,
+          `${result.attemptId} ${result.state}${result.output === null ? '' : `\n${JSON.stringify(result.output)}`}`,
+        )
       }
       case 'pair': {
         const configured = yield* configuredHome(options)
@@ -289,7 +321,10 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
                   catch: storageFailure,
                 })
               }
-              yield* out({ state: 'ready', ...ready }, `Home ready: ${ready.homeId}`)
+              yield* out(
+                { state: 'ready', ...ready },
+                `Home ready: ${ready.homeId}${ready.workerPort === undefined ? '' : `\nWorker listener on port ${ready.workerPort}`}`,
+              )
             }),
           hostDependencies,
         )

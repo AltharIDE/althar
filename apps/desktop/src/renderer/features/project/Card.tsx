@@ -2,6 +2,8 @@ import { useState } from 'react'
 
 import type { AgentStatus, ChangeSummary, PlanStep, Product, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
+  AsideCard,
+  AsideState,
   type IssueRefProps,
   type LaunchStep,
   LinkButton,
@@ -91,6 +93,8 @@ export interface CardActions {
   /** Makes a branch its list doesn't have, in the plan's repository, and points the plan at it (ADR-093). */
   readonly onCreateBranch: (planId: string, steps: ReadonlyArray<PlanStep>, end: End | null, repositoryId: string, branch: string) => void
   readonly onOpen: (threadId: string) => void
+  /** Opens an aside beside the coordinator, as its pill does; absent where there is no room for one, and it opens as a task does. */
+  readonly onOpenAside?: (taskId: string, threadId: string) => void
   /** Opens a task's team dialog: a small change's card, which starts at once, offers it from the start. */
   readonly onChangeTeam?: (taskId: string) => void
   /** Stops a command a task's lead left running, from the task that waits for the place it keeps. */
@@ -393,8 +397,13 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   const title = useTaskTitle(card.taskId, card.title)
   const named = useModelNames()
   const effortOf = useEffortNames()
-  // Never begun: drafted with no plan, or discarded before it started, wherever it was then.
+  // Never begun: drafted with no plan, or discarded before it started, wherever it was then, on Scratch too: an aside's card
+  // would show it running or ready.
   if (card.unplanned === true || (card.discarded === true && card.startedAt === null)) return <NotBegun card={card} actions={actions} />
+  // An aside (a quick job on Scratch, off the board) has no steps to show or plan to change: its own card, lighter, says so,
+  // whatever it waits for. Only one counting down to its start keeps the plan's card, which can hold it.
+  if (card.scratch === true && !(card.phase === 'planned' && card.plan?.startsAt != null))
+    return <Aside card={card} actions={actions} title={title} />
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
@@ -482,6 +491,65 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
           })}
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: discarded ? { ...text.status, [TaskStatus.Stopped]: text.discarded } : text.status }}
+    />
+  )
+}
+
+/** Where an aside stands, as its card says it: one its lead ended unasked failed; one the person stopped is stopped. */
+const asideStateOf = (card: TaskCardContent): AsideState => {
+  if (card.phase === 'ready' || card.phase === 'settled')
+    return (card.handedBack ?? card.checksBack ?? null) === null ? AsideState.Ready : AsideState.Yours
+  // Kept for later by the person: done, its result standing.
+  if (card.phase === 'kept') return AsideState.Kept
+  if (card.phase === 'waiting') return AsideState.Yours
+  if (card.phase === 'stopped')
+    return card.stopped?.by === 'declined' || card.stopped?.by === 'interrupted' ? AsideState.Stopped : AsideState.Failed
+  if (card.phase === 'held') return AsideState.Stopped
+  if (card.queued !== null || (card.planWaits === true && card.waitsForCheckout != null)) return AsideState.Waiting
+  if (card.waits !== null || card.reconnects != null || card.externalWait !== undefined) return AsideState.Paused
+  return AsideState.Running
+}
+
+/** An aside's card: where it stands, its result or what it is at, and a way in beside the coordinator. */
+function Aside({ card, actions, title }: { card: TaskCardContent; actions: CardActions; title: string }) {
+  const state = asideStateOf(card)
+  const said = card.latest?.by === 'lead' ? card.latest.said : undefined
+  // Its answer, by the thread's order: its lead's report, or what it said after the person last asked it more. Its lead's
+  // latest words may only acknowledge the report, so they stand only where there is neither.
+  const answer = card.answer ?? said
+  const result = (() => {
+    switch (state) {
+      case AsideState.Ready:
+      case AsideState.Kept:
+      case AsideState.Failed:
+        return answer
+      case AsideState.Stopped:
+        return card.stopped?.by == null ? undefined : stepText.stoppedBy[card.stopped.by]
+      case AsideState.Waiting:
+        return card.queued !== null
+          ? queuedWords(card.queued)
+          : card.waitsForCheckout == null
+            ? undefined
+            : localText.waits(card.waitsForCheckout)
+      case AsideState.Paused:
+        return card.externalWait !== undefined
+          ? externalWaitWords(card.externalWait, clock)
+          : card.waits !== null
+            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until), undefined, card.waits.left)
+            : card.reconnects != null
+              ? reconnectsWords(card.reconnects, clock)
+              : said
+      default:
+        return said
+    }
+  })()
+  return (
+    <AsideCard
+      task={card.slug}
+      title={title}
+      state={state}
+      result={result}
+      onOpen={() => (actions.onOpenAside === undefined ? actions.onOpen(card.threadId) : actions.onOpenAside(card.taskId, card.threadId))}
     />
   )
 }

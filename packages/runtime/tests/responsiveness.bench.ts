@@ -9,6 +9,8 @@ import { SqlClient } from 'effect/sql'
 import { afterAll, beforeAll, test } from 'vitest'
 
 import { Connections } from '../src/Connections'
+import { Coordinator } from '../src/Coordinator'
+import { coordinatorRecord } from '../src/handover'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -27,8 +29,9 @@ import { fakeConnectors, HOST, runtime, until } from './support'
  * with a thread of 1,000 items, and a coordinator's thread of 400 with its
  * cards. A board, the home, a task's latest page and the coordinator's are
  * what each window reads again as agents work; a tool call's update is what
- * an agent writes most; and a card worked out again is what each change
- * costs before any window hears of it.
+ * an agent writes most; a card worked out again is what each change costs
+ * before any window hears of it; and the coordinator's record is what the
+ * person's first words to a session of it wait on, beside its agent starting.
  */
 
 const store = join(mkdtempSync(join(tmpdir(), 'althar-bench-')), 'althar.sqlite')
@@ -93,6 +96,8 @@ afterAll(async () => {
 const READ = 50
 const WRITE = 5
 const ROUND = 150
+/** The coordinator's record is written while its agent starts, which takes a second or more: well within that. */
+const RECORD = 250
 
 /** A read of the store, as a window's call makes it. */
 const reading = (read: (queries: Queries['Service']) => Effect.Effect<unknown, unknown>) => () =>
@@ -143,3 +148,20 @@ const cardAgain = () =>
   )
 
 test('works a task’s card out again after one change', (context) => measure(context, ROUND, { 'a rename, to its card': cardAgain }))
+
+test('writes the coordinator’s record, as a session of it starts', (context) =>
+  measure(context, RECORD, {
+    'the coordinator’s record': () =>
+      run(
+        Effect.gen(function* () {
+          const threadId = yield* (yield* Coordinator).thread(projectId)
+          return yield* coordinatorRecord({
+            projectId,
+            threadId,
+            modelOf: (step) => step.model ?? step.agentId,
+            working: () => false,
+            recent: { budget: 60_000 },
+          })
+        }),
+      ),
+  }))
