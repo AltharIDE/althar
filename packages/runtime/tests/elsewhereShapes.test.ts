@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
@@ -319,7 +319,7 @@ describe('tools’ stores', () => {
     assert.isNull(by('/trees/b')?.pullRequest)
     assert.isUndefined(by('/trees/c'))
     // Orca's folder is named either way, one folder where the disk ignores case, as a Mac's does.
-    assert.deepStrictEqual([...new Set(stores.roots.orca)], ['/trees', '/abs/trees'])
+    assert.deepStrictEqual([...new Set(stores.roots.orca)], [resolve('/r', '../trees'), '/abs/trees'])
     assert.strictEqual(by('/t3then/x')?.name, 'Old thread')
     assert.deepStrictEqual(stores.roots.t3, ['/t3now', '/t3then'])
     assert.deepStrictEqual(
