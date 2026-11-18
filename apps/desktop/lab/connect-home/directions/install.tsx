@@ -75,7 +75,12 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
   const [madeUser, setMadeUser] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
-  const target = flow.ssh.target.trim() || (scenario === 'root' ? 'root@vps.example.com' : 'deploy@vps.example.com')
+  // The run's timers outlive the render that started them: they reach the form, and its check, as it is now.
+  const latest = useRef(flow)
+  latest.current = flow
+  const fallback = scenario === 'root' ? 'root@vps.example.com' : 'deploy@vps.example.com'
+  const typed = () => latest.current.ssh.target.trim() || fallback
+  const target = startedFor.current || typed()
   const login = target.includes('@') ? target.split('@')[0]! : 'deploy'
   const host = TARGET_HOST(target)
   const say = (line: string) => setLog((was) => [...was, line])
@@ -88,8 +93,28 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
     setPhase('failed')
   }
 
-  /** Runs the step at `step`, then the next, as the scenario has them go. */
+  /** Another server typed since it failed: what was done was done there, so it starts over, there. True where it did. */
+  const movedOn = () => {
+    if (typed() === startedFor.current) return false
+    startedFor.current = typed()
+    trusted.current = false
+    dropped.current = false
+    offline.current = scenario === 'offline'
+    sending.current = false
+    setUpload(false)
+    setProgress(0)
+    setWarning(null)
+    setMadeUser(false)
+    setLog([])
+    run(0)
+    return true
+  }
+
+  /** Runs the step at `step`, then the next, as the scenario has them go, on the server it's setting up now. */
   const run = (step: number) => {
+    const target = startedFor.current || typed()
+    const login = target.includes('@') ? target.split('@')[0]! : 'deploy'
+    const host = TARGET_HOST(target)
     setAt(step)
     setPhase('running')
     setProblem(null)
@@ -138,7 +163,7 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
           say(`$ ssh ${own}  (from here on: the home is althar's)`)
           startedFor.current = own
           setMadeUser(true)
-          flow.ssh.setTarget(own)
+          latest.current.ssh.setTarget(own)
         }
         run(2)
       })
@@ -155,6 +180,7 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
             other: {
               label: 'Send it from here',
               act: () => {
+                if (movedOn()) return
                 offline.current = false
                 sending.current = true
                 setUpload(true)
@@ -205,7 +231,8 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
         say('althar-host status: ready')
         setAt(5)
         setPhase('done')
-        flow.submit()
+        // the form's check as it is now: of the dedicated user's target where Althar made one
+        latest.current.submit()
       })
   }
 
@@ -237,32 +264,19 @@ export const useInstall = (flow: Flow, scenario: Scenario) => {
     /** Under way, where the form holds still. */
     busy: phase === 'running' || phase === 'reconnecting' || (phase === 'done' && flow.stage === 'checking'),
     start: () => {
-      startedFor.current = flow.ssh.target.trim()
+      startedFor.current = typed()
       setLog([])
       run(0)
     },
     retry: () => {
-      // Another server typed since it failed: what was done was done there, so it starts over here.
-      if (flow.ssh.target.trim() !== startedFor.current) {
-        startedFor.current = flow.ssh.target.trim()
-        trusted.current = false
-        dropped.current = false
-        offline.current = scenario === 'offline'
-        sending.current = false
-        setUpload(false)
-        setProgress(0)
-        setWarning(null)
-        setMadeUser(false)
-        setLog([])
-        return run(0)
-      }
+      if (movedOn()) return
       say(`(trying again from: ${STEPS[at]?.label ?? ''})`)
       run(at)
     },
     /** Set up, but its identity couldn't be read: reads it again; the setup itself stands. */
     reread: () => {
       say('(reading its identity again)')
-      flow.submit()
+      latest.current.submit()
     },
     resume: () => {
       say('(resuming: the server has what it had)')

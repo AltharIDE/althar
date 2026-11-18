@@ -38,6 +38,7 @@ export const homes: HomesHost = {
   list: async () => [],
   overview: async () => ({ homes: [], windows: { local: 'local' }, projects: {}, opened: {} }),
   inspect: async (target): Promise<CheckedHome> => {
+    document.body.dataset.inspected = target.target
     if (scene === 'checking' || scene === 'installing') return never()
     await wait(1300)
     if (scene === 'refused' || failed())
