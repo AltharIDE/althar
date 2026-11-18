@@ -162,6 +162,11 @@ export interface RuntimeOptions {
    * host registers its checks a few seconds after a push. A minute unless a test says otherwise (ADR-040).
    */
   readonly checksAppear?: Duration.Duration
+  /**
+   * How long the look at a pull request that heard its checks fail has to tell its lead before the card says nobody is on
+   * them: a minute unless a test says otherwise.
+   */
+  readonly checksTold?: Duration.Duration
   /** How long a change's checks may run, while Althar sees them through, before the change is the person's: 45 minutes unless a test says (ADR-041). */
   readonly checksStuck?: Duration.Duration
   /**

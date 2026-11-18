@@ -3011,7 +3011,8 @@ export class Queries extends Context.Service<
                     ? 'conflict'
                     : roundChecks && !busy
                       ? 'checks_running'
-                      : seeing || fixing?.open === true
+                      : // Only while its lead is on them: failing checks it was never told are nobody's yet (`untold`).
+                        (seeing && fixing?.untold !== true) || fixing?.onIt === true
                         ? busy || !checksRun
                           ? 'checks'
                           : 'checks_running'
