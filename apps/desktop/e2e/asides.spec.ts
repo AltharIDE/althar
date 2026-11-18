@@ -195,7 +195,7 @@ test('an aside answers while the task slot is occupied and another task waits in
       .click()
     await startTask(page, 'Keep the one task place', '[lead:wait]')
     await startTask(page, 'Wait for the task place', '[lead:wait]')
-    const queued = page.getByText(/^Waiting: 1 of 1 agents busy/)
+    const queued = page.getByText(/^Waiting · 1 agent busy$/)
     await expect(queued).toBeVisible()
     await startAside(page, 'Hi')
     const pills = page.getByRole('tablist', { name: 'Conversations' }).filter({ visible: true })

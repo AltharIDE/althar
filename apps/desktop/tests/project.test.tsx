@@ -757,7 +757,7 @@ describe('the Talk room', () => {
     const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
     withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(await screen.findByText('Waiting · 4 agents busy')).toBeTruthy()
     // Nothing to start: it starts on its own once an agent is free. It can still be held, which takes it out of the line.
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Hold' }))
@@ -781,7 +781,7 @@ describe('the Talk room', () => {
     const waitingCard = card({ phase: 'running', step: 'review', queued: { busy: 4, atOnce: 4 }, branch: 'althar/midway' })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
     withServices(<Project room={Room.Talk} />, client)
-    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(await screen.findByText('Waiting · 4 agents busy')).toBeTruthy()
     const track = screen.getByRole('list', { name: 'Steps' })
     expect(track.getAttribute('data-status')).toBe('queued')
     // The branch is on the task's own view, not on the card.
