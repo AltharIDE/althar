@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit } from 'effect'
+import { Effect, Exit, Fiber } from 'effect'
 
 import { keeper, keeperName, keeperStartedAt } from '../src/keeper'
 
@@ -65,6 +65,35 @@ describe('the keeper', () => {
       const paths = await Effect.runPromise(Effect.all([keeper(folder), keeper(folder), keeper(folder)], { concurrency: 'unbounded' }))
       assert.deepStrictEqual(paths, [join(folder, keeperName), join(folder, keeperName), join(folder, keeperName)])
       assert.deepStrictEqual(readFileSync(runs, 'utf8').trim().split('\n'), ['ran'])
+    })
+  })
+
+  scripted('tells all that asked while it was being built why that build failed, and builds no more for them', async () => {
+    const runs = join(mkdtempSync(join(tmpdir(), 'althar-keeper-runs-')), 'runs')
+    await withCompiler(`echo ran >> '${runs}'; sleep 0.3; echo 'keeper.cs(1,1): error CS1002'; exit 1`, async (folder) => {
+      const exits = await Effect.runPromise(
+        Effect.all([Effect.exit(keeper(folder)), Effect.exit(keeper(folder))], { concurrency: 'unbounded' }),
+      )
+      for (const exit of exits) assert.include(JSON.stringify(exit), 'keeper.cs(1,1): error CS1002')
+      assert.deepStrictEqual(readFileSync(runs, 'utf8').trim().split('\n'), ['ran'])
+    })
+  })
+
+  scripted('is built by one that waited where the build it waited for stopped, as its asker did', async () => {
+    const runs = join(mkdtempSync(join(tmpdir(), 'althar-keeper-runs-')), 'runs')
+    await withCompiler(`echo ran >> '${runs}'; sleep 0.3; ${BUILDS}`, async (folder) => {
+      const path = await Effect.runPromise(
+        Effect.gen(function* () {
+          const first = yield* Effect.forkChild(keeper(folder))
+          yield* Effect.sleep('50 millis')
+          const waiting = yield* Effect.forkChild(keeper(folder))
+          yield* Effect.sleep('50 millis')
+          yield* Fiber.interrupt(first)
+          return yield* Fiber.join(waiting)
+        }),
+      )
+      assert.strictEqual(path, join(folder, keeperName))
+      assert.deepStrictEqual(readFileSync(runs, 'utf8').trim().split('\n'), ['ran', 'ran'])
     })
   })
 

@@ -19,7 +19,7 @@ import {
 } from '../src/agentTools'
 import { Sessions } from '../src/Sessions'
 import { turnSkillsOn } from '../src/skillSync'
-import { items, launches, runtime, sessionMetas, sessionsAsked, task, until } from './support'
+import { items, runtime, sessionLaunch, sessionMetas, sessionsAsked, task, until } from './support'
 
 /*
  * The person's skills as one list, from each place they are kept, and which roles
@@ -296,15 +296,15 @@ describe('the roles and projects a skill is given in', () => {
         yield* sessions.stop(created.threadId)
         // The coordinator gets impeccable, and not alpha, whatever agent it runs.
         yield* sessions.start({ threadId: project.coordinatorThreadId, agentId: 'opencode' })
-        assert.isUndefined(launches.at(-1)?.options?.heldSkills)
-        const config = JSON.parse(launches.at(-1)?.launched?.OPENCODE_CONFIG_CONTENT ?? '{}') as { permission?: { skill?: unknown } }
+        assert.isUndefined(sessionLaunch()?.options?.heldSkills)
+        const config = JSON.parse(sessionLaunch()?.launched?.OPENCODE_CONFIG_CONTENT ?? '{}') as { permission?: { skill?: unknown } }
         assert.isUndefined(config.permission?.skill)
         yield* sessions.stop(project.coordinatorThreadId)
         // Pressed out of the project: its lead holds it too.
         yield* setToolInProject('skill', 'shared', project.projectId, false)
         yield* sessions.start({ threadId: created.threadId, agentId: 'opencode' })
-        assert.deepStrictEqual(launches.at(-1)?.options?.heldSkills, [{ name: 'impeccable' }, { name: 'shared' }])
-        const held = JSON.parse(launches.at(-1)?.launched?.OPENCODE_CONFIG_CONTENT ?? '{}') as { permission?: { skill?: unknown } }
+        assert.deepStrictEqual(sessionLaunch()?.options?.heldSkills, [{ name: 'impeccable' }, { name: 'shared' }])
+        const held = JSON.parse(sessionLaunch()?.launched?.OPENCODE_CONFIG_CONTENT ?? '{}') as { permission?: { skill?: unknown } }
         assert.deepStrictEqual(held.permission?.skill, { impeccable: 'deny', shared: 'deny' })
         yield* sessions.stop(created.threadId)
       }),

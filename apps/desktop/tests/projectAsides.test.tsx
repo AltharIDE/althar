@@ -33,7 +33,8 @@ const aside: BoardTask = {
   phase: 'ready',
   scratch: true,
   state: 'active',
-  createdAt: '2026-11-12T10:00:00Z',
+  // Dated by the real clock: the pills read it, and one left a week folds into “N older”, off its tab.
+  createdAt: new Date().toISOString(),
   settledAt: null,
   changed: null,
   here: [],

@@ -94,6 +94,13 @@ export const launches: Array<{
   readonly launched?: Readonly<Record<string, string>> | undefined
 }> = []
 
+/**
+ * The latest agent started for a session, by the worker id each session's launch carries. Not the models' catalogue's
+ * probe of an agent, started in the background once its sign-in is checked, which can land after a session's on a busy
+ * computer (Models.ts).
+ */
+export const sessionLaunch = () => launches.findLast((one) => one.env.ALTHAR_WORKER !== undefined)
+
 /** What each fake agent in this process was asked as a session started, as it received it: its added directories and `_meta`. */
 export const sessionsAsked: Array<{
   readonly agentId: string
