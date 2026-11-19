@@ -263,11 +263,11 @@ describe('presets', () => {
       const [card] = yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Small change')
       assert.strictEqual(card?.plan?.preset, 'Small change')
 
-      // Prototype, picked on its card: its lead, ending and brief.
+      // Prototype, picked on its card: its ending and brief. It names no model, so the lead the plan had stays.
       const instance = yield* Instance
       assert.strictEqual(yield* (yield* Plans).applyPreset(first.id, 'Prototype', instance.personId), 'Prototype')
       const now = yield* plan()
-      assert.deepInclude(now.parameters.steps[0], { agentId: 'claude-code', model: 'claude-opus-5-5' })
+      assert.deepInclude(now.parameters.steps[0], { agentId: 'codex', model: 'large' })
       assert.strictEqual(now.parameters.end, 'none')
       // The review Small change had is gone, not left as a skipped row to add back.
       assert.deepStrictEqual(
@@ -277,6 +277,22 @@ describe('presets', () => {
       const [task] = yield* sql<{ description: string }>`SELECT description FROM tasks WHERE id = ${now.taskId}`
       assert.include(task?.description, 'A prototype: show the idea working, quickly.')
       yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Prototype')
+      // Tuned by the person, through the coordinator: their lead goes on a plan from it, and its card still names it.
+      assert.match(
+        yield* callTool(coordinator, 'tune_preset', { preset: 'prototype', lead: { agent: 'claude-code' }, brief: 'Mine.' }),
+        /^Prototype is tuned as theirs: .*led by claude-code’s own model/,
+      )
+      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Prototype (built in, tuned by them):')
+      yield* (yield* Plans).applyPreset(first.id, 'Prototype', instance.personId)
+      assert.deepInclude((yield* plan()).parameters.steps[0], { agentId: 'claude-code', model: null })
+      yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Prototype')
+      // Only a built-in one is tuned here; reset, it is the built-in again, naming no model.
+      assert.include(yield* callTool(coordinator, 'tune_preset', { preset: 'Mine', brief: 'x' }), 'isn’t a built-in preset')
+      assert.match(
+        yield* callTool(coordinator, 'tune_preset', { preset: 'Prototype', reset: true }),
+        /^Prototype is back to the built-in: .*the coordinator picks its lead/,
+      )
+      assert.notInclude(yield* callTool(coordinator, 'list_presets', {}), 'tuned by them')
       // Chat: a copy on Scratch, nothing checked.
       yield* (yield* Plans).applyPreset(first.id, 'Chat', instance.personId)
       const chat = yield* plan()

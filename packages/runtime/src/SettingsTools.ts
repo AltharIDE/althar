@@ -1546,6 +1546,8 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   // althar/tasks: presets (a task is a conversation plus parts)
   editPreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',
   removePreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',
+  tunePreset: 'tool:tune_preset',
+  resetPreset: 'tool:tune_preset',
   // althar/notifications, althar/appearance, althar/editor-and-browser, althar/about
   notifyCalls: 'window: kept in the window on this computer',
   notifyReady: 'window: kept in the window on this computer',

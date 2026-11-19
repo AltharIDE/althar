@@ -22,6 +22,7 @@ import {
   type MoveOutcome,
   type Preset,
   type PresetParts,
+  type PresetTuning,
   type WorksIn,
   type AccountSignInState,
   type SignInEnding,
@@ -390,6 +391,10 @@ export interface Client {
   }) => Promise<{ readonly name: string }>
   /** Removes one of the person's presets. */
   readonly removePreset: (id: string) => Promise<void>
+  /** Tunes a built-in preset as the person's own: its lead and reviewer, their efforts, and its brief. */
+  readonly tunePreset: (id: string, tuning: PresetTuning) => Promise<void>
+  /** Takes a built-in preset back to its default. */
+  readonly resetPreset: (id: string) => Promise<void>
   /** Says not to offer a task's parts as a preset again. */
   readonly declinePresetOffer: (taskId: string) => Promise<void>
   /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
@@ -1118,6 +1123,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     editPreset: (input) => command((commandId) => api.EditPreset({ commandId, ...input })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
+    tunePreset: (id, tuning) => command((commandId) => api.TunePreset({ commandId, id, tuning })),
+    resetPreset: (id) => command((commandId) => api.ResetPreset({ commandId, id })),
     declinePresetOffer: (taskId) => command((commandId) => api.DeclinePresetOffer({ commandId, taskId })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
     stopRunning: (taskId) => command((commandId) => api.StopRunning({ commandId, taskId })),

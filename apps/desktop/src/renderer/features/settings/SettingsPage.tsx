@@ -46,7 +46,7 @@ import altharFace from '../../../../resources/faces/althar-ai.svg'
 import type { AccentSource, Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
 import { type StoragePlace, useServices } from '../../data/services'
-import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
+import { agentLineOf, brandOf, canPick, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
@@ -244,7 +244,7 @@ function SectionBody({
         <>
           <TasksSection />
           <SettingGroup title={presetsText.title} headingLevel={2}>
-            <PresetsSection />
+            <PresetsSection agents={(start.status?.agents ?? []).filter(canPick)} />
           </SettingGroup>
         </>
       )
