@@ -28,6 +28,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/ProjectSwitcher/ProjectSwitcher.tsx': 'the switcher’s trigger and its project rows',
   'home/SinceRow/SinceRow.tsx': 'what happened, stretched over its row',
   'home/NeedLine/NeedLine.tsx': 'the call’s title, which opens its task',
+  'setup/OtherTools/OtherTools.tsx': 'a tool’s tile, the whole of which takes all it left, and its corner, which opens it',
   'home/ProjectList/ProjectList.tsx': 'a project’s row, which opens it; the quiet line, which folds',
   'chrome/ProjectTabs/ProjectTabs.tsx': 'a tab, whose shape joins the bar below it',
   'setup/RepositorySetups/RepositorySetups.tsx': 'a repository’s tab, whose shape joins the card below it',

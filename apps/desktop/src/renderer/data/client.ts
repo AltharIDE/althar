@@ -1,8 +1,10 @@
 import {
   API_VERSION,
   socketCanCall,
+  type BroughtIn,
   type ClientIdentity,
   type ConnectionInfo,
+  type Elsewhere,
   type FeedPosition,
   type SearchDocuments,
 } from '@althar/contracts'
@@ -20,6 +22,7 @@ import {
   type MoveOutcome,
   type Preset,
   type PresetParts,
+  type PresetTuning,
   type WorksIn,
   type AccountSignInState,
   type SignInEnding,
@@ -160,6 +163,16 @@ export interface Client {
   readonly listProjects: () => Promise<ProjectList>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
+  /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
+  readonly lookElsewhere: (at: { readonly projectId: string } | { readonly grant: string }) => Promise<Elsewhere>
+  /** Brings in what was picked of it, by its keys: worktrees as tasks held Up next on `steps`, setups, conversations. */
+  readonly bringIn: (input: {
+    readonly projectId: string
+    readonly worktrees: ReadonlyArray<string>
+    readonly setups: ReadonlyArray<string>
+    readonly conversations: ReadonlyArray<string>
+    readonly steps: ReadonlyArray<PlanStep>
+  }) => Promise<BroughtIn>
   /** Where a new repository named after `name` would go in the folder a grant names, read without making it; refused where it can't. */
   readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
   /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
@@ -378,6 +391,10 @@ export interface Client {
   }) => Promise<{ readonly name: string }>
   /** Removes one of the person's presets. */
   readonly removePreset: (id: string) => Promise<void>
+  /** Tunes a built-in preset as the person's own: its lead and reviewer, their efforts, and its brief. */
+  readonly tunePreset: (id: string, tuning: PresetTuning) => Promise<void>
+  /** Takes a built-in preset back to its default. */
+  readonly resetPreset: (id: string) => Promise<void>
   /** Says not to offer a task's parts as a preset again. */
   readonly declinePresetOffer: (taskId: string) => Promise<void>
   /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
@@ -994,6 +1011,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    lookElsewhere: (at) => settle(api.LookElsewhere(at)),
+    bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
     makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
     prepareFolder: (grant, path) =>
@@ -1104,6 +1123,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     editPreset: (input) => command((commandId) => api.EditPreset({ commandId, ...input })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
+    tunePreset: (id, tuning) => command((commandId) => api.TunePreset({ commandId, id, tuning })),
+    resetPreset: (id) => command((commandId) => api.ResetPreset({ commandId, id })),
     declinePresetOffer: (taskId) => command((commandId) => api.DeclinePresetOffer({ commandId, taskId })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
     stopRunning: (taskId) => command((commandId) => api.StopRunning({ commandId, taskId })),

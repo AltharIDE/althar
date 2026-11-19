@@ -84,7 +84,7 @@ import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { hearsOf, personsWords, quoted, threadsSaying } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { describe as describePreset, presetsIn } from './presets'
+import { describe as describePreset, presetsIn, resetPreset, tunePreset } from './presets'
 import {
   callBegan,
   callEnded,
@@ -108,7 +108,7 @@ import { waitFor } from './waits'
 export const LEAD_STARTS = { turn: 3, all: 10 } as const
 
 /** What a task's lead is told of starting tasks, in each tool that starts one. */
-const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers (a prototype the person wants built goes on as a change in its own task: change_part). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
+const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers, and never to change your own task's shape or approach: prototyping or exploring designs for its work, or building what it prototyped, happens on your task itself, on its branch and pull request, with change_part (preset Prototype, or Change). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
 
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
@@ -368,6 +368,13 @@ const Relead = Schema.Struct({
 const OnTask = Schema.Struct({ task: Schema.String })
 /* A review offered: on the lead's own task where it leaves task out; by the rules' reviewer where it leaves review out. */
 const ReviewOffered = Schema.Struct({ task: Schema.optional(Schema.String), review: Schema.optional(StepPick) })
+const TunePresetInput = Schema.Struct({
+  preset: Schema.String,
+  lead: Schema.optional(Schema.NullOr(StepPick)),
+  review: Schema.optional(Schema.NullOr(StepPick)),
+  brief: Schema.optional(Schema.NullOr(Schema.String)),
+  reset: Schema.optional(Schema.Boolean),
+})
 const PartOf = Schema.Struct({ task: Schema.String, part_of: Schema.Boolean, issue: Schema.optional(Schema.String) })
 const IssueAdded = Schema.Struct({ task: Schema.optional(Schema.String), issue: Schema.String, part_of: Schema.optional(Schema.Boolean) })
 
@@ -1544,10 +1551,12 @@ export class Coordinator extends Context.Service<
               title,
               follow: 'none',
             })
+          // Its review reads what its lead builds now, at Ship, not a pull request's head as it stood while it was a prototype.
           yield* runs.changeTeam({
             taskId: task.id,
             steps: review === null ? (own === undefined ? [] : [{ ...own, skipped: true }]) : [review],
             actorId: instance.systemId,
+            atShip: true,
           })
           yield* runs.reshape({ taskId: task.id, end, ...(review === null ? {} : { afterMerge: null }), actorId: instance.systemId })
           const named = yield* modelNamer
@@ -2921,7 +2930,76 @@ export class Coordinator extends Context.Service<
               const all = yield* presetsIn(access.projectId)
               // Its lead as list_models names it, not by the id a preset was written with.
               const models = presetModels(yield* usableModels(access.projectId).pipe(Effect.orElseSucceed(() => [])))
-              return all.map((one) => `- ${one.name}${one.builtin ? '' : ' (theirs)'}: ${describePreset(one.parts, models)}.`).join('\n')
+              return all
+                .map(
+                  (one) =>
+                    `- ${one.name}${one.builtin ? (one.tuned === true ? ' (built in, tuned by them)' : '') : ' (theirs)'}: ${describePreset(one.parts, models)}.`,
+                )
+                .join('\n')
+            }),
+        ),
+        tool(
+          'tune_preset',
+          'Tunes one of the built-in presets (Chat, Change, Small change, Review a PR, Prototype) as the person’s own, on their word, as Settings does: who leads it and at what effort, who reviews it and at what effort, and its brief. A built-in names no model: its lead and reviewer are picked as for any step until the person sets one here. What you leave out stays as they had it; null puts that part back to the built-in’s; reset takes all of it back. Their own presets they change in Settings. It acts at once: say what you set in a line.',
+          {
+            type: 'object',
+            properties: {
+              preset: { type: 'string', description: 'The built-in preset, by name as list_presets names it.' },
+              lead: {
+                type: ['object', 'null'],
+                description: 'Its lead’s model, as list_models writes it, with an effort where it matters; null, picked as for any step.',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+              },
+              review: {
+                type: ['object', 'null'],
+                description: 'Its reviewer’s model, with an effort where it matters; null, picked as for any step.',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+              },
+              brief: { type: ['string', 'null'], description: 'A few lines its lead reads first; null, the built-in’s own.' },
+              reset: { type: 'boolean', description: 'Takes the preset back to the built-in, everything the person set gone.' },
+            },
+            required: ['preset'],
+          },
+          (access, input) =>
+            Effect.gen(function* () {
+              const asked = yield* read(TunePresetInput, input)
+              const now = (yield* presetsIn(access.projectId)).find(
+                (one) => one.builtin && (one.id === asked.preset || one.name.toLowerCase() === asked.preset.trim().toLowerCase()),
+              )
+              if (now === undefined)
+                return yield* new ToolRefused({
+                  message: `“${asked.preset}” isn’t a built-in preset: Chat, Change, Small change, Review a PR or Prototype. The person changes their own in Settings.`,
+                })
+              const models = presetModels(yield* usableModels(access.projectId).pipe(Effect.orElseSucceed(() => [])))
+              if (asked.reset === true) {
+                const back = yield* resetPreset(now.id)
+                return `${back.name} is back to the built-in: ${describePreset(back.parts, models)}.`
+              }
+              // Each part as the person had it, unless named here.
+              const pick = (
+                step: typeof StepPick.Type | null | undefined,
+                name: string,
+                was: string | null,
+                wasEffort: string | null | undefined,
+              ) =>
+                step === undefined
+                  ? Effect.succeed({ named: was, effort: wasEffort ?? null })
+                  : step === null
+                    ? Effect.succeed({ named: null, effort: null })
+                    : Effect.map(stepOf(access.projectId, step, name), (one) => ({
+                        named: `${one.agentId}/${one.model ?? 'default'}`,
+                        effort: 'effort' in one && typeof one.effort === 'string' ? one.effort : null,
+                      }))
+              const lead = yield* pick(asked.lead, 'its lead', now.parts.lead, now.parts.effort)
+              const review = yield* pick(asked.review, 'its review', now.parts.reviewer, now.parts.reviewerEffort)
+              const tuned = yield* tunePreset(now.id, {
+                lead: lead.named,
+                effort: lead.effort,
+                reviewer: review.named,
+                reviewerEffort: review.effort,
+                ...(asked.brief === undefined ? { brief: now.parts.brief } : asked.brief === null ? {} : { brief: asked.brief }),
+              })
+              return `${tuned.name}${tuned.tuned === true ? ' is tuned as theirs' : ' is as built in'}: ${describePreset(tuned.parts, models)}.`
             }),
         ),
         tool(
@@ -2932,7 +3010,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines can be planned small: pass small_change and keep its configured review before Ship. Size never schedules a review after merge, and you must not propose an extra one there. Only an explicit requested review timing or a custom preset can do that. Put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
+          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines can be planned small: pass small_change and keep its configured review before Ship. Size never schedules a review after merge, and you must not propose an extra one there. Only an explicit requested review timing or a custom preset can do that. Put its lead on a light, quick model of those list_models gives, at a low effort, unless the person's defaults or notes say otherwise. It then has no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
           {
             type: 'object',
             properties: {

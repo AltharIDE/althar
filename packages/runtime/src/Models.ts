@@ -350,19 +350,27 @@ export class Models extends Context.Service<
           const asked = probed.get(definition.id)
           if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
           // Not asked yet this launch: asked now, in the background, if it is installed and signed in; its latest session says until then.
+          // Whether it is signed in is its own command's to say, which takes seconds with the computer busy, so that is asked
+          // behind too: the read never waits on it (foundations.md, The UI is instant). One signed out counts as one that
+          // couldn't say, asked again a while on or once it is found signed in.
           if (!probing.has(definition.id) && isInstalled(installs, definition)) {
             const reservation = Symbol()
             probing.set(definition.id, reservation)
-            const status = yield* signIns
-              .of(definition.id)
-              .pipe(
-                Effect.onExit((exit) => (Exit.isFailure(exit) ? Effect.sync(() => releaseProbe(definition.id, reservation)) : Effect.void)),
-              )
-            if (ownsProbe(definition.id, reservation) && status !== 'signed_out') {
-              yield* Effect.forkIn(probe(entry, reservation), scope)
-              return { ...seen, ...now, defaults, blocked, probing: true }
-            }
-            releaseProbe(definition.id, reservation)
+            yield* Effect.forkIn(
+              signIns.of(definition.id).pipe(
+                Effect.flatMap((status) => {
+                  if (!ownsProbe(definition.id, reservation)) return Effect.void
+                  if (status !== 'signed_out') return Effect.asVoid(probe(entry, reservation))
+                  return Effect.gen(function* () {
+                    probed.set(definition.id, null)
+                    failedAt.set(definition.id, yield* Clock.currentTimeMillis)
+                  })
+                }),
+                Effect.ensuring(Effect.sync(() => releaseProbe(definition.id, reservation))),
+              ),
+              scope,
+            )
+            return { ...seen, ...now, defaults, blocked, probing: true }
           }
           return { ...seen, ...now, defaults, blocked, probing: probing.has(definition.id) }
         })

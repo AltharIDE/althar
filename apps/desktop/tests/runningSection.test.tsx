@@ -16,7 +16,15 @@ import { withServices } from './render'
 
 const show = (props: Partial<Parameters<typeof RunningSection>[0]> = {}, client = fakeClient().client) =>
   withServices(
-    <RunningSection projectId="p1" project="meridian" runnables={null} repositories={null} worktrees={null} {...props} />,
+    <RunningSection
+      projectId="p1"
+      project="meridian"
+      runnables={null}
+      repositories={null}
+      worktrees={null}
+      onWorksIn={vi.fn()}
+      {...props}
+    />,
     client,
   )
 
@@ -31,6 +39,15 @@ describe('the running section', () => {
   it('says where its tasks’ worktrees are', () => {
     show({ worktrees: '/Users/me/Althar/meridian' })
     expect(screen.getByText('~/Althar/meridian')).toBeTruthy()
+  })
+
+  it('goes to where its work’s place is set, and says when it is the person’s own checkout', async () => {
+    const onWorksIn = vi.fn()
+    show({ worktrees: '/Users/me/Althar/meridian', worksIn: 'checkout', onWorksIn })
+    expect(screen.getByText('Your own checkout')).toBeTruthy()
+    expect(screen.queryByText('~/Althar/meridian')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }))
+    expect(onWorksIn).toHaveBeenCalledOnce()
   })
 
   it('says what went wrong in the list, where no dialog is open to say it', async () => {

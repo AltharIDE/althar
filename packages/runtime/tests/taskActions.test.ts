@@ -311,7 +311,7 @@ describe('settle_task', () => {
       return task
     })
 
-  it.live('keeps for later and marks done on the person’s word; refuses done for a change', () =>
+  it.live('keeps for later and marks done on the person’s word; refuses done for a change, and keeps one with no pull request open', () =>
     Effect.gen(function* () {
       const c = yield* coordinator
       const one = yield* quick(c, 'Which partners still call v1')
@@ -334,10 +334,16 @@ describe('settle_task', () => {
         yield* callTool(c.access, 'settle_task', { task: change.slug, how: 'done' }),
         /^Nothing changed: .* is a change: it is done once its pull request merges/,
       )
+      // Commits of it held for Ship wait on Ship: nothing to keep.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE workspaces SET held_at = ${new Date().toISOString()} WHERE task_id = ${change.taskId}`
       assert.match(
         yield* callTool(c.access, 'settle_task', { task: change.slug, how: 'keep' }),
-        /is a change: it waits on its pull request/,
+        /has its pull request open, or commits waiting for Ship/,
       )
+      yield* sql`UPDATE workspaces SET held_at = NULL WHERE task_id = ${change.taskId}`
+      // Any kind keeps, a change with no pull request open as a prototype ending on its branch: it waits in Kept once it finishes.
+      assert.match(yield* callTool(c.access, 'settle_task', { task: change.slug, how: 'keep' }), /^Kept .* for later/)
       yield* until(standing(change.taskId), (row) => row?.run === 'running')
       assert.match(yield* callTool(c.access, 'hold_task', { task: change.slug }), /has started: there is no plan to hold/)
       assert.match(yield* callTool(c.access, 'restart_task', { task: change.slug }), /isn’t stopped, held or discarded/)

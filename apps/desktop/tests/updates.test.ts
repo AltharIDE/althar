@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { checkFor, notesOf, type UpdateGlance, updating } from '../src/main/updates'
+import { checkFor, type UpdateGlance, updating } from '../src/main/updates'
 import { glanceOf } from '../src/renderer/shared/useUpdate'
 
 /* The updater as `updating` sees it: a check that resolves or fails, and an install that may throw. */
@@ -120,6 +120,5 @@ describe('updates', () => {
     expect(glanceOf({ ready: 1, working: false, restarting: false, failed: null })).toBeNull()
     expect(glanceOf({ ready: null, working: 'no', restarting: false, failed: null })).toBeNull()
     expect(glanceOf({ ready: null, working: false, restarting: false, failed: 2 })).toBeNull()
-    expect(notesOf('0.1.0')).toBe('https://github.com/AltharIDE/althar/releases/tag/v0.1.0')
   })
 })

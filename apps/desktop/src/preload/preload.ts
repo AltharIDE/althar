@@ -258,6 +258,7 @@ contextBridge.exposeInMainWorld('althar', {
   update: {
     glance: (): Promise<unknown> => ipcRenderer.invoke('althar:update'),
     restart: (): Promise<boolean> => ipcRenderer.invoke('althar:update-restart'),
+    check: (): Promise<void> => ipcRenderer.invoke('althar:update-check'),
     onChange: (listener: (glance: unknown) => void): (() => void) => {
       updating.add(listener)
       return () => void updating.delete(listener)

@@ -83,9 +83,13 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
     await expect(shown(page, 'Ready', { exact: true })).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-moved-card.png', animations: 'disabled' })
     await openTask(page)
+    // A handover to another model is said in the thread as it happens, each named by its model where known (never silent).
     await expect(
-      shown(page, /^Claude Code ran out of usage while working on the task, until .+\. Codex takes the work over(, on .+)?\.$/),
-    ).toHaveCount(0)
+      shown(
+        page,
+        /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (.+ on )?Codex takes the work over( until then)?\.$/,
+      ),
+    ).toBeVisible()
     await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-moved.png', animations: 'disabled' })
   } finally {
@@ -115,12 +119,16 @@ test('waits for the reset where no other agent is free, and says so on its card,
     await expect(page.getByRole('region', { name: 'The project’s work' }).getByText(held)).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-waits-board.png', animations: 'disabled' })
     await page.getByRole('button', { name: 'Add a retry to the checkout call' }).click()
+    // A handover to another model is said in the thread as it happens, each named by its model where known (never silent).
     await expect(
-      shown(page, /^Claude Code ran out of usage while working on the task, until .+\. Codex takes the work over(, on .+)?\.$/),
-    ).toHaveCount(0)
+      shown(
+        page,
+        /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (.+ on )?Codex takes the work over( until then)?\.$/,
+      ),
+    ).toBeVisible()
     // Passive quota notices stay out of the thread; its actionable waiting state still offers another model.
     await expect(
-      shown(page, /^Codex ran out of usage while working on the task\. No other model is free: the work waits until .+\.$/),
+      shown(page, /^(.+ on )?Codex ran out of usage while working on the task\. No other model is free: the work waits until .+\.$/),
     ).toHaveCount(0)
     // Its header says so too, rather than that it is idle.
     await expect(shown(page, /^The work waits: Codex is out of usage until /)).toBeVisible()
@@ -140,8 +148,8 @@ test('asks the person when the reset isn’t known and no other agent is free', 
     await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible()
     await openTask(page)
     await expect(
-      shown(page, /^Claude Code ran out of usage while working on the task\. Codex takes the work over(, on .+)?\.$/),
-    ).toHaveCount(0)
+      shown(page, /^(.+ on )?Claude Code ran out of usage while working on the task\. (.+ on )?Codex takes the work over( until .+)?\.$/),
+    ).toBeVisible()
     await expect(shown(page, 'Codex is out of usage.')).toBeVisible()
     // Telling an agent that is out anything would hit the same limit. Claude Code ran out first, and nothing else is free: it is tried again.
     await expect(shown(page, 'Out of usage', { exact: true })).toBeVisible()
@@ -203,7 +211,9 @@ test('lets the person hand a step held for the reset to another model, from the 
       .locator('header[aria-label="Add a retry to the checkout call"]')
       .screenshot({ path: 'test-results/limit-held-header.png', scale: 'css' })
     // No passive quota notice: the actionable waiting state offers models that could carry it on now.
-    await expect(shown(page, /^Claude Code ran out of usage while working on the task\. The work waits until .+\.$/)).toHaveCount(0)
+    await expect(shown(page, /^(.+ on )?Claude Code ran out of usage while working on the task\. The work waits until .+\.$/)).toHaveCount(
+      0,
+    )
     const offer = shown(page, /^Claude Code is out of usage until .+\.$/)
     await expect(offer).toBeVisible()
     await expect(page.getByRole('button', { name: /^Wait until / })).toBeVisible()

@@ -1090,6 +1090,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
+    lookElsewhere: vi.fn(async () => ({ worktrees: [], setups: [], conversations: [] })),
+    bringIn: vi.fn(async () => ({ tasks: [], asides: [], setups: 0, histories: 0, failed: [] })),
     placeRepository: vi.fn(async (_grant: string, name: string) => ({
       name: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
@@ -1244,6 +1246,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listPresets: vi.fn(async () => []),
     savePreset: vi.fn(async () => ({ name: 'Preset' })),
     removePreset: vi.fn(async () => {}),
+    tunePreset: vi.fn(async () => {}),
+    resetPreset: vi.fn(async () => {}),
     declinePresetOffer: vi.fn(async () => {}),
     runIt: vi.fn(async () => ({ kind: 'ran' as const, trust: 'safe' as const, said: '' })),
     stopRunning: vi.fn(async () => ''),

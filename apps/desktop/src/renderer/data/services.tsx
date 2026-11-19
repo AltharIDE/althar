@@ -83,6 +83,8 @@ export interface UpdateHost {
   readonly glance: () => Promise<UpdateGlance | null>
   /** Restarts into the update, at the person's word; false where it won't, as while work runs. */
   readonly restart: () => Promise<boolean>
+  /** Checks for a newer version now, as the app menu's Check for Updates… does: a dialog says what it found. */
+  readonly check?: () => Promise<void>
   /** Calls `listener` with the update as it changes, until the returned function is called. */
   readonly onChange: (listener: (glance: unknown) => void) => () => void
 }

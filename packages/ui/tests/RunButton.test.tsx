@@ -52,3 +52,14 @@ describe('the label of what runs', () => {
     expect(screen.getByText('zypak-wrapper electron apps/desktop --no-sandbox', { selector: '[title]' })).toHaveAttribute('title', LONG)
   })
 })
+
+describe('a start pressed before its run exists', () => {
+  it('says it starts, with nothing to stop until a run exists', () => {
+    render(<RunButton targets={[target({ name: 'Mobile', run: { state: 'starting', pending: true } })]} defaultOpen {...handlers} />)
+    expect(screen.getAllByText(/Starting/).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: 'Stop Mobile' })).toBeNull()
+    cleanup()
+    render(<RunButton targets={[target({ name: 'Mobile', run: { state: 'starting' } })]} defaultOpen {...handlers} />)
+    expect(screen.getByRole('button', { name: 'Stop Mobile' })).toBeTruthy()
+  })
+})

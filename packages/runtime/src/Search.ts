@@ -5,7 +5,7 @@ import { Clock, Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig } from './Config'
-import { asideIn, issueCardsWaiting } from './kinds'
+import { asideIn, issueCardsWaiting, keepWaitsIn } from './kinds'
 import { DRAFTING_MS, stillDrafting } from './needsYou'
 
 /*
@@ -310,7 +310,9 @@ export interface SearchInput {
  */
 export const phaseRead = (sql: SqlClient.SqlClient) => ({
   columns: sql`
-    k.state, k.created_at, k.kept_at,
+    k.state, k.created_at,
+    -- Kept, unless a pull request of its own is open or commits wait for Ship, as its card says.
+    CASE WHEN ${sql.unsafe(keepWaitsIn('k'))} THEN NULL ELSE k.kept_at END AS kept_at,
     -- Only the coordinator's own turn, which is the one that drafts a task: a lead's turn on another says nothing of its plan.
     EXISTS (SELECT 1 FROM turn_deliveries d
       WHERE d.thread_id = ch.id AND d.requested_at <= k.created_at

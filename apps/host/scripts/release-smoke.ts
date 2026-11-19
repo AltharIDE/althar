@@ -1,14 +1,16 @@
 import { execFileSync } from 'node:child_process'
 import { createHash, generateKeyPairSync, verify } from 'node:crypto'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 
 // No production signing secret is needed or accepted by this smoke test.
 const root = mkdtempSync(join(tmpdir(), 'althar-release-smoke-'))
 try {
   const pair = generateKeyPairSync('ed25519')
   const output = join(root, 'output')
+  const fixture = process.env.ALTHAR_HOST_BOOTSTRAP_FIXTURE || undefined
+  const base = fixture === undefined ? 'https://example.invalid/host/' : 'https://127.0.0.1:8443/'
   const env = {
     HOME: root,
     PATH: '/usr/bin:/bin',
@@ -22,7 +24,7 @@ try {
         resolve('dist/althar-host.js'),
         'package-release',
         '--release-base-url',
-        'https://example.invalid/host/',
+        base,
         '--release-sequence',
         '1',
         '--output',
@@ -57,6 +59,8 @@ try {
   if (
     typeof manifest !== 'object' ||
     manifest === null ||
+    !('unpackedBytes' in manifest) ||
+    typeof manifest.unpackedBytes !== 'number' ||
     !('archive' in manifest) ||
     typeof manifest.archive !== 'object' ||
     manifest.archive === null ||
@@ -83,6 +87,26 @@ try {
     env: probeEnvironment,
     stdio: ['ignore', 'inherit', 'inherit'],
   })
+  if (fixture !== undefined) {
+    mkdirSync(fixture, { mode: 0o700 })
+    const archive = basename(result.archive)
+    copyFileSync(result.archive, join(fixture, archive))
+    const envelope = readFileSync(result.manifest)
+    const key = pair.publicKey.export({ type: 'spki', format: 'pem' })
+    writeFileSync(
+      join(fixture, 'install-args'),
+      [
+        manifest.archive.sha256,
+        bytes.length,
+        manifest.unpackedBytes,
+        new URL(archive, base).href,
+        envelope.toString('base64'),
+        Buffer.from(key).toString('base64'),
+        archive,
+      ].join('\n') + '\n',
+      { mode: 0o600 },
+    )
+  }
   process.stdout.write('Signed portable host release verified outside the workspace.\n')
 } finally {
   rmSync(root, { recursive: true, force: true })

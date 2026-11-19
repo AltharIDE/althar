@@ -327,3 +327,25 @@
     background: none;
   }
 }
+
+/* sent here to free space: a well behind the row, at once, fading back */
+.lit {
+  position: relative;
+  isolation: isolate;
+}
+
+.lit::before {
+  position: absolute;
+  inset: 0 -10px;
+  z-index: -1;
+  border-radius: var(--r);
+  background: var(--well);
+  content: '';
+  opacity: 0;
+  transition: opacity 700ms var(--ease-out);
+}
+
+.glow::before {
+  opacity: 1;
+  transition: none;
+}

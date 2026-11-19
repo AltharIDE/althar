@@ -6,22 +6,29 @@
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./grpc": "./src/grpc.ts",
+    "./relay": "./src/relayClient.ts"
   },
   "scripts": {
     "generate": "buf generate && vp fmt src/gen",
     "check": "buf lint && vp check",
     "test": "vp test run",
-    "test:interop": "node --test --test-concurrency=1 integration/worker-handshake.ts"
+    "test:interop": "node --test --test-concurrency=1 integration/worker-handshake.ts integration/worker-grpc.ts",
+    "test:execution": "node --test --test-concurrency=1 integration/worker-run.ts integration/worker-relay.ts",
+    "start:relay": "node relay/main.ts"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "2.17.0"
+    "@bufbuild/protobuf": "2.17.0",
+    "@grpc/grpc-js": "1.14.7",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@althar/testing": "workspace:*",
     "@bufbuild/buf": "1.75.0",
     "@bufbuild/protoc-gen-es": "2.17.0",
     "@types/node": "^24.0.0",
+    "@types/ws": "8.18.2",
     "typescript": "^7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.6.0",
     "vite-plus": "1.6.0",

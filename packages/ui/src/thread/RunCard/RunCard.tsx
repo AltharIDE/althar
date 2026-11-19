@@ -37,6 +37,8 @@ export interface RunCardText {
   stopLabel: (called: string) => string
   again: string
   againLabel: (called: string) => string
+  help: string
+  helpLabel: (called: string) => string
   openLabel: (url: string) => string
   output: string
   outputOf: (called: string) => string
@@ -53,6 +55,8 @@ export const runCardText: RunCardText = {
   stopLabel: (called) => `Stop ${called}`,
   again: 'Run again',
   againLabel: (called) => `Run ${called} again`,
+  help: 'Help me fix it',
+  helpLabel: (called) => `Help me fix ${called}`,
   openLabel: (url) => `Open ${url}`,
   output: 'Output',
   outputOf: (called) => `Output of ${called}`,
@@ -86,6 +90,8 @@ export interface RunCardProps {
   onStop?: () => void
   /** Run it again, once it ended. Without it, no Run again. */
   onRunAgain?: () => void
+  /** Put a prompt about its failure in the composer, unsent, once it failed. Without it, no Help me fix it. */
+  onHelp?: () => void
   /** What it printed. Without it, no console. */
   output?: RunOutput
   /** Its console is open: to read what it printed only while it is. */
@@ -111,6 +117,7 @@ export function RunCard({
   onOpen,
   onStop,
   onRunAgain,
+  onHelp,
   output,
   outputOpen,
   defaultOutputOpen = false,
@@ -169,6 +176,11 @@ export function RunCard({
       {ended === undefined && onStop && (
         <Button size="small" variant="quiet" className={s.act} aria-label={t.stopLabel(called)} onClick={onStop}>
           {t.stop}
+        </Button>
+      )}
+      {phase === 'failed' && onHelp && (
+        <Button size="small" variant="quiet" icon="agents" className={s.act} aria-label={t.helpLabel(called)} onClick={onHelp}>
+          {t.help}
         </Button>
       )}
       {ended !== undefined && onRunAgain && (

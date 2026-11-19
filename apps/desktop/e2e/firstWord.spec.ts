@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -294,6 +294,45 @@ test('thinks while the agent starts for what was said: the coordinator’s first
       gates,
       'other',
     )
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('keeps messages accessible when the coordinator or task lead cannot start, including after reload', async () => {
+  const failure = join(mkdtempSync(join(tmpdir(), 'althar-start-')), 'fail')
+  writeFileSync(failure, '')
+  const { electronApp, page } = await opened({ ALTHAR_FAKE_FAIL_START: failure })
+  try {
+    // The coordinator starts before the message is sent. A failed start leaves the words in the composer.
+    const box = page.getByRole('textbox', { name: /^Tell .* something/ })
+    await say(page, 'Coordinator start failed.')
+    await expect(box).toHaveValue('Coordinator start failed.')
+    await expect(page.getByRole('region', { name: /queued/i })).toHaveCount(0)
+    await page.screenshot({ path: 'test-results/idle-start-failed-coordinator.png', scale: 'css' })
+
+    unlinkSync(failure)
+    await box.fill('')
+    await startTask(page, 'Stopped lead', '[lead:wait]')
+    await page.getByRole('button', { name: /Open task/ }).click()
+    await expect(page.getByText('Implementing', { exact: true }).first()).toBeVisible()
+    await page.getByRole('button', { name: 'More for this task' }).click()
+    await page
+      .getByRole('menu')
+      .getByRole('menuitem', { name: /Stop the task/ })
+      .click()
+    await expect(page.getByText('Stopped', { exact: true }).first()).toBeVisible()
+    await toConversation(page)
+    const thread = page.getByRole('region', { name: 'Thread' })
+    writeFileSync(failure, '')
+    // A task sends first, then starts its lead. If that start fails, the accepted message stays editable.
+    await say(page, 'Task start failed.')
+    const queue = page.getByRole('region', { name: /queued/i })
+    await expect(queue).toContainText('Task start failed.')
+    await expect(thread.getByText('Task start failed.', { exact: true })).toHaveCount(0)
+    await queue.screenshot({ path: 'test-results/idle-start-failed-task.png', scale: 'css' })
+    await page.reload()
+    await expect(page.getByRole('region', { name: /queued/i })).toContainText('Task start failed.')
   } finally {
     await electronApp.close()
   }

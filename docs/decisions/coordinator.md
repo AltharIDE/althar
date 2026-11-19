@@ -36,6 +36,23 @@ is rebuilt from a brief that Althar writes from its own records
 ([agents.md](agents.md)). The conversation the person scrolls is Althar's
 record, not the session's.
 
+Every session of it gets the same brief, whether it starts as the project
+opens, after a relaunch, on another agent or in a handover (below): its role,
+the project, the notes, what the repositories tell agents, every open task,
+the ten finished last, its errands, and the conversation, the last of it word
+for word and the earlier part in short. Only how much is word for word
+differs. The brief is written while the agent starts, so the person's first
+words wait for neither twice.
+
+**What the repositories tell agents goes in the brief.** The coordinator's
+agent loads no settings file from a repository, so no hook or permission of
+the repository's reaches it, and its `AGENTS.md` and `CLAUDE.md` didn't
+either. Althar reads them from the coordinator's copies instead: regular
+files inside the copy only, never a link, with an import on a line of its
+own put in place once, each cut at 10,000 characters and all at 20,000. They
+say how the code is laid out and how the team works; the coordinator still
+changes no code, and its role, the notes and the person's word come first.
+
 ## One pool of tools, shared with leads
 
 The coordinator and every lead share one pool of tools: Althar's MCP server,
@@ -126,12 +143,19 @@ Althar hands the coordinator over itself.
   - its role and tools;
   - a line saying it took over;
   - the project overview and the project's notes;
+  - what the repositories tell agents;
   - every open task, with where it stands, who leads it and what waits on
     the person, and the newest 25 tasks with their plan and their lead's
     last report;
+  - the ten tasks finished last, and how each ended;
+  - the earlier conversation in short: every line the person wrote, up to
+    500 characters, and the start of each reply, up to 200, with the tasks,
+    issues and questions that came of it, in up to 20,000 characters, the
+    newest kept. Althar cuts it from the record itself, with no agent, so
+    the handover waits for no model;
   - the last twelve messages, word for word.
 
-  It reads anything earlier with `read_thread`, a part at a time.
+  It reads anything earlier, or whole, with `read_thread`, a part at a time.
 - **The person sees one quiet line** in the thread, and the whole
   conversation stays theirs to scroll.
 - **Nothing Althar owns moves.** Plans counting down, held plans, drafts and
@@ -177,8 +201,10 @@ nothing and says so, as a second press would.
   declined, its calls are withdrawn and its agents stop, while its worktree
   and branch stay. The folder goes only as workspace clean-up allows
   ([workspaces-and-runs.md](workspaces-and-runs.md)).
-- **Done and Keep for later are for a task that isn't a change.** A change
-  is done when its pull request merges ([tasks.md](tasks.md#needs-you-and-settling)).
+- **Done is for a task that isn't a change.** A change is done when its
+  pull request merges ([tasks.md](tasks.md#needs-you-and-settling)). **Keep
+  for later is for any task** with no pull request of its own open: a
+  prototype or a chat that ends on its branch keeps as a quick task does.
 
 **Automations are the exception.** Resuming one or running one now spends
 the person's plan while they may be away. So it acts at once only in a turn
@@ -229,3 +255,4 @@ isn't being extended to more agents ([what-agents-may-do.md](what-agents-may-do.
 
 - 8 Nov 2026: written from the ADRs under Replaces.
 - 8 Nov 2026: the limits sweep (#696) built: the coordinator's commands go by the project's rules, reach the network and read ordinary files anywhere.
+- 18 Nov 2026: every session of the coordinator starts from the same brief, not only a handover's: it gained what the repositories tell agents (their `AGENTS.md` and `CLAUDE.md`), the tasks finished last and the earlier conversation in short, and is written while the agent starts.

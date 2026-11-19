@@ -62,6 +62,8 @@
 -- automation_occurrence_state: starting, running, made, nothing, failed, missed, skipped
 -- works_in: worktree, checkout
 -- workspace_kind: worktree, checkout, copy
+-- other_tool: conductor, orca, t_three_code, paradev, cursor, codex, claude_code, hand
+-- brought_kind: worktree, setup, conversation
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -1127,7 +1129,7 @@ CREATE TABLE runnables (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   dropped_by_actor_id TEXT REFERENCES actors (id),
   dropped_at TEXT CHECK (dropped_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), task_id TEXT REFERENCES tasks (id),
   FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id)
 ) STRICT;
 
@@ -1492,7 +1494,7 @@ CREATE TABLE "workspaces" (
   held_at TEXT CHECK (held_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   name TEXT,
   reviewing TEXT,
-  moving_to TEXT CHECK (moving_to IN ('worktree', 'checkout')), trust TEXT CHECK (trust IN ('safe', 'full')), waits_for TEXT,
+  moving_to TEXT CHECK (moving_to IN ('worktree', 'checkout')), trust TEXT CHECK (trust IN ('safe', 'full')), waits_for TEXT, made_by TEXT REFERENCES vocab_other_tool (word),
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id),
   UNIQUE (id, project_id)
@@ -1715,3 +1717,27 @@ CREATE TRIGGER task_waits_cleared AFTER UPDATE OF state ON tasks WHEN NEW.state 
 CREATE INDEX turn_deliveries_by_thread_time ON turn_deliveries (thread_id, requested_at);
 
 CREATE INDEX thread_items_tool_calls ON thread_items (thread_id, sequence) WHERE kind = 'tool_call';
+
+CREATE TABLE brought_in (
+    project_id TEXT NOT NULL REFERENCES projects (id),
+    key TEXT NOT NULL CHECK (length(key) > 0),
+    kind TEXT NOT NULL REFERENCES vocab_brought_kind (word),
+    tool TEXT NOT NULL REFERENCES vocab_other_tool (word),
+    task_id TEXT REFERENCES tasks (id),
+    binding_id TEXT REFERENCES repository_bindings (id),
+    created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+    PRIMARY KEY (project_id, key),
+    CHECK ((kind = 'setup') = (task_id IS NULL))
+  ) STRICT;
+
+CREATE INDEX brought_in_task ON brought_in (task_id) WHERE task_id IS NOT NULL;
+
+CREATE INDEX runnables_of_task ON runnables (task_id) WHERE task_id IS NOT NULL AND dropped_at IS NULL;
+
+CREATE TABLE preset_tunings (
+    preset_id TEXT PRIMARY KEY NOT NULL CHECK (preset_id GLOB 'builtin:*'),
+    parts TEXT NOT NULL CHECK (json_valid(parts)),
+    updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+  ) STRICT;
+
+CREATE INDEX provider_sessions_by_agent ON provider_sessions (agent_id, started_at);

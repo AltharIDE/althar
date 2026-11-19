@@ -171,10 +171,24 @@ describe('a task', () => {
     expect(within(header).getByRole('button', { name: 'Keep for later' })).toBeTruthy()
     expect(within(header).queryByRole('button', { name: 'Done' })).toBeNull()
     first.unmount()
-    const change = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'change', phase: 'ready' } })) })
-    withServices(<Task />, change.client)
+    // A change with its pull request open waits on that: nothing to keep.
+    const opened = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'change', phase: 'ready', changes: [change()] } })),
+    })
+    withServices(<Task />, opened.client)
     const again = await screen.findByRole('banner', { name: thread().task.title })
     expect(within(again).queryByRole('button', { name: 'Keep for later' })).toBeNull()
+  })
+
+  it('offers Keep for later to a prototype that ended on its branch, with no pull request open', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'change', phase: 'ready', changes: [] } })),
+    })
+    withServices(<Task />, client)
+    const header = await screen.findByRole('banner', { name: thread().task.title })
+    await userEvent.click(within(header).getByRole('button', { name: 'Keep for later' }))
+    expect(client.keepTaskForLater).toHaveBeenCalledWith(snapshot().task.id)
+    expect(within(header).queryByRole('button', { name: 'Done' })).toBeNull()
   })
 
   it('opens whether or not seeing it goes through', async () => {
@@ -3666,6 +3680,26 @@ describe('a task', () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => taken) })
     withServices(<Task />, client)
     expect(await screen.findByRole('button', { name: 'Lead: Claude Sonnet Low' })).toBeTruthy()
+  })
+
+  it('says whose place a lead a usage limit handed the task to holds, until when, and puts that one back when pressed', async () => {
+    const base = thread()
+    const until = isoAfter(2 * 60 * 60 * 1000)
+    const standing = {
+      ...base,
+      session: { ...base.session!, standsIn: { agentId: 'codex', model: 'gpt-5.2-codex', effort: null, until } },
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => standing) })
+    withServices(<Task />, client)
+    const chip = await screen.findByRole('button', { name: 'For gpt-5.2-codex' })
+    act(() => chip.focus())
+    expect((await screen.findByRole('tooltip')).textContent).toBe(
+      `gpt-5.2-codex ran out of usage and leads again at ${clock(until)}. Press to put it back now.`,
+    )
+    // Pressed, the lead the task was given is picked again, at once, to take over with what is said next.
+    await userEvent.click(chip)
+    expect(screen.getByRole('button', { name: /^Lead: gpt-5\.2-codex/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'For gpt-5.2-codex' })).toBeNull()
   })
 
   it('goes back to the model it was on, and says why, where the agent won’t take the pick', async () => {
