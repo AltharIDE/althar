@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     ffi::OsString,
     fs, io,
     os::fd::AsFd,
@@ -18,7 +17,7 @@ use tokio::{
 };
 
 use crate::{
-    diagnostic::read_credentials,
+    diagnostic::{DiagnosticJournal, read_credentials},
     valid_id,
     wire::{
         DiagnosticLog, DiagnosticOffer, DiagnosticOutcome, ProjectCommand, WorkerFrame,
@@ -168,38 +167,59 @@ pub async fn run_unit(executable: &Path, args: &[OsString]) -> io::Result<ExitCo
 
 pub(crate) struct ProjectUnit {
     name: String,
-    cgroup: RefCell<Option<PathBuf>>,
 }
 
 impl ProjectUnit {
     pub(crate) fn new(offer: &DiagnosticOffer) -> Self {
         Self {
             name: format!("althar-{}.service", offer.attempt_id),
-            cgroup: RefCell::new(None),
         }
     }
 
-    pub(crate) async fn stop(&self) -> bool {
-        // No permit was sent if the cgroup never reached the worker. The
-        // pending service can only encounter EOF and exit.
-        let path = self.cgroup.borrow().clone();
-        let Some(path) = path else {
-            return true;
+    pub(crate) async fn stop(
+        &self,
+        journal: &DiagnosticJournal,
+        offer: &DiagnosticOffer,
+    ) -> io::Result<()> {
+        let Some(group) = journal.control_group(offer)? else {
+            // The unit cannot start the command before the control group is recorded.
+            return Ok(());
         };
-        if Self::empty(&path) {
-            return true;
+        let path = self.cgroup_path(&group)?;
+        if !Self::empty(&path) {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(4),
+                Command::new("/usr/bin/systemctl")
+                    .args(["--user", "stop", &self.name])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .kill_on_drop(true)
+                    .status(),
+            )
+            .await;
         }
-        let _ = tokio::time::timeout(
-            Duration::from_secs(4),
-            Command::new("/usr/bin/systemctl")
-                .args(["--user", "stop", &self.name])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .kill_on_drop(true)
-                .status(),
-        )
-        .await;
-        Self::empty(&path)
+        if !Self::empty(&path) {
+            return Err(invalid(
+                "Could not confirm that the previous project command stopped",
+            ));
+        }
+        Ok(())
+    }
+
+    fn cgroup_path(&self, group: &[u8]) -> io::Result<PathBuf> {
+        let group = std::str::from_utf8(group).map_err(|_| invalid("Invalid control group"))?;
+        let Some(relative) = group.trim().strip_prefix('/') else {
+            return Err(invalid("The project command needs systemd and cgroup v2"));
+        };
+        let relative = Path::new(relative);
+        if relative.file_name().and_then(|name| name.to_str()) != Some(self.name.as_str())
+            || !relative
+                .components()
+                .all(|part| matches!(part, std::path::Component::Normal(_)))
+        {
+            return Err(invalid("Unexpected project control group"));
+        }
+        Ok(Path::new("/sys/fs/cgroup").join(relative))
     }
 
     fn empty(path: &Path) -> bool {
@@ -215,6 +235,7 @@ impl ProjectUnit {
         offer: &DiagnosticOffer,
         send: &mpsc::Sender<WorkerFrame>,
         mut lease: watch::Receiver<Instant>,
+        journal: &DiagnosticJournal,
     ) -> io::Result<DiagnosticOutcome> {
         let mut supervisor = Command::new("/usr/bin/systemd-run")
             .args([
@@ -268,25 +289,13 @@ impl ProjectUnit {
             .kill_on_drop(true)
             .output()
             .await?;
-        let group = std::str::from_utf8(&group.stdout)
-            .map_err(|_| invalid("Invalid control group"))?
-            .trim();
-        let Some(relative) = group.strip_prefix('/') else {
-            return Err(invalid("The project command needs systemd and cgroup v2"));
-        };
-        let relative = Path::new(relative);
-        if relative.file_name().and_then(|name| name.to_str()) != Some(self.name.as_str())
-            || !relative
-                .components()
-                .all(|part| matches!(part, std::path::Component::Normal(_)))
-        {
-            return Err(invalid("Unexpected project control group"));
-        }
-        let path = Path::new("/sys/fs/cgroup").join(relative);
+        let path = self.cgroup_path(&group.stdout)?;
         if !path.join("cgroup.events").is_file() {
             return Err(invalid("The project command needs systemd and cgroup v2"));
         }
-        *self.cgroup.borrow_mut() = Some(path);
+        // Persist before authorizing execution. A restarted worker can stop
+        // and verify this unit before returning the attempt to the home.
+        journal.record_control_group(offer, &group.stdout)?;
         let mut publish_lease = true;
         let mut bytes = 0;
         let mut chunks = 0;

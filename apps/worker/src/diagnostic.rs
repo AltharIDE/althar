@@ -188,6 +188,27 @@ impl DiagnosticJournal {
         )
     }
 
+    pub(crate) fn control_group(&self, offer: &DiagnosticOffer) -> io::Result<Option<Vec<u8>>> {
+        self.read(
+            &self.root.join(format!("{}.cgroup", offer.attempt_id)),
+            4096,
+        )
+    }
+
+    pub(crate) fn record_control_group(
+        &self,
+        offer: &DiagnosticOffer,
+        group: &[u8],
+    ) -> io::Result<()> {
+        if group.len() > 4096 {
+            return Err(invalid("The control group record exceeds its size limit"));
+        }
+        self.publish(
+            &self.root.join(format!("{}.cgroup", offer.attempt_id)),
+            group,
+        )
+    }
+
     fn result(&self, offer: &DiagnosticOffer) -> Result<Option<DiagnosticResult>, Failure> {
         let Some(bytes) = self.read(
             &self.root.join(format!("{}.result", offer.attempt_id)),
@@ -489,6 +510,9 @@ pub async fn run_worker_once(
             let result = if let Some(result) = journal.result(&offer)? {
                 result
             } else if journal.started(&offer)? || offer.claimable_for_ms == 0 {
+                if offer.project_command.is_some() {
+                    ProjectUnit::new(&offer).stop(journal, &offer).await?;
+                }
                 report(&offer, DiagnosticOutcome::Unknown, Vec::new())
             } else {
                 let claim_sent = Instant::now();
@@ -525,24 +549,24 @@ pub async fn run_worker_once(
                             &send,
                             &mut reply,
                             async {
-                                let outcome = match unit.run(config, &offer, &send, updates).await {
-                                    Ok(outcome) => outcome,
-                                    Err(error) => {
-                                        eprintln!(
-                                            "Could not supervise the project command: {error}"
-                                        );
-                                        DiagnosticOutcome::Unknown
-                                    }
-                                };
+                                let outcome =
+                                    match unit.run(config, &offer, &send, updates, journal).await {
+                                        Ok(outcome) => outcome,
+                                        Err(error) => {
+                                            eprintln!(
+                                                "Could not supervise the project command: {error}"
+                                            );
+                                            DiagnosticOutcome::Unknown
+                                        }
+                                    };
                                 report(&offer, outcome, Vec::new())
                             },
                             Some(&deadline),
                         )
                         .await;
-                        let cleaned = unit.stop().await;
+                        unit.stop(journal, &offer).await?;
                         match execution {
-                            Ok(result) if cleaned => result,
-                            Ok(_) => report(&offer, DiagnosticOutcome::Unknown, Vec::new()),
+                            Ok(result) => result,
                             Err(error) => {
                                 journal.record_result(&report(
                                     &offer,

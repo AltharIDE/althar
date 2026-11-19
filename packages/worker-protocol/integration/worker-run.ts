@@ -241,6 +241,12 @@ const recoverWorker = async (t: TestContext, routed: boolean, projectPilot = fal
     await waitFor(() => !crashing.alive(), 'The detached process survived the worker crash')
     match((await run(first, undefined, projectFlags)).stdout, /DIAGNOSTIC_OUTCOME_UNKNOWN/)
     equal((await query(interrupted)).state, 'unknown')
+    const restarted = await enqueue()
+    const previous = await running(restarted)
+    await stop(previous.child, 'SIGKILL')
+    match((await run(first, undefined, projectFlags)).stdout, /DIAGNOSTIC_OUTCOME_UNKNOWN/)
+    equal(previous.alive(), false)
+    equal((await query(restarted)).state, 'unknown')
     return
   }
   const completed = await queue()
