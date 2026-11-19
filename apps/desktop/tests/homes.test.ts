@@ -1,9 +1,9 @@
-import { chmodSync, linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, linkSync, mkdtempSync, promises, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { removeTreeSync } from '@althar/testing'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { homeController } from '../src/main/homes/controller'
 import { homeGlances, reportedProjects } from '../src/main/homes/glances'
@@ -27,6 +27,7 @@ const temporary = () => {
   return root
 }
 afterEach(() => {
+  vi.restoreAllMocks()
   for (const root of roots.splice(0)) removeTreeSync(root)
 })
 
@@ -39,6 +40,43 @@ describe('saved homes', () => {
     expect(await store.save({ ...remote('6'), name: 'Another label' })).toEqual(remote())
     await store.forget(remote().id)
     expect((await store.list()).map((home) => home.id)).toEqual([remote('5').id])
+  })
+  it('never replaces the file while a read has it open, as Windows refuses to', async () => {
+    const root = temporary()
+    const store = homeStore(root)
+    const path = join(root, 'homes.json')
+    await store.save(remote())
+    const { open, rename } = promises
+    let reading = 0
+    const reads: Array<Promise<unknown>> = []
+    vi.spyOn(promises, 'open').mockImplementation(async (...given: Parameters<typeof open>) => {
+      // A read the glances' cache starts while a change is writing its file, as a window opening does.
+      if (String(given[0]).endsWith('.tmp')) reads.push(store.list())
+      const handle = await open(...given)
+      if (given[0] !== path) return handle
+      reading++
+      const read = handle.read.bind(handle)
+      const close = handle.close.bind(handle)
+      Object.assign(handle, {
+        read: async (...args: Parameters<typeof read>) => {
+          await new Promise((resolve) => setTimeout(resolve, 40))
+          return read(...args)
+        },
+        close: async () => {
+          reading--
+          return close()
+        },
+      })
+      return handle
+    })
+    vi.spyOn(promises, 'rename').mockImplementation(async (from, to) => {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      if (to === path && reading > 0) throw Object.assign(new Error(`EPERM: operation not permitted, rename '${from}'`), { code: 'EPERM' })
+      return rename(from, to)
+    })
+    expect((await store.rename(remote().id, 'Renamed')).name).toBe('Renamed')
+    expect(reads).toHaveLength(1)
+    expect((await reads[0]) as ReadonlyArray<RemoteHome>).toEqual([{ ...remote(), name: 'Renamed' }])
   })
   it('refuses malformed, linked, exposed or oversized files without replacing them', async () => {
     const root = temporary()
