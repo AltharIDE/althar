@@ -33,6 +33,7 @@ const aside: BoardTask = {
   phase: 'ready',
   scratch: true,
   state: 'active',
+  // Started just now, on the real clock the project reads: a fixed date drops it to the older asides a week later.
   createdAt: new Date().toISOString(),
   settledAt: null,
   changed: null,
