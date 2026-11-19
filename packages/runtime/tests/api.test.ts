@@ -2079,7 +2079,7 @@ describe('the coordinator, through the API', () => {
           disposition: 'after_current',
         })
         const planned = yield* until(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
-          snapshot.items.some((item) => item.kind === 'task'),
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null),
         )
         const card = planned.items.find((item) => item.kind === 'task')
         const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''

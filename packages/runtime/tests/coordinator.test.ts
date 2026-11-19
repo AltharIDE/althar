@@ -82,7 +82,7 @@ describe('the coordinator loop', () => {
       yield* say(threadId, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
 
       // The plan shows as a card, then starts on its own when its time comes.
-      const [planned] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
+      const [planned] = yield* until(cardsOf(projectId), (cards) => cards.length === 1 && cards[0]?.plan != null)
       assert.strictEqual(planned?.title, 'Add a retry')
       assert.deepStrictEqual(
         planned?.plan?.steps.map((step) => [step.key, step.agentId]),
@@ -575,7 +575,7 @@ describe('the coordinator loop', () => {
       yield* models.catalog
       yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
       yield* say(threadId, 'Rework the cache. [coordinator:plan-effort] [coordinator:plan-no-review] [lead:finish]')
-      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1 && cards[0]?.plan != null)
       assert.deepStrictEqual(card?.plan?.steps, [
         { key: 'implement', agentId: 'claude-code', model: 'large', effort: 'high', skipped: false },
       ])
@@ -597,7 +597,7 @@ describe('the coordinator loop', () => {
       const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
       const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
       yield* say(threadId, 'Something small. [coordinator:plan-no-review] [lead:finish]')
-      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1 && cards[0]?.plan != null)
       const planId = card?.plan?.id ?? ''
       assert.deepStrictEqual(
         card?.plan?.steps.map((step) => step.key),
@@ -658,7 +658,7 @@ describe('the coordinator loop', () => {
       const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
       const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
       yield* say(threadId, 'Something small. [coordinator:plan-no-review] [lead:finish]')
-      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1 && cards[0]?.plan != null)
       const planId = card?.plan?.id ?? ''
       yield* plans.hold(planId, actor)
       yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'held')
@@ -689,7 +689,7 @@ describe('the coordinator loop', () => {
         const sql = yield* SqlClient.SqlClient
         const { projectId: id, threadId } = yield* opened
         yield* say(threadId, 'Later. [coordinator:plan]')
-        yield* until(cardsOf(id), (cards) => cards.length === 1)
+        yield* until(cardsOf(id), (cards) => cards.length === 1 && cards[0]?.plan != null)
         // As if Althar had closed before its time came.
         yield* sql`UPDATE task_plans SET starts_at = '2020-01-01T00:00:00.000Z'`
         return id

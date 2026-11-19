@@ -144,6 +144,8 @@ export interface ProjectModel {
   readonly stopWaiting: (taskId: string, on: string) => Promise<void>
   /** Reopens a task, as one a plan waits for that was abandoned. */
   readonly reopenTask: (taskId: string) => Promise<void>
+  /** Discards a task, from its card: the card shows it discarded at once, and as it was again where this fails, the line saying why. */
+  readonly discardTask: (taskId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly holdDraft: (threadId: string, key: string) => Promise<void>
   /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
@@ -697,6 +699,11 @@ export const useProject = (projectId: string): ProjectModel => {
     startPlan: (planId) => act(() => client.startPlan(planId)),
     stopWaiting: (taskId, on) => act(() => client.stopWaiting(taskId, on)),
     reopenTask: (taskId) => act(() => client.reopenTask(taskId)),
+    discardTask: (taskId) =>
+      client.abandonTask(taskId).catch((failure: unknown) => {
+        fail(failure)
+        throw failure
+      }),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     // Shown held at once by its card, which shows it as it was again where this fails, with the line saying why.
     holdDraft: (threadId, key) =>

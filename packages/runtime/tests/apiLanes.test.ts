@@ -169,6 +169,41 @@ describe('what streams to a watch, through the API', () => {
   )
 })
 
+describe('a watch opened while the coordinator drafts', () => {
+  it.live('is told what is being drafted at once, not only at its next change, and nothing once drafting is over', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, context } = yield* connected
+        const live = Context.get(context, Live)
+        const sizing = {
+          key: 'draft_1',
+          title: 'Explore the roles',
+          brief: true,
+          taskId: 't1',
+          slug: 'explore-the-roles',
+          planning: false,
+          lead: null,
+          review: null,
+          noReview: false,
+          preset: null,
+          planned: false,
+          held: false,
+          unplanned: false,
+          discarded: false,
+        }
+        // Drafted before the window watched: a draft elsewhere, then one that is over.
+        yield* live.publish({ _tag: 'Drafting', threadId: 'th1', drafts: [sizing] })
+        yield* live.publish({ _tag: 'Drafting', threadId: 'th2', drafts: [{ ...sizing, key: 'draft_2', taskId: 't2' }] })
+        yield* live.publish({ _tag: 'Drafting', threadId: 'th2', drafts: [] })
+        const heard = yield* Stream.runHead(
+          Stream.filter(client.Watch({}), (event): event is Extract<WatchEvent, { _tag: 'Drafting' }> => event._tag === 'Drafting'),
+        ).pipe(Effect.timeout('5 seconds'))
+        assert.deepStrictEqual(heard._tag === 'Some' ? [heard.value.threadId, heard.value.drafts] : null, ['th1', [sizing]])
+      }),
+    ),
+  )
+})
+
 describe('what a watch that fell behind is sent', () => {
   it.effect('is the newest of each thing, in the order each last changed, and nothing of the rest', () =>
     Effect.scoped(

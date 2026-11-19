@@ -2680,6 +2680,13 @@ export const TaskCard = Schema.Struct({
    * repository. Absent otherwise.
    */
   settingUp: Schema.optional(Schema.Literals(['install', 'kept'])),
+  /** Discarded: settled without its work, whatever it stood at then (drafted, planned, held or at work). Absent otherwise. */
+  discarded: Schema.optional(Schema.Literal(true)),
+  /**
+   * Drafted, and its plan never came: no plan proposed or started, nothing run. Its card says so and offers to plan or
+   * discard it, rather than that it stopped. Absent otherwise, and while its plan is still on its way.
+   */
+  unplanned: Schema.optional(Schema.Literal(true)),
   /** What it makes, read from what it has now: its card's word, and what the card shows. */
   kind: TaskKind,
   /** The task whose lead started it (ADR-097: leads start tasks), which its card names; absent for one the person or the coordinator started. */
@@ -4471,6 +4478,10 @@ export const Draft = Schema.Struct({
   planned: Schema.Boolean,
   /** The person held it while it was drafted: its plan comes held. */
   held: Schema.Boolean,
+  /** Its plan's call failed and no other has begun: it says it has no plan, rather than sizing it for ever. */
+  unplanned: Schema.optional(Schema.Boolean),
+  /** Its task was discarded while it was drafted. */
+  discarded: Schema.optional(Schema.Boolean),
 })
 export type Draft = typeof Draft.Type
 

@@ -89,6 +89,7 @@ import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { DraftingCard, useDraftingCards } from './DraftingCard'
+import { planIt, usePlansAsked } from '../../shared/planIt'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
@@ -500,7 +501,7 @@ export function ProjectView({
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   const coordinator = model.coordinator
-  // The tasks the coordinator is drafting, each as its card fills in, until the thread's card takes its place.
+  // The tasks the coordinator is drafting, each as its card fills in, in its card's place in the thread once it is a task.
   const drafting = useDraftingCards(coordinator?.threadId ?? null, model.drafts, coordinator?.items ?? NO_DRAFTED_ITEMS, model.holdDraft)
   // Every run in the project, the tasks' too: Run's list and its switcher say them.
   const launches = coordinator?.launches ?? []
@@ -528,6 +529,8 @@ export function ProjectView({
   // What the coordinator's thread is drawn from, kept while its items and its turn are: its words streaming, its commands
   // printing and its clock ticking draw the thread alone (LiveBlocks), not the project.
   const coordinatorItems = coordinator?.items
+  // With a stand-in for each draft that is a task, its card not read yet, where it will be.
+  const draftedItems = drafting.placed
   const turnStarted = session?.turnStartedAt ?? null
   const turnEnded = session?.turnEndedAt ?? null
   const reading = readingNow(session, model.pending, false, coordinator?.accepting)
@@ -538,7 +541,7 @@ export function ProjectView({
       coordinatorItems === undefined
         ? null
         : {
-            items: coordinatorItems,
+            items: draftedItems,
             turnRunning: busy,
             turnStarted,
             reading,
@@ -548,7 +551,7 @@ export function ProjectView({
             queue,
             turns: turnsById(turns),
           },
-    [coordinatorItems, busy, turnStarted, reading, readingLocally, turnEnded, queue, turns],
+    [coordinatorItems, draftedItems, busy, turnStarted, reading, readingLocally, turnEnded, queue, turns],
   )
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
@@ -600,6 +603,8 @@ export function ProjectView({
 
   // The team of a task, open from its row up next or from a small change's card, while it can still change.
   const [teamFor, setTeamFor] = useState<string | null>(null)
+  // Drafts whose plan the person asked for, each until its ask is over (`usePlansAsked`).
+  const plansAsked = usePlansAsked(coordinator?.items ?? NO_DRAFTED_ITEMS, session)
   const actions: CardActions = {
     project: name,
     ...(about === null ? {} : { projectId: about }),
@@ -619,6 +624,18 @@ export function ProjectView({
       (seen?.tasks ?? NO_TASKS).some((one) => one.taskId === taskId && opensInPlace(one)) ? asides.pick(taskId) : onTask(threadId),
     onChangeTeam: setTeamFor,
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
+    // A draft whose plan didn't come: the coordinator is asked for it, in the person's words, which show in the thread at once.
+    onPlanDraft: (task) => {
+      plansAsked.ask(task)
+      void model
+        .say(planIt(task), null)
+        .then((sent) => {
+          if (!sent) plansAsked.unask(task.taskId)
+        })
+        .catch(() => plansAsked.unask(task.taskId))
+    },
+    planAsked: plansAsked.asked,
+    onDiscard: (taskId) => model.discardTask(taskId),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),
     ...(presets === undefined
@@ -1123,7 +1140,23 @@ export function ProjectView({
                                 retryable={coordinator.retryable}
                                 {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                                 {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
-                                card={(card) => <Card card={card} actions={actions} />}
+                                card={(card) => {
+                                  // Still being drafted: the live draft fills its card's place, until its plan is in.
+                                  const draft = drafting.inPlace(card)
+                                  return draft === undefined ? (
+                                    <Card card={card} actions={actions} />
+                                  ) : (
+                                    <DraftingCard
+                                      draft={draft}
+                                      project={name}
+                                      held={drafting.held(draft)}
+                                      onHold={() => drafting.hold(draft)}
+                                      onPlan={actions.onPlanDraft}
+                                      planAsked={actions.planAsked}
+                                      onDiscard={actions.onDiscard}
+                                    />
+                                  )
+                                }}
                                 draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
                                 automation={(card, itemId) => (
                                   <AutomationInThread
@@ -1159,6 +1192,9 @@ export function ProjectView({
                                   project={name}
                                   held={drafting.held(draft)}
                                   onHold={() => drafting.hold(draft)}
+                                  onPlan={actions.onPlanDraft}
+                                  planAsked={actions.planAsked}
+                                  onDiscard={actions.onDiscard}
                                 />
                               ))}
                             </ThreadShellProvider>
