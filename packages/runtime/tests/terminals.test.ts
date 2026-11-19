@@ -64,7 +64,11 @@ const setUp = () => {
       terminalFolder: (input: { readonly projectId: string; readonly taskId: string | null; readonly launchId?: string }) =>
         Effect.sync(() => {
           asked.push(input)
-          return input.launchId !== undefined ? '/runs/ios' : input.taskId === null ? '/repo' : `/worktrees/${input.taskId}`
+          return input.launchId !== undefined
+            ? { path: '/runs/ios', where: 'main' }
+            : input.taskId === null
+              ? { path: '/repo', where: 'althar' }
+              : { path: `/worktrees/${input.taskId}`, where: 'A task' }
         }),
     } as unknown as Launches['Service']),
   )
@@ -110,6 +114,7 @@ describe('terminals', () => {
       const run = yield* terminals.open({ id: 'term_fromrun1', projectId: 'p', taskId: null, launchId: 'l', cols: 80, rows: 24 })
       const again = yield* terminals.open({ id: 'term_project1', projectId: 'p', taskId: null, cols: 80, rows: 24 })
       assert.deepStrictEqual([project.folder, task.folder, run.folder, again.folder], ['/repo', '/worktrees/t', '/runs/ios', '/repo'])
+      assert.deepStrictEqual([project.where, task.where, run.where], ['althar', 'A task', 'main'])
       assert.strictEqual(ptys.length, 3)
       assert.strictEqual(asked.length, 3)
       assert.deepStrictEqual([ptys[1]?.options.cwd, ptys[1]?.options.cols, ptys[1]?.options.rows], ['/worktrees/t', 100, 30])

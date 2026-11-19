@@ -29,6 +29,8 @@ export interface ShownTerminal {
   readonly taskId: string | null
   readonly launchId: string | null
   readonly folder: string
+  /** Where it is, in words: the run's, the task's title, or the repository's name. */
+  readonly where: string
   readonly title: string
   readonly busy: boolean
   readonly startedAt: string
@@ -171,6 +173,7 @@ interface Terminal {
   readonly taskId: string | null
   readonly launchId: string | null
   readonly folder: string
+  readonly where: string
   readonly shell: string
   readonly pty: Pty
   readonly startedAt: string
@@ -226,6 +229,7 @@ export class Terminals extends Context.Service<
         taskId: term.taskId,
         launchId: term.launchId,
         folder: term.folder,
+        where: term.where,
         title: term.front === '' ? basename(term.shell).replace(/\.exe$/i, '') : term.front.replace(/^-/, ''),
         busy: term.exited === null && !isShell(term.front, term.shell),
         startedAt: term.startedAt,
@@ -310,7 +314,7 @@ export class Terminals extends Context.Service<
         Effect.gen(function* () {
           const there = terminals.get(input.id)
           if (there !== undefined) return shown(there)
-          const folder = yield* launches.terminalFolder({
+          const { path: folder, where } = yield* launches.terminalFolder({
             projectId: input.projectId,
             taskId: input.taskId,
             ...(input.launchId === undefined ? {} : { launchId: input.launchId }),
@@ -336,6 +340,7 @@ export class Terminals extends Context.Service<
             taskId: input.taskId,
             launchId: input.launchId ?? null,
             folder,
+            where,
             shell: shell.file,
             pty,
             startedAt: new Date(yield* Clock.currentTimeMillis).toISOString(),

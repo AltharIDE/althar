@@ -979,6 +979,10 @@ handleLocal('althar:pick-folder', async (event, purpose: unknown) => {
 
 // Whether the window is maximized, as its own buttons ask.
 ipcMain.handle('althar:maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false)
+// A terminal's paste key (Ctrl+V on Windows, Ctrl+Shift+V on Linux): the clipboard pasted where the window's focus is, as the Edit menu's Paste does.
+ipcMain.on('althar:paste', (event) => {
+  if (mine(event.sender)) event.sender.paste()
+})
 
 // The window's own buttons, from its strip: close, minimize, or maximize and back (windowOptions.ts names the chrome).
 ipcMain.on('althar:window', (event, action: unknown) => {

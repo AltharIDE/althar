@@ -4470,6 +4470,8 @@ export const ShownTerminal = Schema.Struct({
   launchId: Schema.NullOr(Schema.String),
   /** The folder it opened in. */
   folder: Schema.String,
+  /** Where that is, in words: the run's, the task's title, or the repository's name. */
+  where: Schema.String,
   /** What runs in it in front now: the shell, or the program the person started from it (`vim`, `bun`). */
   title: Schema.String,
   /** Something besides the shell runs in it now: closing it stops that too. */
@@ -6251,6 +6253,8 @@ const WorkApi = RpcGroup.make(
   ),
   /** The project's terminals, in the order they opened. */
   call('ListTerminals', { projectId: Schema.String }, Schema.Array(ShownTerminal)),
+  /** What Althar runs of the project itself, its tasks' too, in the order they started. */
+  call('ListLaunches', { projectId: Schema.String }, Schema.Array(Launch)),
   /** What a terminal prints: what it printed so far, kept to its end, then each piece as it comes, until it ends or is closed. */
   Rpc.make('AttachTerminal', { payload: { id: Schema.String }, success: TerminalChunk, error: ApiError, stream: true }),
   /** What the person typed or pasted into a terminal, as its keys send it. */

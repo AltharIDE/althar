@@ -385,8 +385,8 @@ export const useProject = (projectId: string): ProjectModel => {
       if (event.projectId === projectId) setCoordinator((current) => ({ ...current, launches: event.launches }))
       return
     }
-    // What it is still saying is useStreamed's.
-    if (event._tag === 'Streaming') return
+    // What it is still saying is useStreamed's; its terminals are the status line's.
+    if (event._tag === 'Streaming' || event._tag === 'Terminals') return
     // How full the coordinator's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context') {
       if (event.threadId === threadId)

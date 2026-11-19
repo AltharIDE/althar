@@ -2611,6 +2611,7 @@ export const handlers = apiLayer(
           ),
         ),
       ListTerminals: ({ projectId }) => api(terminals.ofProject(projectId)),
+      ListLaunches: ({ projectId }) => api(launches.ofProject(projectId)),
       AttachTerminal: ({ id }) =>
         Stream.mapError(terminals.attach(id), (error) => new ApiError({ reason: 'NotFound', message: `No terminal ${error.id}.` })),
       // Each key as it is pressed: straight to the shell, not through the call log a command keeps.

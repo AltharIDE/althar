@@ -1,6 +1,6 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
-import { Icon, type IconName } from '../../foundations/Icon/Icon'
+import { Icon } from '../../foundations/Icon/Icon'
 import { modKey } from '../../foundations/keys'
 import { Logo } from '../../foundations/Logo/Logo'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
@@ -63,8 +63,6 @@ export interface PageTab {
   title: string
   /** It has the window: no other tab does. */
   current: boolean
-  /** What it is, where it isn't a web page: a terminal. */
-  icon?: IconName
   onSelect: () => void
   onClose: () => void
 }
@@ -360,7 +358,7 @@ export function ProjectTabs({
             {pages.map((page) => (
               <li key={page.id} className={cx(s.tab, s.project, page.current && s.current)}>
                 <button type="button" className={s.select} aria-current={page.current ? 'page' : undefined} onClick={page.onSelect}>
-                  <Icon name={page.icon ?? 'globe'} size={15} className={s.logo} />
+                  <Icon name="globe" size={15} className={s.logo} />
                   <span className={s.name}>{page.title}</span>
                 </button>
                 <IconButton icon="close" label={t.close(page.title)} size="small" className={s.close} onClick={page.onClose} />

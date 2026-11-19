@@ -230,6 +230,10 @@ contextBridge.exposeInMainWorld('althar', {
     const path = webUtils.getPathForFile(file)
     return path === '' ? Promise.resolve(null) : ipcRenderer.invoke('althar:attach', path)
   },
+  // A dropped file's path on disk, which a terminal types; one the page made has none, and gets ''.
+  pathOfFile: (file: File): string => webUtils.getPathForFile(file),
+  // Pastes the clipboard where the window's focus is, as the Edit menu does: a terminal's own paste key. The page never reads the clipboard.
+  paste: (): void => ipcRenderer.send('althar:paste'),
   // The files copied in the file manager, pasted into a message: as main reads them off the clipboard.
   attachPasted: (): Promise<unknown> => ipcRenderer.invoke('althar:attach-pasted'),
   appIcon: (): Promise<string | null> => ipcRenderer.invoke('althar:app-icon'),

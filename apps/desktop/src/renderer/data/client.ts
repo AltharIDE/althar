@@ -12,6 +12,8 @@ import { checkedPosition, checkedWatch } from './checkedWatch'
 import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
 
 import {
+  type ShownTerminal,
+  type TerminalChunk,
   type PlaceId,
   type StorageSize,
   type CanvasDetail,
@@ -783,6 +785,23 @@ export interface Client {
   ) => Promise<Launch>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
+  /** What Althar runs of the project itself, its tasks' too. */
+  readonly listLaunches: (projectId: string) => Promise<ReadonlyArray<Launch>>
+  /** Opens a terminal by the id the window gave it: in the run's folder, else the task's worktree, else the project's repository. */
+  readonly openTerminal: (input: {
+    readonly id: string
+    readonly projectId: string
+    readonly taskId: string | null
+    readonly launchId?: string
+    readonly cols: number
+    readonly rows: number
+  }) => Promise<ShownTerminal>
+  readonly listTerminals: (projectId: string) => Promise<ReadonlyArray<ShownTerminal>>
+  /** What a terminal prints, from what it printed so far, until it ends or `stop` is called; `onEnd` once the stream ends either way but `stop`. */
+  readonly attachTerminal: (id: string, onChunk: (chunk: TerminalChunk) => void, onEnd: (failure?: unknown) => void) => () => void
+  readonly writeTerminal: (id: string, data: string) => Promise<void>
+  readonly resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
+  readonly closeTerminal: (id: string) => Promise<void>
   /** Keeps something for the project to run: a new one, or, by id, a change to one; a null command is its repository's own way. */
   readonly keepRunnable: (input: {
     readonly projectId: string
@@ -1336,6 +1355,26 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     getRunnableRefs: (projectId, text) => settle(api.GetRunnableRefs({ projectId, ...(text === undefined ? {} : { text }) })),
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
+    listLaunches: (projectId) => settle(api.ListLaunches({ projectId })),
+    openTerminal: (input) => command((commandId) => api.OpenTerminal({ commandId, ...input })),
+    listTerminals: (projectId) => settle(api.ListTerminals({ projectId })),
+    attachTerminal: (id, onChunk, onEnd) => {
+      const fiber = Effect.runFork(
+        Stream.runForEach(api.AttachTerminal({ id }), (chunk) => Effect.sync(() => onChunk(chunk))).pipe(
+          Effect.matchCause({
+            onSuccess: () => onEnd(),
+            onFailure: (cause) => {
+              if (!Cause.hasInterruptsOnly(cause)) onEnd(Cause.squash(cause))
+            },
+          }),
+        ),
+      )
+      return () => void Effect.runFork(Fiber.interrupt(fiber))
+    },
+    // Each key as it is pressed: never tried twice, which would type it twice.
+    writeTerminal: (id, data) => settle(api.WriteTerminal({ id, data })),
+    resizeTerminal: (id, cols, rows) => settle(api.ResizeTerminal({ id, cols, rows })),
+    closeTerminal: (id) => command((commandId) => api.CloseTerminal({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
     moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),

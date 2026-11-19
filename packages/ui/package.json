@@ -11,6 +11,7 @@
     "./opening": "./src/opening.ts",
     "./device": "./src/foundations/device.ts",
     "./seal": "./src/seal/seal.ts",
+    "./terminal": "./src/chrome/TerminalView/index.ts",
     "./styles.css": "./src/styles/global.css"
   },
   "scripts": {

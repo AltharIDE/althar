@@ -207,6 +207,10 @@ export interface Host {
   readonly pickPlace: (name: string) => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
+  /** A dropped file's path on disk; '' for one the page made. */
+  readonly pathOfFile?: (file: File) => string
+  /** Pastes the clipboard where the window's focus is, as the Edit menu does. */
+  readonly paste?: () => void
   /** A file or folder added to a message, measured and granted: its grant, name and size, or why it can't go; null for one with no file behind it, as a pasted picture. */
   readonly attach: (file: File) => Promise<Attached | null>
   /** The files copied in the file manager, as the clipboard names them, each as `attach` says it; none where what was copied isn't files. */

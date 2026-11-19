@@ -213,12 +213,14 @@ export class Launches extends Context.Service<
      * Where a terminal opens: the folder the run named ran in, while it is
      * there; else the task's worktree, or the project's own repository, at
      * the folder in it the project is about; the first repository of several.
+     * With where that is, in words: the run's, the task's title, or the
+     * repository's name.
      */
     terminalFolder(input: {
       readonly projectId: string
       readonly taskId: string | null
       readonly launchId?: string
-    }): Effect.Effect<string, unknown>
+    }): Effect.Effect<{ readonly path: string; readonly where: string }, unknown>
     /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
     processes(): Effect.Effect<ReadonlyArray<{ readonly pid: number; readonly projectId: string; readonly taskId: string | null }>>
     /**
@@ -1667,7 +1669,7 @@ export class Launches extends Context.Service<
           provide(
             Effect.gen(function* () {
               const launch = launchId === undefined ? undefined : (launches.get(launchId) ?? leftBehind.get(launchId))
-              if (launch !== undefined && existsSync(launch.folder)) return launch.folder
+              if (launch !== undefined && existsSync(launch.folder)) return { path: launch.folder, where: launch.where }
               const [place] = yield* placesOf(projectId, taskId, undefined)
               if (place === undefined)
                 return yield* new LaunchRefused({
@@ -1675,8 +1677,13 @@ export class Launches extends Context.Service<
                   message:
                     taskId === null ? 'The project has no repository on this computer.' : 'The task has no worktree on this computer.',
                 })
+              const sql = yield* SqlClient.SqlClient
+              const [task] = taskId === null ? [] : yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
               // A finished task's folder that was removed opens in its repository's own folder, as its runs say (ADR-056).
-              return within(place.binding, existsSync(place.root) ? place.root : place.binding.repository)
+              return {
+                path: within(place.binding, existsSync(place.root) ? place.root : place.binding.repository),
+                where: task?.title ?? place.binding.name,
+              }
             }),
           ),
         processes: () =>
