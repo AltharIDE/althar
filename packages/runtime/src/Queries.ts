@@ -2988,9 +2988,8 @@ export class Queries extends Context.Service<
                       return presetOfPlan(yield* presetsIn(task.projectId), {
                         small: field(parameters, 'smallChange') === true,
                         ...(recorded === '' ? {} : { recorded }),
-                        parts: partsOfPlan(shape, task.shelf, ''),
                         // Its ending counts where it was chosen: a prototype pointed at a pull request is no prototype.
-                        chosen: partsOfPlan({ ...shape, endChosen: field(parameters, 'endChosen') === true }, task.shelf, ''),
+                        parts: partsOfPlan({ ...shape, endChosen: field(parameters, 'endChosen') === true }, task.shelf, ''),
                       })
                     }),
                     // Any agent may lead a review: the card offers them all.

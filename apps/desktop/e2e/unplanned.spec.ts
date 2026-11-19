@@ -157,7 +157,8 @@ test('a draft’s card stays where it was drafted, above a message sent while it
     // A task now, its plan streaming, they say something.
     await expect(conversation).toContainText(/Choosing a (lead|reviewer)/)
     await say('you dont need to split these')
-    const message = conversation.getByText('you dont need to split these', { exact: true })
+    // The message itself, not the preview of it the conversation shows once it has scrolled.
+    const message = conversation.locator('p:not([data-thread-preview])', { hasText: /^you dont need to split these$/ })
     await expect(message).toBeVisible()
     const above = async () => {
       const card = await title.boundingBox()
