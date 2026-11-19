@@ -1,12 +1,13 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { BoardTask } from '@althar/contracts'
 
 import {
   MERGE_QUEUE_STEP,
   MERGING_STEP,
+  QUEUES_AFTER,
   asMerging,
   mergeStandingOf,
   mergesThroughQueue,
@@ -29,6 +30,8 @@ const plain = change({ draft: false })
 
 const ready = (one: Partial<BoardTask>): BoardTask =>
   ({ threadId: `th-${one.taskId}`, phase: 'ready', step: null, createdAt: '2026-11-18T20:00:00.000Z', ...one }) as BoardTask
+
+afterEach(() => void vi.useRealTimers())
 
 describe('a merge going into its queue', () => {
   it('goes through its queue where its host said its branch merges through one', () => {
@@ -60,6 +63,8 @@ describe('a merge going into its queue', () => {
   })
 
   it('leaves the board’s merging once a read had it in its queue and the queue took it out, Merge still unanswered', async () => {
+    // Merge answers its press for a moment (QUEUES_AFTER) before it shows in its queue: that moment is the clock's, not the runner's.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     const answers: Array<() => void> = []
     const { client } = fakeClient({ merge: vi.fn(() => new Promise<void>((resolve) => answers.push(resolve))) })
     const services = servicesFor(client)
@@ -70,7 +75,8 @@ describe('a merge going into its queue', () => {
     )
     act(() => void result.current.merge({ taskId: 't1', head: bound.head ?? '', url: bound.url }))
     await waitFor(() => expect(result.current.merging.merging.has('t1')).toBe(true))
-    await waitFor(() => expect(result.current.merging.queuing.has('t1')).toBe(true))
+    await act(() => vi.advanceTimersByTimeAsync(QUEUES_AFTER))
+    expect(result.current.merging.queuing.has('t1')).toBe(true)
     // A read has it in its queue: the board's own queue step says so (queuedToMerge), not the press.
     rerender({ read: { ...bound, queued: true } })
     expect(result.current.merging.merging.has('t1')).toBe(false)
