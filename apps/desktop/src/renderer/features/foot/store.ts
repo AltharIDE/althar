@@ -155,6 +155,17 @@ export const makeFootStore = (
     one?.session.dispose()
   }
 
+  /** A terminal the runtime didn't close is back, drawn again from what it kept, with why. */
+  const closeFailed = (id: string, failure: unknown, shown?: ShownTerminal) => {
+    gone.delete(id)
+    if (shown !== undefined && !terminals.some((known) => known.id === id)) {
+      terminals = [...terminals, shown]
+      answered.set(id, { at: Date.now(), shown })
+    }
+    set({ problem: messageOf(failure) })
+    settle()
+  }
+
   const pump = (id: string) => {
     const one = attached.get(id)
     if (one === undefined || !one.ready || one.writing || one.waiting === '') return
@@ -290,7 +301,8 @@ export const makeFootStore = (
             rows: Math.max(2, session.rows),
           })
           const one = attached.get(id)
-          if (one === undefined) return void client.closeTerminal(id).catch(() => {})
+          // Closed as it opened: closed in the runtime too, or back with a line.
+          if (one === undefined) return void client.closeTerminal(id).catch((failure: unknown) => closeFailed(id, failure, shown))
           one.ready = true
           opening.delete(id)
           if (!terminals.some((known) => known.id === id)) {
@@ -317,7 +329,7 @@ export const makeFootStore = (
         const failedHere = opening.get(choice.id)?.failed !== undefined
         forget(choice.id)
         settle()
-        if (!failedHere) void client.closeTerminal(choice.id).catch(() => {})
+        if (!failedHere) void client.closeTerminal(choice.id).catch((failure: unknown) => closeFailed(choice.id, failure))
         return
       }
       const run = launches.find((one) => one.id === choice.id)

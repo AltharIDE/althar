@@ -9,8 +9,8 @@ import { fakeClient } from './fixtures'
 /*
  * The status line's store: a terminal opened is there at once and its keys
  * wait for its shell, then go in order; one closed or a run dismissed is
- * gone at once, and a run comes back with a line where it couldn't be
- * stopped; the runtime's lists keep it as they say it.
+ * gone at once, and comes back with a line where the runtime couldn't close
+ * or stop it; the runtime's lists keep it as they say it.
  */
 
 const feed = () => {
@@ -100,6 +100,39 @@ describe('the status line’s store', () => {
     store.dismiss({ kind: 'terminal', id: 'term_000001' })
     expect(store.get()).toMatchObject({ terminals: [], raised: false, chosen: null })
     expect(client.closeTerminal).toHaveBeenCalledWith('term_000001')
+  })
+
+  it('brings a terminal back with a line, drawn again from what it kept, where the runtime didn’t close it', async () => {
+    const { client } = fakeClient({
+      listTerminals: vi.fn(async () => [shell({ busy: true, title: 'bun' })]),
+      closeTerminal: vi.fn(async () =>
+        Promise.reject(new ApiError({ reason: 'Unavailable', message: 'Althar’s runtime isn’t answering.' })),
+      ),
+    })
+    const store = makeFootStore(client, feed(), {}, 'proj_1')
+    await waitFor(() => expect(store.get().terminals).toHaveLength(1))
+    const was = store.sessionOf('term_000001')
+    store.dismiss({ kind: 'terminal', id: 'term_000001' })
+    expect(store.get().terminals).toEqual([])
+    await waitFor(() => expect(store.get().problem).toBe('Althar’s runtime isn’t answering.'))
+    expect(store.get().terminals.map((one) => [one.id, one.busy])).toEqual([['term_000001', true]])
+    // Its old session went with the close: shown again, it attaches afresh, and the runtime sends what it kept.
+    expect(store.sessionOf('term_000001')).not.toBe(was)
+    expect(client.attachTerminal).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a terminal closed where the runtime closed it, or had no such shell', async () => {
+    const said = feed()
+    const { client } = fakeClient({ listTerminals: vi.fn(async () => [shell({})]) })
+    const store = makeFootStore(client, said, {}, 'proj_1')
+    await waitFor(() => expect(store.get().terminals).toHaveLength(1))
+    store.dismiss({ kind: 'terminal', id: 'term_000001' })
+    await waitFor(() => expect(client.closeTerminal).toHaveBeenCalledWith('term_000001'))
+    // A list said before the runtime closed it still names it: it stays closed here.
+    said.say({ _tag: 'Terminals', projectId: 'proj_1', terminals: [shell({})] })
+    expect(store.get()).toMatchObject({ terminals: [], problem: null })
+    said.say({ _tag: 'Terminals', projectId: 'proj_1', terminals: [] })
+    expect(store.get()).toMatchObject({ terminals: [], problem: null })
   })
 
   it('stops a running run and clears one that ended, at once, and brings one back with a line where the runtime said no', async () => {
