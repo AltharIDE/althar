@@ -20,7 +20,7 @@
         "althar": "./dist/althar.js",
       },
       "dependencies": {
-        "@agentclientprotocol/claude-agent-acp": "0.108.0",
+        "@agentclientprotocol/claude-agent-acp": "0.108.1",
         "@agentclientprotocol/codex-acp": "2.7.0",
         "@althar/contracts": "workspace:*",
         "@althar/domain": "workspace:*",
@@ -45,7 +45,7 @@
       "name": "@althar/desktop",
       "version": "0.9.0",
       "dependencies": {
-        "@agentclientprotocol/claude-agent-acp": "0.108.0",
+        "@agentclientprotocol/claude-agent-acp": "0.108.1",
         "@agentclientprotocol/codex-acp": "2.7.0",
         "@althar/connectors": "workspace:*",
         "@althar/contracts": "workspace:*",
@@ -92,7 +92,7 @@
         "althar-host": "./dist/althar-host.js",
       },
       "dependencies": {
-        "@agentclientprotocol/claude-agent-acp": "0.108.0",
+        "@agentclientprotocol/claude-agent-acp": "0.108.1",
         "@agentclientprotocol/codex-acp": "2.7.0",
         "@althar/contracts": "workspace:*",
         "@althar/persistence-sqlite": "workspace:*",
@@ -250,7 +250,7 @@
       "name": "@althar/provider-adapters",
       "version": "0.0.0",
       "dependencies": {
-        "@agentclientprotocol/claude-agent-acp": "0.108.0",
+        "@agentclientprotocol/claude-agent-acp": "0.108.1",
         "@agentclientprotocol/codex-acp": "2.7.0",
         "@agentclientprotocol/sdk": "1.5.1",
         "@althar/domain": "workspace:*",
@@ -420,7 +420,7 @@
     "sharp",
   ],
   "patchedDependencies": {
-    "@agentclientprotocol/claude-agent-acp@0.108.0": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.108.0.patch",
+    "@agentclientprotocol/claude-agent-acp@0.108.1": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.108.1.patch",
     "@agentclientprotocol/codex-acp@2.7.0": "patches/@agentclientprotocol%2Fcodex-acp@2.7.0.patch",
   },
   "overrides": {
@@ -433,7 +433,7 @@
   "packages": {
     "@adobe/css-tools": ["@adobe/css-tools@4.5.0", "", {}, "sha512-6OzddxPio9UiWTCemp4N8cYLV2ZN1ncRnV1cVGtve7dhPOtRkleRyx32GQCYSwDYgaHU3USMm84tNsvKzRCa1Q=="],
 
-    "@agentclientprotocol/claude-agent-acp": ["@agentclientprotocol/claude-agent-acp@0.108.0", "", { "dependencies": { "@agentclientprotocol/sdk": "2.7.0", "@anthropic-ai/claude-agent-sdk": "0.3.326", "diff": "9.0.0", "zod": "4.6.7" }, "bin": { "claude-agent-acp": "dist/index.js" } }, "sha512-Y0HI3CB0DfhpWItCn2RE3xgpen001V2U/bHm3G6ZVKXsElF5N4uYyjYlmgNzZBKcBtZK0JqiE96NMaeVXtgJjw=="],
+    "@agentclientprotocol/claude-agent-acp": ["@agentclientprotocol/claude-agent-acp@0.108.1", "", { "dependencies": { "@agentclientprotocol/sdk": "2.8.0", "@anthropic-ai/claude-agent-sdk": "0.3.326", "diff": "9.0.0", "zod": "4.6.7" }, "bin": { "claude-agent-acp": "dist/index.js" } }, "sha512-Qn1EjtmqJtEhwvMLfeWPZXLv9++hfM5dkAiVOTJEp28TBcebLR7Gypm7KGWAf1g7/ei1R3w3teOlMIl9f3+j4Q=="],
 
     "@agentclientprotocol/codex-acp": ["@agentclientprotocol/codex-acp@2.7.0", "", { "dependencies": { "@agentclientprotocol/sdk": "~2.6.0", "@openai/codex": "^0.166.0", "cross-spawn": "^7.0.6", "diff": "^9.0.0", "open": "^11.0.1", "vscode-jsonrpc": "^9.0.1", "zod": "^4.0.0" }, "bin": { "codex-acp": "dist/index.js" } }, "sha512-fFFU/tV5DltBzN4cZIh5tJEWGTZFXbwHU7I5RxPkmrGraw3jhAIuvTeudYwK3wAbV311WgIi7qONl2I8uRV2jw=="],
 
@@ -2577,7 +2577,7 @@
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
 
-    "@agentclientprotocol/claude-agent-acp/@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@2.7.0", "", { "peerDependencies": { "@modelcontextprotocol/server": "^2.4.0", "zod": "^3.25.76 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/server"] }, "sha512-oXdQq0plWv3iOg01zJghNZRSuyWeMYxOgWIaSdwg1BZe2ZAC9LRhNDi023lNYxXq1zVIpQjIp8P6AfsxpvxF6g=="],
+    "@agentclientprotocol/claude-agent-acp/@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@2.8.0", "", { "peerDependencies": { "@modelcontextprotocol/server": "^2.4.0", "zod": "^3.25.76 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/server"] }, "sha512-EjsvoRX8nEH2z3PAVI2ILsVXAefVcSlLPeXGjlQoFgkJE71F2J0Fj7N6oL/k7SnP0vY+9hmONPFz/K2zalnTiw=="],
 
     "@agentclientprotocol/codex-acp/@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@2.6.0", "", { "peerDependencies": { "@modelcontextprotocol/server": "^2.4.0", "zod": "^3.25.76 || ^4.0.0" }, "optionalPeers": ["@modelcontextprotocol/server"] }, "sha512-3FtL6MkAV5F9qxg0FQV8wmBszIm2xuVPoDWOILIFSDQ+Vq3Twdh7Cw6Hk2GOPUbevgrTUpUAqZXQy7Geaj79mw=="],
 

@@ -1,5 +1,5 @@
 diff --git a/dist/permissions/response.js b/dist/permissions/response.js
-index 2b763db8700c12b859490858b1026373fcf84b6f..4871dc8f6657f6a3271f367a4c0ac537e701c919 100644
+index 2b763db..4871dc8 100644
 --- a/dist/permissions/response.js
 +++ b/dist/permissions/response.js
 @@ -12,8 +12,12 @@ export function decodeClaudePermissionResponse(response, toolName, input, toolUs
