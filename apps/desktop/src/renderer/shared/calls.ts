@@ -48,6 +48,18 @@ export const isSettleable = (task: {
   (task.kind !== 'change' || (task.nothingBuilt === true && task.phase === 'ready')) && (task.phase === 'ready' || task.phase === 'kept')
 
 /**
+ * Whether a finished task takes Keep for later: any kind, a prototype or a chat that ends on its branch included, waiting
+ * in Needs you and not settled (a merged one's later commits wait for a pull request), with no pull request of its own open
+ * and nothing held for Ship. Those wait on the person in their own ways (accepting, Ship), which a kept row doesn't show.
+ */
+export const takesKeep = (task: {
+  readonly phase: string
+  readonly state?: string | undefined
+  readonly pullOpen: boolean
+  readonly held?: unknown
+}): boolean => task.phase === 'ready' && task.state !== 'done' && task.state !== 'abandoned' && !task.pullOpen && task.held == null
+
+/**
  * What a finished lead's report leaves to the person, in a line: the last line of it that asks, else its last line. Null where
  * it said nothing. Bullets and numbers its options come in are dropped.
  */

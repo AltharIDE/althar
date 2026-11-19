@@ -22,7 +22,7 @@ import { Errands } from './Errands'
 import { CantMerge, PushRefused, ShipRefused } from './errors'
 import { commitsOf } from './git'
 import { Instance } from './Instance'
-import { answeredIn, quickIn } from './kinds'
+import { answeredIn, keepWaitsIn, quickIn } from './kinds'
 import { MergeReviews } from './MergeReviews'
 import { Reviews } from './Reviews'
 import { shelve } from './scratch'
@@ -314,12 +314,14 @@ export class TaskActions extends Context.Service<
             projectId: ProjectId
             threadId: string
             change: number
+            pullOpen: number
             reviews: number
             answered: number
           }>`
             SELECT k.id, k.slug, k.title, k.project_id, t.id AS thread_id,
               CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
                 THEN 0 ELSE 1 END AS change,
+              ${sql.unsafe(keepWaitsIn('k'))} AS pull_open,
               EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews,
               ${sql.unsafe(answeredIn('k'))} AS answered
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
@@ -529,8 +531,12 @@ export class TaskActions extends Context.Service<
                 : nothing(`${task.slug} can’t be marked done yet: it is still at work, or something on it waits on the person.`)
             }
             case 'keep': {
-              if (task.change === 1)
-                return nothing(`${task.slug} is a change: it waits on its pull request, not in Needs you, so there is nothing to keep.`)
+              // Any kind keeps, a prototype or a chat ending on its branch included; one with its pull request open, or commits held
+              // for Ship, waits on that.
+              if (task.pullOpen === 1)
+                return nothing(
+                  `${task.slug} has its pull request open, or commits waiting for Ship: it waits on that, so there is nothing to keep.`,
+                )
               if (standing.state !== 'open') return nothing(`${task.slug} is settled already.`)
               return (yield* tasks.keep({ envelope: yield* said('task.keep'), taskId: task.id }))
                 ? did(`Kept ${task.slug} for later: out of Needs you as it is, under Kept for later. Writing to it brings it back.`)
@@ -1999,7 +2005,7 @@ export class TaskActions extends Context.Service<
         {
           ...tool(
             'settle_task',
-            'Settles a task when the person says it is done, to keep it for later, or to discard it, as its menu does. done and keep are for a task that isn’t a change (a quick task, or a review once its review was posted); a change is done when its pull request merges. discard settles any task as it stands (its menu’s Abandon): its worktree and branch stay, and restart_task opens it again; a lead discarding its own task does so as its turn ends. It acts at once, with a line in your thread and the task’s. A task’s lead may leave task out for its own. One call for each task.',
+            'Settles a task when the person says it is done, to keep it for later, or to discard it, as its menu does. done is for a task that isn’t a change (a quick task, or a review once its review was posted); a change is done when its pull request merges. keep is for any task, a prototype or a chat ending on its branch included, except one with its pull request open or commits waiting for Ship, which wait on those. discard settles any task as it stands (its menu’s Abandon): its worktree and branch stay, and restart_task opens it again; a lead discarding its own task does so as its turn ends. It acts at once, with a line in your thread and the task’s. A task’s lead may leave task out for its own. One call for each task.',
             {
               type: 'object',
               properties: { task: optionalTask, how: { type: 'string', enum: ['done', 'keep', 'discard'] }, why },
