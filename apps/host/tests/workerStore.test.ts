@@ -74,6 +74,7 @@ describe('the private worker ledger', () => {
     try {
       const worker = store.enroll(fingerprint)
       const command = { projectId: `proj_${'1'.repeat(32)}`, commandName: 'check' }
+      expect(() => operator.cancel(`wpr_${'f'.repeat(32)}`)).toThrow('No project run')
       const queued = operator.enqueue(worker, command)
       expect(store.next(worker)).toBeUndefined()
       expect(() => store.enqueue(worker)).toThrow('no outstanding')
