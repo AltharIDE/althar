@@ -633,14 +633,20 @@ export const planFromPreset = <P extends PresetPlan>(
   const lead = before.steps.find((step) => step.key === 'implement')
   const review = before.steps.find((step) => step.key === 'review')
   const named = models?.named ?? ((pick: ModelPick) => pick)
+  const tunedLead = lead === undefined || parts.lead === null ? undefined : named(pickOf(parts.lead))
   const implement =
     lead === undefined
       ? undefined
       : {
           ...lead,
-          ...(parts.lead === null ? {} : named(pickOf(parts.lead))),
-          // The person's effort for its lead, where they tuned one.
-          ...(parts.effort == null ? {} : { effort: parts.effort }),
+          ...tunedLead,
+          // The person's effort for its lead, where they tuned one; none tuned, an effort for another model than it had
+          // goes, so the new one runs at the person's or its own default.
+          ...(parts.effort != null
+            ? { effort: parts.effort }
+            : lead.effort != null && tunedLead !== undefined && (tunedLead.agentId !== lead.agentId || tunedLead.model !== lead.model)
+              ? { effort: null }
+              : {}),
           skipped: false,
         }
   const reviewer = reviewerOfPreset(before, parts, models)

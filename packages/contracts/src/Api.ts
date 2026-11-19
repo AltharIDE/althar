@@ -205,6 +205,8 @@ export const Preset = Schema.Struct({
   from: Schema.optional(Schema.String),
   /** A built-in one the person tuned: its lead, reviewer, efforts or brief are theirs, until they reset it. */
   tuned: Schema.optional(Schema.Boolean),
+  /** On a tuned one, the built-in as it is, naming no model: what Reset takes it back to, shown at once. */
+  asBuilt: Schema.optional(Schema.Struct({ parts: PresetParts, about: Schema.String })),
 })
 export type Preset = typeof Preset.Type
 

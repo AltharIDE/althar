@@ -85,8 +85,43 @@ describe('presets in Settings', () => {
     )
   })
 
-  it('resets a tuned built-in one at once, and brings the tuning back with a line where the runtime kept it', async () => {
-    const tuned: Preset = { ...builtIn, tuned: true, parts: { ...builtIn.parts, lead: 'codex/gpt-5' } }
+  it('resets a tuned built-in one at once, model-free, and no older list brings its tuning back while reads overlap', async () => {
+    const tuned: Preset = {
+      ...builtIn,
+      tuned: true,
+      about: 'a worktree, reviewed before it ships, a draft pull request, led by GPT-5',
+      parts: { ...builtIn.parts, lead: 'codex/gpt-5' },
+      asBuilt: { parts: builtIn.parts, about: builtIn.about },
+    }
+    // The runtime is slow: the read after the reset is from before it caught up, and still has it tuned.
+    const lists = [[tuned], [tuned]]
+    const listPresets = vi.fn(async () => lists.shift() ?? [builtIn])
+    let done = () => {}
+    const resetPreset = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
+    const { client } = fakeClient({ listPresets, resetPreset })
+    withServices(<PresetsSection agents={agents} />, client)
+    expect(await screen.findByText('Tuned')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Reset' }))
+    // The built-in, naming no model, in the frame it is pressed.
+    expect(screen.queryByText('Tuned')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull()
+    expect(screen.getByText(builtIn.about)).toBeTruthy()
+    // Reset; the read after it, from before the runtime caught up, never brings its tuning back.
+    done()
+    await waitFor(() => expect(listPresets).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('Tuned')).toBeNull()
+    expect(screen.queryByText(tuned.about)).toBeNull()
+    expect(screen.getByText(builtIn.about)).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('brings a tuning the runtime kept back with a line, where Reset was refused', async () => {
+    const tuned: Preset = {
+      ...builtIn,
+      tuned: true,
+      parts: { ...builtIn.parts, lead: 'codex/gpt-5' },
+      asBuilt: { parts: builtIn.parts, about: builtIn.about },
+    }
     const resetPreset = vi.fn(async () => Promise.reject(new Error('Althar couldn’t reset it.')))
     const { client } = fakeClient({ listPresets: vi.fn(async () => [tuned]), resetPreset })
     withServices(<PresetsSection agents={agents} />, client)

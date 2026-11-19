@@ -144,6 +144,7 @@ import { shelve } from './scratch'
 import { Helpers } from './Helpers'
 import {
   declinePresetOffer,
+  BUILT_IN,
   describe as describePreset,
   editPreset,
   partsOfTask,
@@ -1983,9 +1984,11 @@ export const handlers = apiLayer(
             return all.map(({ fromProjectId, ...one }) => {
               const keptTo = one.projectId === null ? undefined : named.get(one.projectId)
               const from = fromProjectId == null ? undefined : named.get(fromProjectId)
+              const built = one.tuned === true ? BUILT_IN.find((preset) => preset.id === one.id) : undefined
               return {
                 ...one,
                 about: describePreset(one.parts, models),
+                ...(built === undefined ? {} : { asBuilt: { parts: built.parts, about: describePreset(built.parts, models) } }),
                 ...(keptTo === undefined ? {} : { keptTo }),
                 ...(from === undefined ? {} : { from }),
               }

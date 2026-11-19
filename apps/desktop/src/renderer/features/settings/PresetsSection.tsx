@@ -227,12 +227,42 @@ function PresetEditor({ preset, onDone }: { preset: Preset; onDone: () => void }
   )
 }
 
+/**
+ * Built-in presets the person reset, shown as built in, naming no model (`asBuilt`), from the frame they pressed Reset
+ * (docs/decisions/foundations.md, "The UI is instant"). Each stays so until a read with it untuned lands, so no read from
+ * before the reset, however reads overlap, brings its tuning back for a moment; `back` returns one the runtime kept.
+ */
+function useResetAtOnce(items: ReadonlyArray<Preset> | undefined) {
+  const [held, setHeld] = useState<ReadonlySet<string>>(() => new Set())
+  // A read with it untuned says it is reset: from then on it is the read's to show.
+  if (items !== undefined && held.size > 0) {
+    const still = [...held].filter((id) => items.some((one) => one.id === id && one.tuned === true))
+    if (still.length !== held.size) setHeld(new Set(still))
+  }
+  const asBuilt = (one: Preset): Preset => {
+    if (!held.has(one.id) || one.asBuilt === undefined) return one
+    const { tuned: _tuned, asBuilt: built, ...rest } = one
+    return { ...rest, parts: built.parts, about: built.about }
+  }
+  return {
+    shown: items === undefined || held.size === 0 ? items : items.map(asBuilt),
+    hold: (id: string) => setHeld((was) => new Set([...was, id])),
+    back: (id: string) =>
+      setHeld((was) => {
+        const next = new Set(was)
+        next.delete(id)
+        return next
+      }),
+  }
+}
+
 export function PresetsSection({ agents = [] }: { agents?: ReadonlyArray<AgentStatus> }) {
   const { client } = useServices()
   const cache = useQueryClient()
   const read = useQuery({ queryKey: PRESETS, queryFn: () => client.listPresets() }).data
   const gone = useGoneAtOnce(read, (preset) => preset.id)
-  const presets = gone.shown
+  const reset = useResetAtOnce(gone.shown)
+  const presets = reset.shown
   const [editing, setEditing] = useState<string | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
   if (presets === undefined) return null
@@ -249,7 +279,15 @@ export function PresetsSection({ agents = [] }: { agents?: ReadonlyArray<AgentSt
           {...(editing === preset.id
             ? {
                 under: preset.builtin ? (
-                  <PresetTuner preset={preset} agents={agents} onDone={() => setEditing(null)} />
+                  <PresetTuner
+                    preset={preset}
+                    agents={agents}
+                    onDone={() => {
+                      // Tuned again: the read is theirs to show, not a reset held from before.
+                      reset.back(preset.id)
+                      setEditing(null)
+                    }}
+                  />
                 ) : (
                   <PresetEditor preset={preset} onDone={() => setEditing(null)} />
                 ),
@@ -268,17 +306,14 @@ export function PresetsSection({ agents = [] }: { agents?: ReadonlyArray<AgentSt
                     size="small"
                     variant="quiet"
                     onClick={() => {
-                      // Back to the built-in at once; the runtime catches up behind it, and a refusal comes back with a line.
+                      // Back to the built-in at once, until a read with it untuned lands; a refusal brings the tuning back, with a line.
                       setFailed(null)
                       setEditing(null)
-                      const was = cache.getQueryData<ReadonlyArray<Preset>>(PRESETS)
-                      cache.setQueryData<ReadonlyArray<Preset>>(PRESETS, (list) =>
-                        list?.map((one) => (one.id === preset.id ? { ...one, tuned: false } : one)),
-                      )
+                      reset.hold(preset.id)
                       void client
                         .resetPreset(preset.id)
                         .catch((error: unknown) => {
-                          cache.setQueryData(PRESETS, was)
+                          reset.back(preset.id)
                           setFailed(error instanceof Error ? error.message : String(error))
                         })
                         .finally(() => void cache.invalidateQueries({ queryKey: PRESETS }))

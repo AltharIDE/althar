@@ -231,6 +231,8 @@ describe('presets, through the API', () => {
           brief: 'Three directions.',
         })
         assert.include(tuned?.about, 'led by Large at high effort')
+        // What Reset takes it back to, for Settings to show at once: the built-in, naming no model.
+        assert.deepStrictEqual(tuned?.asBuilt, { parts: before?.parts, about: before?.about })
         // Settings' edit of the person's own leaves a built-in alone.
         assert.include(
           yield* refused(client.EditPreset({ commandId: commandId(), id: 'builtin:prototype', name: 'Mine', parts: LOCAL })),

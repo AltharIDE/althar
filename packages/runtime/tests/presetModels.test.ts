@@ -91,6 +91,19 @@ describe('the built-in Prototype preset', () => {
       describePreset(tuned, presetModels([OPUS])),
       'a worktree, no review, ends here, led by Claude Opus 5.5 at xhigh effort',
     )
+    // Tuned to another model with no effort: the old model's effort goes, so it runs at its default; the same model keeps it.
+    const [fresh] = planFromPreset(
+      proposed({ steps: [{ ...LEAD, agentId: 'codex', model: 'large', effort: 'high' }] }),
+      { ...prototype, lead: 'claude-code/default' },
+      presetModels([OPUS, SOL]),
+    ).steps
+    assert.deepInclude(fresh, { agentId: 'claude-code', model: null, effort: null })
+    const [same] = planFromPreset(
+      proposed({ steps: [{ ...LEAD, agentId: 'codex', model: 'large', effort: 'high' }] }),
+      { ...prototype, lead: 'codex/large' },
+      presetModels([OPUS, SOL]),
+    ).steps
+    assert.deepInclude(same, { agentId: 'codex', model: 'large', effort: 'high' })
     // One the agent doesn't list stays as the preset names it.
     const [kept] = planFromPreset(proposed({ steps: [LEAD] }), tuned, presetModels([SOL])).steps
     assert.deepInclude(kept, { agentId: 'claude-code', model: 'claude-opus-5-5' })
