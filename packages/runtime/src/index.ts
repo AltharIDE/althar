@@ -11,6 +11,7 @@ export {
 } from './Config'
 export { type AtOnce, Busy } from './Busy'
 export { Launches } from './Launches'
+export { PtySpawner, Terminals, type Pty, type ShownTerminal } from './Terminals'
 export { type AtOnceDefault, atOnceFor, type Machine } from './atOnce'
 export { SignIns } from './SignIns'
 export * from './errors'

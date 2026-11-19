@@ -22,7 +22,7 @@ import { Errands } from './Errands'
 import { CantMerge, PushRefused, ShipRefused } from './errors'
 import { commitsOf } from './git'
 import { Instance } from './Instance'
-import { answeredIn, quickIn } from './kinds'
+import { answeredIn, keepWaitsIn, quickIn } from './kinds'
 import { MergeReviews } from './MergeReviews'
 import { Reviews } from './Reviews'
 import { shelve } from './scratch'
@@ -314,12 +314,14 @@ export class TaskActions extends Context.Service<
             projectId: ProjectId
             threadId: string
             change: number
+            pullOpen: number
             reviews: number
             answered: number
           }>`
             SELECT k.id, k.slug, k.title, k.project_id, t.id AS thread_id,
               CASE WHEN ${sql.unsafe(quickIn('k'))} OR EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review')
                 THEN 0 ELSE 1 END AS change,
+              ${sql.unsafe(keepWaitsIn('k'))} AS pull_open,
               EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews,
               ${sql.unsafe(answeredIn('k'))} AS answered
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
@@ -529,8 +531,12 @@ export class TaskActions extends Context.Service<
                 : nothing(`${task.slug} can’t be marked done yet: it is still at work, or something on it waits on the person.`)
             }
             case 'keep': {
-              if (task.change === 1)
-                return nothing(`${task.slug} is a change: it waits on its pull request, not in Needs you, so there is nothing to keep.`)
+              // Any kind keeps, a prototype or a chat ending on its branch included; one with its pull request open, or commits held
+              // for Ship, waits on that.
+              if (task.pullOpen === 1)
+                return nothing(
+                  `${task.slug} has its pull request open, or commits waiting for Ship: it waits on that, so there is nothing to keep.`,
+                )
               if (standing.state !== 'open') return nothing(`${task.slug} is settled already.`)
               return (yield* tasks.keep({ envelope: yield* said('task.keep'), taskId: task.id }))
                 ? did(`Kept ${task.slug} for later: out of Needs you as it is, under Kept for later. Writing to it brings it back.`)
@@ -1232,7 +1238,7 @@ export class TaskActions extends Context.Service<
        * Its review before it ships, as asked: put on, by the model named or as `reviewerFor` picks it, or taken off (null),
        * one under way stopping and nothing reading it after the merge either. What changed, in a few words each.
        */
-      const reviewTo = (actorId: ActorId, task: Task, pick: typeof StepPick.Type | null | undefined) =>
+      const reviewTo = (actorId: ActorId, task: Task, pick: typeof StepPick.Type | null | undefined, atShip = false) =>
         Effect.gen(function* () {
           const { plan, lead, review } = yield* teamOf(task)
           if (plan.parameters.reads === true)
@@ -1267,7 +1273,7 @@ export class TaskActions extends Context.Service<
               message: 'No agent can review it now: each is out of usage or signed out. Name one with review, or try once one is back.',
             })
           const step: PlanStep = { key: 'review', ...pickedStep(reviewer), skipped: false }
-          const changed = yield* plainly(runs.changeTeam({ taskId: task.id, steps: [step], actorId }), task.slug)
+          const changed = yield* plainly(runs.changeTeam({ taskId: task.id, steps: [step], actorId, atShip }), task.slug)
           if (changed.review === undefined) return []
           const when =
             changed.review.when === 'next_round'
@@ -1302,13 +1308,15 @@ export class TaskActions extends Context.Service<
         })
 
       /**
-       * How it ends, as asked, and what that does to a pull request it has open: marked ready where it ends ready, closed where
-       * it ends with its branch or here (its branch stays, and reopen_pull_request opens it again). One ready already stays
-       * so where it ends as a draft: no host Althar knows turns one back. Null: on its branch, as a project on no host Althar
-       * knows ends. `chosen`: the person's own ending rather than the project's, which a preset saved from the task keeps.
-       * What changed, in a few words each.
+       * How it ends, as asked, and what that does to a pull request it has open: marked ready where it ends ready. Where it ends
+       * with its branch or here (a change stepped back to prototyping, say), it stays open as it is and nothing more goes to it
+       * until the task ends in a pull request again, when the same one carries on: every part changes either way, on the same
+       * task, branch and pull request. Only `close`, its pull request removed as a part, closes it (its branch stays, and
+       * reopen_pull_request opens it again). One ready already stays so where it ends as a draft: no host Althar knows turns one
+       * back. Null: on its branch, as a project on no host Althar knows ends. `chosen`: the person's own ending rather than the
+       * project's, which a preset saved from the task keeps. What changed, in a few words each.
        */
-      const endTo = (actorId: ActorId, task: Task, end: TaskEnding | null, chosen: boolean) =>
+      const endTo = (actorId: ActorId, task: Task, end: TaskEnding | null, chosen: boolean, close = false) =>
         Effect.gen(function* () {
           const { was } = yield* plainly(runs.reshape({ taskId: task.id, end, chosen, actorId: actorId }), task.slug)
           const said: Array<string> = was === end ? [] : [endingWords(end)]
@@ -1318,11 +1326,14 @@ export class TaskActions extends Context.Service<
             if (end === 'ready' && one.draft) {
               yield* plainly(changes.markReady(task.id, one.url), task.slug)
               said.push(`${name} marked ready for review`)
-            } else if (end === 'draft' && !one.draft) said.push(`${name} stays ready for review, and the next opens as a draft`)
-            else if (end === 'none' || end === 'here') {
+            } else if ((end === 'none' || end === 'here') && close) {
               yield* plainly(changes.close(task.id, one.url, { deleteBranch: false }), task.slug)
               said.push(`${name} closed, its branch staying`)
-            }
+            } else if (end === 'none' || end === 'here') {
+              if (was !== 'none' && was !== 'here')
+                said.push(`${name} stays open as it is, and nothing more goes to it until it ends in a pull request again`)
+            } else if (was === 'none' || was === 'here') said.push(`its work goes on in ${name} again`)
+            else if (end === 'draft' && !one.draft) said.push(`${name} stays ready for review, and the next opens as a draft`)
           }
           return said
         })
@@ -1407,12 +1418,14 @@ export class TaskActions extends Context.Service<
                 ? undefined
                 : presetPick(preset.parts.reviewer)
               : (reviewOverride ?? undefined)
+          // A review the preset puts on reads the work at its next Ship, even where a pull request of it is open already: its lead
+          // builds it now (a change stepped back from prototyping), and its review reads what it built.
           said.push(
             ...(checked === 'none'
               ? yield* reviewTo(actorId, task, null)
               : checked === 'after'
                 ? yield* reviewAfterMergeTo(actorId, task, reviewer)
-                : yield* reviewTo(actorId, task, reviewer)),
+                : yield* reviewTo(actorId, task, reviewer, true)),
             ...ends,
           )
           const shelf = preset.parts.shelf === 'scratch' ? 'scratch' : null
@@ -1502,8 +1515,16 @@ export class TaskActions extends Context.Service<
               )
             case 'ending': {
               const end = removing ? 'none' : yield* endingAsked(asked, task.slug)
-              // The person asked for it: their choice, as an ending changed on the plan card is, which a preset saved keeps.
-              return yield* shapeSaid(access, input, task, asked, 'changed its parts', yield* endTo(actorOf(access), task, end, true))
+              // The person asked for it: their choice, as an ending changed on the plan card is, which a preset saved keeps. Its
+              // pull request removed as a part is closed; an ending changed keeps it open, for the task to carry on in.
+              return yield* shapeSaid(
+                access,
+                input,
+                task,
+                asked,
+                'changed its parts',
+                yield* endTo(actorOf(access), task, end, true, removing),
+              )
             }
             default: {
               if (asked.preset === undefined || asked.preset.trim() === '')
@@ -1984,7 +2005,7 @@ export class TaskActions extends Context.Service<
         {
           ...tool(
             'settle_task',
-            'Settles a task when the person says it is done, to keep it for later, or to discard it, as its menu does. done and keep are for a task that isn’t a change (a quick task, or a review once its review was posted); a change is done when its pull request merges. discard settles any task as it stands (its menu’s Abandon): its worktree and branch stay, and restart_task opens it again; a lead discarding its own task does so as its turn ends. It acts at once, with a line in your thread and the task’s. A task’s lead may leave task out for its own. One call for each task.',
+            'Settles a task when the person says it is done, to keep it for later, or to discard it, as its menu does. done is for a task that isn’t a change (a quick task, or a review once its review was posted); a change is done when its pull request merges. keep is for any task, a prototype or a chat ending on its branch included, except one with its pull request open or commits waiting for Ship, which wait on those. discard settles any task as it stands (its menu’s Abandon): its worktree and branch stay, and restart_task opens it again; a lead discarding its own task does so as its turn ends. It acts at once, with a line in your thread and the task’s. A task’s lead may leave task out for its own. One call for each task.',
             {
               type: 'object',
               properties: { task: optionalTask, how: { type: 'string', enum: ['done', 'keep', 'discard'] }, why },
@@ -2127,7 +2148,7 @@ export class TaskActions extends Context.Service<
         ),
         tool(
           'change_part',
-          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change becomes a Prototype (no review, ending with its branch, an open pull request closed) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; an open one is closed, its branch staying), draft or ready (a pull request; an open draft is marked ready). Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
+          `Changes one of a task’s parts, with why, any task’s, your own included, either way and at any time, on the person’s word, in plain words or by voice (a task is a conversation plus parts): act at once, and say what you did in a line; never ask them again. preset gives it another preset’s parts all at once, by name as list_presets names it: a prototype the person wants built becomes a Change (a reviewer added, the project’s pull request ending, and a worktree with its branch where it had none), a change steps back into a Prototype (no review, so none runs and its card drops the step; ending with its branch, so nothing more goes up; an open pull request staying as it is, for the same task to carry on in once it is a Change again) or a Chat (no review, nothing going up, on Scratch), a chat becomes a Change; its lead stays (change_lead changes it). When the person names a reviewer or effort while choosing a preset, pass review in this same call so no other reviewer is selected first. checked_by puts a review of its own work on before it ships, by review’s model or, left out, the one its plan had or the project’s rules pick, or changes its reviewer; null takes it off, one under way stopping. ending: here (nothing goes up until it ships), branch (its branch pushed, no pull request; while one is open it stays as it is and nothing more goes to it, its work waiting on the branch here), draft or ready (a pull request: an open one carries on, and an open draft is marked ready). Never start a new task to change a task’s shape: change its parts here. Where the ending is a pull request and its work isn’t up, Ship runs its review and opens it: ship ships it now, as ship_task does, where the person asked for it to go up. workspace moves it between a worktree and Local (to: worktree or checkout; it waits for the lead’s turn to end, and asks the person before taking their checkout off a branch of their own) or points it at another branch to work toward (toward, null for the default); shelf puts it on Scratch or on the board. Running an outside author’s code is the person’s word alone: suggest Run it to them. ${TITLES_FOLLOW_WORK}`,
           {
             type: 'object',
             properties: {

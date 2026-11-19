@@ -20,7 +20,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { callTool, fakeConnectors, HOST, launches, notices, repository, runtime, turns, until } from './support'
+import { callTool, fakeConnectors, HOST, lastSession, notices, repository, runtime, turns, until } from './support'
 
 /*
  * Projects of several repositories, and of a folder inside one
@@ -153,7 +153,7 @@ describe('opening a folder', () => {
       assert.strictEqual(coordinator.repositories[0]?.within, 'packages/api')
       const task = yield* createTask(opened.projectId)
       yield* sessions.start({ threadId: task.threadId, agentId: 'codex' })
-      assert.strictEqual(launches.at(-1)?.cwd, join(task.worktree, 'packages', 'api'))
+      assert.strictEqual(lastSession()?.cwd, join(task.worktree, 'packages', 'api'))
       const [brief] = yield* until(turns(task.threadId), (rows) => rows.length > 0)
       assert.include(brief?.prompt ?? '', 'The project is its folder packages/api: start there')
     }).pipe(Effect.provide(runtime())),
@@ -187,7 +187,7 @@ describe('a task of several repositories', () => {
         [task.branch, task.branch],
       )
       yield* sessions.start({ threadId: task.threadId, agentId: 'codex' })
-      assert.strictEqual(launches.at(-1)?.cwd, dirname(worktrees[0]?.path ?? ''))
+      assert.strictEqual(lastSession()?.cwd, dirname(worktrees[0]?.path ?? ''))
       const [brief] = yield* until(turns(task.threadId), (rows) => rows.length > 0)
       assert.include(brief?.prompt ?? '', 'You are working on a task across several repositories')
       assert.include(brief?.prompt ?? '', `- web, the frontend: ${worktrees[1]?.path ?? ''}, on the branch ${task.branch}`)
@@ -377,7 +377,7 @@ describe('a task of several repositories', () => {
 
       // The lead is told where the ones it doesn't change are.
       yield* sessions.start({ threadId: onWeb.threadId, agentId: 'codex' })
-      assert.strictEqual(launches.at(-1)?.cwd, onWeb.worktree)
+      assert.strictEqual(lastSession()?.cwd, onWeb.worktree)
       const [brief] = yield* until(turns(onWeb.threadId), (rows) => rows.length > 0)
       assert.include(brief?.prompt ?? '', `The project's other repositories, to read but not change`)
       assert.include(brief?.prompt ?? '', `api, a service, at ${join(localFirst, 'api')}.`)

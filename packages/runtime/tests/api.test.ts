@@ -43,6 +43,7 @@ import {
 } from '../src/errors'
 import { NotConnected } from '../src/Connections'
 import { Projects } from '../src/Projects'
+import { Terminals } from '../src/Terminals'
 import * as Runtime from '../src/Runtime'
 import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
@@ -2276,19 +2277,24 @@ describe('the coordinator, through the API', () => {
           ['Which partners still call v1', 'ready'],
           ['Make the sketch real', 'ready'],
         ])
-        // Kept for later, the plain task is out of Needs you; a change with work on it can't be kept, nor marked done.
-        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
-        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        // A change with work on it can't be marked done.
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })
         assert.sameDeepMembers(yield* phases, [
-          ['Which partners still call v1', 'kept'],
+          ['Which partners still call v1', 'ready'],
           ['Make the sketch real', 'ready'],
         ])
-        // Marked done, it settles.
+        // Kept for later, both are out of Needs you: the plain task, and the change on its branch, with no pull request open.
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'kept'],
+          ['Make the sketch real', 'kept'],
+        ])
+        // Marked done, the plain task settles.
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: question?.taskId ?? '' })
         assert.sameDeepMembers(yield* phases, [
           ['Which partners still call v1', 'settled'],
-          ['Make the sketch real', 'ready'],
+          ['Make the sketch real', 'kept'],
         ])
         const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
         assert.strictEqual(unknown.reason, 'NotFound')
@@ -3762,6 +3768,50 @@ describe('a project set up where it starts, through the API', () => {
           reason: 'NotFound',
         })
         assert.isFalse(existsSync(join(outside, '.git')))
+      }),
+    ),
+  )
+})
+
+describe('terminals, through the API', () => {
+  it.live('are the window’s alone: a paired device opens, reads, types into, resizes and closes none', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, context } = yield* connected({ sender: { kind: 'paired_device', deviceId: 'phone-1' } })
+        const projectId = yield* Effect.provideContext(
+          Effect.gen(function* () {
+            const opened = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+            return opened.projectId
+          }),
+          context,
+        )
+        const refused = <A, E>(call: Effect.Effect<A, E>) =>
+          Effect.map(Effect.flip(call), (error) => (error instanceof ApiError ? error.reason : String(error)))
+        const reasons = [
+          yield* refused(client.OpenTerminal({ commandId: commandId(), id: 'term_phone1', projectId, taskId: null, cols: 80, rows: 24 })),
+          yield* refused(client.ListTerminals({ projectId })),
+          yield* refused(Stream.runDrain(client.AttachTerminal({ id: 'term_phone1' }))),
+          yield* refused(client.WriteTerminal({ id: 'term_phone1', data: 'echo hi\n' })),
+          yield* refused(client.ResizeTerminal({ id: 'term_phone1', cols: 100, rows: 30 })),
+          yield* refused(client.CloseTerminal({ commandId: commandId(), id: 'term_phone1' })),
+        ]
+        assert.deepStrictEqual(reasons, Array(6).fill('Forbidden'))
+        // The window's own calls go through: to the shells it has, and to none it hasn't.
+        const { client: window } = yield* connected({})
+        assert.deepStrictEqual(yield* window.ListTerminals({ projectId }), [])
+        const unknown = yield* Effect.flip(Stream.runDrain(window.AttachTerminal({ id: 'term_none' })))
+        assert.strictEqual(unknown.reason, 'NotFound')
+        yield* window.CloseTerminal({ commandId: commandId(), id: 'term_none' })
+        // No shell was started for it.
+        assert.deepStrictEqual(
+          yield* Effect.provideContext(
+            Effect.gen(function* () {
+              return yield* (yield* Terminals).ofProject(projectId)
+            }),
+            context,
+          ),
+          [],
+        )
       }),
     ),
   )

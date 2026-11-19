@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, globSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -94,8 +94,8 @@ const RELEASES = { provider: 'github', owner: 'AltharIDE', repo: 'althar' } as c
 
 /** The packages the runtime starts as processes, at the versions the app depends on. */
 const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
-/** What stays in node_modules: speech and image processing with their platform binaries, and the updater. */
-const NATIVE = ['sherpa-onnx-node', 'electron-updater', 'sharp']
+/** What stays in node_modules: speech and image processing and the terminals' pseudo-terminals, with their platform binaries, and the updater. */
+const NATIVE = ['sherpa-onnx-node', 'electron-updater', 'sharp', 'node-pty']
 
 /** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
 const BINARIES: Record<string, string> = {
@@ -225,6 +225,8 @@ const stageFor = (arch: string) => {
     join(stage, CLAUDE_ADAPTER),
     adapterPatchFor(join(desktop, '..', '..'), own.dependencies['@agentclientprotocol/claude-agent-acp']),
   )
+  // node-pty's helper that starts a shell comes from the registry without leave to run, so no terminal would open; it is given it here.
+  for (const helper of globSync('node_modules/node-pty/prebuilds/*/spawn-helper', { cwd: stage })) chmodSync(join(stage, helper), 0o755)
   for (const [name, version] of Object.entries(pinned)) {
     const staged = versionAt(join(stage, 'node_modules', name, 'package.json'))
     if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)

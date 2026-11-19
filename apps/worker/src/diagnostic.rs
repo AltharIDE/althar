@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fs::{self, File, OpenOptions};
+use std::future::Future;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -9,17 +10,20 @@ use std::time::Duration;
 use prost::Message;
 use rustix::fs::OFlags;
 use tokio::{io::AsyncReadExt, process::Command, sync::mpsc, time::Instant};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 
 use crate::grpc::{WorkerEnrollment, control_client, endpoint};
 use crate::relay::{WorkerRelay, relay_channel};
 use crate::wire::{
-    DiagnosticClaim, DiagnosticOffer, DiagnosticOutcome, DiagnosticResult, HomeFrame, WorkerFrame,
+    DiagnosticClaim, DiagnosticLease, DiagnosticOffer, DiagnosticOutcome, DiagnosticRenew,
+    DiagnosticResult, HomeFrame, WorkerFrame,
 };
 use crate::wire::{home_frame, worker_frame};
 use crate::{HandshakeError, MAX_HELLO_BYTES, accept_home_frame, valid_id, worker_hello};
 
 const LEASE_MS: u32 = 15_000;
+const RENEWAL_MS: u32 = 2_000;
+const RUNTIME_LIMIT: Duration = Duration::from_secs(3);
 const OUTPUT_BYTES: usize = 1024;
 type Failure = Box<dyn Error + Send + Sync>;
 
@@ -245,6 +249,104 @@ async fn run_uname(deadline: Instant, offer: &DiagnosticOffer) -> DiagnosticResu
     }
 }
 
+struct ExecutionLease {
+    until: Instant,
+    renew_at: Instant,
+    sequence: u32,
+    pending: Option<Instant>,
+}
+
+impl ExecutionLease {
+    fn new(sent: Instant, run_for_ms: u32) -> Self {
+        Self {
+            until: sent + Duration::from_millis(u64::from(run_for_ms)),
+            renew_at: sent + Duration::from_millis(u64::from((run_for_ms / 2).max(250))),
+            sequence: 0,
+            pending: None,
+        }
+    }
+
+    fn renew(&mut self, at: Instant) -> u32 {
+        self.sequence += 1;
+        self.pending = Some(at);
+        self.sequence
+    }
+
+    fn confirm(&mut self, at: Instant, sequence: u32, run_for_ms: u32) -> bool {
+        let Some(sent) = self.pending else {
+            return false;
+        };
+        if sequence != self.sequence
+            || run_for_ms == 0
+            || run_for_ms > RENEWAL_MS
+            || at >= self.until
+        {
+            return false;
+        }
+        // Time in flight consumes the grant. A slow response cannot authorize
+        // the worker to run beyond the deadline the home actually issued.
+        let granted = Self::new(sent, run_for_ms);
+        if granted.until <= at {
+            return false;
+        }
+        self.until = granted.until;
+        self.renew_at = granted.renew_at;
+        self.pending = None;
+        true
+    }
+}
+
+fn matches_renewal(
+    offer: &DiagnosticOffer,
+    extension: &DiagnosticLease,
+    sequence: Option<u32>,
+) -> bool {
+    sequence == Some(extension.sequence)
+        && extension.attempt_id == offer.attempt_id
+        && extension.fence == offer.fence
+        && (1..=RENEWAL_MS).contains(&extension.run_for_ms)
+}
+
+async fn run_with_lease(
+    offer: &DiagnosticOffer,
+    lease: &mut ExecutionLease,
+    renewable: bool,
+    send: &mpsc::Sender<WorkerFrame>,
+    reply: &mut (impl Stream<Item = Result<HomeFrame, tonic::Status>> + Unpin),
+    command: impl Future<Output = DiagnosticResult>,
+) -> Result<DiagnosticResult, Failure> {
+    if Instant::now() >= lease.until {
+        return Ok(report(offer, DiagnosticOutcome::Unknown, Vec::new()));
+    }
+    tokio::pin!(command);
+    loop {
+        tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(lease.until) => return Ok(report(offer, DiagnosticOutcome::Unknown, Vec::new())),
+            result = &mut command => return Ok(result),
+            disposition = reply.next() => {
+                let Some(frame) = disposition.transpose()? else {
+                    return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "The home disconnected before the diagnostic finished").into());
+                };
+                let home_frame::Payload::DiagnosticLease(extension) = payload(Some(frame))? else {
+                    return Err(HandshakeError::InvalidFrame.into());
+                };
+                if !renewable || !matches_renewal(offer, &extension, lease.pending.map(|_| lease.sequence)) ||
+                    !lease.confirm(Instant::now(), extension.sequence, extension.run_for_ms)
+                {
+                    return Err(HandshakeError::InvalidFrame.into());
+                }
+            }
+            _ = tokio::time::sleep_until(lease.renew_at), if renewable && lease.pending.is_none() && lease.renew_at < lease.until => {
+                let sequence = lease.renew(Instant::now());
+                send.try_send(WorkerFrame { payload: Some(worker_frame::Payload::DiagnosticRenew(DiagnosticRenew {
+                    attempt_id: offer.attempt_id.clone(), fence: offer.fence.clone(), sequence,
+                })) })?;
+            }
+        }
+    }
+}
+
 fn payload(frame: Option<HomeFrame>) -> Result<home_frame::Payload, HandshakeError> {
     frame
         .and_then(|value| value.payload)
@@ -268,6 +370,7 @@ pub async fn run_diagnostic_with_transport(
     let mut hello = worker_hello(enrollment.worker_id)?;
     if let Some(worker_frame::Payload::Hello(hello)) = &mut hello.payload {
         hello.accepts_diagnostics = true;
+        hello.renews_diagnostic_lease = true;
     }
     tokio::time::timeout(Duration::from_secs(25), async {
         let endpoint = endpoint(address, &enrollment)?;
@@ -278,49 +381,206 @@ pub async fn run_diagnostic_with_transport(
         let mut client = control_client(channel);
         let (send, receive) = mpsc::channel(2);
         send.send(hello).await?;
-        let mut reply = client.connect(ReceiverStream::new(receive)).await?.into_inner();
-        let hello = accept_home_frame(reply.message().await?.ok_or(HandshakeError::InvalidFrame)?, enrollment.home_id, enrollment.worker_id)?;
+        let mut reply = client
+            .connect(ReceiverStream::new(receive))
+            .await?
+            .into_inner();
+        let hello = accept_home_frame(
+            reply.message().await?.ok_or(HandshakeError::InvalidFrame)?,
+            enrollment.home_id,
+            enrollment.worker_id,
+        )?;
         if !hello.supports_diagnostics {
             return Err(HandshakeError::IncompatibleVersion.into());
         }
-        let Some(frame) = reply.message().await? else { return Ok(None); };
+        let Some(frame) = reply.message().await? else {
+            return Ok(None);
+        };
         let home_frame::Payload::DiagnosticOffer(offer) = payload(Some(frame))? else {
             return Err(HandshakeError::InvalidFrame.into());
         };
-        if !valid_id(&offer.attempt_id, "watt_") || !valid_id(&offer.fence, "wfn_") || offer.claimable_for_ms > LEASE_MS {
+        if !valid_id(&offer.attempt_id, "watt_")
+            || !valid_id(&offer.fence, "wfn_")
+            || offer.claimable_for_ms > LEASE_MS
+        {
             return Err(HandshakeError::InvalidFrame.into());
         }
+        let mut pending_acknowledgment = None;
         let result = if let Some(result) = journal.result(&offer)? {
             result
         } else if journal.started(&offer)? || offer.claimable_for_ms == 0 {
             report(&offer, DiagnosticOutcome::Unknown, Vec::new())
         } else {
-            send.send(WorkerFrame { payload: Some(worker_frame::Payload::DiagnosticClaim(DiagnosticClaim {
-                attempt_id: offer.attempt_id.clone(), fence: offer.fence.clone(),
-            })) }).await?;
-            let home_frame::Payload::DiagnosticStart(start) = payload(reply.message().await?)? else {
+            let claim_sent = Instant::now();
+            send.send(WorkerFrame {
+                payload: Some(worker_frame::Payload::DiagnosticClaim(DiagnosticClaim {
+                    attempt_id: offer.attempt_id.clone(),
+                    fence: offer.fence.clone(),
+                })),
+            })
+            .await?;
+            let home_frame::Payload::DiagnosticStart(start) = payload(reply.message().await?)?
+            else {
                 return Err(HandshakeError::InvalidFrame.into());
             };
-            if start.attempt_id != offer.attempt_id || start.fence != offer.fence || start.run_for_ms == 0 || start.run_for_ms > LEASE_MS {
+            let renewable = hello.supports_diagnostic_lease_renewal;
+            let maximum = if renewable { RENEWAL_MS } else { LEASE_MS };
+            if start.attempt_id != offer.attempt_id
+                || start.fence != offer.fence
+                || start.run_for_ms == 0
+                || start.run_for_ms > maximum
+            {
                 return Err(HandshakeError::InvalidFrame.into());
             }
-            let deadline = Instant::now() + Duration::from_millis(u64::from(start.run_for_ms.min(3000)));
+            let mut lease = ExecutionLease::new(claim_sent, start.run_for_ms);
             journal.record_start(&offer)?;
-            let result = tokio::select! {
-                biased;
-                result = run_uname(deadline, &offer) => result,
-                disconnected = reply.message() => {
-                    disconnected?;
-                    return Err(io::Error::new(io::ErrorKind::ConnectionAborted, "The home disconnected before the diagnostic finished").into());
-                }
-            };
+            let result = run_with_lease(
+                &offer,
+                &mut lease,
+                renewable,
+                &send,
+                &mut reply,
+                run_uname(Instant::now() + RUNTIME_LIMIT, &offer),
+            )
+            .await?;
+            pending_acknowledgment = lease.pending.map(|_| lease.sequence);
             journal.record_result(&result)?;
             result
         };
-        send.send(WorkerFrame { payload: Some(worker_frame::Payload::DiagnosticResult(result.clone())) }).await?;
-        if reply.message().await?.is_some() {
-            return Err(HandshakeError::InvalidFrame.into());
+        send.send(WorkerFrame {
+            payload: Some(worker_frame::Payload::DiagnosticResult(result.clone())),
+        })
+        .await?;
+        if let Some(frame) = reply.message().await? {
+            // A result can race with a renewal already sent on this stream.
+            // Drain that one in-flight acknowledgment without granting any more work.
+            let home_frame::Payload::DiagnosticLease(extension) = payload(Some(frame))? else {
+                return Err(HandshakeError::InvalidFrame.into());
+            };
+            if !matches_renewal(&offer, &extension, pending_acknowledgment)
+                || reply.message().await?.is_some()
+            {
+                return Err(HandshakeError::InvalidFrame.into());
+            }
         }
         Ok(Some(result))
-    }).await?
+    })
+    .await?
+}
+
+#[cfg(test)]
+mod execution_lease_tests {
+    use super::*;
+
+    #[test]
+    fn a_reply_counts_from_the_request_and_cannot_revive_an_expired_lease() {
+        let start = Instant::now();
+        let mut lease = ExecutionLease::new(start, 2000);
+        assert!(!lease.confirm(start, 0, 2000));
+        let sent = start + Duration::from_millis(1000);
+        assert_eq!(lease.renew(sent), 1);
+        assert!(!lease.confirm(sent, 2, 2000));
+        assert!(!lease.confirm(sent, 1, 2001));
+        assert!(lease.confirm(sent + Duration::from_millis(300), 1, 2000));
+        assert_eq!(lease.until, start + Duration::from_secs(3));
+        assert!(!lease.confirm(sent, 1, 2000));
+        assert_eq!(lease.renew(start + Duration::from_millis(2400)), 2);
+        assert!(!lease.confirm(start + Duration::from_secs(3), 2, 2000));
+    }
+
+    #[tokio::test]
+    async fn an_expired_grant_does_not_start_the_command() {
+        let (send, _commands) = mpsc::channel(1);
+        let mut disconnected = tokio_stream::empty();
+        let offer = DiagnosticOffer {
+            attempt_id: "attempt".into(),
+            fence: "fence".into(),
+            claimable_for_ms: 0,
+        };
+        let mut expired = ExecutionLease::new(Instant::now(), 0);
+        let result = run_with_lease(
+            &offer,
+            &mut expired,
+            true,
+            &send,
+            &mut disconnected,
+            async {
+                panic!("The command ran after its lease expired");
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.outcome(), DiagnosticOutcome::Unknown);
+    }
+
+    #[tokio::test]
+    async fn a_silent_connection_cannot_keep_running_work_alive() {
+        let (send, _requests) = mpsc::channel(1);
+        let mut silent = tokio_stream::pending();
+        let offer = DiagnosticOffer {
+            attempt_id: "attempt".into(),
+            fence: "fence".into(),
+            claimable_for_ms: 0,
+        };
+        let mut lease = ExecutionLease::new(Instant::now(), 100);
+        lease.renew_at = Instant::now();
+        let result = tokio::time::timeout(
+            RUNTIME_LIMIT,
+            run_with_lease(
+                &offer,
+                &mut lease,
+                true,
+                &send,
+                &mut silent,
+                std::future::pending(),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.outcome(), DiagnosticOutcome::Unknown);
+    }
+
+    #[tokio::test]
+    async fn disconnect_drops_running_work_after_a_renewal_request() {
+        struct Running<'a>(&'a std::cell::Cell<bool>);
+        impl Drop for Running<'_> {
+            fn drop(&mut self) {
+                self.0.set(true);
+            }
+        }
+
+        let (send, mut requests) = mpsc::channel::<WorkerFrame>(1);
+        let (home, replies) = mpsc::channel(1);
+        let mut replies = ReceiverStream::new(replies);
+        let offer = DiagnosticOffer {
+            attempt_id: "attempt".into(),
+            fence: "fence".into(),
+            claimable_for_ms: 0,
+        };
+        let mut lease = ExecutionLease::new(Instant::now(), RENEWAL_MS);
+        lease.renew_at = Instant::now();
+        let stopped = std::cell::Cell::new(false);
+        let command = async {
+            let _guard = Running(&stopped);
+            std::future::pending().await
+        };
+        let disconnect = async {
+            let request = tokio::time::timeout(RUNTIME_LIMIT, requests.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let Some(worker_frame::Payload::DiagnosticRenew(request)) = request.payload else {
+                panic!("expected a renewal");
+            };
+            assert_eq!(request.sequence, 1);
+            drop(home);
+        };
+        let (result, ()) = tokio::join!(
+            run_with_lease(&offer, &mut lease, true, &send, &mut replies, command),
+            disconnect
+        );
+        assert!(result.unwrap_err().to_string().contains("disconnected"));
+        assert!(stopped.get());
+    }
 }

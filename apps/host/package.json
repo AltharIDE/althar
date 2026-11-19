@@ -28,6 +28,7 @@
     "@althar/transport-node": "workspace:*",
     "@althar/worker-protocol": "workspace:*",
     "effect": "4.0.7",
+    "node-pty": "1.1.0",
     "sharp": "^0.35.5",
     "tar": "7.5.22"
   },

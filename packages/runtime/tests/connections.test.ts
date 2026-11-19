@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { type Fetch, type ProductInfo, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Deferred, Duration, Effect, Fiber, Layer } from 'effect'
+import { Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
@@ -482,6 +482,69 @@ describe('a connection', () => {
       assert.isNull(yield* connections.resolve('https://example.com/x'))
       assert.strictEqual((yield* connections.resolve('https://git.meridian.dev/meridian/api/pull/3'))?.ref.kind, 'change')
       assert.lengthOf(yield* connections.trackers, 1)
+    }).pipe(
+      Effect.provide(
+        Runtime.layer({
+          database: ':memory:',
+          worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+          appVersion: '0.0.0-test',
+          deviceName: 'Test Mac',
+          agents: fakeAgents(),
+          secrets: Secrets.memory(),
+          connectors: fakeConnectors({ github }),
+        }),
+      ),
+    )
+  })
+})
+
+describe('what reads through a connection', () => {
+  it.live('ends before its removal, a removal stopped and made again included, and none starts after', () => {
+    const github = makeFakeService()
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const { id } = yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId })
+      // A read under way through it, held until the test lets it go.
+      const reading = yield* Deferred.make<void>()
+      const gate = yield* Deferred.make<void>()
+      let acted = false
+      const read = yield* Effect.forkChild(
+        connections.whileThere(
+          id,
+          Effect.gen(function* () {
+            yield* Deferred.succeed(reading, undefined)
+            yield* Deferred.await(gate)
+            acted = true
+          }),
+        ),
+      )
+      yield* Deferred.await(reading)
+      // A removal waits for it, and none starts meanwhile; stopped, the connection is there to read through again.
+      const first = yield* Effect.forkChild(connections.remove(id, instance.personId))
+      yield* until(connections.whileThere(id, Effect.void), Option.isNone)
+      yield* Fiber.interrupt(first)
+      assert.isTrue(Option.isSome(yield* connections.whileThere(id, Effect.void)))
+      // The next removal still waits for the read begun before the first.
+      const second = yield* Effect.forkChild(connections.remove(id, instance.personId))
+      yield* until(connections.whileThere(id, Effect.void), Option.isNone)
+      yield* Effect.sleep(Duration.millis(50))
+      assert.isUndefined(second.pollUnsafe(), 'the removal waits for the read under way')
+      assert.isFalse(acted)
+      yield* Deferred.succeed(gate, undefined)
+      assert.isTrue(Option.isSome(yield* Fiber.join(read)))
+      yield* Fiber.join(second)
+      assert.isTrue(acted)
+      assert.lengthOf(yield* connections.list, 0)
+      // Removed, it reads nothing more.
+      assert.isTrue(
+        Option.isNone(
+          yield* connections.whileThere(
+            id,
+            Effect.sync(() => assert.fail('read after its removal')),
+          ),
+        ),
+      )
     }).pipe(
       Effect.provide(
         Runtime.layer({

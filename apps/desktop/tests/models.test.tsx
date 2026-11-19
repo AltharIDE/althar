@@ -421,7 +421,7 @@ describe('reading the models', () => {
     }
   })
 
-  it('reads them again once the person sets a default effort, and keeps the one there was when it isn’t set', async () => {
+  it('reads them again once the person sets a default effort, and shows the runtime’s word when it isn’t set', async () => {
     let kept: ReadonlyArray<{ readonly model: string; readonly effort: string }> = []
     let first: (known: ReadonlyArray<AgentModels>) => void = () => undefined
     const now = () => models.map((offered) => (offered.agentId === 'codex' ? { ...offered, defaults: kept, probing: false } : offered))
@@ -442,7 +442,7 @@ describe('reading the models', () => {
       return (
         <>
           <output>{JSON.stringify(known?.find((offered) => offered.agentId === 'codex')?.defaults ?? null)}</output>
-          <button type="button" onClick={() => void setDefault({ agentId: 'codex', model: 'gpt-5.2', effort: 'high' })}>
+          <button type="button" onClick={() => setDefault({ agentId: 'codex', model: 'gpt-5.2', effort: 'high' })}>
             Set
           </button>
         </>
@@ -455,10 +455,10 @@ describe('reading the models', () => {
     act(() => first(now()))
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('[{"model":"gpt-5.2","effort":"high"}]'))
     expect(getModels).toHaveBeenCalledTimes(2)
-    // One that isn't set leaves what there was, and isn't read again for.
+    // One that isn't set is taken back, to what the runtime has, read afresh.
     await userEvent.click(screen.getByRole('button', { name: 'Set' }))
     await waitFor(() => expect(setDefaultEffort).toHaveBeenCalledTimes(2))
-    expect(getModels).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(getModels).toHaveBeenCalledTimes(3))
     expect(screen.getByRole('status').textContent).toBe('[{"model":"gpt-5.2","effort":"high"}]')
   })
 

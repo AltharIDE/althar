@@ -420,9 +420,20 @@ because it puts a card on the board for what is only a look.
 
 ### Where runs show
 
-A run is said in three places that share one state, so they agree:
+A run is said in four places that share one state, so they agree:
 
 - **Run's list,** above.
+- **The status line** along the foot of the project's screen and its
+  tasks': there once the project runs something or a terminal is open, so a
+  screen where nothing runs is as it was, for a designer as for anyone. Each
+  of the project's runs, its tasks' too, by its mark, its name and how it
+  stands (Starting…, its address, Exited 1), and each terminal (below). A
+  press raises a drawer over the screen's lower part, which moves nothing
+  under it: a run's output, following the end, with Open, Stop or Run again,
+  Help me fix it where it failed, and a terminal where it ran. Its top edge
+  drags it taller; Escape, outside a terminal, lowers it. Pointed at, each
+  has an X in its mark's place: a run that ended goes at once; one still
+  running asks first, since closing it stops it.
 - **The pill over the composer.** A task's lists what its lead left running
   and the task's runs, one row each: name, address, how long it has been up,
   and Stop. The coordinator's lists the project's runs of no task ("Run on
@@ -443,6 +454,42 @@ A run is said in three places that share one state, so they agree:
 Where a run answers is read from the first local address it prints. One that
 answers nowhere (an app's window, a watcher) is taken as starting for ten
 seconds, then as running with no address.
+
+### Terminals
+
+The person's own shell, in a pseudo-terminal, as an editor's terminal is:
+opened from the status line's end, from Run's list (Open a terminal), with
+Ctrl+` (again: the last one, then lowered; with Shift, a new one), or from a
+run in the drawer, in the folder it ran in. Otherwise a terminal opens where
+the screen is: a task's worktree on a task's screen, the project's
+repository on the project's. It is the person's login shell, with their
+PATH, as an xterm-256color terminal with true colour.
+
+- **It shows at once.** The window gives it its id and draws it in the
+  frame it is asked for; the runtime starts the shell behind it at the size
+  it was drawn, and what was typed meanwhile goes as it starts. A shell that
+  can't start says why in the terminal, which stays to close.
+- **The runtime owns it** (node-pty, in the runtime's process, so a home on
+  another machine runs it where its files are). What it prints goes to each
+  window attached as it comes, a few milliseconds' worth at a time; its end
+  (about a million characters) is kept, so a window that attaches again, after
+  a reload or another project, shows it as it was. A window that can't keep
+  up holds the shell rather than Althar keeping all it printed.
+- **What runs in front** of the shell is read every second: the status line
+  names it (a terminal with `bun` running in it), and closing that terminal
+  asks first, since it stops it. A shell that ends well (`exit`) closes its
+  terminal; one that ends badly stays to say how. None outlives Althar, so
+  Quit counts those running something among what it would stop and asks
+  first (an idle shell holds nothing to lose); removing the project, or a
+  finished task's folder going, closes its terminals.
+- **An editor's keys:** copy (with a selection), paste, select all, clear
+  and find, on each system's keys; a word and a line at a time on a Mac;
+  links open with the primary key held; a dropped file types its path. The
+  window never reads the clipboard itself: paste goes through the Edit
+  menu's own. What a shell prints never reaches the clipboard (no OSC 52):
+  copy is only ever the person's selection.
+- **Only the person's own window** opens one: a paired device or another
+  connection can't, as it can't other calls the window alone makes.
 
 ## Fetching for leads
 
@@ -623,4 +670,5 @@ in its editor's storage.
 - 8 Nov 2026: Althar repairs a worktree whose link to its repository broke (#654).
 - 10 Nov 2026: a running task moves between a worktree and Local, and changes the branch it works toward at any time (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 17 Nov 2026: bringing in other tools' worktrees, setups and conversations (DEV-211, DEV-37): each worktree a task in place, which Althar never sets up, moves or removes.
+- 19 Nov 2026: the status line along the foot, and terminals: picked from a prototype of five places for runs and a terminal (beside the conversation, along the foot, in the thread, a tab of its own, and three spin-offs of the foot).
 - 19 Nov 2026: a send to a conversation brought in waits while Claude Code or Codex still has it open (DEV-264).

@@ -104,7 +104,12 @@ describe('the person’s saved ACP connections', () => {
       yield* catalog.save(spec)
       yield* catalog.check(spec.id)
       const result = yield* until(catalog.read(), (state) => state.connections[0]?.state !== 'checking')
-      assert.deepInclude(result.connections[0], { state: 'ready', version: '1.2.3', reason: null })
+      // Compared whole, so a check that failed says why.
+      const checked = result.connections[0]
+      assert.deepStrictEqual(
+        { state: checked?.state, version: checked?.version, reason: checked?.reason },
+        { state: 'ready', version: '1.2.3', reason: null },
+      )
       const transport = (yield* agents.get(spec.id)).transport(tmpdir())
       if (transport._tag === 'Process') assert.strictEqual(transport.expectedVersion, '1.2.3')
       const [process] = yield* sql<{

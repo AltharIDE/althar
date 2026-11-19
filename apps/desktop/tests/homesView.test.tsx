@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 
 import type { CheckedHome, HomeState, HomesHost, HomesOverview, RemoteHome } from '../src/homes'
-import { ConnectHome } from '../src/renderer/features/homes/ConnectHome'
+import { ConnectHome, useConnect } from '../src/renderer/features/homes/ConnectHome'
 import { Chip, HomeConnections } from '../src/renderer/features/homes/HomeConnections'
 import { ManageHomes } from '../src/renderer/features/homes/ManageHomes'
 import { HomeOpening } from '../src/renderer/features/homes/HomeOpening'
@@ -125,13 +125,34 @@ it('discards an obsolete pairing preview and cancels pairing when its form is le
   expect(screen.getByLabelText('SSH host')).not.toBeNull()
   expect(at.homes.cancelCheck).toHaveBeenCalled()
 })
+it('keeps what was typed for each way of connecting as the person switches between them, in one dialog', async () => {
+  const at = fixture()
+  const homes = {
+    ...at.homes,
+    pair: vi.fn(async () => {}),
+    pairingInfo: vi.fn(async () => ({ origin: 'https://my-vps.test', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER })),
+  }
+  render(<ConnectHome homes={homes} onClose={() => {}} />)
+  const dialog = screen.getByRole('dialog', { name: 'Connect a home' })
+  await userEvent.type(screen.getByLabelText('Name'), 'My VPS')
+  await userEvent.click(screen.getByRole('radio', { name: 'SSH' }))
+  await userEvent.type(screen.getByLabelText('SSH host'), 'deploy@vps.test')
+  await userEvent.click(screen.getByRole('radio', { name: 'Pairing code' }))
+  expect(screen.getByRole('dialog', { name: 'Connect a home' })).toBe(dialog)
+  expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('My VPS')
+  await userEvent.click(screen.getByRole('radio', { name: 'SSH' }))
+  expect((screen.getByLabelText('SSH host') as HTMLInputElement).value).toBe('deploy@vps.test')
+})
 const later = <A,>() => {
   let resolve!: (value: A) => void
+  let reject!: (error: Error) => void
   return {
-    promise: new Promise<A>((done) => {
+    promise: new Promise<A>((done, fail) => {
       resolve = done
+      reject = fail
     }),
     resolve: (value: A) => resolve(value),
+    reject: (error: Error) => reject(error),
   }
 }
 
@@ -1206,4 +1227,74 @@ it('opens Manage from File › Homes when saved homes exist but no chip is drawn
   await screen.findByRole('dialog', { name: 'Homes' })
   await userEvent.click(screen.getByRole('button', { name: 'Done' }))
   expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+it('holds the host and the method while it connects, and closes once the home connects', async () => {
+  const at = fixture()
+  const connecting = later<void>()
+  at.homes.connect.mockImplementationOnce(() => connecting.promise)
+  const close = vi.fn()
+  const homes = {
+    ...at.homes,
+    pair: vi.fn(async () => {}),
+    pairingInfo: vi.fn(async () => ({ origin: 'https://my-vps.test', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER })),
+  }
+  render(<ConnectHome homes={homes} onClose={close} />)
+  await userEvent.click(screen.getByRole('radio', { name: 'SSH' }))
+  await userEvent.type(screen.getByLabelText('SSH host'), 'fixture')
+  await userEvent.click(screen.getByRole('button', { name: 'Check host' }))
+  await userEvent.click(await screen.findByRole('button', { name: 'Connect' }))
+  await userEvent.type(screen.getByLabelText('SSH host'), '-other')
+  expect((screen.getByLabelText('SSH host') as HTMLInputElement).value).toBe('fixture')
+  expect(screen.getByRole('radio', { name: 'Pairing code' }).hasAttribute('disabled')).toBe(true)
+  await act(async () => connecting.resolve())
+  expect(close).toHaveBeenCalledOnce()
+})
+
+it('lets a connection abandoned by an edit come to nothing in the form', async () => {
+  const at = fixture()
+  const first = later<void>()
+  const second = later<void>()
+  at.homes.connect.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise)
+  const done = vi.fn()
+  const { result } = renderHook(() => useConnect(at.homes, done))
+  act(() => result.current.setTarget('fixture'))
+  act(() => result.current.check())
+  await waitFor(() => expect(result.current.phase).toBe('checked'))
+  act(() => result.current.connect())
+  act(() => result.current.setTarget('fixture-2'))
+  await act(async () => first.reject(new Error('The home check was cancelled.')))
+  expect(result.current.problem).toBeNull()
+  expect(result.current.phase).toBe('idle')
+  act(() => result.current.check())
+  await waitFor(() => expect(result.current.phase).toBe('checked'))
+  act(() => result.current.connect())
+  act(() => result.current.setTarget('fixture-3'))
+  await act(async () => second.resolve())
+  expect(done).not.toHaveBeenCalled()
+})
+
+it('keeps focus on the method switch as an arrow key chooses another', async () => {
+  const at = fixture()
+  const homes = {
+    ...at.homes,
+    pair: vi.fn(async () => {}),
+    pairingInfo: vi.fn(async () => ({ origin: 'https://my-vps.test', homeId: home.homeId, expiresAt: Number.MAX_SAFE_INTEGER })),
+  }
+  render(<ConnectHome homes={homes} onClose={() => {}} />)
+  expect(document.activeElement).toBe(screen.getByLabelText('Pairing code'))
+  screen.getByRole('radio', { name: 'Pairing code' }).focus()
+  // Radix moves focus on a timeout and chooses only while the arrow is held, as a person's key is: press, wait, release.
+  const arrow = async (key: 'ArrowRight' | 'ArrowLeft') => {
+    await userEvent.keyboard(`{${key}>}`)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    await userEvent.keyboard(`{/${key}}`)
+  }
+  await arrow('ArrowRight')
+  await waitFor(() => expect(screen.getByRole('radio', { name: 'SSH' }).getAttribute('aria-checked')).toBe('true'))
+  expect(screen.getByLabelText('SSH host')).not.toBeNull()
+  expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'SSH' }))
+  await arrow('ArrowLeft')
+  await waitFor(() => expect(screen.getByRole('radio', { name: 'Pairing code' }).getAttribute('aria-checked')).toBe('true'))
+  expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Pairing code' }))
 })

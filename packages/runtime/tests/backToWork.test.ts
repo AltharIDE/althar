@@ -578,13 +578,26 @@ describe('a task the person stopped', () => {
   it.live('stays stopped through a conflict and failed checks, and its card says why', () => {
     const { working, bare } = hosted()
     let broken = false
-    const github = hostOf(bare, () => (broken ? FAILED : PASSED))
+    let held = false
+    const gate = Effect.runSync(Deferred.make<void>())
+    const github = hostOf(bare, () => (broken ? FAILED : PASSED), undefined, {
+      waitsFor: (method) => (held && method === 'change' ? Deferred.await(gate) : Effect.void),
+    })
+    const reads = () => github.calls.filter((method) => method === 'change').length
     return Effect.gen(function* () {
       const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
+      // A look at its pull request under way as the person stops it, holding the task's lock as every look does: what it
+      // hears once they have, the conflict and the checks failing, is theirs all the same.
+      held = true
+      const read = reads()
+      yield* (yield* Changes).refresh(taskId)
+      yield* until(Effect.sync(reads), (now) => now > read)
       yield* stopped(taskId, threadId)
       const before = (yield* given(threadId)).length
       broken = true
       moveHostMainOn(working, bare)
+      held = false
+      yield* Deferred.succeed(gate, undefined)
       const [why] = yield* until(
         Effect.map(cardOf(projectId), (one) => [one?.conflictUnsent ?? null]),
         ([one]) => one !== null,
@@ -594,7 +607,7 @@ describe('a task the person stopped', () => {
       yield* Effect.sleep('600 millis')
       // Nothing asked of its lead, nor a round begun.
       assert.deepStrictEqual(yield* rounds(taskId), [])
-      assert.strictEqual((yield* given(threadId)).length, before)
+      assert.deepStrictEqual((yield* given(threadId)).slice(before), [])
       assert.strictEqual((yield* cardOf(projectId))?.phase, 'stopped')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

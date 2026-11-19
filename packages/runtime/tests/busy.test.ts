@@ -942,9 +942,10 @@ const served = (projectId: ProjectId, title: string) =>
     const sessions = yield* Sessions
     yield* sessions.start({ threadId: task.threadId, agentId: 'claude-code' })
     yield* say(task.threadId, 'Serve it. [lead:serve]')
-    yield* idle(task.threadId)
+    // Its server started and the turn that started it over: the server is there before the turn ends, and between the
+    // first turn and this one the lead is between turns too, so neither alone says the lead is done.
     const running = yield* until(
-      Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
+      Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) && !live.value.turnRunning ? live.value.background : [])),
       (left) => left.length === 1,
     )
     return { ...task, serverId: running[0]?.id ?? '' }

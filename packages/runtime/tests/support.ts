@@ -94,6 +94,12 @@ export const launches: Array<{
   readonly launched?: Readonly<Record<string, string>> | undefined
 }> = []
 
+/**
+ * The latest session's launch. Not the latest launch: a models probe the catalogue begins in the background launches its
+ * agent too, with no session of its own, and may land after a session's, on a slow computer (Models.ts).
+ */
+export const lastSession = () => launches.findLast((one) => one.env.ALTHAR_WORKER !== undefined)
+
 /** What each fake agent in this process was asked as a session started, as it received it: its added directories and `_meta`. */
 export const sessionsAsked: Array<{
   readonly agentId: string
@@ -132,6 +138,12 @@ const launchedEnv = (agentId: string, cwd: string, env: Readonly<Record<string, 
 
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
+
+/**
+ * Each models probe of that agent, kept out of `sessionMetas`: a probe is no session, and gives none of a session's options.
+ * The catalogue begins one in the background, behind a sign-in check, so it may land after a session's (Models.ts).
+ */
+export const probeMetas: Array<{ readonly role: 'lead' | 'reader' | undefined }> = []
 
 /**
  * Whether the fake `claude-code` holds the coordinator in a sandbox it never leaves, as Claude Code's does where it starts;
@@ -191,7 +203,9 @@ export const definition = (
   ...(id === 'claude-code'
     ? {
         sessionMeta: (role?: 'lead' | 'reader', options?: SessionOptions) => {
-          sessionMetas.push({ role, options })
+          // A session always says its options, if only whether it reaches the web; a models probe says none.
+          if (options === undefined) probeMetas.push({ role })
+          else sessionMetas.push({ role, options })
           // Given skills, with Claude Code's own session options beside its own, so the plugin they name reaches the session.
           return { ...(options?.skills === undefined ? {} : registry['claude-code'].sessionMeta?.(role, options)), fake: { asks: true } }
         },

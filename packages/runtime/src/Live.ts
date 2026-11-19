@@ -3,6 +3,7 @@ import type { SessionEvent } from '@althar/provider-adapters'
 
 import type { Draft } from './drafts'
 import type { ShownLaunch } from './Launches'
+import type { ShownTerminal } from './Terminals'
 import type { ShownLeftRunning } from './leftRunning'
 import { Context, Effect, Layer, PubSub, Queue, type Scope, Stream } from 'effect'
 
@@ -32,6 +33,8 @@ export type LiveEvent =
   | { readonly _tag: 'Background'; readonly threadId: string; readonly background: ReadonlyArray<ShownLeftRunning> }
   /** What Althar runs of a project itself, whole each time it changes (Launches.ts). */
   | { readonly _tag: 'Launches'; readonly projectId: string; readonly launches: ReadonlyArray<ShownLaunch> }
+  /** A project's terminals, whole each time they change (Terminals.ts). */
+  | { readonly _tag: 'Terminals'; readonly projectId: string; readonly terminals: ReadonlyArray<ShownTerminal> }
   /** The tasks a coordinator is drafting now, as far as written, whole each time they change (drafts.ts). */
   | { readonly _tag: 'Drafting'; readonly threadId: string; readonly drafts: ReadonlyArray<Draft> }
   /** Every account's plan usage and the warnings not yet seen, whole each time either changes (PlanUsage.ts). */
@@ -112,6 +115,8 @@ export const watchedOf = (event: LiveEvent): Watched | undefined => {
       return { _tag: 'Background', threadId: event.threadId, background: event.background }
     case 'Launches':
       return { _tag: 'Launches', projectId: event.projectId, launches: event.launches }
+    case 'Terminals':
+      return { _tag: 'Terminals', projectId: event.projectId, terminals: event.terminals }
     case 'PlanUsage':
       return { _tag: 'PlanUsage', usage: event.usage }
     case 'Drafting':
@@ -128,6 +133,7 @@ export const watchedKey = (event: Watched): string => {
     case 'Output':
       return `${event._tag}:${event.itemId}`
     case 'Launches':
+    case 'Terminals':
       return `${event._tag}:${event.projectId}`
     case 'PlanUsage':
       return event._tag

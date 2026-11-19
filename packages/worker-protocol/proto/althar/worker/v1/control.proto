@@ -13,6 +13,7 @@ message WorkerFrame {
     WorkerHello hello = 1;
     DiagnosticClaim diagnostic_claim = 2;
     DiagnosticResult diagnostic_result = 3;
+    DiagnosticRenew diagnostic_renew = 4;
   }
 }
 
@@ -21,6 +22,7 @@ message HomeFrame {
     HomeHello hello = 1;
     DiagnosticOffer diagnostic_offer = 2;
     DiagnosticStart diagnostic_start = 3;
+    DiagnosticLease diagnostic_lease = 4;
   }
 }
 
@@ -31,6 +33,7 @@ message WorkerHello {
   uint32 min_version = 2;
   uint32 max_version = 3;
   bool accepts_diagnostics = 4;
+  bool renews_diagnostic_lease = 5;
 }
 
 // The first home frame binds this stream to one authenticated, negotiated session.
@@ -40,6 +43,7 @@ message HomeHello {
   string session_id = 3;
   uint32 version = 4;
   bool supports_diagnostics = 5;
+  bool supports_diagnostic_lease_renewal = 6;
 }
 
 // A lease of zero requests reconciliation without granting a new start.
@@ -73,4 +77,20 @@ message DiagnosticResult {
   string fence = 2;
   DiagnosticOutcome outcome = 3;
   bytes output = 4;
+}
+
+// Available only when both peers negotiate renewal. Sequence starts at one.
+// A request is only valid on the stream that received the original start.
+message DiagnosticRenew {
+  string attempt_id = 1;
+  string fence = 2;
+  uint32 sequence = 3;
+}
+
+// A renewal confirms the current authority and never authorizes another start.
+message DiagnosticLease {
+  string attempt_id = 1;
+  string fence = 2;
+  uint32 sequence = 3;
+  uint32 run_for_ms = 4;
 }

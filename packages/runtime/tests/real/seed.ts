@@ -202,6 +202,37 @@ export const settled = (from: { readonly taskId: string }, count: number) =>
     return made
   })
 
+/**
+ * Agents' sessions long over, as many as the person's store has (3,129 on 18 Nov, with about 3 kB of settings each):
+ * copies of one of the long task's, spread over the settled tasks' threads and older than any live one, so the models'
+ * catalogue reads its agents' latest sessions in a table of the person's size.
+ */
+export const ended = (from: { readonly threadId: string }, count: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const columns = (yield* sql<{ name: string }>`SELECT name FROM pragma_table_info('provider_sessions')`).map((row) => row.name)
+    const own: Readonly<Record<string, string>> = {
+      id: "'sess_' || printf('%032x', 2882400000 + n.i)",
+      thread_id: 't.id',
+      state: "'completed'",
+      superseded_by_session_id: 'NULL',
+      run_attempt_id: 'NULL',
+      external_session_id: 'NULL',
+      config: "json_set(s.config, '$.pad', hex(randomblob(1400)))",
+      started_at: "strftime('%Y-%m-%dT%H:%M:%fZ', '2026-09-01', '+' || n.i || ' minutes')",
+      ended_at: "strftime('%Y-%m-%dT%H:%M:%fZ', '2026-09-01', '+' || (n.i + 1) || ' minutes')",
+    }
+    yield* sql.unsafe(
+      `WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ? - 1),
+       t AS (SELECT id, row_number() OVER (ORDER BY id) - 1 AS k, count(*) OVER () AS c FROM threads
+             WHERE kind = 'task' AND task_id LIKE 'task_00000000%')
+       INSERT INTO provider_sessions (${columns.join(', ')})
+       SELECT ${columns.map((name) => own[name] ?? `s.${name}`).join(', ')}
+       FROM n JOIN t ON t.k = n.i % t.c, (SELECT * FROM provider_sessions WHERE thread_id = ? ORDER BY started_at LIMIT 1) s`,
+      [count, from.threadId],
+    )
+  })
+
 /** Rows the change feed has carried, as many as the person's store has had. */
 export const history = (rows: number) =>
   Effect.gen(function* () {

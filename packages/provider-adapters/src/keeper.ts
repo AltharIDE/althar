@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Effect } from 'effect'
+import { Cause, Deferred, Effect } from 'effect'
 
 import { cleanUp } from './removal'
 
@@ -328,8 +328,17 @@ export const compilerOf = (
 let built: string | undefined
 
 /**
+ * The builds under way here, by where each puts its keeper: what asks for it
+ * meanwhile, as several agents starting at once on Althar's first launch do,
+ * waits for that build rather than run the compiler beside it, each slower
+ * for the other.
+ */
+const building = new Map<string, Deferred.Deferred<string, string>>()
+
+/**
  * The keeper's path, built where it isn't yet; why it can't be, where it
- * can't. Two built at once each build their own and the first in place stays.
+ * can't. Asked for again while it is built here, it is that build's. Two
+ * Althars building at once each build their own and the first in place stays.
  */
 export const keeper = (folder: string = join(tmpdir(), 'althar')): Effect.Effect<string, string> =>
   Effect.suspend(() => {
@@ -338,6 +347,29 @@ export const keeper = (folder: string = join(tmpdir(), 'althar')): Effect.Effect
       built = path
       return Effect.succeed(path)
     }
+    const under = building.get(path)
+    // That build stopped before it ended, as its asker was, this one builds it.
+    if (under !== undefined)
+      return Deferred.await(under).pipe(
+        Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? keeper(folder) : Effect.failCause(cause))),
+      )
+    const done = Deferred.makeUnsafe<string, string>()
+    building.set(path, done)
+    return build(folder, path).pipe(
+      Effect.onExit((exit) =>
+        Effect.andThen(
+          Effect.sync(() => {
+            if (building.get(path) === done) building.delete(path)
+          }),
+          Deferred.done(done, exit),
+        ),
+      ),
+    )
+  })
+
+/** Builds the keeper at `path`, in a folder of its own beside it. */
+const build = (folder: string, path: string): Effect.Effect<string, string> =>
+  Effect.suspend(() => {
     const compiler = compilerOf()
     if (compiler === undefined)
       return Effect.fail("Windows has no .NET Framework 4 compiler, which Althar builds the keeper of its agents' processes with")
