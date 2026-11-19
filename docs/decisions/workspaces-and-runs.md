@@ -485,7 +485,8 @@ PATH, as an xterm-256color terminal with true colour.
   and find, on each system's keys; a word and a line at a time on a Mac;
   links open with the primary key held; a dropped file types its path. The
   window never reads the clipboard itself: paste goes through the Edit
-  menu's own.
+  menu's own. What a shell prints never reaches the clipboard (no OSC 52):
+  copy is only ever the person's selection.
 - **Only the person's own window** opens one: a paired device or another
   connection can't, as it can't other calls the window alone makes.
 

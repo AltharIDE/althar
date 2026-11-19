@@ -1,4 +1,3 @@
-import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { FitAddon } from '@xterm/addon-fit'
 import { type ISearchOptions, SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -16,7 +15,8 @@ import { platform } from '../../foundations/device'
  * all, clear, find, a word and a line at a time on a Mac; links open with the
  * primary key held; a file dropped on it types its path. What is typed goes
  * to `onData`, its size in characters to `onResize`; nothing else of it is
- * the window's business.
+ * the window's business. What it prints never reaches the clipboard (no OSC
+ * 52): copy is the person's selection, paste the Edit menu's.
  */
 
 export interface TerminalSessionOptions {
@@ -187,7 +187,6 @@ export class TerminalSession {
     this.term.loadAddon(this.search)
     this.term.loadAddon(new Unicode11Addon())
     this.term.unicode.activeVersion = '11'
-    this.term.loadAddon(new ClipboardAddon())
     this.term.loadAddon(
       new WebLinksAddon((event, url) => {
         if (this.primary(event)) this.options.onLink?.(url)
