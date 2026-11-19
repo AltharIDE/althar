@@ -2,10 +2,12 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import {
+  CLAUDE_AHEAD,
   CLAUDE_PLENTY,
   CLAUDE_RESETS,
   CLAUDE_TWO,
   CLAUDE_UNREAD,
+  CODEX_BEHIND,
   CODEX_NEARLY,
   CODEX_PLENTY,
   CODEX_SIGNED_OUT,
@@ -176,5 +178,25 @@ export const OpenCodeGoSignIn: Story = {
   play: async ({ args }) => {
     await userEvent.click(within(document.body).getByRole('button', { name: 'Sign in again' }))
     await expect(args.onSignIn).toHaveBeenCalledWith('opencode')
+  },
+}
+
+/** A tick on each bar where now sits in its window: Claude is 40% through its week with 65% left (ahead of pace), Codex 70% through with 20% left (behind). */
+export const Pace: Story = {
+  args: { agents: [CODEX_BEHIND, CLAUDE_AHEAD], defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getAllByTitle('40% of the way through').length).toBeGreaterThan(0)
+    await expect(page.getAllByTitle('70% of the way through').length).toBeGreaterThan(0)
+    await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
+    await expect(page.getAllByTitle('30% of the way through').length).toBe(1)
+  },
+}
+
+/** No window known (no start or reset): no tick, and the bars are as they were. */
+export const NoWindowKnown: Story = {
+  args: { agents: [CLAUDE_RESETS, CODEX_PLENTY], defaultOpen: true },
+  play: async () => {
+    await expect(within(document.body).queryByTitle(/of the way through/)).toBeNull()
   },
 }

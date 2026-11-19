@@ -101,6 +101,26 @@ const tightest = (account: AccountUsage): UsageWindow | undefined => {
 /** A read that failed for a moment (a rate limit, no answer, an error) and will pass on its own: nothing the person can do, so the peek keeps to the last numbers and how old they are. */
 const passing = (account: AccountUsage) => account.fault?.kind === 'unreachable'
 
+/**
+ * How far through its window now is, 0 to 100, where the window's start is known: it ends at `resetsAt` and runs the length
+ * of its kind (five hours, a week, a calendar month). A window of another kind has no known length, so no tick.
+ */
+export const elapsedOf = (window: UsageWindow, now: Date): number | undefined => {
+  if (window.resetsAt === null) return undefined
+  const end = Date.parse(window.resetsAt)
+  if (Number.isNaN(end)) return undefined
+  let start: number
+  if (window.kind === 'five_hour') start = end - 5 * 3_600_000
+  else if (window.kind === 'weekly') start = end - 7 * 86_400_000
+  else if (window.kind === 'monthly') {
+    const d = new Date(end)
+    d.setMonth(d.getMonth() - 1)
+    start = d.getTime()
+  } else return undefined
+  const share = ((now.getTime() - start) / (end - start)) * 100
+  return share < 0 || share > 100 ? undefined : Math.round(share)
+}
+
 /** What the end of a window's row says of when it resets, and in full on hover: the time left, that it reset and wasn't read since, or that no time is known. */
 const resetsOf = (window: UsageWindow, now: Date, reset: boolean): Pick<PlanWindow, 'resets' | 'resetsTitle' | 'note'> => {
   const at = window.resetsAt === null ? '' : clock(window.resetsAt, now)
@@ -130,6 +150,7 @@ const accountOf = (account: AccountUsage, several: boolean, now: Date, read: Acc
       left: reset ? 0 : leftOf(window),
       until: window.resetsAt === null ? null : clock(window.resetsAt, now),
       ...resetsOf(window, now, reset),
+      ...(reset || elapsedOf(window, now) === undefined ? {} : { elapsed: elapsedOf(window, now) }),
       ...(reset ? { unread: true } : {}),
     }
   }),
@@ -234,6 +255,7 @@ export const planOf = (usage: PlanUsage | null, now: Date): { readonly agents: P
       left: leftOf(route.window),
       limit: limitWords(route.window),
       until: route.window.resetsAt === null ? null : clock(route.window.resetsAt, now),
+      ...(elapsedOf(route.window, now) === undefined ? {} : { elapsed: elapsedOf(route.window, now) }),
       account: several ? route.account.accountName : null,
       accounts: each,
     })

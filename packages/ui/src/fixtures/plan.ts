@@ -234,3 +234,46 @@ export const OPENCODE_GO_SIGN_IN: PlanAgent = {
   signIn: true,
   accounts: [{ id: 'opencode-usual', name: null, age: null, fault: 'OpenCode Go needs signing in again.', windows: [] }],
 }
+
+/** Behind the clock: 40% through the week and 65% left, so ahead of pace for someone rationing. */
+export const CLAUDE_AHEAD: PlanAgent = {
+  ...CLAUDE_PLENTY,
+  left: 65,
+  limit: 'weekly limit',
+  until: 'Fri 09:00',
+  elapsed: 40,
+  accounts: [
+    {
+      id: 'claude-work',
+      name: null,
+      age: null,
+      fault: null,
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 80, until: '17:00', elapsed: 30 },
+        { id: 'weekly', label: 'Week', left: 65, until: 'Fri 09:00', elapsed: 40 },
+        { id: 'weekly:Opus', label: 'Opus week', left: 81, until: 'Fri 09:00', elapsed: 40 },
+      ],
+    },
+  ],
+}
+
+/** Used faster than the clock: 70% through the week with 20% left. */
+export const CODEX_BEHIND: PlanAgent = {
+  ...CODEX_PLENTY,
+  left: 20,
+  limit: 'weekly limit',
+  until: 'Sun 18:12',
+  elapsed: 70,
+  accounts: [
+    {
+      id: 'codex-work',
+      name: null,
+      age: null,
+      fault: null,
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 55, until: '18:40', elapsed: 60 },
+        { id: 'weekly', label: 'Week', left: 20, until: 'Sun 18:12', elapsed: 70 },
+      ],
+    },
+  ],
+}
