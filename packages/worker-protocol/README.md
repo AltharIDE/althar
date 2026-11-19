@@ -41,6 +41,21 @@ sequenceDiagram
 See the [host operator guide](../../apps/host/README.md#native-worker-diagnostic)
 for credential configuration and command invocation.
 
+## Execution leases
+
+When both endpoints advertise renewal support, a diagnostic starts with a
+lease of up to two seconds. The worker can request a numbered extension
+on the authenticated stream that granted the start. The home checks the
+worker, attempt, fence and existing lease before committing an extension.
+Only the diagnostic's fixed three-second runtime budget can be used.
+
+The worker measures each grant from when it sent its request using its
+monotonic clock, so time spent in transit counts against the grant. A lost
+connection or expired grant stops the diagnostic. Reconnecting can report a
+journaled result or an unknown outcome. It cannot extend the old stream's
+lease or start the attempt again. Version 1 peers without the renewal
+capability keep using the existing one-shot diagnostic grant.
+
 ## Outbound worker relay
 
 Run the relay on a machine both endpoints can reach. The home and worker

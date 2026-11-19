@@ -12,7 +12,7 @@ import type { Message, UnknownEnum } from '@bufbuild/protobuf'
 export const file_althar_worker_v1_control: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'Ch5hbHRoYXIvd29ya2VyL3YxL2NvbnRyb2wucHJvdG8SEGFsdGhhci53b3JrZXIudjEiyAEKC1dvcmtlckZyYW1lEi4KBWhlbGxvGAEgASgLMh0uYWx0aGFyLndvcmtlci52MS5Xb3JrZXJIZWxsb0gAEj0KEGRpYWdub3N0aWNfY2xhaW0YAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNDbGFpbUgAEj8KEWRpYWdub3N0aWNfcmVzdWx0GAMgASgLMiIuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljUmVzdWx0SABCCQoHcGF5bG9hZCLCAQoJSG9tZUZyYW1lEiwKBWhlbGxvGAEgASgLMhsuYWx0aGFyLndvcmtlci52MS5Ib21lSGVsbG9IABI9ChBkaWFnbm9zdGljX29mZmVyGAIgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT2ZmZXJIABI9ChBkaWFnbm9zdGljX3N0YXJ0GAMgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljU3RhcnRIAEIJCgdwYXlsb2FkImcKC1dvcmtlckhlbGxvEhEKCXdvcmtlcl9pZBgBIAEoCRITCgttaW5fdmVyc2lvbhgCIAEoDRITCgttYXhfdmVyc2lvbhgDIAEoDRIbChNhY2NlcHRzX2RpYWdub3N0aWNzGAQgASgIInIKCUhvbWVIZWxsbxIPCgdob21lX2lkGAEgASgJEhEKCXdvcmtlcl9pZBgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEg8KB3ZlcnNpb24YBCABKA0SHAoUc3VwcG9ydHNfZGlhZ25vc3RpY3MYBSABKAgiTgoPRGlhZ25vc3RpY09mZmVyEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSGAoQY2xhaW1hYmxlX2Zvcl9tcxgDIAEoDSI0Cg9EaWFnbm9zdGljQ2xhaW0SEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCSJICg9EaWFnbm9zdGljU3RhcnQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRISCgpydW5fZm9yX21zGAMgASgNInsKEERpYWdub3N0aWNSZXN1bHQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRI0CgdvdXRjb21lGAMgASgOMiMuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT3V0Y29tZRIOCgZvdXRwdXQYBCABKAwqmAEKEURpYWdub3N0aWNPdXRjb21lEiIKHkRJQUdOT1NUSUNfT1VUQ09NRV9VTlNQRUNJRklFRBAAEiAKHERJQUdOT1NUSUNfT1VUQ09NRV9TVUNDRUVERUQQARIdChlESUFHTk9TVElDX09VVENPTUVfRkFJTEVEEAISHgoaRElBR05PU1RJQ19PVVRDT01FX1VOS05PV04QAzJhChRXb3JrZXJDb250cm9sU2VydmljZRJJCgdDb25uZWN0Eh0uYWx0aGFyLndvcmtlci52MS5Xb3JrZXJGcmFtZRobLmFsdGhhci53b3JrZXIudjEuSG9tZUZyYW1lKAEwAWIGcHJvdG8z',
+    'Ch5hbHRoYXIvd29ya2VyL3YxL2NvbnRyb2wucHJvdG8SEGFsdGhhci53b3JrZXIudjEihwIKC1dvcmtlckZyYW1lEi4KBWhlbGxvGAEgASgLMh0uYWx0aGFyLndvcmtlci52MS5Xb3JrZXJIZWxsb0gAEj0KEGRpYWdub3N0aWNfY2xhaW0YAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNDbGFpbUgAEj8KEWRpYWdub3N0aWNfcmVzdWx0GAMgASgLMiIuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljUmVzdWx0SAASPQoQZGlhZ25vc3RpY19yZW5ldxgEIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY1JlbmV3SABCCQoHcGF5bG9hZCKBAgoJSG9tZUZyYW1lEiwKBWhlbGxvGAEgASgLMhsuYWx0aGFyLndvcmtlci52MS5Ib21lSGVsbG9IABI9ChBkaWFnbm9zdGljX29mZmVyGAIgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT2ZmZXJIABI9ChBkaWFnbm9zdGljX3N0YXJ0GAMgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljU3RhcnRIABI9ChBkaWFnbm9zdGljX2xlYXNlGAQgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljTGVhc2VIAEIJCgdwYXlsb2FkIogBCgtXb3JrZXJIZWxsbxIRCgl3b3JrZXJfaWQYASABKAkSEwoLbWluX3ZlcnNpb24YAiABKA0SEwoLbWF4X3ZlcnNpb24YAyABKA0SGwoTYWNjZXB0c19kaWFnbm9zdGljcxgEIAEoCBIfChdyZW5ld3NfZGlhZ25vc3RpY19sZWFzZRgFIAEoCCKdAQoJSG9tZUhlbGxvEg8KB2hvbWVfaWQYASABKAkSEQoJd29ya2VyX2lkGAIgASgJEhIKCnNlc3Npb25faWQYAyABKAkSDwoHdmVyc2lvbhgEIAEoDRIcChRzdXBwb3J0c19kaWFnbm9zdGljcxgFIAEoCBIpCiFzdXBwb3J0c19kaWFnbm9zdGljX2xlYXNlX3JlbmV3YWwYBiABKAgiTgoPRGlhZ25vc3RpY09mZmVyEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSGAoQY2xhaW1hYmxlX2Zvcl9tcxgDIAEoDSI0Cg9EaWFnbm9zdGljQ2xhaW0SEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCSJICg9EaWFnbm9zdGljU3RhcnQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRISCgpydW5fZm9yX21zGAMgASgNInsKEERpYWdub3N0aWNSZXN1bHQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRI0CgdvdXRjb21lGAMgASgOMiMuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT3V0Y29tZRIOCgZvdXRwdXQYBCABKAwiRgoPRGlhZ25vc3RpY1JlbmV3EhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0iWgoPRGlhZ25vc3RpY0xlYXNlEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0SEgoKcnVuX2Zvcl9tcxgEIAEoDSqYAQoRRGlhZ25vc3RpY091dGNvbWUSIgoeRElBR05PU1RJQ19PVVRDT01FX1VOU1BFQ0lGSUVEEAASIAocRElBR05PU1RJQ19PVVRDT01FX1NVQ0NFRURFRBABEh0KGURJQUdOT1NUSUNfT1VUQ09NRV9GQUlMRUQQAhIeChpESUFHTk9TVElDX09VVENPTUVfVU5LTk9XThADMmEKFFdvcmtlckNvbnRyb2xTZXJ2aWNlEkkKB0Nvbm5lY3QSHS5hbHRoYXIud29ya2VyLnYxLldvcmtlckZyYW1lGhsuYWx0aGFyLndvcmtlci52MS5Ib21lRnJhbWUoATABYgZwcm90bzM',
   )
 
 /**
@@ -43,6 +43,13 @@ export type WorkerFrame = Message<'althar.worker.v1.WorkerFrame'> & {
          */
         value: DiagnosticResult
         case: 'diagnosticResult'
+      }
+    | {
+        /**
+         * @generated from field: althar.worker.v1.DiagnosticRenew diagnostic_renew = 4;
+         */
+        value: DiagnosticRenew
+        case: 'diagnosticRenew'
       }
     | { case: undefined; value?: undefined }
 }
@@ -82,6 +89,13 @@ export type HomeFrame = Message<'althar.worker.v1.HomeFrame'> & {
         value: DiagnosticStart
         case: 'diagnosticStart'
       }
+    | {
+        /**
+         * @generated from field: althar.worker.v1.DiagnosticLease diagnostic_lease = 4;
+         */
+        value: DiagnosticLease
+        case: 'diagnosticLease'
+      }
     | { case: undefined; value?: undefined }
 }
 
@@ -117,6 +131,11 @@ export type WorkerHello = Message<'althar.worker.v1.WorkerHello'> & {
    * @generated from field: bool accepts_diagnostics = 4;
    */
   acceptsDiagnostics: boolean
+
+  /**
+   * @generated from field: bool renews_diagnostic_lease = 5;
+   */
+  renewsDiagnosticLease: boolean
 }
 
 /**
@@ -155,6 +174,11 @@ export type HomeHello = Message<'althar.worker.v1.HomeHello'> & {
    * @generated from field: bool supports_diagnostics = 5;
    */
   supportsDiagnostics: boolean
+
+  /**
+   * @generated from field: bool supports_diagnostic_lease_renewal = 6;
+   */
+  supportsDiagnosticLeaseRenewal: boolean
 }
 
 /**
@@ -270,6 +294,68 @@ export type DiagnosticResult = Message<'althar.worker.v1.DiagnosticResult'> & {
  * Use `create(DiagnosticResultSchema)` to create a new message.
  */
 export const DiagnosticResultSchema: GenMessage<DiagnosticResult> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 7)
+
+/**
+ * Available only when both peers negotiate renewal. Sequence starts at one.
+ * A request is only valid on the stream that received the original start.
+ *
+ * @generated from message althar.worker.v1.DiagnosticRenew
+ */
+export type DiagnosticRenew = Message<'althar.worker.v1.DiagnosticRenew'> & {
+  /**
+   * @generated from field: string attempt_id = 1;
+   */
+  attemptId: string
+
+  /**
+   * @generated from field: string fence = 2;
+   */
+  fence: string
+
+  /**
+   * @generated from field: uint32 sequence = 3;
+   */
+  sequence: number
+}
+
+/**
+ * Describes the message althar.worker.v1.DiagnosticRenew.
+ * Use `create(DiagnosticRenewSchema)` to create a new message.
+ */
+export const DiagnosticRenewSchema: GenMessage<DiagnosticRenew> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 8)
+
+/**
+ * A renewal confirms the current authority and never authorizes another start.
+ *
+ * @generated from message althar.worker.v1.DiagnosticLease
+ */
+export type DiagnosticLease = Message<'althar.worker.v1.DiagnosticLease'> & {
+  /**
+   * @generated from field: string attempt_id = 1;
+   */
+  attemptId: string
+
+  /**
+   * @generated from field: string fence = 2;
+   */
+  fence: string
+
+  /**
+   * @generated from field: uint32 sequence = 3;
+   */
+  sequence: number
+
+  /**
+   * @generated from field: uint32 run_for_ms = 4;
+   */
+  runForMs: number
+}
+
+/**
+ * Describes the message althar.worker.v1.DiagnosticLease.
+ * Use `create(DiagnosticLeaseSchema)` to create a new message.
+ */
+export const DiagnosticLeaseSchema: GenMessage<DiagnosticLease> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 9)
 
 /**
  * @generated from enum althar.worker.v1.DiagnosticOutcome

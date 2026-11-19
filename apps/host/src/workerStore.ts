@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import { DiagnosticOutcome, validWorkerProtocolId, type DiagnosticResult } from '@althar/worker-protocol'
-import { DIAGNOSTIC_LEASE_MS, MAX_DIAGNOSTIC_OUTPUT } from '@althar/worker-protocol/grpc'
+import { DIAGNOSTIC_LEASE_MS, DIAGNOSTIC_RENEWAL_MS, MAX_DIAGNOSTIC_OUTPUT } from '@althar/worker-protocol/grpc'
 
 import { fileErrorCode, HostError } from './errors'
 import { privateDirectory, writePrivate } from './privateFiles'
@@ -76,7 +76,10 @@ export const openWorkerStore = async (profile: string, homeId: string, now = Dat
       "UPDATE diagnostic SET state = 'offered', lease_until = ? WHERE worker_id = ? AND state = 'queued' RETURNING id, fence, state, lease_until",
     )
     const claim = db.prepare(
-      "UPDATE diagnostic SET state = 'claimed' WHERE id = ? AND worker_id = ? AND fence = ? AND state = 'offered' AND lease_until > ? AND EXISTS (SELECT 1 FROM worker_enrollment WHERE id = ? AND revoked = 0) RETURNING lease_until",
+      "UPDATE diagnostic SET state = 'claimed', lease_until = min(lease_until, ?) WHERE id = ? AND worker_id = ? AND fence = ? AND state = 'offered' AND lease_until > ? AND EXISTS (SELECT 1 FROM worker_enrollment WHERE id = ? AND revoked = 0) RETURNING lease_until",
+    )
+    const renew = db.prepare(
+      "UPDATE diagnostic SET lease_until = ? WHERE id = ? AND worker_id = ? AND fence = ? AND state = 'claimed' AND lease_until > ? AND EXISTS (SELECT 1 FROM worker_enrollment WHERE id = ? AND revoked = 0) RETURNING lease_until",
     )
     const complete = db.prepare(
       "UPDATE diagnostic SET state = ?, output = ? WHERE id = ? AND worker_id = ? AND fence = ? AND (state = 'claimed' OR (state = 'offered' AND ? = 'unknown')) AND EXISTS (SELECT 1 FROM worker_enrollment WHERE id = ? AND revoked = 0)",
@@ -139,10 +142,15 @@ export const openWorkerStore = async (profile: string, homeId: string, now = Dat
           claimableForMs: row.state === 'offered' ? Math.max(0, Math.min(DIAGNOSTIC_LEASE_MS, (row.lease_until ?? at) - at)) : 0,
         }
       },
-      claim(workerId: string, attemptId: string, fence: string) {
+      claim(workerId: string, attemptId: string, fence: string, maximumMs = DIAGNOSTIC_LEASE_MS) {
         const at = now()
-        const row = claim.get(attemptId, workerId, fence, at, workerId)
+        const row = claim.get(at + maximumMs, attemptId, workerId, fence, at, workerId)
         return row === undefined ? 0 : Math.max(0, Math.min(DIAGNOSTIC_LEASE_MS, Number(row.lease_until) - now()))
+      },
+      renew(workerId: string, attemptId: string, fence: string, maximumMs: number) {
+        const at = now()
+        const row = renew.get(at + Math.min(DIAGNOSTIC_RENEWAL_MS, maximumMs), attemptId, workerId, fence, at, workerId)
+        return row === undefined ? 0 : Math.max(0, Math.min(DIAGNOSTIC_RENEWAL_MS, Number(row.lease_until) - now()))
       },
       complete(workerId: string, result: DiagnosticResult) {
         const state =
