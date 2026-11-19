@@ -128,9 +128,11 @@ test('offers Try again in the coordinator’s chat where its turn failed on the 
     // Back, Try again sends what the person said again, and it is answered.
     writeFileSync(connection, '')
     await again.click()
-    // The fake answers with all it was told, its brief and then the person's words: the turn that failed is under it.
-    await expect(page.getByText(/^echo: /)).toBeVisible()
-    await expect(page.getByText('What is left on the checkout?', { exact: true })).toHaveCount(2)
+    // The fake answers with all it was told, its brief and then the person's words: the turn that failed is under it. Its
+    // brief is long enough that the thread no longer draws the person's own message far above, so look in the answer.
+    const answer = page.getByRole('article').filter({ has: page.getByText(/^echo: /) })
+    await expect(answer).toBeVisible()
+    await expect(answer.getByText('What is left on the checkout?', { exact: true })).toBeVisible()
     await expect(again).toHaveCount(0)
   } finally {
     await electronApp.close()
