@@ -438,7 +438,10 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(brief, 'The person’s own presets count too')
       // A prototype ends with its branch; it may graduate to a change in the same task, or not, and the person decides.
       assert.include(brief, 'A prototype ends with its branch')
-      assert.include(brief, 'the same task goes on as a change, rather than a new task by default: change_part with preset Change')
+      assert.include(brief, 'the same task goes on as a change, never a new task: change_part with preset Change')
+      // Either way, in place: a change steps back into prototyping on its own branch and pull request, never by a new task.
+      assert.include(brief, 'A task’s shape changes on that task, never by a new one')
+      assert.include(brief, 'change_part with preset Prototype makes it a prototype in place')
       assert.include(brief, 'never assume either way')
       assert.include(brief, 'Whenever a task’s scope or shape changes, check whether its title still says what it does now')
       assert.include(brief, 'call rename_task with its id or slug')
@@ -448,6 +451,8 @@ describe('what the coordinator and a lead are told of presets', () => {
       for (const words of PICKS) assert.include(tools.get('propose_plan'), words)
       assert.include(tools.get('draft_task'), 'list_presets')
       assert.include(tools.get('draft_task'), 'Prototype for a prototype or design directions')
+      assert.include(tools.get('draft_task'), 'Never draft a task to prototype, redesign, build or rework what a task already does')
+      assert.include(tools.get('draft_task'), "never to change your own task's shape or approach")
       assert.include(tools.get('list_presets'), 'Prototype is for a prototype or design directions')
       assert.include(tools.get('list_presets'), 'Change for the rest')
       assert.include(tools.get('change_part'), 'Whenever a task’s scope or shape changes')

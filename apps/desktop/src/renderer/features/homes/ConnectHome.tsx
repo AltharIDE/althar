@@ -9,6 +9,7 @@ import {
   DisclosureTrigger,
   Field,
   Fold,
+  Icon,
   Problem,
   Spinner,
   Segmented,
@@ -17,7 +18,7 @@ import {
 import type { CheckedHome, HomesHost, SshHomeTarget } from '../../../homes'
 import { homeProblem, nameFrom } from './useHomes'
 import s from './Homes.module.css'
-import { PairHome } from './PairHome'
+import { usePairStep } from './PairHome'
 
 /*
  * Connecting a home: the host, checked first (read-only, and cancelled by any
@@ -133,15 +134,17 @@ export const useConnect = (homes: HomesHost, onDone?: () => void, start?: { targ
     },
     connect: () => {
       if (checked === null || name.trim() === '') return
+      // An edit or a switch away abandons it: what it comes to then is no longer this form's.
+      const at = generation.current
       setPhase('connecting')
       setProblem(null)
       void homes
         .connect(checked.checkId, name)
         .then(() => {
-          if (live.current) onDone?.()
+          if (live.current && generation.current === at) onDone?.()
         })
         .catch((error: unknown) => {
-          if (!live.current) return
+          if (!live.current || generation.current !== at) return
           setProblem(homeProblem(error))
           setPhase('refused')
           setChecked(null)
@@ -189,9 +192,51 @@ export function Identity({ homeId }: { homeId: string }) {
   )
 }
 
+/**
+ * The home a check or a code found, as Manage homes shows a home: its glyph, where it is (or what it is, where the
+ * dialog shows where already), its identity to compare, and a line on what to compare it with.
+ */
+export function FoundHome({
+  where,
+  homeId,
+  label,
+  children,
+}: {
+  /** Where it is, where the dialog doesn't already show it; its identity is named instead. */
+  where?: string
+  homeId: string
+  label: string
+  children: ReactNode
+}) {
+  return (
+    <section className={s.found} aria-label={label}>
+      <div className={s.foundHead}>
+        <span className={s.glyph}>
+          <Icon name="home" size={15} />
+        </span>
+        <span className={s.foundWords}>
+          {where === undefined ? (
+            <span className={s.foundLabel}>Identity</span>
+          ) : (
+            <span className={s.foundWhere} title={where}>
+              {where}
+            </span>
+          )}
+          <Identity homeId={homeId} />
+        </span>
+      </div>
+      <p className={s.foundNote}>{children}</p>
+    </section>
+  )
+}
+
 /** A refused check or connection, under what it was about. */
-export function Refusal({ problem }: { problem: string }) {
-  return <Problem size="small">{problem}</Problem>
+export function Refusal({ problem, id }: { problem: string; id?: string }) {
+  return (
+    <Problem size="small" id={id}>
+      {problem}
+    </Problem>
+  )
 }
 
 /** Work under way, with what it is. */
@@ -204,75 +249,109 @@ export function Working({ children }: { children: string }) {
   )
 }
 
-export function ConnectHome({ homes, onClose }: { homes: HomesHost; onClose: () => void }) {
-  const [method, setMethod] = useState<'pair' | 'ssh'>(homes.pair === undefined ? 'ssh' : 'pair')
-  const choice =
-    homes.pair === undefined ? undefined : (
-      <Segmented
-        label="Connection method"
-        value={method}
-        onChange={setMethod}
-        options={[
-          { value: 'pair', label: 'Pairing code' },
-          { value: 'ssh', label: 'SSH' },
-        ]}
-      />
-    )
-  return method === 'pair' ? (
-    <PairHome homes={homes} onClose={onClose} choice={choice} />
-  ) : (
-    <SshConnectHome homes={homes} onClose={onClose} choice={choice} />
-  )
+/** What a way of connecting puts in the dialog: its fields, its main button, what Enter does, and whether it is at work. */
+export interface Step {
+  readonly body: ReactNode
+  readonly action: ReactNode
+  readonly submit: () => void
+  readonly busy: boolean
+  /** Switched away from: what it had under way in main is cancelled, as if its form were left. */
+  readonly leave: () => void
 }
 
-function SshConnectHome({ homes, onClose, choice }: { homes: HomesHost; onClose: () => void; choice: ReactNode }) {
-  const id = useId()
-  const form = useConnect(homes, onClose)
-  const checked = form.checked !== null && (form.phase === 'checked' || form.phase === 'connecting')
-  const busy = form.phase === 'checking' || form.phase === 'connecting'
+/**
+ * One dialog for both ways of connecting: switching between them keeps the dialog where it is, and what was typed in
+ * each.
+ */
+export function ConnectHome({ homes, onClose }: { homes: HomesHost; onClose: () => void }) {
+  const [method, setMethod] = useState<'pair' | 'ssh'>(homes.pair === undefined ? 'ssh' : 'pair')
+  // The first field takes the keys as the dialog opens; a method chosen after keeps focus on its switch.
+  const [switched, setSwitched] = useState(false)
+  const ssh = useSshStep(homes, onClose, !switched)
+  const pair = usePairStep(homes, onClose, !switched)
+  const step = method === 'pair' ? pair : ssh
   return (
     <Dialog
       title="Connect a home"
       width={480}
-      holding={busy}
+      holding={step.busy}
       onClose={onClose}
-      onSubmit={() => (checked ? form.connect() : form.check())}
+      onSubmit={step.submit}
       actions={
         <>
           <Button onClick={onClose}>Cancel</Button>
-          {checked ? (
-            <Button type="submit" variant="signal" busy={form.phase === 'connecting'} disabled={form.name.trim() === ''}>
-              {form.phase === 'connecting' ? 'Connecting…' : 'Connect'}
-            </Button>
-          ) : (
-            <Button type="submit" busy={form.phase === 'checking'} disabled={form.target.trim() === '' || form.phase === 'checking'}>
-              {form.phase === 'checking' ? 'Checking…' : 'Check host'}
-            </Button>
-          )}
+          {step.action}
         </>
       }
     >
       <div className={s.form}>
-        {choice}
+        {homes.pair !== undefined && (
+          <Segmented
+            label="Connection method"
+            value={method}
+            onChange={(next) => {
+              if (next === method) return
+              step.leave()
+              setSwitched(true)
+              setMethod(next)
+            }}
+            className={s.method}
+            options={[
+              { value: 'pair', label: 'Pairing code', disabled: step.busy },
+              { value: 'ssh', label: 'SSH', disabled: step.busy },
+            ]}
+          />
+        )}
+        {step.body}
+      </div>
+    </Dialog>
+  )
+}
+
+function useSshStep(homes: HomesHost, onClose: () => void, focus: boolean): Step {
+  const id = useId()
+  const form = useConnect(homes, onClose)
+  const checked = form.checked !== null && (form.phase === 'checked' || form.phase === 'connecting') ? form.checked : null
+  const problem = form.phase === 'refused' ? form.problem : null
+  return {
+    busy: form.phase === 'checking' || form.phase === 'connecting',
+    leave: () => form.reset(form.target, form.options),
+    submit: () => (checked !== null ? form.connect() : form.check()),
+    action:
+      checked !== null ? (
+        <Button type="submit" variant="signal" busy={form.phase === 'connecting'} disabled={form.name.trim() === ''}>
+          {form.phase === 'connecting' ? 'Connecting…' : 'Connect'}
+        </Button>
+      ) : (
+        <Button type="submit" busy={form.phase === 'checking'} disabled={form.target.trim() === '' || form.phase === 'checking'}>
+          {form.phase === 'checking' ? 'Checking…' : 'Check host'}
+        </Button>
+      ),
+    body: (
+      <>
         <div className={s.field}>
-          <label className={s.field} htmlFor={`${id}-host`}>
-            <span>SSH host</span>
-            <Field
-              id={`${id}-host`}
-              value={form.target}
-              invalid={form.phase === 'refused'}
-              placeholder="user@host, or a Host from your SSH config"
-              spellCheck={false}
-              autoComplete="off"
-              maxLength={4096}
-              // oxlint-disable-next-line jsx-a11y/no-autofocus -- the dialog is opened to type a host; its first field takes the keys.
-              autoFocus
-              onChange={(event) => form.setTarget(event.currentTarget.value)}
-            />
+          <label className={s.fieldLabel} htmlFor={`${id}-host`}>
+            SSH host
           </label>
-          {form.phase === 'refused' && form.problem !== null && <Refusal problem={form.problem} />}
+          <Field
+            id={`${id}-host`}
+            value={form.target}
+            invalid={problem !== null}
+            aria-describedby={problem === null ? undefined : `${id}-problem`}
+            placeholder="user@host, or a Host from your SSH config"
+            spellCheck={false}
+            autoComplete="off"
+            maxLength={4096}
+            className={s.mono}
+            // While it connects, the host it connects to stays as it is.
+            readOnly={form.phase === 'connecting'}
+            // oxlint-disable-next-line jsx-a11y/no-autofocus -- the dialog is opened to type a host; its first field takes the keys.
+            autoFocus={focus}
+            onChange={(event) => form.setTarget(event.currentTarget.value)}
+          />
+          {problem !== null && <Refusal problem={problem} id={`${id}-problem`} />}
         </div>
-        {!checked && (
+        {checked === null ? (
           <Disclosure>
             <DisclosureTrigger>
               <button type="button" className={s.more}>
@@ -283,23 +362,20 @@ function SshConnectHome({ homes, onClose, choice }: { homes: HomesHost; onClose:
               <OptionFields form={form} />
             </Fold>
           </Disclosure>
+        ) : (
+          <>
+            <FoundHome homeId={checked.homeId} label="The home on this host">
+              On the host, <Code>althar-host status</Code> prints the same identity. Connect only if it does.
+            </FoundHome>
+            <div className={s.field}>
+              <label className={s.fieldLabel} htmlFor={`${id}-name`}>
+                Name
+              </label>
+              <Field id={`${id}-name`} value={form.name} maxLength={120} onChange={(event) => form.setName(event.currentTarget.value)} />
+            </div>
+          </>
         )}
-        {checked && form.checked !== null && (
-          <section className={s.check} aria-label="The home on this host">
-            <span className={s.label}>Home on {form.checked.target}</span>
-            <Identity homeId={form.checked.homeId} />
-            <p className={s.note}>
-              On the host, <Code>althar-host status</Code> prints the same home. Connect only if it does.
-            </p>
-          </section>
-        )}
-        {checked && (
-          <label className={s.field} htmlFor={`${id}-name`}>
-            <span>Name</span>
-            <Field id={`${id}-name`} value={form.name} maxLength={120} onChange={(event) => form.setName(event.currentTarget.value)} />
-          </label>
-        )}
-      </div>
-    </Dialog>
-  )
+      </>
+    ),
+  }
 }

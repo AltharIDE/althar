@@ -171,10 +171,24 @@ describe('a task', () => {
     expect(within(header).getByRole('button', { name: 'Keep for later' })).toBeTruthy()
     expect(within(header).queryByRole('button', { name: 'Done' })).toBeNull()
     first.unmount()
-    const change = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'change', phase: 'ready' } })) })
-    withServices(<Task />, change.client)
+    // A change with its pull request open waits on that: nothing to keep.
+    const opened = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'change', phase: 'ready', changes: [change()] } })),
+    })
+    withServices(<Task />, opened.client)
     const again = await screen.findByRole('banner', { name: thread().task.title })
     expect(within(again).queryByRole('button', { name: 'Keep for later' })).toBeNull()
+  })
+
+  it('offers Keep for later to a prototype that ended on its branch, with no pull request open', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, kind: 'change', phase: 'ready', changes: [] } })),
+    })
+    withServices(<Task />, client)
+    const header = await screen.findByRole('banner', { name: thread().task.title })
+    await userEvent.click(within(header).getByRole('button', { name: 'Keep for later' }))
+    expect(client.keepTaskForLater).toHaveBeenCalledWith(snapshot().task.id)
+    expect(within(header).queryByRole('button', { name: 'Done' })).toBeNull()
   })
 
   it('opens whether or not seeing it goes through', async () => {

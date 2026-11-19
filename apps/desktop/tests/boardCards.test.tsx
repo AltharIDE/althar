@@ -309,6 +309,18 @@ describe('a ready card’s own ways', () => {
     expect(shown.getByRole('button', { name: 'Keep for later' }).hasAttribute('disabled')).toBe(true)
   })
 
+  it('offers Keep for later on a prototype that ended on its branch, and not on a change with its pull request open', async () => {
+    const actions = ways()
+    const sketch = task({ taskId: 'p1', threadId: 'thp1', title: 'Prototype the tabs', phase: 'ready', kind: 'change', change: null })
+    const opened = task({ taskId: 'p2', threadId: 'thp2', title: 'Retry twice', phase: 'ready', kind: 'change', change: change() })
+    show(lanesOf(board([sketch, opened])), { actions })
+    const shown = cardOf('Prototype the tabs')
+    expect(shown.queryByRole('button', { name: 'Done' })).toBeNull()
+    await userEvent.click(shown.getByRole('button', { name: 'Keep for later' }))
+    expect(actions.keep).toHaveBeenCalledWith('p1')
+    expect(cardOf('Retry twice').queryByRole('button', { name: 'Keep for later' })).toBeNull()
+  })
+
   it('says what waits for Ship and ships it from the card, whatever its pull request’s checks say (a task is a conversation plus parts)', async () => {
     const ship = vi.fn(async () => true)
     const actions = ways({ ship, shipping: new Set<string>() })

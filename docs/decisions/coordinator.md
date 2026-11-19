@@ -201,8 +201,10 @@ nothing and says so, as a second press would.
   declined, its calls are withdrawn and its agents stop, while its worktree
   and branch stay. The folder goes only as workspace clean-up allows
   ([workspaces-and-runs.md](workspaces-and-runs.md)).
-- **Done and Keep for later are for a task that isn't a change.** A change
-  is done when its pull request merges ([tasks.md](tasks.md#needs-you-and-settling)).
+- **Done is for a task that isn't a change.** A change is done when its
+  pull request merges ([tasks.md](tasks.md#needs-you-and-settling)). **Keep
+  for later is for any task** with no pull request of its own open: a
+  prototype or a chat that ends on its branch keeps as a quick task does.
 
 **Automations are the exception.** Resuming one or running one now spends
 the person's plan while they may be away. So it acts at once only in a turn

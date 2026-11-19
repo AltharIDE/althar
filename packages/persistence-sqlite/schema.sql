@@ -1739,3 +1739,5 @@ CREATE TABLE preset_tunings (
     parts TEXT NOT NULL CHECK (json_valid(parts)),
     updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
   ) STRICT;
+
+CREATE INDEX provider_sessions_by_agent ON provider_sessions (agent_id, started_at);

@@ -9,7 +9,7 @@ import { PlanGauge } from '@althar/ui'
 
 import type { Host } from '../src/renderer/data/services'
 import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
-import { limitWords, planOf, roomOf, windowName } from '../src/renderer/features/usage/plan'
+import { elapsedOf, limitWords, planOf, roomOf, windowName } from '../src/renderer/features/usage/plan'
 import { waitsWords } from '../src/renderer/shared/agents'
 import { ModelChoice } from '../src/renderer/shared/ModelChoice'
 import { clock } from '../src/renderer/shared/time'
@@ -394,6 +394,27 @@ describe('what the window says of a plan', () => {
     expect(roomOf({ id: 'copilot:gpt-5' }, rooms, usage, NOW)).toBeNull()
     // Nothing to say of an agent with no plan here.
     expect(roomOf({ id: 'gemini-cli:gemini-3-pro' }, rooms, usage, NOW)).toBeUndefined()
+  })
+
+  it('marks how far through its window now is, only where the window’s length and reset are known', () => {
+    const window = (kind: 'five_hour' | 'weekly' | 'monthly' | 'other', resetsAt: string | null) => ({
+      kind,
+      label: null,
+      usedPercent: 10,
+      resetsAt,
+    })
+    // Ends 15:00 and began 10:00: five minutes in is 2%.
+    expect(elapsedOf(window('five_hour', RESET), NOW)).toBe(2)
+    expect(elapsedOf(window('weekly', '2026-10-18T22:05:00.000Z'), NOW)).toBe(50)
+    expect(elapsedOf(window('monthly', '2026-11-15T10:05:00.000Z'), NOW)).toBe(0)
+    // The month before a 31st has no 31st: 31 May starts on 30 April, and 31 March on 28 February, not in the reset's own month.
+    expect(elapsedOf(window('monthly', '2026-05-31T10:05:00.000Z'), new Date('2026-05-15T10:05:00.000Z'))).toBe(48)
+    expect(elapsedOf(window('monthly', '2026-03-31T10:05:00.000Z'), new Date('2026-03-01T10:05:00.000Z'))).toBe(3)
+    expect(elapsedOf(window('weekly', null), NOW)).toBeUndefined()
+    expect(elapsedOf(window('other', WEEK), NOW)).toBeUndefined()
+    // Not begun yet by that length, or already over: nothing to mark.
+    expect(elapsedOf(window('five_hour', '2026-10-16T15:00:00.000Z'), NOW)).toBeUndefined()
+    expect(elapsedOf(window('five_hour', '2026-10-15T09:00:00.000Z'), NOW)).toBeUndefined()
   })
 
   it('ends every window’s row with the time left, the exact time on hover, that one reset is not read since, and that no time was given', () => {

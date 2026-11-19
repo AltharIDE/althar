@@ -96,7 +96,8 @@ import { statements as clickup } from './0091_clickup'
 import { statements as broughtIn } from './0092_brought_in'
 import { statements as runnableTask } from './0093_runnable_task'
 import { statements as presetTunings } from './0094_preset_tunings'
-import { statements as issueDraftWaits } from './0095_issue_draft_waits'
+import { statements as sessionsByAgent } from './0095_sessions_by_agent'
+import { statements as issueDraftWaits } from './0096_issue_draft_waits'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -210,7 +211,8 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0092_brought_in', statements: broughtIn },
   { key: '0093_runnable_task', statements: runnableTask },
   { key: '0094_preset_tunings', statements: presetTunings },
-  { key: '0095_issue_draft_waits', statements: issueDraftWaits },
+  { key: '0095_sessions_by_agent', statements: sessionsByAgent },
+  { key: '0096_issue_draft_waits', statements: issueDraftWaits },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -45,7 +45,7 @@ import {
   TaskWaitedBy,
 } from '@althar/ui'
 
-import { isAnswered, isSettleable, kindWords, takesDone } from '../../shared/calls'
+import { isAnswered, isSettleable, kindWords, takesDone, takesKeep } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
 import { externalWaitWords, queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
@@ -1031,10 +1031,20 @@ export function TaskView({
   })
   // Held for Ship, Ship is its one way on, first in the chip; a finished task that isn't a change keeps Done and Keep beside it.
   const held = !busy && snapshot.task.phase === 'ready' ? snapshot.task.held : undefined
+  // Keep for later, for any kind that finished, a prototype or a chat ending on its branch too: not one whose pull request is
+  // open, or held for Ship, which wait on the person in their own ways.
+  const keeps =
+    !busy &&
+    takesKeep({
+      phase: snapshot.task.phase ?? '',
+      state: snapshot.task.state,
+      pullOpen: snapshot.task.changes.some((one) => one.state === 'open'),
+      held: snapshot.task.held,
+    })
   // What its review after a merge found: Fix it and Leave it, first in the chip.
   const found = !busy && snapshot.task.afterMerge?.state === 'found' ? snapshot.task.afterMerge : undefined
   const settle =
-    settleable || held !== undefined || found !== undefined ? (
+    settleable || keeps || held !== undefined || found !== undefined ? (
       <SettleWays
         place="header"
         {...(found === undefined
@@ -1055,9 +1065,7 @@ export function TaskView({
               ),
             })}
         {...(settleable && done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
-        {...(settleable && snapshot.task.phase === 'ready' && snapshot.task.kind !== 'change'
-          ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint }
-          : {})}
+        {...(keeps ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint } : {})}
         {...(model.doing === doing.ship
           ? { busy: 'ship' as const }
           : model.doing === doing.fixAfterMerge

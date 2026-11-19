@@ -26,6 +26,8 @@ export interface PlanWindow {
   resetsTitle?: string
   /** What stands where the bar would, for a window that has reset: "not read since". */
   note?: string
+  /** How far through the window now is, 0 to 100: only where its start and reset are both known. */
+  elapsed?: number
   /** It has reset since it was read: how much of it is used no one has said yet, so no figure or bar, and never an empty limit. */
   unread?: boolean
 }
@@ -51,6 +53,8 @@ export interface PlanAgent {
   /** The window that figure is of, as a sentence names it: five-hour limit, weekly Opus limit. */
   limit: string
   until: string | null
+  /** How far through that window now is, 0 to 100, where known. */
+  elapsed?: number
   /** That account's name, where the agent has several. */
   account: string | null
   /** Every account read, tightest first. */

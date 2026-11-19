@@ -57,7 +57,7 @@ import { MERGE_QUEUE_STEP, MERGING_STEP } from '../../data/merges'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
-import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, whereOf } from '../../shared/calls'
+import { askOf, callKindOf, isAnswered, isSettleable, kindWords, takesDone, takesKeep, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import {
@@ -792,6 +792,7 @@ const readyCard = (work: BoardTask, actions?: CardActions): Card => {
       const size = { add: work.unshipped?.add ?? work.changed?.add ?? 0, del: work.unshipped?.del ?? work.changed?.del ?? 0 }
       const branch = work.branch === null || empty(size) ? null : { name: work.branch, ...size }
       const ask = work.nothingBuilt === true ? askOf(work.summary) : null
+      const corner = settleWaysOf(work, actions)
       const object =
         change === null ? (
           branch === null ? null : (
@@ -811,7 +812,9 @@ const readyCard = (work: BoardTask, actions?: CardActions): Card => {
         word: readyWordOf(work),
         ...(object === null ? {} : { object }),
         // Nothing built: no accept to press; what its lead leaves to the person, and Done, which settles it where it is, in its corner.
-        ...(work.nothingBuilt === true ? { ...(ask === null ? {} : { why: ask }), corner: settleWaysOf(work, actions) } : {}),
+        // Any other with no pull request open, as a prototype ending on its branch: Keep for later there.
+        ...(ask === null ? {} : { why: ask }),
+        ...(corner === null ? {} : { corner }),
         // Its conflict the person's: not asked of its lead, why, and Resolve now, which asks it anyway; handed back by its lead,
         // why alone, as asking it again asks what it couldn't do, and the task, which the card opens, is where it is settled (DEV-173).
         ...(work.handedBack != null
@@ -986,17 +989,21 @@ const unsentOf = (work: BoardTask, why: string, actions: CardActions | undefined
 }
 
 /**
- * A finished task's Done and Keep for later, for its card's corner, where it
- * isn't a change: a review with a draft only keeps, as it settles once
- * posted, and one kept has only Done.
+ * A finished task's Done and Keep for later, for its card's corner. Done where
+ * it isn't a change, or built nothing: a review with a draft only keeps, as
+ * it settles once posted. Keep for later for any kind, a prototype or a chat
+ * ending on its branch included, but one whose pull request is open.
  */
 const settleWaysOf = (work: BoardTask, actions: CardActions | undefined): ReactNode => {
   const { markDone, keep } = actions ?? {}
-  if (!isSettleable(work) || markDone === undefined || keep === undefined) return null
+  if (markDone === undefined || keep === undefined) return null
+  const done = isSettleable(work) && takesDone(work)
+  const keeps = takesKeep({ phase: work.phase, state: work.state, pullOpen: work.change?.state === 'open', held: work.held })
+  if (!done && !keeps) return null
   return (
     <SettleWays
-      {...(takesDone(work) ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint } : {})}
-      {...(work.phase === 'ready' && work.kind !== 'change' ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
+      {...(done ? { onDone: () => void markDone(work.taskId), doneHint: text.doneHint } : {})}
+      {...(keeps ? { onKeep: () => void keep(work.taskId), keepHint: text.keepHint } : {})}
       {...(actions?.settling?.has(work.taskId) === true ? { busy: 'done' as const } : {})}
     />
   )
