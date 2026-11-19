@@ -209,7 +209,7 @@ const recoverWorker = async (t: TestContext, routed: boolean, projectPilot = fal
       const proc = `/proc/${pid}/stat`
       const alive = () => {
         try {
-          return !/^Z /.test(readFileSync(proc, 'utf8').split(') ')[1] ?? '')
+          return !(readFileSync(proc, 'utf8').split(') ')[1] ?? '').startsWith('Z ')
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
           throw error
