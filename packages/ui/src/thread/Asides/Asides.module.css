@@ -1,6 +1,7 @@
 /*
  * The heading over the conversation, set as the board heads its lanes (13px, 600, on their line), with no hairline under
- * it, as a lane has none: what scrolls under it fades into it instead.
+ * it, as a lane has none. Its padding is the spacing scale's: 8px above and below the 30px heading, 12px at the sides.
+ * What scrolls under it fades out at its edge (TaskFace's .fades) rather than being cut off there.
  */
 .strip {
   position: relative;
@@ -8,15 +9,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 14px 12px 6px 14px;
-}
-.strip::after {
-  content: '';
-  position: absolute;
-  inset: 100% 0 auto;
-  height: 14px;
-  background: linear-gradient(var(--face-surface, var(--paper)), transparent);
-  pointer-events: none;
+  padding: 8px 12px;
 }
 .tabs {
   flex: 1;
@@ -33,7 +26,7 @@
   gap: 8px;
   min-width: 0;
   height: 30px;
-  padding: 0 8px 0 6px;
+  padding: 0 8px;
   border-radius: 7px;
   color: var(--t-1);
   font-size: 13px;
