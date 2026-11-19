@@ -45,7 +45,6 @@
   },
   "trustedDependencies": [
     "electron",
-    "node-pty",
     "sharp"
   ]
 }
