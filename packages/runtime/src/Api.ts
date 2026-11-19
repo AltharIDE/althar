@@ -496,6 +496,9 @@ export const handlers = apiLayer(
         queryContext,
       )
 
+    /** A terminal is the person's own shell: only their window opens, reads, types into or closes one, never a paired device or a socket. */
+    const terminalRefused = new ApiError({ reason: 'Forbidden', message: 'A terminal opens only in Althar’s window on this computer.' })
+    const windowOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) => (sender.kind === 'window' ? api(effect) : Effect.fail(terminalRefused))
     /* GitHub as the skills page reaches it: over the app's own network, unauthenticated, for public repositories. */
     const github: GitHubAccess = config.fetch === undefined ? {} : { fetch: config.fetch }
     /**
@@ -2599,7 +2602,7 @@ export const handlers = apiLayer(
       OpenTerminal: ({ commandId, ...input }) =>
         once(
           commandId,
-          api(
+          windowOnly(
             terminals.open({
               id: input.id,
               projectId: input.projectId,
@@ -2610,14 +2613,16 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      ListTerminals: ({ projectId }) => api(terminals.ofProject(projectId)),
+      ListTerminals: ({ projectId }) => windowOnly(terminals.ofProject(projectId)),
       ListLaunches: ({ projectId }) => api(launches.ofProject(projectId)),
       AttachTerminal: ({ id }) =>
-        Stream.mapError(terminals.attach(id), (error) => new ApiError({ reason: 'NotFound', message: `No terminal ${error.id}.` })),
+        sender.kind === 'window'
+          ? Stream.mapError(terminals.attach(id), (error) => new ApiError({ reason: 'NotFound', message: `No terminal ${error.id}.` }))
+          : Stream.fail(terminalRefused),
       // Each key as it is pressed: straight to the shell, not through the call log a command keeps.
-      WriteTerminal: ({ id, data }) => api(terminals.write(id, data)),
-      ResizeTerminal: ({ id, cols, rows }) => api(terminals.resize(id, cols, rows)),
-      CloseTerminal: ({ commandId, id }) => once(commandId, api(terminals.close(id))),
+      WriteTerminal: ({ id, data }) => windowOnly(terminals.write(id, data)),
+      ResizeTerminal: ({ id, cols, rows }) => windowOnly(terminals.resize(id, cols, rows)),
+      CloseTerminal: ({ commandId, id }) => once(commandId, windowOnly(terminals.close(id))),
       Watch: ({ since, deltas }) => Stream.merge(changes(since), streaming(deltas === true)),
     }
     return implemented
