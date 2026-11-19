@@ -1395,13 +1395,13 @@ app.on('window-all-closed', () => {
 
 /*
  * Quitting with work under way says what it will stop and asks (DEV-118): the
- * runtime counts the leads and reviews in a turn, the runs going and what
- * agents left running, and the window asks the person to quit, to keep it all
+ * runtime counts the leads and reviews in a turn, the runs going, what
+ * agents left running and the terminals running something, and the window asks the person to quit, to keep it all
  * working in the background (where the edge keeps Althar in reach), or to
  * carry on. A Quit asked again while the question is open is their yes. With
  * nothing at work it quits as it always did.
  */
-const NOT_COUNTED: Work = { leads: 0, reviews: 0, runs: 0, left: 0 }
+const NOT_COUNTED: Work = { leads: 0, reviews: 0, runs: 0, left: 0, terminals: 0 }
 const QUIT_ASK_WAIT = 4_000
 /** A spec of Quit's own makes the runtime give no answer (ALTHAR_QUIT_UNANSWERED=1), which waiting out the time would only make slow. */
 const quitUnanswered = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_QUIT_UNANSWERED === '1'

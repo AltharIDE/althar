@@ -177,21 +177,26 @@ describe('terminals', () => {
     }).pipe(Effect.scoped, Effect.provide(layer))
   })
 
-  it.live('says what runs in front, so closing it says it stops something', () => {
+  it.live('says what runs in front, so closing it, or quitting, says it stops something', () => {
     const { ptys, layer } = setUp()
     return Effect.gen(function* () {
       const terminals = yield* Terminals
       yield* terminals.open({ id: 'term_project1', projectId: 'p', taskId: null, cols: 80, rows: 24 })
+      yield* terminals.open({ id: 'term_other1', projectId: 'q', taskId: null, cols: 80, rows: 24 })
       const pty = ptys[0]!
       const [idle] = yield* terminals.ofProject('p')
       assert.isFalse(idle?.busy)
+      assert.strictEqual(yield* terminals.busy, 0)
       pty.process = 'bun'
       yield* Effect.sleep('1100 millis')
       const [busy] = yield* terminals.ofProject('p')
       assert.deepStrictEqual([busy?.busy, busy?.title], [true, 'bun'])
+      // Quit counts it, in any project; the idle shell beside it, not.
+      assert.strictEqual(yield* terminals.busy, 1)
       yield* terminals.close('term_project1')
       assert.isTrue(pty.killed)
       assert.strictEqual((yield* terminals.ofProject('p')).length, 0)
+      assert.strictEqual(yield* terminals.busy, 0)
     }).pipe(Effect.provide(layer))
   })
 

@@ -212,6 +212,8 @@ export class Terminals extends Context.Service<
     close(id: string): Effect.Effect<void>
     /** Closes every terminal of the project, or only the task's: the project is removed, or the task settled. */
     closeAll(projectId: string, taskId?: string): Effect.Effect<void>
+    /** How many, in every project, run something in front of their shell, as the status line says: what Quit would stop. */
+    readonly busy: Effect.Effect<number>
   }
 >()('@althar/runtime/Terminals') {
   static readonly layer: Layer.Layer<Terminals, never, Launches | Live | PtySpawner> = Layer.effect(
@@ -489,6 +491,7 @@ export class Terminals extends Context.Service<
             for (const term of gone) stop(term)
             return gone.length === 0 ? Effect.void : told(projectId)
           }),
+        busy: Effect.sync(() => [...terminals.values()].filter((term) => shown(term).busy).length),
       })
     }),
   )

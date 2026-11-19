@@ -478,9 +478,10 @@ PATH, as an xterm-256color terminal with true colour.
 - **What runs in front** of the shell is read every second: the status line
   names it (a terminal with `bun` running in it), and closing that terminal
   asks first, since it stops it. A shell that ends well (`exit`) closes its
-  terminal; one that ends badly stays to say how. None outlives Althar;
-  removing the project, or a finished task's folder going, closes its
-  terminals.
+  terminal; one that ends badly stays to say how. None outlives Althar, so
+  Quit counts those running something among what it would stop and asks
+  first (an idle shell holds nothing to lose); removing the project, or a
+  finished task's folder going, closes its terminals.
 - **An editor's keys:** copy (with a selection), paste, select all, clear
   and find, on each system's keys; a word and a line at a time on a Mac;
   links open with the primary key held; a dropped file types its path. The

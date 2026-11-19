@@ -13,7 +13,8 @@ import { launch, openFirstProject, sizeWindow, still } from './support'
  * terminal opens at once in the project's repository, takes keys, says what
  * runs in front of its shell, and asks before closing stops it; a run that
  * fails shows along the line, its output a press away with Help me fix it,
- * and goes with its X.
+ * and goes with its X. Quit asks first while something runs in a terminal,
+ * and not for an idle shell.
  */
 
 const env = {
@@ -22,6 +23,14 @@ const env = {
   GIT_AUTHOR_EMAIL: 't@althar.test',
   GIT_COMMITTER_NAME: 'Test',
   GIT_COMMITTER_EMAIL: 't@althar.test',
+}
+
+/** Opens a terminal with Ctrl+`, pressed again until the screen has drawn and listens. */
+const openTerminal = async (page: Page) => {
+  await expect(async () => {
+    if ((await line(page).count()) === 0) await page.keyboard.press('Control+Backquote')
+    await expect(line(page).getByRole('button', { name: 'meridian', exact: true })).toBeVisible({ timeout: 1_000 })
+  }).toPass()
 }
 
 const line = (page: Page) => page.getByLabel('Runs and terminals', { exact: true })
@@ -49,11 +58,8 @@ test('a terminal opens in the project’s repository, says what runs in it, and 
     // Nothing runs and no terminal is open: no line.
     await expect(line(page)).toHaveCount(0)
 
-    // Ctrl+`: a terminal at once, in the drawer, with the keys; pressed again until the screen has drawn and listens.
-    await expect(async () => {
-      if ((await line(page).count()) === 0) await page.keyboard.press('Control+Backquote')
-      await expect(line(page).getByRole('button', { name: 'meridian', exact: true })).toBeVisible({ timeout: 1_000 })
-    }).toPass()
+    // Ctrl+`: a terminal at once, in the drawer, with the keys.
+    await openTerminal(page)
     await expect(drawer(page)).toBeVisible()
     await expect(terminalKeys(page)).toBeFocused()
     // What is typed reaches a real shell, in the project's repository.
@@ -127,5 +133,38 @@ test('a terminal opens in the project’s repository, says what runs in it, and 
     await page.screenshot({ path: 'test-results/terminal-line-at-rest.png', scale: 'css' })
   } finally {
     await electronApp.close()
+  }
+})
+
+test('Quit asks first while something runs in a terminal, and not for an idle shell', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  // Quit asks, as it does for a person: the other specs' apps quit without asking (support.ts).
+  const { electronApp, page, child } = await launch(home, { ALTHAR_QUIT_WITHOUT_ASKING: '0' })
+  try {
+    await openFirstProject(electronApp, page, repository(home))
+    await openTerminal(page)
+    await expect(terminalKeys(page)).toBeFocused()
+    await page.keyboard.type('sleep 60\n')
+    const item = line(page).getByRole('listitem').filter({ hasText: 'meridian' })
+    await expect(item).toContainText('sleep', { timeout: 10_000 })
+
+    await electronApp.evaluate(({ app }) => app.quit())
+    const dialog = page.getByRole('dialog', { name: 'Quit Althar?' })
+    await expect(dialog).toContainText('Quitting stops what’s running in a terminal.')
+    await still(page)
+    await dialog.screenshot({ path: 'test-results/terminal-quit-asks.png', scale: 'css' })
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(item).toContainText('sleep')
+
+    // Ctrl+C in the terminal: the shell is idle again, and Quit doesn't ask.
+    await terminalKeys(page).focus()
+    await page.keyboard.press('Control+c')
+    await expect(item).not.toContainText('sleep', { timeout: 10_000 })
+    // It quits as it is told: a question asked would keep it open.
+    await electronApp.evaluate(({ app }) => app.quit()).catch(() => undefined)
+    await expect.poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15_000 }).toBe(true)
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) await electronApp.close().catch(() => undefined)
   }
 })
