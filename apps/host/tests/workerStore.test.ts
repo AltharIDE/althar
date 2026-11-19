@@ -53,7 +53,7 @@ describe('the private worker ledger', () => {
       expect(first.complete(worker, result(attempt, offer.fence))).toBe(false)
       expect(first.next(worker)).toBeUndefined()
       expect(first.result(attempt)).toMatchObject({ output: 'Linux\n', state: 'succeeded' })
-      expect(() => first.result('missing')).toThrow('No diagnostic')
+      expect(() => first.result('missing')).toThrow('No worker run')
     } finally {
       first.close()
       other.close()
@@ -65,6 +65,39 @@ describe('the private worker ledger', () => {
       reopened.close()
     }
     await expect(openWorkerStore(profile, otherHome)).rejects.toThrow('another home')
+  })
+
+  it('offers project commands only to capable workers and fences cancellation', async () => {
+    const profile = temporary()
+    const store = await openWorkerStore(profile, homeId)
+    const operator = await openWorkerStore(profile, homeId)
+    try {
+      const worker = store.enroll(fingerprint)
+      const command = { projectId: `proj_${'1'.repeat(32)}`, commandName: 'check' }
+      expect(() => operator.cancel(`wpr_${'f'.repeat(32)}`)).toThrow('No project run')
+      const queued = operator.enqueue(worker, command)
+      expect(store.next(worker)).toBeUndefined()
+      expect(() => store.enqueue(worker)).toThrow('no outstanding')
+      expect(operator.cancel(queued).state).toBe('cancelled')
+      expect(store.next(worker, true)).toBeUndefined()
+
+      const attempt = operator.enqueue(worker, command)
+      const offer = store.next(worker, true)!
+      expect(offer.projectCommand).toMatchObject(command)
+      expect(store.claim(worker, attempt, offer.fence, 2000)).toBeGreaterThan(0)
+      expect(store.complete(worker, result(attempt, offer.fence, DiagnosticOutcome.CANCELLED))).toBe(false)
+      expect(operator.cancel(attempt)).toMatchObject({ state: 'claimed', cancellationRequested: true })
+      expect(() => operator.enqueue(worker, command)).toThrow('no outstanding')
+      expect(store.cancellationRequested(worker, attempt, 'other')).toBe(false)
+      expect(store.cancellationRequested(worker, attempt, offer.fence)).toBe(true)
+      expect(store.renew(worker, attempt, offer.fence, 2000)).toBe(0)
+      expect(store.complete(worker, result(attempt, offer.fence, DiagnosticOutcome.CANCELLED))).toBe(true)
+      expect(store.result(attempt).state).toBe('cancelled')
+      expect(store.next(worker, true)).toBeUndefined()
+    } finally {
+      operator.close()
+      store.close()
+    }
   })
 
   it('reconciles expired offers and closes outstanding records on revocation', async () => {
@@ -166,7 +199,7 @@ describe('the private worker ledger', () => {
       expect(() => store.log(attempt, 5)).toThrow('outside')
       expect(() => store.log(attempt, -1)).toThrow('outside')
       expect(() => store.log(attempt, 0.5)).toThrow('outside')
-      expect(() => store.log('missing', 0)).toThrow('No diagnostic')
+      expect(() => store.log('missing', 0)).toThrow('No worker run')
       clock += 2000
       expect(store.appendLog(worker, makeLog(4, Uint8Array.of(1), offer.fence))).toBe(false)
       store.revoke(worker)

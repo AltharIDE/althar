@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { once } from 'node:events'
 import { copyFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -29,9 +30,14 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
         agentConfigs: { homeDir: root, folder: join(root, 'agent-sync') },
       }
       const command = (...tokens: string[]) => runCommand(parseOptions([...tokens, ...args], {}, root), io, dependencies)
-      const last = () => JSON.parse(output.at(-1) ?? '{}') as Record<string, string>
-      yield* command('init', '--json')
-      const homeId = last().homeId ?? ''
+      const last = <T = Record<string, string>>() => JSON.parse(output.at(-1) ?? '{}') as T
+      const checkout = join(root, 'checkout')
+      yield* Effect.sync(() => execFileSync('git', ['init', '--quiet', checkout]))
+      yield* command('init', '--project', checkout, '--json')
+      const {
+        homeId,
+        projects: [projectId],
+      } = last<{ homeId: string; projects: [string] }>()
       const credentials = ['--worker-ca', certificates('home-ca.pem'), '--tls-certificate', certificates('home.pem')]
       const wrongKey = yield* Effect.flip(command('configure-workers', ...credentials, '--tls-key', certificates('enrolled.key')))
       assert.strictEqual(wrongKey._tag, 'HostError')
@@ -62,6 +68,11 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
       assert.strictEqual(invalidEnrollment._tag, 'HostError')
       yield* command('enroll-worker', '--worker-certificate', certificates('enrolled.pem'), '--json')
       const workerId = last().workerId ?? ''
+      const projectRun = (id = projectId) =>
+        command('worker-project-run', '--worker-id', workerId, '--project-id', id, '--command-name', 'check', '--json')
+      const offline = yield* Effect.flip(projectRun())
+      assert.strictEqual(offline._tag, 'HostError')
+      if (offline._tag === 'HostError') assert.strictEqual(offline.code, 'HostUnavailable')
 
       const start = () => Effect.forkScoped(command('serve', '--json'))
       const listener = yield* start()
@@ -69,6 +80,15 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
         Effect.sync(() => output.some((line) => line.includes('"workerPort":'))),
         Boolean,
       )
+      const foreign = yield* Effect.flip(projectRun(`proj_${'f'.repeat(32)}`))
+      assert.strictEqual(foreign._tag, 'HostError')
+      if (foreign._tag === 'HostError') assert.include(foreign.message, 'registered on this home')
+      yield* projectRun()
+      const queuedProject = last().attemptId ?? ''
+      yield* command('worker-cancel', '--attempt-id', queuedProject)
+      assert.include(output.at(-1) ?? '', 'cancelled')
+      yield* command('worker-result', '--attempt-id', queuedProject)
+      assert.include(output.at(-1) ?? '', 'cancelled')
       yield* command('worker-run', '--worker-id', workerId, '--json')
       const attemptId = last().attemptId ?? ''
       yield* command('worker-result', '--attempt-id', attemptId)
@@ -100,6 +120,34 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
             fence: offer.fence,
             outcome: DiagnosticOutcome.FAILED,
             output: Buffer.from('diagnostic unavailable\n'),
+          }),
+        )
+        yield* projectRun()
+        const claimedProject = last().attemptId ?? ''
+        const projectOffer = store.next(workerId, true)
+        if (!projectOffer) throw new Error('The project command was not offered')
+        assert.strictEqual(projectOffer.attemptId, claimedProject)
+        assert.isAbove(store.claim(workerId, claimedProject, projectOffer.fence), 0)
+        assert.isTrue(
+          store.appendLog(workerId, {
+            $typeName: 'althar.worker.v1.DiagnosticLog',
+            attemptId: claimedProject,
+            fence: projectOffer.fence,
+            offset: 0,
+            output: stdout,
+          }),
+        )
+        yield* command('worker-log', '--attempt-id', claimedProject, '--json')
+        assert.strictEqual(last().bytesBase64, stdout.toString('base64'))
+        yield* command('worker-cancel', '--attempt-id', claimedProject)
+        assert.include(output.at(-1) ?? '', 'cancellation requested')
+        assert.isTrue(
+          store.complete(workerId, {
+            $typeName: 'althar.worker.v1.DiagnosticResult',
+            attemptId: claimedProject,
+            fence: projectOffer.fence,
+            outcome: DiagnosticOutcome.CANCELLED,
+            output: new Uint8Array(),
           }),
         )
       } finally {

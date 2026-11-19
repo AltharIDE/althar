@@ -32,6 +32,7 @@ export const negotiateWorkerHello = (
   diagnostics = false,
   renewals = false,
   logs = false,
+  projectCommands = false,
 ): HomeFrame => {
   if (
     !validWorkerProtocolId(binding.homeId, 'home_') ||
@@ -54,6 +55,7 @@ export const negotiateWorkerHello = (
     throw new WorkerHandshakeError('IncompatibleVersion')
   const supportsDiagnostics = diagnostics && hello.acceptsDiagnostics
   const supportsDiagnosticLeaseRenewal = supportsDiagnostics && renewals && hello.renewsDiagnosticLease
+  const supportsDiagnosticLogs = supportsDiagnosticLeaseRenewal && logs && hello.streamsDiagnosticLogs
   return create(HomeFrameSchema, {
     payload: {
       case: 'hello',
@@ -62,7 +64,8 @@ export const negotiateWorkerHello = (
         version: WORKER_PROTOCOL_VERSION,
         supportsDiagnostics,
         supportsDiagnosticLeaseRenewal,
-        supportsDiagnosticLogs: supportsDiagnosticLeaseRenewal && logs && hello.streamsDiagnosticLogs,
+        supportsDiagnosticLogs,
+        supportsProjectCommands: supportsDiagnosticLogs && projectCommands && hello.acceptsProjectCommands,
       },
     },
   })

@@ -20,6 +20,13 @@ describe('host command configuration', () => {
     assert.equal(parse(['worker-result', '--attempt-id', attempt]).workerAttemptId, attempt)
     assert.equal(parse(['worker-log', '--attempt-id', attempt]).workerAttemptId, attempt)
     assert.equal(parse(['worker-log', '--attempt-id', attempt, '--offset', '3']).workerLogOffset, 3)
+    const project = `proj_${'2'.repeat(32)}`
+    const projectAttempt = `wpr_${'3'.repeat(32)}`
+    assert.deepEqual(
+      parse(['worker-project-run', '--worker-id', id, '--project-id', project, '--command-name', 'git-check']).workerProject,
+      { projectId: project, commandName: 'git-check' },
+    )
+    assert.equal(parse(['worker-cancel', '--attempt-id', projectAttempt]).workerAttemptId, projectAttempt)
     for (const args of [
       ['configure-workers', '--worker-ca', '/trusted/ca'],
       ['configure-workers', ...tls, '--listen-port', '99999'],
@@ -30,6 +37,9 @@ describe('host command configuration', () => {
       ['enroll-worker'],
       ['serve', '--worker-certificate', '/trusted/worker'],
       ['worker-run', '--worker-id', 'not-a-worker'],
+      ['worker-run', '--worker-id', id, '--project-id', project],
+      ['worker-project-run', '--worker-id', id, '--project-id', project, '--command-name', 'a command'],
+      ['worker-cancel', '--attempt-id', attempt],
       ['serve', '--worker-id', id],
       ['worker-result', '--attempt-id', 'not-an-attempt'],
       ['worker-log'],

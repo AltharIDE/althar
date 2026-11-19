@@ -36,6 +36,7 @@ message WorkerHello {
   bool accepts_diagnostics = 4;
   bool renews_diagnostic_lease = 5;
   bool streams_diagnostic_logs = 6;
+  bool accepts_project_commands = 7;
 }
 
 // The first home frame binds this stream to one authenticated, negotiated session.
@@ -47,6 +48,7 @@ message HomeHello {
   bool supports_diagnostics = 5;
   bool supports_diagnostic_lease_renewal = 6;
   bool supports_diagnostic_logs = 7;
+  bool supports_project_commands = 8;
 }
 
 // A lease of zero requests reconciliation without granting a new start.
@@ -54,6 +56,13 @@ message DiagnosticOffer {
   string attempt_id = 1;
   string fence = 2;
   uint32 claimable_for_ms = 3;
+  ProjectCommand project_command = 4;
+}
+
+// The worker operator resolves this reference locally. No paths or argv are sent.
+message ProjectCommand {
+  string project_id = 1;
+  string command_name = 2;
 }
 
 message DiagnosticClaim {
@@ -73,6 +82,7 @@ enum DiagnosticOutcome {
   DIAGNOSTIC_OUTCOME_SUCCEEDED = 1;
   DIAGNOSTIC_OUTCOME_FAILED = 2;
   DIAGNOSTIC_OUTCOME_UNKNOWN = 3;
+  DIAGNOSTIC_OUTCOME_CANCELLED = 4;
 }
 
 message DiagnosticResult {
@@ -91,6 +101,7 @@ message DiagnosticRenew {
 }
 
 // A renewal confirms the current authority and never authorizes another start.
+// A zero grant requests cancellation only for a negotiated project command.
 message DiagnosticLease {
   string attempt_id = 1;
   string fence = 2;

@@ -18,7 +18,9 @@ Commands:
   enroll-worker    Register an operator-provisioned worker certificate
   revoke-worker    Revoke a worker's certificate
   worker-run       Queue one Linux diagnostic on an enrolled worker
-  worker-result    Read a diagnostic's durable state and output
+  worker-project-run  Queue a named command for a registered project
+  worker-cancel    Cancel a project run
+  worker-result    Read a worker run's durable state and output
   worker-log       Read received diagnostic output from a byte offset
   init             Initialize a private profile and a separate encryption key
   serve            Run the home until stopped
@@ -46,7 +48,9 @@ Options:
   --worker-relay <file>     Private JSON link for an outbound worker relay
   --worker-certificate <file>  Worker client certificate for enroll-worker
   --worker-id <wrk_id>      Worker for worker-run or revoke-worker
-  --attempt-id <watt_id>    Diagnostic for worker-result or worker-log
+  --project-id <proj_id>   Home project for worker-project-run
+  --command-name <name>    Command registered on the worker
+  --attempt-id <id>        Worker attempt for worker-result, worker-log or worker-cancel
   --offset <bytes>         Start reading worker-log at this byte offset
   --profile <dir>             Host profile (default: XDG data/althar-host)
   --worktrees <dir>           Task worktrees (default: <profile>/worktrees)
@@ -84,6 +88,8 @@ export interface HostOptions {
     | 'enroll-worker'
     | 'revoke-worker'
     | 'worker-run'
+    | 'worker-project-run'
+    | 'worker-cancel'
     | 'worker-result'
     | 'worker-log'
     | 'init'
@@ -110,6 +116,7 @@ export interface HostOptions {
   readonly workerConfiguration?: WorkerConfiguration
   readonly workerCertificate?: string
   readonly workerId?: string
+  readonly workerProject?: { projectId: string; commandName: string }
   readonly workerAttemptId?: string
   readonly workerLogOffset?: number
   readonly deviceAfter?: string
@@ -171,6 +178,8 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     '--worker-relay',
     '--worker-certificate',
     '--worker-id',
+    '--project-id',
+    '--command-name',
     '--attempt-id',
     '--offset',
     '--after',
@@ -202,6 +211,8 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     'enroll-worker',
     'revoke-worker',
     'worker-run',
+    'worker-project-run',
+    'worker-cancel',
     'worker-result',
     'worker-log',
     'connect-stdio',
@@ -271,6 +282,8 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
         case 'enroll-worker':
         case 'revoke-worker':
         case 'worker-run':
+        case 'worker-project-run':
+        case 'worker-cancel':
         case 'worker-result':
         case 'worker-log':
         case 'init':
@@ -350,13 +363,26 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   if (workerRelay !== undefined && command !== 'configure-workers') return invalid('--worker-relay requires configure-workers.')
   if (flags.has('--worker-certificate') !== (command === 'enroll-worker')) return invalid('enroll-worker requires --worker-certificate.')
   const workerId = flags.get('--worker-id')
-  if (command === 'worker-run' || command === 'revoke-worker') {
+  if (command === 'worker-run' || command === 'worker-project-run' || command === 'revoke-worker') {
     if (!/^wrk_[0-9a-f]{32}$/.test(workerId ?? '')) return invalid('Choose the --worker-id printed by enroll-worker.')
-  } else if (workerId !== undefined) return invalid('--worker-id requires worker-run or revoke-worker.')
+  } else if (workerId !== undefined) return invalid('--worker-id requires worker-run, worker-project-run or revoke-worker.')
   const workerAttemptId = flags.get('--attempt-id')
-  if (command === 'worker-result' || command === 'worker-log') {
-    if (!/^watt_[0-9a-f]{32}$/.test(workerAttemptId ?? '')) return invalid('Choose the --attempt-id printed by worker-run.')
-  } else if (workerAttemptId !== undefined) return invalid('--attempt-id requires worker-result or worker-log.')
+  if (command === 'worker-result' || command === 'worker-log' || command === 'worker-cancel') {
+    const format = command === 'worker-cancel' ? /^wpr_[0-9a-f]{32}$/ : /^(watt|wpr)_[0-9a-f]{32}$/
+    if (!format.test(workerAttemptId ?? '')) return invalid('Choose a valid --attempt-id for this command.')
+  } else if (workerAttemptId !== undefined) return invalid('--attempt-id requires worker-result, worker-log or worker-cancel.')
+  const projectId = flags.get('--project-id')
+  const commandName = flags.get('--command-name')
+  if (command === 'worker-project-run') {
+    if (
+      projectId === undefined ||
+      !/^proj_[0-9a-f]{32}$/.test(projectId) ||
+      commandName === undefined ||
+      !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(commandName)
+    )
+      return invalid('worker-project-run requires a valid --project-id and --command-name.')
+  } else if (projectId !== undefined || commandName !== undefined)
+    return invalid('--project-id and --command-name require worker-project-run.')
   const workerLogOffset = flags.get('--offset')
   if (
     workerLogOffset !== undefined &&
@@ -437,6 +463,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
       : {}),
     ...(flags.has('--worker-certificate') ? { workerCertificate: resolve(flags.get('--worker-certificate') ?? '') } : {}),
     ...(workerId === undefined ? {} : { workerId }),
+    ...(projectId === undefined || commandName === undefined ? {} : { workerProject: { projectId, commandName } }),
     ...(workerAttemptId === undefined ? {} : { workerAttemptId }),
     ...(workerLogOffset === undefined ? {} : { workerLogOffset: Number(workerLogOffset) }),
     profile,

@@ -9,10 +9,16 @@ use std::time::Duration;
 
 use prost::Message;
 use rustix::fs::OFlags;
-use tokio::{io::AsyncReadExt, process::Command, sync::mpsc, time::Instant};
+use tokio::{
+    io::AsyncReadExt,
+    process::Command,
+    sync::{mpsc, watch},
+    time::Instant,
+};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 
 use crate::grpc::{WorkerEnrollment, control_client, endpoint};
+use crate::project::{ProjectConfig, ProjectUnit};
 use crate::relay::{WorkerRelay, relay_channel};
 use crate::wire::{
     DiagnosticClaim, DiagnosticLease, DiagnosticLog, DiagnosticOffer, DiagnosticOutcome,
@@ -182,6 +188,27 @@ impl DiagnosticJournal {
         )
     }
 
+    pub(crate) fn control_group(&self, offer: &DiagnosticOffer) -> io::Result<Option<Vec<u8>>> {
+        self.read(
+            &self.root.join(format!("{}.cgroup", offer.attempt_id)),
+            4096,
+        )
+    }
+
+    pub(crate) fn record_control_group(
+        &self,
+        offer: &DiagnosticOffer,
+        group: &[u8],
+    ) -> io::Result<()> {
+        if group.len() > 4096 {
+            return Err(invalid("The control group record exceeds its size limit"));
+        }
+        self.publish(
+            &self.root.join(format!("{}.cgroup", offer.attempt_id)),
+            group,
+        )
+    }
+
     fn result(&self, offer: &DiagnosticOffer) -> Result<Option<DiagnosticResult>, Failure> {
         let Some(bytes) = self.read(
             &self.root.join(format!("{}.result", offer.attempt_id)),
@@ -336,10 +363,12 @@ fn matches_renewal(
     extension: &DiagnosticLease,
     sequence: Option<u32>,
 ) -> bool {
+    let duration_is_valid = (1..=RENEWAL_MS).contains(&extension.run_for_ms)
+        || (extension.run_for_ms == 0 && offer.project_command.is_some());
     sequence == Some(extension.sequence)
         && extension.attempt_id == offer.attempt_id
         && extension.fence == offer.fence
-        && (1..=RENEWAL_MS).contains(&extension.run_for_ms)
+        && duration_is_valid
 }
 
 async fn run_with_lease(
@@ -349,6 +378,7 @@ async fn run_with_lease(
     send: &mpsc::Sender<WorkerFrame>,
     reply: &mut (impl Stream<Item = Result<HomeFrame, tonic::Status>> + Unpin),
     command: impl Future<Output = DiagnosticResult>,
+    project_deadline: Option<&watch::Sender<Instant>>,
 ) -> Result<DiagnosticResult, Failure> {
     if Instant::now() >= lease.until {
         return Ok(report(offer, DiagnosticOutcome::Unknown, Vec::new()));
@@ -366,17 +396,27 @@ async fn run_with_lease(
                 let home_frame::Payload::DiagnosticLease(extension) = payload(Some(frame))? else {
                     return Err(HandshakeError::InvalidFrame.into());
                 };
-                if !renewable || !matches_renewal(offer, &extension, lease.pending.map(|_| lease.sequence)) ||
-                    !lease.confirm(Instant::now(), extension.sequence, extension.run_for_ms)
-                {
+                if !renewable || !matches_renewal(offer, &extension, lease.pending.map(|_| lease.sequence)) {
                     return Err(HandshakeError::InvalidFrame.into());
                 }
+                if extension.run_for_ms == 0 && project_deadline.is_some() {
+                    return Ok(report(offer, DiagnosticOutcome::Cancelled, Vec::new()));
+                }
+                if !lease.confirm(Instant::now(), extension.sequence, extension.run_for_ms) {
+                    return Err(HandshakeError::InvalidFrame.into());
+                }
+                if let Some(deadline) = project_deadline {
+                    deadline.send_replace(lease.until);
+                }
             }
-            _ = tokio::time::sleep_until(lease.renew_at), if renewable && lease.pending.is_none() && lease.renew_at < lease.until => {
+            permit = async {
+                tokio::time::sleep_until(lease.renew_at).await;
+                send.reserve().await
+            }, if renewable && lease.pending.is_none() && lease.renew_at < lease.until => {
                 let sequence = lease.renew(Instant::now());
-                send.try_send(WorkerFrame { payload: Some(worker_frame::Payload::DiagnosticRenew(DiagnosticRenew {
+                permit?.send(WorkerFrame { payload: Some(worker_frame::Payload::DiagnosticRenew(DiagnosticRenew {
                     attempt_id: offer.attempt_id.clone(), fence: offer.fence.clone(), sequence,
-                })) })?;
+                })) });
             }
         }
     }
@@ -402,109 +442,186 @@ pub async fn run_diagnostic_with_transport(
     journal: &DiagnosticJournal,
     relay: Option<&WorkerRelay<'_>>,
 ) -> Result<Option<DiagnosticResult>, Failure> {
+    run_worker_once(address, enrollment, journal, relay, None).await
+}
+
+pub async fn run_worker_once(
+    address: &str,
+    enrollment: WorkerEnrollment<'_>,
+    journal: &DiagnosticJournal,
+    relay: Option<&WorkerRelay<'_>>,
+    project: Option<&ProjectConfig>,
+) -> Result<Option<DiagnosticResult>, Failure> {
     let mut hello = worker_hello(enrollment.worker_id)?;
     if let Some(worker_frame::Payload::Hello(hello)) = &mut hello.payload {
         hello.accepts_diagnostics = true;
         hello.renews_diagnostic_lease = true;
         hello.streams_diagnostic_logs = true;
+        hello.accepts_project_commands = project.is_some();
     }
-    tokio::time::timeout(Duration::from_secs(25), async {
-        let endpoint = endpoint(address, &enrollment)?;
-        let channel = match relay {
-            Some(relay) => relay_channel(endpoint, relay).await?,
-            None => endpoint.connect().await?,
-        };
-        let mut client = control_client(channel);
-        let (send, receive) = mpsc::channel(2);
-        send.send(hello).await?;
-        let mut reply = client
-            .connect(ReceiverStream::new(receive))
-            .await?
-            .into_inner();
-        let hello = accept_home_frame(
-            reply.message().await?.ok_or(HandshakeError::InvalidFrame)?,
-            enrollment.home_id,
-            enrollment.worker_id,
-        )?;
-        if !hello.supports_diagnostics {
-            return Err(HandshakeError::IncompatibleVersion.into());
-        }
-        let Some(frame) = reply.message().await? else {
-            return Ok(None);
-        };
-        let home_frame::Payload::DiagnosticOffer(offer) = payload(Some(frame))? else {
-            return Err(HandshakeError::InvalidFrame.into());
-        };
-        if !valid_id(&offer.attempt_id, "watt_")
-            || !valid_id(&offer.fence, "wfn_")
-            || offer.claimable_for_ms > LEASE_MS
-        {
-            return Err(HandshakeError::InvalidFrame.into());
-        }
-        let mut pending_acknowledgment = None;
-        let result = if let Some(result) = journal.result(&offer)? {
-            result
-        } else if journal.started(&offer)? || offer.claimable_for_ms == 0 {
-            report(&offer, DiagnosticOutcome::Unknown, Vec::new())
-        } else {
-            let claim_sent = Instant::now();
+    tokio::time::timeout(
+        Duration::from_secs(if project.is_some() { 90 } else { 25 }),
+        async {
+            let endpoint = endpoint(address, &enrollment)?;
+            let channel = match relay {
+                Some(relay) => relay_channel(endpoint, relay).await?,
+                None => endpoint.connect().await?,
+            };
+            let mut client = control_client(channel);
+            let (send, receive) = mpsc::channel(2);
+            send.send(hello).await?;
+            let mut reply = client
+                .connect(ReceiverStream::new(receive))
+                .await?
+                .into_inner();
+            let hello = accept_home_frame(
+                reply.message().await?.ok_or(HandshakeError::InvalidFrame)?,
+                enrollment.home_id,
+                enrollment.worker_id,
+            )?;
+            if !hello.supports_diagnostics {
+                return Err(HandshakeError::IncompatibleVersion.into());
+            }
+            let Some(frame) = reply.message().await? else {
+                return Ok(None);
+            };
+            let home_frame::Payload::DiagnosticOffer(offer) = payload(Some(frame))? else {
+                return Err(HandshakeError::InvalidFrame.into());
+            };
+            let prefix = if offer.project_command.is_some() {
+                if project.is_none()
+                    || !hello.supports_project_commands
+                    || !hello.supports_diagnostic_logs
+                    || !hello.supports_diagnostic_lease_renewal
+                {
+                    return Err(HandshakeError::InvalidFrame.into());
+                }
+                "wpr_"
+            } else {
+                "watt_"
+            };
+            if !valid_id(&offer.attempt_id, prefix)
+                || !valid_id(&offer.fence, "wfn_")
+                || offer.claimable_for_ms > LEASE_MS
+            {
+                return Err(HandshakeError::InvalidFrame.into());
+            }
+            let mut pending_acknowledgment = None;
+            let result = if let Some(result) = journal.result(&offer)? {
+                result
+            } else if journal.started(&offer)? || offer.claimable_for_ms == 0 {
+                if offer.project_command.is_some() {
+                    ProjectUnit::new(&offer).stop(journal, &offer).await?;
+                }
+                report(&offer, DiagnosticOutcome::Unknown, Vec::new())
+            } else {
+                let claim_sent = Instant::now();
+                send.send(WorkerFrame {
+                    payload: Some(worker_frame::Payload::DiagnosticClaim(DiagnosticClaim {
+                        attempt_id: offer.attempt_id.clone(),
+                        fence: offer.fence.clone(),
+                    })),
+                })
+                .await?;
+                let home_frame::Payload::DiagnosticStart(start) = payload(reply.message().await?)?
+                else {
+                    return Err(HandshakeError::InvalidFrame.into());
+                };
+                let renewable = hello.supports_diagnostic_lease_renewal;
+                let maximum = if renewable { RENEWAL_MS } else { LEASE_MS };
+                if start.attempt_id != offer.attempt_id
+                    || start.fence != offer.fence
+                    || start.run_for_ms == 0
+                    || start.run_for_ms > maximum
+                {
+                    return Err(HandshakeError::InvalidFrame.into());
+                }
+                let mut lease = ExecutionLease::new(claim_sent, start.run_for_ms);
+                journal.record_start(&offer)?;
+                let result = if let Some(request) = &offer.project_command {
+                    if let Some(config) = project.filter(|config| config.matches(request)) {
+                        let unit = ProjectUnit::new(&offer);
+                        let (deadline, updates) = watch::channel(lease.until);
+                        let execution = run_with_lease(
+                            &offer,
+                            &mut lease,
+                            true,
+                            &send,
+                            &mut reply,
+                            async {
+                                let outcome =
+                                    match unit.run(config, &offer, &send, updates, journal).await {
+                                        Ok(outcome) => outcome,
+                                        Err(error) => {
+                                            eprintln!(
+                                                "Could not supervise the project command: {error}"
+                                            );
+                                            DiagnosticOutcome::Unknown
+                                        }
+                                    };
+                                report(&offer, outcome, Vec::new())
+                            },
+                            Some(&deadline),
+                        )
+                        .await;
+                        unit.stop(journal, &offer).await?;
+                        match execution {
+                            Ok(result) => result,
+                            Err(error) => {
+                                journal.record_result(&report(
+                                    &offer,
+                                    DiagnosticOutcome::Unknown,
+                                    Vec::new(),
+                                ))?;
+                                return Err(error);
+                            }
+                        }
+                    } else {
+                        report(
+                            &offer,
+                            DiagnosticOutcome::Failed,
+                            b"No matching command is configured on this worker".to_vec(),
+                        )
+                    }
+                } else {
+                    run_with_lease(
+                        &offer,
+                        &mut lease,
+                        renewable,
+                        &send,
+                        &mut reply,
+                        run_uname(
+                            Instant::now() + RUNTIME_LIMIT,
+                            &offer,
+                            (renewable && hello.supports_diagnostic_logs).then_some(&send),
+                        ),
+                        None,
+                    )
+                    .await?
+                };
+                pending_acknowledgment = lease.pending.map(|_| lease.sequence);
+                journal.record_result(&result)?;
+                result
+            };
             send.send(WorkerFrame {
-                payload: Some(worker_frame::Payload::DiagnosticClaim(DiagnosticClaim {
-                    attempt_id: offer.attempt_id.clone(),
-                    fence: offer.fence.clone(),
-                })),
+                payload: Some(worker_frame::Payload::DiagnosticResult(result.clone())),
             })
             .await?;
-            let home_frame::Payload::DiagnosticStart(start) = payload(reply.message().await?)?
-            else {
-                return Err(HandshakeError::InvalidFrame.into());
-            };
-            let renewable = hello.supports_diagnostic_lease_renewal;
-            let maximum = if renewable { RENEWAL_MS } else { LEASE_MS };
-            if start.attempt_id != offer.attempt_id
-                || start.fence != offer.fence
-                || start.run_for_ms == 0
-                || start.run_for_ms > maximum
-            {
-                return Err(HandshakeError::InvalidFrame.into());
+            if let Some(frame) = reply.message().await? {
+                // A result can race with a renewal already sent on this stream.
+                // Drain that one in-flight acknowledgment without granting any more work.
+                let home_frame::Payload::DiagnosticLease(extension) = payload(Some(frame))? else {
+                    return Err(HandshakeError::InvalidFrame.into());
+                };
+                if !matches_renewal(&offer, &extension, pending_acknowledgment)
+                    || reply.message().await?.is_some()
+                {
+                    return Err(HandshakeError::InvalidFrame.into());
+                }
             }
-            let mut lease = ExecutionLease::new(claim_sent, start.run_for_ms);
-            journal.record_start(&offer)?;
-            let result = run_with_lease(
-                &offer,
-                &mut lease,
-                renewable,
-                &send,
-                &mut reply,
-                run_uname(
-                    Instant::now() + RUNTIME_LIMIT,
-                    &offer,
-                    (renewable && hello.supports_diagnostic_logs).then_some(&send),
-                ),
-            )
-            .await?;
-            pending_acknowledgment = lease.pending.map(|_| lease.sequence);
-            journal.record_result(&result)?;
-            result
-        };
-        send.send(WorkerFrame {
-            payload: Some(worker_frame::Payload::DiagnosticResult(result.clone())),
-        })
-        .await?;
-        if let Some(frame) = reply.message().await? {
-            // A result can race with a renewal already sent on this stream.
-            // Drain that one in-flight acknowledgment without granting any more work.
-            let home_frame::Payload::DiagnosticLease(extension) = payload(Some(frame))? else {
-                return Err(HandshakeError::InvalidFrame.into());
-            };
-            if !matches_renewal(&offer, &extension, pending_acknowledgment)
-                || reply.message().await?.is_some()
-            {
-                return Err(HandshakeError::InvalidFrame.into());
-            }
-        }
-        Ok(Some(result))
-    })
+            Ok(Some(result))
+        },
+    )
     .await?
 }
 
@@ -536,6 +653,7 @@ mod execution_lease_tests {
             attempt_id: "attempt".into(),
             fence: "fence".into(),
             claimable_for_ms: 0,
+            project_command: None,
         };
         let mut expired = ExecutionLease::new(Instant::now(), 0);
         let result = run_with_lease(
@@ -547,6 +665,7 @@ mod execution_lease_tests {
             async {
                 panic!("The command ran after its lease expired");
             },
+            None,
         )
         .await
         .unwrap();
@@ -561,6 +680,7 @@ mod execution_lease_tests {
             attempt_id: "attempt".into(),
             fence: "fence".into(),
             claimable_for_ms: 0,
+            project_command: None,
         };
         let mut lease = ExecutionLease::new(Instant::now(), 100);
         lease.renew_at = Instant::now();
@@ -573,6 +693,7 @@ mod execution_lease_tests {
                 &send,
                 &mut silent,
                 std::future::pending(),
+                None,
             ),
         )
         .await
@@ -597,6 +718,7 @@ mod execution_lease_tests {
             attempt_id: "attempt".into(),
             fence: "fence".into(),
             claimable_for_ms: 0,
+            project_command: None,
         };
         let mut lease = ExecutionLease::new(Instant::now(), RENEWAL_MS);
         lease.renew_at = Instant::now();
@@ -617,7 +739,7 @@ mod execution_lease_tests {
             drop(home);
         };
         let (result, ()) = tokio::join!(
-            run_with_lease(&offer, &mut lease, true, &send, &mut replies, command),
+            run_with_lease(&offer, &mut lease, true, &send, &mut replies, command, None),
             disconnect
         );
         assert!(result.unwrap_err().to_string().contains("disconnected"));
