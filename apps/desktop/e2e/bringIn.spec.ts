@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { author, repository } from '../tests/repository'
-import { chooseFolder, launch, openMadeProject, say, shown, still, toFirstProject } from './support'
+import { chooseFolder, launch, openMadeProject, shown, still, toFirstProject } from './support'
 
 /*
  * Moving to Althar from other tools (docs/decisions/workspaces-and-runs.md, "Bringing in other tools' work"), in the
@@ -200,9 +200,10 @@ test('a conversation brought in waits while Claude Code still has it open, and g
   const line = 'Claude Code still has this conversation open in another window. Close it there and send again.'
 
   const { electronApp, page } = await launch(home)
+  // An aside's composer is a task's own, embedded: Reply, or while its lead works, to queue or steer.
+  const composer = page.getByRole('textbox', { name: /^(Reply|Add to the queue|Steer the lead)/ }).filter({ visible: true })
   /** The conversation's column with its composer, at 1×. */
   const shoot = async (name: string) => {
-    const composer = page.getByRole('textbox', { name: /^Tell .* something/ }).filter({ visible: true })
     const box = await composer.boundingBox()
     if (box === null) return
     await still(page)
@@ -216,7 +217,11 @@ test('a conversation brought in waits while Claude Code still has it open, and g
     await toFirstProject(page)
     await chooseFolder(electronApp, repo)
     await page.getByRole('button', { name: /Choose a folder/ }).click()
+    await expect(
+      page.getByRole('list', { name: 'Repositories for the project' }).getByRole('checkbox', { checked: true }).first(),
+    ).toBeVisible()
     await page.getByRole('button', { name: /Make the project/ }).click()
+    await expect(page.getByRole('heading', { name: 'Already under way', level: 1 })).toBeVisible()
     const card = page
       .getByRole('region')
       .filter({ has: page.getByRole('heading', { name: 'Already under way', level: 1 }) })
@@ -234,9 +239,11 @@ test('a conversation brought in waits while Claude Code still has it open, and g
     await expect(shown(page, 'It rounds too early.').first()).toBeVisible()
 
     // Sent while it's open: not sent, the words back in the composer, and the line says which tool has it.
-    await say(page, 'Is it fixed now?')
+    // A click waits until the window takes input, as `say` does.
+    await composer.click()
+    await composer.fill('Is it fixed now?')
+    await composer.press('Enter')
     await expect(page.getByText(line).filter({ visible: true })).toBeVisible()
-    const composer = page.getByRole('textbox', { name: /^Tell .* something/ }).filter({ visible: true })
     await expect(composer).toHaveValue('Is it fixed now?')
     for (const scheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: scheme })
