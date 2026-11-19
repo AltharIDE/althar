@@ -15,7 +15,7 @@ import { type Failure, Failures, failuresLayer } from '../src/Failures'
 import { onlyReads, Sessions } from '../src/Sessions'
 import { listSkills, runSkills } from '../src/Skills'
 import { recorder, transcript } from '../src/threads'
-import { fakeAgents, items, launches, notices, runtime, sessionMetas, sessionsAsked, task, turns, until } from './support'
+import { fakeAgents, items, lastSession, notices, runtime, sessionMetas, sessionsAsked, task, turns, until } from './support'
 
 /*
  * Althar-selected skills reach a task's lead on every agent the registry says how to give them to, from Althar's own
@@ -44,7 +44,7 @@ const skillFilesUnder = (folder: string): Array<string> =>
 /** Where the last session of an agent was given its skills, one folder per skill, as the registry lays them out for it. */
 const skillsFolderOf = (agentId: string, root: string) => {
   if (agentId === 'claude-code') return join(sessionMetas.at(-1)?.options?.skills ?? '', 'skills')
-  if (agentId === 'opencode') return launches.at(-1)?.options?.skills ?? ''
+  if (agentId === 'opencode') return lastSession()?.options?.skills ?? ''
   const [run = ''] = readdirSync(join(root, 'runs'))
   return join(root, 'runs', run, agentId, '.agents', 'skills')
 }
@@ -163,12 +163,12 @@ describe('skills for a task’s lead', () => {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
         yield* sessions.start({ threadId: created.threadId, agentId: 'opencode' })
-        const folder = launches.at(-1)?.options?.skills ?? ''
+        const folder = lastSession()?.options?.skills ?? ''
         assert.isTrue(folder.startsWith(join(skills.root, 'runs')), folder)
         assert.deepStrictEqual(readdirSync(folder).toSorted(), ['alpha', 'beta'])
         // The fake runs in this process, so what is read is the environment `Agents.fromRegistry` composes from this launch's
         // arguments, not one a process received: OpenCode's own config, with that folder among its skills' paths.
-        const config = JSON.parse(launches.at(-1)?.launched?.OPENCODE_CONFIG_CONTENT ?? '{}') as { skills?: { paths?: Array<string> } }
+        const config = JSON.parse(lastSession()?.launched?.OPENCODE_CONFIG_CONTENT ?? '{}') as { skills?: { paths?: Array<string> } }
         assert.include(config.skills?.paths ?? [], folder)
         yield* sessions.stop(created.threadId)
         assert.isFalse(existsSync(folder))
