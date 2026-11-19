@@ -43,6 +43,7 @@ import {
 } from '../src/errors'
 import { NotConnected } from '../src/Connections'
 import { Projects } from '../src/Projects'
+import { Terminals } from '../src/Terminals'
 import * as Runtime from '../src/Runtime'
 import { ALWAYS } from '../src/sandboxReach'
 import { Folders } from '../src/Folders'
@@ -2078,7 +2079,7 @@ describe('the coordinator, through the API', () => {
           disposition: 'after_current',
         })
         const planned = yield* until(client.GetCoordinator({ projectId: project.id, limit: 50 }), (snapshot) =>
-          snapshot.items.some((item) => item.kind === 'task'),
+          snapshot.items.some((item) => item.kind === 'task' && item.content.plan !== null),
         )
         const card = planned.items.find((item) => item.kind === 'task')
         const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
@@ -3767,6 +3768,50 @@ describe('a project set up where it starts, through the API', () => {
           reason: 'NotFound',
         })
         assert.isFalse(existsSync(join(outside, '.git')))
+      }),
+    ),
+  )
+})
+
+describe('terminals, through the API', () => {
+  it.live('are the window’s alone: a paired device opens, reads, types into, resizes and closes none', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, context } = yield* connected({ sender: { kind: 'paired_device', deviceId: 'phone-1' } })
+        const projectId = yield* Effect.provideContext(
+          Effect.gen(function* () {
+            const opened = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+            return opened.projectId
+          }),
+          context,
+        )
+        const refused = <A, E>(call: Effect.Effect<A, E>) =>
+          Effect.map(Effect.flip(call), (error) => (error instanceof ApiError ? error.reason : String(error)))
+        const reasons = [
+          yield* refused(client.OpenTerminal({ commandId: commandId(), id: 'term_phone1', projectId, taskId: null, cols: 80, rows: 24 })),
+          yield* refused(client.ListTerminals({ projectId })),
+          yield* refused(Stream.runDrain(client.AttachTerminal({ id: 'term_phone1' }))),
+          yield* refused(client.WriteTerminal({ id: 'term_phone1', data: 'echo hi\n' })),
+          yield* refused(client.ResizeTerminal({ id: 'term_phone1', cols: 100, rows: 30 })),
+          yield* refused(client.CloseTerminal({ commandId: commandId(), id: 'term_phone1' })),
+        ]
+        assert.deepStrictEqual(reasons, Array(6).fill('Forbidden'))
+        // The window's own calls go through: to the shells it has, and to none it hasn't.
+        const { client: window } = yield* connected({})
+        assert.deepStrictEqual(yield* window.ListTerminals({ projectId }), [])
+        const unknown = yield* Effect.flip(Stream.runDrain(window.AttachTerminal({ id: 'term_none' })))
+        assert.strictEqual(unknown.reason, 'NotFound')
+        yield* window.CloseTerminal({ commandId: commandId(), id: 'term_none' })
+        // No shell was started for it.
+        assert.deepStrictEqual(
+          yield* Effect.provideContext(
+            Effect.gen(function* () {
+              return yield* (yield* Terminals).ofProject(projectId)
+            }),
+            context,
+          ),
+          [],
+        )
       }),
     ),
   )

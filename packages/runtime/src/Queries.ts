@@ -114,7 +114,7 @@ import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRe
 import { reachedRemote } from './sshHosts'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
-import { partsOfPlan, presetOf, presetOfferOn, presetsIn } from './presets'
+import { partsOfPlan, presetOfferOn, presetOfPlan, presetsIn } from './presets'
 import { Sessions } from './Sessions'
 import { teamLeadsOf } from './teamLead'
 import { spendingOf } from './Spending'
@@ -2546,7 +2546,11 @@ export class Queries extends Context.Service<
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
-            LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1)
+            -- Its plan; discarded before it began, the one it was discarded with, which discarding declined: its card keeps it.
+            LEFT JOIN task_plans p ON p.id = (
+              SELECT id FROM task_plans
+              WHERE task_id = k.id AND (state IN ('proposed', 'accepted') OR (k.state = 'abandoned' AND state = 'declined'))
+              ORDER BY state IN ('proposed', 'accepted') DESC, proposed_at DESC LIMIT 1)
             LEFT JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
             WHERE k.id = ${taskId}`
           if (task === undefined) return undefined
@@ -2970,24 +2974,24 @@ export class Queries extends Context.Service<
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                     ...(field(parameters, 'reviewAfterMerge') === true ? { reviewAfterMerge: true } : {}),
                     // The preset its parts are, which the card's kicker names first (a task is a conversation plus parts).
-                    preset:
-                      field(parameters, 'smallChange') === true
-                        ? 'Small change'
-                        : presetOf(
-                            yield* presetsIn(task.projectId),
-                            partsOfPlan(
-                              {
-                                steps: planned,
-                                end: end ?? null,
-                                here: field(parameters, 'here') === true,
-                                reads: field(parameters, 'reads') === true,
-                                reviewAfterMerge: field(parameters, 'reviewAfterMerge') === true,
-                                worksIn: text(parameters, 'worksIn'),
-                              },
-                              task.shelf,
-                              '',
-                            ),
-                          ),
+                    // The one it was planned from, while its parts keep that preset's shape; else the one they are.
+                    preset: yield* Effect.gen(function* () {
+                      const shape = {
+                        steps: planned,
+                        end: end ?? null,
+                        here: field(parameters, 'here') === true,
+                        reads: field(parameters, 'reads') === true,
+                        reviewAfterMerge: field(parameters, 'reviewAfterMerge') === true,
+                        worksIn: text(parameters, 'worksIn'),
+                      }
+                      const recorded = text(parameters, 'preset')
+                      return presetOfPlan(yield* presetsIn(task.projectId), {
+                        small: field(parameters, 'smallChange') === true,
+                        ...(recorded === '' ? {} : { recorded }),
+                        // Its ending counts where it was chosen: a prototype pointed at a pull request is no prototype.
+                        parts: partsOfPlan({ ...shape, endChosen: field(parameters, 'endChosen') === true }, task.shelf, ''),
+                      })
+                    }),
                     // Any agent may lead a review: the card offers them all.
                     ...(field(parameters, 'reads') === true
                       ? {}
@@ -3116,6 +3120,16 @@ export class Queries extends Context.Service<
             // Not looked at for a conflict, whatever its host says: why, beside Look again.
             ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
+            ...(task.state === 'abandoned' ? { discarded: true as const } : {}),
+            // Drafted, and its plan didn't come: the person's, to plan or discard, not to resume. Its card is in the thread from
+            // its drafting on: while the coordinator's turn that made it is open, its plan is still on its way, and its card says
+            // it is being drafted (a window opened then has no live draft yet); a draft no turn made says so once its moment is.
+            ...((phase === 'stopped' || (phase === 'drafting' && madeInOpenTurn === 0)) &&
+            task.state === 'draft' &&
+            task.planState === null &&
+            task.runState === null
+              ? { unplanned: true as const }
+              : {}),
             automation: yield* fromAutomation(taskId),
             // Its parts, offered to keep as a preset, while they are.
             ...offering(yield* presetOfferOn(task.projectId, taskId)),

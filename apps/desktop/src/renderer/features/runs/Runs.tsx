@@ -29,6 +29,7 @@ import { ago, running } from '../../shared/time'
 import { openCoordinator } from '../../shared/openCoordinator'
 import { askInDraft, type RunsModel, useRuns } from './useRuns'
 import { usePageOpener } from '../browser/opener'
+import { footStoreOf } from '../foot/store'
 
 /*
  * What a project runs, from the top of its screen or a task's bar (ADR-090):
@@ -579,7 +580,7 @@ export function Runs({
   readonly onConnect?: () => void
 }) {
   const dialogs = useRunDialogs(projectId, runnables)
-  const { client } = useServices()
+  const { client, feed, host } = useServices()
   const toward = useWorkToward(projectId)
   const repositories = useQuery(reads(client).repositories(projectId)).data
   // Each repository's Work toward as the person just picked it, while it is on its way.
@@ -781,6 +782,13 @@ export function Runs({
         // Asking needs no dialog: it goes straight to the coordinator's composer.
         onAdd={(way) => (way === 'ask' ? dialogs.ask() : dialogs.show({ kind: 'add', way }))}
         onEdit={() => dialogs.show({ kind: 'list' })}
+        // In the task's worktree on a task, the project's repository on the project, as Ctrl+` opens one.
+        onTerminal={() =>
+          footStoreOf(client, feed, host, projectId).openTerminal({
+            taskId,
+            where: (taskId === null ? shown?.[0]?.name : tasks?.find((one) => one.id === taskId)?.title) ?? project,
+          })
+        }
       />
       <RunDialogs projectId={projectId} project={project} runnables={runnables} dialogs={dialogs} afterEdit={{ kind: 'list' }} />
     </>

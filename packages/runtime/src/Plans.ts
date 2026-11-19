@@ -198,6 +198,7 @@ export class Plans extends Context.Service<
           worksIn?: WorksIn
           worksInWhy?: string | null
           proposal?: string
+          preset?: string
           reviewAfterMerge?: boolean
           smallChange?: boolean
         }
@@ -471,6 +472,8 @@ export class Plans extends Context.Service<
                   ...(before.proposal === undefined ? {} : { proposal: before.proposal }),
                   ...(before.reviewAfterMerge === true ? { reviewAfterMerge: true } : {}),
                   ...(before.smallChange === undefined ? {} : { smallChange: before.smallChange }),
+                  // The preset it was planned from: its card names it while its parts still have that preset's shape.
+                  ...(before.preset === undefined ? {} : { preset: before.preset }),
                 })
               }
               // Any agent Althar has may lead a review.
@@ -508,6 +511,8 @@ export class Plans extends Context.Service<
                   JSON.stringify({
                     ...planFromPreset(parametersOf(now), preset.parts, models, projectEnd),
                     smallChange: preset.id === 'builtin:small-change',
+                    // Its card names the preset it was planned from, rather than guessing it from the parts.
+                    preset: preset.name,
                   }),
                 actorId,
                 undefined,

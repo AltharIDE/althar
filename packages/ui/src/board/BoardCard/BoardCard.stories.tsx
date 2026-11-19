@@ -799,7 +799,90 @@ export const StartedByALead: Story = {
     startedBy: 'Prototype the browser',
   },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('Started by Prototype the browser')).toBeVisible()
+    await expect(within(canvasElement).getByText('Started by').closest('p')).toHaveTextContent('Started by Prototype the browser')
+  },
+}
+
+/** The line is one line high and stays inside its card. */
+async function expectOneLine(line: HTMLElement) {
+  const card = line.closest('article')!.getBoundingClientRect()
+  await expect(line.getBoundingClientRect().height).toBeLessThan(18)
+  for (const el of [line, ...line.querySelectorAll(':scope > *, :scope > * > *:not([role=listitem])')]) {
+    const box = el.getBoundingClientRect()
+    // what overflows is clipped by its own box, so the box itself must sit in the card
+    await expect(box.right).toBeLessThanOrEqual(card.right)
+  }
+  for (const el of line.querySelectorAll('span, button')) {
+    if (el.scrollWidth > el.clientWidth)
+      await expect(getComputedStyle(el).textOverflow === 'ellipsis' || getComputedStyle(el).overflow === 'hidden').toBe(true)
+  }
+}
+
+/** A long parent title never makes the foot run to two lines: "Started by" stays whole and the title is cut with "…". */
+export const StartedByALongTitle: Story = {
+  args: {
+    ...StartedByALead.args,
+    title: "Prototype: redesign the issue switch under a task's issue",
+    startedBy: 'Only-part-of switch sits under the issue, not beside it, and then keeps going on and on',
+    onOpenStartedBy: fn(),
+  },
+  decorators: [(Story) => <div style={{ width: 220 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const link = within(canvasElement).getByRole('button', { name: /Only-part-of/ })
+    await expectOneLine(link.closest('p')!)
+    await expect(link.scrollWidth).toBeGreaterThan(link.clientWidth)
+    await expect(link.closest('p')).toHaveAttribute(
+      'title',
+      'Started by Only-part-of switch sits under the issue, not beside it, and then keeps going on and on',
+    )
+  },
+}
+
+/** The same without a link, at the narrowest a lane goes: the label stays whole, the title gives way. */
+export const StartedByALongTitleNoLink: Story = {
+  args: { ...StartedByALongTitle.args, onOpenStartedBy: undefined },
+  decorators: [(Story) => <div style={{ width: 200 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const label = within(canvasElement).getByText('Started by')
+    await expectOneLine(label.closest('p')!)
+    await expect(label.scrollWidth).toBe(label.clientWidth)
+  },
+}
+
+/** An automation's long name and a changes count with marks: each footer keeps to one line inside the card. */
+export const LongFooters: Story = {
+  args: {
+    ...StartedByALead.args,
+    startedBy: undefined,
+    from: 'A nightly automation with a name much too long for a narrow lane to hold',
+    changes: 3,
+    marks: [
+      { name: 'a', says: 'a: checks passing', tone: 'ok' },
+      { name: 'b', says: 'b: checks failing', tone: 'ok' },
+    ],
+  },
+  decorators: [(Story) => <div style={{ width: 200 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const from = within(canvasElement).getByText(/A nightly automation/)
+    await expectOneLine(from.closest('p')!)
+    await expect(from.closest('p')).toHaveAttribute('title', expect.stringContaining('A nightly automation'))
+    await expectOneLine(within(canvasElement).getByText('3 changes').closest('p')!)
+  },
+}
+
+/** More marks than the card is wide: the row stays one line and inside the card; each mark keeps its meaning on hover. */
+export const CrowdedMarks: Story = {
+  args: {
+    ...StartedByALead.args,
+    startedBy: undefined,
+    changes: 40,
+    marks: Array.from({ length: 40 }, (_, at) => ({ name: `c${at}`, says: `c${at}: checks passing`, tone: 'ok' as const })),
+  },
+  decorators: [(Story) => <div style={{ width: 200 }}>{Story()}</div>],
+  play: async ({ canvasElement }) => {
+    const row = within(canvasElement).getByText('40 changes').closest('p')!
+    await expectOneLine(row)
+    await expect(within(row).getAllByRole('listitem')[0]).toHaveAttribute('title', 'c0: checks passing')
   },
 }
 

@@ -71,7 +71,7 @@ export function RunOf({
 }
 
 /** What a run printed, read while its console is open: once for a run that ended, and on and on while it runs. */
-function useRunOutput(launchId: string, open: boolean, running: boolean): RunOutput {
+export function useRunOutput(launchId: string, open: boolean, running: boolean): RunOutput {
   const { client } = useServices()
   const read = useQuery({
     // Ending needs its own snapshot even if a running read is still in flight.

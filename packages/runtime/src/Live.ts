@@ -3,6 +3,7 @@ import type { SessionEvent } from '@althar/provider-adapters'
 
 import type { Draft } from './drafts'
 import type { ShownLaunch } from './Launches'
+import type { ShownTerminal } from './Terminals'
 import type { ShownLeftRunning } from './leftRunning'
 import { Context, Effect, Layer, PubSub, Queue, type Scope, Stream } from 'effect'
 
@@ -32,6 +33,8 @@ export type LiveEvent =
   | { readonly _tag: 'Background'; readonly threadId: string; readonly background: ReadonlyArray<ShownLeftRunning> }
   /** What Althar runs of a project itself, whole each time it changes (Launches.ts). */
   | { readonly _tag: 'Launches'; readonly projectId: string; readonly launches: ReadonlyArray<ShownLaunch> }
+  /** A project's terminals, whole each time they change (Terminals.ts). */
+  | { readonly _tag: 'Terminals'; readonly projectId: string; readonly terminals: ReadonlyArray<ShownTerminal> }
   /** The tasks a coordinator is drafting now, as far as written, whole each time they change (drafts.ts). */
   | { readonly _tag: 'Drafting'; readonly threadId: string; readonly drafts: ReadonlyArray<Draft> }
   /** Every account's plan usage and the warnings not yet seen, whole each time either changes (PlanUsage.ts). */
@@ -112,6 +115,8 @@ export const watchedOf = (event: LiveEvent): Watched | undefined => {
       return { _tag: 'Background', threadId: event.threadId, background: event.background }
     case 'Launches':
       return { _tag: 'Launches', projectId: event.projectId, launches: event.launches }
+    case 'Terminals':
+      return { _tag: 'Terminals', projectId: event.projectId, terminals: event.terminals }
     case 'PlanUsage':
       return { _tag: 'PlanUsage', usage: event.usage }
     case 'Drafting':
@@ -128,6 +133,7 @@ export const watchedKey = (event: Watched): string => {
     case 'Output':
       return `${event._tag}:${event.itemId}`
     case 'Launches':
+    case 'Terminals':
       return `${event._tag}:${event.projectId}`
     case 'PlanUsage':
       return event._tag
@@ -201,6 +207,11 @@ export class Live extends Context.Service<
     readonly events: Stream.Stream<LiveEvent>
     /** Events from the moment this returns, for as long as the scope lasts: nothing published after it is missed. */
     readonly subscribe: Effect.Effect<Stream.Stream<LiveEvent>, never, Scope.Scope>
+    /**
+     * What is being drafted now, each thread's latest `Drafting` that still has drafts: a window that starts watching in the
+     * middle of a turn is told them at once, rather than only at the next change, which may be long in coming.
+     */
+    readonly drafting: Effect.Effect<ReadonlyArray<LiveEvent>>
   }
 >()('@althar/runtime/Live') {
   static readonly layer: Layer.Layer<Live> = Layer.effect(
@@ -210,8 +221,16 @@ export class Live extends Context.Service<
       // comes as it comes. A client's watch, which may stall, takes from it as events come too, and holds the newest of each
       // thing for the client (`newestOf`), so a window that stops reading doesn't make this grow.
       const pubsub = yield* PubSub.unbounded<LiveEvent>()
+      const drafting = new Map<string, LiveEvent>()
       return Live.of({
-        publish: (event) => Effect.asVoid(PubSub.publish(pubsub, event)),
+        publish: (event) =>
+          Effect.suspend(() => {
+            if (event._tag === 'Drafting')
+              if (event.drafts.length === 0) drafting.delete(event.threadId)
+              else drafting.set(event.threadId, event)
+            return Effect.asVoid(PubSub.publish(pubsub, event))
+          }),
+        drafting: Effect.sync(() => [...drafting.values()]),
         events: Stream.fromPubSub(pubsub),
         subscribe: Effect.map(PubSub.subscribe(pubsub), Stream.fromSubscription),
       })
