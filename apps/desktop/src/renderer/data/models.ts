@@ -39,6 +39,11 @@ interface Change {
   writing: boolean
   /** Taken by the runtime: a read begun after this many confirms it. Null until then. */
   after: number | null
+  /**
+   * The latest the runtime took of it, and how many reads had begun then: where a later write isn't taken, this is what
+   * shows, held until a read begun after it lands, never a read from before it. Null while it has taken none.
+   */
+  taken: { readonly setting: Setting; readonly after: number } | null
   /** Tells the latest change's caller it was taken back; an earlier one's says nothing, as a later one speaks for the model. */
   failed: () => void
 }
@@ -138,18 +143,26 @@ const send = (client: Client, change: Change) =>
 /* Writes what the person wants of one model's setting; once it is answered, a later change is written next. */
 const write = (client: Client, store: Store, key: string, change: Change) => {
   const count = change.count
+  const sent = change.wanted
   change.writing = true
   const answered = (taken: boolean) => {
     change.writing = false
     if (store.changes.get(key) !== change) return
+    if (taken) change.taken = { setting: sent, after: store.begun }
     // Changed again while this was on its way: that one is written now, and it says how it ends.
     if (change.count !== count) return write(client, store, key, change)
     if (taken) change.after = store.begun
-    else {
-      // Not taken: shown as the runtime has it, which an earlier write of the same model may have changed.
+    else if (change.taken === null) {
+      // Not taken, nor any before it: shown as last read.
       store.changes.delete(key)
       show(store)
+    } else {
+      // Not taken, but an earlier one was: that shows, until a read begun after it says, never a read from before it.
+      change.wanted = change.taken.setting
+      change.after = change.taken.after
+      show(store)
     }
+    // Either way the runtime's word is read afresh.
     read(client, store, true)
     if (!taken) change.failed()
   }
@@ -174,7 +187,7 @@ const change = (client: Client, agentId: string, model: string, wanted: Setting,
     if (!now.writing) write(client, store, key, now)
     return
   }
-  const made: Change = { agentId, model, wanted, count: 0, writing: false, after: null, failed }
+  const made: Change = { agentId, model, wanted, count: 0, writing: false, after: null, taken: null, failed }
   store.changes.set(key, made)
   show(store)
   write(client, store, key, made)

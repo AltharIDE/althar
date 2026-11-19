@@ -166,4 +166,47 @@ describe('the full model picker', () => {
     expect(efforts).toEqual(['Medium', 'High', 'Low', 'Extra high', 'High'])
     expect(screen.getByRole('status').textContent).not.toMatch(/Couldn’t/)
   })
+
+  it('keeps the last effort the runtime took when a later one isn’t, never a read from before it', async () => {
+    const runtime = slowRuntime()
+    await open(runtime.client)
+    const shown: Array<string | null> = []
+    const watch = new MutationObserver(() => shown.push(effortShown()))
+    watch.observe(document.body, { subtree: true, childList: true, characterData: true })
+    const failed = () => screen.getByRole('status').textContent
+
+    // Taken while a later change waited for it: the later one is written next, and isn't taken.
+    await chooseEffort('High')
+    await chooseEffort('Low')
+    act(() => runtime.writes[0]?.answer.resolve())
+    await waitFor(() => expect(runtime.setDefaultEffort).toHaveBeenCalledTimes(2))
+    act(() => runtime.writes[1]?.answer.reject(new Error('The store is busy')))
+    await waitFor(() => expect(failed()).toBe('Couldn’t set gpt-5.2’s default effort to Low.Try again'))
+    expect(effortShown()).toBe('High')
+    // The read from after it says High too; a read from before never showed.
+    await waitFor(() => expect(runtime.reads).toHaveLength(1))
+    act(() => runtime.reads[0]?.resolve(codexWith([{ model: 'gpt-5.2', effort: 'high' }])))
+    await waitFor(() => expect(runtime.getModels).toHaveBeenCalledTimes(2))
+    expect(effortShown()).toBe('High')
+
+    // Taken, its read still out, then a later one made and not taken before that read lands.
+    await chooseEffort('Extra high')
+    act(() => runtime.writes[2]?.answer.resolve())
+    await waitFor(() => expect(runtime.reads).toHaveLength(2))
+    await chooseEffort('Low')
+    act(() => runtime.writes[3]?.answer.reject(new Error('The store is busy')))
+    await waitFor(() => expect(failed()).toBe('Couldn’t set gpt-5.2’s default effort to Low.Try again'))
+    expect(effortShown()).toBe('Extra high')
+    act(() => runtime.reads[1]?.resolve(codexWith([{ model: 'gpt-5.2', effort: 'extra-high' }])))
+    await waitFor(() => expect(runtime.reads).toHaveLength(3))
+    expect(effortShown()).toBe('Extra high')
+    act(() => runtime.reads[2]?.resolve(codexWith([{ model: 'gpt-5.2', effort: 'extra-high' }])))
+    await waitFor(() => expect(runtime.getModels).toHaveBeenCalledTimes(4))
+    expect(effortShown()).toBe('Extra high')
+    watch.disconnect()
+
+    // Medium, the value from before anything was taken, never came back.
+    const efforts = shown.filter((effort, at) => effort !== shown[at - 1])
+    expect(efforts).toEqual(['Medium', 'High', 'Low', 'High', 'Extra high', 'Low', 'Extra high'])
+  })
 })
