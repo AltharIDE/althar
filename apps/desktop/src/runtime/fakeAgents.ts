@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -85,6 +85,8 @@ const out = new Map(
 
 /** How long each fake agent takes to start a session, in milliseconds, where ALTHAR_FAKE_SLOW_START says: for what shows meanwhile. */
 const slowStart = process.env.ALTHAR_FAKE_SLOW_START === undefined ? undefined : Number(process.env.ALTHAR_FAKE_SLOW_START)
+// A test can make subsequent starts fail after it has prepared a task.
+const failStart = process.env.ALTHAR_FAKE_FAIL_START
 
 /** A spec releases each named marker by writing its file, after it has asserted the waiting state. */
 const held = process.env.ALTHAR_FAKE_AGENT_HELD
@@ -122,6 +124,13 @@ export const fakeAgents = Layer.succeed(
               ...(heldMarkers === undefined ? {} : { holds: heldMarkers }),
               ...(own === undefined ? {} : { outOfUsage: own }),
               ...(slowStart === undefined ? {} : { slowStart }),
+              ...(failStart === undefined
+                ? {}
+                : {
+                    beforeNewSession: async () => {
+                      if (existsSync(failStart)) throw new Error('Fake agent could not start')
+                    },
+                  }),
               ...(connection === undefined ? {} : { connection }),
               ...(connectionFile === undefined
                 ? {}

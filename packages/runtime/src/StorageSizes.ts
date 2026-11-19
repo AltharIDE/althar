@@ -59,6 +59,10 @@ export const storageSizes = (places: Readonly<Record<PlaceId, string>>, measureI
     return walk
   }
   return {
+    /** Drops what was kept of a place, as after its folders were removed: the next look measures it anew. */
+    forget: (place: PlaceId) => {
+      kept.delete(place)
+    },
     /**
      * Its size. `signal` is the asker giving up: the walk goes on for others
      * waiting on it, else stops, and the asker's promise rejects.
@@ -74,7 +78,10 @@ export const storageSizes = (places: Readonly<Record<PlaceId, string>>, measureI
       joined.waiting++
       return new Promise<StorageSize>((resolveSize, reject) => {
         const leave = () => {
-          if (--joined.waiting === 0 && signal?.aborted === true) joined.stop.abort()
+          if (--joined.waiting !== 0 || signal?.aborted !== true) return
+          joined.stop.abort()
+          // Forgotten as it is stopped, not once it ends: a look meanwhile measures anew rather than join it.
+          if (kept.get(place) === joined) kept.delete(place)
         }
         const abandon = () => {
           signal?.removeEventListener('abort', abandon)

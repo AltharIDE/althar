@@ -8,7 +8,7 @@ import { taskStatusOf } from '../../shared/taskStatus'
 import { queuedOfWords } from '../../shared/agents'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import type { DoneHere } from '../../shared/standing'
-import { ago, clock, useNow } from '../../shared/time'
+import { ago, clock, MINUTE, useNow } from '../../shared/time'
 import { useNewTab } from '../tabs/TabsFrame'
 import type { StartModel } from '../start/useStart'
 import { yoursByProject } from '../board/lanes'
@@ -113,7 +113,8 @@ export function HomeView({
   onSignIn?: (agentId: string) => void
 }) {
   const home = model.home
-  const now = useNow(true)
+  // The home says only minutes and times of day: it is drawn again once a minute, not each second.
+  const now = useNow(true, MINUTE)
   // Calls answered here: each stays its line, quiet, where it was, until the person leaves.
   const [answered, setAnswered] = useState<ReadonlyArray<AnsweredCall>>([])
   // Ready changes merged from their lines here: each stays its line while its merge is under way, its Merge answering the press.

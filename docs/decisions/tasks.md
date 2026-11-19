@@ -219,6 +219,13 @@ leaves its conversation as it was.
   count asides, and `list_tasks` and a fresh session's brief leave them out.
   `find_tasks` finds one when asked for it and says it is an aside.
 
+A conversation brought in from Claude Code or Codex that ran in none of the
+worktrees brought in is an aside too ([bringing in other tools'
+work](workspaces-and-runs.md#bringing-in-other-tools-work)): its thread is
+the conversation, at its own times, with no plan of its own, and its copy is
+made only once the person writes to it; its first brief has the
+conversation, so its lead carries it on.
+
 An aside never installs or upgrades dependencies, runs the repository's
 setup, or builds, before it answers or after: it reads its copy as it was
 made, and that is how it answers in seconds. Its copy is never set up while
@@ -237,8 +244,17 @@ A preset is a named set of starting parts: where it works, Checked by and
 when, its ending, where it sits, its lead and reviewer, and a few lines of
 brief (`presets`). Only a start: changing a task's parts never changes it.
 
-- **Built in:** Chat, Change, Small change, Review a PR, and Prototype, led
-  by Claude Opus 5.5, with no review, ending with its branch. A prototype may
+- **Built in:** Chat, Change, Small change, Review a PR, and Prototype (no
+  review, ending with its branch). No built-in names a model or an agent:
+  its lead and reviewer are picked as for any step, by the person's defaults
+  and notes and the coordinator's choice.
+- **The person tunes a built-in one as their own:** its lead and reviewer,
+  their efforts, and its brief, from Settings › Tasks › Presets (Tune) or on
+  their word to the coordinator or a lead (`tune_preset`). Only what differs
+  is kept (`preset_tunings`), over the built-in, which stays model-free;
+  Reset, or `tune_preset` with reset, takes it back. A plan from a tuned one
+  takes their lead and reviewer, and its card still names the built-in.
+- **Prototype and Change, either way:** a prototype may
   later go on as a change in the same task, its pull request ending and its
   review added then, or never: the person decides, so the coordinator and the
   leads never assume either way. On their word it is one move: `change_part`
@@ -523,6 +539,12 @@ where it stands in its header:
 A review with a draft only keeps: it settles once its draft is posted. A
 change settles when its pull request merges, or when it is abandoned.
 
+**Keep for later is for every kind of task** that finished, not only one
+that isn't a change: a prototype or a chat planned from a preset ends on
+its branch, which makes it a change, and it keeps all the same. Only a
+task with its pull request open, or commits held for Ship, has no Keep:
+those wait on the person in their own ways, which a kept row doesn't show.
+
 The person can also tell the lead, which has `settle_task` (done, keep or
 discard). The composer suggests "Mark this as done". The coordinator settles
 with the same tool ([coordinator.md](coordinator.md#moving-a-task)).
@@ -730,3 +752,4 @@ optionally a model, an agent, an effort and the change.
 - 12 Nov 2026: an aside is cleared by its pill's ×, whatever it stands at, and clearing it or making it a task shows at once; an aside never installs, builds or runs the setup ([Asides](#asides)).
 - 12 Nov 2026: commits that only bring the base branch in, as a clean merge of main, are never the task's work: no hold for Ship, no review, no round; they go up to the open pull request (#773's merge of main had started a second Review and Pull request).
 - 12 Nov 2026: every part changes either way on the person's word to the lead or the coordinator, the lead's own task included: `change_part` sets Checked by, the ending and another preset's parts at once, `change_lead` acts on a lead's own task, Ship honours an ending of its branch alone, and the task menu has Make it a change; a prototype becomes a change in one move, and a change goes back.
+- 17 Nov 2026: a conversation brought in from another tool is an aside, its first brief the conversation so far.

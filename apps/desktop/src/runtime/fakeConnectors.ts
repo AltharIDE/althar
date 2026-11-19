@@ -26,7 +26,8 @@ import { Duration, Effect, Layer } from 'effect'
  * repository ALTHAR_FAKE_REMOTE_API or _WEB names, else ALTHAR_FAKE_REMOTE, and its commits have the checks
  * ALTHAR_FAKE_CHECKS names, where it does, passed once the file
  * ALTHAR_FAKE_CHECKS_PASS names is there, where it names one; a merge into
- * main requires what ALTHAR_FAKE_RULES says, where it does; a call of a method
+ * main requires what ALTHAR_FAKE_RULES says, where it does, and goes into its
+ * merge queue where ALTHAR_FAKE_QUEUE is set; a call of a method
  * ALTHAR_FAKE_HELD names, as JSON, waits until the file it names for it is
  * there, which the test writes once it has seen what it looks for meanwhile:
  * at once unless it does. A pasted token connects it, and so
@@ -69,6 +70,7 @@ const github = makeFakeService({
   },
 })
 github.addRepository(['meridian', 'api'])
+if (process.env.ALTHAR_FAKE_QUEUE !== undefined) github.mergeQueue()
 // Only for a test that gives it somewhere to push: every other sees the one repository it always did.
 if (process.env.ALTHAR_FAKE_REMOTE_WEB !== undefined) github.addRepository(['meridian', 'web'])
 github.addIssue({ ref: 'meridian/api#12', title: 'Checkout gives up after one try', body: 'It should retry.' })
@@ -139,6 +141,7 @@ const demo = {
   jira_cloud: fake('jira_cloud', 'balazs@northwind.io'),
   jira_dc: fake('jira_dc', 'balazs'),
   trello: fake('trello', 'balazsk'),
+  clickup: fake('clickup', 'balazs'),
 } satisfies Record<Product, ReturnType<typeof makeFakeService>>
 
 /** Linear's other workspace, which a key with `halyard` in it signs in to. */

@@ -15,6 +15,7 @@ import { type Client, messageOf, newProjectId } from '../../data/client'
 import { keys, reads as readsOf } from '../../data/reads'
 import type { Host } from '../../data/services'
 import { shortFolder } from '../../shared/folders'
+import { type CloneChoice, sameRepository } from '../../shared/hostRepositories'
 import { remoteOf } from '../../shared/remotes'
 
 /*
@@ -84,21 +85,7 @@ export interface Reading {
 }
 
 /** A repository chosen to clone: on a connection's host, by its path there, or by a URL pasted. */
-export interface DraftClone {
-  /** How the list knows it. */
-  readonly id: string
-  /** As its host names it: balazs/tidepool. */
-  readonly remote: string
-  readonly from: { readonly connectionId: string; readonly path: ReadonlyArray<string> } | { readonly url: string }
-  /** Its host, where Althar knows it: what its changes and issues are called there. */
-  readonly product: Product | null
-  /** Its host's name: GitHub, or the host a URL names. */
-  readonly hostName: string
-  /** Its host's address, as a remote names it: github.com. With `remote`, which repository it is. */
-  readonly host: string
-  /** A repository main found of the same name, which may be it, on this computer already: added, not cloned, where it is. */
-  readonly here: { readonly found: string; readonly where: string } | null
-}
+export type DraftClone = CloneChoice
 
 /** Where a repository only on this computer goes as the project is made: a new one on a connected host, or nowhere. */
 export type DraftHome =
@@ -220,13 +207,8 @@ export interface DraftActions {
 
 const IDLE: DraftSteps = { source: 'idle', home: 'idle', issues: 'idle' }
 
-/** Whether two remotes are one repository: the same host, and the same path there, which code hosts read whatever its case. */
-export const sameRepository = (
-  one: { readonly host: string; readonly remote: string },
-  other: { readonly host: string; readonly remote: string },
-) =>
-  one.host.toLowerCase() === other.host.toLowerCase() &&
-  one.remote.replace(/\.git$/, '').toLowerCase() === other.remote.replace(/\.git$/, '').toLowerCase()
+/** Kept here too, where the new project's own code and tests have it. */
+export { sameRepository }
 
 /** The ink a draft's mark is drawn in: the person's, or what the runtime would pick beside the projects there are. */
 export const inkOf = (draft: Draft, projects: ReadonlyArray<ProjectSummary>): ProjectInk =>

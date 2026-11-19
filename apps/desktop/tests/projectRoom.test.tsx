@@ -15,6 +15,7 @@ import { hostNameOf, partsOf, trackersOf, trackerUrlOf } from '../src/renderer/f
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { keys } from '../src/renderer/data/reads'
+import { locallyReading, queuedOf, queueShown, readingLocallyOf } from '../src/renderer/shared/items'
 import {
   card,
   change,
@@ -160,7 +161,7 @@ describe('the Talk room’s model, once the thread is read', () => {
       })
       await waitFor(() => expect(result.current.coordinator?.items).toHaveLength(2))
       act(() => emit(streamed('old', 'I’ve planned it as you asked. Earlier turns load as you scroll. A small indicator app', 'thc')))
-      expect(result.current.streaming.get('old')?.text).toMatch(/indicator app$/)
+      expect(result.current.streaming.read().get('old')?.text).toMatch(/indicator app$/)
       stop({
         emit,
         rewatch: () => act(() => rewatch()),
@@ -179,7 +180,7 @@ describe('the Talk room’s model, once the thread is read', () => {
       rerender()
       await act(async () => services.cache.refetchQueries({ queryKey: keys.coordinator('p1') }))
       await waitFor(() => expect(result.current.coordinator?.items.map((item) => item.id)).toEqual(newer.map((item) => item.id)))
-      return result.current.streaming
+      return result.current.streaming.read()
     }
 
     it('goes once the screen is hidden (`KeptScreens`), and doesn’t show under the turn that runs after', async () => {
@@ -236,10 +237,10 @@ describe('the Talk room’s model, once the thread is read', () => {
     })
     await waitFor(() => expect(result.current.coordinator).not.toBeNull())
     act(() => emit(streamed('m', 'Hello', 'thc')))
-    expect(result.current.streaming.has('m')).toBe(true)
+    expect(result.current.streaming.read().has('m')).toBe(true)
     getCoordinator.mockResolvedValue(coordinatorSnapshot({ items: [{ ...items.says('Hello there', 'claude-code', 'm'), sequence: 1 }] }))
     await act(async () => services.cache.refetchQueries({ queryKey: keys.coordinator('p1') }))
-    await waitFor(() => expect(result.current.streaming.has('m')).toBe(false))
+    await waitFor(() => expect(result.current.streaming.read().has('m')).toBe(false))
   })
 
   it('compacts the coordinator’s context', async () => {
@@ -280,6 +281,28 @@ describe('the Talk room’s model, once the thread is read', () => {
     expect(await act(async () => result.current.say('Plan it', null))).toBe(true)
     expect(client.startSession).not.toHaveBeenCalled()
     expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Plan it', disposition: 'after_current' })
+  })
+
+  it('releases an accepted idle send when no coordinator session appears, even before its stored copy arrives', async () => {
+    const { client, emit, result } = read({ accepting: 'now', session: null })
+    await waitFor(() => expect(result.current.coordinator).not.toBeNull())
+    expect(await act(async () => result.current.say('No session', null))).toBe(true)
+    const optimistic = result.current.coordinator!.items.at(-1)!
+    expect(locallyReading(optimistic)).toBe(true)
+    await waitFor(() => expect(locallyReading(optimistic)).toBe(false))
+    await waitFor(() => expect(result.current.coordinator?.items.at(-1)).toMatchObject({ input: { claimed: false } }))
+    const stored = { ...items.you('No session', { state: 'queued', interrupting: false }), id: 'not-started', sequence: 1 }
+    vi.mocked(client.getThreadItem).mockResolvedValue(stored)
+    act(() => emit(changed('thread_item', stored.id, 'thc', 'p1')))
+    await waitFor(() => expect(result.current.coordinator?.items.some((item) => item.id === stored.id)).toBe(true))
+    const head = result.current.coordinator!
+    expect(
+      queuedOf(
+        head.items,
+        queueShown(head.session, result.current.pending, head.accepting, head.items),
+        readingLocallyOf(head.session, head.accepting),
+      ).map((item) => item.text),
+    ).toEqual(['No session'])
   })
 
   it('shows a dictated message as dictated while it is on its way, and takes back nothing still on its way', async () => {
@@ -370,11 +393,11 @@ describe('a task’s card in the Talk room', () => {
         queued: { busy: 4, atOnce: 4, holders },
       })
     const client = await talking(waiting(1), waiting(2), waiting(3))
-    expect(await screen.findAllByText('Waiting: 4 of 4 agents busy on this Mac: Start the dev server')).toHaveLength(3)
+    expect(await screen.findAllByText('Waiting · 4 agents busy')).toHaveLength(3)
     const pills = screen.getAllByRole('button', { name: /^Keeping a place/ })
     expect(pills).toHaveLength(1)
     // It sits under the lowest card.
-    const last = screen.getAllByText('Waiting: 4 of 4 agents busy on this Mac: Start the dev server').at(-1)!
+    const last = screen.getAllByText('Waiting · 4 agents busy').at(-1)!
     expect(last.compareDocumentPosition(pills[0]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     await userEvent.click(pills[0]!)
     const list = within(await screen.findByRole('dialog', { name: 'Keeping a place' }))
@@ -388,7 +411,7 @@ describe('a task’s card in the Talk room', () => {
       { taskId: 't8', title: 'Fix the login', threadId: null, kept: false, running: [] },
     ]
     await talking(card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4, holders } }))
-    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac: Run the suite; Fix the login')).toBeTruthy()
+    expect(await screen.findByText('Waiting · 4 agents busy')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Keeping a place/ })).toBeNull()
   })
 

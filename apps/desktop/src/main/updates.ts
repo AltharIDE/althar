@@ -11,9 +11,6 @@
  * wired in updater.ts.
  */
 
-/** Where the release notes of a version are: its GitHub Release. */
-export const notesOf = (version: string) => `https://github.com/AltharIDE/althar/releases/tag/v${version}`
-
 /** Where the update stands. */
 export type Update =
   /** Nothing newer was found, or no one has looked yet. */

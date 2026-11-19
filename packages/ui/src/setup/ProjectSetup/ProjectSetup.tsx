@@ -440,6 +440,7 @@ export function SetupRepositories({
   onChoose,
   onConnect,
   connecting,
+  landing,
   height,
   text,
 }: {
@@ -458,6 +459,8 @@ export function SetupRepositories({
   onConnect: (host: string) => void
   /** A host being connected, in place: its walk, in the room the list had. */
   connecting?: ReactNode
+  /** Where the one chosen lands, said on its row in place of when it was pushed: ~/code/meridian-web. */
+  landing?: string | null
   height: number
   text?: Partial<ProjectSetupText>
 }) {
@@ -570,6 +573,12 @@ export function SetupRepositories({
                     )}
                     {one.here !== null ? (
                       <span className={s.mono}>{t.hereNote(one.here)}</span>
+                    ) : on && landing != null ? (
+                      // Keyed by the place, so a place changed lands again.
+                      <span key={landing} className={cx(s.mono, s.landing)} title={landing}>
+                        <Icon name="folder" size={11} />
+                        {landing}
+                      </span>
                     ) : (
                       one.pushed !== null && <span>{one.pushed}</span>
                     )}

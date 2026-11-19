@@ -48,6 +48,7 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
+  linksIssues,
   Policies,
   postsScreenshots,
   pushesCommits,
@@ -71,6 +72,7 @@ import { listSkills } from './Skills'
 import { addItem, updateItem } from './threads'
 import { POOL, ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { agentTools } from './agentTools'
+import { changesOf, defaultEfforts, inWords, modelsTurnedOff, plainNames, said, type Names } from './settingWords'
 
 /*
  * Settings, as the person changes them on the Settings screens, for the
@@ -100,6 +102,12 @@ interface Field {
   readonly loosens?: (before: unknown, after: unknown) => boolean
   /** When it loosens, in words, for read_settings. */
   readonly loosening?: string
+  /** What a change to it says, a line for each thing that moved, where the generic diff of its value doesn't say it well. */
+  readonly say?: (before: unknown, after: unknown, names: Names) => ReadonlyArray<string>
+  /** A map it takes replaces the whole of what was there, so a key left out is taken out; otherwise a map names only the keys it changes. */
+  readonly whole?: boolean
+  /** A key of its map a change adds was absent before, and Undo takes it away by writing none for it. */
+  readonly forgets?: boolean
 }
 
 /** A section of the Settings screens, by its address, with what it holds and how a change to it is made. */
@@ -144,16 +152,39 @@ const stable = (value: unknown): string =>
 
 const same = (a: unknown, b: unknown) => stable(a) === stable(b)
 
-/** A value as a line says it: on or off, none, a list, or as it is. */
-export const inWords = (value: unknown): string => {
-  if (value === true) return 'on'
-  if (value === false) return 'off'
-  if (value === null || value === undefined) return 'none'
-  if (Array.isArray(value))
-    return value.length === 0 ? 'none' : value.map((one) => (typeof one === 'string' ? one : stable(one))).join(', ')
-  if (typeof value === 'string' || typeof value === 'number') return String(value)
-  return stable(value)
+const isMap = (value: unknown): value is Values => value !== null && typeof value === 'object' && !Array.isArray(value)
+
+/**
+ * Whether a setting still holds what a change left it: its value now is the one given. A map that names only the fields
+ * it changes holds while those fields do, at any depth, whatever the others became (a repository's role, while its
+ * change target moved on); one given whole, or any other value, holds only as it is. A key absent holds only as none, where the setting takes none to mean taking it away (`forgets`).
+ */
+const holdsAt = (now: unknown, given: unknown, whole: boolean, forgets: boolean): boolean =>
+  !whole && isMap(now) && isMap(given)
+    ? Object.entries(given).every(([key, value]) =>
+        key in now ? holdsAt(now[key], value, whole, false) : forgets && (value === null || value === undefined),
+      )
+    : same(now, given)
+
+const holds = (field: Field | undefined, now: unknown, given: unknown): boolean =>
+  holdsAt(now, given, field?.whole === true, field?.forgets === true)
+
+/**
+ * A map's fields a change names, as they were, for Undo to put back: the rest of a map it changes only in part isn't its
+ * to put back. A key that was absent is none, where the setting takes none to mean taking it away (`forgets`).
+ */
+const namedAt = (now: unknown, given: unknown, forgets: boolean, top: boolean): unknown => {
+  if (!isMap(given) || !isMap(now)) return now
+  const kept: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(given)) {
+    if (key in now) kept[key] = namedAt(now[key], value, forgets, false)
+    else if (top && forgets) kept[key] = null
+  }
+  return kept
 }
+
+const named = (field: Field | undefined, now: unknown, given: unknown): unknown =>
+  field?.whole === true ? now : namedAt(now, given, field?.forgets === true, true)
 
 /* ---- How a setting loosens what asks ---- */
 
@@ -222,7 +253,12 @@ const Changing = Schema.Struct({
   message_id: Schema.optional(Schema.String),
 })
 
-const field = (label: string, takes: string, schema: Schema.Top, more: Pick<Field, 'loosens' | 'loosening'> = {}): Field => ({
+const field = (
+  label: string,
+  takes: string,
+  schema: Schema.Top,
+  more: Pick<Field, 'loosens' | 'loosening' | 'say' | 'whole' | 'forgets'> = {},
+): Field => ({
   label,
   takes,
   schema: schema as unknown as Schema.Codec<unknown, unknown>,
@@ -319,6 +355,7 @@ export class SettingsTools extends Context.Service<
               pushCommits: pushesCommits(rules),
               postScreenshots: postsScreenshots(rules),
               moveIssues: movesIssues(rules),
+              linkIssues: linksIssues(rules),
               afterMergeReview: afterMergeReviewOf(rules),
               branchPattern: rules.branchPattern ?? null,
               titlePattern: rules.titlePattern ?? null,
@@ -344,6 +381,7 @@ export class SettingsTools extends Context.Service<
         'pushCommits',
         'postScreenshots',
         'moveIssues',
+        'linkIssues',
         'afterMergeReview',
         'branchPattern',
         'titlePattern',
@@ -489,6 +527,7 @@ export class SettingsTools extends Context.Service<
               'Accounts its work runs on',
               'by agent id, the account ids it may use, or null for every account',
               Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+              { whole: true },
             ),
             branchPattern: field('Branch names', 'a pattern, or null for what each repository says', Schema.NullOr(Schema.String)),
             titlePattern: field('Pull request titles', 'a pattern, or null for what each repository says', Schema.NullOr(Schema.String)),
@@ -501,6 +540,7 @@ export class SettingsTools extends Context.Service<
             postScreenshots: field('Post screenshots automatically', SWITCH, Schema.Boolean),
             resolveConflicts: field('Resolve conflicts automatically', SWITCH, Schema.Boolean),
             moveIssues: field('Move issues automatically', SWITCH, Schema.Boolean),
+            linkIssues: field('Link pull requests on their issues (a comment on ClickUp)', SWITCH, Schema.Boolean),
             afterMergeReview: field(
               'After a small change merges',
               'major (reviewed; only blocking and major findings come back to the person), all (any finding comes back), or none (no review after the merge)',
@@ -538,6 +578,7 @@ export class SettingsTools extends Context.Service<
                   'postScreenshots',
                   'resolveConflicts',
                   'moveIssues',
+                  'linkIssues',
                   'afterMergeReview',
                   'repositoryFiles',
                 ]),
@@ -574,6 +615,7 @@ export class SettingsTools extends Context.Service<
                 'postScreenshots',
                 'resolveConflicts',
                 'moveIssues',
+                'linkIssues',
                 'afterMergeReview',
                 'repositoryFiles',
               ])
@@ -679,13 +721,15 @@ export class SettingsTools extends Context.Service<
           fields: {
             efforts: field(
               'Default efforts',
-              'by "agent/model" (as list_models names them), the effort a session on it starts at: { "claude-code/opus": "high" }',
-              Schema.Record(Schema.String, Schema.String),
+              'by "agent/model" (as list_models names them), the effort a session on it starts at, or null for the agent\'s own: { "claude-code/opus": "high" }',
+              Schema.Record(Schema.String, Schema.NullOr(Schema.String)),
+              { say: defaultEfforts, forgets: true },
             ),
             turnedOff: field(
               'Models turned off',
               'by agent id, the whole list of its models turned off: { "codex": ["gpt-6.1-luna"] }',
               Schema.Record(Schema.String, Schema.Array(Schema.String)),
+              { say: modelsTurnedOff },
             ),
           },
           read: () =>
@@ -701,7 +745,7 @@ export class SettingsTools extends Context.Service<
           write: (_projectId, change) =>
             Effect.gen(function* () {
               const models = yield* Models
-              for (const [key, effort] of Object.entries((change['efforts'] as Record<string, string> | undefined) ?? {})) {
+              for (const [key, effort] of Object.entries((change['efforts'] as Record<string, string | null> | undefined) ?? {})) {
                 const at = key.indexOf('/')
                 if (at <= 0) return yield* new ToolRefused({ message: `Name each as "agent/model": ${key} isn't.` })
                 yield* models.setDefaultEffort({ agentId: key.slice(0, at), model: key.slice(at + 1), effort })
@@ -1001,13 +1045,35 @@ export class SettingsTools extends Context.Service<
           return message?.body
         })
 
+      /** What agents and their models are called on screen, for the lines of a change to them. */
+      const namesOf = Effect.gen(function* () {
+        const catalog = yield* (yield* Models).catalog
+        const agents = yield* Agents
+        return {
+          agent: (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId,
+          model: (agentId: string, model: string) =>
+            catalog.find((one) => one.agentId === agentId)?.models.find((offered) => offered.id === model)?.name ?? model,
+        } satisfies Names
+      })
+
+      /** What a change moved, in plain words: a line for each thing that changed, never a value's whole list or object. */
       const movesOf = (section: Section, before: Values, after: Values) =>
-        Object.keys(after).map((key) => ({
-          key,
-          label: section.fields[key]?.label ?? key,
-          before: inWords(before[key]),
-          after: inWords(after[key]),
-        }))
+        Effect.gen(function* () {
+          const names = Object.keys(after).some((key) => section.fields[key]?.say !== undefined) ? yield* namesOf : plainNames
+          return Object.keys(after).map((key) => {
+            const one = section.fields[key]
+            const label = one?.label ?? key
+            const lines = one?.say?.(before[key], after[key], names) ?? changesOf(label, before[key], after[key], one?.whole === true)
+            return {
+              key,
+              label,
+              before: inWords(before[key]),
+              after: inWords(after[key]),
+              // A change that moved nothing a line can name (an agent Althar doesn't have) still says which setting it was.
+              changes: lines.length === 0 ? [`${label} changed`] : lines,
+            }
+          })
+        })
 
       /** What of a change loosens what asks, in words; empty where nothing does. */
       const looseningOf = (section: Section, before: Values, after: Values, current: Values) => {
@@ -1041,7 +1107,7 @@ export class SettingsTools extends Context.Service<
             section: section.id,
             title: section.title,
             project: section.scope === 'project' ? yield* projectNameOf(access.projectId) : null,
-            moves: movesOf(section, input.before, input.after),
+            moves: yield* movesOf(section, input.before, input.after),
             by: input.by,
             loosens: input.loosens,
             words: input.words,
@@ -1146,9 +1212,12 @@ export class SettingsTools extends Context.Service<
           }
           const current = yield* section.read(access.projectId)
           const before = pick(current, Object.keys(change))
-          const after = Object.fromEntries(Object.entries(change).filter(([key, value]) => !same(before[key], value)))
+          const after = Object.fromEntries(Object.entries(change).filter(([key, value]) => !holds(section.fields[key], before[key], value)))
           if (Object.keys(after).length === 0) return `Nothing changed: ${section.title} is so already.`
-          const moved = pick(before, Object.keys(after))
+          // What was there, for the keys of a map the change names alone: Undo puts those back, and no other key's.
+          const moved = Object.fromEntries(
+            Object.entries(pick(before, Object.keys(after))).map(([key, value]) => [key, named(section.fields[key], value, after[key])]),
+          )
           const by = yield* changerOf(access)
           const loosened = looseningOf(section, moved, after, current)
           const words = loosened.length === 0 ? undefined : yield* wordsOf(access, asked.message_id)
@@ -1161,7 +1230,7 @@ export class SettingsTools extends Context.Service<
               section: section.id,
               title: section.title,
               project: section.scope === 'project' ? yield* projectNameOf(access.projectId) : null,
-              moves: movesOf(section, moved, after),
+              moves: yield* movesOf(section, moved, after),
               by,
               loosens: true,
               words: null,
@@ -1201,10 +1270,8 @@ export class SettingsTools extends Context.Service<
             actorId: actorOf(by),
           })
           if (undoing !== undefined) yield* settle(undoing, 'undone', null)
-          const said = Object.entries(after)
-            .map(([key, value]) => `${section.fields[key]?.label ?? key}: ${inWords(moved[key])} → ${inWords(value)}`)
-            .join('; ')
-          return `${undoing === undefined ? 'Changed' : 'Undid'} ${section.title}: ${said}. A line in your thread says so, with Undo; Settings shows it at once. To put it back yourself, change_settings with undo: ${id}.`
+          const told = said((yield* movesOf(section, moved, after)).flatMap((move) => move.changes))
+          return `${undoing === undefined ? 'Changed' : 'Undid'} ${section.title}: ${told}. A line in your thread says so, with Undo; Settings shows it at once. To put it back yourself, change_settings with undo: ${id}.`
         })
 
       /** The settings in a section now, for a row's keys, and whether they are still as one side of it left them. */
@@ -1215,7 +1282,7 @@ export class SettingsTools extends Context.Service<
           const values = JSON.parse(side === 'before' ? row.before : row.after) as Values
           const projectId = row.projectId ?? (yield* projectOfThread(row.threadId))
           const current = yield* section.read(projectId)
-          return { section, projectId, matches: Object.keys(values).every((key) => same(current[key], values[key])) }
+          return { section, projectId, matches: Object.keys(values).every((key) => holds(section.fields[key], current[key], values[key])) }
         })
       const projectOfThread = (threadId: string) =>
         Effect.gen(function* () {
@@ -1228,6 +1295,16 @@ export class SettingsTools extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<ChangeRow>`SELECT * FROM setting_changes WHERE item_id = ${itemId}`
           return row
+        })
+      /** What a change said of one setting, as its line in the thread did: the same words Settings reads. */
+      const linesOfRow = (row: ChangeRow, key: string) =>
+        Effect.gen(function* () {
+          if (row.itemId === null) return []
+          const sql = yield* SqlClient.SqlClient
+          const [item] = yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE id = ${row.itemId}`
+          if (item === undefined) return []
+          const card = JSON.parse(item.content) as SettingChangeCard
+          return card.moves.find((move) => move.key === key)?.changes ?? []
         })
       const changerOfRow = (row: ChangeRow) =>
         Effect.gen(function* () {
@@ -1305,7 +1382,7 @@ export class SettingsTools extends Context.Service<
                   yield* section.read(projectId ?? (yield* projectOfThread(row.threadId))).pipe(Effect.orElseSucceed(() => ({}))),
                 )
               // Shown only while it stays as the agent left it: changed since, by anyone, it is theirs now.
-              if (!same(currents.get(row.section)?.[key], after[key])) continue
+              if (!holds(section.fields[key], currents.get(row.section)?.[key], after[key])) continue
               found.push({
                 // Where the setting is now, not where it was when the change was recorded (the sections moved on 8 Nov 2026).
                 section: section.id,
@@ -1314,6 +1391,7 @@ export class SettingsTools extends Context.Service<
                 by: yield* changerOfRow(row),
                 at: row.updatedAt,
                 threadId: row.threadId,
+                changes: yield* linesOfRow(row, key),
               })
             }
           }
@@ -1415,6 +1493,8 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   setProjectTracker: 'project/code.tracker',
   setRepository: 'project/code.repositories',
   addRepositories: 'person: adding a repository is the person’s (project/code says so)',
+  cloneRepository: 'person: cloning a repository into the project is adding one, the person’s (project/code says so)',
+  prepareFolder: 'person: gives a repository cloned into the project its first commit, as part of adding it, the person’s',
   leaveOutRepository: 'person: leaving a repository out is the person’s (project/code says so)',
   // project/rules
   setProjectRules: 'project/rules.never',
@@ -1466,6 +1546,8 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   // althar/tasks: presets (a task is a conversation plus parts)
   editPreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',
   removePreset: 'person: a preset is the person’s own: the coordinator offers one to keep, and only they keep, change or remove it',
+  tunePreset: 'tool:tune_preset',
+  resetPreset: 'tool:tune_preset',
   // althar/notifications, althar/appearance, althar/editor-and-browser, althar/about
   notifyCalls: 'window: kept in the window on this computer',
   notifyReady: 'window: kept in the window on this computer',

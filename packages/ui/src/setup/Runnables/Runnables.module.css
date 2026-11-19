@@ -123,3 +123,68 @@
   font-size: 11.5px;
   color: var(--t-3);
 }
+
+/* Its command over where it runs; in a long list, side by side, so each row is a line shorter. */
+.line {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dense .line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.dense .command {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.dense .about {
+  flex: 0 10 auto;
+  min-width: 4em;
+}
+
+.dense > .item {
+  padding-block: 8px;
+}
+
+/* A long list's search, and who added each, over it. */
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.find {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+/* Where the grip is, while the list is searched or sorted and there is nothing to drag. */
+.gripless {
+  flex: none;
+  width: 24px;
+  margin-inline-start: -6px;
+}
+
+.none,
+.more {
+  margin: 0;
+  padding: 12px 0;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+
+.none {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.more {
+  padding-bottom: 0;
+}

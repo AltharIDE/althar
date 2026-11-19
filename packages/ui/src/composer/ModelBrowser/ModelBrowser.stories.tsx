@@ -143,6 +143,21 @@ export const SwitchingOff: Story = {
   },
 }
 
+/** A change that didn't go through is taken back and said in the foot, in the room its hint keeps, with Try again. */
+export const NotSwitched: Story = {
+  args: {
+    blocked: [],
+    onToggleBlocked: fn(),
+    failed: { text: 'Couldn’t switch GPT-5.2 Codex off.', retry: fn() },
+  },
+  play: async ({ args }) => {
+    const body = within(document.body)
+    await expect(body.getByRole('status')).toHaveTextContent('Couldn’t switch GPT-5.2 Codex off.')
+    await userEvent.click(body.getByRole('button', { name: 'Try again' }))
+    await expect(args.failed?.retry).toHaveBeenCalledOnce()
+  },
+}
+
 /** Usable models first, pinned ones leading their group; the switched-off ones last, pinned or not. */
 export const UsableFirst: Story = {
   args: {

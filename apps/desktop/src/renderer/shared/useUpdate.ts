@@ -25,11 +25,16 @@ export const glanceOf = (value: unknown): UpdateGlance | null => {
 export interface UpdateModel {
   /** Null where there is no update ready, or the app doesn't update. */
   readonly ready: Pick<UpdateReadyProps, 'version' | 'onRestart' | 'restarting' | 'error'> | null
+  /** Checks for a newer version now, as the app menu does; absent where the app doesn't update. */
+  readonly check?: () => void
+  /** A check asked for here is under way. */
+  readonly checking: boolean
 }
 
 export const useUpdate = (): UpdateModel => {
   const { host } = useServices()
   const [glance, setGlance] = useState<UpdateGlance | null>(null)
+  const [checking, setChecking] = useState(false)
 
   useEffect(() => {
     const update = host.update
@@ -51,8 +56,21 @@ export const useUpdate = (): UpdateModel => {
   }, [host])
 
   const update = host.update
-  if (glance === null || glance.ready === null || update === undefined) return { ready: null }
+  // Only where the app updates: its glance says so.
+  const check =
+    glance === null || update?.check === undefined
+      ? {}
+      : {
+          check: () => {
+            if (checking) return
+            setChecking(true)
+            void update.check?.().finally(() => setChecking(false))
+          },
+        }
+  if (glance === null || glance.ready === null || update === undefined) return { ready: null, checking, ...check }
   return {
+    checking,
+    ...check,
     ready: {
       version: glance.ready,
       restarting: glance.restarting,

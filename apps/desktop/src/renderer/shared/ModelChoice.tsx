@@ -100,7 +100,7 @@ export function ModelChoice({
   /** Makes an effort a model's default; an agent's own default, whose model isn't known, has none to keep. */
   const makeDefault = (key: string, name: string) => {
     const { agentId, model } = choiceOf(key)
-    if (model !== null) void setDefault({ agentId, model, effort: effortId(catalog, key, name) })
+    if (model !== null) setDefault({ agentId, model, effort: effortId(catalog, key, name) })
   }
 
   return (
@@ -152,6 +152,12 @@ export function ModelChoice({
   )
 }
 
+/** What the full picker says of a change that didn't go through. */
+const text = {
+  notKept: (model: string, effort: string) => `Couldn’t set ${model}’s default effort to ${effort}.`,
+  notSwitched: (model: string, off: boolean) => (off ? `Couldn’t switch ${model} off.` : `Couldn’t switch ${model} on again.`),
+}
+
 export interface ModelsBrowserProps {
   /** The agents whose models it lists: installed, and signed in or not saying (see `canPick`). */
   agents: ReadonlyArray<AgentStatus>
@@ -174,24 +180,39 @@ export function ModelsBrowser({ agents, without = null, value, onPick, onClose }
   const setDefault = useSetDefaultEffort()
   const setBlocked = useSetModelBlocked()
   const prefs = useModelPrefs()
+  // The latest change that didn't go through, said in the foot until the next one.
+  const [failed, setFailed] = useState<{ readonly text: string; readonly retry: () => void } | null>(null)
   const catalog = useMemo(() => withoutModel(catalogOf(known ?? [], agents), without), [known, agents, without])
   const every = useMemo(() => withoutModel(catalogOf(known ?? [], agents, { withBlocked: true }), without), [known, agents, without])
   const blocked = (known ?? []).flatMap((offered) => offered.blocked.map((model) => keyOf(offered.agentId, model)))
   const pins = prefs.pins ?? defaultPins(catalog)
+  const nameOf = (key: string) => every.models.find((info) => info.id === key)?.name ?? choiceOf(key).model ?? key
   /** Makes an effort a model's default; an agent's own default, whose model isn't known, has none to keep. */
   const makeDefault = (key: string, name: string) => {
     const { agentId, model } = choiceOf(key)
-    if (model !== null) void setDefault({ agentId, model, effort: effortId(catalog, key, name) })
+    if (model === null) return
+    // Every picker shows it at once; taken back, with a line, if it isn't kept.
+    setFailed(null)
+    setDefault({ agentId, model, effort: effortId(catalog, key, name) }, () =>
+      setFailed({ text: text.notKept(nameOf(key), name), retry: () => makeDefault(key, name) }),
+    )
+  }
+  /** Switches a model off, or on again, as the person last left it here. */
+  const switchTo = (key: string, off: boolean) => {
+    const { agentId, model } = choiceOf(key)
+    if (model === null) return
+    setFailed(null)
+    setBlocked({ agentId, model, blocked: off }, () =>
+      setFailed({ text: text.notSwitched(nameOf(key), off), retry: () => switchTo(key, off) }),
+    )
   }
   return (
     <ModelBrowser
       models={every.models}
       runtimes={every.runtimes}
       blocked={blocked}
-      onToggleBlocked={(key) => {
-        const { agentId, model } = choiceOf(key)
-        if (model !== null) void setBlocked({ agentId, model, blocked: !blocked.includes(key) })
-      }}
+      onToggleBlocked={(key) => switchTo(key, !blocked.includes(key))}
+      failed={failed}
       value={value}
       pins={pins}
       defaultEffort={(info) => defaultEffortOf(catalog, info)}

@@ -17,15 +17,15 @@ export default defineConfig(({ mode }) => ({
       generateScopedName: mode === 'production' ? '[local]_[hash:base64:5]' : '[name]__[local]__[hash:base64:4]',
     },
   },
-  // One bundle is right for a page read from disk; there is no network to split it for.
-  // Two pages: the window, and the edge of the screen (the island round the notch, or the menu bar's sheet).
+  // One bundle is right for a page read from disk; there is no network to split it for. The edge of the screen (the
+  // island round the notch, or the menu bar's sheet) is a page built apart, after this one (vite.edge.config.ts).
   build: {
     outDir: '../../dist/renderer',
     emptyOutDir: true,
     target: 'chrome140',
     sourcemap: true,
     chunkSizeWarningLimit: 2_000,
-    rollupOptions: { input: { index: join(pages, 'index.html'), edge: join(pages, 'edge.html') } },
+    rollupOptions: { input: { index: join(pages, 'index.html') } },
   },
   test: {
     ...testing('medium'),
@@ -45,7 +45,7 @@ export default defineConfig(({ mode }) => ({
         'src/renderer/root.ts',
         'src/renderer/features/*/route.tsx',
       ],
-      reporter: ['text', 'html'],
+      reporter: ['text', 'html', 'json'],
       // Checked when a test fails too, so a run that only quarantined tests fail still gates on it (@althar/testing).
       reportOnFailure: true,
       thresholds: { lines: 90, branches: 90 },

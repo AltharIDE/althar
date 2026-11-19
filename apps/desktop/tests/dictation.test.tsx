@@ -259,7 +259,8 @@ describe('dictating with the model here', () => {
     setDraftText('thread:kept', 'Ask Alpha')
     setDraftDictated('thread:kept', true)
     setDraftText('thread:typed', 'Ask Althar')
-    // A window that starts again reads them from its storage.
+    // A window that starts again reads them from its storage, written as the last one went.
+    window.dispatchEvent(new Event('pagehide'))
     forgetDrafts()
     expect(draftOf('thread:kept')).toMatchObject({ text: 'Ask Alpha', dictated: true })
     expect(draftOf('thread:typed')).toMatchObject({ text: 'Ask Althar', dictated: false })

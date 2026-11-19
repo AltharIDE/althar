@@ -192,6 +192,13 @@ export const serverProtocol = (port: PortLike): Layer.Layer<RpcServer.Protocol> 
     Layer.orDie,
   )
 
+/**
+ * What an API client is made with (`RpcClient.make(Api, untraced)`): no span of its own for each call, which nothing
+ * reads, and which each call would make on the thread that makes it, the window's on a press. The runtime's server
+ * keeps its span per call: the call's name, which its log and failures give, is read from it (Api.ts).
+ */
+export const untraced = { disableTracing: true } as const
+
 /** The window's end: the RPC client's protocol, over a port. Every request says which API version the client speaks. */
 export const clientProtocol = (port: PortLike, apiVersion: number = API_VERSION): Layer.Layer<RpcClient.Protocol> => {
   // One port, carrying every call at once: a long-running stream such as `Watch` mustn't hold up the rest.

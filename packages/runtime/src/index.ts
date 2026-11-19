@@ -40,6 +40,7 @@ export { settledAmong, settling } from './settled'
 export { contained, type Failure, Failures, failureOf } from './Failures'
 export { familyOf, type Settled, type Took, tookBetween, UsageData, type UsageEvent } from './UsageData'
 export { agentSaid, summarize, words } from './words'
+export { gitFields, redacted } from './gitSaid'
 export { Changes, type ChangeSummary, type Published } from './Changes'
 export { Connectors, type Screenshot, type Shot } from './Config'
 export { type ConnectionInfo, Connections, NotConnected, SignInUnavailable } from './Connections'
@@ -59,3 +60,7 @@ export { InstallFailed, Installs, type OnDevice } from './Installs'
 
 export { AfterOpen, startup } from './startup'
 export { lagLogged, watchLag } from './lag'
+
+export { DevicePairings } from './DevicePairings'
+
+export { listenNetworkApi, type NetworkApiOptions } from './networkApi'

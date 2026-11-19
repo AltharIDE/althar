@@ -1,0 +1,589 @@
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { MessageChannel } from 'node:worker_threads'
+
+import { Api, clientProtocol, emitterPort } from '@althar/contracts'
+import { makeFakeService } from '@althar/connectors/testing'
+import { budget } from '@althar/testing'
+import { assert, describe, it } from '@effect/vitest'
+import { Context, Duration, Effect, Layer } from 'effect'
+import { RpcClient } from 'effect/rpc'
+import { SqlClient } from 'effect/sql'
+import { until } from '@althar/testing/effect'
+
+import { connection, services } from '../src/Api'
+import { Changes } from '../src/Changes'
+import { FolderCleanup } from '../src/FolderCleanup'
+import { Folders } from '../src/Folders'
+import { Instance } from '../src/Instance'
+import { Secrets } from '../src/Secrets'
+
+import { claudeFolder } from '../src/elsewhere/conversations'
+
+import { computer, digest, gitIn, PHRASE, sessionIds } from './elsewhereFixtures'
+import { fakeAgents, fakeConnectors, repository, ROOMY } from './support'
+
+/*
+ * Bringing in other tools' work, through the API as the window does it (docs/decisions/workspaces-and-runs.md, "Bringing in
+ * other tools' work"; DEV-211, DEV-37): each worktree a task in place, held Up next, with the conversations that ran in it;
+ * a setup the repository's; other conversations asides that carry on where they stood. Twice makes nothing twice, and
+ * nothing of another tool's changes: its files read the same to the byte, and its folders are never set up, moved, rewound
+ * or removed.
+ */
+
+const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
+const steps = [{ key: 'implement' as const, agentId: 'codex', model: null, skipped: false }]
+
+const connectedTo = () =>
+  Effect.gen(function* () {
+    const machine = computer(repository())
+    const channel = new MessageChannel()
+    yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+    const context = yield* Layer.build(
+      services({
+        database: ':memory:',
+        worktreeRoot: join(machine.home, 'Althar'),
+        appVersion: '0.0.0-test',
+        deviceName: 'Test Mac',
+        agents: fakeAgents(),
+        secrets: Secrets.memory(),
+        connectors: fakeConnectors({ github: makeFakeService() }),
+        busy: { machine: ROOMY },
+        checksAppear: Duration.zero,
+        elsewhere: { home: machine.home, env: {} },
+      }),
+    )
+    yield* Effect.forkScoped(
+      Layer.launch(
+        connection(
+          emitterPort(channel.port1, (data) => data),
+          { kind: 'window' },
+        ),
+      ).pipe(Effect.provideContext(context)),
+    )
+    const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
+    const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+    const store = <A, E, R>(effect: Effect.Effect<A, E, R>) => effect.pipe(Effect.provideContext(context as Context.Context<R>))
+    const grant = yield* Context.get(context, Folders).allow(machine.repository)
+    const project = yield* client.OpenProject({ commandId: commandId(), grant })
+    const sql = <A extends object>(run: (sql: SqlClient.SqlClient) => Effect.Effect<ReadonlyArray<A>, unknown>) =>
+      store(Effect.flatMap(SqlClient.SqlClient, run))
+    return { client, store, project, machine, sql }
+  })
+
+/** What the project's conversation says didn't come in from other tools, and what Try again would bring: its lines, oldest first. */
+const missedIn = (sql: Effect.Success<ReturnType<typeof connectedTo>>['sql'], projectId: string) =>
+  Effect.map(
+    sql(
+      (sql) => sql<{ content: string }>`
+        SELECT i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id
+        WHERE t.project_id = ${projectId} AND t.kind = 'coordinator' AND i.kind = 'notice' ORDER BY i.rowid`,
+    ),
+    (rows) =>
+      rows.flatMap((row) => {
+        const content = JSON.parse(row.content) as {
+          title: string
+          severity: string
+          offer?: {
+            kind: string
+            missed: ReadonlyArray<unknown>
+            worktrees: ReadonlyArray<string>
+            setups: ReadonlyArray<string>
+            conversations: ReadonlyArray<string>
+          }
+        }
+        return content.offer?.kind === 'bring_in' ? [{ title: content.title, severity: content.severity, ...content.offer }] : []
+      }),
+  )
+
+describe('bringing in other tools’ work', () => {
+  it.live(
+    'brings each worktree in as a held task in place with its conversations, a setup as the repository’s, the rest as asides, and twice as once',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, store, project, machine, sql } = yield* connectedTo()
+          const found = yield* client.LookElsewhere({ projectId: project.id })
+          assert.strictEqual(found.worktrees.length, 7)
+          const lima = found.worktrees.find((one) => one.path === machine.worktrees.conductor)
+          const codex = found.worktrees.find((one) => one.path === machine.worktrees.codex)
+          assert.deepStrictEqual(lima?.conversations, [`claude_code:${sessionIds.inLima}`])
+          const conductorSetup = found.setups.find((one) => one.tool === 'conductor')
+          assert.isFalse(conductorSetup?.current)
+          // Read from the folder before its project is made, what is found has the same keys, so picks made there come in.
+          const folder = yield* client.LookElsewhere({
+            grant: yield* store(Effect.flatMap(Folders, (folders) => folders.allow(machine.repository))),
+          })
+          assert.deepStrictEqual(
+            [
+              ...folder.worktrees.map((one) => one.key),
+              ...folder.setups.map((one) => one.key),
+              ...folder.conversations.map((one) => one.key),
+            ].toSorted(),
+            [
+              ...found.worktrees.map((one) => one.key),
+              ...found.setups.map((one) => one.key),
+              ...found.conversations.map((one) => one.key),
+            ].toSorted(),
+          )
+          const before = digest(machine.home)
+
+          const brought = yield* client.BringIn({
+            commandId: commandId(),
+            projectId: project.id,
+            worktrees: [lima?.key ?? '', codex?.key ?? '', 'worktree:/nowhere'],
+            setups: [conductorSetup?.key ?? '', found.setups.find((one) => one.tool === 'orca')?.key ?? ''],
+            conversations: [`claude_code:${sessionIds.inRoot}`, `codex:${sessionIds.codexLegacy}`],
+            steps,
+          })
+          assert.strictEqual(brought.tasks.length, 2)
+          assert.strictEqual(brought.asides.length, 2)
+          assert.strictEqual(brought.setups, 1)
+          assert.strictEqual(brought.histories, 2)
+          // One no longer there, and a second setup for the same repository, each say why; the rest came in.
+          assert.deepStrictEqual(
+            brought.failed.map((one) => one.key),
+            [`setup:orca:${machine.repository}`, 'worktree:/nowhere'],
+          )
+
+          // Each worktree is its task's workspace where its tool made it, set up already, its plan held Up next.
+          const workspaces = yield* sql(
+            (sql) =>
+              sql<{
+                taskId: string
+                path: string
+                branch: string
+                branched: number
+                madeBy: string | null
+                setup: string | null
+                state: string
+              }>`
+              SELECT task_id, path, branch, branched_at IS NOT NULL AS branched, made_by, setup, state FROM workspaces
+              WHERE task_id IN ${sql.in(brought.tasks)} ORDER BY path`,
+          )
+          const conductorTask = workspaces.find((one) => one.madeBy === 'conductor')
+          assert.strictEqual(conductorTask?.path, machine.worktrees.conductor)
+          assert.strictEqual(conductorTask?.branch, 'feature/lima')
+          assert.strictEqual(conductorTask?.branched, 1)
+          assert.isNotNull(conductorTask?.setup)
+          const codexTask = workspaces.find((one) => one.madeBy === 'codex')
+          assert.strictEqual(codexTask?.branched, 0)
+          const board = yield* client.GetBoard({ projectId: project.id })
+          const held = board.tasks.filter((task) => brought.tasks.includes(task.taskId))
+          assert.deepStrictEqual(
+            held.map((task) => task.phase),
+            ['held', 'held'],
+          )
+          assert.strictEqual(held.find((task) => task.taskId === conductorTask?.taskId)?.title, 'Lima')
+          const asides = board.tasks.filter((task) => brought.asides.includes(task.taskId))
+          assert.isTrue(asides.every((task) => task.scratch === true))
+          assert.sameMembers(
+            asides.map((task) => task.title),
+            ['Gyroscope fixture failing on CI', 'Rename to compass'],
+          )
+
+          // The conversation that ran in Conductor's worktree is its task's history, after the line saying where it came from.
+          const thread = yield* client.GetThread({ threadId: held.find((task) => task.taskId === conductorTask?.taskId)?.threadId ?? '' })
+          assert.deepStrictEqual(
+            thread.items.map((item) => item.kind),
+            ['notice', 'notice', 'user_message', 'agent_message'],
+          )
+          assert.strictEqual(thread.items[2]?.createdAt, '2026-11-10T09:00:01.000Z')
+
+          // The repository keeps Conductor's setup, run as it ran there.
+          const [recorded] = yield* sql(
+            (sql) => sql<{ recorded: string }>`SELECT recorded_setup AS recorded FROM repository_bindings WHERE project_id = ${project.id}`,
+          )
+          assert.deepStrictEqual(JSON.parse(recorded?.recorded ?? '{}').copy, ['.env'])
+          assert.match(JSON.parse(recorded?.recorded ?? '{}').commands[0], /^export CONDUCTOR_ROOT_PATH=/)
+
+          // What the person said there finds it.
+          const search = yield* client.SearchTasks({ projectId: project.id, text: 'quaternion gyroscope' })
+          assert.deepStrictEqual(
+            search.tasks.map((task) => task.taskId),
+            [asides.find((task) => task.title === 'Gyroscope fixture failing on CI')?.taskId],
+          )
+
+          // Twice is once: what came in is found and named, and nothing new is made.
+          const count = () =>
+            sql((sql) => sql<{ n: number }>`SELECT (SELECT count(*) FROM tasks) + (SELECT count(*) FROM thread_items) AS n`)
+          const made = yield* count()
+          const again = yield* client.BringIn({
+            commandId: commandId(),
+            projectId: project.id,
+            worktrees: [lima?.key ?? '', codex?.key ?? ''],
+            setups: [],
+            conversations: [`claude_code:${sessionIds.inRoot}`, `codex:${sessionIds.codexLegacy}`, `claude_code:${sessionIds.inLima}`],
+            steps,
+          })
+          assert.deepStrictEqual([again.tasks, again.asides, again.histories], [[], [], 0])
+          assert.deepStrictEqual(yield* count(), made)
+          const looked = yield* client.LookElsewhere({ projectId: project.id })
+          assert.strictEqual(looked.worktrees.find((one) => one.key === lima?.key)?.taskId, conductorTask?.taskId)
+          assert.isTrue(looked.setups.find((one) => one.tool === 'conductor')?.current)
+          // Nothing of any tool's changed.
+          assert.strictEqual(digest(machine.home), before)
+        }),
+      ),
+    budget.large,
+  )
+
+  it.live('says a conversation with nothing said in it didn’t come in, and brings in the rest', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, machine, sql } = yield* connectedTo()
+        const id = '019a0000-0000-7000-8000-0000000000ff'
+        writeFileSync(
+          join(machine.home, '.codex', 'sessions', '2026', '11', '12', `rollout-2026-11-12T13-00-00-${id}.jsonl`),
+          `${JSON.stringify({ timestamp: '2026-11-12T13:00:00.000Z', type: 'session_meta', payload: { id, timestamp: '2026-11-12T13:00:00.000Z', cwd: machine.repository, source: 'cli' } })}\n`,
+        )
+        const brought = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [],
+          setups: [],
+          conversations: [`codex:${id}`, `codex:${sessionIds.codexLegacy}`],
+          steps,
+        })
+        assert.deepStrictEqual(brought.failed, [{ key: `codex:${id}`, why: 'Nothing was said in it.' }])
+        assert.strictEqual(brought.asides.length, 1)
+        // Said where it stays, by name and why; another try wouldn't bring it, so there is nothing to try again.
+        const [said, ...more] = yield* missedIn(sql, project.id)
+        assert.deepStrictEqual(more, [])
+        assert.strictEqual(said?.title, 'Not everything picked from other tools came in')
+        assert.strictEqual(said?.severity, 'warning')
+        assert.deepStrictEqual(said?.missed, [{ name: '“Codex conversation”', why: 'Nothing was said in it.' }])
+        assert.deepStrictEqual([...(said?.conversations ?? []), ...(said?.worktrees ?? []), ...(said?.setups ?? [])], [])
+      }),
+    ),
+  )
+
+  it.live('makes nothing of a chat whose history couldn’t go in, so trying again makes it once', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, sql } = yield* connectedTo()
+        const key = `claude_code:${sessionIds.inRoot}`
+        const bring = client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [],
+          setups: [],
+          conversations: [key],
+          steps,
+        })
+        // Its history fails as it goes in, after the chat is made.
+        yield* sql(
+          (sql) =>
+            sql`CREATE TRIGGER no_history BEFORE INSERT ON brought_in WHEN NEW.kind = 'conversation' BEGIN SELECT RAISE(ABORT, 'no'); END`,
+        )
+        const first = yield* bring
+        assert.deepStrictEqual(first.asides, [])
+        assert.deepStrictEqual(
+          first.failed.map((one) => one.key),
+          [key],
+        )
+        const chats = () => sql((sql) => sql<{ id: string }>`SELECT id FROM tasks WHERE project_id = ${project.id} AND shelf = 'scratch'`)
+        assert.strictEqual((yield* chats()).length, 0)
+        // Said in the project's conversation, with it to try again.
+        const [said] = yield* missedIn(sql, project.id)
+        assert.strictEqual(said?.title, 'Nothing picked from other tools came in')
+        assert.deepStrictEqual(said?.conversations, [key])
+        yield* sql((sql) => sql`DROP TRIGGER no_history`)
+        const again = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [],
+          setups: [],
+          conversations: [key],
+          steps,
+        })
+        assert.strictEqual(again.asides.length, 1)
+        assert.deepStrictEqual(
+          (yield* chats()).map((one) => one.id),
+          [...again.asides],
+        )
+      }),
+    ),
+  )
+
+  it.live('brings a conversation had in a worktree after it came in into its task, and says what was picked and isn’t there', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, machine, sql } = yield* connectedTo()
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const lima = found.worktrees.find((one) => one.path === machine.worktrees.conductor)
+        // Without steps of its own, the task is planned as the project's lead would plan it.
+        const first = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [lima?.key ?? ''],
+          setups: [],
+          conversations: [],
+          steps: [],
+        })
+        assert.strictEqual(first.tasks.length, 1)
+        assert.strictEqual(first.histories, 1)
+        const later = '55555555-5555-4555-8555-555555555555'
+        writeFileSync(
+          join(machine.home, '.claude', 'projects', claudeFolder(machine.worktrees.conductor), `${later}.jsonl`),
+          [
+            {
+              type: 'user',
+              cwd: machine.worktrees.conductor,
+              timestamp: '2026-11-13T09:00:00.000Z',
+              message: { content: 'One more thing' },
+            },
+            { type: 'assistant', timestamp: '2026-11-13T09:00:04.000Z', message: { id: 'm', content: [{ type: 'text', text: 'Done.' }] } },
+          ]
+            .map((one) => JSON.stringify(one))
+            .join('\n'),
+        )
+        const items = () =>
+          Effect.map(
+            sql(
+              (sql) =>
+                sql<{
+                  kind: string
+                }>`SELECT i.kind FROM thread_items i JOIN threads t ON t.id = i.thread_id WHERE t.task_id = ${first.tasks[0] ?? ''} ORDER BY i.rowid`,
+            ),
+            (rows) => rows.map((row) => row.kind),
+          )
+        const before = yield* items()
+        const second = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [],
+          setups: ['setup:conductor:/nowhere'],
+          conversations: [`claude_code:${later}`, 'claude_code:gone'],
+          steps,
+        })
+        assert.deepStrictEqual([second.tasks, second.asides, second.histories], [[], [], 1])
+        // Its own line saying where it came from, then what was said, after what came in with the worktree.
+        assert.deepStrictEqual((yield* items()).slice(before.length), ['notice', 'user_message', 'agent_message'])
+        assert.deepStrictEqual(second.failed, [
+          { key: 'setup:conductor:/nowhere', why: 'It isn’t in the repository any more.' },
+          { key: 'claude_code:gone', why: 'It isn’t on this computer any more.' },
+        ])
+        const [said] = yield* missedIn(sql, project.id)
+        assert.deepStrictEqual(
+          said?.missed.map((one) => (one as { name: string }).name),
+          ['Something picked', 'Something picked'],
+        )
+      }),
+    ),
+  )
+
+  it.live('brings a worktree made by hand in with its conversations, the latest of a long one, and one with nothing said', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, machine, sql } = yield* connectedTo()
+        const day = join(machine.home, '.codex', 'sessions', '2026', '11', '14')
+        mkdirSync(day, { recursive: true })
+        const rollout = (id: string, lines: ReadonlyArray<unknown>) =>
+          writeFileSync(
+            join(day, `rollout-2026-11-14T10-00-00-${id}.jsonl`),
+            [{ type: 'session_meta', payload: { id, cwd: machine.worktrees.hand, source: 'cli' } }, ...lines]
+              .map((one) => JSON.stringify(one))
+              .join('\n'),
+          )
+        const long = '019a0000-0000-7000-8000-0000000000a1'
+        rollout(
+          long,
+          Array.from({ length: 1_300 }, (_, n) => ({
+            timestamp: new Date(Date.UTC(2026, 10, 14, 10) + n * 1000).toISOString(),
+            type: 'event_msg',
+            payload: n % 2 === 0 ? { type: 'user_message', message: `Ask ${n}` } : { type: 'agent_message', message: `Answer ${n}` },
+          })),
+        )
+        rollout('019a0000-0000-7000-8000-0000000000a2', [])
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const hand = found.worktrees.find((one) => one.path === machine.worktrees.hand)
+        assert.strictEqual(hand?.tool, 'hand')
+        assert.lengthOf(hand?.conversations ?? [], 2)
+        const brought = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [hand?.key ?? ''],
+          setups: [],
+          conversations: [],
+          steps,
+        })
+        assert.strictEqual(brought.histories, 2)
+        const items = yield* sql(
+          (sql) => sql<{ kind: string; content: string }>`
+            SELECT i.kind, i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id WHERE t.task_id = ${brought.tasks[0] ?? ''} ORDER BY i.rowid`,
+        )
+        const notices = items.flatMap((item) =>
+          item.kind === 'notice' ? [JSON.parse(item.content) as { title: string; description: string | null }] : [],
+        )
+        assert.strictEqual(notices[0]?.title, 'Brought in: a worktree made by hand')
+        // Only the latest of it, saying how much was left out; it has no start of its own, so no date.
+        assert.deepStrictEqual(
+          notices.slice(1).map((one) => one.description),
+          ['600 prompts · the 100 earliest left out'],
+        )
+        assert.strictEqual(items.filter((item) => item.kind === 'agent_message').length, 600)
+      }),
+    ),
+  )
+
+  it.live('says so where it stays when bringing in fails as a whole, with all of it to try again', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, sql } = yield* connectedTo()
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const worktrees = found.worktrees.slice(0, 2).map((one) => one.key)
+        const conversations = [`codex:${sessionIds.codexLegacy}`]
+        yield* sql((sql) => sql`ALTER TABLE brought_in RENAME TO brought_in_gone`)
+        const failed = yield* Effect.flip(
+          client.BringIn({ commandId: commandId(), projectId: project.id, worktrees, setups: [], conversations, steps }),
+        )
+        assert.isDefined(failed)
+        const [said] = yield* missedIn(sql, project.id)
+        assert.strictEqual(said?.title, 'Nothing picked from other tools came in')
+        assert.deepStrictEqual(said?.worktrees, worktrees)
+        assert.deepStrictEqual(said?.conversations, conversations)
+      }),
+    ),
+  )
+
+  it.live('never removes, rewinds or switches a folder another tool made', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store, project, machine } = yield* connectedTo()
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const key = found.worktrees.find((one) => one.path === machine.worktrees.orca)?.key ?? ''
+        const brought = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [key],
+          setups: [],
+          conversations: [],
+          steps,
+        })
+        const taskId = brought.tasks[0] ?? ''
+        const head = gitIn(machine.worktrees.orca, 'rev-parse', 'HEAD')
+        const actor = yield* store(Effect.map(Instance, (instance) => instance.personId))
+        const refused = yield* store(Effect.flatMap(Changes, (changes) => Effect.flip(changes.leaveWorktree(taskId, actor))))
+        assert.include(String((refused as { message?: string }).message), 'another tool made')
+        // Abandoned, a finished task's folder is never cleaned up: Orca's stays Orca's.
+        yield* client.AbandonTask({ commandId: commandId(), taskId })
+        yield* store(Effect.flatMap(FolderCleanup, (cleanup) => cleanup.cleanUp(actor)))
+        assert.isTrue(existsSync(join(machine.worktrees.orca, 'README.md')))
+        assert.strictEqual(gitIn(machine.worktrees.orca, 'rev-parse', 'HEAD'), head)
+        assert.strictEqual(gitIn(machine.worktrees.orca, 'status', '--porcelain'), 'M README.md')
+      }),
+    ),
+  )
+
+  it.live('brings a worktree its tool removed back in a folder of Althar’s own, from its branch', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, machine, sql } = yield* connectedTo()
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const key = found.worktrees.find((one) => one.path === machine.worktrees.t3)?.key ?? ''
+        const brought = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [key],
+          setups: [],
+          conversations: [],
+          steps,
+        })
+        const taskId = brought.tasks[0] ?? ''
+        rmSync(machine.worktrees.t3, { recursive: true, force: true })
+        const [thread] = yield* sql((sql) => sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`)
+        yield* client.Send({ commandId: commandId(), threadId: thread?.id ?? '', body: 'Carry on', disposition: 'after_current' })
+        // Its lead starting brings its folder back first, as for any task whose folder went.
+        yield* client.StartSession({ commandId: commandId(), threadId: thread?.id ?? '', agentId: 'codex' })
+        yield* until(
+          sql((sql) => sql<{ id: string }>`SELECT id FROM turn_deliveries WHERE thread_id = ${thread?.id ?? ''}`),
+          (rows) => rows.length > 0,
+        )
+        const [workspace] = yield* sql(
+          (sql) => sql<{ path: string; madeBy: string | null }>`SELECT path, made_by FROM workspaces WHERE task_id = ${taskId}`,
+        )
+        assert.strictEqual(workspace?.madeBy, null)
+        assert.isTrue(workspace?.path.startsWith(join(machine.home, 'Althar')))
+        assert.strictEqual(gitIn(workspace?.path ?? '', 'branch', '--show-current'), 't3/1a2b3c4d')
+        assert.isFalse(existsSync(machine.worktrees.t3))
+      }),
+    ),
+  )
+
+  it.live('brings a detached worktree its tool removed back at its own last commit, not where it branched off', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, project, machine, sql } = yield* connectedTo()
+        // Codex's worktree is detached; a commit made there is on no branch, and only its folder knows it.
+        gitIn(machine.worktrees.codex, 'commit', '-q', '--allow-empty', '-m', 'Only in the detached worktree')
+        const head = gitIn(machine.worktrees.codex, 'rev-parse', 'HEAD')
+        const found = yield* client.LookElsewhere({ projectId: project.id })
+        const key = found.worktrees.find((one) => one.path === machine.worktrees.codex)?.key ?? ''
+        const brought = yield* client.BringIn({
+          commandId: commandId(),
+          projectId: project.id,
+          worktrees: [key],
+          setups: [],
+          conversations: [],
+          steps,
+        })
+        const taskId = brought.tasks[0] ?? ''
+        assert.notStrictEqual(taskId, '')
+        rmSync(machine.worktrees.codex, { recursive: true, force: true })
+        // As Codex removes one: git forgets the folder, and the commit is left to whatever still names it.
+        gitIn(machine.repository, 'worktree', 'prune')
+        const [thread] = yield* sql((sql) => sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`)
+        yield* client.Send({ commandId: commandId(), threadId: thread?.id ?? '', body: 'Carry on', disposition: 'after_current' })
+        yield* client.StartSession({ commandId: commandId(), threadId: thread?.id ?? '', agentId: 'codex' })
+        yield* until(
+          sql((sql) => sql<{ id: string }>`SELECT id FROM turn_deliveries WHERE thread_id = ${thread?.id ?? ''}`),
+          (rows) => rows.length > 0,
+        )
+        const [workspace] = yield* sql((sql) => sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${taskId}`)
+        assert.isTrue(workspace?.path.startsWith(join(machine.home, 'Althar')))
+        assert.strictEqual(gitIn(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
+        assert.strictEqual(gitIn(workspace?.path ?? '', 'log', '-1', '--format=%s'), 'Only in the detached worktree')
+      }),
+    ),
+  )
+
+  it.live(
+    'carries an aside brought in on where it stood: its copy made as the person writes, its first brief the conversation so far',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const { client, project, sql } = yield* connectedTo()
+          const brought = yield* client.BringIn({
+            commandId: commandId(),
+            projectId: project.id,
+            worktrees: [],
+            setups: [],
+            conversations: [`claude_code:${sessionIds.inRoot}`],
+            steps,
+          })
+          const taskId = brought.asides[0] ?? ''
+          const [thread] = yield* sql((sql) => sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId}`)
+          const threadId = thread?.id ?? ''
+          const [unmade] = yield* sql((sql) => sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${taskId}`)
+          assert.isFalse(existsSync(unmade?.path ?? ''))
+          yield* client.Send({ commandId: commandId(), threadId, body: 'Is it fixed now?', disposition: 'after_current' })
+          yield* client.StartSession({ commandId: commandId(), threadId, agentId: 'codex' })
+          const turns = yield* until(
+            sql((sql) => sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId}`),
+            (rows) => rows.length > 0,
+          )
+          const prompt = turns[0]?.prompt ?? ''
+          assert.include(prompt, "You are an aside of this project's coordinator")
+          assert.include(prompt, 'brought in from another tool')
+          assert.include(prompt, PHRASE)
+          assert.include(prompt, '[claude-code] Looking at the test first.\n\nThe fixture rounds too early. Fixed.')
+          assert.isTrue(existsSync(unmade?.path ?? ''))
+          // Made as it was first needed: nothing in the thread says a folder came back.
+          const items = (yield* client.GetThread({ threadId })).items
+          assert.isFalse(items.some((item) => item.kind === 'notice' && JSON.stringify(item).includes('Folder back')))
+        }),
+      ),
+  )
+})

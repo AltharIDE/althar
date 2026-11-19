@@ -84,7 +84,7 @@ describe('the coordinator out of usage', () => {
       assert.deepStrictEqual(reply, { agentId: 'claude-code', accountId: work.id })
       assert.include(
         yield* said(threadId),
-        `Fake claude-code (main) ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Fake claude-code (work) takes over, on Small.`,
+        `Small on Fake claude-code (main) ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake claude-code (work) takes over.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code@usual': { outOfUsage: { until: back } } })))
   })
@@ -100,7 +100,7 @@ describe('the coordinator out of usage', () => {
         const { projectId, threadId, say } = yield* asked('Is the checkout slow?')
         yield* say
         const lines = yield* until(said(threadId), (all) => all.some((line) => line.includes('ran out of usage')))
-        assert.include(lines, 'Fake claude-code ran out of usage. Your message waits until Fake claude-code is back.')
+        assert.include(lines, 'Small on Fake claude-code ran out of usage. Your message waits until Small on Fake claude-code is back.')
         assert.lengthOf(yield* replies(threadId), 0)
 
         // Out already, and nothing else free to start instead: the plan's lead starts all the same, and its step needs the person.

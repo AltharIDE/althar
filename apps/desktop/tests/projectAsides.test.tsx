@@ -12,14 +12,14 @@ import { useProject } from '../src/renderer/features/project/useProject'
 import { card, coordinatorSnapshot, fakeClient, items, snapshot, task } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
-function Project() {
+function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void } = {}) {
   return (
     <ProjectView
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
       settings={useSettingsOf('p1')}
-      onTask={vi.fn()}
+      onTask={onTask}
       room={Room.Talk}
     />
   )
@@ -33,7 +33,8 @@ const aside: BoardTask = {
   phase: 'ready',
   scratch: true,
   state: 'active',
-  createdAt: '2026-11-12T10:00:00Z',
+  // Started just now, on the real clock the project reads: a fixed date drops it to the older asides a week later.
+  createdAt: new Date().toISOString(),
   settledAt: null,
   changed: null,
   here: [],
@@ -99,6 +100,32 @@ describe('asides in the project’s conversation', () => {
     await screen.findByRole('textbox', { name: 'Ask about this, on the side' })
     await userEvent.click(screen.getByRole('button', { name: 'Drop the quote' }))
     expect(await screen.findByRole('textbox', { name: 'Ask on the side' })).toBeTruthy()
+  })
+
+  it('answers an aside that waits on the person from its card in the coordinator’s thread, in place, with its pill', async () => {
+    const waiting: BoardTask = { ...aside, phase: 'waiting' }
+    const onTask = vi.fn()
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          items: [
+            items.says('An aside on Scratch looks into it.'),
+            items.card({ ...card(), taskId: 'a1', threadId: 'tha', title: 'Retry', phase: 'waiting', scratch: true }),
+          ],
+        }),
+      ),
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [waiting], calls: [], settledTotal: 0 })),
+      getThread: vi.fn(async () => {
+        const thread = snapshot()
+        return { ...thread, threadId: 'tha', task: { ...thread.task, id: 'a1', scratch: true }, items: [items.says('May I read it?')] }
+      }),
+    })
+    withServices(<Project onTask={onTask} />, client)
+    expect(await screen.findByText('Aside on Scratch')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: /Answer/ }))
+    expect(await screen.findByText('May I read it?')).toBeTruthy()
+    expect(screen.getByRole('tab', { name: 'Retry' })).toBeTruthy()
+    expect(onTask).not.toHaveBeenCalled()
   })
 
   it('opens an existing aside, clears it immediately, and restores a refused clear on its tab', async () => {

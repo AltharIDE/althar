@@ -258,6 +258,250 @@ describe('an issue', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
   })
 
+  it.live('moves each of several issues to In Progress as its task starts, and one added after at once', () => {
+    const { working } = hosted()
+    const tracker = linear()
+    tracker.addIssue({ ref: 'MER-233', title: 'Charge limits too' })
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, taskId, threadId, slug, start } = yield* fromIssue(working)
+      const issues = yield* Issues
+      yield* issues.attach({ projectId, taskId, issue: 'MER-232' })
+      yield* start
+      yield* until(outcomes(taskId), (rows) => rows.length === 2)
+      assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'started')
+      assert.strictEqual((yield* tracker.issue('MER-232')).status.category, 'started')
+      yield* until(notices(threadId), (said) => said.length === 2)
+      assert.sameMembers(yield* notices(threadId), ['Moved MER-231 to In Progress', 'Moved MER-232 to In Progress'])
+      // Its thread heads with each, in the order they were tied to it; the first is the one a task always had.
+      const snapshot = yield* (yield* Queries).thread(threadId)
+      assert.strictEqual(snapshot.task.issue?.key, 'MER-231')
+      assert.deepStrictEqual(
+        snapshot.task.fromIssues?.map((one) => one.key),
+        ['MER-231', 'MER-232'],
+      )
+      // Added once it is under way, it moves at once; added again, it is the same issue.
+      const coordinatorThread = yield* (yield* Coordinator).thread(projectId)
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId: coordinatorThread, sessionId: 'none', taskId: null }
+      assert.match(
+        yield* callTool(access, 'add_issue', { task: slug, issue: 'MER-233', part_of: true }),
+        /comes from MER-233 too, only part of it/,
+      )
+      yield* until(outcomes(taskId), (rows) => rows.length === 3)
+      assert.strictEqual((yield* tracker.issue('MER-233')).status.category, 'started')
+      assert.match(yield* callTool(access, 'add_issue', { task: slug, issue: 'MER-233' }), /came from MER-233 already/)
+      assert.deepStrictEqual(
+        (yield* issues.allOfTask(taskId)).map((one) => [one.key, one.partOf]),
+        [
+          ['MER-231', false],
+          ['MER-232', false],
+          ['MER-233', true],
+        ],
+      )
+      // The coordinator reads each, and sets which it does only part of by its key.
+      const read = yield* callTool(access, 'read_task', { task: slug })
+      assert.include(read, 'Issue: MER-232')
+      assert.include(read, 'only part of it')
+      assert.match(yield* callTool(access, 'set_part_of_issue', { task: slug, issue: 'MER-232', part_of: true }), /only part of MER-232/)
+      assert.match(yield* callTool(access, 'set_part_of_issue', { task: slug, issue: 'MER-9', part_of: true }), /didn't come from MER-9/)
+    }).pipe(
+      Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))),
+    )
+  })
+
+  it.live('is drafted from several issues by the coordinator, each with whether it does only part of it', () => {
+    const { working } = hosted()
+    const tracker = linear()
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, threadId } = yield* opened(working)
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const said = yield* callTool(access, 'draft_task', {
+        title: 'Prototype the import',
+        // The same issue by its link and its key is tied once.
+        issues: ['MER-231', { issue: 'MER-232', part_of: true }, LINK],
+      })
+      assert.match(said, /^Drafted [^,]+, from MER-231 and part of MER-232\./)
+      const sql = yield* SqlClient.SqlClient
+      const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE title = 'Prototype the import'`
+      assert.deepStrictEqual(
+        (yield* (yield* Issues).allOfTask(task?.id ?? '')).map((one) => [one.key, one.partOf]),
+        [
+          ['MER-231', false],
+          ['MER-232', true],
+        ],
+      )
+    }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
+  })
+
+  it.live('of two trackers sharing a key, is switched alone by its tie or its link, never by the key both have', () => {
+    const { working } = hosted()
+    const tracker = linear()
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, taskId, threadId, slug } = yield* fromIssue(working)
+      // Jira's MER-231 too: its keys are like Linear's, so one task can come from both.
+      const sql = yield* SqlClient.SqlClient
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'a'.repeat(32)}`,
+        projectId,
+        taskId,
+        connectionId: null,
+        product: 'jira_cloud',
+        kind: 'issue',
+        externalId: 'MER-231',
+        ref: 'MER-231',
+        key: 'MER-231',
+        url: 'https://meridian.atlassian.net/browse/MER-231',
+        snapshot: JSON.stringify({ title: 'Refund limits on Jira', status: { name: 'To Do', category: 'todo' } }),
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      const issues = yield* Issues
+      const parts = Effect.map(issues.allOfTask(taskId), (all) => all.map((one) => [one.product, one.partOf]))
+      // The thread names each by its tie, which the window's switch sends.
+      const shown = (yield* (yield* Queries).thread(threadId)).task.fromIssues ?? []
+      const [linearTie, jiraTie] = shown.map((one) => one.link ?? '')
+      assert.lengthOf(shown, 2)
+      assert.notStrictEqual(linearTie, jiraTie)
+      yield* issues.setPart(taskId, true, jiraTie)
+      assert.deepStrictEqual(yield* parts, [
+        ['linear', false],
+        ['jira_cloud', true],
+      ])
+      // The key both have names neither, and changes nothing.
+      const refused = yield* Effect.flip(issues.setPart(taskId, false, 'MER-231'))
+      assert.instanceOf(refused, NotFound)
+      assert.deepStrictEqual(yield* parts, [
+        ['linear', false],
+        ['jira_cloud', true],
+      ])
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId: '', sessionId: 'none', taskId: null }
+      const said = yield* callTool(access, 'set_part_of_issue', { task: slug, issue: 'mer-231', part_of: true })
+      assert.match(
+        said,
+        /more than one mer-231, on different trackers: name the one you mean by its link, https:\/\/linear\.app\/.+ or https:\/\/meridian\.atlassian\.net\/browse\/MER-231/,
+      )
+      // By its link, the Linear one alone; the Jira one stays as it was.
+      yield* callTool(access, 'set_part_of_issue', { task: slug, issue: 'https://meridian.atlassian.net/browse/MER-231', part_of: false })
+      yield* callTool(access, 'set_part_of_issue', {
+        task: slug,
+        issue: 'https://linear.app/fake/issue/MER-231/rate-limit-refunds-like-charges',
+        part_of: true,
+      })
+      assert.deepStrictEqual(yield* parts, [
+        ['linear', true],
+        ['jira_cloud', false],
+      ])
+    }).pipe(
+      Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))),
+    )
+  })
+
+  it.live(
+    'links its pull request back to each issue, one tracker failing leaves the others linked; one added after it opened is named and linked too',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      const tracker = linear()
+      const trello = makeFakeService({ product: 'trello' })
+      trello.addIssue({ ref: 'dRlAmgAi', title: 'Siri shortcuts' })
+      trello.addIssue({ ref: 'kP2xQ9aZ', title: 'Refund receipts' })
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        yield* connect('linear')
+        yield* connect('trello')
+        const { projectId } = yield* opened(working)
+        const projects = yield* Projects
+        const plans = yield* Plans
+        const instance = yield* Instance
+        const created = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId,
+          title: 'Rate-limit refunds',
+          description: '[lead:edit] [lead:finish]',
+          issueKey: 'MER-231',
+        })
+        const issues = yield* Issues
+        yield* issues.attach({ projectId, taskId: created.taskId, issue: 'MER-231' })
+        yield* issues.attach({ projectId, taskId: created.taskId, issue: 'dRlAmgAi' })
+        // Linear refuses its link: Trello's goes through all the same.
+        tracker.failNext('link', 'forbidden', undefined, 403, { message: 'No links on this team' })
+        const planId = yield* plans.propose({
+          projectId,
+          taskId: created.taskId,
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+          reason: null,
+          actorId: instance.personId,
+          startsIn: Duration.minutes(5),
+          end: 'draft',
+        })
+        yield* plans.start(planId, instance.personId)
+        yield* until(
+          Effect.sync(() => github.changes),
+          (all) => all.length > 0,
+        )
+        yield* until(
+          Effect.sync(() => trello.linksOn('dRlAmgAi')),
+          (links) => links.length > 0,
+        )
+        const url = github.changes[0]?.url ?? ''
+        assert.include(github.changes[0]?.body, 'Issues: [MER-231](')
+        assert.deepStrictEqual(tracker.linksOn('MER-231'), [])
+        assert.deepStrictEqual(trello.linksOn('dRlAmgAi'), [{ url, title: 'PR #1: MER-231: Rate-limit refunds' }])
+
+        // Added after it opened, only part of it: its description names it, the rest as it was, and its tracker links it.
+        const access: ToolAccess = {
+          role: 'coordinator',
+          projectId,
+          threadId: yield* (yield* Coordinator).thread(projectId),
+          sessionId: 'none',
+          taskId: null,
+        }
+        yield* callTool(access, 'add_issue', { task: created.slug, issue: 'kP2xQ9aZ', part_of: true })
+        const [now] = yield* until(
+          Effect.sync(() => github.changes),
+          ([one]) => (one?.body ?? '').includes('Part of'),
+        )
+        const before = (github.changes[0]?.body ?? '').split('\n\n')
+        assert.match(now?.body ?? '', /\nPart of \[kP2xQ9aZ\]\(https:\/\/[^)]+\)\n\nOpened by \[Althar\]/)
+        assert.match(now?.body ?? '', /Issues: \[MER-231\]\([^)]+\), \[dRlAmgAi\]\([^)]+\)\nPart of/)
+        assert.include(now?.body, before[0] ?? '')
+        yield* until(
+          Effect.sync(() => trello.linksOn('kP2xQ9aZ')),
+          (links) => links.length > 0,
+        )
+        assert.deepStrictEqual(trello.linksOn('kP2xQ9aZ'), [{ url, title: 'PR #1: MER-231: Rate-limit refunds' }])
+        // Those linked already aren't linked again; the one that refused is, now it may.
+        assert.lengthOf(trello.linksOn('dRlAmgAi'), 1)
+        assert.lengthOf(tracker.linksOn('MER-231'), 1)
+        // Switched to what it was already, its description stays as it is: nothing is edited.
+        const edits = () => github.calls.filter((call) => call === 'editChange').length
+        const edited = edits()
+        const reads = () => github.calls.filter((call) => call === 'change').length
+        let read = reads()
+        yield* callTool(access, 'set_part_of_issue', { task: created.slug, issue: 'kP2xQ9aZ', part_of: true })
+        yield* until(Effect.sync(reads), (now) => now > read)
+        // Closed on its host since, it is left as it is.
+        github.close(1)
+        read = reads()
+        yield* callTool(access, 'set_part_of_issue', { task: created.slug, issue: 'MER-231', part_of: true })
+        yield* until(Effect.sync(reads), (now) => now > read)
+        yield* Effect.sleep(Duration.millis(100))
+        assert.strictEqual(edits(), edited)
+        assert.notInclude(github.changes[0]?.body, 'Part of [MER-231]')
+      }).pipe(
+        Effect.provide(
+          Queries.layer.pipe(
+            Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker, trello }) })),
+          ),
+        ),
+      )
+    },
+  )
+
   it.live('says in a line when it can’t be moved, and the task goes on', () => {
     const { working } = hosted()
     const tracker = linear()
@@ -331,6 +575,34 @@ describe('an issue', () => {
       assert.notInclude(tracker.calls, 'start')
       assert.strictEqual((yield* tracker.issue('MER-231')).status.category, 'todo')
     }).pipe(Effect.provide(runtime(':memory:', {}, { connectors: fakeConnectors({ linear: tracker }) })))
+  })
+
+  it.live('opens its pull request without linking it on the issue when the project’s rules say not to link issues', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    const tracker = linear()
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      yield* connect('linear')
+      const { projectId, threadId } = yield* opened(working)
+      yield* (yield* Policies).set(projectId, { linkIssues: false }, (yield* Instance).personId)
+      const body = `Rate-limit refunds ${LINK} [coordinator:plan] [lead:finish] [lead:edit] [review:pass]`
+      const envelope = yield* Runtime.envelope('thread.send', { body })
+      yield* (yield* Coordinator).say({ envelope, threadId, body, disposition: 'after_current' })
+      yield* (yield* Issues).unfurlInput(envelope.commandId)
+      const cards = Effect.map((yield* Queries).coordinator(projectId), (snapshot) =>
+        snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : [])),
+      )
+      yield* until(cards, (all) => all[0]?.phase === 'ready')
+      assert.strictEqual(github.changes[0]?.title, 'MER-231: Rate-limit refunds')
+      assert.deepStrictEqual(tracker.linksOn('MER-231'), [])
+      assert.notInclude(tracker.calls, 'link')
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors({ github, linear: tracker }) }))),
+      ),
+    )
   })
 
   it.live('stays where it is when the project’s rules say not to move issues', () => {

@@ -110,6 +110,7 @@ const VERBS: Readonly<Record<string, readonly [running: string, done: string]>> 
 /** Althar's own tools, as a request: its first word is the verb the row conjugates. */
 const ALTHAR: Readonly<Record<string, string>> = {
   accept_task: 'Accept the task',
+  add_issue: 'Add an issue to the task',
   add_part: 'Add a part to the task',
   add_review: 'Add a pull request review',
   answer_review_after_merge: 'Answer the review after the merge',

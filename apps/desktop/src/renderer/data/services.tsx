@@ -1,4 +1,5 @@
 import type { StartupStage } from '../../startup'
+import type { HomesHost } from '../../homes'
 import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
@@ -12,6 +13,7 @@ import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '
 import type { UpdateGlance } from '../../main/updates'
 
 import type { Attached } from '../shared/files'
+import type { SlowFrames } from '../shared/frames'
 import type { Client } from './client'
 import type { Feed } from './feed'
 
@@ -81,6 +83,8 @@ export interface UpdateHost {
   readonly glance: () => Promise<UpdateGlance | null>
   /** Restarts into the update, at the person's word; false where it won't, as while work runs. */
   readonly restart: () => Promise<boolean>
+  /** Checks for a newer version now, as the app menu's Check for Updates… does: a dialog says what it found. */
+  readonly check?: () => Promise<void>
   /** Calls `listener` with the update as it changes, until the returned function is called. */
   readonly onChange: (listener: (glance: unknown) => void) => () => void
 }
@@ -180,6 +184,7 @@ export interface StorageHost {
 }
 
 export interface Host {
+  readonly homes?: HomesHost
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
@@ -284,6 +289,8 @@ export interface Host {
   readonly quit?: QuitHost
   /** Keeps an error the page didn't handle in main's log. */
   readonly logError?: (error: WindowError) => void
+  /** Keeps the page's long frames and slow presses in main's log (`shared/frames.ts`). */
+  readonly logFrames?: (frames: SlowFrames) => void
   /** The pages beside the conversations (ADR-100); absent where a page can't have them, as the edge's. */
   readonly pages?: PagesHost
   /** The HTML canvases beside the conversations (ADR-104); absent where a page can't have them, as the edge's. */
@@ -306,6 +313,10 @@ export interface CanvasesHost {
   readonly close: (threadId: string) => void
   /** Loads the version shown again, as it was published. */
   readonly reload: (threadId: string) => void
+  /** A picture of the canvas as it shows, for the window to draw in its place while something of its own is over it; null where there is none. */
+  readonly still: (threadId: string) => Promise<string | null>
+  /** Hides the view while something of the window's is over it (ADR-100), and shows it again after. */
+  readonly cover: (threadId: string, covered: boolean) => Promise<void>
 }
 
 /**

@@ -36,7 +36,14 @@ const as = (identity: string | null) => {
     vi.stubEnv(key, undefined)
 }
 
-const git = (cwd: string, ...args: ReadonlyArray<string>) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
+/**
+ * git for the test's own setup and reads. Its commits start no maintenance:
+ * `git commit` leaves a detached `git maintenance run --auto` behind, which
+ * holds `.git/objects/maintenance.lock` for a moment after it returns, and a
+ * look at what's in `.git/objects` would see it there one time and not the next.
+ */
+const git = (cwd: string, ...args: ReadonlyArray<string>) =>
+  execFileSync('git', ['-c', 'maintenance.auto=false', ...args], { cwd, encoding: 'utf8' }).trim()
 const tracked = (cwd: string) =>
   git(cwd, 'ls-files')
     .split('\n')

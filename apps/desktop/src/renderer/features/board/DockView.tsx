@@ -198,6 +198,7 @@ export function DockView({
             change,
             model.merging.has(task.taskId) || pressed.has(change.url),
             pressed.get(change.url) === 'bypass',
+            pressed.get(change.url) === 'queue' || model.queuing.has(task.taskId),
           )}
           sendingBack={model.sending.has(task.taskId)}
           {...(model.error === null ? {} : { error: model.error })}

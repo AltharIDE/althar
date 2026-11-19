@@ -124,7 +124,7 @@ describe('where a started task stands, in the board’s words', () => {
 })
 
 const reading = (tasks: ReadonlyArray<BoardTask>, calls: ReadonlyArray<BoardCall> = [], onOpen = vi.fn()): StartedReading => ({
-  board: { cursor: 1, tasks, calls, settledTotal: 0 } satisfies BoardSnapshot,
+  board: { tasks, calls },
   now: NOW,
   agents,
   onOpen,

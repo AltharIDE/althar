@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { AddRunnable, EditRunnable, type ListedRunnable, type PickableScript, RunnableList, Runnables } from './Runnables'
+import { LONG } from './long'
 
 /* This repository's own scripts, as its package.json files say them. */
 const SCRIPTS: PickableScript[] = [
@@ -104,6 +105,57 @@ export const ListOnAPage: StoryObj<typeof RunnableList> = {
   },
 }
 
+/**
+ * Dozens of them, as a project of labs and prototypes has: searched, sorted by who added each, and only the first few
+ * until all are asked for. The default stays first; searched or sorted, nothing drags.
+ */
+export const LongListOnAPage: StoryObj<typeof RunnableList> = {
+  render: (args) => (
+    <div style={{ width: 720, padding: 24 }}>
+      <RunnableList {...args} />
+    </div>
+  ),
+  args: { runnables: LONG, onOrder: fn(), onDefault: fn(), onEdit: fn(), onRemove: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    // The first few, the default first, and the rest behind Show all.
+    await expect(c.getAllByRole('listitem')).toHaveLength(8)
+    await expect(c.getAllByRole('listitem')[0]).toHaveTextContent(/^Desktop app.*Default$/)
+    await userEvent.click(c.getByRole('button', { name: `Show all ${LONG.length}` }))
+    await expect(c.getAllByRole('listitem')).toHaveLength(LONG.length)
+    await userEvent.click(c.getByRole('button', { name: 'Show fewer' }))
+    // The person's own, at once.
+    await userEvent.click(c.getByRole('radio', { name: 'Yours' }))
+    await expect(c.getAllByRole('listitem')).toHaveLength(LONG.filter((one) => one.from === 'person').length)
+    await expect(c.queryByRole('button', { name: /^Drag to move/ })).toBeNull()
+    await userEvent.click(c.getAllByRole('button', { name: 'Make default' })[0]!)
+    await expect(args.onDefault).toHaveBeenCalledWith('storybook')
+    await userEvent.click(c.getByRole('radio', { name: 'All' }))
+    // Searched by name, command or where it runs.
+    await userEvent.type(c.getByRole('searchbox', { name: `Find among ${LONG.length}` }), 'handoff')
+    await expect(c.getAllByRole('listitem')).toHaveLength(1)
+    await userEvent.type(c.getByRole('searchbox'), 'x')
+    await expect(c.getByText('Nothing here matches.')).toBeVisible()
+    await userEvent.click(c.getByRole('button', { name: 'Clear' }))
+    await expect(c.getAllByRole('listitem')).toHaveLength(8)
+    await expect(c.getByRole('button', { name: 'Drag to move Desktop app' })).toBeVisible()
+  },
+}
+
+/** The same, at night. */
+export const LongListOnAPageDark: StoryObj<typeof RunnableList> = {
+  ...LongListOnAPage,
+  render: (args) => (
+    <div style={{ width: 720, padding: 24, background: 'var(--n-1)' }}>
+      <RunnableList {...args} />
+    </div>
+  ),
+  globals: { theme: 'dark' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getAllByRole('listitem')).toHaveLength(8)
+  },
+}
+
 /** Adding one by typing its command and a name for it. */
 export const AddTyped: StoryObj<typeof AddRunnable> = {
   render: (args) => <AddRunnable {...args} />,
@@ -175,13 +227,19 @@ export const NoScripts: StoryObj<typeof AddRunnable> = {
   args: { ...AddTyped.args, way: 'scripts', scripts: [] } as StoryObj<typeof AddRunnable>['args'],
 }
 
-/** Asking the coordinator to work it out: it answers in the project's conversation. */
+/**
+ * Asking the coordinator to work it out: the request goes in its composer, unsent, for the person to change or send.
+ * Nothing waits on it, even while the scripts are read behind it.
+ */
 export const AddByAsking: StoryObj<typeof AddRunnable> = {
   render: (args) => <AddRunnable {...args} />,
-  args: { ...AddTyped.args, way: 'ask' } as StoryObj<typeof AddRunnable>['args'],
+  args: { ...AddTyped.args, way: 'ask', scripts: null, busy: true } as StoryObj<typeof AddRunnable>['args'],
   play: async ({ args }) => {
     const page = within(document.body)
-    await userEvent.click(await page.findByRole('button', { name: 'Ask the coordinator' }))
+    const ask = await page.findByRole('button', { name: 'Ask the coordinator' })
+    await expect(ask).not.toHaveAttribute('aria-busy')
+    await expect(page.getByText(/goes in the coordinator’s composer, unsent/)).toBeVisible()
+    await userEvent.click(ask)
     await expect(args.onAsk).toHaveBeenCalledOnce()
   },
 }

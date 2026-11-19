@@ -20,6 +20,10 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 | `native/copilot.ts` | Copilot model catalog and streaming inference compatibility for Chat Completions, Responses and Messages; credentials and authenticated HTTP remain in the runtime |
 | `testing/` | The scripted fake agent, in process and as a process |
 
+## Background resource scheduling
+
+`process.ts` groups commands by the provider session's `ALTHAR_WORKER` identity. `resourceGroups.ts` uses optional delegated Linux CPU groups; `processTrees.ts` applies Unix exec wrappers and macOS background policy; the Windows keeper shares an optional CPU-weight job between a worker's commands while preserving each command's lifetime job. All retain inherited background priority when stronger controls are unavailable. Resource controls do not change command authorization or require a toolchain adapter. Native checks and the bounded CPU-share experiment run in `resource-controls.yml`.
+
 ## Principles
 
 - **ACP is the transport; the domain never sees it.** Agent updates become normalized events, and SDK errors become tagged failures. A native side channel or a full native adapter can later replace ACP for one agent without the callers changing (ADR-002).

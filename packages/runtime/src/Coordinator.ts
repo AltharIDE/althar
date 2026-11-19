@@ -31,7 +31,7 @@ import { commitsOf } from './git'
 import { Instance } from './Instance'
 import { IssueDrafts, refusedDraft } from './IssueDrafts'
 import { AskedFields, fieldSchema, wantedFields } from './issueFields'
-import { findWords, foundLine, Issues, keysOf, READ_ISSUE, READ_ISSUE_INPUT, stoppedAt } from './Issues'
+import { findWords, foundLine, Issues, keysOf, pickIssue, READ_ISSUE, READ_ISSUE_INPUT, readRefusal, stoppedAt } from './Issues'
 import { asideIn, quickIn } from './kinds'
 import { DRAFT_THEN_PRESET, PICK_A_PRESET } from './presetBrief'
 import { presetModels } from './presetModels'
@@ -84,7 +84,7 @@ import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { hearsOf, personsWords, quoted, threadsSaying } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { describe as describePreset, presetsIn } from './presets'
+import { describe as describePreset, presetsIn, resetPreset, tunePreset } from './presets'
 import {
   callBegan,
   callEnded,
@@ -108,7 +108,7 @@ import { waitFor } from './waits'
 export const LEAD_STARTS = { turn: 3, all: 10 } as const
 
 /** What a task's lead is told of starting tasks, in each tool that starts one. */
-const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers (a prototype the person wants built goes on as a change in its own task: change_part). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
+const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers, and never to change your own task's shape or approach: prototyping or exploring designs for its work, or building what it prototyped, happens on your task itself, on its branch and pull request, with change_part (preset Prototype, or Change). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
 
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
@@ -182,9 +182,38 @@ const Drafted = Schema.Struct({
   issue: Schema.optional(Schema.String),
   /** It does only part of its issue: its merge comments on the issue rather than closing it. */
   part_of: Schema.optional(Schema.Boolean),
+  /** Several issues it comes from, on any trackers, beside issue: each by its link or key, with part_of where it does only part of that one. */
+  issues: Schema.optional(
+    Schema.Array(Schema.Union([Schema.String, Schema.Struct({ issue: Schema.String, part_of: Schema.optional(Schema.Boolean) })])),
+  ),
   repositories: Schema.optional(Schema.Array(Schema.String)),
   ...Where,
 })
+
+/** Where a drafted task comes from, as its line says it: `, from DEV-1 and part of DEV-2`; empty for no issue. */
+export const fromWords = (issues: ReadonlyArray<{ readonly key: string; readonly partOf: boolean }>) => {
+  if (issues.length === 0) return ''
+  const whole = issues.filter((one) => !one.partOf).map((one) => one.key)
+  const part = issues.filter((one) => one.partOf).map((one) => one.key)
+  const list = (keys: ReadonlyArray<string>) =>
+    keys.length <= 1 ? (keys[0] ?? '') : `${keys.slice(0, -1).join(', ')} and ${keys.at(-1) ?? ''}`
+  return `, ${[...(whole.length === 0 ? [] : [`from ${list(whole)}`]), ...(part.length === 0 ? [] : [`part of ${list(part)}`])].join(' and ')}`
+}
+
+/** The issues a drafted task comes from, each once, in the order given: issue first, then issues. */
+export const draftedIssues = (drafted: {
+  readonly issue?: string | undefined
+  readonly part_of?: boolean | undefined
+  readonly issues?: ReadonlyArray<string | { readonly issue: string; readonly part_of?: boolean | undefined }> | undefined
+}): ReadonlyArray<{ readonly issue: string; readonly partOf: boolean }> => {
+  const all = [
+    ...(drafted.issue === undefined ? [] : [{ issue: drafted.issue, partOf: drafted.part_of === true }]),
+    ...(drafted.issues ?? []).map((one) =>
+      typeof one === 'string' ? { issue: one, partOf: false } : { issue: one.issue, partOf: one.part_of === true },
+    ),
+  ].filter((one) => one.issue.trim() !== '')
+  return all.filter((one, index) => all.findIndex((other) => other.issue.trim().toLowerCase() === one.issue.trim().toLowerCase()) === index)
+}
 /**
  * Whether the person's words ask for a pull request to be reviewed: "review" (not its comments or findings, which are work on
  * it) beside a pull request named by its link or its number. Such a request is a review task's, read only and drafted to post
@@ -339,7 +368,15 @@ const Relead = Schema.Struct({
 const OnTask = Schema.Struct({ task: Schema.String })
 /* A review offered: on the lead's own task where it leaves task out; by the rules' reviewer where it leaves review out. */
 const ReviewOffered = Schema.Struct({ task: Schema.optional(Schema.String), review: Schema.optional(StepPick) })
-const PartOf = Schema.Struct({ task: Schema.String, part_of: Schema.Boolean })
+const TunePresetInput = Schema.Struct({
+  preset: Schema.String,
+  lead: Schema.optional(Schema.NullOr(StepPick)),
+  review: Schema.optional(Schema.NullOr(StepPick)),
+  brief: Schema.optional(Schema.NullOr(Schema.String)),
+  reset: Schema.optional(Schema.Boolean),
+})
+const PartOf = Schema.Struct({ task: Schema.String, part_of: Schema.Boolean, issue: Schema.optional(Schema.String) })
+const IssueAdded = Schema.Struct({ task: Schema.optional(Schema.String), issue: Schema.String, part_of: Schema.optional(Schema.Boolean) })
 
 /** What propose_plan takes, said when its input can't be read: lead and review are objects, never a name alone. */
 const PLAN_SHAPE =
@@ -847,24 +884,29 @@ export class Coordinator extends Context.Service<
         workspace?.goesInto == null ? '' : ` It works toward ${workspace.goesInto}, not the default branch.`
       const upper = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
 
-      /** The issue a task came from, where it stands as last seen, and whether Althar moved it to In Progress as the task started. */
+      /** Each issue a task came from, where it stands as last seen, whether it does only part of it, and whether Althar moved it to In Progress as the task started. */
       const issueWords = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [link] = yield* sql<{ key: string; url: string; snapshot: string; type: string | null; payload: string | null }>`
-            SELECT x.key, x.url, x.snapshot, e.type, e.payload FROM external_links x
-            LEFT JOIN record_events e ON e.aggregate_id = x.id
-              AND e.type IN ('external_link.issue_started', 'external_link.issue_start_failed')
-            WHERE x.task_id = ${taskId} AND x.kind = 'issue' ORDER BY x.created_at, e.sequence DESC LIMIT 1`
-          if (link === undefined) return ''
-          const status = (JSON.parse(link.snapshot) as { status?: { name?: string } }).status?.name
-          const said = JSON.parse(link.payload ?? '{}') as { moved?: boolean; error?: string }
-          const issue = `Issue: ${link.key}${status === undefined ? '' : `, ${status}`}, ${link.url}.`
-          if (link.type === 'external_link.issue_started' && said.moved === true)
-            return `${issue} Althar moved it to In Progress as the task started: the person needn’t.`
-          if (link.type === 'external_link.issue_start_failed')
-            return `${issue} Althar couldn’t move it to In Progress as the task started: ${said.error ?? ''}.`
-          return issue
+          const links = yield* sql<{ id: string; key: string; url: string; snapshot: string; partOf: number }>`
+            SELECT id, key, url, snapshot, part_of FROM external_links WHERE task_id = ${taskId} AND kind = 'issue'
+            ORDER BY created_at, rowid`
+          const said = yield* Effect.forEach(links, (link) =>
+            Effect.gen(function* () {
+              const [moved] = yield* sql<{ type: string; payload: string }>`
+                SELECT type, payload FROM record_events WHERE aggregate_type = 'external_link' AND aggregate_id = ${link.id}
+                  AND type IN ('external_link.issue_started', 'external_link.issue_start_failed') ORDER BY sequence DESC LIMIT 1`
+              const status = (JSON.parse(link.snapshot) as { status?: { name?: string } }).status?.name
+              const told = JSON.parse(moved?.payload ?? '{}') as { moved?: boolean; error?: string }
+              const issue = `Issue: ${link.key}${status === undefined ? '' : `, ${status}`}, ${link.url}${link.partOf === 1 ? ', only part of it' : ''}.`
+              if (moved?.type === 'external_link.issue_started' && told.moved === true)
+                return `${issue} Althar moved it to In Progress as the task started: the person needn’t.`
+              if (moved?.type === 'external_link.issue_start_failed')
+                return `${issue} Althar couldn’t move it to In Progress as the task started: ${told.error ?? ''}.`
+              return issue
+            }),
+          )
+          return said.join(' ')
         })
 
       /** A task's thread, or the coordinator's own conversation: its latest part, or the part before an earlier read. */
@@ -957,7 +999,7 @@ export class Coordinator extends Context.Service<
        */
       const drafting = (
         access: ToolAccess,
-        { title, description, issue: from, part_of: partOf, repositories, works_in: asked, toward }: typeof Drafted.Type,
+        { title, description, repositories, works_in: asked, toward, ...fromIssues }: typeof Drafted.Type,
         plain = false,
         aside = false,
       ) =>
@@ -967,17 +1009,25 @@ export class Coordinator extends Context.Service<
             return yield* new ToolRefused({
               message: `That title is ${title.trim().length} characters. Keep it to ${TITLE_LENGTH}: what should change, in a few words. The rest belongs in the description.`,
             })
-          // The issue it comes from is read first: its key goes in the task's branch.
-          const issue =
-            from === undefined
-              ? undefined
-              : yield* issues
-                  .read(from, access.projectId)
-                  .pipe(
-                    Effect.mapError(
-                      () => new ToolRefused({ message: `Althar can't read ${from}. Draft the task without it, or check the link.` }),
-                    ),
-                  )
+          // The issues it comes from are read first: the first one's key goes in the task's branch.
+          const wanted = draftedIssues(fromIssues)
+          const read = yield* Effect.forEach(
+            wanted,
+            (one) =>
+              issues.read(one.issue, access.projectId).pipe(
+                Effect.map((found) => ({ ...one, found })),
+                Effect.mapError(
+                  () => new ToolRefused({ message: `Althar can't read ${one.issue}. Draft the task without it, or check the link.` }),
+                ),
+              ),
+            { concurrency: 4 },
+          )
+          // The same issue named twice, by its key and its link, is tied once.
+          const tied = read.filter(
+            (one, index) =>
+              read.findIndex((other) => other.found.product === one.found.product && other.found.ref === one.found.ref) === index,
+          )
+          const issue = tied[0]?.found
           // What the person said in the turn the coordinator is on is what they asked for, not what they sent since: the task's thread starts with it.
           const sql = yield* SqlClient.SqlClient
           // The images and files they sent with it are the task's too, referred to where their messages keep them.
@@ -1032,9 +1082,9 @@ export class Coordinator extends Context.Service<
                 ),
               ),
             )
-          if (issue !== undefined && from !== undefined) {
-            yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
-            if (partOf === true) yield* issues.setPart(created.taskId, true)
+          for (const one of tied) {
+            const attached = yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: one.issue })
+            if (one.partOf) yield* issues.setPart(created.taskId, true, attached.ref)
           }
           yield* adopt(access, { taskId: created.taskId, slug: created.slug, title: title.trim() })
           // The leads already at work on tasks from this message hear of this one: their opening briefs were written before it was made.
@@ -1052,7 +1102,7 @@ export class Coordinator extends Context.Service<
               })
             }
           }
-          return { created, issue }
+          return { created, issue, issues: tied }
         })
 
       /** The drafts the coordinator made in its turn now, by thread: told at its end if none has a plan (`unplannedNews`). */
@@ -1198,7 +1248,7 @@ export class Coordinator extends Context.Service<
           const { pull_request: pullRequest, ...drafted } = yield* read(DraftedTask, input)
           // Work on a pull request names it; asked only to review one, the person gets a review task.
           if (pullRequest === undefined) yield* notAReview(access)
-          const { created, issue } = yield* drafting(access, drafted)
+          const { created, issues: tied } = yield* drafting(access, drafted)
           if (access.role === 'coordinator') {
             draftedThisTurn.set(access.threadId, (draftedThisTurn.get(access.threadId) ?? new Map()).set(created.taskId, created.slug))
             yield* redraft(access.threadId, (drafts) =>
@@ -1216,7 +1266,7 @@ export class Coordinator extends Context.Service<
             ),
             lifetime,
           )
-          const from = issue === undefined ? '' : drafted.part_of === true ? `, part of ${issue.key}` : `, from ${issue.key}`
+          const from = fromWords(tied.map((one) => ({ key: one.found.key, partOf: one.partOf })))
           if (pullRequest === undefined) return `Drafted ${created.slug}${from}. Now propose its plan with propose_plan.`
           // A new task has nothing of its own to lose: it starts on the pull request's head.
           const attached = yield* changes
@@ -1501,10 +1551,12 @@ export class Coordinator extends Context.Service<
               title,
               follow: 'none',
             })
+          // Its review reads what its lead builds now, at Ship, not a pull request's head as it stood while it was a prototype.
           yield* runs.changeTeam({
             taskId: task.id,
             steps: review === null ? (own === undefined ? [] : [{ ...own, skipped: true }]) : [review],
             actorId: instance.systemId,
+            atShip: true,
           })
           yield* runs.reshape({ taskId: task.id, end, ...(review === null ? {} : { afterMerge: null }), actorId: instance.systemId })
           const named = yield* modelNamer
@@ -2038,17 +2090,72 @@ export class Coordinator extends Context.Service<
           return `${task.slug}'s lead compacts its context after what it was told before.`
         })
 
-      /** Whether a task does only part of its issue, as its issue's switch says: merged, the issue is commented on, not closed. */
+      /** Whether a task does only part of an issue it came from, as that issue's switch says: merged, the issue is commented on, not closed. */
       const setPartOf = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const asked = yield* read(PartOf, input)
           const task = yield* taskOf(access, asked.task)
-          if ((yield* issues.ofTask(task.id)) === null)
+          const all = yield* issues.allOfTask(task.id)
+          if (all.length === 0)
             return yield* new ToolRefused({ message: `${task.slug} didn't come from an issue: there is nothing to set.` })
-          yield* issues.setPart(task.id, asked.part_of)
-          const how = asked.part_of ? 'does only part of its issue' : 'does all of its issue'
+          const picked = asked.issue === undefined ? undefined : pickIssue(asked.issue, all)
+          if (picked !== undefined && picked.one === null)
+            return yield* new ToolRefused({
+              message:
+                picked.several.length > 1
+                  ? `${task.slug} came from more than one ${asked.issue}, on different trackers: name the one you mean by its link, ${picked.several.map((one) => one.url).join(' or ')}.`
+                  : `${task.slug} didn't come from ${asked.issue}: it came from ${all.map((one) => one.key).join(', ')}.`,
+            })
+          const named = picked?.one ?? undefined
+          yield* issues.setPart(task.id, asked.part_of, named?.link)
+          yield* changes.issuesChanged(task.id)
+          // Said for the one named, or for its only issue; for all of several, by their keys.
+          const which = named?.key ?? (all.length === 1 ? 'its issue' : all.map((one) => one.key).join(' and '))
+          const how = asked.part_of ? `does only part of ${which}` : `does all of ${which}`
           yield* saidOn(access, input, task, `“${task.title}” ${how} now`, `set this task as one that ${how}`)
           return `${task.slug} ${how} now: ${asked.part_of ? 'as its pull request merges, Althar comments on the issue and leaves it open' : 'its pull request merging closes the issue'}.`
+        })
+
+      /**
+       * Ties a task to another issue it comes from, on any tracker, beside
+       * those it came from already: its card and thread show it, its pull
+       * request names it, and its merge closes it, or comments where it does
+       * only part. One added to a task under way moves to In Progress too.
+       */
+      const addIssue = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(IssueAdded, input)
+          const reference = asked.task ?? (access.role === 'lead' ? access.taskId : null)
+          if (reference === null) return yield* new ToolRefused({ message: 'Name the task: its slug, as list_tasks shows it.' })
+          const task = yield* taskOf(access, reference)
+          const had = yield* issues.allOfTask(task.id)
+          const added = yield* issues
+            .attach({ projectId: access.projectId as ProjectId, taskId: task.id, issue: asked.issue })
+            .pipe(Effect.mapError((error) => new ToolRefused({ message: readRefusal(error, asked.issue) })))
+          const again = had.some((one) => one.product === added.product && one.ref === added.ref)
+          // By the tie's id: another tracker's issue of this task may share its key.
+          const tie = (yield* issues.allOfTask(task.id)).find((one) => one.product === added.product && one.ref === added.ref)
+          if (asked.part_of !== undefined && tie !== undefined) yield* issues.setPart(task.id, asked.part_of, tie.link)
+          // An open pull request names it, and its tracker links back to it, as one opened now would.
+          yield* changes.issuesChanged(task.id)
+          if (again)
+            return `${task.slug} came from ${added.key} already${asked.part_of === undefined ? '' : asked.part_of ? ': it does only part of it now' : ': it does all of it now'}.`
+          // A task whose work has begun moves it as it moved the others; one not started moves each as it starts.
+          const sql = yield* SqlClient.SqlClient
+          const [begun] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+            JOIN runs r ON r.id = e.run_id JOIN tasks k ON k.id = r.task_id
+            WHERE r.task_id = ${task.id} AND k.state = 'open' LIMIT 1`
+          if (begun !== undefined) yield* issues.started(task.id)
+          const part = asked.part_of === true ? ', only part of it' : ''
+          yield* saidOn(
+            access,
+            input,
+            task,
+            `“${task.title}” comes from ${added.key} too${part}`,
+            `added ${added.key} to the issues this task comes from${part}`,
+          )
+          return `${task.slug} comes from ${added.key} too${part}: ${added.title}. Its card and thread show it, its pull request names it, and as it merges Althar ${asked.part_of === true ? 'comments on it with what landed and leaves it open' : 'closes it, where the project moves issues'}.${begun === undefined ? '' : ' Althar moves it to In Progress now, where the project moves issues.'}`
         })
 
       const message = (access: ToolAccess, input: unknown) =>
@@ -2415,10 +2522,14 @@ export class Coordinator extends Context.Service<
             type: 'object',
             properties: {
               text: { type: 'string', description: 'Words in its title or description: all of them.' },
-              tracker: { type: 'string', description: 'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab, or a workspace.' },
+              tracker: {
+                type: 'string',
+                description: 'The tracker, by name: Linear, Jira, Trello, ClickUp, GitHub, GitLab, or a workspace.',
+              },
               container: {
                 type: 'string',
-                description: "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list.",
+                description:
+                  "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list, a ClickUp list.",
               },
               state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Open unless said; with keys, all unless said.' },
               mine: {
@@ -2475,12 +2586,12 @@ export class Coordinator extends Context.Service<
             tracker: {
               type: 'string',
               description:
-                'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab; where two connections share a name, as Althar names them, or by site.',
+                'The tracker, by name: Linear, Jira, Trello, ClickUp, GitHub, GitLab; where two connections share a name, as Althar names them, or by site.',
             },
             container: {
               type: 'string',
               description:
-                "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a repository as owner/name.",
+                "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a ClickUp list as Space / Folder / List, a repository as owner/name.",
             },
             labels: { type: 'array', items: { type: 'string' }, description: 'Labels the tracker has; Althar says which it left off.' },
             ...fieldSchema,
@@ -2576,7 +2687,7 @@ export class Coordinator extends Context.Service<
         ...readTasksTools,
         tool(
           'draft_task',
-          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. ${DRAFT_THEN_PRESET}${LEAD_STARTING}`,
+          `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue, and part_of where it does only part of it; from several, on any trackers, pass each in issues. When it works on an open pull request, such as to answer its review, pass it as pull_request: the task starts on its head and follows it, and its work goes there, with no new pull request. ${DRAFT_THEN_PRESET}${LEAD_STARTING}`,
           {
             type: 'object',
             properties: {
@@ -2587,6 +2698,21 @@ export class Coordinator extends Context.Service<
                 type: 'boolean',
                 description:
                   'It does only part of its issue: as its pull request merges, Althar comments on the issue with what landed and leaves it open, rather than closing it.',
+              },
+              issues: {
+                type: 'array',
+                description:
+                  'Several issues it comes from, on any trackers, where it does more than one: each its link or key, or { issue, part_of } where it does only part of that one. Beside issue, or instead of it; the first one’s key goes in its branch.',
+                items: {
+                  anyOf: [
+                    { type: 'string' },
+                    {
+                      type: 'object',
+                      properties: { issue: { type: 'string' }, part_of: { type: 'boolean' } },
+                      required: ['issue'],
+                    },
+                  ],
+                },
               },
               pull_request: {
                 type: 'string',
@@ -2804,7 +2930,76 @@ export class Coordinator extends Context.Service<
               const all = yield* presetsIn(access.projectId)
               // Its lead as list_models names it, not by the id a preset was written with.
               const models = presetModels(yield* usableModels(access.projectId).pipe(Effect.orElseSucceed(() => [])))
-              return all.map((one) => `- ${one.name}${one.builtin ? '' : ' (theirs)'}: ${describePreset(one.parts, models)}.`).join('\n')
+              return all
+                .map(
+                  (one) =>
+                    `- ${one.name}${one.builtin ? (one.tuned === true ? ' (built in, tuned by them)' : '') : ' (theirs)'}: ${describePreset(one.parts, models)}.`,
+                )
+                .join('\n')
+            }),
+        ),
+        tool(
+          'tune_preset',
+          'Tunes one of the built-in presets (Chat, Change, Small change, Review a PR, Prototype) as the person’s own, on their word, as Settings does: who leads it and at what effort, who reviews it and at what effort, and its brief. A built-in names no model: its lead and reviewer are picked as for any step until the person sets one here. What you leave out stays as they had it; null puts that part back to the built-in’s; reset takes all of it back. Their own presets they change in Settings. It acts at once: say what you set in a line.',
+          {
+            type: 'object',
+            properties: {
+              preset: { type: 'string', description: 'The built-in preset, by name as list_presets names it.' },
+              lead: {
+                type: ['object', 'null'],
+                description: 'Its lead’s model, as list_models writes it, with an effort where it matters; null, picked as for any step.',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+              },
+              review: {
+                type: ['object', 'null'],
+                description: 'Its reviewer’s model, with an effort where it matters; null, picked as for any step.',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+              },
+              brief: { type: ['string', 'null'], description: 'A few lines its lead reads first; null, the built-in’s own.' },
+              reset: { type: 'boolean', description: 'Takes the preset back to the built-in, everything the person set gone.' },
+            },
+            required: ['preset'],
+          },
+          (access, input) =>
+            Effect.gen(function* () {
+              const asked = yield* read(TunePresetInput, input)
+              const now = (yield* presetsIn(access.projectId)).find(
+                (one) => one.builtin && (one.id === asked.preset || one.name.toLowerCase() === asked.preset.trim().toLowerCase()),
+              )
+              if (now === undefined)
+                return yield* new ToolRefused({
+                  message: `“${asked.preset}” isn’t a built-in preset: Chat, Change, Small change, Review a PR or Prototype. The person changes their own in Settings.`,
+                })
+              const models = presetModels(yield* usableModels(access.projectId).pipe(Effect.orElseSucceed(() => [])))
+              if (asked.reset === true) {
+                const back = yield* resetPreset(now.id)
+                return `${back.name} is back to the built-in: ${describePreset(back.parts, models)}.`
+              }
+              // Each part as the person had it, unless named here.
+              const pick = (
+                step: typeof StepPick.Type | null | undefined,
+                name: string,
+                was: string | null,
+                wasEffort: string | null | undefined,
+              ) =>
+                step === undefined
+                  ? Effect.succeed({ named: was, effort: wasEffort ?? null })
+                  : step === null
+                    ? Effect.succeed({ named: null, effort: null })
+                    : Effect.map(stepOf(access.projectId, step, name), (one) => ({
+                        named: `${one.agentId}/${one.model ?? 'default'}`,
+                        effort: 'effort' in one && typeof one.effort === 'string' ? one.effort : null,
+                      }))
+              const lead = yield* pick(asked.lead, 'its lead', now.parts.lead, now.parts.effort)
+              const review = yield* pick(asked.review, 'its review', now.parts.reviewer, now.parts.reviewerEffort)
+              const tuned = yield* tunePreset(now.id, {
+                lead: lead.named,
+                effort: lead.effort,
+                reviewer: review.named,
+                reviewerEffort: review.effort,
+                ...(asked.brief === undefined ? { brief: now.parts.brief } : asked.brief === null ? {} : { brief: asked.brief }),
+              })
+              return `${tuned.name}${tuned.tuned === true ? ' is tuned as theirs' : ' is as built in'}: ${describePreset(tuned.parts, models)}.`
             }),
         ),
         tool(
@@ -2815,7 +3010,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines can be planned small: pass small_change and keep its configured review before Ship. Size never schedules a review after merge, and you must not propose an extra one there. Only an explicit requested review timing or a custom preset can do that. Put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
+          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines can be planned small: pass small_change and keep its configured review before Ship. Size never schedules a review after merge, and you must not propose an extra one there. Only an explicit requested review timing or a custom preset can do that. Put its lead on a light, quick model of those list_models gives, at a low effort, unless the person's defaults or notes say otherwise. It then has no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
           {
             type: 'object',
             properties: {
@@ -3119,12 +3314,13 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'set_part_of_issue',
-          "Sets whether a task does only part of the issue it came from, as its issue's switch does: part_of true, and as its pull request merges Althar comments on the issue with what landed and leaves it open; false, and merging closes it.",
+          "Sets whether a task does only part of an issue it came from, as that issue's switch does: part_of true, and as its pull request merges Althar comments on the issue with what landed and leaves it open; false, and merging closes it. Names the issue as issue, where the task came from several; without it, each of them.",
           {
             type: 'object',
             properties: {
               task: { type: 'string' },
               part_of: { type: 'boolean' },
+              issue: { type: 'string', description: 'Which of its issues, by key or link, where it came from several.' },
               why: {
                 type: 'string',
                 description: 'Why, in a few plain words, said in both threads: "the person asked", or what is going wrong.',
@@ -3133,6 +3329,24 @@ export class Coordinator extends Context.Service<
             required: ['task', 'part_of'],
           },
           setPartOf,
+        ),
+        tool(
+          'add_issue',
+          "Adds an issue a task comes from, beside those it came from already, on any tracker, such as a second ticket the person meant it to do too: its card and thread show it, its pull request names it, and as it merges Althar closes it, or comments with what landed where part_of is true. One added to a task under way moves to In Progress at once, where the project moves issues. A lead's own task where task is left out.",
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: 'Its slug; your own task where you leave it out.' },
+              issue: { type: 'string', description: 'Its link, or its key (DEV-37, #12).' },
+              part_of: { type: 'boolean', description: 'The task does only part of it: its merge comments on it rather than closing it.' },
+              why: {
+                type: 'string',
+                description: 'Why, in a few plain words, said in both threads: "the person asked", or what is going wrong.',
+              },
+            },
+            required: ['issue'],
+          },
+          addIssue,
         ),
         tool(
           'keep_note',

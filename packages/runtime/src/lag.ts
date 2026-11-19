@@ -3,15 +3,17 @@ import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { Duration, Effect, type Scope } from 'effect'
 
 /*
- * How late the runtime's thread ran, for whoever works on Althar: in a
- * development build the app asks for it (`ALTHAR_LAG_LOG`), and every few
- * seconds the runtime's log says how late its event loop ran where it ran
- * late at all, so work that holds the one thread the window is answered on
- * shows where it happens rather than as a window that crawls. A window's
- * call that took long says so too, by its name (`slowCall`).
+ * How late the runtime's thread ran, for whoever works on Althar: the app
+ * asks for it (`ALTHAR_LAG_LOG`), packaged or not, and every few seconds the
+ * runtime's log says how late its event loop ran where it ran late at all,
+ * so work that holds the one thread the window is answered on shows where it
+ * happens rather than as a window that crawls, on a person's computer as on
+ * ours. A window's call that took long says so too, by its name
+ * (`slowCall`). It stays in the log on this computer, and goes nowhere but
+ * with a problem the person reports. The command-line client doesn't ask.
  */
 
-/** Whether the app asked for the log of a late loop: a development build does. */
+/** Whether the app asked for the log of a late loop: the desktop app does, packaged or not. */
 export const lagLogged = (env: NodeJS.ProcessEnv = process.env) => env.ALTHAR_LAG_LOG === '1'
 
 /** How late the loop may run before a window of it is said. */

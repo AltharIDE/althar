@@ -1,4 +1,6 @@
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import type { Appearance } from './appPreferences'
 
@@ -223,6 +225,53 @@ export const firstScheme = (
     // told at once, as a late listener is: it left before it knew how
     if (done) leave()
   })
+
+/** The desktop's scheme as last heard, kept for the next start: read, and kept again as it changes. */
+export interface KeptScheme {
+  readonly read: () => Promise<Scheme | undefined>
+  readonly write: (scheme: Scheme) => Promise<void>
+}
+
+/** Its file in the profile. */
+export const SCHEME_CACHE = 'window-scheme.json'
+
+/** The scheme kept in `profile`'s file; nothing where none was kept, or what was isn't one. */
+export const keptSchemeIn = (profile: string): KeptScheme => ({
+  read: async () => {
+    try {
+      const { scheme } = JSON.parse(await readFile(join(profile, SCHEME_CACHE), 'utf8')) as { scheme?: unknown }
+      return scheme === 0 || scheme === 1 || scheme === 2 ? scheme : undefined
+    } catch {
+      return undefined
+    }
+  },
+  write: async (scheme) => {
+    await mkdir(profile, { recursive: true })
+    const temporary = join(profile, `${SCHEME_CACHE}.${process.pid}.tmp`)
+    await writeFile(temporary, JSON.stringify({ scheme }))
+    await rename(temporary, join(profile, SCHEME_CACHE))
+  },
+})
+
+/**
+ * The scheme the first window opens in on Linux, while Appearance is as the system is: what the desktop said last
+ * time, at once, where it was kept, so a portal slow to start never holds the window; else its first word now, within
+ * `within` (`firstScheme`). The windows follow what it says after either way. Each scheme it says is kept for the next start.
+ */
+export const openingScheme = async (
+  follow: (listener: (scheme: Scheme | undefined) => void) => () => void,
+  within: number,
+  kept: KeptScheme,
+): Promise<Scheme | undefined> => {
+  const last = await kept.read()
+  let keeping = last
+  follow((scheme) => {
+    if (scheme === undefined || scheme === keeping) return
+    keeping = scheme
+    void kept.write(scheme).catch(() => undefined)
+  })
+  return last ?? firstScheme(follow, within)
+}
 
 /**
  * What Electron's nativeTheme should follow for Settings › Appearance. Light and dark are themselves. As the system is,

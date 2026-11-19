@@ -12,7 +12,7 @@ import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { UnknownAgent } from './errors'
 import { Installs, isInstalled } from './Installs'
 import { Instance } from './Instance'
-import { blockedModelsOf, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
+import { blockedModelsOf, clearDefaultEffort, defaultEffortsOf, setDefaultEffort, setModelBlocked } from './preferences'
 import { change, timestamp } from './records'
 import { SignIns } from './SignIns'
 import { Accounts } from './Accounts'
@@ -186,11 +186,11 @@ export class Models extends Context.Service<
   {
     /** Every agent's models and efforts, as far as they are known, with the person's default efforts. */
     readonly catalog: Effect.Effect<ReadonlyArray<AgentModels>, SqlError.SqlError>
-    /** The person's default effort for one of an agent's models, for every session on it from now. */
+    /** The person's default effort for one of an agent's models, for every session on it from now; none takes theirs away. */
     setDefaultEffort(input: {
       readonly agentId: string
       readonly model: string
-      readonly effort: string
+      readonly effort: string | null
     }): Effect.Effect<void, SqlError.SqlError | UnknownAgent>
     /** Switches one of an agent's models off, or on again (ADR-015). */
     setModelBlocked(input: {
@@ -350,19 +350,27 @@ export class Models extends Context.Service<
           const asked = probed.get(definition.id)
           if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
           // Not asked yet this launch: asked now, in the background, if it is installed and signed in; its latest session says until then.
+          // Whether it is signed in is its own command's to say, which takes seconds with the computer busy, so that is asked
+          // behind too: the read never waits on it (foundations.md, The UI is instant). One signed out counts as one that
+          // couldn't say, asked again a while on or once it is found signed in.
           if (!probing.has(definition.id) && isInstalled(installs, definition)) {
             const reservation = Symbol()
             probing.set(definition.id, reservation)
-            const status = yield* signIns
-              .of(definition.id)
-              .pipe(
-                Effect.onExit((exit) => (Exit.isFailure(exit) ? Effect.sync(() => releaseProbe(definition.id, reservation)) : Effect.void)),
-              )
-            if (ownsProbe(definition.id, reservation) && status !== 'signed_out') {
-              yield* Effect.forkIn(probe(entry, reservation), scope)
-              return { ...seen, ...now, defaults, blocked, probing: true }
-            }
-            releaseProbe(definition.id, reservation)
+            yield* Effect.forkIn(
+              signIns.of(definition.id).pipe(
+                Effect.flatMap((status) => {
+                  if (!ownsProbe(definition.id, reservation)) return Effect.void
+                  if (status !== 'signed_out') return Effect.asVoid(probe(entry, reservation))
+                  return Effect.gen(function* () {
+                    probed.set(definition.id, null)
+                    failedAt.set(definition.id, yield* Clock.currentTimeMillis)
+                  })
+                }),
+                Effect.ensuring(Effect.sync(() => releaseProbe(definition.id, reservation))),
+              ),
+              scope,
+            )
+            return { ...seen, ...now, defaults, blocked, probing: true }
           }
           return { ...seen, ...now, defaults, blocked, probing: probing.has(definition.id) }
         })
@@ -375,7 +383,8 @@ export class Models extends Context.Service<
         setDefaultEffort: (input) =>
           Effect.gen(function* () {
             const entry = yield* agents.get(input.agentId)
-            yield* setDefaultEffort(entry.definition.id, input.model, input.effort)
+            if (input.effort === null) yield* clearDefaultEffort(entry.definition.id, input.model)
+            else yield* setDefaultEffort(entry.definition.id, input.model, input.effort)
           }).pipe(Effect.provide(context)),
         setModelBlocked: (input) =>
           Effect.gen(function* () {

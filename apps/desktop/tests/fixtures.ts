@@ -86,6 +86,7 @@ export const projectRules: ProjectRulesView = {
   branchPattern: null,
   titlePattern: null,
   moveIssues: true,
+  linkIssues: true,
   afterMergeReview: 'major',
   repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
@@ -721,7 +722,7 @@ export const items = {
       section: 'althar/plans-and-reviews',
       title: 'Plans and reviews',
       project: null,
-      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5' }],
+      moves: [{ key: 'rounds', label: 'Review rounds', before: '3', after: '5', changes: ['Review rounds: 3 → 5'] }],
       by: { kind: 'coordinator', taskId: null, title: null },
       loosens: false,
       words: null,
@@ -1082,13 +1083,15 @@ export const agentTools: AgentTools = {
 
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
-  const watching: Array<number | undefined> = []
+  const watching: Array<number | import('@althar/contracts').FeedPosition | undefined> = []
   const starts = new Set<() => void>()
   const client: Client = {
     status: vi.fn(async () => status),
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
+    lookElsewhere: vi.fn(async () => ({ worktrees: [], setups: [], conversations: [] })),
+    bringIn: vi.fn(async () => ({ tasks: [], asides: [], setups: 0, histories: 0, failed: [] })),
     placeRepository: vi.fn(async (_grant: string, name: string) => ({
       name: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       path: `/Users/ada/code/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
@@ -1121,6 +1124,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
+    // Each as `getThreadItem` reads it, whatever a test makes that do.
+    getThreadItems: vi.fn(async (threadId: string, itemIds: Iterable<string>) => {
+      const ids = [...itemIds]
+      const read = await Promise.all(ids.map((id) => client.getThreadItem(threadId, id)))
+      return new Map(ids.map((id, at) => [id, read[at] ?? null]))
+    }),
+    behind: (start) => start(),
     readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
     readBackgroundOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
     readLaunchOutput: vi.fn(async () => ({ text: 'VITE ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/\n', dropped: 0 })),
@@ -1236,6 +1246,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listPresets: vi.fn(async () => []),
     savePreset: vi.fn(async () => ({ name: 'Preset' })),
     removePreset: vi.fn(async () => {}),
+    tunePreset: vi.fn(async () => {}),
+    resetPreset: vi.fn(async () => {}),
     declinePresetOffer: vi.fn(async () => {}),
     runIt: vi.fn(async () => ({ kind: 'ran' as const, trust: 'safe' as const, said: '' })),
     stopRunning: vi.fn(async () => ''),
@@ -1539,6 +1551,7 @@ export const usageAccount = (over: Partial<PlanUsage['accounts'][number]> = {}):
   observedAt: '2026-10-15T10:00:00.000Z',
   plan: 'pro',
   windows: [{ kind: 'five_hour', label: null, usedPercent: 60, resetsAt: '2026-10-15T15:00:00.000Z' }],
+  resetWindows: [],
   fault: null,
   noReading: null,
   resetSince: false,

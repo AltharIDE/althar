@@ -441,15 +441,42 @@ describe('an automation’s page', () => {
     expect(client.turnOnAutomation).toHaveBeenCalledWith('auto1')
   })
 
-  it('is deleted, asked first, and goes back to the tab', async () => {
-    const { client } = fakeClient()
+  it('is deleted, asked first, and goes back to the tab at once, gone from it though a read from before lands', async () => {
+    let answer: () => void = () => undefined
+    const getAutomations = vi.fn(async () => automationsSnapshot())
+    const { client } = fakeClient({ getAutomations, deleteAutomation: vi.fn(() => new Promise<void>((resolve) => (answer = resolve))) })
     withServices(<Room opening="auto1" />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'More' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete…' }))
     const dialog = await screen.findByRole('dialog', { name: 'Delete Morning review?' })
     await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
     expect(client.deleteAutomation).toHaveBeenCalledWith('auto1')
-    await waitFor(() => expect(opened()).toBe('the tab'))
+    // Back on the tab, with the runtime still to answer: it isn't there, though the tab reads it as it was.
+    expect(opened()).toBe('the tab')
+    await waitFor(() => expect(getAutomations).toHaveBeenCalled())
+    expect(screen.queryByText('Morning review')).toBeNull()
+    // Gone, and read so.
+    getAutomations.mockResolvedValue(automationsSnapshot({ automations: [] }))
+    await act(async () => answer())
+    await waitFor(() => expect(getAutomations).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('Morning review')).toBeNull()
+  })
+
+  it('comes back on the tab where it couldn’t be deleted, saying why', async () => {
+    const { client } = fakeClient({
+      getAutomations: vi.fn(async () => automationsSnapshot()),
+      deleteAutomation: vi.fn(async () => {
+        throw new ApiError({ reason: 'Busy', message: 'It is running now.' })
+      }),
+    })
+    withServices(<Room opening="auto1" />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Delete…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Delete Morning review?' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    expect(opened()).toBe('the tab')
+    expect(await screen.findByText('It is running now.')).toBeTruthy()
+    expect(await screen.findByText('Morning review')).toBeTruthy()
   })
 
   it('goes back to the tab once the coordinator deletes it', async () => {

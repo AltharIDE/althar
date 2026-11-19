@@ -10,6 +10,7 @@ import type { ReviewSealSample } from '../setup/ReviewSeal/ReviewSeal'
 import type { ServiceConnection, ServiceOption } from '../setup/Connections/Connections'
 import type { AgentGlance, MarkGlance } from '../setup/ControlCenter/ControlCenter'
 import type { SwitchedModel } from '../setup/ModelSwitches/ModelSwitches'
+import type { HostedRepository, SetupHost } from '../setup/ProjectSetup/ProjectSetup'
 import type { MapHost, MapRepository } from '../setup/RepositoryMap/RepositoryMap'
 import type { RuntimeEntry } from '../setup/Runtimes/Runtimes'
 import type { SourceEntry } from '../setup/SourceMap/SourceMap'
@@ -312,6 +313,7 @@ export const MAP_MERIDIAN: MapRepository[] = [
     name: 'meridian-app',
     where: '~/code/meridian-app',
     branch: 'main',
+    toward: { branch: 'main', defaultBranch: 'main', branches: ['main', 'next'] },
     role: RepositoryRole.Frontend,
     tasks: 2,
     remote: { host: 'github', path: 'meridian/app', href: 'https://github.com/meridian/app' },
@@ -321,6 +323,7 @@ export const MAP_MERIDIAN: MapRepository[] = [
     name: 'meridian-api',
     where: '~/code/meridian-api',
     branch: 'refunds-v2',
+    toward: { branch: 'main', defaultBranch: 'main', branches: ['main', 'release/2.4', 'refunds-v2'] },
     role: RepositoryRole.Service,
     tasks: 1,
     remote: { host: 'github', path: 'meridian/api', href: 'https://github.com/meridian/api' },
@@ -330,6 +333,7 @@ export const MAP_MERIDIAN: MapRepository[] = [
     name: 'meridian-infra',
     where: '~/code/meridian-infra',
     branch: 'trunk',
+    toward: { branch: 'trunk', defaultBranch: 'trunk', branches: ['trunk'] },
     role: RepositoryRole.Infrastructure,
     tasks: 0,
     remote: { host: 'gitlab', path: 'meridian-ops/infra', href: 'https://gitlab.com/meridian-ops/infra' },
@@ -365,3 +369,58 @@ export const CO_AUTHOR_COMMIT: CoAuthorCommit = {
   sha: '4e1c07a',
   when: 'committed 12 minutes ago',
 }
+
+/* The code hosts a clone comes from: GitHub connected, GitLab and Bitbucket not yet. */
+export const CLONE_HOSTS: SetupHost[] = [
+  { id: 'github', name: 'GitHub', brand: Brand.GitHub, thing: 'repository', connected: true, how: 'In your browser' },
+  { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, thing: 'project', connected: false, how: 'In your browser' },
+  { id: 'bitbucket', name: 'Bitbucket', brand: Brand.Bitbucket, thing: 'repository', connected: false, how: 'With an Atlassian API token' },
+]
+
+/* Your repositories on GitHub, last pushed to first, as Meridian adds one it doesn't have yet. */
+export const CLONE_REPOSITORIES: HostedRepository[] = [
+  {
+    id: 'gh:meridian/web',
+    host: 'github',
+    owner: 'meridian',
+    name: 'meridian-web',
+    description: 'The marketing site and docs',
+    private: false,
+    pushed: '2 h ago',
+    like: false,
+    here: null,
+  },
+  {
+    id: 'gh:meridian/mobile',
+    host: 'github',
+    owner: 'meridian',
+    name: 'meridian-mobile',
+    description: 'iOS and Android app',
+    private: true,
+    pushed: 'yesterday',
+    like: false,
+    here: null,
+  },
+  {
+    id: 'gh:meridian/design-tokens',
+    host: 'github',
+    owner: 'meridian',
+    name: 'design-tokens',
+    description: null,
+    private: true,
+    pushed: '3 days ago',
+    like: false,
+    here: '~/code/design-tokens',
+  },
+  {
+    id: 'gh:balazs/dotfiles',
+    host: 'github',
+    owner: 'balazs',
+    name: 'dotfiles',
+    description: null,
+    private: false,
+    pushed: 'in August',
+    like: false,
+    here: null,
+  },
+]

@@ -9,6 +9,7 @@ import { makeLinear } from '../src/linear'
 import { IssueField, IssueFilter, type Product, type TrackerCapabilities } from '../src/model'
 import { changeTable, findTable, trackerCapabilities, TRACKERS } from '../src/trackers'
 import { makeTrello } from '../src/trello'
+import { makeClickUp } from '../src/clickup'
 
 /* What each tracker finds and changes, read without a connection, is what its adapter says of itself. */
 
@@ -25,6 +26,7 @@ const adapters: ReadonlyArray<readonly [Product, { readonly capabilities: Tracke
   ['jira_cloud', makeJiraCloud(options)],
   ['jira_dc', makeJiraDataCenter(options)],
   ['trello', makeTrello(options)],
+  ['clickup', makeClickUp(options)],
   ['github', makeGitHub(options)],
   ['gitlab', makeGitLab(options)],
 ]
@@ -47,7 +49,7 @@ describe('trackerCapabilities', () => {
       for (const key of Object.keys(table ?? {}) as ReadonlyArray<keyof TrackerCapabilities>)
         assert.strictEqual(adapter.capabilities[key], table?.[key], `${product} ${key}`)
     }
-    for (const product of ['linear', 'jira_cloud', 'jira_dc', 'trello'] as const)
+    for (const product of ['linear', 'jira_cloud', 'jira_dc', 'trello', 'clickup'] as const)
       assert.strictEqual(adapters.find(([one]) => one === product)?.[1].capabilities, trackerCapabilities(product))
   })
 
@@ -62,8 +64,8 @@ describe('findTable', () => {
   const rows = cellsOf(findTable())
 
   it('has a column per tracker and a row per filter', () => {
-    assert.deepStrictEqual(rows[0], ['Find by', 'Linear', 'Jira', 'Trello', 'GitHub', 'GitLab'])
-    assert.deepStrictEqual(rows[1], ['---', '---', '---', '---', '---', '---'])
+    assert.deepStrictEqual(rows[0], ['Find by', 'Linear', 'Jira', 'Trello', 'ClickUp', 'GitHub', 'GitLab'])
+    assert.deepStrictEqual(rows[1], ['---', '---', '---', '---', '---', '---', '---'])
     assert.lengthOf(rows, 2 + IssueFilter.literals.length)
     for (const row of rows) assert.lengthOf(row, 1 + TRACKERS.length)
   })
@@ -85,7 +87,7 @@ describe('changeTable', () => {
   const rows = cellsOf(changeTable())
 
   it('has a column per tracker, a row per field, and one for linking a pull request', () => {
-    assert.deepStrictEqual(rows[0], ['Change', 'Linear', 'Jira', 'Trello', 'GitHub', 'GitLab'])
+    assert.deepStrictEqual(rows[0], ['Change', 'Linear', 'Jira', 'Trello', 'ClickUp', 'GitHub', 'GitLab'])
     assert.lengthOf(rows, 2 + IssueField.literals.length + 1)
     for (const row of rows) assert.lengthOf(row, 1 + TRACKERS.length)
     assert.strictEqual(rows.at(-1)?.[0], 'link a pull request')
@@ -101,7 +103,7 @@ describe('changeTable', () => {
       })
     })
     const assignees = rows.find((row) => row[0] === 'assignees')
-    assert.deepStrictEqual(assignees?.slice(1), ['one', 'one', 'several', 'several', 'several'])
+    assert.deepStrictEqual(assignees?.slice(1), ['one', 'one', 'several', 'several', 'several', 'several'])
     assert.deepStrictEqual(
       rows.at(-1)?.slice(1),
       TRACKERS.map((tracker) => (tracker.capabilities.links ? 'yes' : 'by its name')),

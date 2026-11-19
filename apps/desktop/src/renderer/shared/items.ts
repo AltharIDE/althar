@@ -24,6 +24,23 @@ export const isSending = (id: string) => id.startsWith(SENDING)
  */
 const moves = new Map<string, string>()
 export const messageMove = (item: ThreadItem): string => moves.get(item.id) ?? `message:${item.id}`
+// The window's idle-send guess follows the message when the store's copy replaces it.
+const reading = new Set<string>()
+export const releaseSending = (id: string) => reading.delete(`message:${id}`)
+export const locallyReading = (item: ThreadItem) => reading.has(messageMove(item))
+/** Release the guess and update the held items, so the window redraws even when the runtime head is unchanged. */
+export const releasedReadings = (items: ReadonlyArray<ThreadItem>, moves: ReadonlyArray<string>): ReadonlyArray<ThreadItem> => {
+  for (const move of moves) reading.delete(move)
+  return items.map((item) =>
+    moves.includes(messageMove(item)) && item.kind === 'user_message' && item.input !== null && item.input.claimed !== true
+      ? { ...item, input: { ...item.input, claimed: false } }
+      : item,
+  )
+}
+
+/** Whether a locally sent first message can be starting this thread's absent session. */
+export const readingLocallyOf = (session: { readonly turnRunning: boolean } | null, accepting?: 'now' | 'queued', kept = false) =>
+  session === null && accepting === 'now' && !kept
 
 /** A message the window shows the moment it is sent, after what it holds, until the store's copy arrives. */
 export const sending = (
@@ -44,6 +61,7 @@ export const sending = (
 ): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
   sent += 1
   const id = `${SENDING}${sent}`
+  if (!message.queued) reading.add(`message:${id}`)
   const item: ThreadItem = {
     id,
     kind: 'user_message',
@@ -74,6 +92,7 @@ export const sending = (
  * instead, so what shows is what was sent.
  */
 export const unsent = (items: ReadonlyArray<ThreadItem>, id: string, text: string): ReadonlyArray<ThreadItem> => {
+  releaseSending(id)
   if (items.some((item) => item.id === id)) return items.filter((item) => item.id !== id)
   const other = items.find((item) => isSending(item.id) && item.kind === 'user_message' && item.content.text === text)
   return other === undefined ? items : items.filter((item) => item.id !== other.id)
@@ -110,6 +129,7 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
         byId.delete(copy.id)
       }
     }
+    if (item.kind === 'user_message' && item.input?.state !== 'queued') reading.delete(messageMove(item))
     byId.set(item.id, item)
   }
   return [...byId.values()].toSorted((a, b) => a.sequence - b.sequence)
@@ -197,8 +217,24 @@ export const waiting = (items: ReadonlyArray<ThreadItem>): ReadonlyArray<string>
  * in the thread first. A message the runtime has claimed but not begun
  * reading yet is not shown as waiting: the agent is reading it now.
  */
-export const queueShown = (session: { readonly turnRunning: boolean } | null, sending: boolean, accepting?: 'now' | 'queued'): boolean =>
-  (sending && accepting === 'queued') || session?.turnRunning === true || (!sending && session === null)
+export const queueShown = (
+  session: { readonly turnRunning: boolean } | null,
+  sending: boolean,
+  accepting?: 'now' | 'queued',
+  items: ReadonlyArray<ThreadItem> = [],
+): boolean =>
+  (sending && accepting === 'queued') ||
+  session?.turnRunning === true ||
+  (session === null &&
+    (!sending ||
+      items.some(
+        (item) =>
+          item.kind === 'user_message' &&
+          item.input?.state === 'queued' &&
+          !item.input.interrupting &&
+          item.input.claimed !== true &&
+          !locallyReading(item),
+      )))
 
 /**
  * Whether what waits after the agent's last reply is being read now, with
@@ -212,7 +248,11 @@ export const readingNow = (
   session: { readonly turnRunning: boolean; readonly held: boolean; readonly state: string } | null,
   sending: boolean,
   kept = false,
-): boolean => !kept && session?.turnRunning !== true && (sending || session?.held === true || session?.state === 'starting')
+  accepting?: 'now' | 'queued',
+): boolean =>
+  !kept &&
+  session?.turnRunning !== true &&
+  (sending || session?.held === true || session?.state === 'starting' || (session === null && accepting === 'now'))
 
 /**
  * What waits its turn, oldest first, in the composer where the person can
@@ -223,6 +263,7 @@ export const readingNow = (
 export const queuedOf = (
   items: ReadonlyArray<ThreadItem>,
   shown: boolean,
+  readingLocally = false,
 ): ReadonlyArray<{
   readonly id: string
   readonly move?: string
@@ -237,7 +278,11 @@ export const queuedOf = (
   !shown
     ? []
     : items.flatMap((item) =>
-        item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
+        item.kind === 'user_message' &&
+        item.input?.state === 'queued' &&
+        !item.input.interrupting &&
+        item.input.claimed !== true &&
+        !(readingLocally && locallyReading(item))
           ? [
               {
                 id: item.id,
@@ -303,11 +348,34 @@ export const newestReads = (head?: string) => {
     begun.set(key, { read: mine, landed })
     return landed
   }
+  /**
+   * One read of several things, as `newest` reads each: `keep` is given, at once, those of them no read began after,
+   * so a burst read together is shown in one write.
+   */
+  const many = <A>(
+    keys: ReadonlyArray<string>,
+    read: Promise<ReadonlyMap<string, A>>,
+    keep: (values: ReadonlyMap<string, A>) => void,
+    fail: (failure: unknown) => void,
+  ): Promise<void> => {
+    reads += 1
+    const mine = reads
+    const landed = read.then((values) => {
+      const commit = () => {
+        const kept = new Map([...values].filter(([key]) => begun.get(key)?.read === mine))
+        if (kept.size > 0) keep(kept)
+      }
+      if (held !== null) held.push(commit)
+      else commit()
+    }, fail)
+    for (const key of keys) begun.set(key, { read: mine, landed })
+    return landed
+  }
   const landed = async (key: string) => {
     for (let now = begun.get(key); now !== undefined; now = begun.get(key)) {
       await now.landed
       if (begun.get(key) === now) return
     }
   }
-  return Object.assign(newest, { landed })
+  return Object.assign(newest, { many, landed })
 }

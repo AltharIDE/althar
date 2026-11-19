@@ -259,10 +259,10 @@ export const HeldByTheRuntime: Story = {
 
 /** Started, it waits for a free agent: it says so where the clock was, its steps can still change, and Hold takes it out of the line until you start it. */
 export const WaitingForAFreeAgent: Story = {
-  render: () => <Launch queued="Waiting: 4 of 4 agents busy on this Mac" />,
+  render: () => <Launch queued="Waiting · 4 agents busy" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('status')).toHaveTextContent('Waiting: 4 of 4 agents busy on this Mac')
+    await expect(c.getByRole('status')).toHaveTextContent('Waiting · 4 agents busy')
     await expect(c.queryByRole('button', { name: /Start/ })).toBeNull()
     await expect(c.getByRole('button', { name: 'Hold' })).toBeInTheDocument()
   },
@@ -275,7 +275,7 @@ function HeldWhileQueued() {
   const [held, setHeld] = useState(false)
   return (
     <Launch
-      {...(held ? {} : { queued: 'Waiting: 4 of 4 agents busy on this Mac' })}
+      {...(held ? {} : { queued: 'Waiting · 4 agents busy' })}
       held={held}
       onHeldChange={(next) => {
         heldQueued(next)
