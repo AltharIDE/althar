@@ -120,3 +120,59 @@ test('a held Prototype plan and a draft with no plan, both discarded by the coor
     await electronApp.close()
   }
 })
+
+/*
+ * As the person saw it: they said something while the coordinator was still
+ * drafting, steering it, and the drafts' cards were drawn after the
+ * conversation, below their message, then moved. A draft's card stays where
+ * it was drafted, above what was said since, while it is sized and once its
+ * plan didn't come.
+ */
+test('a draft’s card stays where it was drafted, above a message sent while its plan was on its way', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, repository(home, 'meridian'))
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    // What they said went to the coordinator at once, mid-turn.
+    await page.keyboard.press('ControlOrMeta+Shift+Comma')
+    await page
+      .getByRole('navigation', { name: 'Settings' })
+      .getByRole('button', { name: /^Tasks/ })
+      .click()
+    const group = page.getByRole('radiogroup', { name: 'When I send while an agent is working' })
+    await group.getByRole('radio', { name: 'Steer the agent' }).click()
+    await expect(group.getByRole('radio', { name: 'Steer the agent' })).toBeChecked()
+    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close Settings' }).click()
+
+    const conversation = page.getByRole('region', { name: 'Conversation' })
+    const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue|Steer)/ })
+    const say = async (words: string) => {
+      await box.fill(words)
+      await box.press('Enter')
+    }
+    await say('Explore the team. [coordinator:plan] [coordinator:plan-fails] [coordinator:slowly]')
+    const title = conversation.getByText('Explore the team', { exact: true }).first()
+    await expect(title).toBeVisible()
+    // A task now, its plan streaming, they say something.
+    await expect(conversation).toContainText(/Choosing a (lead|reviewer)/)
+    await say('you dont need to split these')
+    const message = conversation.getByText('you dont need to split these', { exact: true })
+    await expect(message).toBeVisible()
+    const above = async () => {
+      const card = await title.boundingBox()
+      const said = await message.boundingBox()
+      return card !== null && said !== null && card.y < said.y
+    }
+    expect(await above()).toBe(true)
+    // Its plan didn't come: its card says so, still above the message.
+    await expect(conversation.getByText('No plan yet')).toBeVisible()
+    await expect(conversation.getByText('Explore the team', { exact: true })).toHaveCount(1)
+    expect(await above()).toBe(true)
+    await title.evaluate((one) => one.scrollIntoView({ block: 'start' }))
+    await still(page)
+    await page.screenshot({ path: 'test-results/unplanned-5-stays-above-message.png', animations: 'disabled' })
+  } finally {
+    await electronApp.close()
+  }
+})
