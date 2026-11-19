@@ -5498,7 +5498,16 @@ export class Changes extends Context.Service<
           // from what they saved, so a host's read that lags behind its merge doesn't open it again.
           const link = (yield* linksOf(asked.taskId)).find((candidate) => candidate.id === asked.id) ?? asked
           if (link.connectionId === null) return false
-          const adapters = yield* connections.adapters(link.connectionId)
+          // Read and acted on whole while its connection is there, or not at all: a removal waits for it, and none reads after one
+          // began. Nothing read through a connection being removed is half heard, so a connection made again hears it anew.
+          const polled = yield* connections.whileThere(link.connectionId, pollThrough(link, link.connectionId, how))
+          return Option.getOrElse(polled, () => false)
+        })
+
+      /** One look at a pull request through its connection, held by `poll` against the connection's removal. */
+      const pollThrough = (link: LinkRow, connectionId: string, how: { readonly force: boolean; readonly fresh: boolean }) =>
+        Effect.gen(function* () {
+          const adapters = yield* connections.adapters(connectionId)
           const host = adapters.host
           if (host === undefined) return false
           const account = adapters.info.account

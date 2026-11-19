@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { Database } from '@althar/persistence-sqlite'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -23,12 +24,15 @@ const waitsOn = (threadId: string) =>
     return row?.since ?? null
   })
 
-/** A turn on the thread waits for a place, as Althar left it when it stopped. */
-const keptWaiting = (threadId: string) =>
+/**
+ * A turn on the thread waits for a place, as Althar left it when it stopped: written with Althar closed, as a look at what
+ * waits reads it as Althar starts, and one already running looks again only once woken.
+ */
+const keptWaiting = (file: string, threadId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     yield* sql`UPDATE threads SET waits_for_place = ${new Date().toISOString()} WHERE id = ${threadId}`
-  })
+  }).pipe(Effect.provide(Database.layer({ filename: file })))
 
 /** Looked at often, on a machine with room. */
 const often = (file = ':memory:') => runtime(file, {}, { busy: { every: Duration.millis(100) } })
@@ -40,9 +44,9 @@ describe('a turn kept waiting for a place', () => {
       // As Althar stopped, a turn on a thread no agent was ever on waited for a place.
       const threadId = yield* Effect.gen(function* () {
         const { task: created } = yield* task('Never started')
-        yield* keptWaiting(created.threadId)
         return created.threadId
       }).pipe(Effect.provide(runtime(file)))
+      yield* keptWaiting(file, threadId)
       yield* Effect.gen(function* () {
         const sessions = yield* Sessions
         yield* until(
@@ -56,21 +60,29 @@ describe('a turn kept waiting for a place', () => {
 
   it.live('starts the agent last on the thread for what the person said, at once', () =>
     Effect.gen(function* () {
-      const sessions = yield* Sessions
-      const { task: created } = yield* task('Said meanwhile')
-      yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
-      yield* until(turns(created.threadId), (rows) => rows[0]?.state === 'completed')
-      yield* sessions.stop(created.threadId)
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-kept-')), 'althar.sqlite')
       const body = 'Carry on with the docs.'
-      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId: created.threadId, body })
-      yield* keptWaiting(created.threadId)
-      const [delivered] = yield* until(
-        Effect.map(turns(created.threadId), (rows) => rows.filter((row) => row.prompt?.endsWith(body) === true)),
-        (rows) => rows.length === 1,
-      )
-      assert.strictEqual(delivered?.inputs, 1)
-      assert.strictEqual(Option.getOrUndefined(yield* sessions.running(created.threadId))?.agentId, 'codex')
-      assert.isNull(yield* waitsOn(created.threadId))
-    }).pipe(Effect.provide(often())),
+      // As Althar stopped, what the person said to a thread whose agent was stopped waited for a place.
+      const threadId = yield* Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task('Said meanwhile')
+        yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+        yield* until(turns(created.threadId), (rows) => rows[0]?.state === 'completed')
+        yield* sessions.stop(created.threadId)
+        yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId: created.threadId, body })
+        return created.threadId
+      }).pipe(Effect.provide(runtime(file)))
+      yield* keptWaiting(file, threadId)
+      yield* Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const [delivered] = yield* until(
+          Effect.map(turns(threadId), (rows) => rows.filter((row) => row.prompt?.endsWith(body) === true)),
+          (rows) => rows.length === 1,
+        )
+        assert.strictEqual(delivered?.inputs, 1)
+        assert.strictEqual(Option.getOrUndefined(yield* sessions.running(threadId))?.agentId, 'codex')
+        assert.isNull(yield* waitsOn(threadId))
+      }).pipe(Effect.provide(often(file)))
+    }),
   )
 })
