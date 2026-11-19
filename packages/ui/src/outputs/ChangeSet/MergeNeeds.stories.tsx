@@ -225,3 +225,25 @@ export const InTheQueue: StoryObj<typeof ChangeSet> = {
     />
   ),
 }
+
+/** A long requirement that wraps, with no chevron, over another row: its extra lines push the next row down, as a row holds what it says. */
+export const WrappedLine: StoryObj<typeof ChangeSet> = {
+  decorators: [(Story) => <div style={{ width: 300 }}>{Story()}</div>],
+  render: () => (
+    <ChangeSet
+      state={ChangeState.Ready}
+      host={GITHUB}
+      prs={[PR_416[0]!]}
+      needs={[
+        {
+          kind: 'other',
+          state: 'unmet',
+          said: 'GitHub holds it back until the release-train/2026-11-long-lived-branch protection rule passes',
+        },
+        { kind: 'approvals', state: 'unmet', have: 0, need: 1 },
+      ]}
+      target="main"
+      actions={<Button variant="signal">Accept and merge</Button>}
+    />
+  ),
+}

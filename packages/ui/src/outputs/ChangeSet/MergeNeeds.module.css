@@ -18,7 +18,7 @@
   align-items: flex-start;
 }
 .line > :first-child,
-.line > :last-child:not(:first-child) {
+.line > svg:last-child {
   display: inline-flex;
   align-items: center;
   height: 18px;
