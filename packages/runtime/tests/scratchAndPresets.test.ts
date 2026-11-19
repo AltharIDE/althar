@@ -390,8 +390,8 @@ describe('what the coordinator and a lead are told of presets', () => {
       assert.include(brief, 'A prototype ends with its branch')
       assert.include(brief, 'the same task goes on as a change, never a new task: change_part with preset Change')
       // Either way, in place: a change steps back into prototyping on its own branch and pull request, never by a new task.
-      assert.include(brief, 'A task’s shape or approach changes on that task, never by starting or drafting a new one')
-      assert.include(brief, 'change_part with preset Prototype makes that task a prototype in place')
+      assert.include(brief, 'A task’s shape changes on that task, never by a new one')
+      assert.include(brief, 'change_part with preset Prototype makes it a prototype in place')
       assert.include(brief, 'never assume either way')
       assert.include(brief, 'Whenever a task’s scope or shape changes, check whether its title still says what it does now')
       assert.include(brief, 'call rename_task with its id or slug')
