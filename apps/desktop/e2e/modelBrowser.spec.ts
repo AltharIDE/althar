@@ -15,8 +15,27 @@ import { launch, openFirstProject } from './support'
  * modelsBrowser.test.tsx's to show, with a runtime that answers only when told.
  */
 
-/** Keeps every core busy, as the person's tasks' builds and tests do, until stopped. */
-const busy = (): ReadonlyArray<ChildProcess> => Array.from({ length: availableParallelism() }, () => spawn('yes', [], { stdio: 'ignore' }))
+/** Keeps every core busy, as the person's tasks' builds and tests do, until stopped: each started once it resolves. */
+const busy = async (): Promise<ReadonlyArray<ChildProcess>> => {
+  const load = Array.from({ length: availableParallelism() }, () => spawn('yes', [], { stdio: 'ignore' }))
+  await Promise.all(load.map((one) => new Promise((started, failed) => one.once('spawn', started).once('error', failed))))
+  return load
+}
+
+/** Opens the full model picker from a preset's lead, in Settings › Tasks › Presets. */
+const openBrowser = async (page: Page) => {
+  await page.keyboard.press('ControlOrMeta+Shift+Comma')
+  await page
+    .getByRole('navigation', { name: 'Settings' })
+    .getByRole('button', { name: /^Tasks/ })
+    .click()
+  const presets = page.getByRole('main').getByRole('region', { name: 'Presets' })
+  await presets.getByRole('button', { name: 'Tune' }).nth(4).click()
+  await presets.getByRole('button', { name: 'Choose a model' }).click()
+  await presets.getByRole('button', { name: /^Lead: / }).click()
+  await page.getByRole('button', { name: /^All models/ }).click()
+  return page.getByRole('dialog', { name: 'Models' })
+}
 
 /** Starts timing `target`: from the next press on what `pressed` finds to the moment what `shown` reads of it first changes. */
 const arm = (target: ElementHandle, shown: 'text' | 'pressed', pressed: string) =>
@@ -61,17 +80,7 @@ test('the full model picker shows a default effort and a model switched off at o
   try {
     await page.setViewportSize({ width: 1180, height: 900 })
     await openFirstProject(electronApp, page, repository(home))
-    await page.keyboard.press('ControlOrMeta+Shift+Comma')
-    await page
-      .getByRole('navigation', { name: 'Settings' })
-      .getByRole('button', { name: /^Tasks/ })
-      .click()
-    const presets = page.getByRole('main').getByRole('region', { name: 'Presets' })
-    await presets.getByRole('button', { name: 'Tune' }).nth(4).click()
-    await presets.getByRole('button', { name: 'Choose a model' }).click()
-    await presets.getByRole('button', { name: /^Lead: / }).click()
-    await page.getByRole('button', { name: /^All models/ }).click()
-    const browser = page.getByRole('dialog', { name: 'Models' })
+    const browser = await openBrowser(page)
     const first = browser.getByRole('combobox', { name: /^Default effort for / }).first()
     await expect(first).toBeVisible()
     const name = ((await first.getAttribute('aria-label')) ?? '').replace('Default effort for ', '')
@@ -79,9 +88,7 @@ test('the full model picker shows a default effort and a model switched off at o
     const effort = browser.getByRole('combobox', { name: `Default effort for ${name}`, exact: true })
     const was = (await effort.textContent()) ?? ''
 
-    load = busy()
-    // Let the load take hold before pressing.
-    await page.waitForTimeout(3000)
+    load = await busy()
 
     await arm(await effort.elementHandle().then((one) => one!), 'text', '[role="option"]')
     await effort.click()
@@ -105,10 +112,11 @@ test('the full model picker shows a default effort and a model switched off at o
     expect(effortMs).toBeLessThan(100)
     expect(offMs).toBeLessThan(100)
 
-    // And the runtime took both: they hold once it is read again.
-    await page.waitForTimeout(2000)
-    await expect(effort).toHaveText(chosen)
-    await expect(off).toHaveAttribute('aria-pressed', 'true')
+    // And the runtime took both: a fresh window, holding no change of its own, reads them back.
+    await page.reload()
+    const again = await openBrowser(page)
+    await expect(again.getByRole('combobox', { name: `Default effort for ${name}`, exact: true })).toHaveText(chosen)
+    await expect(again.getByRole('button', { name: `Don’t use ${name}` })).toHaveAttribute('aria-pressed', 'true')
   } finally {
     load.forEach((one) => one.kill())
     await electronApp.close()
