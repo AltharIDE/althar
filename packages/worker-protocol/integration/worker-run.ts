@@ -1,13 +1,14 @@
-import { equal, match, rejects } from 'node:assert/strict'
+import { equal, match, ok, rejects } from 'node:assert/strict'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomBytes, X509Certificate } from 'node:crypto'
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { test, type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { setTimeout as delay } from 'node:timers/promises'
 import { promisify } from 'node:util'
 
 import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
@@ -40,7 +41,15 @@ const stop = async (child: ChildProcess, signal: NodeJS.Signals) => {
   }
 }
 
-const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => {
+const waitFor = async (condition: () => boolean | Promise<boolean>, message: string) => {
+  const deadline = performance.now() + 8000
+  while (!(await condition())) {
+    if (performance.now() >= deadline) throw new Error(message)
+    await delay(50)
+  }
+}
+
+const recoverWorker = async (t: TestContext, routed: boolean, projectPilot = false): Promise<void> => {
   const root = mkdtempSync(join(tmpdir(), 'althar-worker-process-'))
   const children: ChildProcess[] = []
   t.after(async () => {
@@ -74,9 +83,9 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
   }
   const common = ['--profile', path('profile'), '--key-file', path('keys/master'), '--json']
   const env = { HOME: root, PATH: pathEnv }
-  const host = async (command: string, args: string[] = []) => {
+  const host = async <T = Record<string, string>>(command: string, args: string[] = []) => {
     const result = await exec(process.execPath, [bundle, command, ...common, ...args], { env, timeout: 15000, maxBuffer: 128 * 1024 })
-    return JSON.parse(result.stdout) as Record<string, string>
+    return JSON.parse(result.stdout) as T
   }
   const start = async () => {
     const child = spawn(process.execPath, [bundle, 'serve', ...common], { env, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -104,7 +113,12 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
     }
   }
 
-  const initialized = await host('init')
+  const checkout = path('checkout')
+  if (projectPilot) {
+    mkdirSync(checkout)
+    await exec('/usr/bin/git', ['init', '--quiet', checkout])
+  }
+  const initialized = await host<{ homeId: string; projects: string[] }>('init', projectPilot ? ['--project', checkout] : [])
   await host('configure-workers', [
     '--listen-port',
     '0',
@@ -122,26 +136,113 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
   const queue = async () => (await host('worker-run', ['--worker-id', worker])).attemptId ?? ''
   const query = (attempt: string) => host('worker-result', ['--attempt-id', attempt])
   const logs = (attempt: string, offset = 0) => host('worker-log', ['--attempt-id', attempt, '--offset', String(offset)])
-  const run = (home: { workerPort: number; homeId: string }, ca = path('home-ca.pem')) =>
-    exec(
-      binary,
-      [
-        `https://localhost:${gateway?.port ?? home.workerPort}`,
-        home.homeId,
-        worker,
-        ca,
-        path('enrolled.pem'),
-        path('enrolled.key'),
-        path('journal'),
-        ...(gatewayUrl === undefined ? [] : ['--relay', `${gatewayUrl}/worker`, path('worker-token'), path('other-ca.pem')]),
-      ],
-      {
-        timeout: 15000,
-        maxBuffer: 4096,
-      },
-    )
+  const workerArgs = (home: { workerPort: number; homeId: string }, ca = path('home-ca.pem')) => [
+    `https://localhost:${gateway?.port ?? home.workerPort}`,
+    home.homeId,
+    worker,
+    ca,
+    path('enrolled.pem'),
+    path('enrolled.key'),
+    path('journal'),
+    ...(gatewayUrl === undefined ? [] : ['--relay', `${gatewayUrl}/worker`, path('worker-token'), path('other-ca.pem')]),
+  ]
+  const run = (home: { workerPort: number; homeId: string }, ca = path('home-ca.pem'), flags: string[] = []) =>
+    exec(binary, [...workerArgs(home, ca), ...flags], { timeout: 15000, maxBuffer: 4096 })
   const first = await start()
   equal(first.homeId, initialized.homeId)
+  if (projectPilot) {
+    const [projectId] = initialized.projects
+    ok(projectId)
+    match(projectId, /^proj_[a-f0-9]{32}$/)
+    const fixture = path('check.sh')
+    writeFileSync(
+      fixture,
+      [
+        'set -eu',
+        '/usr/bin/git rev-parse --is-inside-work-tree',
+        `test "$1" = 'a spec with $literal values'`,
+        '/usr/bin/git diff --check',
+        'printf "check stdout\n"',
+        'printf "check stderr\n" >&2',
+        'if test -f hold; then',
+        `  /usr/bin/setsid /bin/sh -c 'trap "" TERM; echo $$ > detached.pid; exec /usr/bin/sleep 600' &`,
+        '  wait',
+        'fi',
+      ].join('\n'),
+    )
+    const config = path('project-command')
+    writeFileSync(config, [projectId, 'check', checkout, '/usr/bin/sh', fixture, 'a spec with $literal values', ''].join('\n'), {
+      mode: 0o600,
+    })
+    const projectFlags = ['--project-config', config]
+    const enqueue = async (id = projectId, command = 'check') => {
+      const result = await host('worker-project-run', ['--worker-id', worker, '--project-id', id, '--command-name', command])
+      ok(result.attemptId)
+      return result.attemptId
+    }
+    await rejects(enqueue(`proj_${'0'.repeat(32)}`), { stderr: /registered on this home/ })
+
+    const completed = await enqueue()
+    match(completed, /^wpr_[a-f0-9]{32}$/)
+    equal((await run(first)).stdout.trim(), 'No queued diagnostic')
+    equal((await query(completed)).state, 'queued')
+    match((await run(first, undefined, projectFlags)).stdout, /DIAGNOSTIC_OUTCOME_SUCCEEDED/)
+    equal((await query(completed)).state, 'succeeded')
+    equal(Buffer.from((await logs(completed)).bytesBase64 ?? '', 'base64').toString(), 'true\ncheck stdout\ncheck stderr\n')
+    const unmatched = await enqueue(projectId, 'unregistered')
+    match((await run(first, undefined, projectFlags)).stdout, /DIAGNOSTIC_OUTCOME_FAILED/)
+    equal((await query(unmatched)).output, 'No matching command is configured on this worker')
+
+    const detached = join(checkout, 'detached.pid')
+    writeFileSync(join(checkout, 'hold'), '')
+    const running = async (attempt: string) => {
+      rmSync(detached, { force: true })
+      const child = spawn(binary, [...workerArgs(first), ...projectFlags], { stdio: ['ignore', 'pipe', 'pipe'] })
+      children.push(child)
+      child.stdout.resume()
+      child.stderr.pipe(process.stderr, { end: false })
+      const exit = once(child, 'exit', { signal: AbortSignal.timeout(15000) })
+      void exit.catch(() => undefined)
+      await waitFor(() => existsSync(detached), 'The registered command did not start its detached child')
+      const pid = Number(readFileSync(detached, 'utf8'))
+      ok(Number.isSafeInteger(pid) && pid > 1)
+      const proc = `/proc/${pid}/stat`
+      const alive = () => {
+        try {
+          return !/^Z /.test(readFileSync(proc, 'utf8').split(') ')[1] ?? '')
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+          throw error
+        }
+      }
+      equal(alive(), true)
+      await waitFor(async () => {
+        const output = await logs(attempt)
+        return (
+          output.state === 'claimed' &&
+          Buffer.from(output.bytesBase64 ?? '', 'base64')
+            .toString()
+            .includes('check stderr')
+        )
+      }, 'Live output was not available while the command was running')
+      return { child, exit, alive }
+    }
+
+    const cancelled = await enqueue()
+    const cancelling = await running(cancelled)
+    await host('worker-cancel', ['--attempt-id', cancelled])
+    equal((await cancelling.exit)[0], 0)
+    equal((await query(cancelled)).state, 'cancelled')
+    equal(cancelling.alive(), false)
+
+    const interrupted = await enqueue()
+    const crashing = await running(interrupted)
+    await stop(crashing.child, 'SIGKILL')
+    await waitFor(() => !crashing.alive(), 'The detached process survived the worker crash')
+    match((await run(first, undefined, projectFlags)).stdout, /DIAGNOSTIC_OUTCOME_UNKNOWN/)
+    equal((await query(interrupted)).state, 'unknown')
+    return
+  }
   const completed = await queue()
   if (gateway !== undefined) {
     await rejects(run(first, path('other-ca.pem')))
@@ -259,6 +360,15 @@ void test('the direct worker persists enrollment, outcome, and a lost grant acro
 )
 void test('the relayed worker persists enrollment, outcome, and a lost grant across restart', { timeout: 50000 }, (t) =>
   recoverWorker(t, true),
+)
+
+void test(
+  'a Linux worker runs a registered checkout and stops detached processes on cancel and crash',
+  {
+    timeout: 60000,
+    skip: process.env.ALTHAR_TEST_SYSTEMD !== '1',
+  },
+  (t) => recoverWorker(t, false, true),
 )
 
 void test('the home accepts bounded log chunks only on the stream holding the live grant', { timeout: 20000 }, async (t) => {

@@ -242,3 +242,53 @@ and rollout before it can participate in managed updates.
 Use the [outbound worker relay](../../packages/worker-protocol/README.md#outbound-worker-relay)
 when the worker and home can each reach a gateway and the home's worker
 listener is private.
+
+## Run a project command on a Linux worker
+
+The manual pilot uses the worker enrollment above, Linux with cgroup v2 and
+a systemd 254 or newer user service manager, and a checkout already on the
+worker. Run the worker as a dedicated, unprivileged OS user. Use trusted
+project code and tools. The command runs as that user, with its file access,
+inside a service that controls the lifetime of all its processes.
+
+Use the home project ID printed by `althar-host init --json --project <path>`
+when registering the project, or read the ID of an existing project from the
+home API. On the worker, create a mode 0600 UTF-8 file outside the checkout.
+Its first four lines are the project ID, command name, absolute checkout path
+and absolute executable path. Each following line becomes one argument. For
+example, to check a Git checkout:
+
+```text
+proj_0123456789abcdef0123456789abcdef
+check
+/srv/checkouts/example
+/usr/bin/git
+diff
+--check
+```
+
+On the home, queue the command while the home is serving its API:
+
+```sh
+althar-host worker-project-run --profile /path/to/profile \
+  --worker-id "$WORKER_ID" --project-id "$PROJECT_ID" --command-name check
+```
+
+Run the worker as above and add `--project-config /private/project-command`
+to pick up the run. The home sends the project ID and command name. The
+worker finds the executable and arguments in the private file.
+
+Use the returned `ATTEMPT_ID` on the home to follow or stop the run:
+
+```sh
+althar-host worker-log --profile /path/to/profile --attempt-id "$ATTEMPT_ID" --json
+althar-host worker-cancel --profile /path/to/profile --attempt-id "$ATTEMPT_ID"
+althar-host worker-result --profile /path/to/profile --attempt-id "$ATTEMPT_ID"
+```
+
+Poll `worker-log` with `--offset` set to the previous `nextOffset`. It retains
+up to 64 KiB of combined stdout and stderr, in at most 1,024 chunks. The
+execution budget is one minute. A claimed run reports `cancelled` after the
+worker confirms the control group has stopped. If the worker loses its
+connection or crashes, the local grant expires and systemd stops the command.
+Run the worker again with the same journal to reconcile the result.

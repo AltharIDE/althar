@@ -56,7 +56,14 @@ jobs:
           else
             echo "This change introduces the first worker protocol schema."
           fi
+      - name: Start the Linux worker user service manager
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
       - working-directory: packages/worker-protocol
+        env:
+          ALTHAR_TEST_SYSTEMD: '1'
         run: |
           bun run generate
           test -z "$(git status --short -- src/gen)" || { git status --short -- src/gen; git diff -- src/gen; exit 1; }

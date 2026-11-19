@@ -7,6 +7,8 @@ use std::{error::Error, fmt};
 pub mod diagnostic;
 pub mod grpc;
 #[cfg(target_os = "linux")]
+pub mod project;
+#[cfg(target_os = "linux")]
 pub mod relay;
 
 pub mod wire {
@@ -62,6 +64,7 @@ pub fn worker_hello(worker_id: &str) -> Result<wire::WorkerFrame, HandshakeError
             accepts_diagnostics: false,
             renews_diagnostic_lease: false,
             streams_diagnostic_logs: false,
+            accepts_project_commands: false,
         })),
     })
 }
@@ -126,6 +129,7 @@ mod tests {
             supports_diagnostics: false,
             supports_diagnostic_lease_renewal: false,
             supports_diagnostic_logs: false,
+            supports_project_commands: false,
         }
     }
 
