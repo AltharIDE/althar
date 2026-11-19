@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { asksFirst, type StatusItem, StatusLine } from '../src/chrome/StatusLine/StatusLine'
+import { asksFirst, StatusDrawer, type StatusItem, StatusLine } from '../src/chrome/StatusLine/StatusLine'
 import { actionOf, macKeyOf, quotedPath } from '../src/chrome/TerminalView/session'
 
 afterEach(cleanup)
@@ -107,5 +107,113 @@ describe('a terminal’s keys', () => {
     expect(quotedPath('/Users/me/app/src/index.ts', 'darwin')).toBe('/Users/me/app/src/index.ts')
     expect(quotedPath("/Users/me/My Files/it's.png", 'darwin')).toBe("'/Users/me/My Files/it'\\''s.png'")
     expect(quotedPath('C:\\Users\\me\\My Files\\a.txt', 'win32')).toBe('"C:\\Users\\me\\My Files\\a.txt"')
+  })
+})
+
+describe('a run’s mark and words', () => {
+  it('says each phase, and a failure with or without its exit code', () => {
+    const phase = (item: StatusItem) => {
+      const { container, unmount } = render(<StatusLine items={[item]} onPress={vi.fn()} onDismiss={vi.fn()} onNewTerminal={vi.fn()} />)
+      const text = container.querySelector('[role="listitem"]')?.textContent
+      unmount()
+      return text
+    }
+    expect(phase({ kind: 'run', id: 'a', name: 'A', phase: 'starting' })).toBe('AStarting…')
+    expect(phase({ kind: 'run', id: 'a', name: 'A', phase: 'finished' })).toBe('AFinished')
+    expect(phase({ kind: 'run', id: 'a', name: 'A', phase: 'stopped' })).toBe('AStopped')
+    expect(phase({ kind: 'run', id: 'a', name: 'A', phase: 'failed' })).toBe('AFailed')
+    expect(phase({ kind: 'run', id: 'a', name: 'A', phase: 'up' })).toBe('A')
+    expect(phase({ kind: 'terminal', id: 't', name: 'T', code: 2 })).toBe('TExited 2')
+  })
+
+  it('shows the key that opens a terminal, and leaves other keys on an item alone', () => {
+    const { onDismiss } = (() => {
+      const handlers = { onPress: vi.fn(), onDismiss: vi.fn(), onNewTerminal: vi.fn() }
+      render(<StatusLine items={ITEMS} chosen="t1" newTerminalKbd="⌃`" {...handlers} />)
+      return handlers
+    })()
+    expect(screen.getByRole('button', { name: 'althar' }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.keyDown(screen.getByRole('button', { name: 'althar' }), { key: 'a' })
+    expect(onDismiss).not.toHaveBeenCalled()
+  })
+})
+
+describe('the drawer', () => {
+  const drawer = (height: number, max: number, extra: { actions?: boolean } = {}) => {
+    const onHeight = vi.fn()
+    const onLower = vi.fn()
+    render(
+      <StatusDrawer
+        title="Storybook"
+        {...(extra.actions ? { actions: <button type="button">Do</button> } : {})}
+        height={height}
+        max={max}
+        onHeight={onHeight}
+        onLower={onLower}
+        label="Drawer"
+      >
+        <div className="xterm">
+          <input aria-label="inside" />
+        </div>
+        <input aria-label="outside" />
+      </StatusDrawer>,
+    )
+    return { onHeight, onLower }
+  }
+
+  it('keeps its height between the least and the most, and shows its actions where it has them', () => {
+    drawer(50, 400, { actions: true })
+    expect(screen.getByRole('region', { name: 'Drawer' }).style.height).toBe('160px')
+    expect(screen.getByRole('button', { name: 'Do' })).toBeTruthy()
+    cleanup()
+    drawer(900, 300)
+    expect(screen.getByRole('region', { name: 'Drawer' }).style.height).toBe('300px')
+    expect(screen.queryByRole('button', { name: 'Do' })).toBeNull()
+  })
+
+  it('lowers on Escape outside a terminal, and leaves Escape to a terminal', () => {
+    const { onLower } = drawer(300, 600)
+    fireEvent.keyDown(screen.getByLabelText('inside'), { key: 'Escape' })
+    expect(onLower).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByLabelText('outside'), { key: 'a' })
+    expect(onLower).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByLabelText('outside'), { key: 'Escape' })
+    expect(onLower).toHaveBeenCalledOnce()
+  })
+
+  it('moves its edge a step by the arrows, and by a drag', () => {
+    const { onHeight } = drawer(300, 600)
+    const edge = screen.getByRole('separator')
+    expect(edge.getAttribute('aria-valuenow')).toBe('300')
+    fireEvent.keyDown(edge, { key: 'ArrowUp' })
+    expect(onHeight).toHaveBeenLastCalledWith(324)
+    fireEvent.keyDown(edge, { key: 'ArrowDown' })
+    expect(onHeight).toHaveBeenLastCalledWith(276)
+    onHeight.mockClear()
+    fireEvent.keyDown(edge, { key: 'Enter' })
+    expect(onHeight).not.toHaveBeenCalled()
+
+    const capture = { set: vi.fn(), release: vi.fn(), has: vi.fn(() => true) }
+    Object.defineProperties(edge, {
+      setPointerCapture: { value: capture.set, configurable: true },
+      releasePointerCapture: { value: capture.release, configurable: true },
+      hasPointerCapture: { value: capture.has, configurable: true },
+    })
+    fireEvent.pointerMove(edge, { clientY: 100 })
+    expect(onHeight).not.toHaveBeenCalled()
+    fireEvent.pointerDown(edge, { button: 2, clientY: 500 })
+    fireEvent.pointerMove(edge, { clientY: 450 })
+    expect(onHeight).not.toHaveBeenCalled()
+    fireEvent.pointerDown(edge, { button: 0, clientY: 500 })
+    fireEvent.pointerMove(edge, { clientY: 450 })
+    expect(onHeight).toHaveBeenLastCalledWith(350)
+    fireEvent.pointerUp(edge)
+    expect(capture.release).toHaveBeenCalled()
+    fireEvent.pointerMove(edge, { clientY: 400 })
+    expect(onHeight).toHaveBeenCalledOnce()
+    fireEvent.pointerDown(edge, { button: 0, clientY: 500 })
+    capture.has.mockReturnValue(false)
+    fireEvent.pointerCancel(edge)
+    expect(capture.release).toHaveBeenCalledOnce()
   })
 })
