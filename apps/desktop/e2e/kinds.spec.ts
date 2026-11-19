@@ -54,10 +54,16 @@ test('shows each kind of task on the board, with nothing to press, and finds one
     await expect(running).toContainText('Rate-limit refunds per partner')
     await page.screenshot({ path: 'test-results/kinds-board.png', animations: 'disabled', scale: 'css' })
 
-    // No card has a button of its own but the finished one's Done and Keep for later: each is its title, which opens its task.
+    // No card has a button of its own but the finished one's Done and Keep for later, and Keep for later on the change ready on
+    // its branch, with no pull request open: each is its title, which opens its task.
     const finished = work.getByRole('article').filter({ hasText: 'Which partners still call the v1 endpoint' })
+    const buttonsOf = (text: string | null) =>
+      text?.includes('Which partners') === true ? 3 : text?.includes('Retry webhook deliveries') === true ? 2 : 1
     for (const card of await work.getByRole('article').all())
-      await expect(card.getByRole('button')).toHaveCount((await card.textContent())?.includes('Which partners') === true ? 3 : 1)
+      await expect(card.getByRole('button')).toHaveCount(buttonsOf(await card.textContent()))
+    const onItsBranch = work.getByRole('article').filter({ hasText: 'Retry webhook deliveries with backoff' })
+    await expect(onItsBranch.getByRole('button', { name: 'Keep for later' })).toBeAttached()
+    await onItsBranch.screenshot({ path: 'test-results/kinds-branch-card.png', animations: 'disabled', scale: 'css' })
     await finished.screenshot({ path: 'test-results/kinds-finished-card.png', animations: 'disabled', scale: 'css' })
 
     // Opened, the plain task that finished moves nothing: its header says Finished, with Done and Keep for later beside it.
