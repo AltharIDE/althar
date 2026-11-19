@@ -13,7 +13,7 @@ import { Queries } from '../src/Queries'
 import type { ToolAccess } from '../src/ToolServer'
 import * as Runtime from '../src/Runtime'
 import { addItem } from '../src/threads'
-import { callTool, repository, runtime, until } from './support'
+import { callTool, repository, runtime, turnsFor, until } from './support'
 
 /** The coordinator's thread of a project opened on `path`, its tools' access, and the drafts the window is told of. */
 const opened = (path: string) =>
@@ -200,6 +200,25 @@ describe('a task drafted whose plan never came', () => {
         ),
         ['explore-the-roles', 'explore-the-team', 'said'],
       )
+    }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
+  it.live('says its card is being drafted while the turn that drafted it is open, and that no plan came once it is over', () =>
+    Effect.gen(function* () {
+      const { threadId, coordinator } = yield* opened(repository())
+      const live = yield* Live
+      const sql = yield* SqlClient.SqlClient
+      // The coordinator's turn, open, as a window opened now reads its card: no live draft yet to fill it.
+      const { access, turn } = yield* turnsFor(coordinator)
+      yield* turn('Explore the roles.')
+      yield* callTool(access, 'draft_task', { title: 'Explore the roles', description: 'Who may do what. [lead:finish]' })
+      const [drafting] = yield* until(cardsOn(threadId), (cards) => cards.length === 1)
+      assert.deepInclude(drafting, { phase: 'drafting', plan: null })
+      assert.isUndefined(drafting?.unplanned)
+      // That turn over with no plan: the card says so.
+      yield* sql`UPDATE turn_deliveries SET state = 'completed', ended_at = ${new Date().toISOString()} WHERE thread_id = ${threadId}`
+      yield* live.publish({ _tag: 'TurnEnded', threadId, turnId: 'turn', state: 'completed' })
+      yield* until(cardsOn(threadId), (cards) => cards[0]?.unplanned === true)
     }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 

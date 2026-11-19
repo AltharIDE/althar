@@ -35,17 +35,57 @@ it('describes the incoming draft through its brief, sizing, team and completed p
   expect(phaseOf(draft({ brief: true, planning: true, lead, review }))).toBe('end')
 })
 
-it('replaces a streaming draft only when its own durable task card appears in the thread', () => {
+it('replaces a streaming draft’s stand-in only with its own durable task card', () => {
   const pending = draft()
   const planned = draft({ key: 'draft_2', taskId: 't2' })
   const hold = vi.fn(async () => {})
+  const earlier = [items.says('An earlier message'), items.card(card({ taskId: 'other' }))]
   const hook = renderHook(({ committed }: { committed: ThreadItem[] }) => useDraftingCards('th1', [pending, planned], committed, hold), {
-    initialProps: { committed: [items.says('An earlier message'), items.card(card({ taskId: 'other' }))] },
+    initialProps: { committed: earlier },
   })
-  expect(hook.result.current.shown).toEqual([pending, planned])
-  hook.rerender({ committed: [items.card(card({ taskId: 't2' }))] })
+  // Only the one not yet a task is after the thread; the task stands in it, its card not read yet.
+  expect(hook.result.current.shown).toEqual([pending])
+  expect(hook.result.current.placed.map((item) => item.id)).toEqual([...earlier.map((item) => item.id), 'drafting:t2'])
+  const own = items.card(card({ taskId: 't2' }))
+  hook.rerender({ committed: [...earlier, own] })
+  expect(hook.result.current.placed.map((item) => item.id)).toEqual([...earlier, own].map((item) => item.id))
   expect(hook.result.current.shown).toEqual([pending])
   expect(hold).not.toHaveBeenCalled()
+})
+
+it('keeps a draft that became a task above what the person says before its card is read', () => {
+  // As the reviewer put it: the draft heard as a task, its card's read still on its way, the person steers.
+  const said = items.says('Drafting two tasks')
+  const sizing = draft({ key: 'draft_1', taskId: 't1', slug: 'explore-the-roles', title: 'Explore the roles', brief: true })
+  const hold = vi.fn(async () => {})
+  const hook = renderHook(({ thread }: { thread: ThreadItem[] }) => useDraftingCards('th1', [sizing], thread, hold), {
+    initialProps: { thread: [said] },
+  })
+  expect(hook.result.current.placed.map((item) => item.id)).toEqual([said.id, 'drafting:t1'])
+  // Their message, shown at once: after the draft, not above it.
+  const message = items.you('you dont need to split these')
+  hook.rerender({ thread: [said, message] })
+  expect(hook.result.current.placed.map((item) => item.id)).toEqual([said.id, 'drafting:t1', message.id])
+  const stand = hook.result.current.placed[1]
+  expect(stand?.kind === 'task' && hook.result.current.inPlace(stand.content)).toEqual(sizing)
+  // Its card read, where the runtime posted it, before the message: the same place.
+  const own = items.card(card({ taskId: 't1', phase: 'drafting' }))
+  hook.rerender({ thread: [said, own, message] })
+  expect(hook.result.current.placed.map((item) => item.id)).toEqual([said.id, own.id, message.id])
+  expect(hook.result.current.inPlace(card({ taskId: 't1', phase: 'drafting' }))).toEqual(sizing)
+})
+
+it('says a card read as being drafted, with nothing live to fill it, is being drafted, and holds it by its task', () => {
+  const hold = vi.fn(async () => {})
+  const hook = renderHook(() => useDraftingCards('th1', [], [], hold))
+  const drafting = hook.result.current.inPlace(card({ taskId: 't1', slug: 'explore', title: 'Explore', phase: 'drafting', plan: null }))
+  expect(drafting).toMatchObject({ key: 'task:t1', taskId: 't1', title: 'Explore', brief: true, planned: false })
+  expect(drafting === undefined ? 'none' : phaseOf(drafting)).toBe('sizing')
+  act(() => hook.result.current.hold(drafting ?? draft()))
+  expect(hold).toHaveBeenCalledWith('th1', 'task:t1')
+  // No plan came, or discarded: the card says so itself.
+  expect(hook.result.current.inPlace(card({ taskId: 't1', phase: 'drafting', unplanned: true }))).toBeUndefined()
+  expect(hook.result.current.inPlace(card({ taskId: 't1', phase: 'settled', discarded: true }))).toBeUndefined()
 })
 
 it('shows a draft in its card’s place in the thread, above what the person said since, until its plan is in', () => {
@@ -58,13 +98,13 @@ it('shows a draft in its card’s place in the thread, above what the person sai
     initialProps: { drafts: [sizing, writing] },
   })
   // Its card is in the thread where it was drafted, before the message: the draft fills it there, not after the thread.
-  expect(hook.result.current.inPlace('t1')).toEqual(sizing)
+  expect(hook.result.current.inPlace(card({ taskId: 't1' }))).toEqual(sizing)
   expect(hook.result.current.shown).toEqual([writing])
   // One not yet a task has no card: it alone shows after the thread.
-  expect(hook.result.current.inPlace('t2')).toBeUndefined()
+  expect(hook.result.current.inPlace(card({ taskId: 't2' }))).toBeUndefined()
   // Its plan in, the card shows it, in the same place.
   hook.rerender({ drafts: [{ ...sizing, planned: true }, writing] })
-  expect(hook.result.current.inPlace('t1')).toBeUndefined()
+  expect(hook.result.current.inPlace(card({ taskId: 't1' }))).toBeUndefined()
   expect(hook.result.current.shown).toEqual([writing])
 })
 
@@ -169,7 +209,7 @@ it('holds a draft immediately, restores runtime state on refusal, and replaces i
   const hook = renderHook(({ threadId }) => useDraftingCards(threadId, [own, other, coverageDraft], cards, hold), {
     initialProps: { threadId: 'thread' as string | null },
   })
-  expect(hook.result.current.shown).toEqual([own, coverageDraft])
+  expect(hook.result.current.shown).toEqual([coverageDraft])
   act(() => hook.result.current.hold(own))
   expect(hook.result.current.held(own)).toBe(true)
   expect(hold).toHaveBeenCalledWith('thread', 'draft')

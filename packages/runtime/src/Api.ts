@@ -834,7 +834,10 @@ export const handlers = apiLayer(
     const streaming = (deltas: boolean): Stream.Stream<WatchEvent> =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const events = Stream.flatMap(yield* live.subscribe, (event) => {
+          // Listening first, then what is being drafted now: nothing between is missed, and a newer draft takes its place.
+          const subscribed = yield* live.subscribe
+          const now = yield* live.drafting
+          const events = Stream.flatMap(Stream.concat(Stream.fromIterable(now), subscribed), (event) => {
             const shown = watchedOf(event)
             return shown === undefined ? Stream.empty : Stream.make(shown)
           })

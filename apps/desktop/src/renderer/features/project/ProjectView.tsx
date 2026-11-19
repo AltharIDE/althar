@@ -525,6 +525,8 @@ export function ProjectView({
   // What the coordinator's thread is drawn from, kept while its items and its turn are: its words streaming, its commands
   // printing and its clock ticking draw the thread alone (LiveBlocks), not the project.
   const coordinatorItems = coordinator?.items
+  // With a stand-in for each draft that is a task, its card not read yet, where it will be.
+  const draftedItems = drafting.placed
   const turnStarted = session?.turnStartedAt ?? null
   const turnEnded = session?.turnEndedAt ?? null
   const reading = readingNow(session, model.pending, false, coordinator?.accepting)
@@ -535,7 +537,7 @@ export function ProjectView({
       coordinatorItems === undefined
         ? null
         : {
-            items: coordinatorItems,
+            items: draftedItems,
             turnRunning: busy,
             turnStarted,
             reading,
@@ -545,7 +547,7 @@ export function ProjectView({
             queue,
             turns: turnsById(turns),
           },
-    [coordinatorItems, busy, turnStarted, reading, readingLocally, turnEnded, queue, turns],
+    [coordinatorItems, draftedItems, busy, turnStarted, reading, readingLocally, turnEnded, queue, turns],
   )
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
@@ -1135,7 +1137,7 @@ export function ProjectView({
                                 {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
                                 card={(card) => {
                                   // Still being drafted: the live draft fills its card's place, until its plan is in.
-                                  const draft = drafting.inPlace(card.taskId)
+                                  const draft = drafting.inPlace(card)
                                   return draft === undefined ? (
                                     <Card card={card} actions={actions} />
                                   ) : (

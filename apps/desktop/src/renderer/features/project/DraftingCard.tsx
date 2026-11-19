@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 
 import type { Draft, ThreadItem } from '@althar/contracts'
 import { type LaunchPhase, type LaunchStep, TaskLaunch } from '@althar/ui'
 
 import { useEffortNames, useModelNames } from '../../shared/modelNames'
 import { stepText } from '../../shared/steps'
+import type { TaskCardContent } from '../../shared/thread'
 
 /*
  * A task's card while the coordinator drafts it (`useDrafts`): the plan
@@ -90,12 +91,40 @@ export function DraftingCard({
   )
 }
 
+/** Where a draft that became a task was in the thread then: after the item last there, the thread's start where none was. */
+type Anchor = { readonly id: string; readonly createdAt: string } | null
+
+/** The id of the stand-in for a draft's card, until its own is read. */
+const STAND_IN = 'drafting:'
+
+/**
+ * A card read as being drafted, with no live draft to fill it (a window opened in the middle of the coordinator's turn,
+ * before it hears the draft): it says it is being drafted, and holds as the live one does, by its task.
+ */
+const draftOfCard = (card: TaskCardContent): Draft => ({
+  key: `task:${card.taskId}`,
+  title: card.title,
+  brief: true,
+  taskId: card.taskId,
+  slug: card.slug,
+  planning: false,
+  lead: null,
+  review: null,
+  noReview: false,
+  preset: null,
+  planned: false,
+  held: false,
+})
+
 /**
  * The drafts to show on a thread, and Hold for them. A draft's card is in the
  * thread from the moment its task is made, where it was drafted (the runtime
  * posts it then), and keeps that place: the live draft shows in it (`inPlace`)
  * until its plan is in, so neither jumps past what the person said meanwhile.
- * Only one not yet a task shows after the thread (`shown`). Hold goes to the runtime at once,
+ * Until its card is read, a draft that is a task stands in the thread (`placed`)
+ * after what was there when the window heard it became one, so what the person
+ * says from then on comes after it, as it will once its card is in. Only one
+ * not yet a task shows after the thread (`shown`). Hold goes to the runtime at once,
  * which makes the draft's plan held as it comes, whether this screen is still
  * open then or not; it shows held here at once, and stays so where the
  * runtime turns it down only until the draft says otherwise.
@@ -107,16 +136,67 @@ export function useDraftingCards(
   onHold: (threadId: string, key: string) => Promise<void>,
 ): {
   readonly shown: ReadonlyArray<Draft>
-  readonly inPlace: (taskId: string) => Draft | undefined
+  readonly placed: ReadonlyArray<ThreadItem>
+  readonly inPlace: (card: TaskCardContent) => Draft | undefined
   readonly held: (draft: Draft) => boolean
   readonly hold: (draft: Draft) => void
 } {
   const [pressed, setPressed] = useState<ReadonlySet<string>>(() => new Set())
-  const cards = items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
+  const cards = new Set(items.flatMap((item) => (item.kind === 'task' && !item.id.startsWith(STAND_IN) ? [item.content.taskId] : [])))
+  // Tasks now, their cards not read yet: each where the thread was as the window heard it became one.
+  const waiting = drafts.filter((draft) => draft.taskId !== null && !cards.has(draft.taskId))
+  const [heard, setHeard] = useState<ReadonlyMap<string, Anchor>>(() => new Map())
+  let anchors = heard
+  if (waiting.some((draft) => !heard.has(draft.taskId ?? ''))) {
+    const last = items.at(-1)
+    const next = new Map(heard)
+    for (const draft of waiting)
+      if (!next.has(draft.taskId ?? ''))
+        next.set(draft.taskId ?? '', last === undefined ? null : { id: last.id, createdAt: last.createdAt })
+    anchors = next
+    setHeard(next)
+  }
+  const standing = new Set(waiting.map((draft) => draft.taskId ?? ''))
+  const placed = useMemo(() => {
+    if (waiting.length === 0) return items
+    const out = [...items]
+    for (const draft of waiting) {
+      const anchor = anchors.get(draft.taskId ?? '') ?? null
+      // Its item, or, where that went (a message the runtime has under its own id now), the last before it.
+      let at = anchor === null ? -1 : out.findIndex((item) => item.id === anchor.id)
+      if (anchor !== null && at < 0) at = out.findLastIndex((item) => !item.id.startsWith(STAND_IN) && item.createdAt <= anchor.createdAt)
+      at += 1
+      while (out[at]?.id.startsWith(STAND_IN) === true) at += 1
+      const before = out[at - 1]
+      out.splice(at, 0, {
+        id: `${STAND_IN}${draft.taskId}`,
+        sequence: before?.sequence ?? 0,
+        createdAt: before?.createdAt ?? new Date(0).toISOString(),
+        agentId: null,
+        kind: 'task',
+        content: {
+          taskId: draft.taskId,
+          slug: draft.slug ?? '',
+          title: draft.title ?? '',
+          phase: 'drafting',
+          plan: null,
+        } as unknown as TaskCardContent,
+      } as ThreadItem)
+    }
+    return out
+    // `waiting` and `anchors` are read from `drafts`, `items` and `heard`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, drafts, heard])
   return {
-    shown: drafts.filter((draft) => draft.taskId === null || !cards.some((card) => card.taskId === draft.taskId)),
-    // Its plan in, the card has it: the thread's card shows it from then on.
-    inPlace: (taskId) => drafts.find((draft) => draft.taskId === taskId && !draft.planned),
+    shown: drafts.filter((draft) => draft.taskId === null),
+    placed,
+    // Its plan in, the card has it: the thread's card shows it from then on. Read as being drafted with nothing live to fill
+    // it, it says so, rather than that no plan came.
+    inPlace: (card) => {
+      const live = drafts.find((draft) => draft.taskId === card.taskId)
+      if (live !== undefined) return !live.planned || standing.has(card.taskId) ? live : undefined
+      return card.phase === 'drafting' && card.unplanned !== true && card.discarded !== true ? draftOfCard(card) : undefined
+    },
     held: (draft) => draft.held || pressed.has(draft.key),
     hold: (draft) => {
       if (threadId === null) return

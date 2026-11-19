@@ -3106,9 +3106,13 @@ export class Queries extends Context.Service<
             ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
             ...(task.state === 'abandoned' ? { discarded: true as const } : {}),
-            // Drafted, and its plan didn't come: the person's, to plan or discard, not to resume. Its card is in the thread only
-            // once the turn that drafted it is over, so a card still read as drafting as that turn ends says so too.
-            ...((phase === 'stopped' || phase === 'drafting') && task.state === 'draft' && task.planState === null && task.runState === null
+            // Drafted, and its plan didn't come: the person's, to plan or discard, not to resume. Its card is in the thread from
+            // its drafting on: while the coordinator's turn that made it is open, its plan is still on its way, and its card says
+            // it is being drafted (a window opened then has no live draft yet); a draft no turn made says so once its moment is.
+            ...((phase === 'stopped' || (phase === 'drafting' && madeInOpenTurn === 0)) &&
+            task.state === 'draft' &&
+            task.planState === null &&
+            task.runState === null
               ? { unplanned: true as const }
               : {}),
             automation: yield* fromAutomation(taskId),
