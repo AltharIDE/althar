@@ -3791,6 +3791,12 @@ describe('terminals, through the API', () => {
           yield* refused(client.CloseTerminal({ commandId: commandId(), id: 'term_phone1' })),
         ]
         assert.deepStrictEqual(reasons, Array(6).fill('Forbidden'))
+        // The window's own calls go through: to the shells it has, and to none it hasn't.
+        const { client: window } = yield* connected({})
+        assert.deepStrictEqual(yield* window.ListTerminals({ projectId }), [])
+        const unknown = yield* Effect.flip(Stream.runDrain(window.AttachTerminal({ id: 'term_none' })))
+        assert.strictEqual(unknown.reason, 'NotFound')
+        yield* window.CloseTerminal({ commandId: commandId(), id: 'term_none' })
         // No shell was started for it.
         assert.deepStrictEqual(
           yield* Effect.provideContext(

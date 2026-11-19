@@ -59,6 +59,9 @@ class FakePty implements Pty {
   end(exitCode: number) {
     for (const listener of this.exit) listener({ exitCode })
   }
+  endBy(exitCode: number, signal: number) {
+    for (const listener of this.exit) listener({ exitCode, signal })
+  }
 }
 
 /** The service with fake shells, or with what a test starts them with instead. */
@@ -186,6 +189,45 @@ describe('terminals', () => {
     }).pipe(Effect.scoped, Effect.provide(layer))
   })
 
+  it.live('says a shell ended after all that waited for a window behind, and lets the shell go for a window that leaves', () => {
+    const { ptys, layer } = setUp()
+    return Effect.gen(function* () {
+      const terminals = yield* Terminals
+      yield* terminals.open({ id: 'term_behind1', projectId: 'p', taskId: null, cols: 80, rows: 24 })
+      const pty = ptys[0]!
+      const pulled = yield* Stream.toPull(terminals.attach('term_behind1'))
+      for (let i = 0; i < 40; i++) {
+        pty.print(`line ${i}\r\n`)
+        yield* settle
+      }
+      assert.isTrue(pty.paused)
+      pty.end(1)
+      yield* settle
+      // Everything it printed comes first, then how it ended.
+      const read: Array<string> = []
+      while (!read.includes('[exit 1]'))
+        for (const chunk of yield* pulled) read.push(chunk._tag === 'Data' ? chunk.data : `[exit ${chunk.code}]`)
+      assert.include(read.join(''), 'line 39')
+      assert.strictEqual(read.at(-1), '[exit 1]')
+
+      // A window that leaves while behind holds the shell no longer.
+      yield* terminals.open({ id: 'term_behind2', projectId: 'p', taskId: null, cols: 80, rows: 24 })
+      const other = ptys[1]!
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* Stream.toPull(terminals.attach('term_behind2'))
+          for (let i = 0; i < 40; i++) {
+            other.print(`line ${i}\r\n`)
+            yield* settle
+          }
+          assert.isTrue(other.paused)
+        }),
+      )
+      yield* settle
+      assert.isFalse(other.paused)
+    }).pipe(Effect.scoped, Effect.provide(layer))
+  })
+
   it.live('says what runs in front, so closing it, or quitting, says it stops something', () => {
     const { ptys, layer } = setUp()
     return Effect.gen(function* () {
@@ -268,6 +310,11 @@ describe('terminals that aren’t there, or have ended', () => {
       yield* Effect.ignore(terminals.resize('term_ended1', 100, 30))
       assert.deepStrictEqual([pty.written, pty.sizes], [[], []])
       assert.strictEqual((yield* terminals.ofProject('p')).length, 1)
+      // One stopped by a signal stays too, though its code was 0.
+      yield* terminals.open({ id: 'term_signal1', projectId: 'p', taskId: null, cols: 80, rows: 24 })
+      ptys[1]!.endBy(0, 9)
+      yield* settle
+      assert.strictEqual((yield* terminals.ofProject('p')).length, 2)
     }).pipe(Effect.provide(layer))
   })
 
@@ -380,6 +427,10 @@ describe('a terminal’s shell and what it keeps', () => {
     assert.deepStrictEqual(whole, ['a\nb\n'])
     const many = ['xxxx', 'yyyy', 'zz\nzz']
     assert.strictEqual(keptOf(many, 13, 4), 2)
+    // A piece with no line in what is kept of it goes whole.
+    const one = ['abcdefghij']
+    assert.strictEqual(keptOf(one, 10, 4), 0)
+    assert.deepStrictEqual(one, [''])
     assert.deepStrictEqual(many, ['zz'])
   })
 })
