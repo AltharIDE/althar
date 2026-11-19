@@ -103,6 +103,40 @@ describe('a chat on Scratch', () => {
   })
 })
 
+describe('an aside’s answer', () => {
+  it.live('is its lead’s report, not what it says after reporting, and its reply once the person asks it more', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* opened(working)
+      yield* callTool(coordinator, 'start_task', {
+        title: 'How does retry work?',
+        description: 'Look. [lead:finish]',
+        lead: { agent: 'claude-code' },
+      })
+      // Its lead reports with finish_step, then says what Althar answered it: those words are the last it said, not its answer.
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.latest?.by === 'lead')
+      assert.match(ready?.latest?.said ?? '', /^Althar has your summary/)
+      assert.strictEqual(ready?.answer, 'Did the task.')
+      const threadId = ready?.threadId ?? ''
+      yield* until(
+        Effect.flatMap(Sessions, (sessions) => sessions.busy(threadId)),
+        (busy) => !busy,
+      )
+      // Asked more, its reply is the answer now, the report standing as the first answer's.
+      yield* Effect.flatMap(Sessions, (sessions) =>
+        Effect.flatMap(Runtime.envelope('thread.send', { threadId, body: 'And on a timeout?' }), (envelope) =>
+          sessions.send({ envelope, threadId, body: 'And on a timeout?', disposition: 'after_current' }),
+        ),
+      )
+      const [asked] = yield* until(cards(projectId), (all) => all[0]?.latest?.by === 'lead' && all[0]?.answer !== 'Did the task.')
+      assert.strictEqual(asked?.summary, 'Did the task.')
+      assert.strictEqual(asked?.answer, asked?.latest?.said)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
 describe('a chat’s copy', () => {
   it.live('is never set up while it is an aside, whatever its lead runs: made a task, it is, before its next turn', () => {
     const { working, bare } = hosted()
@@ -229,11 +263,11 @@ describe('presets', () => {
       const [card] = yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Small change')
       assert.strictEqual(card?.plan?.preset, 'Small change')
 
-      // Prototype, picked on its card: its lead, ending and brief.
+      // Prototype, picked on its card: its ending and brief. It names no model, so the lead the plan had stays.
       const instance = yield* Instance
       assert.strictEqual(yield* (yield* Plans).applyPreset(first.id, 'Prototype', instance.personId), 'Prototype')
       const now = yield* plan()
-      assert.deepInclude(now.parameters.steps[0], { agentId: 'claude-code', model: 'claude-opus-5-5' })
+      assert.deepInclude(now.parameters.steps[0], { agentId: 'codex', model: 'large' })
       assert.strictEqual(now.parameters.end, 'none')
       // The review Small change had is gone, not left as a skipped row to add back.
       assert.deepStrictEqual(
@@ -243,6 +277,22 @@ describe('presets', () => {
       const [task] = yield* sql<{ description: string }>`SELECT description FROM tasks WHERE id = ${now.taskId}`
       assert.include(task?.description, 'A prototype: show the idea working, quickly.')
       yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Prototype')
+      // Tuned by the person, through the coordinator: their lead goes on a plan from it, and its card still names it.
+      assert.match(
+        yield* callTool(coordinator, 'tune_preset', { preset: 'prototype', lead: { agent: 'claude-code' }, brief: 'Mine.' }),
+        /^Prototype is tuned as theirs: .*led by claude-code’s own model/,
+      )
+      assert.include(yield* callTool(coordinator, 'list_presets', {}), '- Prototype (built in, tuned by them):')
+      yield* (yield* Plans).applyPreset(first.id, 'Prototype', instance.personId)
+      assert.deepInclude((yield* plan()).parameters.steps[0], { agentId: 'claude-code', model: null })
+      yield* until(cards(projectId), (all) => all[0]?.plan?.preset === 'Prototype')
+      // Only a built-in one is tuned here; reset, it is the built-in again, naming no model.
+      assert.include(yield* callTool(coordinator, 'tune_preset', { preset: 'Mine', brief: 'x' }), 'isn’t a built-in preset')
+      assert.match(
+        yield* callTool(coordinator, 'tune_preset', { preset: 'Prototype', reset: true }),
+        /^Prototype is back to the built-in: .*the coordinator picks its lead/,
+      )
+      assert.notInclude(yield* callTool(coordinator, 'list_presets', {}), 'tuned by them')
       // Chat: a copy on Scratch, nothing checked.
       yield* (yield* Plans).applyPreset(first.id, 'Chat', instance.personId)
       const chat = yield* plan()

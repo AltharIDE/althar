@@ -6,6 +6,7 @@ import {
   choiceKey,
   EditRunnable,
   type ListedRunnable,
+  Room,
   RunButton,
   runButtonText,
   Runnables,
@@ -16,7 +17,8 @@ import {
   type RunTargetRun,
 } from '@althar/ui'
 import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
 
 import { messageOf, type RunRef } from '../../data/client'
 import { reads } from '../../data/reads'
@@ -24,7 +26,8 @@ import { useServices } from '../../data/services'
 import { addressOf } from '../../shared/running'
 import { useWorkToward } from '../../shared/useWorkToward'
 import { ago, running } from '../../shared/time'
-import { type RunsModel, useRuns } from './useRuns'
+import { openCoordinator } from '../../shared/openCoordinator'
+import { askInDraft, type RunsModel, useRuns } from './useRuns'
 import { usePageOpener } from '../browser/opener'
 
 /*
@@ -46,6 +49,9 @@ import { usePageOpener } from '../browser/opener'
 
 /** How long a run that hasn't said where it answers is taken as starting; after, as running with no address, as an app's window. */
 export const STARTING_FOR = 10_000
+
+/** How long after its start answered a run that shows as starting waits for a launch that never shows. */
+const NEVER = 60_000
 
 /** A run as the button says it: starting, up where it answers, or how it ended by itself; a stopped one is gone. */
 const runOf = (launch: Launch, now: string): RunTargetRun =>
@@ -149,7 +155,17 @@ export const placeOfLaunch = (launch: Launch, repository?: string): RunPlace => 
 }
 
 /** A run asked for on a branch or pull request, until it runs: fetching, or what went wrong. */
-export type Attempt = { readonly state: 'fetching' } | { readonly state: 'unfetched'; readonly why: string; readonly at: string }
+export type Attempt =
+  | { readonly state: 'fetching' }
+  /** A press, before the runtime says a run exists: `seen` are the runs there were when it was pressed, which a launch it hasn't seen replaces. */
+  | {
+      readonly state: 'starting'
+      readonly seen: ReadonlyArray<string>
+      readonly token: number
+      readonly runnableId: string
+      readonly place: RunPlace
+    }
+  | { readonly state: 'unfetched'; readonly why: string; readonly at: string }
 
 /** The same pull request or branch, whatever repository either says: a run's place says none. */
 const sameRef = (one: RunPlace, other: RunPlace) => {
@@ -182,9 +198,12 @@ export const targetsOf = (
           ? { state: 'fetching' }
           : attempt?.state === 'unfetched'
             ? { state: 'unfetched', why: attempt.why, since: ago(attempt.at, new Date(now)) }
-            : here === undefined
-              ? undefined
-              : runOf(here, now)
+            : attempt?.state === 'starting' && (here === undefined || attempt.seen.includes(here.id))
+              ? // No launch yet: nothing to stop until there is.
+                { state: 'starting', pending: true }
+              : here === undefined
+                ? undefined
+                : runOf(here, now)
       return {
         id: one.id,
         ...(one.name === null ? {} : { name: one.name }),
@@ -233,12 +252,18 @@ export interface RunDialogsModel {
   readonly showing: RunDialog
   /** Opens one, or closes them with null: each says only what went wrong in it, and adding reads the repository's scripts. */
   readonly show: (next: RunDialog) => void
+  /**
+   * Asks the coordinator to work out what the project runs: its conversation, at once, the ask in its composer unsent,
+   * after what the person had written there, for them to change or send. Any dialog open closes.
+   */
+  readonly ask: () => void
 }
 
 /** The dialogs for what a project runs, wherever they open from: Run's list, or the project's settings. */
 export const useRunDialogs = (projectId: string, runnables: ReadonlyArray<Runnable> | null = null): RunDialogsModel => {
   const runs = useRuns({ projectId, runnables })
   const [showing, setShowing] = useState<RunDialog>(null)
+  const navigate = useNavigate()
   return {
     runs,
     showing,
@@ -246,6 +271,12 @@ export const useRunDialogs = (projectId: string, runnables: ReadonlyArray<Runnab
       runs.dismissError()
       setShowing(next)
       if (next?.kind === 'add') void runs.readScripts()
+    },
+    ask: () => {
+      setShowing(null)
+      askInDraft(projectId)
+      openCoordinator(projectId)
+      void navigate({ to: '/projects/$projectId', params: { projectId }, search: { room: Room.Talk } })
     },
   }
 }
@@ -272,7 +303,7 @@ export function RunDialogs({
 }) {
   const { client } = useServices()
   const repositories = (useQuery(reads(client).repositories(projectId)).data ?? []).map((one) => one.name)
-  const { runs: model, showing, show } = dialogs
+  const { runs: model, showing, show, ask } = dialogs
   const close = () => show(null)
   const error = model.error === null ? {} : { error: model.error }
   // As the person left them: one removed gone at once.
@@ -305,11 +336,8 @@ export function RunDialogs({
           onAddScripts={async (picked) => {
             if (await model.keepScripts((fresh ?? []).filter((script) => picked.includes(scriptId(script))))) close()
           }}
-          // Said in the coordinator's thread at once; where it couldn't be, asked again here, saying why.
-          onAsk={() => {
-            model.ask(() => show({ kind: 'add', way: 'ask' }))
-            close()
-          }}
+          // In the coordinator's composer, unsent: the person changes or sends it there.
+          onAsk={ask}
           onClose={close}
           busy={model.busy}
           {...error}
@@ -360,6 +388,7 @@ export const listedOf = (one: Runnable): ListedRunnable => ({
   ...(one.name === null ? {} : { name: one.name }),
   command: one.command,
   about: `${one.repository} · ${runButtonText.from[one.from]}`,
+  from: one.from,
 })
 
 /** What the repositories offer, as the picker lists it: each one's pull requests, then its branches, saying which repository where there are several. */
@@ -538,7 +567,8 @@ export function Runs({
   readonly launches: ReadonlyArray<Launch>
   readonly now: string
   /** Runs one in a task's worktree, or with null a copy of the default branch, as the screen runs it. */
-  readonly onRun: (runnableId: string, taskId: string | null) => void
+  /** Whether it went, where it says: false where the runtime refused it. */
+  readonly onRun: (runnableId: string, taskId: string | null) => void | Promise<boolean | void>
   /** Stops a run, as the screen stops it. */
   readonly onStop: (launchId: string) => void
   /** Clears one that ended by itself. */
@@ -628,9 +658,59 @@ export function Runs({
   const ended = (runnableId: string) =>
     launches.findLast((launch) => launch.runnableId === runnableId && runsAt(launch, place) && launch.ended !== null)
 
+  const pressed = useRef(0)
+  const lose = (key: string, token: number) =>
+    setAttempts((was) => {
+      const now = was.get(key)
+      if (now?.state !== 'starting' || now.token !== token) return was
+      const next = new Map(was)
+      next.delete(key)
+      return next
+    })
+  /**
+   * What shows as starting stays until its launch shows (below), or its start is known to have failed; a start that
+   * answered and never shows a launch lets go after a long while. One pressed again since is left alone.
+   */
+  const holdStart = (key: string, token: number, started: void | Promise<boolean | void>) => {
+    void Promise.resolve(started).then(
+      (went) => {
+        if (went === false) lose(key, token)
+        else setTimeout(() => lose(key, token), NEVER)
+      },
+      () => lose(key, token),
+    )
+  }
+  // A start whose launch the runtime has now shown is that launch's to tell.
+  useEffect(() => {
+    setAttempts((was) => {
+      let next: Map<string, Attempt> | null = null
+      for (const [key, one] of was) {
+        if (one.state !== 'starting') continue
+        const shown = launches.some(
+          (launch) =>
+            launch.runnableId === one.runnableId &&
+            !one.seen.includes(launch.id) &&
+            runsAt(launch, one.place, runnables.find((r) => r.id === one.runnableId)?.repository),
+        )
+        if (!shown) continue
+        next ??= new Map(was)
+        next.delete(key)
+      }
+      return next ?? was
+    })
+  }, [launches, runnables])
+
   const run = (runnableId: string) => {
     if (place.choice === undefined) {
-      onRun(runnableId, place.kind === 'task' ? place.key.slice('task:'.length) : null)
+      // Starting at once, as pressed: the runtime's launch takes over when it lands, and a start that never lands lets go.
+      const key = attemptKey(place, runnableId)
+      const mine = launches.filter(
+        (launch) => launch.runnableId === runnableId && runsAt(launch, place, runnables.find((one) => one.id === runnableId)?.repository),
+      )
+      if (live(runnableId) !== undefined) return
+      const token = ++pressed.current
+      attempt(key, { state: 'starting', seen: mine.map((launch) => launch.id), token, runnableId, place })
+      holdStart(key, token, onRun(runnableId, place.kind === 'task' ? place.key.slice('task:'.length) : null))
       return
     }
     if (onRunRef === undefined) return
@@ -698,7 +778,8 @@ export function Runs({
             if (launch !== undefined) onClear(launch.id)
           }
         }}
-        onAdd={(way) => dialogs.show({ kind: 'add', way })}
+        // Asking needs no dialog: it goes straight to the coordinator's composer.
+        onAdd={(way) => (way === 'ask' ? dialogs.ask() : dialogs.show({ kind: 'add', way }))}
         onEdit={() => dialogs.show({ kind: 'list' })}
       />
       <RunDialogs projectId={projectId} project={project} runnables={runnables} dialogs={dialogs} afterEdit={{ kind: 'list' }} />

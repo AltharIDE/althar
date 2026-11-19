@@ -244,8 +244,17 @@ A preset is a named set of starting parts: where it works, Checked by and
 when, its ending, where it sits, its lead and reviewer, and a few lines of
 brief (`presets`). Only a start: changing a task's parts never changes it.
 
-- **Built in:** Chat, Change, Small change, Review a PR, and Prototype, led
-  by Claude Opus 5.5, with no review, ending with its branch. A prototype may
+- **Built in:** Chat, Change, Small change, Review a PR, and Prototype (no
+  review, ending with its branch). No built-in names a model or an agent:
+  its lead and reviewer are picked as for any step, by the person's defaults
+  and notes and the coordinator's choice.
+- **The person tunes a built-in one as their own:** its lead and reviewer,
+  their efforts, and its brief, from Settings › Tasks › Presets (Tune) or on
+  their word to the coordinator or a lead (`tune_preset`). Only what differs
+  is kept (`preset_tunings`), over the built-in, which stays model-free;
+  Reset, or `tune_preset` with reset, takes it back. A plan from a tuned one
+  takes their lead and reviewer, and its card still names the built-in.
+- **Prototype and Change, either way:** a prototype may
   later go on as a change in the same task, its pull request ending and its
   review added then, or never: the person decides, so the coordinator and the
   leads never assume either way. On their word it is one move: `change_part`

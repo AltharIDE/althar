@@ -10,6 +10,7 @@ on:
       - 'apps/host/**'
       - 'packages/contracts/**'
       - 'packages/transport-node/**'
+      - 'packages/worker-protocol/**'
       - 'packages/domain/**'
       - 'packages/connectors/**'
       - 'packages/persistence-sqlite/**'
@@ -33,6 +34,7 @@ on:
       - 'apps/host/**'
       - 'packages/contracts/**'
       - 'packages/transport-node/**'
+      - 'packages/worker-protocol/**'
       - 'packages/domain/**'
       - 'packages/connectors/**'
       - 'packages/persistence-sqlite/**'
@@ -99,6 +101,11 @@ jobs:
       - run: bun run check
       - run: bun run test:coverage --maxWorkers=2
       - name: Verify a signed portable release with real bundled provider CLIs
+        env:
+          ALTHAR_HOST_BOOTSTRAP_FIXTURE: ${{ matrix.arch == 'x64' && format('{0}/host-bootstrap', runner.temp) || '' }}
         run: bun run release:smoke
+      - name: Set up a signed release over SSH on the isolated runner
+        if: matrix.arch == 'x64'
+        run: bash scripts/ssh-setup-systemd.sh "$RUNNER_TEMP/host-bootstrap"
       - if: always()
         uses: ./.github/actions/flaky
