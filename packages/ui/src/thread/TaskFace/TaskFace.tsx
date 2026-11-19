@@ -45,7 +45,7 @@ export function TaskFace({ children, composer, panel, panelWidth, unseen, under,
           {under && <div className={s.edge} aria-hidden="true" />}
           <div
             ref={scroll}
-            className={s.scroll}
+            className={cx(s.scroll, under && s.fades)}
             onScroll={
               under
                 ? (event) => {

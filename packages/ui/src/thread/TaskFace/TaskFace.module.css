@@ -42,6 +42,10 @@
 [data-scrolled] > .edge {
   opacity: 1;
 }
+/* under a bar: the thread fades out over its first 24px, where it passes beneath, rather than ending in a cut */
+.fades {
+  mask-image: linear-gradient(to bottom, transparent, #000 24px);
+}
 .scroll {
   flex: 1;
   min-height: 0;

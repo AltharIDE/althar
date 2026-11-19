@@ -12,13 +12,13 @@
 .decide {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   padding: 16px 18px;
 }
 .facts {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
   min-width: 0;
 }
 .head {
@@ -128,6 +128,13 @@
 }
 
 /* its checks and its review, a line each */
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+.rows:empty {
+  display: none;
+}
 .lines {
   display: flex;
   flex-direction: column;
@@ -137,9 +144,9 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 26px;
+  min-height: 18px;
   margin: 0 -8px;
-  padding: 2px 8px;
+  padding: 6px 8px;
   box-sizing: content-box;
   border: 0;
   border-radius: 7px;
@@ -169,6 +176,7 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -200,11 +208,12 @@ span.you {
   align-items: flex-start;
 }
 .review > .mark {
-  margin-top: 3px;
+  align-items: center;
+  height: 18px;
 }
 .reviewSaid {
   overflow: visible;
-  line-height: 1.5;
+  line-height: 18px;
   white-space: normal;
   text-overflow: clip;
   text-wrap: pretty;
