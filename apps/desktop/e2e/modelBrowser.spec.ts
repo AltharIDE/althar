@@ -15,10 +15,18 @@ import { launch, openFirstProject } from './support'
  * modelsBrowser.test.tsx's to show, with a runtime that answers only when told.
  */
 
-/** Keeps every core busy, as the person's tasks' builds and tests do, until stopped: each started once it resolves. */
+/**
+ * Keeps every core busy, as the person's tasks' builds and tests do, until stopped: each started once it resolves. Where
+ * one can't start, those that did are stopped before it says so, as the caller never has them to stop.
+ */
 const busy = async (): Promise<ReadonlyArray<ChildProcess>> => {
   const load = Array.from({ length: availableParallelism() }, () => spawn('yes', [], { stdio: 'ignore' }))
-  await Promise.all(load.map((one) => new Promise((started, failed) => one.once('spawn', started).once('error', failed))))
+  try {
+    await Promise.all(load.map((one) => new Promise((started, failed) => one.once('spawn', started).once('error', failed))))
+  } catch (error) {
+    load.forEach((one) => one.kill())
+    throw error
+  }
   return load
 }
 
@@ -112,11 +120,14 @@ test('the full model picker shows a default effort and a model switched off at o
     expect(effortMs).toBeLessThan(100)
     expect(offMs).toBeLessThan(100)
 
-    // And the runtime took both: a fresh window, holding no change of its own, reads them back.
-    await page.reload()
-    const again = await openBrowser(page)
-    await expect(again.getByRole('combobox', { name: `Default effort for ${name}`, exact: true })).toHaveText(chosen)
-    await expect(again.getByRole('button', { name: `Don’t use ${name}` })).toHaveAttribute('aria-pressed', 'true')
+    // And the runtime took both: a fresh window, holding no change of its own, reads them back. Each try is a window of its
+    // own, as one that read before a write was in never reads again once no agent is probing.
+    await expect(async () => {
+      await page.reload()
+      const again = await openBrowser(page)
+      await expect(again.getByRole('combobox', { name: `Default effort for ${name}`, exact: true })).toHaveText(chosen, { timeout: 5000 })
+      await expect(again.getByRole('button', { name: `Don’t use ${name}` })).toHaveAttribute('aria-pressed', 'true', { timeout: 5000 })
+    }).toPass({ timeout: 60_000 })
   } finally {
     load.forEach((one) => one.kill())
     await electronApp.close()
