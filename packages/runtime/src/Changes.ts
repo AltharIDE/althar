@@ -7438,10 +7438,12 @@ export class Changes extends Context.Service<
             })}`
         })
 
-      /** The person stopped or interrupted a task's lead: what it was resolving waits for them, and checks that fail don't ask it again. */
-      const leadStopped = (taskId: string, how: 'stopped' | 'interrupted') =>
+      /**
+       * The person stopped or interrupted a task's lead, which `taken` recorded as they did: what it was resolving waits for
+       * them, and the checks of a round waiting on them are theirs.
+       */
+      const stoppedRounds = (taskId: string, how: 'stopped' | 'interrupted') =>
         Effect.gen(function* () {
-          yield* taken(taskId, how)
           for (const round of yield* underWay(taskId)) {
             if (round.state === 'resolving') {
               yield* settleRound(round.id, { why: `You ${how} the lead.`, stopped: true })
@@ -9852,25 +9854,28 @@ export class Changes extends Context.Service<
           ),
         stopListening: (taskId, url) => provide(locked(taskId)(stopListening(taskId, url))),
         attach: (input) => provide(locked(input.taskId)(attaching.withPermits(1)(attach(input)))),
-        // Behind the press: it waits for the task's lock, which the pull request's own work (its checks, a push) can hold for
-        // seconds while agents are at work, and Stop and Interrupt answer once their lead is told. What it records, that the
-        // person took the task, only a turn's end reads, and a turn the person interrupted is theirs anyway (`look`).
+        // That the person took the task is recorded as they press, taking no lock: a look at its pull request under way, which
+        // holds the task's lock for seconds while agents are at work, then finds its checks theirs (`fixesOf`), rather than
+        // telling the lead they failed. Its rounds are settled behind the press, behind that lock, and Stop and Interrupt
+        // answer once their lead is told.
         leadStopped: (where, how = 'stopped') =>
-          Effect.asVoid(
-            Effect.forkIn(
-              provide(
-                Effect.gen(function* () {
-                  const sql = yield* SqlClient.SqlClient
-                  const [task] =
-                    'taskId' in where
-                      ? [{ taskId: where.taskId }]
-                      : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId} AND task_id IS NOT NULL`
-                  if (task !== undefined) yield* locked(task.taskId)(leadStopped(task.taskId, how))
-                }),
-              ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the lead stopped', cause))),
-              scope,
-            ),
-          ),
+          provide(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [task] =
+                'taskId' in where
+                  ? [{ taskId: where.taskId }]
+                  : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId} AND task_id IS NOT NULL`
+              if (task === undefined) return
+              yield* taken(task.taskId, how)
+              yield* Effect.forkIn(
+                provide(locked(task.taskId)(stoppedRounds(task.taskId, how))).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not settle what the stopped lead was resolving', cause)),
+                ),
+                scope,
+              )
+            }),
+          ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the lead stopped', cause))),
         resolveNow: (where, force) => Effect.asVoid(Effect.forkIn(provide(resolveNow(where, force)), scope)),
         setResolveConflicts: (input) => provide(setResolveConflicts(input)),
         // The person looking at the task counts as something happening on it.

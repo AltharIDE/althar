@@ -3301,6 +3301,11 @@ export class Queries extends Context.Service<
       const keptCards = new Map<string, Kept>()
       /** The cards being worked out now, by task: a read that wants one meanwhile waits for it, and reads it as kept. */
       const workingOut = new Map<string, Deferred.Deferred<void>>()
+      /**
+       * How many cards have been worked out to their end. A read that found its card no longer held, and finds one worked
+       * out since, as the watcher's while its look at git was under way, reads what that kept rather than work it out again.
+       */
+      let workedOutCount = 0
       const timeNow = Clock.clockWith((clock) => Effect.sync(() => clock.currentTimeMillisUnsafe()))
       const keptForMs = Duration.toMillis(config.keptFor ?? KEPT_FOR)
 
@@ -3364,13 +3369,38 @@ export class Queries extends Context.Service<
           return kept
         })
 
-      /** Works a task's card out once, whoever asks meanwhile: they wait for it, and read it as kept. */
-      const once = <A, E, R>(taskId: string, work: Effect.Effect<A, E, R>, kept: Effect.Effect<A | undefined, E, R>) =>
+      /**
+       * `effect`, its looks taken afresh rather than as this read first took them, and kept so for the rest of the read. For
+       * a card another read worked out meanwhile: what that one read (a worktree's facts worked out again among it) says
+       * now, which what this read took before it would refuse.
+       */
+      const lookingAgain = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         Effect.gen(function* () {
+          const read = yield* ReadAt
+          if (read === null) return yield* effect
+          const again: { at?: number; readonly looked: Map<string, Promise<string>> } = {
+            ...(read.at === undefined ? {} : { at: read.at }),
+            looked: new Map(),
+          }
+          const value = yield* Effect.provideService(effect, ReadAt, again)
+          if (read.at === undefined && again.at !== undefined) read.at = again.at
+          for (const [key, look] of again.looked) read.looked.set(key, look)
+          return value
+        })
+
+      /**
+       * A task's card as kept, where it still holds, else worked out once, whoever asks meanwhile: they wait for it, and
+       * read it as kept. One worked out to its end while this looked whether its own still held is read as kept too.
+       */
+      const keptOrOnce = <A, E, R>(taskId: string, kept: Effect.Effect<A | undefined, E, R>, work: Effect.Effect<A, E, R>) =>
+        Effect.gen(function* () {
+          const since = workedOutCount
+          const held = yield* kept
+          if (held !== undefined) return held
           const under = workingOut.get(taskId)
-          if (under !== undefined) {
-            yield* Deferred.await(under)
-            const found = yield* kept
+          if (under !== undefined) yield* Deferred.await(under)
+          if (under !== undefined || workedOutCount !== since) {
+            const found = yield* lookingAgain(kept)
             if (found !== undefined) return found
           }
           const done = Deferred.makeUnsafe<void>()
@@ -3379,6 +3409,7 @@ export class Queries extends Context.Service<
             Effect.ensuring(
               Effect.andThen(
                 Effect.sync(() => {
+                  workedOutCount += 1
                   if (workingOut.get(taskId) === done) workingOut.delete(taskId)
                 }),
                 Deferred.succeed(done, undefined),
@@ -3393,23 +3424,19 @@ export class Queries extends Context.Service<
        */
       const keptCard = (taskId: string, links?: Parameters<typeof standingFor>[1]) => {
         const served = Effect.map(keptOf(taskId), (kept): TaskCard | undefined => kept?.card)
-        return Effect.flatMap(served, (card) =>
-          card !== undefined
-            ? Effect.succeed(card)
-            : once(
-                taskId,
-                Effect.gen(function* () {
-                  const cursor = yield* readAt
-                  const memory = yield* agentsOf(taskId)
-                  const at = yield* timeNow
-                  const [found, on] = yield* cardWorkedOut(taskId, standingFor(taskId, links))
-                  if (found === undefined) keptCards.delete(taskId)
-                  else keepCard(taskId, { projectId: found.projectId, cursor, at, on, memory, card: found.card, row: found.row })
-                  const made: TaskCard | undefined = found?.card
-                  return made
-                }),
-                served,
-              ),
+        return keptOrOnce(
+          taskId,
+          served,
+          Effect.gen(function* () {
+            const cursor = yield* readAt
+            const memory = yield* agentsOf(taskId)
+            const at = yield* timeNow
+            const [found, on] = yield* cardWorkedOut(taskId, standingFor(taskId, links))
+            if (found === undefined) keptCards.delete(taskId)
+            else keepCard(taskId, { projectId: found.projectId, cursor, at, on, memory, card: found.card, row: found.row })
+            const made: TaskCard | undefined = found?.card
+            return made
+          }),
         )
       }
 
@@ -3431,34 +3458,30 @@ export class Queries extends Context.Service<
           const shown: Shown | undefined = board
           return shown
         })
-        return Effect.flatMap(served, (board) =>
-          board !== undefined
-            ? Effect.succeed(board)
-            : once(
-                row.id,
-                Effect.gen(function* () {
-                  const cursor = yield* readAt
-                  const memory = yield* agentsOf(row.id)
-                  const at = yield* timeNow
-                  const [found, on] = yield* cardWorkedOut(
-                    row.id,
-                    Effect.gen(function* () {
-                      const standing = yield* standingFor(row.id)
-                      return standing === undefined ? undefined : { ...standing, read: yield* boardOf(row, standing.card) }
-                    }),
-                  )
-                  if (found === undefined) {
-                    keptCards.delete(row.id)
-                    const none: Shown = { read: [], json: '[]' }
-                    return none
-                  }
-                  const board = { read: [found.read], json: JSON.stringify([found.read]) }
-                  keepCard(row.id, { projectId: found.projectId, cursor, at, on, memory, card: found.card, row: found.row, board })
-                  const shown: Shown = board
-                  return shown
-                }),
-                served,
-              ),
+        return keptOrOnce(
+          row.id,
+          served,
+          Effect.gen(function* () {
+            const cursor = yield* readAt
+            const memory = yield* agentsOf(row.id)
+            const at = yield* timeNow
+            const [found, on] = yield* cardWorkedOut(
+              row.id,
+              Effect.gen(function* () {
+                const standing = yield* standingFor(row.id)
+                return standing === undefined ? undefined : { ...standing, read: yield* boardOf(row, standing.card) }
+              }),
+            )
+            if (found === undefined) {
+              keptCards.delete(row.id)
+              const none: Shown = { read: [], json: '[]' }
+              return none
+            }
+            const board = { read: [found.read], json: JSON.stringify([found.read]) }
+            keepCard(row.id, { projectId: found.projectId, cursor, at, on, memory, card: found.card, row: found.row, board })
+            const shown: Shown = board
+            return shown
+          }),
         )
       }
 
