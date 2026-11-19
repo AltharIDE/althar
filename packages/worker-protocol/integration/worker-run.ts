@@ -15,6 +15,7 @@ import { Client, credentials } from '@grpc/grpc-js'
 import { bindWorkerHandshake, workerCertificateFingerprint } from '../src/grpc.ts'
 import {
   DiagnosticClaimSchema,
+  DiagnosticLogSchema,
   DiagnosticRenewSchema,
   DiagnosticOutcome,
   HomeFrameSchema,
@@ -120,6 +121,7 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
   match(worker, /^wrk_[a-f0-9]{32}$/)
   const queue = async () => (await host('worker-run', ['--worker-id', worker])).attemptId ?? ''
   const query = (attempt: string) => host('worker-result', ['--attempt-id', attempt])
+  const logs = (attempt: string, offset = 0) => host('worker-log', ['--attempt-id', attempt, '--offset', String(offset)])
   const run = (home: { workerPort: number; homeId: string }, ca = path('home-ca.pem')) =>
     exec(
       binary,
@@ -147,6 +149,8 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
   }
   match((await run(first)).stdout, /DIAGNOSTIC_OUTCOME_SUCCEEDED/)
   equal((await query(completed)).output, 'Linux\n')
+  equal((await logs(completed)).bytesBase64, Buffer.from('Linux\n').toString('base64'))
+  equal((await logs(completed, 2)).bytesBase64, Buffer.from('nux\n').toString('base64'))
 
   const lost = await queue()
   const tls = credentials.createSsl(
@@ -174,6 +178,7 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
             maxVersion: 1,
             acceptsDiagnostics: true,
             renewsDiagnosticLease: routed,
+            streamsDiagnosticLogs: routed,
           }),
         },
       }),
@@ -181,6 +186,7 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
     const hello = (await frames.next()).value?.payload
     if (hello?.case !== 'hello') throw new Error('Expected authenticated home hello')
     equal(hello.value.supportsDiagnosticLeaseRenewal, routed)
+    equal(hello.value.supportsDiagnosticLogs, routed)
     const offered = (await frames.next()).value?.payload
     if (offered?.case !== 'diagnosticOffer') throw new Error('Expected a diagnostic offer')
     equal(offered.value.attemptId, lost)
@@ -196,6 +202,19 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
     if (started?.case !== 'diagnosticStart') throw new Error('Expected the durable start grant')
     if (routed) {
       equal(started.value.runForMs <= 2000, true)
+      stream.write(
+        create(WorkerFrameSchema, {
+          payload: {
+            case: 'diagnosticLog',
+            value: create(DiagnosticLogSchema, {
+              attemptId: lost,
+              fence: started.value.fence,
+              offset: 0,
+              output: Buffer.from('partial'),
+            }),
+          },
+        }),
+      )
       const renewal = create(WorkerFrameSchema, {
         payload: {
           case: 'diagnosticRenew',
@@ -212,6 +231,11 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
       await rejects(frames.next(), /There is no current execution lease/)
     }
     equal((await query(lost)).state, 'claimed')
+    if (routed) {
+      const received = await logs(lost)
+      equal(received.state, 'claimed')
+      equal(received.bytesBase64, Buffer.from('partial').toString('base64'))
+    }
     // The grant has left the home, but this fixture deliberately never starts the command.
     await stop(first.child, 'SIGKILL')
   } finally {
@@ -223,6 +247,7 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
   equal((await query(completed)).output, 'Linux\n')
   match((await run(second)).stdout, /DIAGNOSTIC_OUTCOME_UNKNOWN/)
   equal((await query(lost)).state, 'unknown')
+  equal((await logs(lost)).bytesBase64, routed ? Buffer.from('partial').toString('base64') : '')
   equal(existsSync(resolve(path('journal'), `${lost}.started`)), false)
   await host('revoke-worker', ['--worker-id', worker])
   await rejects(run(second), { stderr: /Unauthenticated/ })
@@ -235,6 +260,93 @@ void test('the direct worker persists enrollment, outcome, and a lost grant acro
 void test('the relayed worker persists enrollment, outcome, and a lost grant across restart', { timeout: 50000 }, (t) =>
   recoverWorker(t, true),
 )
+
+void test('the home accepts bounded log chunks only on the stream holding the live grant', { timeout: 20000 }, async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'althar-worker-live-log-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const path = workerCertificates(root)
+  const workerId = `wrk_${'2'.repeat(32)}`
+  const attemptId = `watt_${'3'.repeat(32)}`
+  const fence = `wfn_${'4'.repeat(32)}`
+  const certificate = readFileSync(path('enrolled.pem'))
+  const registered = workerCertificateFingerprint(new X509Certificate(certificate).raw)
+  let chunks = 0
+  const listener = await bindWorkerHandshake('127.0.0.1:0', {
+    homeId: `home_${'1'.repeat(32)}`,
+    certificateAuthorityPem: readFileSync(path('home-ca.pem')),
+    certificatePem: readFileSync(path('home.pem')),
+    privateKeyPem: readFileSync(path('home.key')),
+    workerForCertificate: (fingerprint) => (fingerprint === registered ? workerId : undefined),
+    diagnostics: {
+      next: () => ({ attemptId, fence, claimableForMs: 15_000 }),
+      claim: () => 2000,
+      renew: () => 2000,
+      appendLog: () => {
+        chunks += 1
+        return true
+      },
+      complete: () => true,
+    },
+  })
+  t.after(listener.close)
+  const tls = credentials.createSsl(readFileSync(path('home-ca.pem')), readFileSync(path('enrolled.key')), certificate)
+  const client = new Client(`127.0.0.1:${listener.port}`, tls, { 'grpc.ssl_target_name_override': 'localhost' })
+  t.after(() => client.close())
+  const method = WorkerControlService.method.connect
+  const log = (offset: number, bytes: number) =>
+    create(WorkerFrameSchema, {
+      payload: { case: 'diagnosticLog', value: create(DiagnosticLogSchema, { attemptId, fence, offset, output: Buffer.alloc(bytes) }) },
+    })
+  const exchange = async (claim: boolean) => {
+    const stream = client.makeBidiStreamRequest<WorkerFrame, HomeFrame>(
+      `/${WorkerControlService.typeName}/${method.name}`,
+      (frame) => Buffer.from(toBinary(WorkerFrameSchema, frame)),
+      (bytes) => fromBinary(HomeFrameSchema, bytes),
+      { deadline: Date.now() + 4000 },
+    )
+    const frames = stream[Symbol.asyncIterator]()
+    stream.write(
+      create(WorkerFrameSchema, {
+        payload: {
+          case: 'hello',
+          value: create(WorkerHelloSchema, {
+            workerId,
+            minVersion: 1,
+            maxVersion: 1,
+            acceptsDiagnostics: true,
+            renewsDiagnosticLease: true,
+            streamsDiagnosticLogs: true,
+          }),
+        },
+      }),
+    )
+    equal((await frames.next()).value?.payload.case, 'hello')
+    equal((await frames.next()).value?.payload.case, 'diagnosticOffer')
+    if (claim) {
+      stream.write(
+        create(WorkerFrameSchema, {
+          payload: { case: 'diagnosticClaim', value: create(DiagnosticClaimSchema, { attemptId, fence }) },
+        }),
+      )
+      equal((await frames.next()).value?.payload.case, 'diagnosticStart')
+    }
+    return { stream, frames }
+  }
+  const unclaimed = await exchange(false)
+  unclaimed.stream.write(log(0, 1))
+  await rejects(unclaimed.frames.next(), /no live grant for diagnostic logs/)
+  equal(chunks, 0)
+
+  const oversized = await exchange(true)
+  oversized.stream.write(log(0, 257))
+  await rejects(oversized.frames.next(), /exceeds its size limit/)
+  equal(chunks, 0)
+
+  const bounded = await exchange(true)
+  for (let offset = 0; offset < 17; offset += 1) bounded.stream.write(log(offset, 1))
+  await rejects(bounded.frames.next(), /exceeds its size limit/)
+  equal(chunks, 16)
+})
 
 void test('a restarted worker replays its journal after its result could not be committed', { timeout: 30000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-worker-replay-'))

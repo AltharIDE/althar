@@ -119,6 +119,21 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
           `${result.attemptId} ${result.state}${result.output === null ? '' : `\n${JSON.stringify(result.output)}`}`,
         )
       }
+      case 'worker-log': {
+        const configured = yield* configuredHome(options)
+        const log = yield* workerOperation(configured.profile, (store) =>
+          store.log(options.workerAttemptId ?? '', options.workerLogOffset ?? 0),
+        )
+        const readable = JSON.stringify(Buffer.from(log.bytesBase64, 'base64').toString('utf8')).replace(
+          /[\p{Cc}\p{Cf}]/gu,
+          (character) => `\\u{${character.codePointAt(0)?.toString(16)}}`,
+        )
+        return yield* out(
+          log,
+          `${log.attemptId} ${log.state} (${log.offset}–${log.nextOffset})
+${readable}`,
+        )
+      }
       case 'pair': {
         const configured = yield* configuredHome(options)
         const invitation = yield* issuePairing(configured)

@@ -56,6 +56,22 @@ journaled result or an unknown outcome. It cannot extend the old stream's
 lease or start the attempt again. Version 1 peers without the renewal
 capability keep using the existing one-shot diagnostic grant.
 
+## Live diagnostic output
+
+Peers that support renewable leases and live logs can send stdout in
+chunks of up to 256 bytes as the command runs. The home accepts each
+contiguous byte offset only on the authenticated stream holding the
+active grant and saves up to 1 KiB in at most 16 chunks per attempt. The received prefix
+survives a disconnect or restart. The result still records whether the
+command is known to have completed.
+
+Operators can read the prefix while the attempt is running or after
+reconnect using `althar-host worker-log --attempt-id <id> --json`.
+The response includes the attempt state, the requested `offset`,
+`nextOffset` and `bytesBase64`. Use `--offset <nextOffset>` for the next
+read and decode the bytes before assembling text. Legacy peers still return
+their final diagnostic output through `worker-result`.
+
 ## Outbound worker relay
 
 Run the relay on a machine both endpoints can reach. The home and worker

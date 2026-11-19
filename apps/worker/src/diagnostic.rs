@@ -15,8 +15,8 @@ use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use crate::grpc::{WorkerEnrollment, control_client, endpoint};
 use crate::relay::{WorkerRelay, relay_channel};
 use crate::wire::{
-    DiagnosticClaim, DiagnosticLease, DiagnosticOffer, DiagnosticOutcome, DiagnosticRenew,
-    DiagnosticResult, HomeFrame, WorkerFrame,
+    DiagnosticClaim, DiagnosticLease, DiagnosticLog, DiagnosticOffer, DiagnosticOutcome,
+    DiagnosticRenew, DiagnosticResult, HomeFrame, WorkerFrame,
 };
 use crate::wire::{home_frame, worker_frame};
 use crate::{HandshakeError, MAX_HELLO_BYTES, accept_home_frame, valid_id, worker_hello};
@@ -25,6 +25,8 @@ const LEASE_MS: u32 = 15_000;
 const RENEWAL_MS: u32 = 2_000;
 const RUNTIME_LIMIT: Duration = Duration::from_secs(3);
 const OUTPUT_BYTES: usize = 1024;
+const LOG_CHUNK_BYTES: usize = 256;
+const LOG_CHUNKS_LIMIT: usize = 16;
 type Failure = Box<dyn Error + Send + Sync>;
 
 fn invalid(message: &'static str) -> io::Error {
@@ -219,7 +221,11 @@ fn report(
     }
 }
 
-async fn run_uname(deadline: Instant, offer: &DiagnosticOffer) -> DiagnosticResult {
+async fn run_uname(
+    deadline: Instant,
+    offer: &DiagnosticOffer,
+    log: Option<&mpsc::Sender<WorkerFrame>>,
+) -> DiagnosticResult {
     let result = tokio::time::timeout_at(deadline, async {
         let mut child = Command::new("/usr/bin/uname")
             .arg("-s")
@@ -232,18 +238,47 @@ async fn run_uname(deadline: Instant, offer: &DiagnosticOffer) -> DiagnosticResu
         let mut output = child
             .stdout
             .take()
-            .ok_or_else(|| invalid("The diagnostic has no output pipe"))?
-            .take((OUTPUT_BYTES + 1) as u64);
-        let mut bytes = Vec::new();
-        output.read_to_end(&mut bytes).await?;
+            .ok_or_else(|| invalid("The diagnostic has no output pipe"))?;
+        let mut bytes = Vec::with_capacity(OUTPUT_BYTES);
+        let mut buffer = [0; LOG_CHUNK_BYTES];
+        let mut log_chunks = 0;
+        loop {
+            let count = output.read(&mut buffer).await?;
+            if count == 0 {
+                break;
+            }
+            let chunk = &buffer[..count.min(OUTPUT_BYTES - bytes.len())];
+            // Keep draining the pipe after the retained prefix is full.
+            if chunk.is_empty() {
+                continue;
+            }
+            if let Some(send) = log.filter(|_| log_chunks < LOG_CHUNKS_LIMIT) {
+                let offset = u32::try_from(bytes.len())
+                    .map_err(|_| invalid("Invalid diagnostic log offset"))?;
+                send.send(WorkerFrame {
+                    payload: Some(worker_frame::Payload::DiagnosticLog(DiagnosticLog {
+                        attempt_id: offer.attempt_id.clone(),
+                        fence: offer.fence.clone(),
+                        offset,
+                        output: chunk.to_vec(),
+                    })),
+                })
+                .await
+                .map_err(|_| io::Error::from(io::ErrorKind::BrokenPipe))?;
+                log_chunks += 1;
+            }
+            bytes.extend_from_slice(chunk);
+        }
         let exit = child.wait().await?;
-        bytes.truncate(OUTPUT_BYTES);
         Ok::<_, io::Error>((exit.success(), bytes))
     })
     .await;
     match result {
         Ok(Ok((true, bytes))) => report(offer, DiagnosticOutcome::Succeeded, bytes),
         Ok(Ok((false, bytes))) => report(offer, DiagnosticOutcome::Failed, bytes),
+        Ok(Err(error)) if error.kind() == io::ErrorKind::BrokenPipe => {
+            report(offer, DiagnosticOutcome::Unknown, Vec::new())
+        }
         Ok(Err(_)) => report(offer, DiagnosticOutcome::Failed, Vec::new()),
         Err(_) => report(offer, DiagnosticOutcome::Unknown, Vec::new()),
     }
@@ -371,6 +406,7 @@ pub async fn run_diagnostic_with_transport(
     if let Some(worker_frame::Payload::Hello(hello)) = &mut hello.payload {
         hello.accepts_diagnostics = true;
         hello.renews_diagnostic_lease = true;
+        hello.streams_diagnostic_logs = true;
     }
     tokio::time::timeout(Duration::from_secs(25), async {
         let endpoint = endpoint(address, &enrollment)?;
@@ -440,7 +476,11 @@ pub async fn run_diagnostic_with_transport(
                 renewable,
                 &send,
                 &mut reply,
-                run_uname(Instant::now() + RUNTIME_LIMIT, &offer),
+                run_uname(
+                    Instant::now() + RUNTIME_LIMIT,
+                    &offer,
+                    (renewable && hello.supports_diagnostic_logs).then_some(&send),
+                ),
             )
             .await?;
             pending_acknowledgment = lease.pending.map(|_| lease.sequence);

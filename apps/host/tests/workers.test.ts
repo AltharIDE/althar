@@ -79,6 +79,20 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
         assert.isDefined(offer)
         if (!offer) throw new Error('The diagnostic was not offered')
         assert.isAbove(store.claim(workerId, attemptId, offer.fence), 0)
+        const stdout = Buffer.from('partial\n\u009b2J\u202e')
+        assert.isTrue(
+          store.appendLog(workerId, {
+            $typeName: 'althar.worker.v1.DiagnosticLog',
+            attemptId,
+            fence: offer.fence,
+            offset: 0,
+            output: stdout,
+          }),
+        )
+        yield* command('worker-log', '--attempt-id', attemptId)
+        assert.include(output.at(-1) ?? '', '"partial\\n\\u{9b}2J\\u{202e}"')
+        yield* command('worker-log', '--attempt-id', attemptId, '--offset', '8', '--json')
+        assert.strictEqual(last().bytesBase64, stdout.subarray(8).toString('base64'))
         assert.isTrue(
           store.complete(workerId, {
             $typeName: 'althar.worker.v1.DiagnosticResult',

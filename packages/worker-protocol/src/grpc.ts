@@ -13,6 +13,7 @@ import {
   WorkerHandshakeError,
   negotiateWorkerHello,
   validWorkerProtocolId,
+  type DiagnosticLog,
   type DiagnosticOffer,
   type DiagnosticResult,
   type HomeFrame,
@@ -40,15 +41,18 @@ interface HomeWorkerTransport {
     readonly next: (workerId: string) => Omit<DiagnosticOffer, '$typeName'> | undefined
     readonly claim: (workerId: string, attemptId: string, fence: string, maximumMs?: number) => number
     readonly renew?: (workerId: string, attemptId: string, fence: string, maximumMs: number) => number
+    readonly appendLog?: (workerId: string, chunk: DiagnosticLog) => boolean
     readonly complete: (workerId: string, result: DiagnosticResult) => boolean
   }
 }
 
 export const MAX_DIAGNOSTIC_OUTPUT = 1024
+export const MAX_DIAGNOSTIC_LOG_CHUNK = 256
 export const DIAGNOSTIC_LEASE_MS = 15_000
 export const DIAGNOSTIC_RENEWAL_MS = 2_000
 const DIAGNOSTIC_RUNTIME_MS = 3_000
 const MAX_DIAGNOSTIC_RENEWALS = 8
+const MAX_DIAGNOSTIC_LOG_CHUNKS = 16
 const frame = (payload: HomeFrame['payload']) => Buffer.from(toBinary(HomeFrameSchema, create(HomeFrameSchema, { payload })))
 
 export const workerCertificateFingerprint = (der: Uint8Array): string => createHash('sha256').update(der).digest('hex')
@@ -86,6 +90,8 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
         let offer: Omit<DiagnosticOffer, '$typeName'> | undefined
         let askedToStart = false
         let supportsRenewal = false
+        let supportsLogs = false
+        let logChunks = 0
         let execution: { until: number; budget: number; sequence: number } | undefined
         let finished = false
         const reject = (code: status, message: string): void => {
@@ -128,10 +134,12 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
                 { homeId: home.homeId, workerId, sessionId: `wsn_${randomUUID().replaceAll('-', '')}` },
                 diagnostics !== undefined,
                 diagnostics?.renew !== undefined,
+                diagnostics?.appendLog !== undefined,
               )
               call.write(Buffer.from(toBinary(HomeFrameSchema, reply)))
               if (reply.payload.case === 'hello' && reply.payload.value.supportsDiagnostics) {
                 supportsRenewal = reply.payload.value.supportsDiagnosticLeaseRenewal
+                supportsLogs = reply.payload.value.supportsDiagnosticLogs
                 if (connected.has(workerId)) return reject(status.ALREADY_EXISTS, 'This worker already has an active exchange')
                 connected.add(workerId)
                 ownsStream = true
@@ -147,7 +155,10 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
             if (
               offer === undefined ||
               diagnostics === undefined ||
-              (payload.case !== 'diagnosticClaim' && payload.case !== 'diagnosticRenew' && payload.case !== 'diagnosticResult') ||
+              (payload.case !== 'diagnosticClaim' &&
+                payload.case !== 'diagnosticRenew' &&
+                payload.case !== 'diagnosticLog' &&
+                payload.case !== 'diagnosticResult') ||
               payload.value.attemptId !== offer.attemptId ||
               payload.value.fence !== offer.fence
             ) {
@@ -181,6 +192,25 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
               if (runForMs === 0) return reject(status.FAILED_PRECONDITION, 'The execution lease has expired')
               execution = { ...execution, until: at + runForMs, sequence }
               call.write(frame({ case: 'diagnosticLease', value: create(DiagnosticLeaseSchema, { attemptId, fence, sequence, runForMs }) }))
+              return
+            }
+            if (payload.case === 'diagnosticLog') {
+              if (!supportsLogs || execution === undefined || performance.now() >= execution.until) {
+                return reject(status.FAILED_PRECONDITION, 'This stream has no live grant for diagnostic logs')
+              }
+              const chunk = payload.value
+              if (
+                logChunks >= MAX_DIAGNOSTIC_LOG_CHUNKS ||
+                chunk.output.length === 0 ||
+                chunk.output.length > MAX_DIAGNOSTIC_LOG_CHUNK ||
+                chunk.offset + chunk.output.length > MAX_DIAGNOSTIC_OUTPUT
+              ) {
+                return reject(status.INVALID_ARGUMENT, 'The diagnostic log chunk exceeds its size limit')
+              }
+              if (!diagnostics.appendLog?.(workerId, chunk)) {
+                return reject(status.FAILED_PRECONDITION, 'The diagnostic log cursor or lease is no longer current')
+              }
+              logChunks += 1
               return
             }
             const result = payload.value

@@ -14,6 +14,7 @@ message WorkerFrame {
     DiagnosticClaim diagnostic_claim = 2;
     DiagnosticResult diagnostic_result = 3;
     DiagnosticRenew diagnostic_renew = 4;
+    DiagnosticLog diagnostic_log = 5;
   }
 }
 
@@ -34,6 +35,7 @@ message WorkerHello {
   uint32 max_version = 3;
   bool accepts_diagnostics = 4;
   bool renews_diagnostic_lease = 5;
+  bool streams_diagnostic_logs = 6;
 }
 
 // The first home frame binds this stream to one authenticated, negotiated session.
@@ -44,6 +46,7 @@ message HomeHello {
   uint32 version = 4;
   bool supports_diagnostics = 5;
   bool supports_diagnostic_lease_renewal = 6;
+  bool supports_diagnostic_logs = 7;
 }
 
 // A lease of zero requests reconciliation without granting a new start.
@@ -93,4 +96,13 @@ message DiagnosticLease {
   string fence = 2;
   uint32 sequence = 3;
   uint32 run_for_ms = 4;
+}
+
+// Raw stdout, emitted before the result on the claiming stream. Offsets are
+// contiguous byte offsets from zero, independent of character encoding.
+message DiagnosticLog {
+  string attempt_id = 1;
+  string fence = 2;
+  uint32 offset = 3;
+  bytes output = 4;
 }
