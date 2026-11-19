@@ -140,11 +140,13 @@ export const AllUnread: Story = {
   },
 }
 
-/** Nothing read yet: the gauge unlit, and the peek says so. */
+/** Nothing read yet: the gauge unlit and named so, and the peek is its heading alone. */
 export const NothingRead: Story = {
   args: { agents: [], defaultOpen: true },
-  play: async () => {
-    await expect(within(document.body).getByText('Nothing read yet')).toBeInTheDocument()
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Nothing read yet' })).toBeInTheDocument()
+    await expect(within(document.body).getByText('Plan usage', { selector: 'h2' })).toBeInTheDocument()
+    await expect(within(document.body).queryByText('Nothing read yet')).toBeNull()
   },
 }
 
