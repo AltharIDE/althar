@@ -71,7 +71,8 @@ describe('saved homes', () => {
     })
     vi.spyOn(promises, 'rename').mockImplementation(async (from, to) => {
       await new Promise((resolve) => setTimeout(resolve, 10))
-      if (to === path && reading > 0) throw Object.assign(new Error(`EPERM: operation not permitted, rename '${from}'`), { code: 'EPERM' })
+      if (to === path && reading > 0)
+        throw Object.assign(new Error(`EPERM: operation not permitted, rename '${String(from)}'`), { code: 'EPERM' })
       return rename(from, to)
     })
     expect((await store.rename(remote().id, 'Renamed')).name).toBe('Renamed')
