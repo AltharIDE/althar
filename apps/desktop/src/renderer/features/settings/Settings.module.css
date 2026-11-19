@@ -30,14 +30,6 @@
   padding-top: 4px;
 }
 
-.about {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 16px;
-  padding: 4px 0;
-}
-
 /* ---- skills: installing or a review on top, the update check, then every skill ---- */
 .skills {
   display: grid;

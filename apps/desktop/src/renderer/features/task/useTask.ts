@@ -29,6 +29,7 @@ import {
   useMerge,
   useMerging,
   usePressedMerges,
+  useTakenOut,
 } from '../../data/merges'
 import { keys, reads } from '../../data/reads'
 import { canPick } from '../../shared/agents'
@@ -366,7 +367,8 @@ export interface TaskModel {
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
   /** Runs one of the project's runnables in its worktree, its default without one. */
-  readonly runProject: (runnableId?: string | null) => Promise<void>
+  /** Whether it went: false where the runtime refused it, saying why in the error. */
+  readonly runProject: (runnableId?: string | null) => Promise<boolean>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   readonly dismissError: () => void
@@ -409,6 +411,8 @@ export const useTask = (threadId: string): TaskModel => {
   const windowMerges = useMerging(snapshot === null ? null : [{ taskId: snapshot.task.id, change: shownChange }])
   // Each of its pull requests' merges as the window keeps them, by address: pressed on any screen, this one left and back included.
   const pressedByUrl = usePressedMerges(snapshot?.task.changes ?? null)
+  // Those its merge queue took out again since a read had them in it: the person's to merge, though the press hasn't answered.
+  const takenOut = useTakenOut(snapshot?.task.changes ?? null)
   const underWay = useRef(pressedByUrl)
   // The pull requests pressed here, Merging at once, until the window's own record of the press takes over.
   const [pressedMerges, setPressedMerges] = useState<ReadonlyMap<string, Pressing>>(new Map())
@@ -862,23 +866,25 @@ export const useTask = (threadId: string): TaskModel => {
     conflict,
     dismissConflict: () => setConflict(null),
     refused,
-    merging,
+    merging: merging !== null && takenOut.has(merging) ? null : merging,
     mergeRefused: error === null ? null : mergeFailed,
     mergeStanding: (url) => {
-      const pressing = pressedMerges.get(url) ?? pressedByUrl.get(url)
+      // The window's record first, once it has the press: it says when the press is answered and it goes into its queue.
+      const pressing = takenOut.has(url) ? undefined : (pressedByUrl.get(url) ?? pressedMerges.get(url))
+      const unaddressed = snapshot !== null && shownChange?.url === url && windowMerges.unaddressed.has(snapshot.task.id)
       return mergeStandingOf(
         snapshot?.task.changes.find((change) => change.url === url),
-        merging === url ||
-          pressing !== undefined ||
-          // A merge pressed without its address, on a screen that knew only the task: its shown pull request's.
-          (snapshot !== null && shownChange?.url === url && windowMerges.unaddressed.has(snapshot.task.id)),
+        // A merge pressed without its address, on a screen that knew only the task: its shown pull request's.
+        (merging === url && !takenOut.has(url)) || pressing !== undefined || (unaddressed && !takenOut.has(url)),
         pressing === 'bypass',
+        pressing === 'queue' || (unaddressed && windowMerges.queuing.has(snapshot.task.id)),
       )
     },
     mergeAwaits: (url) =>
       (awaitingMerges.has(url) || heldMerges.has(url)) && merging !== url && !pressedMerges.has(url) && !pressedByUrl.has(url),
     pending: under.has(presses.send),
-    doing: [...under.keys()].find((key) => !OWN.has(key)) ?? null,
+    // A merge its queue took out again is the person's, Merge no longer busy, though its press hasn't answered.
+    doing: [...under.keys()].find((key) => !OWN.has(key) && !(key === doing.accept && merging !== null && takenOut.has(merging))) ?? null,
     busy: busyNow,
     loadingEarlier,
     loadEarlier,
@@ -1303,12 +1309,19 @@ export const useTask = (threadId: string): TaskModel => {
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     moveToFront: () => onTask((taskId) => client.moveInLine(taskId, 0)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
-    runProject: (runnableId = null) =>
-      act(async () =>
-        snapshot === null
-          ? undefined
-          : client.runProject(snapshot.project.id, snapshot.task.id, threadId, ...(runnableId === null ? [] : [runnableId])),
-      ),
+    runProject: async (runnableId = null) => {
+      let went = true
+      await act(async () => {
+        try {
+          if (snapshot !== null)
+            await client.runProject(snapshot.project.id, snapshot.task.id, threadId, ...(runnableId === null ? [] : [runnableId]))
+        } catch (failure) {
+          went = false
+          throw failure
+        }
+      })
+      return went
+    },
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
     dismissError: () => setError(null),

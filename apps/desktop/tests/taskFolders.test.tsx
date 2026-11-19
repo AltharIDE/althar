@@ -77,6 +77,59 @@ describe('finished tasks’ folders under Work on this computer', () => {
     expect(within(screen.getByRole('region', { name: 'Goes with Clean up' })).getByText('CI on Windows')).toBeTruthy()
   })
 
+  it('measures the task folders anew on an open About when a cleanup finishes after it read the old size', async () => {
+    let cleaned: (done: { freed: number; failed: number }) => void = () => undefined
+    let removed = false
+    const getStorageSize = vi.fn(async (place: string) => ({
+      state: 'done' as const,
+      bytes: place === 'worktrees' ? (removed ? 0.5 * GB : 4 * GB) : GB,
+      approximate: false,
+      unreadable: 0,
+    }))
+    const { client } = fakeClient({
+      getTaskFolders: vi.fn(async () => FOLDERS),
+      cleanUpFolders: vi.fn(() => new Promise<{ freed: number; failed: number }>((done) => (cleaned = done))),
+      getStorageSize,
+    })
+    withServices(<Settings />, client)
+    const page = screen.getByRole('main')
+    // Clean up, still under way, and on to About, which reads the size from before.
+    await userEvent.click(await within(page).findByRole('button', { name: 'Clean up' }))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Settings' })).getByRole('button', { name: /^About Althar/ }))
+    const tile = (await within(screen.getByRole('main')).findByText('Task folders')).closest('li') as HTMLElement
+    expect(await within(tile).findByText('4.0 GB')).toBeTruthy()
+    // The cleanup finishes with About open: the old figure gives way, and the size is read again.
+    removed = true
+    cleaned({ freed: 3.5 * GB, failed: 0 })
+    expect(await within(tile).findByText('512 MB')).toBeTruthy()
+    expect(getStorageSize.mock.calls.filter(([place]) => place === 'worktrees')).toHaveLength(2)
+  })
+
+  it('measures the task folders anew on an open About when a cleanup finishes that reports nothing freed', async () => {
+    let cleaned: (done: { freed: number; failed: number }) => void = () => undefined
+    let removed = false
+    const getStorageSize = vi.fn(async (place: string) => ({
+      state: 'done' as const,
+      bytes: place === 'worktrees' ? (removed ? 0.5 * GB : 4 * GB) : GB,
+      approximate: false,
+      unreadable: 0,
+    }))
+    const { client } = fakeClient({
+      getTaskFolders: vi.fn(async () => FOLDERS),
+      cleanUpFolders: vi.fn(() => new Promise<{ freed: number; failed: number }>((done) => (cleaned = done))),
+      getStorageSize,
+    })
+    withServices(<Settings />, client)
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: 'Clean up' }))
+    await userEvent.click(within(screen.getByRole('navigation', { name: 'Settings' })).getByRole('button', { name: /^About Althar/ }))
+    const tile = (await within(screen.getByRole('main')).findByText('Task folders')).closest('li') as HTMLElement
+    expect(await within(tile).findByText('4.0 GB')).toBeTruthy()
+    // A folder went, though the disk's free space says nothing was freed: the size is read again all the same.
+    removed = true
+    cleaned({ freed: 0, failed: 0 })
+    expect(await within(tile).findByText('512 MB')).toBeTruthy()
+  })
+
   it('cleans up, says what it freed, and removes a held-back folder by hand once asked', async () => {
     const onTask = vi.fn()
     const { client } = fakeClient({

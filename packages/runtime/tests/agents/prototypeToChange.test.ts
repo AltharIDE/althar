@@ -23,8 +23,8 @@ import { fakeConnectors, HOST, hosted } from '../support'
 
 /*
  * A prototype becoming a change on the person's plain word, with a real lead (a task is a conversation plus parts; the
- * person's note of 12 November): a task planned from Prototype, led by the agent and model that preset names, as installed
- * and signed in on this computer, does its work; the person asks what making it a finished change takes, then answers
+ * person's note of 12 November): a task planned from Prototype, which names no model, led by Claude Code's Opus as the
+ * coordinator may pick, as installed and signed in on this computer, does its work; the person asks what making it a finished change takes, then answers
  * "Yep pls"; its lead makes it a change in place, asking nothing again; the person's Ship runs the review and opens the
  * pull request, on a fake GitHub. It prints each thread as it goes, and costs a few turns of usage on the lead and on the
  * reviewer the project's rules pick: `bunx vp test run --config vite.agents.config.ts tests/agents/prototypeToChange.test.ts`.
@@ -82,7 +82,7 @@ describe('a prototype made a change on the person’s plain word, on a real lead
           actorId: instance.personId,
           held: true,
         })
-        // Planned from Prototype, as the coordinator plans one: its lead, no review, ending with its branch.
+        // Planned from Prototype, as the coordinator plans one: no review, ending with its branch; its lead, as picked.
         yield* plans.applyPreset(planId, 'Prototype', instance.personId)
         // Its lead's model as the agent names it here: a runtime with no model catalogue knows Opus by the agent's own word.
         yield* plans.change(planId, [{ key: 'implement', agentId: 'claude-code', model: 'opus', skipped: false }], instance.personId)

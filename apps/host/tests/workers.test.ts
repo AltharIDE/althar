@@ -132,3 +132,65 @@ it.live('provisions a scoped listener and durable worker enrollment through loca
     }),
   ),
 )
+
+it.live('validates operator relay links and keeps the home ready when the gateway is away', () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const root = temporary()
+      const certificates = workerCertificates(root)
+      const profile = join(root, 'profile')
+      const args = ['--profile', profile, '--key-file', join(root, 'keys/master'), '--json']
+      const output: string[] = []
+      const io = { out: (line: string) => output.push(line), node: process.execPath, entry: '/unused.js', path: '/usr/bin' }
+      const dependencies = {
+        agents: Layer.succeed(Agents, Agents.from([])),
+        agentConfigs: { homeDir: root, folder: join(root, 'agent-sync') },
+      }
+      const command = (...tokens: string[]) => runCommand(parseOptions([...tokens, ...args], {}, root), io, dependencies)
+      yield* command('init')
+      const caFile = certificates('home-ca.pem')
+      const tokenFile = certificates('relay-token')
+      writeFileSync(tokenFile, 'a'.repeat(43), { mode: 0o600 })
+      const url = `wss://localhost:1/v1/worker-relay/wrl_${'a'.repeat(32)}/home`
+      const link = { url, caFile, tokenFile }
+      const file = certificates('relay-link.json')
+      const configure = (path: string) =>
+        command(
+          'configure-workers',
+          '--listen-port',
+          '0',
+          '--listen-address',
+          '0.0.0.0',
+          '--worker-ca',
+          caFile,
+          '--tls-certificate',
+          certificates('home.pem'),
+          '--tls-key',
+          certificates('home.key'),
+          '--worker-relay',
+          path,
+        )
+      const worktreeFile = join(profile, 'worktrees', 'relay.json')
+      writeFileSync(worktreeFile, JSON.stringify(link), { mode: 0o600 })
+      const inProject = yield* Effect.flip(configure(worktreeFile))
+      assert.strictEqual(inProject._tag, 'HostError')
+      for (const invalid of [
+        { ...link, caFile: 'relative-ca' },
+        { ...link, tokenFile: worktreeFile },
+        { ...link, url: url.replace(/home$/, 'worker') },
+      ]) {
+        writeFileSync(file, JSON.stringify(invalid), { mode: 0o600 })
+        const error = yield* Effect.flip(configure(file))
+        assert.strictEqual(error._tag, 'HostError')
+      }
+      writeFileSync(file, JSON.stringify(link), { mode: 0o600 })
+      yield* configure(file)
+      const serve = yield* Effect.forkScoped(command('serve'))
+      yield* until(
+        Effect.sync(() => output.some((line) => line.includes('"workerPort":'))),
+        Boolean,
+      )
+      yield* Fiber.interrupt(serve)
+    }),
+  ),
+)

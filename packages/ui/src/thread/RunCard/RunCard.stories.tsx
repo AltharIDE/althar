@@ -53,6 +53,7 @@ const meta = {
     onOpen: fn(),
     onStop: fn(),
     onRunAgain: fn(),
+    onHelp: fn(),
   },
 } satisfies Meta<typeof RunCard>
 export default meta
@@ -62,9 +63,13 @@ type Story = StoryObj<typeof meta>
 export const Up: Story = {}
 /** Before it says where it answers. */
 export const Starting: Story = { args: { url: undefined, output: { text: '$ vite --config vite.config.mjs\n' } } }
-/** It failed: the line that says why, which opens its console, and Run again. */
+/** It failed: the line that says why, which opens its console, Help me fix it (a prompt in the composer, unsent) and Run again. */
 export const Failed: Story = {
   args: { ended: { code: 1, stopped: false, last: 'Error: Port 5173 is already in use' }, output: { text: FAILED } },
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Help me fix Dev server' }))
+    await expect(args.onHelp).toHaveBeenCalledTimes(1)
+  },
 }
 /** It ended by itself, well. */
 export const Finished: Story = {

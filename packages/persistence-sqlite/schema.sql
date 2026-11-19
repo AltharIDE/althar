@@ -1733,3 +1733,9 @@ CREATE TABLE brought_in (
 CREATE INDEX brought_in_task ON brought_in (task_id) WHERE task_id IS NOT NULL;
 
 CREATE INDEX runnables_of_task ON runnables (task_id) WHERE task_id IS NOT NULL AND dropped_at IS NULL;
+
+CREATE TABLE preset_tunings (
+    preset_id TEXT PRIMARY KEY NOT NULL CHECK (preset_id GLOB 'builtin:*'),
+    parts TEXT NOT NULL CHECK (json_valid(parts)),
+    updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z')
+  ) STRICT;

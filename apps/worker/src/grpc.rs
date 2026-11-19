@@ -15,10 +15,10 @@ pub struct WorkerEnrollment<'a> {
     pub worker_private_key_pem: &'a [u8],
 }
 
-pub(crate) async fn client(
+pub(crate) fn endpoint(
     address: &str,
     enrollment: &WorkerEnrollment<'_>,
-) -> Result<WorkerControlServiceClient<Channel>, Box<dyn Error + Send + Sync>> {
+) -> Result<Endpoint, Box<dyn Error + Send + Sync>> {
     if !valid_id(enrollment.home_id, "home_") {
         return Err(HandshakeError::InvalidIdentity.into());
     }
@@ -36,10 +36,13 @@ pub(crate) async fn client(
             enrollment.worker_certificate_pem,
             enrollment.worker_private_key_pem,
         ));
-    let channel = endpoint.tls_config(tls)?.connect().await?;
-    Ok(WorkerControlServiceClient::new(channel)
+    Ok(endpoint.tls_config(tls)?)
+}
+
+pub(crate) fn control_client(channel: Channel) -> WorkerControlServiceClient<Channel> {
+    WorkerControlServiceClient::new(channel)
         .max_decoding_message_size(MAX_HELLO_BYTES)
-        .max_encoding_message_size(MAX_HELLO_BYTES))
+        .max_encoding_message_size(MAX_HELLO_BYTES)
 }
 
 /// Confirm one enrolled TLS peer and negotiated protocol session.
@@ -49,7 +52,7 @@ pub async fn probe_home(
 ) -> Result<wire::HomeHello, Box<dyn Error + Send + Sync>> {
     let offer = worker_hello(enrollment.worker_id)?;
     tokio::time::timeout(HANDSHAKE_TIMEOUT, async {
-        let mut client = client(address, &enrollment).await?;
+        let mut client = control_client(endpoint(address, &enrollment)?.connect().await?);
         let mut reply = client
             .connect(tokio_stream::once(offer))
             .await?
