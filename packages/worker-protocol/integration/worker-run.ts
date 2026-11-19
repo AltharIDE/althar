@@ -15,6 +15,7 @@ import { Client, credentials } from '@grpc/grpc-js'
 import { bindWorkerHandshake, workerCertificateFingerprint } from '../src/grpc.ts'
 import {
   DiagnosticClaimSchema,
+  DiagnosticRenewSchema,
   DiagnosticOutcome,
   HomeFrameSchema,
   WorkerControlService,
@@ -167,11 +168,19 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
       create(WorkerFrameSchema, {
         payload: {
           case: 'hello',
-          value: create(WorkerHelloSchema, { workerId: worker, minVersion: 1, maxVersion: 1, acceptsDiagnostics: true }),
+          value: create(WorkerHelloSchema, {
+            workerId: worker,
+            minVersion: 1,
+            maxVersion: 1,
+            acceptsDiagnostics: true,
+            renewsDiagnosticLease: routed,
+          }),
         },
       }),
     )
-    equal((await frames.next()).value?.payload.case, 'hello')
+    const hello = (await frames.next()).value?.payload
+    if (hello?.case !== 'hello') throw new Error('Expected authenticated home hello')
+    equal(hello.value.supportsDiagnosticLeaseRenewal, routed)
     const offered = (await frames.next()).value?.payload
     if (offered?.case !== 'diagnosticOffer') throw new Error('Expected a diagnostic offer')
     equal(offered.value.attemptId, lost)
@@ -185,6 +194,23 @@ const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => 
     )
     const started = (await frames.next()).value?.payload
     if (started?.case !== 'diagnosticStart') throw new Error('Expected the durable start grant')
+    if (routed) {
+      equal(started.value.runForMs <= 2000, true)
+      const renewal = create(WorkerFrameSchema, {
+        payload: {
+          case: 'diagnosticRenew',
+          value: create(DiagnosticRenewSchema, { attemptId: lost, fence: started.value.fence, sequence: 1 }),
+        },
+      })
+      stream.write(renewal)
+      const extended = (await frames.next()).value?.payload
+      if (extended?.case !== 'diagnosticLease') throw new Error('Expected a renewal on the claiming stream')
+      equal(extended.value.sequence, 1)
+      equal(extended.value.attemptId, lost)
+      equal(extended.value.runForMs > 0 && extended.value.runForMs <= 2000, true)
+      stream.write(renewal)
+      await rejects(frames.next(), /There is no current execution lease/)
+    }
     equal((await query(lost)).state, 'claimed')
     // The grant has left the home, but this fixture deliberately never starts the command.
     await stop(first.child, 'SIGKILL')

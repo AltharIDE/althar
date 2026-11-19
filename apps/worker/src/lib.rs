@@ -60,6 +60,7 @@ pub fn worker_hello(worker_id: &str) -> Result<wire::WorkerFrame, HandshakeError
             min_version: PROTOCOL_VERSION,
             max_version: PROTOCOL_VERSION,
             accepts_diagnostics: false,
+            renews_diagnostic_lease: false,
         })),
     })
 }
@@ -122,6 +123,7 @@ mod tests {
             session_id: SESSION.to_owned(),
             version: PROTOCOL_VERSION,
             supports_diagnostics: false,
+            supports_diagnostic_lease_renewal: false,
         }
     }
 
