@@ -5,6 +5,7 @@ import { Effect, Fiber, Layer, Stream } from 'effect'
 
 import { Launches } from '../src/Launches'
 import { Live, type LiveEvent } from '../src/Live'
+import { NotFound } from '../src/errors'
 import { envOf, isShell, keptOf, type Pty, type PtyOptions, PtySpawner, shellOf, Terminals } from '../src/Terminals'
 
 /*
@@ -60,7 +61,8 @@ class FakePty implements Pty {
   }
 }
 
-const setUp = () => {
+/** The service with fake shells, or with what a test starts them with instead. */
+const setUp = (spawn?: PtySpawner['Service']['spawn']) => {
   const ptys: Array<FakePty> = []
   const asked: Array<{ readonly projectId: string; readonly taskId: string | null; readonly launchId?: string }> = []
   const launches = Layer.succeed(
@@ -80,11 +82,13 @@ const setUp = () => {
   const spawner = Layer.succeed(
     PtySpawner,
     PtySpawner.of({
-      spawn: (file, _args, options) => {
-        const pty = new FakePty(file, options)
-        ptys.push(pty)
-        return pty
-      },
+      spawn:
+        spawn ??
+        ((file, _args, options) => {
+          const pty = new FakePty(file, options)
+          ptys.push(pty)
+          return pty
+        }),
     }),
   )
   const layer = Terminals.layer.pipe(Layer.provideMerge(Layer.mergeAll(launches, spawner, Live.layer)))
@@ -245,6 +249,41 @@ describe('terminals', () => {
   })
 })
 
+describe('terminals that aren’t there, or have ended', () => {
+  it.live('says a terminal it doesn’t have is gone, and leaves one that ended badly alone', () => {
+    const { ptys, layer } = setUp()
+    return Effect.gen(function* () {
+      const terminals = yield* Terminals
+      const missing = yield* Effect.flip(Stream.runDrain(terminals.attach('term_none')))
+      assert.instanceOf(missing, NotFound)
+      // Closing what isn't there, or a project with none, changes nothing.
+      yield* terminals.close('term_none')
+      yield* terminals.closeAll('nowhere')
+      yield* terminals.open({ id: 'term_ended1', projectId: 'p', taskId: null, cols: 80, rows: 24 })
+      const pty = ptys[0]!
+      pty.end(1)
+      yield* settle
+      // Keys and a new size for a shell that ended go nowhere.
+      yield* Effect.ignore(terminals.write('term_ended1', 'ls\n'))
+      yield* Effect.ignore(terminals.resize('term_ended1', 100, 30))
+      assert.deepStrictEqual([pty.written, pty.sizes], [[], []])
+      assert.strictEqual((yield* terminals.ofProject('p')).length, 1)
+    }).pipe(Effect.provide(layer))
+  })
+
+  for (const thrown of [new Error('no such file'), 'refused'])
+    it.live(`says why a shell couldn’t start (${String(thrown)})`, () => {
+      const { layer } = setUp(() => {
+        throw thrown
+      })
+      return Effect.gen(function* () {
+        const failed = yield* Effect.flip((yield* Terminals).open({ id: 'term_fail1', projectId: 'p', taskId: null, cols: 80, rows: 24 }))
+        assert.include(String(failed), `couldn't start`)
+        assert.include(String(failed), thrown instanceof Error ? thrown.message : thrown)
+      }).pipe(Effect.provide(layer))
+    })
+})
+
 describe('a terminal’s shell and what it keeps', () => {
   it('starts the person’s own shell as a login shell, else the system’s', () => {
     assert.deepStrictEqual(
@@ -294,7 +333,42 @@ describe('a terminal’s shell and what it keeps', () => {
     assert.isTrue(isShell('', '/bin/zsh'))
     assert.isTrue(isShell('powershell.exe', 'powershell.exe'))
     assert.isFalse(isShell('vim', '/bin/zsh'))
+    // Linux names it by its path, as it was started.
+    assert.isTrue(isShell('/bin/bash', '/bin/bash'))
+    assert.isTrue(isShell('-/bin/bash', '/bin/bash'))
+    assert.isTrue(isShell('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'powershell.exe'))
+    assert.isFalse(isShell('/usr/bin/sleep', '/bin/bash'))
   })
+
+  it.live('starts a real shell through node-pty, and hears what it prints and that it ended', () =>
+    Effect.gen(function* () {
+      const { spawn } = yield* PtySpawner
+      const windows = process.platform === 'win32'
+      const pty = spawn(windows ? 'cmd.exe' : '/bin/sh', windows ? ['/c', 'echo althar-pty'] : ['-c', 'echo althar-pty'], {
+        cwd: process.cwd(),
+        cols: 80,
+        rows: 24,
+        env: envOf(process.env, process.platform, '1'),
+      })
+      let printed = ''
+      const [heard, exit] = yield* Effect.all(
+        [
+          Effect.callback<string>((resume) => {
+            pty.onData((data) => {
+              printed += data
+              if (printed.includes('althar-pty')) resume(Effect.succeed(printed))
+            })
+          }),
+          Effect.callback<number>((resume) => {
+            pty.onExit(({ exitCode }) => resume(Effect.succeed(exitCode)))
+          }),
+        ],
+        { concurrency: 'unbounded' },
+      )
+      assert.include(heard, 'althar-pty')
+      assert.strictEqual(exit, 0)
+    }).pipe(Effect.provide(PtySpawner.node)),
+  )
 
   it('keeps the end of what was printed, cut at the start of a line', () => {
     const pieces = ['first line\nsecond line\n', 'third\n']

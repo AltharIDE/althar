@@ -132,11 +132,19 @@ export const envOf = (env: NodeJS.ProcessEnv, platform: NodeJS.Platform, version
   return out
 }
 
-/** Whether what runs in front is the shell itself: by its name, a login shell's with its dash. */
+/** A program's name, however the system gives it: by its path (as Linux does), a login shell's with its dash, Windows' with .exe. */
+const nameOf = (program: string) =>
+  program
+    .replace(/^-/, '')
+    .split(/[\\/]/)
+    .pop()!
+    .replace(/^-/, '')
+    .replace(/\.exe$/i, '')
+
+/** Whether what runs in front is the shell itself, by its name. */
 export const isShell = (front: string, shell: string) => {
-  const name = basename(shell).replace(/\.exe$/i, '')
-  const now = front.replace(/^-/, '').replace(/\.exe$/i, '')
-  return now === '' || now === name
+  const now = nameOf(front)
+  return now === '' || now === nameOf(shell)
 }
 
 /** How much of what a terminal printed is kept, for a window that attaches again: about an editor's scrollback. */
@@ -232,7 +240,7 @@ export class Terminals extends Context.Service<
         launchId: term.launchId,
         folder: term.folder,
         where: term.where,
-        title: term.front === '' ? basename(term.shell).replace(/\.exe$/i, '') : term.front.replace(/^-/, ''),
+        title: nameOf(term.front === '' ? term.shell : term.front),
         busy: term.exited === null && !isShell(term.front, term.shell),
         startedAt: term.startedAt,
         exited: term.exited,
