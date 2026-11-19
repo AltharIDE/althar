@@ -5,6 +5,8 @@ import { join } from 'node:path'
 
 import { expect, type Page, test } from '@playwright/test'
 
+import { budget } from '@althar/testing/budget'
+
 import { repository } from '../tests/repository'
 import { launch, openFirstProject, sizeWindow, still } from './support'
 
@@ -29,7 +31,7 @@ const env = {
 const openTerminal = async (page: Page) => {
   await expect(async () => {
     if ((await line(page).count()) === 0) await page.keyboard.press('Control+Backquote')
-    await expect(line(page).getByRole('button', { name: 'meridian', exact: true })).toBeVisible({ timeout: 1_000 })
+    await expect(line(page).getByRole('button', { name: 'meridian', exact: true })).toBeVisible({ timeout: budget.small })
   }).toPass()
 }
 
@@ -64,7 +66,7 @@ test('a terminal opens in the project’s repository, says what runs in it, and 
     await expect(terminalKeys(page)).toBeFocused()
     // What is typed reaches a real shell, in the project's repository.
     await page.keyboard.type('echo "typed in Althar" > from-the-terminal.txt\n', { delay: 10 })
-    await expect.poll(() => existsSync(join(repo, 'from-the-terminal.txt')), { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => existsSync(join(repo, 'from-the-terminal.txt'))).toBe(true)
     expect(readFileSync(join(repo, 'from-the-terminal.txt'), 'utf8')).toBe('typed in Althar\n')
     await page.keyboard.type('printf "\\033[32mgreen\\033[0m and \\033[1mbold\\033[0m\\n"; ls\n', { delay: 5 })
     await expect(
@@ -78,7 +80,7 @@ test('a terminal opens in the project’s repository, says what runs in it, and 
     // Something runs in front of the shell: the line says so, and closing it asks first.
     await page.keyboard.type('sleep 60\n')
     const item = line(page).getByRole('listitem').filter({ hasText: 'meridian' })
-    await expect(item).toContainText('sleep', { timeout: 10_000 })
+    await expect(item).toContainText('sleep')
     // Escape is the shell's while the terminal has the keys: the drawer stays.
     await page.keyboard.press('Escape')
     await expect(drawer(page)).toBeVisible()
@@ -100,7 +102,7 @@ test('a terminal opens in the project’s repository, says what runs in it, and 
     await page.getByRole('dialog', { name: 'What it runs' }).getByRole('button', { name: 'Run npm run dev' }).click()
     await page.keyboard.press('Escape')
     const run = line(page).getByRole('listitem').filter({ hasText: 'npm run dev' })
-    await expect(run).toContainText('Exited 1', { timeout: 30_000 })
+    await expect(run).toContainText('Exited 1')
     await run
       .getByRole('button', { name: /npm run dev/ })
       .first()
@@ -113,8 +115,12 @@ test('a terminal opens in the project’s repository, says what runs in it, and 
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'))
     await drawer(page).getByRole('button', { name: 'Open a terminal where it ran' }).click()
     await expect(terminalKeys(page)).toBeFocused()
-    await page.keyboard.type('pwd; printf "\\033[31mred\\033[0m \\033[33myellow\\033[0m \\033[34mblue\\033[0m\\n"\n', { delay: 5 })
-    await page.waitForTimeout(800)
+    // The shell says it has printed by a file it writes after: the terminal draws on a canvas, with no text to look for.
+    const printed = join(home, 'dark-printed')
+    await page.keyboard.type(`pwd; printf "\\033[31mred\\033[0m \\033[33myellow\\033[0m \\033[34mblue\\033[0m\\n"; touch '${printed}'\n`, {
+      delay: 5,
+    })
+    await expect.poll(() => existsSync(printed)).toBe(true)
     await still(page)
     await page.screenshot({ path: 'test-results/terminal-dark.png', scale: 'css' })
     await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'))
@@ -146,7 +152,7 @@ test('Quit asks first while something runs in a terminal, and not for an idle sh
     await expect(terminalKeys(page)).toBeFocused()
     await page.keyboard.type('sleep 60\n')
     const item = line(page).getByRole('listitem').filter({ hasText: 'meridian' })
-    await expect(item).toContainText('sleep', { timeout: 10_000 })
+    await expect(item).toContainText('sleep')
 
     await electronApp.evaluate(({ app }) => app.quit())
     const dialog = page.getByRole('dialog', { name: 'Quit Althar?' })
@@ -160,10 +166,10 @@ test('Quit asks first while something runs in a terminal, and not for an idle sh
     // Ctrl+C in the terminal: the shell is idle again, and Quit doesn't ask.
     await terminalKeys(page).focus()
     await page.keyboard.press('Control+c')
-    await expect(item).not.toContainText('sleep', { timeout: 10_000 })
+    await expect(item).not.toContainText('sleep')
     // It quits as it is told: a question asked would keep it open.
     await electronApp.evaluate(({ app }) => app.quit()).catch(() => undefined)
-    await expect.poll(() => child.exitCode !== null || child.signalCode !== null, { timeout: 15_000 }).toBe(true)
+    await expect.poll(() => child.exitCode !== null || child.signalCode !== null).toBe(true)
   } finally {
     if (child.exitCode === null && child.signalCode === null) await electronApp.close().catch(() => undefined)
   }

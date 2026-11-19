@@ -425,6 +425,7 @@
   "trustedDependencies": [
     "electron",
     "sharp",
+    "node-pty",
   ],
   "patchedDependencies": {
     "@agentclientprotocol/claude-agent-acp@0.108.0": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.108.0.patch",

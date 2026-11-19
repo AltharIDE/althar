@@ -1,3 +1,5 @@
+import { basename } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Fiber, Layer, Stream } from 'effect'
 
@@ -15,7 +17,8 @@ import { envOf, isShell, keptOf, type Pty, type PtyOptions, PtySpawner, shellOf,
 
 class FakePty implements Pty {
   readonly pid = 4242
-  process = 'zsh'
+  /** In front, the shell it started as, whichever the system's is, till a test says otherwise. */
+  process: string
   readonly written: Array<string> = []
   readonly sizes: Array<readonly [number, number]> = []
   paused = false
@@ -25,7 +28,9 @@ class FakePty implements Pty {
   constructor(
     readonly file: string,
     readonly options: PtyOptions,
-  ) {}
+  ) {
+    this.process = basename(file)
+  }
   onData(listener: (data: string) => void) {
     this.data.push(listener)
   }
