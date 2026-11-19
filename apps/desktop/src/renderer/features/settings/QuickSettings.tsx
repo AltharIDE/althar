@@ -14,9 +14,9 @@ import {
   Problem,
 } from '@althar/ui'
 
-import { notesOf } from '../../../main/updates'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
+import { CHANGELOG } from '../../shared/links'
 import { usePreferences } from '../../shared/usePreferences'
 import { useSounds } from '../../shared/useSounds'
 import { QuickCards } from './QuickCards'
@@ -91,7 +91,7 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
       </div>
       <ControlFoot>
         <ControlFootStart>
-          {version !== undefined && <AppVersion version={version} notes={notesOf(version)} text={{ name: text.version }} />}
+          {version !== undefined && <AppVersion version={version} notes={CHANGELOG} text={{ name: text.version }} />}
           {reportProblem !== undefined && (
             <LinkButton
               onClick={() => {

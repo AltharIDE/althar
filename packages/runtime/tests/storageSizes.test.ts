@@ -52,6 +52,16 @@ describe('the sizes kept for a session', () => {
     expect(calls).toBe(2)
   })
 
+  it('measures a place anew once it is forgotten, as after its folders were removed', async () => {
+    let calls = 0
+    const sizes = storageSizes(places, async () => done(++calls * 10))
+    expect(bytesOf(await sizes.size('worktrees'))).toBe(10)
+    sizes.forget('worktrees')
+    expect(bytesOf(await sizes.size('worktrees'))).toBe(20)
+    expect(bytesOf(await sizes.size('worktrees'))).toBe(20)
+    expect(calls).toBe(2)
+  })
+
   it('leaves the logs and task folders out of the profile where they sit inside it', async () => {
     const calls: Record<string, ReadonlyArray<string> | undefined> = {}
     const sizes = storageSizes(

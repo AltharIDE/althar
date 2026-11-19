@@ -103,6 +103,40 @@ describe('a chat on Scratch', () => {
   })
 })
 
+describe('an aside’s answer', () => {
+  it.live('is its lead’s report, not what it says after reporting, and its reply once the person asks it more', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* opened(working)
+      yield* callTool(coordinator, 'start_task', {
+        title: 'How does retry work?',
+        description: 'Look. [lead:finish]',
+        lead: { agent: 'claude-code' },
+      })
+      // Its lead reports with finish_step, then says what Althar answered it: those words are the last it said, not its answer.
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.latest?.by === 'lead')
+      assert.match(ready?.latest?.said ?? '', /^Althar has your summary/)
+      assert.strictEqual(ready?.answer, 'Did the task.')
+      const threadId = ready?.threadId ?? ''
+      yield* until(
+        Effect.flatMap(Sessions, (sessions) => sessions.busy(threadId)),
+        (busy) => !busy,
+      )
+      // Asked more, its reply is the answer now, the report standing as the first answer's.
+      yield* Effect.flatMap(Sessions, (sessions) =>
+        Effect.flatMap(Runtime.envelope('thread.send', { threadId, body: 'And on a timeout?' }), (envelope) =>
+          sessions.send({ envelope, threadId, body: 'And on a timeout?', disposition: 'after_current' }),
+        ),
+      )
+      const [asked] = yield* until(cards(projectId), (all) => all[0]?.latest?.by === 'lead' && all[0]?.answer !== 'Did the task.')
+      assert.strictEqual(asked?.summary, 'Did the task.')
+      assert.strictEqual(asked?.answer, asked?.latest?.said)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+})
+
 describe('a chat’s copy', () => {
   it.live('is never set up while it is an aside, whatever its lead runs: made a task, it is, before its next turn', () => {
     const { working, bare } = hosted()

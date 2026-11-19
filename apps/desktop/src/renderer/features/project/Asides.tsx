@@ -179,6 +179,19 @@ const asideOf = (task: BoardTask): Aside => ({
   ...(task.phase === 'running' && task.unsaid !== true ? { running: true } : {}),
 })
 
+/** An aside that opens over the coordinator's conversation: on Scratch and not cleared, whether or not it waits on the person. */
+export const opensInPlace = (task: Pick<BoardTask, 'scratch' | 'phase'>) => task.scratch === true && task.phase !== 'settled'
+
+/**
+ * The asides over the conversation: Scratch's, and the one open where it waits on the person, which the board lists under
+ * Needs you rather than on Scratch, so its pill shows while it is open.
+ */
+export const withOpenAside = (scratch: ReadonlyArray<BoardTask>, open: AsideOpen, tasks: ReadonlyArray<BoardTask>) => {
+  if (open.kind === 'coordinator' || scratch.some((one) => one.taskId === open.taskId)) return scratch
+  const waiting = tasks.find((one) => one.taskId === open.taskId && opensInPlace(one))
+  return waiting === undefined ? scratch : [waiting, ...scratch]
+}
+
 /**
  * The asides, the latest first, and those left a week, apart. The open one always has its pill; one left unsaid shows only
  * while it is open. The one just started (`first`) comes first, under the id it keeps, before the board has it, and after,
@@ -308,7 +321,12 @@ export function useAsides({
   /** A pill: the coordinator's conversation, by null, or an aside's. */
   const pick = (taskId: string | null) => {
     if (open.kind === 'new' && open.taskId === taskId) return
-    const one = taskId === null ? undefined : scratch.find((candidate) => candidate.taskId === taskId)
+    // One that waits on the person is still an aside, though the board lists it under Needs you: its card's Answer opens it here.
+    const one =
+      taskId === null
+        ? undefined
+        : (scratch.find((candidate) => candidate.taskId === taskId) ??
+          tasks.find((candidate) => candidate.taskId === taskId && opensInPlace(candidate)))
     if (one === undefined) return setOpened(COORDINATOR)
     setOpened(
       one.unsaid === true

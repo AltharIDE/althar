@@ -53,7 +53,7 @@ import { type ComponentProps, Fragment, type ReactNode, useEffect, useMemo, useS
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { abandonedBlocker, blockerText, blockerWords } from '../../shared/blockers'
-import { MERGING_STEP } from '../../data/merges'
+import { MERGE_QUEUE_STEP, MERGING_STEP } from '../../data/merges'
 import { taskStatusOf } from '../../shared/taskStatus'
 import { busyWords, externalWaitWords, inLineWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { localText } from '../../shared/local'
@@ -481,8 +481,15 @@ const parentOf = (work: BoardTask, open: (threadId: string) => void): Pick<Board
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string, actions?: CardActions): Card => {
   const base = withHanded(work, runningCard(work, now, name))
-  // Merge pressed on its strip in Needs you, it is here at once, merging: it answers that press as it comes (MergeFeel).
-  const card = work.step === MERGING_STEP && actions?.merging.has(work.taskId) === true ? { ...base, merge: 'merging' as const } : base
+  // Merge pressed on its strip in Needs you, it is here at once, merging: it answers that press as it comes (MergeFeel), and goes
+  // on into its merge queue just after, the ring it came with still spreading.
+  const pressed = actions?.merging.has(work.taskId) === true
+  const card =
+    pressed && work.step === MERGING_STEP
+      ? { ...base, merge: 'merging' as const }
+      : pressed && work.step === MERGE_QUEUE_STEP
+        ? { ...base, merge: 'queued' as const }
+        : base
   // Stopped, or its lead not yet started, with a conflict not asked of it: why, in place of its foot, and Resolve now.
   if (work.conflictUnsent != null) return { ...card, ...unsentOf(work, work.conflictUnsent, actions) }
   if (work.conflictUnchecked != null) return { ...card, foot: <Fact tone="warm">{work.conflictUnchecked}</Fact> }

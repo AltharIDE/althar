@@ -1235,7 +1235,8 @@ describe('a project’s repositories, in its settings', () => {
     const { client } = windowAt('/projects/p1')
     const { here } = await openRepositories()
     expect(here.getByText('~/code/meridian-api')).toBeTruthy()
-    expect(here.getByText('trunk')).toBeTruthy()
+    // Each card's branch is the one its new tasks work toward: its default, as nothing else was chosen.
+    expect(here.getByRole('button', { name: 'Branch new tasks in meridian-infra work toward: main' })).toBeTruthy()
     // On GitHub as you, the fork with the repository it forks; GitLab not connected.
     const github = within(screen.getByRole('region', { name: 'GitHub' }))
     expect(github.getByText('Connected as you')).toBeTruthy()
@@ -1249,9 +1250,8 @@ describe('a project’s repositories, in its settings', () => {
     // A code host never connected is the person's choice: Settings has no dot for it.
     expect((await views()).getByRole('radio', { name: 'Settings' })).toBeTruthy()
 
-    await userEvent.click(here.getByRole('combobox', { name: 'Role of meridian-api' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Library' }))
-    await waitFor(() => expect(client.setRepository).toHaveBeenCalledWith({ projectId: 'p1', repositoryId: 'repo_api', role: 'library' }))
+    // No role to pick: what a repository is to the project isn't asked here.
+    expect(here.queryByRole('combobox', { name: /^Role of/ })).toBeNull()
 
     await userEvent.click(github.getByRole('combobox', { name: 'Where meridian-web’s pull requests open' }))
     await userEvent.click(await screen.findByRole('option', { name: 'meridian/web' }))
@@ -1375,9 +1375,6 @@ describe('a project’s repositories, in its settings', () => {
     const { client } = windowAt(
       '/projects/p1',
       {
-        setRepository: vi.fn(async () => {
-          throw new ApiError({ reason: 'ProjectRefused', message: "That repository isn't a fork, so its pull requests open on it." })
-        }),
         getRepositories: vi.fn(async () => repositories.slice(0, 1)),
         readFolder: vi.fn(async () => {
           throw new ApiError({ reason: 'NotARepository', message: 'There’s no git repository in Downloads.' })
@@ -1390,13 +1387,6 @@ describe('a project’s repositories, in its settings', () => {
     await userEvent.click(here.getByRole('button', { name: 'More for meridian-api' }))
     expect(screen.queryByRole('menuitem', { name: /Leave out/ })).toBeNull()
     await userEvent.keyboard('{Escape}')
-    await userEvent.click(here.getByRole('combobox', { name: 'Role of meridian-api' }))
-    await userEvent.click(await screen.findByRole('option', { name: 'Docs' }))
-    expect(await within(region).findByRole('alert')).toHaveProperty(
-      'textContent',
-      "That repository isn't a fork, so its pull requests open on it.",
-    )
-    await waitFor(() => expect(here.getByRole('combobox', { name: 'Role of meridian-api' }).textContent).toContain('Service'))
     // Cancelling the picker adds nothing.
     await userEvent.click(screen.getByRole('button', { name: 'Add a folder' }))
     expect(client.addRepositories).not.toHaveBeenCalled()

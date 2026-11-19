@@ -22,12 +22,16 @@ export class WorkerHandshakeError extends Error {
   }
 }
 
-const validId = (value: string, prefix: string): boolean =>
+export const validWorkerProtocolId = (value: string, prefix: string): boolean =>
   value.startsWith(prefix) && value.length === prefix.length + 32 && /^[a-f0-9]{32}$/.test(value.slice(prefix.length))
 
 /** The caller must authenticate the worker and allocate its session before accepting its first frame. */
-export const negotiateWorkerHello = (bytes: Uint8Array, binding: WorkerSessionBinding): HomeFrame => {
-  if (!validId(binding.homeId, 'home_') || !validId(binding.workerId, 'wrk_') || !validId(binding.sessionId, 'wsn_'))
+export const negotiateWorkerHello = (bytes: Uint8Array, binding: WorkerSessionBinding, diagnostics = false): HomeFrame => {
+  if (
+    !validWorkerProtocolId(binding.homeId, 'home_') ||
+    !validWorkerProtocolId(binding.workerId, 'wrk_') ||
+    !validWorkerProtocolId(binding.sessionId, 'wsn_')
+  )
     throw new WorkerHandshakeError('InvalidIdentity')
   if (bytes.byteLength > MAX_HELLO_BYTES) throw new WorkerHandshakeError('OversizedFrame')
   const frame = (() => {
@@ -45,7 +49,7 @@ export const negotiateWorkerHello = (bytes: Uint8Array, binding: WorkerSessionBi
   return create(HomeFrameSchema, {
     payload: {
       case: 'hello',
-      value: { ...binding, version: WORKER_PROTOCOL_VERSION },
+      value: { ...binding, version: WORKER_PROTOCOL_VERSION, supportsDiagnostics: diagnostics && hello.acceptsDiagnostics },
     },
   })
 }

@@ -1,0 +1,15 @@
+/* Cloning one into the project, flat in its section: a hairline above and below, the list, then Clone. */
+.clone {
+  /* The list lights the one chosen in --ink, a new project's colour; here, in the colour Clone is. */
+  --ink: var(--signal);
+  display: grid;
+  gap: 10px;
+  padding: 14px 0 12px;
+  border-block: 1px solid var(--line);
+}
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}

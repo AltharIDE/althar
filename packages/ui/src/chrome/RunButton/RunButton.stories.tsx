@@ -104,6 +104,31 @@ export const SeveralRunning: Story = {
   },
 }
 
+/** Pressed, it says at once that it starts, in its line and after Run, and can be stopped; then where it answers, or that it runs. */
+export const Starting: Story = {
+  args: {
+    defaultOpen: true,
+    targets: [
+      {
+        id: 'ios',
+        name: 'Mobile on iOS simulator',
+        command: 'bun --filter @althar/mobile ios',
+        from: 'repository',
+        run: { state: 'starting' },
+      },
+      { id: 'dev', name: 'Public site', command: 'bun --filter site dev', from: 'repository' },
+      { id: 'storybook', name: 'Storybook', command: 'bun --filter ui storybook', from: 'person' },
+    ],
+  },
+  play: async ({ args, canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: /^Run.*Starting/ })).toBeInTheDocument()
+    const page = within(document.body)
+    await expect(await page.findByText('Starting…')).toBeInTheDocument()
+    await userEvent.click(page.getByRole('button', { name: 'Stop Mobile on iOS simulator' }))
+    await expect(args.onStop).toHaveBeenCalledWith('ios')
+  },
+}
+
 /** Something failed: the button says how many in red; each line says what, with its way out. */
 export const Failed: Story = {
   args: { targets: FAILED, defaultOpen: true },

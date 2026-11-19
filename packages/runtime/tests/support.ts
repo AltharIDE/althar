@@ -344,6 +344,7 @@ export const runtime = (
     readonly checksAppear?: Duration.Duration
     /** How long a change's checks may run before it is the person's; 45 minutes unless a test says. */
     readonly checksStuck?: Duration.Duration
+    readonly checksTold?: Duration.Duration
     /** How long a publish step that may pass waits before it is tried again; none at all unless a test says. */
     readonly publishAgain?: Duration.Duration
     /** How long a task is under way after its agent went or its lead's turn ended; none at all unless a test says. */
@@ -422,6 +423,7 @@ export const runtime = (
     ...(more.mergeLineEvery === undefined ? {} : { mergeLineEvery: more.mergeLineEvery }),
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
+    ...(more.checksTold === undefined ? {} : { checksTold: more.checksTold }),
     publishAgain: more.publishAgain ?? Duration.zero,
     ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,

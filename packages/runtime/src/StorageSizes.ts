@@ -59,6 +59,10 @@ export const storageSizes = (places: Readonly<Record<PlaceId, string>>, measureI
     return walk
   }
   return {
+    /** Drops what was kept of a place, as after its folders were removed: the next look measures it anew. */
+    forget: (place: PlaceId) => {
+      kept.delete(place)
+    },
     /**
      * Its size. `signal` is the asker giving up: the walk goes on for others
      * waiting on it, else stops, and the asker's promise rejects.

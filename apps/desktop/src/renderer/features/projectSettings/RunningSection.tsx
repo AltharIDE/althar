@@ -1,4 +1,4 @@
-import type { ProjectRepository, Runnable } from '@althar/contracts'
+import type { ProjectRepository, Runnable, WorksIn } from '@althar/contracts'
 import { Button, Code, Icon, RepositorySetups, RunnableList, SettingGroup, SettingList, SettingRow } from '@althar/ui'
 
 import { shortFolder } from '../../shared/folders'
@@ -14,8 +14,10 @@ import { useSetups } from './useSetups'
  * how each new task's folder gets ready before its lead starts (ADR-080): a
  * tab for each repository, its commands and the files copied from the
  * person's checkout, as a lead recorded them, changed in place. Then
- * where its tasks' work goes: their worktrees on this computer. How their
- * branches are named and what a task ends with are the project's Tasks.
+ * where its tasks' work goes: their worktrees on this computer, or the
+ * person's own checkout, changed where new tasks are said to start, in the
+ * project's Tasks, as how their branches are named and what a task ends with
+ * are.
  */
 
 export const text = {
@@ -26,6 +28,9 @@ export const text = {
   where: 'Where its work goes',
   worktrees: 'Worktrees',
   worktreesUnmade: 'Made with its first task',
+  checkout: 'Your own checkout',
+  checkoutNote: 'New tasks start in it, one at a time, beside your own edits.',
+  change: 'Change',
 }
 
 export function RunningSection({
@@ -34,6 +39,8 @@ export function RunningSection({
   runnables,
   repositories,
   worktrees,
+  worksIn = 'worktree',
+  onWorksIn,
 }: {
   projectId: string
   /** The project's name, for the list's title. */
@@ -44,6 +51,10 @@ export function RunningSection({
   repositories: ReadonlyArray<Pick<ProjectRepository, 'id' | 'name' | 'path' | 'host' | 'setup'>> | null
   /** Where its tasks' worktrees are; null before it has had a task. */
   worktrees: string | null
+  /** Where its new tasks start: a worktree each, or the person's checkout. */
+  worksIn?: WorksIn
+  /** Goes to where that is set: its Tasks. */
+  onWorksIn: () => void
 }) {
   const dialogs = useRunDialogs(projectId, runnables)
   const setups = useSetups(projectId)
@@ -90,11 +101,23 @@ export function RunningSection({
       <SettingGroup title={text.where} headingLevel={HEADING.part}>
         <SettingList>
           <SettingRow
-            title={text.worktrees}
-            note={worktrees === null ? text.worktreesUnmade : <Code className={s.code}>{shortFolder(worktrees)}</Code>}
+            title={worksIn === 'checkout' ? text.checkout : text.worktrees}
+            note={
+              worksIn === 'checkout' ? (
+                text.checkoutNote
+              ) : worktrees === null ? (
+                text.worktreesUnmade
+              ) : (
+                <Code className={s.code}>{shortFolder(worktrees)}</Code>
+              )
+            }
             mark={<Icon name="folder" size={15} className={s.glyph} />}
           >
-            {() => null}
+            {({ labelledBy }) => (
+              <Button size="small" aria-describedby={labelledBy} onClick={onWorksIn}>
+                {text.change}
+              </Button>
+            )}
           </SettingRow>
         </SettingList>
       </SettingGroup>

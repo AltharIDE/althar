@@ -24,6 +24,9 @@ export const isSection = (value: unknown): value is Section =>
 /** The section an address names, an old one included: where its settings went (`MOVED_SETTINGS_SECTIONS`); undefined for anything else. */
 export const sectionOf = (value: unknown): Section | undefined => settingsSectionOf(value)
 
+/** A setting another section sends the person to, brought into view and lit for a moment: the task folders' row, from About's Free up space. */
+export type SettingsFocus = 'task-folders'
+
 /** The section the Settings tab opens on, before it has been on one. */
 export const FIRST_SECTION: Section = 'agents'
 
