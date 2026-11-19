@@ -87,7 +87,7 @@ import type { ProjectSettingsModel } from '../projectSettings/useProjectSettings
 import { kitInk } from '../../shared/inks'
 import { Card, type CardActions } from './Card'
 import { DraftingCard, useDraftingCards } from './DraftingCard'
-import { planAskIn, planIt, planStillAsked } from '../../shared/planIt'
+import { planIt, usePlansAsked } from '../../shared/planIt'
 import { useClearChat } from './ClearChat'
 import { TaskAskOf } from './TaskAskOf'
 import { FirstConnectionsView } from './FirstConnectionsView'
@@ -597,17 +597,8 @@ export function ProjectView({
 
   // The team of a task, open from its row up next or from a small change's card, while it can still change.
   const [teamFor, setTeamFor] = useState<string | null>(null)
-  // Drafts whose plan the person asked for, by task, when: Plan it comes back where the ask wasn't sent, or once the
-  // coordinator's turn that took it is over and no plan came.
-  const [plansAsked, setPlansAsked] = useState<ReadonlyMap<string, { readonly at: number; readonly title: string; readonly slug: string }>>(
-    new Map(),
-  )
-  const unask = (taskId: string) =>
-    setPlansAsked((now) => {
-      const next = new Map(now)
-      next.delete(taskId)
-      return next
-    })
+  // Drafts whose plan the person asked for, each until its ask is over (`usePlansAsked`).
+  const plansAsked = usePlansAsked(coordinator?.items ?? NO_DRAFTED_ITEMS, session)
   const actions: CardActions = {
     project: name,
     ...(about === null ? {} : { projectId: about }),
@@ -629,18 +620,15 @@ export function ProjectView({
     onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
     // A draft whose plan didn't come: the coordinator is asked for it, in the person's words, which show in the thread at once.
     onPlanDraft: (task) => {
-      setPlansAsked((now) => new Map(now).set(task.taskId, { at: Date.now(), title: task.title, slug: task.slug }))
+      plansAsked.ask(task)
       void model
         .say(planIt(task), null)
         .then((sent) => {
-          if (!sent) unask(task.taskId)
+          if (!sent) plansAsked.unask(task.taskId)
         })
-        .catch(() => unask(task.taskId))
+        .catch(() => plansAsked.unask(task.taskId))
     },
-    planAsked: (taskId) => {
-      const asked = plansAsked.get(taskId)
-      return asked !== undefined && planStillAsked(asked.at, planAskIn(coordinator?.items ?? [], asked), session)
-    },
+    planAsked: plansAsked.asked,
     onDiscard: (taskId) => model.discardTask(taskId),
     // Every waiting card has the same holders, so only the newest says them.
     holdersOn: newestWaiting(coordinator?.items ?? []),

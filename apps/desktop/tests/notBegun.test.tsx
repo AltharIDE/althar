@@ -1,9 +1,9 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, renderHook, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { BoardTask, Draft } from '@althar/contracts'
+import type { BoardTask, Draft, ThreadItem } from '@althar/contracts'
 
 import { BoardView } from '../src/renderer/features/board/BoardView'
 import { lanesOf } from '../src/renderer/features/board/lanes'
@@ -11,7 +11,7 @@ import { Card, type CardActions } from '../src/renderer/features/project/Card'
 import { DraftingCard } from '../src/renderer/features/project/DraftingCard'
 import { agents, card, fakeClient } from './fixtures'
 import { withServices } from './render'
-import { planAskIn, planIt, planStillAsked } from '../src/renderer/shared/planIt'
+import { type PlanAsk, planAskIn, planAskNow, planIt, planStillAsked, usePlansAsked } from '../src/renderer/shared/planIt'
 
 /*
  * A task that never began says where it stands, wherever the person sees it:
@@ -120,21 +120,71 @@ describe('Plan it, asked', () => {
 
   it('is on its way until the coordinator turn that took the ask is over, as its session goes from running to idle', () => {
     // Sent, not in the thread yet: on its way.
-    expect(planStillAsked(askedAt, planAskIn([], task), idle(at(-60)))).toBe(true)
+    expect(planStillAsked(askedAt, planAskIn([], task)?.input, idle(at(-60)))).toBe(true)
     // Waiting behind a turn still going when it was asked, which then ends: the ask waits its own.
-    expect(planStillAsked(askedAt, planAskIn([message('queued')], task), running(null))).toBe(true)
-    expect(planStillAsked(askedAt, planAskIn([message('queued')], task), idle(at(5)))).toBe(true)
+    expect(planStillAsked(askedAt, planAskIn([message('queued')], task)?.input, running(null))).toBe(true)
+    expect(planStillAsked(askedAt, planAskIn([message('queued')], task)?.input, idle(at(5)))).toBe(true)
     // Taken by a turn still going.
-    expect(planStillAsked(askedAt, planAskIn([message('delivered')], task), running(at(5)))).toBe(true)
+    expect(planStillAsked(askedAt, planAskIn([message('delivered')], task)?.input, running(at(5)))).toBe(true)
     // Taken, and just delivered: the turn that took it not begun yet, the last that ended before the ask.
-    expect(planStillAsked(askedAt, planAskIn([message('delivered')], task), idle(at(-60)))).toBe(true)
+    expect(planStillAsked(askedAt, planAskIn([message('delivered')], task)?.input, idle(at(-60)))).toBe(true)
     // That turn over, and the session idle, its start gone: where no plan came, Plan it is offered again.
-    expect(planStillAsked(askedAt, planAskIn([message('delivered')], task), idle(at(40)))).toBe(false)
+    expect(planStillAsked(askedAt, planAskIn([message('delivered')], task)?.input, idle(at(40)))).toBe(false)
     // Taken back before the coordinator had it: no ask.
-    expect(planStillAsked(askedAt, planAskIn([message('withdrawn')], task), running(null))).toBe(false)
+    expect(planStillAsked(askedAt, planAskIn([message('withdrawn')], task)?.input, running(null))).toBe(false)
     // Only its own words count, the newest so worded.
     expect(planAskIn([message('delivered', 'Something else')], task)).toBeUndefined()
-    expect(planAskIn([message('delivered'), message('queued')], task)?.state).toBe('queued')
+    expect(planAskIn([message('delivered'), message('queued')], task)?.input?.state).toBe('queued')
+    // One there before the ask is an earlier ask's, not this one's.
+    expect(planAskIn([message('delivered')], { ...task, before: 'm-delivered' })).toBeUndefined()
+  })
+
+  it('follows its own message, not the thread as it shows: over once its turn is, cleared from view or not', () => {
+    const ask: PlanAsk = { at: askedAt, ...task, before: null, seen: false }
+    // Not in the thread yet: on its way, never seen.
+    expect(planAskNow(ask, [], idle(at(-60)))).toEqual({ still: true, seen: false })
+    // In the thread, taken by a turn still going: seen.
+    expect(planAskNow(ask, [message('delivered')], running(at(-60)))).toEqual({ still: true, seen: true })
+    const seen = { ...ask, seen: true }
+    // The thread cleared from view while that turn goes on: still on its way, by the turn.
+    expect(planAskNow(seen, [], running(at(-60))).still).toBe(true)
+    // Cleared, and the turn that took it over: Plan it is offered again, rather than hidden for good.
+    expect(planAskNow(seen, [], idle(at(40))).still).toBe(false)
+    // An earlier ask's message, there at the press, is not this one: this one is on its way until its own shows.
+    expect(planAskNow({ ...ask, before: 'm-delivered' }, [message('delivered')], idle(at(40)))).toEqual({ still: true, seen: false })
+  })
+
+  it('lets an ask go once it is over, so neither a later turn nor clearing the thread from view hides Plan it again', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(askedAt)
+    const one = { taskId: 't5', ...task }
+    type Shown = { items: ReadonlyArray<ThreadItem>; session: Parameters<typeof usePlansAsked>[1] }
+    const { result, rerender } = renderHook(({ items, session }: Shown) => usePlansAsked(items, session), {
+      initialProps: { items: [], session: idle(at(-60)) } as Shown,
+    })
+    act(() => result.current.ask(one))
+    expect(result.current.asked('t5')).toBe(true)
+    // Taken by a turn, which ends with no plan: Plan it is offered again.
+    rerender({ items: [message('delivered')], session: running(at(-60)) })
+    expect(result.current.asked('t5')).toBe(true)
+    rerender({ items: [message('delivered')], session: idle(at(40)) })
+    expect(result.current.asked('t5')).toBe(false)
+    // A later turn on something else: still offered.
+    rerender({ items: [message('delivered')], session: running(at(40)) })
+    expect(result.current.asked('t5')).toBe(false)
+    // The thread cleared from view after it: still offered.
+    rerender({ items: [], session: idle(at(90)) })
+    expect(result.current.asked('t5')).toBe(false)
+
+    // Asked again, its message seen, then the thread cleared while its turn runs: hidden until that turn is over.
+    vi.setSystemTime(askedAt + 60_000)
+    act(() => result.current.ask(one))
+    rerender({ items: [message('queued')], session: running(at(90)) })
+    rerender({ items: [], session: running(at(90)) })
+    expect(result.current.asked('t5')).toBe(true)
+    rerender({ items: [], session: idle(at(100)) })
+    expect(result.current.asked('t5')).toBe(false)
+    vi.useRealTimers()
   })
 
   it('is offered again on both cards once the ask is no longer on its way', () => {
