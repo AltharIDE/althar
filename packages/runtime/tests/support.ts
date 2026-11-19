@@ -140,6 +140,12 @@ const launchedEnv = (agentId: string, cwd: string, env: Readonly<Record<string, 
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
 
 /**
+ * Each models probe of that agent, kept out of `sessionMetas`: a probe is no session, and gives none of a session's options.
+ * The catalogue begins one in the background, behind a sign-in check, so it may land after a session's (Models.ts).
+ */
+export const probeMetas: Array<{ readonly role: 'lead' | 'reader' | undefined }> = []
+
+/**
  * Whether the fake `claude-code` holds the coordinator in a sandbox it never leaves, as Claude Code's does where it starts;
  * and its sandbox probe, which each of its sessions waits for first (`ready`), in at once unless a test holds it.
  */
@@ -197,7 +203,9 @@ export const definition = (
   ...(id === 'claude-code'
     ? {
         sessionMeta: (role?: 'lead' | 'reader', options?: SessionOptions) => {
-          sessionMetas.push({ role, options })
+          // A session always says its options, if only whether it reaches the web; a models probe says none.
+          if (options === undefined) probeMetas.push({ role })
+          else sessionMetas.push({ role, options })
           // Given skills, with Claude Code's own session options beside its own, so the plugin they name reaches the session.
           return { ...(options?.skills === undefined ? {} : registry['claude-code'].sessionMeta?.(role, options)), fake: { asks: true } }
         },

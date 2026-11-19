@@ -15,7 +15,20 @@ import { type Failure, Failures, failuresLayer } from '../src/Failures'
 import { onlyReads, Sessions } from '../src/Sessions'
 import { listSkills, runSkills } from '../src/Skills'
 import { recorder, transcript } from '../src/threads'
-import { fakeAgents, items, lastSession, notices, runtime, sessionMetas, sessionsAsked, task, turns, until } from './support'
+import {
+  definition,
+  fakeAgents,
+  items,
+  lastSession,
+  notices,
+  probeMetas,
+  runtime,
+  sessionMetas,
+  sessionsAsked,
+  task,
+  turns,
+  until,
+} from './support'
 
 /*
  * Althar-selected skills reach a task's lead on every agent the registry says how to give them to, from Althar's own
@@ -259,6 +272,11 @@ describe('skills for a task’s lead', () => {
         for (const agentId of ['claude-code', 'codex', 'opencode']) {
           yield* sessions.start({ threadId: project.coordinatorThreadId, agentId })
           if (agentId === 'claude-code') {
+            // A models probe of the same agent, begun in the background as the brief read the catalogue, may say its own
+            // after the coordinator's: as here, where it lands last, the coordinator's session still reads as its own.
+            const probes = probeMetas.length
+            definition('claude-code').sessionMeta?.('reader')
+            assert.strictEqual(probeMetas.length, probes + 1)
             assert.strictEqual(sessionMetas.at(-1)?.role, 'reader')
             assert.isString(sessionMetas.at(-1)?.options?.skills)
           }
