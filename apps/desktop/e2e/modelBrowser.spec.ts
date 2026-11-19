@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { availableParallelism, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { budget } from '@althar/testing/budget'
 import { type ElementHandle, expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
@@ -125,9 +126,13 @@ test('the full model picker shows a default effort and a model switched off at o
     await expect(async () => {
       await page.reload()
       const again = await openBrowser(page)
-      await expect(again.getByRole('combobox', { name: `Default effort for ${name}`, exact: true })).toHaveText(chosen, { timeout: 5000 })
-      await expect(again.getByRole('button', { name: `Don’t use ${name}` })).toHaveAttribute('aria-pressed', 'true', { timeout: 5000 })
-    }).toPass({ timeout: 60_000 })
+      await expect(again.getByRole('combobox', { name: `Default effort for ${name}`, exact: true })).toHaveText(chosen, {
+        timeout: budget.small,
+      })
+      await expect(again.getByRole('button', { name: `Don’t use ${name}` })).toHaveAttribute('aria-pressed', 'true', {
+        timeout: budget.small,
+      })
+    }).toPass({ timeout: budget.medium })
   } finally {
     load.forEach((one) => one.kill())
     await electronApp.close()
