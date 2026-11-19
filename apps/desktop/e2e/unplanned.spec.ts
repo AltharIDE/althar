@@ -176,3 +176,64 @@ test('a draft’s card stays where it was drafted, above a message sent while it
     await electronApp.close()
   }
 })
+
+/*
+ * Two drafts in one turn, as the person's five were: the first planned, the
+ * second left with no plan. They steer while the second's plan is on its
+ * way; each card keeps its own place above their message, and shows once,
+ * through becoming a plan and through saying no plan came.
+ */
+test('two drafts keep their own places above a message sent between them, one planned and one with no plan', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, repository(home, 'meridian'))
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await page.keyboard.press('ControlOrMeta+Shift+Comma')
+    await page
+      .getByRole('navigation', { name: 'Settings' })
+      .getByRole('button', { name: /^Tasks/ })
+      .click()
+    const group = page.getByRole('radiogroup', { name: 'When I send while an agent is working' })
+    await group.getByRole('radio', { name: 'Steer the agent' }).click()
+    await expect(group.getByRole('radio', { name: 'Steer the agent' })).toBeChecked()
+    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close Settings' }).click()
+
+    const conversation = page.getByRole('region', { name: 'Conversation' })
+    const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue|Steer)/ })
+    const say = async (words: string) => {
+      await box.fill(words)
+      await box.press('Enter')
+    }
+    await say('Explore the team. [coordinator:plan] [coordinator:plan-another-fails] [coordinator:slowly]')
+    const first = conversation.getByText('Explore the team', { exact: true })
+    const second = conversation.getByText('Explore the team, the rest', { exact: true })
+    // Held while drafted, as the person held theirs: it comes as a held plan, and nothing starts.
+    await expect(first).toBeVisible()
+    await conversation.getByRole('button', { name: 'Hold' }).first().click()
+    // The first planned, the second a task with its plan streaming: they say something.
+    await expect(second).toBeVisible()
+    await expect(conversation).toContainText(/Choosing a (lead|reviewer)/)
+    await say('you dont need to split these')
+    // The message itself, not the preview of it the conversation shows once it has scrolled.
+    const message = conversation.locator('p:not([data-thread-preview])', { hasText: /^you dont need to split these$/ })
+    await expect(message).toBeVisible()
+    const order = async () => {
+      const [a, b, said] = await Promise.all([first.boundingBox(), second.boundingBox(), message.boundingBox()])
+      return a !== null && b !== null && said !== null && a.y < b.y && b.y < said.y
+    }
+    expect(await order()).toBe(true)
+    // The second's plan didn't come: it says so, in its place; the first shows its plan, in its own. Each once.
+    await expect(conversation.getByText('No plan yet')).toHaveCount(1)
+    await expect(conversation.getByRole('button', { name: 'Plan it' })).toHaveCount(1)
+    await expect(first).toHaveCount(1)
+    await expect(second).toHaveCount(1)
+    await expect(conversation.getByRole('button', { name: 'Start', exact: true })).toHaveCount(1)
+    expect(await order()).toBe(true)
+    await first.evaluate((one) => one.scrollIntoView({ block: 'start' }))
+    await still(page)
+    await page.screenshot({ path: 'test-results/unplanned-6-two-drafts.png', animations: 'disabled' })
+  } finally {
+    await electronApp.close()
+  }
+})

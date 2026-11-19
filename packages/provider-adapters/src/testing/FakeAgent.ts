@@ -673,7 +673,8 @@ const playStall = async (
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task (`[coordinator:plan-small]` as a small change, reviewed
  * only once it merged; `[coordinator:plan-branch]` ending with its branch, as a prototype does; `[coordinator:plan-fails]` with a
- * plan Althar refuses, so the draft never gets one; `[coordinator:plan-prototype]` from the Prototype preset, its lead on
+ * plan Althar refuses, so the draft never gets one; `[coordinator:plan-another-fails]` drafts a second after it, in the same
+ * turn, whose plan Althar refuses; `[coordinator:plan-prototype]` from the Prototype preset, its lead on
  * the large model), `[coordinator:discard]` discards each task named `[discard:<slug>]`,
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
@@ -1597,6 +1598,15 @@ const playRole = async (
       // `[coordinator:plan-branch]`: it ends with its branch, as a prototype does, set on the plan before it starts.
       if (ask.includes('[coordinator:plan-branch]') && available.has('change_part'))
         await call('change_part', { task: slug, part: 'ending', end: 'branch', why: 'a prototype' })
+      // `[coordinator:plan-another-fails]`: a second task drafted in the same turn, "…, the rest", whose plan Althar refuses.
+      if (ask.includes('[coordinator:plan-another-fails]')) {
+        const another = await callStreamed('draft_task', { ...draft, title: `${title}, the rest` })
+        await callStreamed('propose_plan', {
+          task: /Drafted ([^\s,.]+)/.exec(another)?.[1] ?? '',
+          lead: { agent: 'no-such-agent', reason: 'It knows the code.' },
+          review: { agent: 'codex' },
+        })
+      }
       return planned
     }
     return undefined
