@@ -113,9 +113,18 @@ export const elapsedOf = (window: UsageWindow, now: Date): number | undefined =>
   if (window.kind === 'five_hour') start = end - 5 * 3_600_000
   else if (window.kind === 'weekly') start = end - 7 * 86_400_000
   else if (window.kind === 'monthly') {
+    // In UTC, on the same day of the month before, or its last day where that has none (31 May starts 30 April).
     const d = new Date(end)
-    d.setMonth(d.getMonth() - 1)
-    start = d.getTime()
+    const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 0)).getUTCDate()
+    start = Date.UTC(
+      d.getUTCFullYear(),
+      d.getUTCMonth() - 1,
+      Math.min(d.getUTCDate(), last),
+      d.getUTCHours(),
+      d.getUTCMinutes(),
+      d.getUTCSeconds(),
+      d.getUTCMilliseconds(),
+    )
   } else return undefined
   const share = ((now.getTime() - start) / (end - start)) * 100
   return share < 0 || share > 100 ? undefined : Math.round(share)

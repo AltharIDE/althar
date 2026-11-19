@@ -181,7 +181,7 @@ export const OpenCodeGoSignIn: Story = {
   },
 }
 
-/** A tick on each bar where now sits in its window: Claude is 40% through its week with 65% left (ahead of pace), Codex 70% through with 20% left (behind). */
+/** A tick on each bar at the share of the window still to come: the fill ends on it at an even pace, runs past it ahead of pace (Claude's week, 65% left of a week 40% gone) and stops short of it behind (Codex's week, 20% left of a week 70% gone; Claude's Opus week, 50% left at 40%). */
 export const Pace: Story = {
   args: { agents: [CODEX_BEHIND, CLAUDE_AHEAD], defaultOpen: true },
   play: async () => {

@@ -105,7 +105,7 @@ ul.windows {
   border-radius: 99px;
   background: var(--t-4);
 }
-/* where now sits in the window: a thin tick, a little taller than the bar, quiet */
+/* where the time left sits on the bar: a thin tick, a little taller than it; the fill ends on it when use keeps to the clock */
 .now {
   position: absolute;
   top: -2px;
@@ -113,8 +113,9 @@ ul.windows {
   width: 1.5px;
   margin-left: -0.75px;
   border-radius: 1px;
-  background: var(--t-2);
-  opacity: 0.7;
+  background: var(--t-1);
+  /* a halo of the surface, so it keeps an edge on a fill of its own ink as well as on the track */
+  box-shadow: 0 0 0 1px var(--paper);
 }
 [data-tone='half'] .bar i {
   background: var(--t-3);

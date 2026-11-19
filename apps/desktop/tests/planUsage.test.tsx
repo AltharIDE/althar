@@ -407,6 +407,9 @@ describe('what the window says of a plan', () => {
     expect(elapsedOf(window('five_hour', RESET), NOW)).toBe(2)
     expect(elapsedOf(window('weekly', '2026-10-18T22:05:00.000Z'), NOW)).toBe(50)
     expect(elapsedOf(window('monthly', '2026-11-15T10:05:00.000Z'), NOW)).toBe(0)
+    // The month before a 31st has no 31st: 31 May starts on 30 April, and 31 March on 28 February, not in the reset's own month.
+    expect(elapsedOf(window('monthly', '2026-05-31T10:05:00.000Z'), new Date('2026-05-15T10:05:00.000Z'))).toBe(48)
+    expect(elapsedOf(window('monthly', '2026-03-31T10:05:00.000Z'), new Date('2026-03-01T10:05:00.000Z'))).toBe(3)
     expect(elapsedOf(window('weekly', null), NOW)).toBeUndefined()
     expect(elapsedOf(window('other', WEEK), NOW)).toBeUndefined()
     // Not begun yet by that length, or already over: nothing to mark.

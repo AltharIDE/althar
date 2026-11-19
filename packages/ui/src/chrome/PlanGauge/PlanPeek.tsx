@@ -88,12 +88,12 @@ const capital = (words: string) => words.charAt(0).toUpperCase() + words.slice(1
 const ofWords = (agent: PlanAgent, t: PlanPeekText) =>
   [agent.account, capital(agent.limit), agent.until === null ? null : t.until(agent.until)].filter((part) => part !== null).join(' · ')
 
-/** A share as a bar's width: a sliver while any is left, so a little reads as some. Decoration: the figure beside it says it. */
+/** A share as a bar's width, with a tick at the time left (100 less `elapsed`): where the fill ends if use keeps to the clock.  a sliver while any is left, so a little reads as some. Decoration: the figure beside it says it. */
 function Bar({ left, elapsed, t, className }: { left: number; elapsed?: number; t: PlanPeekText; className?: string }) {
   return (
     <span className={cx(s.bar, className)} aria-hidden="true" title={elapsed === undefined ? undefined : t.through(Math.round(elapsed))}>
       <i style={{ width: `${left > 0 ? Math.max(left, 3) : 0}%` }} />
-      {elapsed !== undefined && <b className={s.now} style={{ left: `${Math.min(100, Math.max(0, elapsed))}%` }} />}
+      {elapsed !== undefined && <b className={s.now} style={{ left: `${Math.min(100, Math.max(0, 100 - elapsed))}%` }} />}
     </span>
   )
 }
