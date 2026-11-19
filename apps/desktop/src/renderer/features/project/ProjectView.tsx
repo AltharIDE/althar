@@ -54,6 +54,7 @@ import { UnsentBringIn } from '../elsewhere/UnsentBringIn'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
+import { Foot } from '../foot/Foot'
 import { pages, usePage } from '../browser/pages'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import { ArtifactsView } from '../canvases/ArtifactsView'
@@ -1232,6 +1233,15 @@ export function ProjectView({
         {teamFor !== null && (
           <TeamOf key={teamFor} projectId={projectId} taskId={teamFor} agents={model.agents} onClose={() => setTeamFor(null)} />
         )}
+        {/* What the project runs, its tasks' too, and its terminals, along its foot; a new terminal opens in its repository. */}
+        <Foot
+          projectId={projectId}
+          taskId={null}
+          where={model.repositories?.[0]?.name ?? kept.name ?? name}
+          onHelp={helpMe.help}
+          // Its card in the coordinator's thread, as a card's Run again has it.
+          onRunAgain={(launch) => void model.runProject(launch.taskId, launch.runnableId ?? null) === undefined}
+        />
       </MessageMotion>
     </PageOpenerProvider>
   )

@@ -121,6 +121,7 @@ import { canHold, ChangeTeam, useTeamed } from '../team/Team'
 import { presses, type TaskModel } from './useTask'
 import { chooseFace, chosenFaces } from './chosenFaces'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
+import { Foot } from '../foot/Foot'
 import { pages } from '../browser/pages'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import {
@@ -2056,6 +2057,17 @@ export function TaskView({
                   {...(editorLine === undefined ? {} : { line: editorLine })}
                 />
               }
+            />
+          )}
+          {/* The project's runs and terminals, along its foot; a new terminal opens in this task's worktree. */}
+          {!embedded && (
+            <Foot
+              projectId={snapshot.project.id}
+              taskId={snapshot.task.id}
+              where={snapshot.task.title}
+              onHelp={helpMe.help}
+              // This task's run again, its card in this thread; another's, from the line.
+              onRunAgain={(launch) => launch.taskId === snapshot.task.id && void model.runProject(launch.runnableId ?? null) === undefined}
             />
           )}
         </MessageMotion>

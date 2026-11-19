@@ -617,8 +617,8 @@ export const useTask = (threadId: string): TaskModel => {
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'; plan usage is the plan gauge's and the pickers'.
     if (event._tag === 'Output' || event._tag === 'PlanUsage' || event._tag === 'Drafting') return
-    // What its lead is still saying is useStreamed's.
-    if (event._tag === 'Streaming') return
+    // What its lead is still saying is useStreamed's; the project's terminals are the status line's.
+    if (event._tag === 'Streaming' || event._tag === 'Terminals') return
     // What Althar runs of the project, whole each time: this task's, which the pill over the composer shows.
     if (event._tag === 'Launches')
       return void setSnapshot((current) =>

@@ -24,6 +24,7 @@ import { Issues } from './Issues'
 import { IntegrationTools } from './IntegrationTools'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
+import { PtySpawner, Terminals } from './Terminals'
 import { Live } from './Live'
 import { MachineLoad } from './MachineLoad'
 import { Overlaps } from './Overlaps'
@@ -180,7 +181,10 @@ export const layer = (options: RuntimeLayerOptions) => {
     ),
   )
   // How many tasks are at work at once on this machine, and what waits for a place among them; and a task that settles stops all it left running.
-  const busy = Layer.mergeAll(Busy.layer, LeftBehind.layer).pipe(Layer.provideMerge(core))
+  // The person's own terminals, in a task's worktree, the project's repository or where a run ran (workspaces-and-runs.md, Terminals).
+  const busy = Layer.mergeAll(Busy.layer, LeftBehind.layer, Terminals.layer.pipe(Layer.provide(PtySpawner.node))).pipe(
+    Layer.provideMerge(core),
+  )
   // A task's issue, and changes to issues on the person's trackers, which its pull request offers as it opens and merges.
   const tracked = IssueChanges.layer.pipe(Layer.provideMerge(Issues.layer.pipe(Layer.provideMerge(busy))))
   // A task's pull request, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.

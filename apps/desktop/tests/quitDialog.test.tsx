@@ -8,7 +8,7 @@ import { fakeHost } from './fixtures'
 
 /* Quit with work under way, asked in the window: what it stops, and the person's answer to main. */
 
-const question: QuitQuestion = { work: { leads: 2, reviews: 1, runs: 0, left: 0 }, background: true, update: '0.7.0' }
+const question: QuitQuestion = { work: { leads: 2, reviews: 1, runs: 0, left: 0, terminals: 0 }, background: true, update: '0.7.0' }
 
 const asked = () => {
   let ask: (question: unknown) => void = () => undefined
@@ -61,7 +61,7 @@ describe('quit with work under way', () => {
   it('says it may stop work where the runtime could not count it', () => {
     const { host, ask } = asked()
     render(<QuitDialog host={host} />)
-    ask({ ...question, work: { leads: 0, reviews: 0, runs: 0, left: 0 } })
+    ask({ ...question, work: { leads: 0, reviews: 0, runs: 0, left: 0, terminals: 0 } })
     screen.getByText('Quitting may stop work that is under way.')
   })
 
