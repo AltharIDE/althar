@@ -108,7 +108,7 @@ import { waitFor } from './waits'
 export const LEAD_STARTS = { turn: 3, all: 10 } as const
 
 /** What a task's lead is told of starting tasks, in each tool that starts one. */
-const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers (a prototype the person wants built goes on as a change in its own task: change_part). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
+const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers, and never to change your own task's shape or approach: prototyping or exploring designs for its work, or building what it prototyped, happens on your task itself, on its branch and pull request, with change_part (preset Prototype, or Change). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
 
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
@@ -1551,10 +1551,12 @@ export class Coordinator extends Context.Service<
               title,
               follow: 'none',
             })
+          // Its review reads what its lead builds now, at Ship, not a pull request's head as it stood while it was a prototype.
           yield* runs.changeTeam({
             taskId: task.id,
             steps: review === null ? (own === undefined ? [] : [{ ...own, skipped: true }]) : [review],
             actorId: instance.systemId,
+            atShip: true,
           })
           yield* runs.reshape({ taskId: task.id, end, ...(review === null ? {} : { afterMerge: null }), actorId: instance.systemId })
           const named = yield* modelNamer

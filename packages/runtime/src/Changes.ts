@@ -343,6 +343,11 @@ export type PublishedOne =
     | { readonly kind: 'nothing' }
     /** Left on its branch: in a task of several repositories, one on no code host Althar knows. */
     | { readonly kind: 'branch' }
+    /**
+     * Kept on its branch here: it ends with its branch while a pull request stands open from it (a change stepped back to a
+     * prototype), so nothing went to that pull request, which stays as it is until the task ends in one again.
+     */
+    | { readonly kind: 'kept'; readonly pullRequest: string }
   ) & { readonly left: ReadonlyArray<string>; readonly repository: string }
 
 /** What publishing did in each of the task's repositories, the project's first first. */
@@ -870,6 +875,12 @@ export class Changes extends Context.Service<
      * request to measure it against.
      */
     onlyBaseWaits(taskId: string): Effect.Effect<boolean, unknown>
+    /**
+     * Whether the task stepped back from its pull request to end on its branch (a change made a prototype or a chat), leaving
+     * the one it has open as it is: then nothing pushes to it, not a lead's commits, a turn's end or Ship, until it ends in a
+     * pull request again.
+     */
+    keptOpen(taskId: string): Effect.Effect<boolean, unknown>
     /**
      * Sends what only brings the base branch in up to the task's open pull
      * requests, with no review, past the hold, and says so in the task's
@@ -1836,6 +1847,16 @@ export class Changes extends Context.Service<
        * Publishes one of the task's repositories: pushes its branch, and opens or adopts its pull request where the ending says to.
        * With `next`, its next pull request, after its last merged or closed: on a new branch, described from what came since.
        */
+      /** See `keptOpen`: the task's plan says so, as changing its ending to its branch from a pull request marks it. */
+      const keptOpenOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [plan] = yield* sql<{ kept: number | null }>`
+            SELECT json_extract(parameters, '$.keptOpen') AS kept FROM task_plans
+            WHERE task_id = ${taskId} AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1`
+          return plan?.kept === 1
+        })
+
       const publishOne = (
         input: PublishInput,
         given: PublishRow,
@@ -1886,6 +1907,10 @@ export class Changes extends Context.Service<
           // project says now: switching where a fork's work goes moves only its next ones (ADR-085). So does one opened from a
           // fork before its clone's remotes were renamed for the repository it came from.
           const standing = next === undefined ? yield* openFrom(input.taskId, task.workspaceId, task.branch) : undefined
+          // Ending with its branch while its pull request stands open (a change stepped back to prototyping): pushing the branch
+          // would send its work to that pull request, so nothing goes up; the work waits on its branch here until it ends in one again.
+          if (input.end === 'none' && standing !== undefined && standing.state === 'open' && (yield* keptOpenOf(input.taskId)))
+            return { kind: 'kept', pullRequest: `${standing.words.short} ${standing.words.prefix}${standing.number}`, left: [] } as const
           if (standing !== undefined) {
             repository = samePath(standing.repository, repository.path) ? repository : yield* host.repository(standing.repository)
             own = yield* branchRepositoryOf(input.taskId, host, repository, task.path, {
@@ -8176,6 +8201,8 @@ export class Changes extends Context.Service<
       const pushLeft = (taskId: string, late = false) =>
         Effect.gen(function* () {
           if (!(yield* pushesFor(taskId))) return
+          // Stepped back into prototyping: its pull request stays as it is, whatever its lead commits.
+          if (yield* keptOpenOf(taskId)) return
           if ((yield* publishing(taskId)) || (yield* roundUnderWay(taskId))) return
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
@@ -9528,6 +9555,14 @@ export class Changes extends Context.Service<
                 )
                 const seen = yield* urlsOf(taskId)
                 if (seen.length === 0) return yield* new NotFound({ kind: 'pull request', id: taskId })
+                // Stepped back into prototyping: nothing goes to its pull request until it is a change again.
+                if (yield* keptOpenOf(taskId))
+                  return `Nothing pushed: this task ends on its branch now (stepped back from its pull request, as for prototyping), so ${seen
+                    .filter((one) => one.state === 'open')
+                    .map(nameOf)
+                    .join(
+                      ' and ',
+                    )} stays as it is and your commits wait on the branch here. Once the person picks a direction, change_part with preset Change (or ending draft or ready) takes it back to its pull request, and Ship reviews and sends what waits.`
                 // In a turn the person's words began, what it committed so far is held now, before its end would hold it.
                 yield* holdBeforePush(taskId)
                 const several = seen.length > 1
@@ -9694,6 +9729,12 @@ export class Changes extends Context.Service<
           provide(
             locked(taskId)(
               Effect.gen(function* () {
+                // Stepped back into prototyping: its pull request stays as it is, whoever asks, until it is a change again.
+                if (yield* keptOpenOf(taskId))
+                  return yield* new ToolRefused({
+                    message:
+                      'Nothing pushed: this task ends on its branch now, stepped back from its pull request (as for prototyping), so its pull request stays as it is. Make it a change again (change_part with preset Change, or ending draft or ready) and Ship sends what waits there, after its review.',
+                  })
                 if ((yield* holdsOf(taskId)).length > 0) return yield* new ShipRefused({ taskId, why: 'held' })
                 yield* taken(taskId, 'pushed')
                 return yield* push(taskId, head, url)
@@ -9705,6 +9746,7 @@ export class Changes extends Context.Service<
         waitingChanges: (taskId, change) => provide(waitingChanges(taskId, change)),
         aheadOfOpen: (taskId) => provide(shipToOpen(taskId, false)),
         onlyBaseWaits: (taskId) => provide(onlyBaseWaitsOf(taskId)),
+        keptOpen: (taskId) => provide(keptOpenOf(taskId)),
         sendBaseOnly: (taskId) => provide(locked(taskId)(sendBaseOnly(taskId))),
         releaseHolds: (taskId, why, only, heads) => provide(locked(taskId)(releaseHolds(taskId, why, only, heads))),
         replace: (taskId, head, replaces, url) =>
