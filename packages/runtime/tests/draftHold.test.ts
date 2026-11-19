@@ -3,6 +3,7 @@ import { Effect, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import type { Draft } from '@althar/contracts'
+import type { ProjectId } from '@althar/domain'
 
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
@@ -11,6 +12,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import type { ToolAccess } from '../src/ToolServer'
 import * as Runtime from '../src/Runtime'
+import { addItem } from '../src/threads'
 import { callTool, repository, runtime, until } from './support'
 
 /** The coordinator's thread of a project opened on `path`, its tools' access, and the drafts the window is told of. */
@@ -163,6 +165,41 @@ describe('a task drafted whose plan never came', () => {
       const [card] = yield* until(cardsOn(threadId), (cards) => cards.some((one) => one.slug === 'explore-the-team'))
       assert.deepInclude(card, { unplanned: true, plan: null })
       assert.isUndefined(card?.discarded)
+    }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
+  it.live('has its card where it was drafted, before what the person said while its plan was on its way', () =>
+    Effect.gen(function* () {
+      const { threadId, coordinator, live } = yield* opened(repository())
+      const sql = yield* SqlClient.SqlClient
+      const [thread] = yield* sql<{ projectId: string }>`SELECT project_id FROM threads WHERE id = ${threadId}`
+      yield* callTool(coordinator, 'draft_task', { title: 'Explore the roles', description: 'Who may do what. [lead:finish]' })
+      yield* callTool(coordinator, 'draft_task', { title: 'Explore the team', description: 'Before multiplayer. [lead:finish]' })
+      // Each card is in the thread as soon as its task is drafted, its plan still to come.
+      const drafted = yield* until(cardsOn(threadId), (cards) => cards.length === 2)
+      assert.deepStrictEqual(
+        drafted.map((card) => [card.slug, card.plan]),
+        [
+          ['explore-the-roles', null],
+          ['explore-the-team', null],
+        ],
+      )
+      // Something said in the thread while the turn goes on, as the person's message was; then it ends with no plan for either.
+      yield* addItem({ projectId: thread?.projectId as ProjectId, threadId }, 'notice', {
+        source: 'runtime',
+        severity: 'info',
+        title: 'Said since',
+      })
+      yield* live.publish({ _tag: 'TurnEnded', threadId, turnId: 'turn', state: 'completed' })
+      yield* until(cardsOn(threadId), (cards) => cards.every((card) => card.unplanned === true))
+      // Neither card came after what was said since, nor twice.
+      const snapshot = yield* Effect.orDie((yield* Queries).coordinator(thread?.projectId ?? ''))
+      assert.deepStrictEqual(
+        snapshot.items.flatMap((item) =>
+          item.kind === 'task' ? [item.content.slug] : item.kind === 'notice' && item.content.title === 'Said since' ? ['said'] : [],
+        ),
+        ['explore-the-roles', 'explore-the-team', 'said'],
+      )
     }).pipe(Effect.scoped, Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 

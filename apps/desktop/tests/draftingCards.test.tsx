@@ -48,6 +48,26 @@ it('replaces a streaming draft only when its own durable task card appears in th
   expect(hold).not.toHaveBeenCalled()
 })
 
+it('shows a draft in its card’s place in the thread, above what the person said since, until its plan is in', () => {
+  // As the person saw it: a message sent while two drafts were sized sat above them, the drafts drawn after the thread.
+  const sizing = draft({ key: 'draft_1', taskId: 't1', slug: 'explore-the-roles', title: 'Explore the roles', brief: true })
+  const writing = draft({ key: 'draft_2' })
+  const hold = vi.fn(async () => {})
+  const thread = [items.card(card({ taskId: 't1' })), items.says('you dont need to split these')]
+  const hook = renderHook(({ drafts }: { drafts: Draft[] }) => useDraftingCards('th1', drafts, thread, hold), {
+    initialProps: { drafts: [sizing, writing] },
+  })
+  // Its card is in the thread where it was drafted, before the message: the draft fills it there, not after the thread.
+  expect(hook.result.current.inPlace('t1')).toEqual(sizing)
+  expect(hook.result.current.shown).toEqual([writing])
+  // One not yet a task has no card: it alone shows after the thread.
+  expect(hook.result.current.inPlace('t2')).toBeUndefined()
+  // Its plan in, the card shows it, in the same place.
+  hook.rerender({ drafts: [{ ...sizing, planned: true }, writing] })
+  expect(hook.result.current.inPlace('t1')).toBeUndefined()
+  expect(hook.result.current.shown).toEqual([writing])
+})
+
 it('does not send a Hold without a thread and honours a hold already read from the home', () => {
   const held = draft({ held: true })
   const hold = vi.fn(async () => {})

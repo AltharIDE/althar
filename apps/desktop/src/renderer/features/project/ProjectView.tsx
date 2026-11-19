@@ -499,7 +499,7 @@ export function ProjectView({
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
   const coordinator = model.coordinator
-  // The tasks the coordinator is drafting, each as its card fills in, until the thread's card takes its place.
+  // The tasks the coordinator is drafting, each as its card fills in, in its card's place in the thread once it is a task.
   const drafting = useDraftingCards(coordinator?.threadId ?? null, model.drafts, coordinator?.items ?? NO_DRAFTED_ITEMS, model.holdDraft)
   // Every run in the project, the tasks' too: Run's list and its switcher say them.
   const launches = coordinator?.launches ?? []
@@ -1145,7 +1145,23 @@ export function ProjectView({
                                 retryable={coordinator.retryable}
                                 {...(busy ? {} : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                                 {...(ways === undefined ? {} : { onSignIn: ways.signIn })}
-                                card={(card) => <Card card={card} actions={actions} />}
+                                card={(card) => {
+                                  // Still being drafted: the live draft fills its card's place, until its plan is in.
+                                  const draft = drafting.inPlace(card.taskId)
+                                  return draft === undefined ? (
+                                    <Card card={card} actions={actions} />
+                                  ) : (
+                                    <DraftingCard
+                                      draft={draft}
+                                      project={name}
+                                      held={drafting.held(draft)}
+                                      onHold={() => drafting.hold(draft)}
+                                      onPlan={actions.onPlanDraft}
+                                      planAsked={actions.planAsked}
+                                      onDiscard={actions.onDiscard}
+                                    />
+                                  )
+                                }}
                                 draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
                                 automation={(card, itemId) => (
                                   <AutomationInThread

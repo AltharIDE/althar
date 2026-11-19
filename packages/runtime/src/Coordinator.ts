@@ -1082,6 +1082,11 @@ export class Coordinator extends Context.Service<
             if (one.partOf) yield* issues.setPart(created.taskId, true, attached.ref)
           }
           yield* adopt(access, { taskId: created.taskId, slug: created.slug, title: title.trim() })
+          // Drafted in the coordinator's own thread, its card takes its place there now, where it was drafted, and keeps it: the
+          // live draft fills it in, then its plan, or its saying it has none. Posted only with its plan, or at the turn's end, it
+          // came after whatever the person said meanwhile. An aside's comes with its plan, as ever.
+          if (!aside && (yield* coordinatorProject(access.threadId)) !== null)
+            yield* postCard(access.projectId as ProjectId, created.taskId)
           // The leads already at work on tasks from this message hear of this one: their opening briefs were written before it was made.
           if (again === undefined && request !== undefined) {
             const task = yield* taskOf(access, created.taskId)

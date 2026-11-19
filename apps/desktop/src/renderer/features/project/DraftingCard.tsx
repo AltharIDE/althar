@@ -91,8 +91,11 @@ export function DraftingCard({
 }
 
 /**
- * The drafts to show on a thread, and Hold for them: a draft whose card is in
- * the thread is that card from then on. Hold goes to the runtime at once,
+ * The drafts to show on a thread, and Hold for them. A draft's card is in the
+ * thread from the moment its task is made, where it was drafted (the runtime
+ * posts it then), and keeps that place: the live draft shows in it (`inPlace`)
+ * until its plan is in, so neither jumps past what the person said meanwhile.
+ * Only one not yet a task shows after the thread (`shown`). Hold goes to the runtime at once,
  * which makes the draft's plan held as it comes, whether this screen is still
  * open then or not; it shows held here at once, and stays so where the
  * runtime turns it down only until the draft says otherwise.
@@ -102,11 +105,18 @@ export function useDraftingCards(
   drafts: ReadonlyArray<Draft>,
   items: ReadonlyArray<ThreadItem>,
   onHold: (threadId: string, key: string) => Promise<void>,
-): { readonly shown: ReadonlyArray<Draft>; readonly held: (draft: Draft) => boolean; readonly hold: (draft: Draft) => void } {
+): {
+  readonly shown: ReadonlyArray<Draft>
+  readonly inPlace: (taskId: string) => Draft | undefined
+  readonly held: (draft: Draft) => boolean
+  readonly hold: (draft: Draft) => void
+} {
   const [pressed, setPressed] = useState<ReadonlySet<string>>(() => new Set())
   const cards = items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
   return {
     shown: drafts.filter((draft) => draft.taskId === null || !cards.some((card) => card.taskId === draft.taskId)),
+    // Its plan in, the card has it: the thread's card shows it from then on.
+    inPlace: (taskId) => drafts.find((draft) => draft.taskId === taskId && !draft.planned),
     held: (draft) => draft.held || pressed.has(draft.key),
     hold: (draft) => {
       if (threadId === null) return
