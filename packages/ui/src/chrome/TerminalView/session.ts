@@ -293,7 +293,12 @@ export class TerminalSession {
 
   private open() {
     if (this.disposed) return
-    this.term.open(this.element)
+    try {
+      this.term.open(this.element)
+    } catch {
+      // A page that can't draw (no canvas, as a test's): it stays undrawn, and takes what it is sent all the same.
+      return
+    }
     this.drawWithGpu()
     this.applyTheme()
     // The theme follows the window's appearance as it changes.
