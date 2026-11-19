@@ -19,6 +19,7 @@ Commands:
   revoke-worker    Revoke a worker's certificate
   worker-run       Queue one Linux diagnostic on an enrolled worker
   worker-result    Read a diagnostic's durable state and output
+  worker-log       Read received diagnostic output from a byte offset
   init             Initialize a private profile and a separate encryption key
   serve            Run the home until stopped
   status           Check the running home's private API
@@ -45,7 +46,8 @@ Options:
   --worker-relay <file>     Private JSON link for an outbound worker relay
   --worker-certificate <file>  Worker client certificate for enroll-worker
   --worker-id <wrk_id>      Worker for worker-run or revoke-worker
-  --attempt-id <watt_id>    Diagnostic for worker-result
+  --attempt-id <watt_id>    Diagnostic for worker-result or worker-log
+  --offset <bytes>         Start reading worker-log at this byte offset
   --profile <dir>             Host profile (default: XDG data/althar-host)
   --worktrees <dir>           Task worktrees (default: <profile>/worktrees)
   --key-file <file>           Separate 32-byte master key; never a project file
@@ -83,6 +85,7 @@ export interface HostOptions {
     | 'revoke-worker'
     | 'worker-run'
     | 'worker-result'
+    | 'worker-log'
     | 'init'
     | 'serve'
     | 'status'
@@ -108,6 +111,7 @@ export interface HostOptions {
   readonly workerCertificate?: string
   readonly workerId?: string
   readonly workerAttemptId?: string
+  readonly workerLogOffset?: number
   readonly deviceAfter?: string
   readonly revokeDeviceId?: string
   readonly profile: string
@@ -168,6 +172,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     '--worker-certificate',
     '--worker-id',
     '--attempt-id',
+    '--offset',
     '--after',
     '--home-id',
     '--client-api-version',
@@ -198,6 +203,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     'revoke-worker',
     'worker-run',
     'worker-result',
+    'worker-log',
     'connect-stdio',
     'init',
     'serve',
@@ -266,6 +272,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
         case 'revoke-worker':
         case 'worker-run':
         case 'worker-result':
+        case 'worker-log':
         case 'init':
         case 'serve':
         case 'status':
@@ -347,9 +354,15 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     if (!/^wrk_[0-9a-f]{32}$/.test(workerId ?? '')) return invalid('Choose the --worker-id printed by enroll-worker.')
   } else if (workerId !== undefined) return invalid('--worker-id requires worker-run or revoke-worker.')
   const workerAttemptId = flags.get('--attempt-id')
-  if (command === 'worker-result') {
+  if (command === 'worker-result' || command === 'worker-log') {
     if (!/^watt_[0-9a-f]{32}$/.test(workerAttemptId ?? '')) return invalid('Choose the --attempt-id printed by worker-run.')
-  } else if (workerAttemptId !== undefined) return invalid('--attempt-id requires worker-result.')
+  } else if (workerAttemptId !== undefined) return invalid('--attempt-id requires worker-result or worker-log.')
+  const workerLogOffset = flags.get('--offset')
+  if (
+    workerLogOffset !== undefined &&
+    (command !== 'worker-log' || !/^(0|[1-9][0-9]*)$/.test(workerLogOffset) || !Number.isSafeInteger(Number(workerLogOffset)))
+  )
+    return invalid('--offset requires worker-log and a nonnegative integer cursor.')
   if (flags.has('--after') && (command !== 'devices' || !/^dev_[0-9a-f]{32}$/.test(flags.get('--after') ?? '')))
     return invalid('--after requires devices and a device id from the previous page.')
   if (flags.has('--device-id') && command !== 'revoke-device') return invalid('--device-id requires revoke-device.')
@@ -425,6 +438,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     ...(flags.has('--worker-certificate') ? { workerCertificate: resolve(flags.get('--worker-certificate') ?? '') } : {}),
     ...(workerId === undefined ? {} : { workerId }),
     ...(workerAttemptId === undefined ? {} : { workerAttemptId }),
+    ...(workerLogOffset === undefined ? {} : { workerLogOffset: Number(workerLogOffset) }),
     profile,
     worktrees: resolve(flags.get('--worktrees') ?? join(profile, 'worktrees')),
     worktreesExplicit: flags.has('--worktrees'),

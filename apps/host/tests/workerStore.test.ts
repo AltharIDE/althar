@@ -1,7 +1,8 @@
 import { chmod, mkdir, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
-import { DiagnosticOutcome, type DiagnosticResult } from '@althar/worker-protocol'
+import { DiagnosticOutcome, type DiagnosticLog, type DiagnosticResult } from '@althar/worker-protocol'
 import { describe, expect, it } from 'vitest'
 
 import { openWorkerStore } from '../src/workerStore'
@@ -118,6 +119,69 @@ describe('the private worker ledger', () => {
       expect(store.renew(worker, attempt, offer.fence, 2000)).toBe(0)
     } finally {
       store.close()
+    }
+  })
+
+  it('upgrades the existing ledger additively and keeps exact log bytes across restart', async () => {
+    let clock = 1000
+    const profile = temporary()
+    const legacy = await openWorkerStore(profile, homeId, () => clock)
+    const worker = legacy.enroll(fingerprint)
+    const attempt = legacy.enqueue(worker)
+    legacy.close()
+    const sqlite = new DatabaseSync(join(profile, 'workers', 'ledger.sqlite'))
+    sqlite.exec('DROP TABLE diagnostic_log')
+    sqlite.close()
+
+    const makeLog = (offset: number, output: Uint8Array, fence: string): DiagnosticLog => ({
+      $typeName: 'althar.worker.v1.DiagnosticLog',
+      attemptId: attempt,
+      fence,
+      offset,
+      output,
+    })
+    const store = await openWorkerStore(profile, homeId, () => clock)
+    try {
+      expect(store.result(attempt).state).toBe('queued')
+      expect(store.log(attempt, 0)).toMatchObject({ state: 'queued', offset: 0, nextOffset: 0, bytesBase64: '' })
+      const stranger = store.enroll(otherFingerprint)
+      const offer = store.next(worker)!
+      const one = makeLog(0, Uint8Array.of(0xe2, 0), offer.fence)
+      expect(store.appendLog(worker, one)).toBe(false)
+      expect(store.claim(worker, attempt, offer.fence, 2000)).toBe(2000)
+      expect(store.appendLog(stranger, one)).toBe(false)
+      expect(store.appendLog(worker, { ...one, fence: 'wrong fence' })).toBe(false)
+      expect(store.appendLog(worker, { ...one, offset: 1 })).toBe(false)
+      expect(store.appendLog(worker, { ...one, offset: -1 })).toBe(false)
+      expect(store.appendLog(worker, { ...one, offset: NaN })).toBe(false)
+      expect(store.appendLog(worker, { ...one, offset: 1024 })).toBe(false)
+      expect(store.appendLog(worker, { ...one, output: new Uint8Array(257) })).toBe(false)
+      expect(store.appendLog(worker, { ...one, output: new Uint8Array() })).toBe(false)
+      expect(store.appendLog(worker, one)).toBe(true)
+      expect(store.appendLog(worker, one)).toBe(false)
+      expect(store.appendLog(worker, makeLog(2, Uint8Array.of(0x80, 0xff), offer.fence))).toBe(true)
+      const log = store.log(attempt, 1)
+      expect(log).toMatchObject({ state: 'claimed', offset: 1, nextOffset: 4 })
+      expect(Buffer.from(log.bytesBase64, 'base64')).toEqual(Buffer.of(0, 0x80, 0xff))
+      expect(() => store.log(attempt, 5)).toThrow('outside')
+      expect(() => store.log(attempt, -1)).toThrow('outside')
+      expect(() => store.log(attempt, 0.5)).toThrow('outside')
+      expect(() => store.log('missing', 0)).toThrow('No diagnostic')
+      clock += 2000
+      expect(store.appendLog(worker, makeLog(4, Uint8Array.of(1), offer.fence))).toBe(false)
+      store.revoke(worker)
+      expect(store.appendLog(worker, makeLog(4, Uint8Array.of(1), offer.fence))).toBe(false)
+    } finally {
+      store.close()
+    }
+    const reopened = await openWorkerStore(profile, homeId)
+    try {
+      const log = reopened.log(attempt, 0)
+      expect(log).toMatchObject({ state: 'unknown', offset: 0, nextOffset: 4 })
+      expect(Buffer.from(log.bytesBase64, 'base64')).toEqual(Buffer.of(0xe2, 0, 0x80, 0xff))
+      expect(reopened.log(attempt, 4).bytesBase64).toBe('')
+    } finally {
+      reopened.close()
     }
   })
 

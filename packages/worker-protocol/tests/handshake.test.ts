@@ -15,11 +15,15 @@ const offer = (
   workerId = binding.workerId,
   acceptsDiagnostics = false,
   renewsDiagnosticLease = false,
+  streamsDiagnosticLogs = false,
 ) =>
   toBinary(
     WorkerFrameSchema,
     create(WorkerFrameSchema, {
-      payload: { case: 'hello', value: { workerId, minVersion, maxVersion, acceptsDiagnostics, renewsDiagnosticLease } },
+      payload: {
+        case: 'hello',
+        value: { workerId, minVersion, maxVersion, acceptsDiagnostics, renewsDiagnosticLease, streamsDiagnosticLogs },
+      },
     }),
   )
 
@@ -33,6 +37,7 @@ test('selects version 1 from an overlapping range and binds the enrolled worker'
       version: 1,
       supportsDiagnostics: false,
       supportsDiagnosticLeaseRenewal: false,
+      supportsDiagnosticLogs: false,
     },
   })
 })
@@ -60,6 +65,21 @@ test('advertises renewal only when both peers support diagnostic leases', () => 
   ] as const) {
     const reply = negotiateWorkerHello(bytes, binding, diagnostics, renewal)
     deepEqual(reply.payload.case === 'hello' && reply.payload.value.supportsDiagnosticLeaseRenewal, expected)
+  }
+})
+
+test('negotiates live logs only with a renewable diagnostic lease and matching capabilities', () => {
+  const logWorker = offer(1, 1, binding.workerId, true, true, true)
+  const noRenewal = offer(1, 1, binding.workerId, true, false, true)
+  const noLogs = offer(1, 1, binding.workerId, true, true)
+  for (const [bytes, logs, expected] of [
+    [logWorker, true, true],
+    [logWorker, false, false],
+    [noRenewal, true, false],
+    [noLogs, true, false],
+  ] as const) {
+    const reply = negotiateWorkerHello(bytes, binding, true, true, logs)
+    deepEqual(reply.payload.case === 'hello' && reply.payload.value.supportsDiagnosticLogs, expected)
   }
 })
 

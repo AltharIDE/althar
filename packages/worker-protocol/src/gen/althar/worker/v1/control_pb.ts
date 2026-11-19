@@ -12,7 +12,7 @@ import type { Message, UnknownEnum } from '@bufbuild/protobuf'
 export const file_althar_worker_v1_control: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'Ch5hbHRoYXIvd29ya2VyL3YxL2NvbnRyb2wucHJvdG8SEGFsdGhhci53b3JrZXIudjEihwIKC1dvcmtlckZyYW1lEi4KBWhlbGxvGAEgASgLMh0uYWx0aGFyLndvcmtlci52MS5Xb3JrZXJIZWxsb0gAEj0KEGRpYWdub3N0aWNfY2xhaW0YAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNDbGFpbUgAEj8KEWRpYWdub3N0aWNfcmVzdWx0GAMgASgLMiIuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljUmVzdWx0SAASPQoQZGlhZ25vc3RpY19yZW5ldxgEIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY1JlbmV3SABCCQoHcGF5bG9hZCKBAgoJSG9tZUZyYW1lEiwKBWhlbGxvGAEgASgLMhsuYWx0aGFyLndvcmtlci52MS5Ib21lSGVsbG9IABI9ChBkaWFnbm9zdGljX29mZmVyGAIgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT2ZmZXJIABI9ChBkaWFnbm9zdGljX3N0YXJ0GAMgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljU3RhcnRIABI9ChBkaWFnbm9zdGljX2xlYXNlGAQgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljTGVhc2VIAEIJCgdwYXlsb2FkIogBCgtXb3JrZXJIZWxsbxIRCgl3b3JrZXJfaWQYASABKAkSEwoLbWluX3ZlcnNpb24YAiABKA0SEwoLbWF4X3ZlcnNpb24YAyABKA0SGwoTYWNjZXB0c19kaWFnbm9zdGljcxgEIAEoCBIfChdyZW5ld3NfZGlhZ25vc3RpY19sZWFzZRgFIAEoCCKdAQoJSG9tZUhlbGxvEg8KB2hvbWVfaWQYASABKAkSEQoJd29ya2VyX2lkGAIgASgJEhIKCnNlc3Npb25faWQYAyABKAkSDwoHdmVyc2lvbhgEIAEoDRIcChRzdXBwb3J0c19kaWFnbm9zdGljcxgFIAEoCBIpCiFzdXBwb3J0c19kaWFnbm9zdGljX2xlYXNlX3JlbmV3YWwYBiABKAgiTgoPRGlhZ25vc3RpY09mZmVyEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSGAoQY2xhaW1hYmxlX2Zvcl9tcxgDIAEoDSI0Cg9EaWFnbm9zdGljQ2xhaW0SEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCSJICg9EaWFnbm9zdGljU3RhcnQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRISCgpydW5fZm9yX21zGAMgASgNInsKEERpYWdub3N0aWNSZXN1bHQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRI0CgdvdXRjb21lGAMgASgOMiMuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT3V0Y29tZRIOCgZvdXRwdXQYBCABKAwiRgoPRGlhZ25vc3RpY1JlbmV3EhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0iWgoPRGlhZ25vc3RpY0xlYXNlEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0SEgoKcnVuX2Zvcl9tcxgEIAEoDSqYAQoRRGlhZ25vc3RpY091dGNvbWUSIgoeRElBR05PU1RJQ19PVVRDT01FX1VOU1BFQ0lGSUVEEAASIAocRElBR05PU1RJQ19PVVRDT01FX1NVQ0NFRURFRBABEh0KGURJQUdOT1NUSUNfT1VUQ09NRV9GQUlMRUQQAhIeChpESUFHTk9TVElDX09VVENPTUVfVU5LTk9XThADMmEKFFdvcmtlckNvbnRyb2xTZXJ2aWNlEkkKB0Nvbm5lY3QSHS5hbHRoYXIud29ya2VyLnYxLldvcmtlckZyYW1lGhsuYWx0aGFyLndvcmtlci52MS5Ib21lRnJhbWUoATABYgZwcm90bzM',
+    'Ch5hbHRoYXIvd29ya2VyL3YxL2NvbnRyb2wucHJvdG8SEGFsdGhhci53b3JrZXIudjEiwgIKC1dvcmtlckZyYW1lEi4KBWhlbGxvGAEgASgLMh0uYWx0aGFyLndvcmtlci52MS5Xb3JrZXJIZWxsb0gAEj0KEGRpYWdub3N0aWNfY2xhaW0YAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNDbGFpbUgAEj8KEWRpYWdub3N0aWNfcmVzdWx0GAMgASgLMiIuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljUmVzdWx0SAASPQoQZGlhZ25vc3RpY19yZW5ldxgEIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY1JlbmV3SAASOQoOZGlhZ25vc3RpY19sb2cYBSABKAsyHy5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNMb2dIAEIJCgdwYXlsb2FkIoECCglIb21lRnJhbWUSLAoFaGVsbG8YASABKAsyGy5hbHRoYXIud29ya2VyLnYxLkhvbWVIZWxsb0gAEj0KEGRpYWdub3N0aWNfb2ZmZXIYAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNPZmZlckgAEj0KEGRpYWdub3N0aWNfc3RhcnQYAyABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNTdGFydEgAEj0KEGRpYWdub3N0aWNfbGVhc2UYBCABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNMZWFzZUgAQgkKB3BheWxvYWQiqQEKC1dvcmtlckhlbGxvEhEKCXdvcmtlcl9pZBgBIAEoCRITCgttaW5fdmVyc2lvbhgCIAEoDRITCgttYXhfdmVyc2lvbhgDIAEoDRIbChNhY2NlcHRzX2RpYWdub3N0aWNzGAQgASgIEh8KF3JlbmV3c19kaWFnbm9zdGljX2xlYXNlGAUgASgIEh8KF3N0cmVhbXNfZGlhZ25vc3RpY19sb2dzGAYgASgIIr8BCglIb21lSGVsbG8SDwoHaG9tZV9pZBgBIAEoCRIRCgl3b3JrZXJfaWQYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIPCgd2ZXJzaW9uGAQgASgNEhwKFHN1cHBvcnRzX2RpYWdub3N0aWNzGAUgASgIEikKIXN1cHBvcnRzX2RpYWdub3N0aWNfbGVhc2VfcmVuZXdhbBgGIAEoCBIgChhzdXBwb3J0c19kaWFnbm9zdGljX2xvZ3MYByABKAgiTgoPRGlhZ25vc3RpY09mZmVyEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSGAoQY2xhaW1hYmxlX2Zvcl9tcxgDIAEoDSI0Cg9EaWFnbm9zdGljQ2xhaW0SEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCSJICg9EaWFnbm9zdGljU3RhcnQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRISCgpydW5fZm9yX21zGAMgASgNInsKEERpYWdub3N0aWNSZXN1bHQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRI0CgdvdXRjb21lGAMgASgOMiMuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT3V0Y29tZRIOCgZvdXRwdXQYBCABKAwiRgoPRGlhZ25vc3RpY1JlbmV3EhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0iWgoPRGlhZ25vc3RpY0xlYXNlEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0SEgoKcnVuX2Zvcl9tcxgEIAEoDSJSCg1EaWFnbm9zdGljTG9nEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSDgoGb2Zmc2V0GAMgASgNEg4KBm91dHB1dBgEIAEoDCqYAQoRRGlhZ25vc3RpY091dGNvbWUSIgoeRElBR05PU1RJQ19PVVRDT01FX1VOU1BFQ0lGSUVEEAASIAocRElBR05PU1RJQ19PVVRDT01FX1NVQ0NFRURFRBABEh0KGURJQUdOT1NUSUNfT1VUQ09NRV9GQUlMRUQQAhIeChpESUFHTk9TVElDX09VVENPTUVfVU5LTk9XThADMmEKFFdvcmtlckNvbnRyb2xTZXJ2aWNlEkkKB0Nvbm5lY3QSHS5hbHRoYXIud29ya2VyLnYxLldvcmtlckZyYW1lGhsuYWx0aGFyLndvcmtlci52MS5Ib21lRnJhbWUoATABYgZwcm90bzM',
   )
 
 /**
@@ -50,6 +50,13 @@ export type WorkerFrame = Message<'althar.worker.v1.WorkerFrame'> & {
          */
         value: DiagnosticRenew
         case: 'diagnosticRenew'
+      }
+    | {
+        /**
+         * @generated from field: althar.worker.v1.DiagnosticLog diagnostic_log = 5;
+         */
+        value: DiagnosticLog
+        case: 'diagnosticLog'
       }
     | { case: undefined; value?: undefined }
 }
@@ -136,6 +143,11 @@ export type WorkerHello = Message<'althar.worker.v1.WorkerHello'> & {
    * @generated from field: bool renews_diagnostic_lease = 5;
    */
   renewsDiagnosticLease: boolean
+
+  /**
+   * @generated from field: bool streams_diagnostic_logs = 6;
+   */
+  streamsDiagnosticLogs: boolean
 }
 
 /**
@@ -179,6 +191,11 @@ export type HomeHello = Message<'althar.worker.v1.HomeHello'> & {
    * @generated from field: bool supports_diagnostic_lease_renewal = 6;
    */
   supportsDiagnosticLeaseRenewal: boolean
+
+  /**
+   * @generated from field: bool supports_diagnostic_logs = 7;
+   */
+  supportsDiagnosticLogs: boolean
 }
 
 /**
@@ -356,6 +373,40 @@ export type DiagnosticLease = Message<'althar.worker.v1.DiagnosticLease'> & {
  * Use `create(DiagnosticLeaseSchema)` to create a new message.
  */
 export const DiagnosticLeaseSchema: GenMessage<DiagnosticLease> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 9)
+
+/**
+ * Raw stdout, emitted before the result on the claiming stream. Offsets are
+ * contiguous byte offsets from zero, independent of character encoding.
+ *
+ * @generated from message althar.worker.v1.DiagnosticLog
+ */
+export type DiagnosticLog = Message<'althar.worker.v1.DiagnosticLog'> & {
+  /**
+   * @generated from field: string attempt_id = 1;
+   */
+  attemptId: string
+
+  /**
+   * @generated from field: string fence = 2;
+   */
+  fence: string
+
+  /**
+   * @generated from field: uint32 offset = 3;
+   */
+  offset: number
+
+  /**
+   * @generated from field: bytes output = 4;
+   */
+  output: Uint8Array
+}
+
+/**
+ * Describes the message althar.worker.v1.DiagnosticLog.
+ * Use `create(DiagnosticLogSchema)` to create a new message.
+ */
+export const DiagnosticLogSchema: GenMessage<DiagnosticLog> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 10)
 
 /**
  * @generated from enum althar.worker.v1.DiagnosticOutcome
