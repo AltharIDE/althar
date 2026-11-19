@@ -1,5 +1,17 @@
+import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  type ComponentProps,
+  type CSSProperties,
+  createContext,
+  useContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 
 import {
   type CanvasRef,
@@ -10,6 +22,7 @@ import {
   Lightbox,
   type ThreadShell,
   isMarkdownPath,
+  TaskFace,
   ThreadShellProvider,
   useThreadShell,
   Workbench,
@@ -52,6 +65,15 @@ export interface ThreadPage {
   readonly onDock: () => void
 }
 
+interface WorkbenchOverlay {
+  readonly room: number
+  readonly keep: number
+  /** Its draggable edge, on the far side from the conversation. */
+  readonly edge?: 'start' | 'end'
+  readonly className?: string
+  readonly style?: CSSProperties
+}
+
 export interface ThreadHost {
   readonly shell: ThreadShell
   /** The lightbox, while a picture is open. */
@@ -76,17 +98,29 @@ export interface ThreadHost {
    * left), within the `room` there, leaving `keep` of it; where it would leave less,
    * as in a small window, it takes the whole room, to the window's edge.
    */
-  readonly workbench: (
-    docPanel: ReactNode,
-    over?: {
-      readonly room: number
-      readonly keep: number
-      /** The edge it is dragged by: its end, over what is right of the conversation; its start, over what is left of it. */
-      readonly edge?: 'start' | 'end'
-      readonly className?: string
-      readonly style?: CSSProperties
-    },
-  ) => ReactNode | undefined
+  readonly workbench: (docPanel: ReactNode, over?: WorkbenchOverlay) => ReactNode | undefined
+}
+
+/** Where the project can lay the active conversation’s workbench over the board. */
+export const BoardWorkbench = createContext<{
+  readonly target: HTMLElement
+  readonly over: WorkbenchOverlay
+} | null>(null)
+
+/** Tasks, coordinator conversations and asides all draw the workbench belonging to the thread on screen. */
+export function ConversationFace({
+  host,
+  documentPanel = null,
+  ...props
+}: Omit<ComponentProps<typeof TaskFace>, 'panel' | 'panelWidth'> & { host: ThreadHost; documentPanel?: ReactNode }) {
+  const board = useContext(BoardWorkbench)
+  if (board === null) return <TaskFace {...props} panel={host.workbench(documentPanel)} panelWidth={host.bench.width} />
+  return (
+    <>
+      <TaskFace {...props} />
+      {createPortal(host.workbench(documentPanel, board.over), board.target)}
+    </>
+  )
 }
 
 /**
