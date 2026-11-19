@@ -1,4 +1,5 @@
 import type { ProjectId } from '@althar/domain'
+import { isoAfter } from '@althar/testing'
 import { type FakeAgentOptions, holds, recorded, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -384,10 +385,10 @@ describe('a lead’s turn after its plan whose connection is lost', () => {
             SELECT project_id, ${id}, user_input_id, position FROM turn_delivery_inputs WHERE delivery_id = ${failed?.id ?? ''}`
             return (yield* queries.thread(task.threadId)).task?.followUp
           })
-        assert.isTrue(yield* followsUp('usage_limit', '2999-01-01T00:00:01.000Z'), 'a usage limit after a lost connection')
-        assert.isTrue(yield* followsUp('session_lost', '2999-01-01T00:00:02.000Z'), 'a lost session, started afresh')
-        assert.isTrue(yield* followsUp('turn_in_progress', '2999-01-01T00:00:03.000Z'), 'a refused prompt, tried again shortly')
-        assert.isFalse(yield* followsUp('transient', '2999-01-01T00:00:04.000Z'), 'a lost connection again')
+        assert.isTrue(yield* followsUp('usage_limit', isoAfter(1000)), 'a usage limit after a lost connection')
+        assert.isTrue(yield* followsUp('session_lost', isoAfter(2000)), 'a lost session, started afresh')
+        assert.isTrue(yield* followsUp('turn_in_progress', isoAfter(3000)), 'a refused prompt, tried again shortly')
+        assert.isFalse(yield* followsUp('transient', isoAfter(4000)), 'a lost connection again')
       }).pipe(Effect.provide(layer))
     },
   )
