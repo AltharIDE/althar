@@ -349,10 +349,46 @@ describe('a task’s card in the Talk room', () => {
     expect(screen.queryByText(/PR #7/)).toBeNull()
   })
 
-  it('says why work its lead couldn’t finish needs you', async () => {
+  it('says why work its lead couldn’t finish needs you, as the board says it, opening it rather than answering', async () => {
     const why = 'The lead couldn’t resolve the conflict with main, in README.md.'
     await talking(card({ phase: 'ready', handedBack: why, plan: null }))
-    expect(await screen.findByText(why)).toBeTruthy()
+    const shown = within(await screen.findByRole('article', { name: 'Add a retry' }))
+    expect(shown.getByText(why)).toBeTruthy()
+    expect(shown.getByText('Merge conflict')).toBeTruthy()
+    expect(shown.getByRole('button', { name: /Open task/ })).toBeTruthy()
+    expect(shown.queryByText('Needs you')).toBeNull()
+  })
+
+  it('follows its task once its question is answered: checks its lead brought to you are not ready to accept, not a question', async () => {
+    const asking = card({ phase: 'waiting', step: 'review', plan: null })
+    const why = 'OpenRouter is out of credit: both evals get 402 Payment Required.'
+    const { client, emit } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(asking, 'c0')] })),
+    })
+    withServices(<Project />, client)
+    const theCard = async () => within(await screen.findByRole('article', { name: 'Add a retry' }))
+    // Its step waits on the person: it asks, and the card answers it.
+    expect((await theCard()).getByText('Needs you')).toBeTruthy()
+    expect((await theCard()).getByRole('button', { name: /Answer/ })).toBeTruthy()
+    // Answered, it went on to its checks, which its lead brought to the person as nothing it can fix: the card reads it again.
+    vi.mocked(client.getThreadItem).mockImplementation(async (_threadId, id) =>
+      items.card(card({ phase: 'ready', step: 'review', plan: null, change: change({ draft: false }), checksBack: why }), id),
+    )
+    act(() => emit(changed('task', 't1', 'th1', 'p1')))
+    await waitFor(async () => expect((await theCard()).queryByText('Needs you')).toBeNull())
+    const shown = await theCard()
+    expect(shown.getByText('Not ready to accept')).toBeTruthy()
+    expect(shown.getByText(why)).toBeTruthy()
+    expect(shown.queryByRole('button', { name: /Answer/ })).toBeNull()
+    expect(shown.getByRole('button', { name: /Open task/ })).toBeTruthy()
+    // And once its checks pass and nothing is in its way, it is ready, as the board has it.
+    vi.mocked(client.getThreadItem).mockImplementation(async (_threadId, id) =>
+      items.card(card({ phase: 'ready', step: 'review', plan: null, summary: 'Fixed the evals.' }), id),
+    )
+    act(() => emit(changed('task', 't1', 'th1', 'p1')))
+    await waitFor(async () => expect((await theCard()).queryByText('Not ready to accept')).toBeNull())
+    expect((await theCard()).getByText('Ready')).toBeTruthy()
+    expect((await theCard()).getByText('Fixed the evals.')).toBeTruthy()
   })
 
   it('names who holds the places it waits for, and stops what one left running', async () => {

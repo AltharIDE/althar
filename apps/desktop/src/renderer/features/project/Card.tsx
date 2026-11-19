@@ -18,6 +18,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { useServices } from '../../data/services'
 import { openBlockers, standsOf } from '../../shared/blockers'
+import { readyWordOf } from '../../shared/standing'
 import { externalWaitWords, holdersWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
@@ -367,6 +368,9 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   const at = stepIndex(steps, card.step)
   // Ready, but its lead couldn't resolve a conflict, or brought its failing checks to the person: it needs them, and says why.
   const handedBack = card.phase === 'ready' ? (card.handedBack ?? card.checksBack ?? null) : null
+  // Said in the word the board, its header and Needs you say it in (`readyWordOf`): a merge conflict, or not ready to accept.
+  // Nothing asks a question, so its way in opens it, rather than offering to answer one that was never asked.
+  const word = handedBack === null ? null : readyWordOf(card)
   // Waiting for a free agent, it says so, rather than that it runs.
   // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
   const status =
@@ -426,8 +430,9 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
               </>
             ),
           })}
+      {...(word === null ? {} : { asks: false })}
       onOpen={() => actions.onOpen(card.threadId)}
-      text={{ status: text.status }}
+      text={{ status: word === null ? text.status : { ...text.status, [TaskStatus.Yours]: word } }}
     />
   )
 }
