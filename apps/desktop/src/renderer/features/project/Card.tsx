@@ -18,7 +18,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { useServices } from '../../data/services'
 import { openBlockers, standsOf } from '../../shared/blockers'
-import { readyWordOf } from '../../shared/standing'
+import { factsOf, readyText, readyWordOf } from '../../shared/standing'
 import { externalWaitWords, holdersWords, queuedWords, reconnectsWords, waitsWords } from '../../shared/agents'
 import { type NameEffort, type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
@@ -366,25 +366,36 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // A review has no steps to go through: its lead reads and drafts.
   const steps = stepNames(card.reviewing == null ? (card.plan?.steps ?? []) : [], card.followUp === true)
   const at = stepIndex(steps, card.step)
-  // Ready, but its lead couldn't resolve a conflict, or brought its failing checks to the person: it needs them, and says why.
-  const handedBack = card.phase === 'ready' ? (card.handedBack ?? card.checksBack ?? null) : null
-  // Said in the word the board, its header and Needs you say it in (`readyWordOf`): a merge conflict, or not ready to accept.
-  // Nothing asks a question, so its way in opens it, rather than offering to answer one that was never asked.
-  const word = handedBack === null ? null : readyWordOf(card)
+  // Ready, in the word the board, its header and Needs you say it in (`readyWordOf`), read from where its pull request stands
+  // now, whatever its lead handed back or didn't.
+  const word = card.phase === 'ready' ? readyWordOf(card) : null
+  // Its lead couldn't resolve a conflict, or wasn't asked to, or brought its failing checks to the person: why, in its lead's line.
+  const why = card.phase === 'ready' ? (card.handedBack ?? card.checksBack ?? card.conflictUnsent ?? null) : null
+  // Something in its way is the person's, as the board has it in Needs you: a reason handed back, or its open pull request not
+  // ready to accept, or ready once they push. Its checks still running, it is under way. Nothing asks a question, so its way in
+  // opens it, rather than offering to answer one that was never asked.
+  const inTheWay = why !== null || word === readyText.blocked || word === readyText.readyOnPush
+  const checking = !inTheWay && word === readyText.checksRunning
   // Waiting for a free agent, it says so, rather than that it runs.
   // Held for a usage limit, it is paused until the reset, as on the board, unless the person moves it on.
   const status =
     card.queued !== null
       ? TaskStatus.Queued
-      : handedBack !== null
+      : inTheWay
         ? TaskStatus.Yours
-        : (card.waits !== null || card.reconnects != null) && card.phase === 'running'
-          ? TaskStatus.Paused
-          : STATUS[card.phase]
+        : checking
+          ? TaskStatus.Running
+          : (card.waits !== null || card.reconnects != null) && card.phase === 'running'
+            ? TaskStatus.Paused
+            : STATUS[card.phase]
+  // Said as the board says it, where its standing is what it says.
+  const said = (status === TaskStatus.Yours && inTheWay) || (status === TaskStatus.Running && checking) ? word : null
+  // Beside it, why, or what of its pull request stands first, as the board's card says it: a failed check, checks running.
+  const standing = said === null ? undefined : (why ?? (card.change === null ? undefined : factsOf(card.change)[0]?.words))
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
   const now =
-    handedBack !== null
-      ? handedBack
+    standing !== undefined
+      ? standing
       : status === TaskStatus.Done
         ? card.summary?.split('\n')[0]
         : card.externalWait !== undefined
@@ -413,7 +424,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       title={title}
       status={status}
       steps={steps}
-      at={status === TaskStatus.Done || handedBack !== null ? steps.length - 1 : at}
+      at={status === TaskStatus.Done || said !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
       started={card.startedAt === null || card.externalWait !== undefined ? '' : ago(card.startedAt)}
       lead={next === undefined ? named(card.lead, card.leadModel) : named(next.agentId, next.model)}
@@ -430,9 +441,9 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
               </>
             ),
           })}
-      {...(word === null ? {} : { asks: false })}
+      {...(said === null ? {} : { asks: false })}
       onOpen={() => actions.onOpen(card.threadId)}
-      text={{ status: word === null ? text.status : { ...text.status, [TaskStatus.Yours]: word } }}
+      text={{ status: said === null ? text.status : { ...text.status, [status]: said } }}
     />
   )
 }
