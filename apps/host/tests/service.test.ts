@@ -18,7 +18,7 @@ describe('the supervised Linux host', () => {
       const root = temporary()
       const unit = join(root, 'althar-host.service')
       const options = parseOptions(
-        ['install-service', '--profile', join(root, 'my $HOME% profile'), '--key-file', join(root, 'master-key')],
+        ['install-service', '--profile', join(root, 'my $HOME% profile'), '--key-file', join(root, 'my % master-key')],
         {},
         root,
       )
@@ -38,7 +38,7 @@ describe('the supervised Linux host', () => {
       path: '/usr/bin:/home/owner/.local/bin',
     })
     assert.include(unit, 'Type=notify')
-    assert.include(unit, 'LoadCredential="master-key:/private/master"')
+    assert.include(unit, 'LoadCredential=master-key:/private/master')
     assert.include(unit, 'ExecStart=:"/usr/bin/node" "/opt/althar host/main.js" "serve"')
     assert.include(unit, '"/data/my $HOME%% profile"')
     assert.include(unit, '"%d/master-key"')
@@ -77,9 +77,12 @@ describe('the supervised Linux host', () => {
   it('can require an OS-sealed service credential without adding a plaintext fallback', () => {
     const options = parseOptions(['install-service', '--encrypted-credential', '/private/host.cred'], {}, '/home/owner')
     const unit = renderService(options, { node: '/usr/bin/node', entry: '/opt/host.js', path: '/usr/bin' })
-    assert.include(unit, 'LoadCredentialEncrypted="master-key:/private/host.cred"')
+    assert.include(unit, 'LoadCredentialEncrypted=master-key:/private/host.cred')
     assert.notInclude(unit, '\nLoadCredential=')
     assert.throws(() => renderService(options, { node: 'relative-node', entry: '/entry', path: '/bin' }))
+    for (const invalid of ['/private/key ', '/private/key\\', '/private/key\nInjected']) {
+      assert.throws(() => renderService({ ...options, encryptedCredential: invalid }, { node: '/node', entry: '/entry', path: '/bin' }))
+    }
   })
 
   it.live('validates encrypted credential installation and surfaces service manager failures', () =>

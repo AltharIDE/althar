@@ -126,7 +126,8 @@ export interface ProjectModel {
   /** Ends the coordinator's session and deletes its conversation. It can't be undone. */
   readonly forgetConversation: () => Promise<void>
   /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
-  readonly runProject: (taskId?: string | null, runnableId?: string | null, ref?: RunRef) => Promise<void>
+  /** Whether it went: false where the runtime refused it, saying why in the error. */
+  readonly runProject: (taskId?: string | null, runnableId?: string | null, ref?: RunRef) => Promise<boolean>
   /** Runs one on a branch or a pull request, fetched by Althar, in a copy of its own, its card in the coordinator's thread; what went wrong is thrown, for its line to say. */
   readonly runRef: (runnableId: string, ref: RunRef) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
@@ -627,12 +628,20 @@ export const useProject = (projectId: string): ProjectModel => {
     showEarlier: (open) => rewrite((id) => client.showEarlier(id, open)),
     undoClearView: () => rewrite((id) => client.undoClearView(id)),
     forgetConversation: () => rewrite((id) => client.forgetConversation(id), true),
-    runProject: (taskId = null, runnableId = null, ref) =>
-      act(() =>
-        ref === undefined
-          ? client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))
-          : client.runProject(projectId, taskId, threadId, runnableId ?? undefined, ref),
-      ),
+    runProject: async (taskId = null, runnableId = null, ref) => {
+      let went = true
+      await act(async () => {
+        try {
+          await (ref === undefined
+            ? client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))
+            : client.runProject(projectId, taskId, threadId, runnableId ?? undefined, ref))
+        } catch (failure) {
+          went = false
+          throw failure
+        }
+      })
+      return went
+    },
     runRef: async (runnableId, ref) => {
       try {
         await client.runProject(projectId, null, threadId, runnableId, ref)

@@ -34,6 +34,17 @@ const measuringAll = (): Record<StoragePlace, StorageFigure> => ({
 // The figures last seen, by host, so About doesn't flash "measuring…" for what it showed a moment ago.
 const remembered = new WeakMap<object, Record<StoragePlace, StorageFigure>>()
 
+// Places whose last figure no longer holds, as the task folders after some were removed: About measures them anew,
+// as it opens, or at once where it is open (a cleanup can finish after About read the old size).
+const changed = new Set<StoragePlace>()
+const open = new Set<(place: StoragePlace) => void>()
+
+/** A place's size changed, as after its folders were removed: About shows it measuring, not the old figure. */
+export const sizeChanged = (place: StoragePlace) => {
+  changed.add(place)
+  for (const heard of open) heard(place)
+}
+
 export const useStorage = (): StorageModel => {
   const { client, host } = useServices()
   const [paths, setPaths] = useState<Partial<Record<StoragePlace, string>>>({})
@@ -43,7 +54,12 @@ export const useStorage = (): StorageModel => {
     const fresh = measuringAll()
     return last === undefined
       ? fresh
-      : { ...fresh, ...Object.fromEntries(Object.entries(last).filter(([, figure]) => figure.state === 'done')) }
+      : {
+          ...fresh,
+          ...Object.fromEntries(
+            Object.entries(last).filter(([place, figure]) => figure.state === 'done' && !changed.has(place as StoragePlace)),
+          ),
+        }
   })
   const [problems, setProblems] = useState<Partial<Record<StoragePlace, string>>>({})
   const keep = useCallback(
@@ -55,29 +71,29 @@ export const useStorage = (): StorageModel => {
       }),
     [host],
   )
-  // Each round of measuring, so an answer to an earlier one doesn't overwrite a newer.
-  const round = useRef(0)
+  // Each place's round of measuring, so an answer to an earlier one doesn't overwrite a newer.
+  const rounds = useRef<Record<StoragePlace, number>>({ profile: 0, logs: 0, worktrees: 0 })
 
-  // The walks of the round in hand: giving up on them (About closed, or measuring again) stops them in the runtime.
-  const giveUp = useRef<AbortController | null>(null)
-  const forget = useCallback(() => {
-    round.current++
-    giveUp.current?.abort()
-    giveUp.current = null
+  // Each place's walk in hand: giving up on it (About closed, or measuring again) stops it in the runtime.
+  const giveUp = useRef<Partial<Record<StoragePlace, AbortController>>>({})
+  const forget = useCallback((places: ReadonlyArray<StoragePlace> = PLACES) => {
+    for (const place of places) {
+      rounds.current[place]++
+      giveUp.current[place]?.abort()
+      delete giveUp.current[place]
+    }
   }, [])
 
   const measure = useCallback(
-    (refresh: boolean) => {
-      forget()
-      const mine = round.current
-      const stop = new AbortController()
-      giveUp.current = stop
-      // Asked for anew, the old figures give way; asked as About opens, they stay until main answers (usually from its cache, at once).
-      if (refresh) setFigures(measuringAll())
-      for (const place of PLACES) {
+    (refresh: boolean, places: ReadonlyArray<StoragePlace> = PLACES) => {
+      forget(places)
+      for (const place of places) {
+        const mine = rounds.current[place]
+        const stop = new AbortController()
+        giveUp.current[place] = stop
         client.getStorageSize(place, refresh, stop.signal).then(
-          (size) => mine === round.current && keep(place, size),
-          () => mine === round.current && keep(place, { state: 'failed' }),
+          (size) => mine === rounds.current[place] && keep(place, size),
+          () => mine === rounds.current[place] && keep(place, { state: 'failed' }),
         )
       }
     },
@@ -90,18 +106,31 @@ export const useStorage = (): StorageModel => {
       (found) => live && setPaths(found),
       () => {},
     )
+    changed.clear()
     measure(false)
+    // A size that changes while About is open: the old figure gives way, and the place is measured anew.
+    const heard = (place: StoragePlace) => {
+      changed.delete(place)
+      keep(place, { state: 'measuring' })
+      measure(false, [place])
+    }
+    open.add(heard)
     return () => {
       live = false
+      open.delete(heard)
       forget()
     }
-  }, [host, measure, forget])
+  }, [host, measure, forget, keep])
 
   return {
     paths,
     figures,
     problems,
-    measureAgain: () => measure(true),
+    measureAgain: () => {
+      // Asked for anew, the old figures give way; asked as About opens, they stay until main answers (usually from its cache, at once).
+      setFigures(measuringAll())
+      measure(true)
+    },
     show: (place) => {
       setProblems(({ [place]: _gone, ...rest }) => rest)
       host.storage.show(place).catch((error: unknown) =>

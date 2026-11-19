@@ -12,6 +12,10 @@ describe('host command configuration', () => {
     const id = `wrk_${'a'.repeat(32)}`
     const attempt = `watt_${'b'.repeat(32)}`
     assert.equal(parse(['configure-workers', ...tls]).workerConfiguration?.port, 6770)
+    assert.equal(
+      parse(['configure-workers', ...tls, '--worker-relay', '/private/link.json']).workerConfiguration?.relay,
+      '/private/link.json',
+    )
     assert.equal(parse(['worker-run', '--worker-id', id]).workerId, id)
     assert.equal(parse(['worker-result', '--attempt-id', attempt]).workerAttemptId, attempt)
     for (const args of [
@@ -20,6 +24,7 @@ describe('host command configuration', () => {
       ['serve', '--listen-port', '6770'],
       ['configure-workers', ...tls, '--origin', 'https://localhost:6770'],
       ['serve', '--worker-ca', '/trusted/ca'],
+      ['serve', '--worker-relay', '/private/link.json'],
       ['enroll-worker'],
       ['serve', '--worker-certificate', '/trusted/worker'],
       ['worker-run', '--worker-id', 'not-a-worker'],

@@ -85,9 +85,37 @@ describe('the private worker ledger', () => {
       expect(() => store.revoke('missing')).toThrow('No worker')
       store.revoke(worker)
       expect(store.workerForCertificate(fingerprint)).toBeUndefined()
+      expect(store.renew(worker, revokedAttempt, revokedOffer.fence, 2000)).toBe(0)
       expect(() => store.enroll(fingerprint)).toThrow('revoked')
       expect(store.complete(worker, result(revokedAttempt, revokedOffer.fence))).toBe(false)
       expect(store.result(revokedAttempt).state).toBe('unknown')
+    } finally {
+      store.close()
+    }
+  })
+
+  it('renews only a live, claimed lease with the original worker and fence', async () => {
+    let clock = 1000
+    const profile = temporary()
+    const store = await openWorkerStore(profile, homeId, () => clock)
+    try {
+      const worker = store.enroll(fingerprint)
+      const stranger = store.enroll(otherFingerprint)
+      const attempt = store.enqueue(worker)
+      const offer = store.next(worker)!
+      expect(store.renew(worker, attempt, offer.fence, 2000)).toBe(0)
+      expect(store.claim(worker, attempt, offer.fence, 2000)).toBe(2000)
+      clock += 1000
+      expect(store.renew(stranger, attempt, offer.fence, 2000)).toBe(0)
+      expect(store.renew(worker, attempt, 'wrong fence', 2000)).toBe(0)
+      expect(store.renew(worker, attempt, offer.fence, 3000)).toBe(2000)
+      clock = 3000
+      expect(store.renew(worker, attempt, offer.fence, 300)).toBe(300)
+      clock = 3300
+      expect(store.renew(worker, attempt, offer.fence, 2000)).toBe(0)
+      expect(store.next(worker)?.claimableForMs).toBe(0)
+      expect(store.complete(worker, result(attempt, offer.fence, DiagnosticOutcome.UNKNOWN))).toBe(true)
+      expect(store.renew(worker, attempt, offer.fence, 2000)).toBe(0)
     } finally {
       store.close()
     }

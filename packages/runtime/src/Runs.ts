@@ -999,13 +999,16 @@ export class Runs extends Context.Service<
      * Changes who leads and who reviews a task, at any time (a task is a conversation plus parts: every part changes either way,
      * on the person's word). The lead changes from its next turn, never in the one it is in; the reviewer until its review round
      * starts, from the next round during one, and once a review of it ran or it merged, from what ships next. A review added
-     * before the work ships where its plan read it only after the merge (the fast lane) reads it before now. Says what it
-     * changed, for its caller to say in the task's thread. Refused only for an abandoned task.
+     * before the work ships where its plan read it only after the merge (the fast lane) reads it before now. A review added
+     * where its work is up in an open pull request reads that pull request's head at once, unless `atShip`: a task stepped back
+     * into a change, whose lead builds it now, has it read at its next Ship. Says what it changed, for its caller to say in the
+     * task's thread. Refused only for an abandoned task.
      */
     changeTeam(input: {
       readonly taskId: string
       readonly steps: ReadonlyArray<PlanStep>
       readonly actorId: ActorId
+      readonly atShip?: boolean | undefined
     }): Effect.Effect<TeamChanged, unknown>
     /**
      * Opens the round a quick task made a change after its last run ended
@@ -1455,6 +1458,8 @@ export class Runs extends Context.Service<
                   return 'The branch has no commits to propose, so nothing was pushed.'
                 case 'branch':
                   return "It isn't on a code host Althar knows, so it ends on its branch."
+                case 'kept':
+                  return `It ends on its branch here: ${one.pullRequest} stays as it is, and nothing more goes to it until it ends in a pull request again.`
               }
             })()
             const said = one.left.length === 0 ? did : `${did} Left out what the lead didn't commit: ${filesLine(one.left)}.`
@@ -2868,6 +2873,13 @@ export class Runs extends Context.Service<
               ? `The person added a review to this change after its work went up. Review what changed since the last review, ${how}. Look at the earlier work only where the new work touches it.${mergedWords}`
               : `The person added a review to this change after its work went up, and none has read it yet. Review all of it, as it stands on its branch now${shown.length === 1 ? `: \`git diff ${shown[0]?.head ?? ''}\` in your copy shows it` : `, change by change:${how}`}.`
           }
+          // A change back from prototyping is read whole: no review before it stepped back counts, and none has read it since.
+          const sql = yield* SqlClient.SqlClient
+          const [plan] = yield* sql<{ since: string | null }>`
+            SELECT json_extract(parameters, '$.reviewsFrom') AS since FROM task_plans
+            WHERE task_id = ${run.taskId} AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1`
+          if (plan?.since != null && worktrees.every((worktree) => (from[worktree.path] ?? worktree.base) === worktree.base))
+            return `The person ships this change, back from prototyping: they explored designs on its branch and picked a direction, which the lead built. Review all of it, as it stands on its branch now${shown.length === 1 ? `: \`git diff ${shown[0]?.head ?? ''}\` in your copy shows it` : `, change by change:${how}`}. What was only the prototype's (a lab page, a direction switcher, throwaway screens) has no place in it.${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
           return `More to review. The person ships ${one === undefined ? 'what they and the lead did since the last review' : `${one}, one of the task’s changes: what they and the lead did on it since its last review`}${listed.length === 0 ? '' : `:\n\n${listed.join('\n')}`}\n\nReview what changed since, ${how}. Look at the earlier work only where the new work touches it.${mergedWords}${several ? ' Each change ships as its own pull request: review each on its own, and say which change each finding is in.' : ''}`
         })
 
@@ -2881,11 +2893,18 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const marks: Record<string, string> = {}
+          // A review stopped before it read anything read nothing; and a change back from prototyping is read whole, from where it
+          // started, so no review from before it stepped back counts.
+          const [plan] = yield* sql<{ since: string | null }>`
+            SELECT json_extract(parameters, '$.reviewsFrom') AS since FROM task_plans
+            WHERE task_id = ${taskId} AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1`
+          const since = plan?.since ?? null
           for (const worktree of yield* worktreesOf(taskId)) {
             const [last] = yield* sql<{ commitSha: string | null }>`
               SELECT s.commit_sha FROM workspace_snapshots s JOIN node_attempts a ON a.id = s.node_attempt_id
               JOIN nodes n ON n.id = a.node_id
               WHERE s.workspace_id = ${worktree.id} AND n.node_key = 'review' AND s.commit_sha IS NOT NULL
+                AND a.state NOT IN ('cancelled', 'failed') AND (${since} IS NULL OR s.taken_at > ${since})
               ORDER BY s.taken_at DESC, s.rowid DESC LIMIT 1`
             const read =
               last?.commitSha == null
@@ -3370,11 +3389,14 @@ export class Runs extends Context.Service<
             // What waits only brings the base branch in, as a merge of main that settled no conflict: none of it is the task's
             // work, so it goes up as it is, with no review and no round, and the task stays where it was. A review the person
             // added still runs. As far as its route goes: an open draft marked ready, then merged.
+            // Not while it is kept on its branch with its pull request left as it is (stepped back into prototyping): its Ship
+            // sends nothing there, nor marks it ready or merges it.
             if (
               !reviewOnly &&
               after.length === 0 &&
               onlyChange === undefined &&
               queued === undefined &&
+              !(yield* changes.keptOpen(taskId)) &&
               (yield* changes.onlyBaseWaits(taskId))
             ) {
               yield* changes.sendBaseOnly(taskId)
@@ -3641,8 +3663,14 @@ export class Runs extends Context.Service<
           const only = shipping?.only
           // A review added after the work went up has nothing to send: it is over once settled.
           const reviewOnly = shipping?.reviewOnly === true
-          // Nor one whose task came to stay here as it shipped: what waited waits for the next Ship.
-          const stays = shipping?.stays === true
+          // Nor one whose task came to stay here as it shipped: what waited waits for the next Ship. Nor one that ends with its branch
+          // while its pull request stands open (a change stepped back to prototyping): pushing the branch would send its work there,
+          // so it waits on the branch until the task ends in a pull request again, and that one carries on.
+          const kept =
+            end === 'none' && (yield* changes.keptOpen(run.taskId))
+              ? (yield* changes.ofTask(run.taskId).pipe(Effect.orElseSucceed(() => []))).filter((one) => one.state === 'open')
+              : []
+          const stays = shipping?.stays === true || kept.length > 0
           // A new pull request opens as far as its route goes: a draft for a push, ready for review beyond. One admitted before
           // routes opens as the plan ends.
           const far = farOf(shipping)
@@ -3748,7 +3776,16 @@ export class Runs extends Context.Service<
           const said = {
             step: 'publish',
             round: 0,
-            summary: summary === '' ? (stays ? 'Kept here: nothing went up.' : reviewOnly ? 'Reviewed.' : 'Shipped.') : summary,
+            summary:
+              summary === ''
+                ? kept.length > 0
+                  ? `Kept on its branch here: ${kept.map((one) => `${one.words.short} ${one.words.prefix}${one.number}`).join(' and ')} ${kept.length === 1 ? 'stays' : 'stay'} as it is, and nothing more goes to it until it ends in a pull request again.`
+                  : stays
+                    ? 'Kept here: nothing went up.'
+                    : reviewOnly
+                      ? 'Reviewed.'
+                      : 'Shipped.'
+                : summary,
             ...(published === undefined ? {} : openedOf(published)),
           }
           const attempt = { id: attemptId, nodeId }
@@ -8470,6 +8507,7 @@ export class Runs extends Context.Service<
           if (plan === undefined) return yield* new TaskRefused({ taskId: input.taskId, why: 'no_lead' })
           const planned = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(plan.parameters)
           const was = endingOf(planned)
+          const now = yield* timestamp
           // Here: nothing goes up until it ships; else its ending, with nothing more of staying here. Read after the merge: its
           // reviewer's row skipped, so nothing waits on it before; read before it ships again: the fast lane's mark gone.
           const reshaped = (parameters: string) => {
@@ -8477,7 +8515,19 @@ export class Runs extends Context.Service<
               steps?: ReadonlyArray<PlanStep>
               ships?: Record<string, unknown>
             }
-            const { here, end, endChosen, reviewAfterMerge, ships, ...rest } = before
+            const { here, end, endChosen, reviewAfterMerge, ships, keptOpen, reviewsFrom, ...rest } = before
+            // A change stepped back from its pull request to its branch (into prototyping, or a chat) keeps that pull request as it
+            // is: marked, so nothing pushes to it until it ends in one again. Back in one, its next review reads the whole change,
+            // from where it started, not from what a review read before it stepped back.
+            const toPullRequest = input.end === 'draft' || input.end === 'ready'
+            const stepped = {
+              ...((input.end === 'none' || input.end === 'here') && (was === 'draft' || was === 'ready')
+                ? { keptOpen: true }
+                : toPullRequest || keptOpen === undefined
+                  ? {}
+                  : { keptOpen }),
+              ...(toPullRequest && keptOpen === true ? { reviewsFrom: now } : reviewsFrom === undefined ? {} : { reviewsFrom }),
+            }
             const chosen = input.end === undefined || input.chosen === undefined ? endChosen === true : input.chosen
             const ending = {
               ...(input.end === undefined
@@ -8514,6 +8564,7 @@ export class Runs extends Context.Service<
             return JSON.stringify({
               ...rest,
               ...ending,
+              ...stepped,
               ...shipped,
               ...after,
               ...(input.smallChange !== undefined
@@ -8751,7 +8802,14 @@ export class Runs extends Context.Service<
           yield* touchCard(input.taskId)
           // A review added where its run is over, or at its ending, has no round to come in it: where its work is up in an open
           // pull request, it reads the head now; where it isn't, Ship reviews it before sending it up.
-          if (reviewChanges && reviews && !reviewed && reviewWhen === 'now' && pulls.some((one) => one.state === 'open')) {
+          if (
+            reviewChanges &&
+            reviews &&
+            !reviewed &&
+            reviewWhen === 'now' &&
+            input.atShip !== true &&
+            pulls.some((one) => one.state === 'open')
+          ) {
             const [last] = yield* sql<{ state: string; late: number }>`
               SELECT r.state, EXISTS (SELECT 1 FROM nodes n WHERE n.execution_id = e.id AND n.node_key = 'publish') AS late
               FROM runs r JOIN workflow_executions e ON e.run_id = r.id WHERE r.task_id = ${input.taskId}

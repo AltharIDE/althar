@@ -52,6 +52,8 @@ export interface ModelBrowserText {
   choose: string
   pinVerb: string
   foot: string
+  /** Offered beside a change that didn't go through. */
+  retry: string
 }
 
 export const modelBrowserText: ModelBrowserText = {
@@ -78,6 +80,7 @@ export const modelBrowserText: ModelBrowserText = {
   choose: 'use',
   pinVerb: 'pin',
   foot: 'Pinned models show in every picker',
+  retry: 'Try again',
 }
 
 export interface ModelBrowserProps {
@@ -102,6 +105,8 @@ export interface ModelBrowserProps {
   roomText?: Partial<ModelRoomText>
   /** Add a runtime. Without it, there is no such row. */
   onConnect?: () => void
+  /** A change that didn't go through and was taken back, said in the foot until the next; `retry` makes it again. */
+  failed?: { readonly text: string; readonly retry?: () => void } | null
   text?: Partial<ModelBrowserText>
 }
 
@@ -158,6 +163,7 @@ export function ModelBrowser({
   onToggleBlocked,
   onSetDefaultEffort,
   onConnect,
+  failed = null,
   text,
 }: ModelBrowserProps) {
   const t = { ...modelBrowserText, ...text }
@@ -409,18 +415,32 @@ export function ModelBrowser({
               {!rows.length && <p className={s.empty}>{t.empty(q)}</p>}
             </div>
           </div>
-          <div className={s.foot} aria-hidden="true">
-            <span>
+          <div className={s.foot}>
+            <span aria-hidden="true">
               <Kbd>{t.keys.up}</Kbd>
               <Kbd>{t.keys.down}</Kbd> {t.move}
             </span>
-            <span>
+            <span aria-hidden="true">
               <Kbd>{t.keys.enter}</Kbd> {t.choose}
             </span>
-            <span>
+            <span aria-hidden="true">
               <Kbd>{t.keys.pin}</Kbd> {t.pinVerb}
             </span>
-            <span className={s.footRight}>{t.foot}</span>
+            {/* a change that didn't go through is said here, in the room the foot's hint keeps, so nothing moves */}
+            <span className={cx(s.footRight, failed && s.failed)} role="status">
+              {failed ? (
+                <>
+                  {failed.text}
+                  {failed.retry && (
+                    <button type="button" className={s.retry} onClick={failed.retry}>
+                      {t.retry}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <span aria-hidden="true">{t.foot}</span>
+              )}
+            </span>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

@@ -38,6 +38,8 @@ export interface WorkActions {
   readonly failed: Readonly<Record<string, ActionFailure>>
   /** The tasks being merged: their pull requests, wherever in the window Merge was pressed, or their branches here. */
   readonly merging: ReadonlySet<string>
+  /** Of those, the tasks going into their branch's merge queue, there from just after the press. */
+  readonly queuing: ReadonlySet<string>
   /** The tasks a note is on its way back to. */
   readonly sending: ReadonlySet<string>
   /** The tasks whose pull requests are being opened. */
@@ -218,6 +220,7 @@ export const useWorkActions = (
     error,
     failed: failures,
     merging,
+    queuing: merges.queuing,
     sending,
     opening,
     pushing,

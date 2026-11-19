@@ -305,8 +305,14 @@ describe('an aside opened with +', () => {
           const reminder = new Promise<void>((resolve) => {
             resumeReminder = resolve
           })
+          // Whether the reminder's turn is under way: its prompt has reached the agent, which holds it.
+          let reminderAsked = false
           const { client, store, project } = yield* connectedWith({
-            promptAsked: (prompt) => (prompt.startsWith("Your step isn't done") ? reminder : undefined),
+            promptAsked: (prompt) => {
+              if (!prompt.startsWith("Your step isn't done")) return undefined
+              reminderAsked = true
+              return reminder
+            },
           })
           yield* Effect.addFinalizer(() => Effect.sync(resumeReminder))
           // A note the coordinator kept: an aside reads the project's notes, as the coordinator does.
@@ -368,18 +374,22 @@ describe('an aside opened with +', () => {
           assert.include(work, SANDBOX)
           assert.notInclude(work, 'The thread so far')
           assert.isTrue(work.endsWith('Fix it then.'))
-          // Delivery completes before Runs handles its end. Let it settle the round or queue its report reminder
-          // before sending again: prompts preserve send order, so a later reminder would follow the person's words.
+          // Delivery completes before Runs handles its end. Where the aside's step was still open as it was made a task (each
+          // of its turns' ends saw the next words waiting, so none closed it), that end reminds it of its report: let the
+          // reminder's turn be under way before sending again. Only queued, the reminder would go out in one turn with the
+          // person's words, which ending without a report again rightly hands the task to another model. A step over
+          // already reminds of nothing.
           yield* until(
-            store(
-              sqlOf(
-                (sql) => sql<{ state: string; reminded: number }>`
-                  SELECT state, EXISTS(SELECT 1 FROM user_inputs WHERE thread_id = ${aside.threadId}
-                    AND sender_kind = 'internal' AND body LIKE 'Your step isn%done%') AS reminded
-                  FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+            Effect.map(
+              store(
+                sqlOf(
+                  (sql) => sql<{ state: string }>`
+                    SELECT state FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+                ),
               ),
+              (rows) => [{ over: rows[0]?.state === 'succeeded', reminded: reminderAsked }],
             ),
-            (rows) => rows[0]?.state === 'succeeded' || rows[0]?.reminded === 1,
+            (rows) => rows[0]?.over === true || rows[0]?.reminded === true,
           )
           // Hold the echo agent's reminder response until the question is queued: ending it without a report
           // would correctly hand the task to another model, whose takeover brief this case isn't testing.

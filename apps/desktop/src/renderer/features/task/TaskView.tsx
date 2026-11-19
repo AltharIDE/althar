@@ -45,7 +45,7 @@ import {
   TaskWaitedBy,
 } from '@althar/ui'
 
-import { isAnswered, isSettleable, kindWords, takesDone } from '../../shared/calls'
+import { isAnswered, isSettleable, kindWords, takesDone, takesKeep } from '../../shared/calls'
 import { text as boardText } from '../board/BoardView'
 import { doing } from './actions'
 import { externalWaitWords, queuedWords, reconnectsWords, upNextWords, waitsWords } from '../../shared/agents'
@@ -81,6 +81,7 @@ import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { pillOf, runIdOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { useHelpMeFix } from '../../shared/helpMeFix'
 import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { localText } from '../../shared/local'
@@ -546,6 +547,8 @@ export function TaskView({
             take: text.carriedTake,
           },
   })
+  // "Help me fix it" on a failed run: a prompt for the composer, unsent.
+  const helpMe = useHelpMeFix(kept, model.snapshot?.session?.turnRunning ?? false, voice.inputRef)
   const { client, host: servicesHost } = useServices()
   // Images and files to send with what the person says, and which agents take images.
   const images = useAttachments(kept, servicesHost)
@@ -1028,10 +1031,20 @@ export function TaskView({
   })
   // Held for Ship, Ship is its one way on, first in the chip; a finished task that isn't a change keeps Done and Keep beside it.
   const held = !busy && snapshot.task.phase === 'ready' ? snapshot.task.held : undefined
+  // Keep for later, for any kind that finished, a prototype or a chat ending on its branch too: not one whose pull request is
+  // open, or held for Ship, which wait on the person in their own ways.
+  const keeps =
+    !busy &&
+    takesKeep({
+      phase: snapshot.task.phase ?? '',
+      state: snapshot.task.state,
+      pullOpen: snapshot.task.changes.some((one) => one.state === 'open'),
+      held: snapshot.task.held,
+    })
   // What its review after a merge found: Fix it and Leave it, first in the chip.
   const found = !busy && snapshot.task.afterMerge?.state === 'found' ? snapshot.task.afterMerge : undefined
   const settle =
-    settleable || held !== undefined || found !== undefined ? (
+    settleable || keeps || held !== undefined || found !== undefined ? (
       <SettleWays
         place="header"
         {...(found === undefined
@@ -1052,9 +1065,7 @@ export function TaskView({
               ),
             })}
         {...(settleable && done ? { onDone: () => void model.markDone(), doneHint: boardText.doneHint } : {})}
-        {...(settleable && snapshot.task.phase === 'ready' && snapshot.task.kind !== 'change'
-          ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint }
-          : {})}
+        {...(keeps ? { onKeep: () => void model.keep(), keepHint: boardText.keepHint } : {})}
         {...(model.doing === doing.ship
           ? { busy: 'ship' as const }
           : model.doing === doing.fixAfterMerge
@@ -1166,7 +1177,7 @@ export function TaskView({
           runnables={snapshot.task.runnables}
           launches={snapshot.task.launches}
           now={now}
-          onRun={(id) => void model.runProject(id)}
+          onRun={(id) => model.runProject(id)}
           onStop={(id) => void model.stopLaunch(id)}
           onClear={(id) => void model.clearLaunch(id)}
         />
@@ -1267,7 +1278,11 @@ export function TaskView({
         draft={kept}
         // What a task that finished and isn't a change is likely told next, for Tab to take; its lead marks it done (settle_task). A
         // review's draft is posted by the person, on it, so nothing is suggested there.
-        {...(settleable && done && !embedded ? { suggestion: text.suggest } : {})}
+        {...(helpMe.suggestion !== undefined
+          ? { suggestion: helpMe.suggestion }
+          : settleable && done && !embedded
+            ? { suggestion: text.suggest }
+            : {})}
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
@@ -1822,6 +1837,7 @@ export function TaskView({
                                 threadTask={snapshot.task.id}
                                 onStop={(id) => void model.stopLaunch(id)}
                                 onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
+                                onHelp={helpMe.help}
                               />
                             )}
                             // An issue the lead drafted is filed from its card, only when the person says.

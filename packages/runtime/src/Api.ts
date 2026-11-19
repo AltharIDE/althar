@@ -142,7 +142,18 @@ import { postTeamReviews, Reviews, runOutside, sendMidTurn, setPostTeamReviews, 
 import { setShipRoute, shipRouteSetting } from './shipRoute'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
-import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
+import {
+  declinePresetOffer,
+  BUILT_IN,
+  describe as describePreset,
+  editPreset,
+  partsOfTask,
+  presetsIn,
+  removePreset,
+  resetPreset,
+  savePreset,
+  tunePreset,
+} from './presets'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
@@ -400,6 +411,7 @@ export const handlers = apiLayer(
       config.storage === undefined
         ? undefined
         : storageSizes({ profile: config.storage.profile, logs: config.storage.logs, worktrees: config.worktreeRoot })
+    const sizesChanged = Effect.sync(() => sizes?.forget('worktrees'))
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
@@ -1484,8 +1496,10 @@ export const handlers = apiLayer(
             ? Effect.succeed<StorageSize>({ state: 'failed' })
             : Effect.promise((signal) => sizes.size(place, refresh, signal).catch(() => ({ state: 'failed' }) as const)),
         ),
-      CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId))),
-      RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, actorId))),
+      // Folders removed (or some, before a failure): the task folders' kept size no longer holds.
+      CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId).pipe(Effect.ensuring(sizesChanged)))),
+      RemoveTaskFolder: ({ commandId, taskId, seen }) =>
+        once(commandId, api(cleanup.remove(taskId, seen, actorId).pipe(Effect.ensuring(sizesChanged)))),
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, actorId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
@@ -1976,9 +1990,11 @@ export const handlers = apiLayer(
             return all.map(({ fromProjectId, ...one }) => {
               const keptTo = one.projectId === null ? undefined : named.get(one.projectId)
               const from = fromProjectId == null ? undefined : named.get(fromProjectId)
+              const built = one.tuned === true ? BUILT_IN.find((preset) => preset.id === one.id) : undefined
               return {
                 ...one,
                 about: describePreset(one.parts, models),
+                ...(built === undefined ? {} : { asBuilt: { parts: built.parts, about: describePreset(built.parts, models) } }),
                 ...(keptTo === undefined ? {} : { keptTo }),
                 ...(from === undefined ? {} : { from }),
               }
@@ -2017,6 +2033,10 @@ export const handlers = apiLayer(
             ),
           ),
         ),
+      TunePreset: ({ commandId, id, tuning }) =>
+        once(commandId, api(tunePreset(id, tuning).pipe(Effect.asVoid, Effect.provideService(SqlClient.SqlClient, sql)))),
+      ResetPreset: ({ commandId, id }) =>
+        once(commandId, api(resetPreset(id).pipe(Effect.asVoid, Effect.provideService(SqlClient.SqlClient, sql)))),
       RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
       DeclinePresetOffer: ({ commandId, taskId }) =>
         once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, actorId), folderStore))),

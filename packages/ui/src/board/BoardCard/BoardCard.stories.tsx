@@ -566,16 +566,37 @@ export const PlainWorking: Story = {
     await expect(card.queryByRole('list', { name: 'Steps' })).not.toBeInTheDocument()
   },
 }
-/** A change that built nothing: what its lead leaves to the person under the title, Done alone in its corner, no Accept. */
+/** A change that built nothing: what its lead leaves to the person under the title, Done and Keep for later in its corner, no Accept. */
 export const ChangeNothingBuilt: Story = {
-  args: { ...CHANGE_NOTHING_BUILT, corner: <SettleWays onDone={fn()} doneHint="Settle it where it is." /> },
+  args: { ...CHANGE_NOTHING_BUILT, corner: <SettleWays onDone={fn()} onKeep={fn()} doneHint="Settle it where it is." /> },
   play: async ({ canvasElement }) => {
     const card = within(canvasElement)
     await expect(card.getByText('Nothing built')).toBeInTheDocument()
     await userEvent.hover(card.getByText('Nothing built'))
     await expect(card.getByRole('button', { name: 'Done' })).toBeInTheDocument()
-    await expect(card.queryByRole('button', { name: 'Keep for later' })).not.toBeInTheDocument()
+    await expect(card.getByRole('button', { name: 'Keep for later' })).toBeInTheDocument()
     await expect(card.queryByText('Ready to accept')).not.toBeInTheDocument()
+  },
+}
+/**
+ * A prototype that finished on its branch, with no pull request: Keep for later in its corner, as any kind of task has, and
+ * no Done, as it settles by being accepted or discarded.
+ */
+export const PrototypeOnItsBranch: Story = {
+  args: {
+    status: TaskStatus.Yours,
+    word: 'Ready to accept',
+    kind: TaskKind.Change,
+    at: 'Nov 18',
+    title: 'Prototype: a terminal and runs you can see',
+    object: <BranchChip name="althar/prototype-a-terminal-and-runs" add={642} del={38} />,
+    corner: <SettleWays onKeep={fn()} keepHint="Take it out of Needs you as it is. Writing to it brings it back." />,
+  },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement)
+    await userEvent.hover(card.getByText('Ready to accept'))
+    await expect(card.getByRole('button', { name: 'Keep for later' })).toBeInTheDocument()
+    await expect(card.queryByRole('button', { name: 'Done' })).not.toBeInTheDocument()
   },
 }
 /** Finished: its Done and Keep for later in its corner, shown as it is hovered or has the focus. */

@@ -181,6 +181,22 @@ export const FinishedNotAChange: Story = {
     await expect(within(chip).getByRole('button', { name: 'Keep for later' })).toBeVisible()
   },
 }
+/** A prototype planned from its preset, finished on its branch with no pull request: Keep for later inside where it stands. */
+export const PrototypeOnItsBranch: Story = {
+  args: {
+    title: 'Prototype: a terminal and runs you can see',
+    status: TaskStatus.Yours,
+    state: 'Ready to accept',
+    steps: [],
+    beside: <SettleWays place="header" onKeep={fn()} />,
+  },
+  play: async ({ canvasElement }) => {
+    const chip = within(canvasElement).getByText('Ready to accept').closest<HTMLElement>('[data-status]')
+    if (chip === null) throw new Error('Where it stands is not a chip')
+    await expect(within(chip).getByRole('button', { name: 'Keep for later' })).toBeVisible()
+    await expect(within(chip).queryByRole('button', { name: 'Done' })).toBeNull()
+  },
+}
 /** A title too long for the bar: one line, the whole of it on hover. */
 export const LongTitle: Story = {
   args: { title: 'Repair token refresh on privilege change so that a downgraded admin loses access at once, everywhere' },

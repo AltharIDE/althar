@@ -3,6 +3,7 @@ import { create, fromBinary, toBinary } from '@bufbuild/protobuf'
 import { Server, ServerCredentials, status, type MethodDefinition, type ServerDuplexStream } from '@grpc/grpc-js'
 import {
   DiagnosticOutcome,
+  DiagnosticLeaseSchema,
   DiagnosticOfferSchema,
   DiagnosticStartSchema,
   HomeFrameSchema,
@@ -37,13 +38,17 @@ interface HomeWorkerTransport {
   readonly workerForCertificate: (fingerprint: string) => string | undefined
   readonly diagnostics?: {
     readonly next: (workerId: string) => Omit<DiagnosticOffer, '$typeName'> | undefined
-    readonly claim: (workerId: string, attemptId: string, fence: string) => number
+    readonly claim: (workerId: string, attemptId: string, fence: string, maximumMs?: number) => number
+    readonly renew?: (workerId: string, attemptId: string, fence: string, maximumMs: number) => number
     readonly complete: (workerId: string, result: DiagnosticResult) => boolean
   }
 }
 
 export const MAX_DIAGNOSTIC_OUTPUT = 1024
 export const DIAGNOSTIC_LEASE_MS = 15_000
+export const DIAGNOSTIC_RENEWAL_MS = 2_000
+const DIAGNOSTIC_RUNTIME_MS = 3_000
+const MAX_DIAGNOSTIC_RENEWALS = 8
 const frame = (payload: HomeFrame['payload']) => Buffer.from(toBinary(HomeFrameSchema, create(HomeFrameSchema, { payload })))
 
 export const workerCertificateFingerprint = (der: Uint8Array): string => createHash('sha256').update(der).digest('hex')
@@ -80,6 +85,8 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
         let ownsStream = false
         let offer: Omit<DiagnosticOffer, '$typeName'> | undefined
         let askedToStart = false
+        let supportsRenewal = false
+        let execution: { until: number; budget: number; sequence: number } | undefined
         let finished = false
         const reject = (code: status, message: string): void => {
           if (finished) return
@@ -120,9 +127,11 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
                 bytes,
                 { homeId: home.homeId, workerId, sessionId: `wsn_${randomUUID().replaceAll('-', '')}` },
                 diagnostics !== undefined,
+                diagnostics?.renew !== undefined,
               )
               call.write(Buffer.from(toBinary(HomeFrameSchema, reply)))
               if (reply.payload.case === 'hello' && reply.payload.value.supportsDiagnostics) {
+                supportsRenewal = reply.payload.value.supportsDiagnosticLeaseRenewal
                 if (connected.has(workerId)) return reject(status.ALREADY_EXISTS, 'This worker already has an active exchange')
                 connected.add(workerId)
                 ownsStream = true
@@ -138,7 +147,7 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
             if (
               offer === undefined ||
               diagnostics === undefined ||
-              (payload.case !== 'diagnosticClaim' && payload.case !== 'diagnosticResult') ||
+              (payload.case !== 'diagnosticClaim' && payload.case !== 'diagnosticRenew' && payload.case !== 'diagnosticResult') ||
               payload.value.attemptId !== offer.attemptId ||
               payload.value.fence !== offer.fence
             ) {
@@ -148,9 +157,30 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
               if (askedToStart || offer.claimableForMs === 0) return reject(status.FAILED_PRECONDITION, 'This attempt cannot start again')
               askedToStart = true
               const { attemptId, fence } = offer
-              const runForMs = diagnostics.claim(workerId, attemptId, fence)
+              const at = performance.now()
+              const runForMs = diagnostics.claim(workerId, attemptId, fence, supportsRenewal ? DIAGNOSTIC_RENEWAL_MS : undefined)
               if (runForMs === 0) return reject(status.FAILED_PRECONDITION, 'The start lease is no longer available')
+              if (supportsRenewal) execution = { until: at + runForMs, budget: at + DIAGNOSTIC_RUNTIME_MS, sequence: 0 }
               call.write(frame({ case: 'diagnosticStart', value: create(DiagnosticStartSchema, { attemptId, fence, runForMs }) }))
+              return
+            }
+            if (payload.case === 'diagnosticRenew') {
+              const { attemptId, fence, sequence } = payload.value
+              const at = performance.now()
+              if (
+                execution === undefined ||
+                sequence !== execution.sequence + 1 ||
+                sequence > MAX_DIAGNOSTIC_RENEWALS ||
+                at >= execution.until
+              ) {
+                return reject(status.FAILED_PRECONDITION, 'There is no current execution lease to renew on this stream')
+              }
+              const maximumMs = Math.min(DIAGNOSTIC_RENEWAL_MS, Math.floor(execution.budget - at))
+              if (maximumMs <= 0) return reject(status.FAILED_PRECONDITION, 'The diagnostic has reached its execution limit')
+              const runForMs = diagnostics.renew?.(workerId, attemptId, fence, maximumMs) ?? 0
+              if (runForMs === 0) return reject(status.FAILED_PRECONDITION, 'The execution lease has expired')
+              execution = { ...execution, until: at + runForMs, sequence }
+              call.write(frame({ case: 'diagnosticLease', value: create(DiagnosticLeaseSchema, { attemptId, fence, sequence, runForMs }) }))
               return
             }
             const result = payload.value

@@ -382,7 +382,8 @@ export function Outputs({
             ? ChangeState.Merged
             : open.some((one) => one.state === 'open' && one.draft)
               ? ChangeState.Draft
-              : shownQueued(task.changes)
+              : // In its queue as read, or as pressed: going into it, it is there once Merge has answered the press.
+                shownQueued(task.changes) || (open.length === 1 && mergeStanding?.(first.url) === 'queued')
                 ? ChangeState.Queued
                 : ChangeState.Ready
           const brand = productBrand(first.product)
@@ -494,15 +495,18 @@ export function Outputs({
         ? 'merged'
         : refusedAt === one.url
           ? 'refused'
-          : merging === one.url || mergeStanding?.(one.url) === 'merging'
-            ? 'merging'
-            : (at !== -1 && i > at && acting === doing.accept) || mergeAwaits?.(one.url) === true
-              ? 'waiting'
-              : one.queued === true
-                ? 'queued'
-                : one.draft
-                  ? 'draft'
-                  : 'open'
+          : // Going into its queue, it is in it once Merge has answered the press, not when the host has.
+            mergeStanding?.(one.url) === 'queued'
+            ? 'queued'
+            : merging === one.url || mergeStanding?.(one.url) === 'merging'
+              ? 'merging'
+              : (at !== -1 && i > at && acting === doing.accept) || mergeAwaits?.(one.url) === true
+                ? 'waiting'
+                : one.queued === true
+                  ? 'queued'
+                  : one.draft
+                    ? 'draft'
+                    : 'open'
     const stops = open.map((one, i): TrackStop => {
       const brand = productBrand(one.product)
       // Its files are under its repository's folder here, which needn't be named as the host names it.

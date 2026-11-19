@@ -13,5 +13,5 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "tests", "integration", "vite.config.ts"]
+  "include": ["src", "tests", "integration", "relay", "vite.config.ts"]
 }

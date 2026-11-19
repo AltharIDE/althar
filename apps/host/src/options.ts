@@ -23,6 +23,9 @@ Commands:
   serve            Run the home until stopped
   status           Check the running home's private API
   connect-stdio    Carry a socket-authority API connection over SSH stdio
+  setup            Launch setup from a verified portable release
+  setup --resume   Resume interrupted setup
+  setup status     Read the setup checkpoint and transcript
   install-service  Install a systemd user service
   configure-updates  Configure verified release downloads and managed installation
   update           Check/download a release; --apply explicitly restarts the host
@@ -39,6 +42,7 @@ Options:
   --after <dev_id>           Read the next page of devices
   --device-id <dev_id>       Connection device to revoke
   --worker-ca <file>        Trusted worker certificate authority for configure-workers
+  --worker-relay <file>     Private JSON link for an outbound worker relay
   --worker-certificate <file>  Worker client certificate for enroll-worker
   --worker-id <wrk_id>      Worker for worker-run or revoke-worker
   --attempt-id <watt_id>    Diagnostic for worker-result
@@ -83,6 +87,8 @@ export interface HostOptions {
     | 'serve'
     | 'status'
     | 'connect-stdio'
+    | 'setup'
+    | 'setup-status'
     | 'install-service'
     | 'configure-updates'
     | 'update'
@@ -96,6 +102,7 @@ export interface HostOptions {
     | 'prepare-update'
     | 'help'
     | 'version'
+  readonly setup?: { mode: 'start' | 'resume' | 'run'; manifest?: string }
   readonly network?: NetworkConfiguration
   readonly workerConfiguration?: WorkerConfiguration
   readonly workerCertificate?: string
@@ -143,6 +150,7 @@ const directory = (value: string | undefined, fallback: string) => {
 
 /** Reads configuration only. In particular, serve never creates or rotates a missing key. */
 export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv = process.env, home = homedir()): HostOptions => {
+  if (args[0] === 'setup' && args[1] === 'status') args = ['setup-status', ...args.slice(2)]
   const flags = new Map<string, string>()
   const switches = new Set<string>()
   const projects: string[] = []
@@ -156,6 +164,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     '--tls-key',
     '--device-id',
     '--worker-ca',
+    '--worker-relay',
     '--worker-certificate',
     '--worker-id',
     '--attempt-id',
@@ -170,6 +179,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     '--encrypted-credential',
     '--installation',
     '--release-key',
+    '--manifest',
     '--update-feed',
     '--release-base-url',
     '--release-sequence',
@@ -192,6 +202,8 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     'init',
     'serve',
     'status',
+    'setup',
+    'setup-status',
     'install-service',
     'configure-updates',
     'update',
@@ -226,7 +238,17 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
       }
       index += 1
     } else if (
-      ['--json', '--wait', '--start', '--automatic-updates', '--manual-updates', '--apply', '--allow-incompatible'].includes(arg)
+      [
+        '--json',
+        '--wait',
+        '--start',
+        '--automatic-updates',
+        '--manual-updates',
+        '--apply',
+        '--allow-incompatible',
+        '--resume',
+        '--run-setup',
+      ].includes(arg)
     ) {
       if (switches.has(arg)) return invalid('A host switch was provided more than once.')
       switches.add(arg)
@@ -248,6 +270,8 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
         case 'serve':
         case 'status':
         case 'connect-stdio':
+        case 'setup':
+        case 'setup-status':
         case 'install-service':
         case 'configure-updates':
         case 'update':
@@ -264,6 +288,13 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
     } else return invalid('Unknown host command or option. Run althar-host --help.')
   }
   command ??= 'help'
+  const setupManifest = flags.get('--manifest')
+  const resume = switches.has('--resume')
+  const runSetup = switches.has('--run-setup')
+  if (command === 'setup') {
+    if ((resume && runSetup) || (setupManifest === undefined ? releaseKeys.length !== 0 || !resume : releaseKeys.length !== 1))
+      return invalid('Supply a verified --manifest and --release-key, or run setup --resume.')
+  } else if (setupManifest !== undefined || resume || runSetup) return invalid('These options require setup.')
   if (command === 'connect-stdio') {
     if (
       !/^home_[a-f0-9]{32}$/.test(flags.get('--home-id') ?? '') ||
@@ -284,7 +315,10 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   )
     return invalid('Service options are available only for install-service.')
   if (
-    (releaseKeys.length > 0 || flags.has('--update-feed') || switches.has('--automatic-updates') || switches.has('--manual-updates')) &&
+    ((releaseKeys.length > 0 && command !== 'setup') ||
+      flags.has('--update-feed') ||
+      switches.has('--automatic-updates') ||
+      switches.has('--manual-updates')) &&
     command !== 'configure-updates'
   )
     return invalid('Update configuration options require configure-updates.')
@@ -305,6 +339,8 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   if (flags.has('--origin') && command !== 'configure-network') return invalid('--origin requires configure-network.')
   if (flags.has('--worker-ca') !== (command === 'configure-workers'))
     return invalid('configure-workers requires --worker-ca, --tls-certificate and --tls-key.')
+  const workerRelay = flags.get('--worker-relay')
+  if (workerRelay !== undefined && command !== 'configure-workers') return invalid('--worker-relay requires configure-workers.')
   if (flags.has('--worker-certificate') !== (command === 'enroll-worker')) return invalid('enroll-worker requires --worker-certificate.')
   const workerId = flags.get('--worker-id')
   if (command === 'worker-run' || command === 'revoke-worker') {
@@ -351,6 +387,14 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
   const keyValue = flags.get('--key-file') ?? delivered ?? join(config, 'althar-host', 'master-key')
   return {
     command,
+    ...(command === 'setup'
+      ? {
+          setup: {
+            mode: runSetup ? ('run' as const) : resume ? ('resume' as const) : ('start' as const),
+            ...(setupManifest === undefined ? {} : { manifest: resolve(setupManifest) }),
+          },
+        }
+      : {}),
     ...(command !== 'configure-network'
       ? {}
       : {
@@ -374,6 +418,7 @@ export const parseOptions = (args: ReadonlyArray<string>, env: NodeJS.ProcessEnv
             ca: resolve(flags.get('--worker-ca') ?? ''),
             certificate: resolve(flags.get('--tls-certificate') ?? ''),
             key: resolve(flags.get('--tls-key') ?? ''),
+            ...(workerRelay === undefined ? {} : { relay: resolve(workerRelay) }),
           },
         }
       : {}),

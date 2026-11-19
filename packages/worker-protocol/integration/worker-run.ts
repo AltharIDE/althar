@@ -1,12 +1,12 @@
 import { equal, match, rejects } from 'node:assert/strict'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { X509Certificate } from 'node:crypto'
+import { createHash, randomBytes, X509Certificate } from 'node:crypto'
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
-import { test } from 'node:test'
+import { test, type TestContext } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
@@ -15,6 +15,7 @@ import { Client, credentials } from '@grpc/grpc-js'
 import { bindWorkerHandshake, workerCertificateFingerprint } from '../src/grpc.ts'
 import {
   DiagnosticClaimSchema,
+  DiagnosticRenewSchema,
   DiagnosticOutcome,
   HomeFrameSchema,
   WorkerControlService,
@@ -24,6 +25,7 @@ import {
   type WorkerFrame,
 } from '../src/index.ts'
 import { workerCertificates } from './worker-certificates.ts'
+import { bindWorkerRelay } from '../src/relayServer.ts'
 
 const exec = promisify(execFile)
 const bundle = fileURLToPath(new URL('../../../apps/host/dist/althar-host.js', import.meta.url))
@@ -37,14 +39,38 @@ const stop = async (child: ChildProcess, signal: NodeJS.Signals) => {
   }
 }
 
-void test('the built home and worker persist enrollment, outcome, and a lost start grant across restart', { timeout: 45000 }, async (t) => {
+const recoverWorker = async (t: TestContext, routed: boolean): Promise<void> => {
   const root = mkdtempSync(join(tmpdir(), 'althar-worker-process-'))
   const children: ChildProcess[] = []
   t.after(async () => {
     await Promise.all(children.map((child) => stop(child, 'SIGKILL')))
     rmSync(root, { recursive: true, force: true })
   })
-  const path = workerCertificates(root)
+  const path = workerCertificates(root, routed)
+  const route = `wrl_${'a'.repeat(32)}`
+  const homeToken = randomBytes(32).toString('base64url')
+  const workerToken = randomBytes(32).toString('base64url')
+  const digest = (value: string) => createHash('sha256').update(value).digest('hex')
+  const gateway = routed
+    ? await bindWorkerRelay({
+        host: '127.0.0.1',
+        port: 0,
+        certificate: readFileSync(path('relay.pem')),
+        key: readFileSync(path('relay.key')),
+        routes: [{ id: route, homeDigest: digest(homeToken), workerDigest: digest(workerToken), expiresAt: Date.now() + 60000 }],
+      })
+    : undefined
+  const gatewayUrl = gateway === undefined ? undefined : `wss://localhost:${gateway.port}/v1/worker-relay/${route}`
+  if (gateway && gatewayUrl) {
+    t.after(gateway.close)
+    writeFileSync(path('home-token'), homeToken, { mode: 0o600 })
+    writeFileSync(path('worker-token'), workerToken, { mode: 0o600 })
+    writeFileSync(
+      path('home-link.json'),
+      JSON.stringify({ url: `${gatewayUrl}/home`, tokenFile: path('home-token'), caFile: path('other-ca.pem') }),
+      { mode: 0o600 },
+    )
+  }
   const common = ['--profile', path('profile'), '--key-file', path('keys/master'), '--json']
   const env = { HOME: root, PATH: pathEnv }
   const host = async (command: string, args: string[] = []) => {
@@ -87,32 +113,38 @@ void test('the built home and worker persist enrollment, outcome, and a lost sta
     path('home.pem'),
     '--tls-key',
     path('home.key'),
+    ...(gateway === undefined ? [] : ['--worker-relay', path('home-link.json')]),
   ])
   const enrolled = await host('enroll-worker', ['--worker-certificate', path('enrolled.pem')])
   const worker = enrolled.workerId ?? ''
   match(worker, /^wrk_[a-f0-9]{32}$/)
   const queue = async () => (await host('worker-run', ['--worker-id', worker])).attemptId ?? ''
   const query = (attempt: string) => host('worker-result', ['--attempt-id', attempt])
-  const run = (home: { workerPort: number; homeId: string }, journal = path('journal')) =>
+  const run = (home: { workerPort: number; homeId: string }, ca = path('home-ca.pem')) =>
     exec(
       binary,
       [
-        `https://localhost:${home.workerPort}`,
+        `https://localhost:${gateway?.port ?? home.workerPort}`,
         home.homeId,
         worker,
-        path('home-ca.pem'),
+        ca,
         path('enrolled.pem'),
         path('enrolled.key'),
-        journal,
+        path('journal'),
+        ...(gatewayUrl === undefined ? [] : ['--relay', `${gatewayUrl}/worker`, path('worker-token'), path('other-ca.pem')]),
       ],
       {
-        timeout: 10000,
+        timeout: 15000,
         maxBuffer: 4096,
       },
     )
   const first = await start()
   equal(first.homeId, initialized.homeId)
   const completed = await queue()
+  if (gateway !== undefined) {
+    await rejects(run(first, path('other-ca.pem')))
+    equal((await query(completed)).state, 'queued')
+  }
   match((await run(first)).stdout, /DIAGNOSTIC_OUTCOME_SUCCEEDED/)
   equal((await query(completed)).output, 'Linux\n')
 
@@ -136,11 +168,19 @@ void test('the built home and worker persist enrollment, outcome, and a lost sta
       create(WorkerFrameSchema, {
         payload: {
           case: 'hello',
-          value: create(WorkerHelloSchema, { workerId: worker, minVersion: 1, maxVersion: 1, acceptsDiagnostics: true }),
+          value: create(WorkerHelloSchema, {
+            workerId: worker,
+            minVersion: 1,
+            maxVersion: 1,
+            acceptsDiagnostics: true,
+            renewsDiagnosticLease: routed,
+          }),
         },
       }),
     )
-    equal((await frames.next()).value?.payload.case, 'hello')
+    const hello = (await frames.next()).value?.payload
+    if (hello?.case !== 'hello') throw new Error('Expected authenticated home hello')
+    equal(hello.value.supportsDiagnosticLeaseRenewal, routed)
     const offered = (await frames.next()).value?.payload
     if (offered?.case !== 'diagnosticOffer') throw new Error('Expected a diagnostic offer')
     equal(offered.value.attemptId, lost)
@@ -154,6 +194,23 @@ void test('the built home and worker persist enrollment, outcome, and a lost sta
     )
     const started = (await frames.next()).value?.payload
     if (started?.case !== 'diagnosticStart') throw new Error('Expected the durable start grant')
+    if (routed) {
+      equal(started.value.runForMs <= 2000, true)
+      const renewal = create(WorkerFrameSchema, {
+        payload: {
+          case: 'diagnosticRenew',
+          value: create(DiagnosticRenewSchema, { attemptId: lost, fence: started.value.fence, sequence: 1 }),
+        },
+      })
+      stream.write(renewal)
+      const extended = (await frames.next()).value?.payload
+      if (extended?.case !== 'diagnosticLease') throw new Error('Expected a renewal on the claiming stream')
+      equal(extended.value.sequence, 1)
+      equal(extended.value.attemptId, lost)
+      equal(extended.value.runForMs > 0 && extended.value.runForMs <= 2000, true)
+      stream.write(renewal)
+      await rejects(frames.next(), /There is no current execution lease/)
+    }
     equal((await query(lost)).state, 'claimed')
     // The grant has left the home, but this fixture deliberately never starts the command.
     await stop(first.child, 'SIGKILL')
@@ -170,7 +227,14 @@ void test('the built home and worker persist enrollment, outcome, and a lost sta
   await host('revoke-worker', ['--worker-id', worker])
   await rejects(run(second), { stderr: /Unauthenticated/ })
   await stop(second.child, 'SIGTERM')
-})
+}
+
+void test('the direct worker persists enrollment, outcome, and a lost grant across restart', { timeout: 50000 }, (t) =>
+  recoverWorker(t, false),
+)
+void test('the relayed worker persists enrollment, outcome, and a lost grant across restart', { timeout: 50000 }, (t) =>
+  recoverWorker(t, true),
+)
 
 void test('a restarted worker replays its journal after its result could not be committed', { timeout: 30000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'althar-worker-replay-'))

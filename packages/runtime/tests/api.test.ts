@@ -2276,19 +2276,24 @@ describe('the coordinator, through the API', () => {
           ['Which partners still call v1', 'ready'],
           ['Make the sketch real', 'ready'],
         ])
-        // Kept for later, the plain task is out of Needs you; a change with work on it can't be kept, nor marked done.
-        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
-        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        // A change with work on it can't be marked done.
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: change.id })
         assert.sameDeepMembers(yield* phases, [
-          ['Which partners still call v1', 'kept'],
+          ['Which partners still call v1', 'ready'],
           ['Make the sketch real', 'ready'],
         ])
-        // Marked done, it settles.
+        // Kept for later, both are out of Needs you: the plain task, and the change on its branch, with no pull request open.
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        yield* client.KeepTaskForLater({ commandId: commandId(), taskId: change.id })
+        assert.sameDeepMembers(yield* phases, [
+          ['Which partners still call v1', 'kept'],
+          ['Make the sketch real', 'kept'],
+        ])
+        // Marked done, the plain task settles.
         yield* client.MarkTaskDone({ commandId: commandId(), taskId: question?.taskId ?? '' })
         assert.sameDeepMembers(yield* phases, [
           ['Which partners still call v1', 'settled'],
-          ['Make the sketch real', 'ready'],
+          ['Make the sketch real', 'kept'],
         ])
         const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
         assert.strictEqual(unknown.reason, 'NotFound')

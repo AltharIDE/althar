@@ -31,7 +31,7 @@ export const workerCertificates = (root: string, extra = false) => {
       'keyUsage=critical,keyCertSign',
     )
   }
-  const issue = (name: string, use: 'serverAuth' | 'clientAuth'): void => {
+  const issue = (name: string, use: 'serverAuth' | 'clientAuth', issuer = 'home-ca'): void => {
     const san = use === 'serverAuth' ? '\nsubjectAltName=DNS:localhost' : ''
     writeFileSync(
       path(`${name}.ext`),
@@ -58,9 +58,9 @@ export const workerCertificates = (root: string, extra = false) => {
       '-in',
       `${name}.csr`,
       '-CA',
-      'home-ca.pem',
+      `${issuer}.pem`,
       '-CAkey',
-      'home-ca.key',
+      `${issuer}.key`,
       '-CAcreateserial',
       '-extfile',
       `${name}.ext`,
@@ -74,7 +74,11 @@ export const workerCertificates = (root: string, extra = false) => {
   if (extra) authority('other-ca')
   issue('home', 'serverAuth')
   issue('enrolled', 'clientAuth')
-  if (extra) issue('unenrolled', 'clientAuth')
-  for (const name of ['home-ca', 'home', 'enrolled', ...(extra ? ['other-ca', 'unenrolled'] : [])]) chmodSync(path(`${name}.pem`), 0o600)
+  if (extra) {
+    issue('unenrolled', 'clientAuth')
+    issue('relay', 'serverAuth', 'other-ca')
+  }
+  for (const name of ['home-ca', 'home', 'enrolled', ...(extra ? ['other-ca', 'unenrolled', 'relay'] : [])])
+    chmodSync(path(`${name}.pem`), 0o600)
   return path
 }

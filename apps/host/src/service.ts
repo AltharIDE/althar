@@ -17,9 +17,12 @@ export interface ServiceCommands {
   readonly run?: (command: string, args: ReadonlyArray<string>, env?: NodeJS.ProcessEnv, signal?: AbortSignal) => Promise<void>
 }
 
-const quote = (value: string, specifier = false) => {
+const validateText = (value: string) => {
   if (Array.from(value).some((character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127))
     throw new HostError({ code: 'InvalidConfig', message: 'Service paths and environment must not contain control characters.' })
+}
+const quote = (value: string, specifier = false) => {
+  validateText(value)
   return `"${value
     .replaceAll('\\', '\\\\')
     .replaceAll('"', '\\"')
@@ -31,6 +34,11 @@ export const renderService = (options: HostOptions, commands: ServiceCommands): 
   if (![commands.node, commands.entry, options.profile, options.worktrees, options.keyFile].every(isAbsolute))
     throw new HostError({ code: 'InvalidConfig', message: 'The service requires absolute executable, profile and credential paths.' })
   const credential = options.encryptedCredential ?? options.keyFile
+  validateText(credential)
+  // LoadCredential is a scalar assignment, unlike the word arguments in ExecStart.
+  // systemd splits it at the first colon and uses the rest as the literal path.
+  if (credential.trimEnd() !== credential || credential.endsWith('\\'))
+    throw new HostError({ code: 'InvalidConfig', message: 'Systemd credential paths cannot end in whitespace or a backslash.' })
   const program =
     options.installation === undefined
       ? [commands.node, commands.entry, 'serve']
@@ -46,7 +54,7 @@ StartLimitBurst=3
 [Service]
 Type=notify
 NotifyAccess=all
-${options.encryptedCredential === undefined ? 'LoadCredential' : 'LoadCredentialEncrypted'}=${quote(`master-key:${credential}`)}
+${options.encryptedCredential === undefined ? 'LoadCredential' : 'LoadCredentialEncrypted'}=master-key:${credential.replaceAll('%', '%%')}
 ExecStart=:${start} "--key-file" ${quote('%d/master-key', true)}
 WorkingDirectory=%h
 Environment=${quote(`PATH=${commands.path}`)}

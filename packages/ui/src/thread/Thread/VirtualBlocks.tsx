@@ -394,11 +394,13 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
   const settle = (scroller: HTMLElement, gaps: ReadonlyArray<HTMLElement>) => {
     hear(scroller)
     layGaps(gaps)
-    // What was in view stays there, unless the thread follows its bottom, where it stays.
-    if (!following.current) keep(scroller, place.current)
+    // What was in view stays there as the commit ends, following the bottom too: what moves a message in place
+    // (ListMotion) reads where each stands then, and a block above that grew or was measured again isn't each message
+    // under it moving. Following, the view goes on down to the bottom after (below).
+    keep(scroller, place.current)
     if (measure()) {
       layGaps(gaps)
-      if (!following.current) keep(scroller, place.current)
+      keep(scroller, place.current)
     }
     const wanted = placing.current
     const first = wanted === null ? undefined : elements.current.get(wanted.key)?.[0]
@@ -408,7 +410,7 @@ export function VirtualBlocks({ count, keyOf, render, holds, stopOf, memory }: V
     }
     if (following.current)
       // Once the commit is over, before the frame is drawn: what moves a message in place (ListMotion) reads where each
-      // stands as the commit ends, and the view following the bottom isn't a message moving.
+      // stands as the commit ends, and the view following the bottom to what came under it isn't a message moving.
       queueMicrotask(() => {
         if (!following.current || !showing(scroller)) return
         down(scroller)

@@ -24,7 +24,7 @@ import { fakeConnectors, HOST, runtime, until } from '../support'
 import { BUDGETS, counted, loop, type Row, table, timed } from './budgets'
 import { follows } from './follow'
 import { lag, type Priority, profiled, spans, spawns, stalledOn, stalls, stress, summary } from './load'
-import { git, history, idle, lengthen, lengthenCoordinator, type Made, onGitHub, ready, settled } from './seed'
+import { ended, git, history, idle, lengthen, lengthenCoordinator, type Made, onGitHub, ready, settled } from './seed'
 import { stormingAgents } from './storm'
 import type { Answer, WindowSetup, WindowStats } from './window'
 import { openWindows } from './windows'
@@ -86,6 +86,8 @@ const ITEMS = Number(setting('ALTHAR_ITEMS', '5000'))
 const TURNS = Number(setting('ALTHAR_TURNS', '500'))
 const COORDINATOR_ITEMS = Number(setting('ALTHAR_COORDINATOR_ITEMS', '2000'))
 const CHANGES = Number(setting('ALTHAR_CHANGES', '1000000'))
+/** Agents' sessions long over, as the person's store has them: the models' catalogue reads its agents' latest. */
+const SESSIONS = Number(setting('ALTHAR_SESSIONS', '3000'))
 /**
  * Windows of the app, each following the feed: the first on its project's screen (the board and the coordinator), the
  * second on the long task's, and so on in turn, each with the projects in its sidebar.
@@ -266,6 +268,7 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
         const doneable = DONES > 0 ? yield* ready(projectId, DONES * PHASES.length, true) : []
         yield* lengthen(long.threadId, ITEMS, TURNS)
         const old = yield* settled(long, SETTLED)
+        if (SESSIONS > 0 && SETTLED > 0) yield* ended(long, SESSIONS)
         const { cardEvery } = yield* lengthenCoordinator(projectId, COORDINATOR_ITEMS, [
           ...made.map((one) => one.taskId),
           ...doneable.map((one) => one.taskId),
@@ -397,6 +400,29 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
             keep('settings', yield* read('GetSettings', {}))
             keep('rules', yield* read('GetProjectRules', { projectId }))
           }
+
+          // The model picker in full: what it reads as it opens and again after each change, and its two changes, each
+          // a model's default effort set and a model switched off or on again.
+          const catalog = yield* read('GetModels', {}, true)
+          const offered = (
+            (catalog.value ?? []) as ReadonlyArray<{
+              agentId: string
+              models: ReadonlyArray<{ id: string; efforts?: ReadonlyArray<{ id: string }> }>
+            }>
+          ).flatMap((agent) => agent.models.map((model) => ({ agentId: agent.agentId, model })))
+          const tuned = offered.find((one) => (one.model.efforts?.length ?? 0) > 0) ?? offered[0]
+          for (let index = 0; index < PRESSES; index += 1) {
+            keep('models', yield* read('GetModels', {}))
+            if (tuned === undefined) continue
+            const efforts = tuned.model.efforts ?? []
+            const effort = efforts[index % Math.max(1, efforts.length)]?.id ?? 'high'
+            keep('default effort', yield* press('SetDefaultEffort', { agentId: tuned.agentId, model: tuned.model.id, effort }))
+            keep(
+              'model switched',
+              yield* press('SetModelBlocked', { agentId: tuned.agentId, model: tuned.model.id, blocked: index % 2 === 0 }),
+            )
+          }
+          if (tuned !== undefined) yield* press('SetModelBlocked', { agentId: tuned.agentId, model: tuned.model.id, blocked: false })
 
           // Presses, from the call to its answer, while the agents work and the windows read behind them.
           const head = yield* read('GetThread', { threadId: pressed.threadId, limit: 0 }, true)
@@ -550,6 +576,7 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
             'search',
             'settings',
             'rules',
+            'models',
           ])
             rows.push(
               timed(
@@ -575,7 +602,18 @@ describe.runIf(setting('ALTHAR_RUN', 'responsiveness') === 'responsiveness')('th
               `${latest.length} items at once, ${batched ? 'in one call' : 'one call each, all answered'}`,
             ),
           )
-          for (const what of ['rename', 'set model', 'send', 'send queued', 'take back', 'interrupt', 'done', 'ship answered'])
+          for (const what of [
+            'rename',
+            'set model',
+            'default effort',
+            'model switched',
+            'send',
+            'send queued',
+            'take back',
+            'interrupt',
+            'done',
+            'ship answered',
+          ])
             rows.push(
               timed(
                 phase,

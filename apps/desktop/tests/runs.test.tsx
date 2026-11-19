@@ -524,6 +524,18 @@ describe('where Run runs with no task, by name', () => {
 describe('what the Run button says of each', () => {
   const now = '2026-10-14T09:10:00.000Z'
 
+  it('says starting at once for a press, until its launch lands, and not over a newer one', () => {
+    const key = `${MAIN.key}\n${runnables[0]!.id}`
+    const attempts = new Map([[key, { state: 'starting' as const, seen: [], token: 1, runnableId: runnables[0]!.id, place: MAIN }]])
+    expect(targetsOf(runnables, [], MAIN, now, attempts)[0]?.run).toEqual({ state: 'starting', pending: true })
+    // Over the run it ended, it starts again; once another launch lands, that one is told.
+    const old = launch({ id: 'old', ended: { at: '2026-10-14T09:05:00.000Z', code: 1 } })
+    const over = new Map([[key, { state: 'starting' as const, seen: ['old'], token: 2, runnableId: runnables[0]!.id, place: MAIN }]])
+    expect(targetsOf(runnables, [old], MAIN, now, over)[0]?.run).toEqual({ state: 'starting', pending: true })
+    const crashed = launch({ id: 'new', ended: { at: '2026-10-14T09:09:30.000Z', code: 1 } })
+    expect(targetsOf(runnables, [old, crashed], MAIN, now, over)[0]?.run).toMatchObject({ state: 'ended', code: 1 })
+  })
+
   it('takes one that says nothing of where it answers as starting, then as running, as an app’s window', () => {
     const fresh = launch({ startedAt: new Date(Date.parse(now) - STARTING_FOR / 2).toISOString() })
     const long = launch({ startedAt: new Date(Date.parse(now) - STARTING_FOR * 2).toISOString() })

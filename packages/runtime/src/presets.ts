@@ -30,9 +30,12 @@ export const PresetParts = Schema.Struct({
    */
   end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
   shelf: Schema.Literals(['scratch', 'board']),
-  /** Its lead and reviewer as `agent/model`, or null where the coordinator picks. */
+  /** Its lead and reviewer as `agent/model`, or null where they're picked as for any step: the person's defaults, the coordinator's choice. */
   lead: Schema.NullOr(Schema.String),
   reviewer: Schema.NullOr(Schema.String),
+  /** How hard its lead and its reviewer think, as their models write it; absent or null, their own or the person's default. */
+  effort: Schema.optional(Schema.NullOr(Schema.String)),
+  reviewerEffort: Schema.optional(Schema.NullOr(Schema.String)),
   brief: Schema.String,
   /** A review of someone else's pull request. */
   reviews: Schema.optional(Schema.Boolean),
@@ -48,9 +51,14 @@ export interface Preset {
   readonly projectId: string | null
   /** The project of the task it was saved from, where it was: the one it can be kept to. */
   readonly fromProjectId?: string | null
+  /** A built-in one the person tuned: its lead, reviewer, efforts or brief are theirs (`tunePreset`), until they reset it. */
+  readonly tuned?: boolean
 }
 
-/** The presets Althar has built in. */
+/**
+ * The presets Althar has built in. None names a model or an agent: its lead and reviewer are picked as for any step, by the
+ * person's defaults and the coordinator's choice, and the person may tune one as their own (`tunePreset`).
+ */
 export const BUILT_IN: ReadonlyArray<Preset> = [
   {
     id: 'builtin:chat',
@@ -90,7 +98,7 @@ export const BUILT_IN: ReadonlyArray<Preset> = [
       checked: 'none',
       end: 'none',
       shelf: 'board',
-      lead: 'claude-code/claude-opus-5-5',
+      lead: null,
       reviewer: null,
       brief: 'A prototype: show the idea working, quickly. Its effort follows its size.',
     },
@@ -98,6 +106,86 @@ export const BUILT_IN: ReadonlyArray<Preset> = [
 ]
 
 const decodeParts = Schema.decodeUnknownOption(Schema.fromJsonString(PresetParts))
+
+/** What the person may set on a built-in preset as their own: its lead and reviewer, their efforts, and its brief. */
+export const PresetTuning = Schema.Struct({
+  lead: Schema.optional(Schema.NullOr(Schema.String)),
+  reviewer: Schema.optional(Schema.NullOr(Schema.String)),
+  effort: Schema.optional(Schema.NullOr(Schema.String)),
+  reviewerEffort: Schema.optional(Schema.NullOr(Schema.String)),
+  brief: Schema.optional(Schema.String),
+})
+export type PresetTuning = typeof PresetTuning.Type
+const decodeTuning = Schema.decodeUnknownOption(Schema.fromJsonString(PresetTuning))
+
+/** A built-in preset with the person's tuning over it. */
+const tunedOf = (preset: Preset, tuning: PresetTuning): Preset => ({
+  ...preset,
+  tuned: true,
+  parts: {
+    ...preset.parts,
+    ...(tuning.lead == null ? {} : { lead: tuning.lead }),
+    ...(tuning.reviewer == null ? {} : { reviewer: tuning.reviewer }),
+    ...(tuning.effort == null ? {} : { effort: tuning.effort }),
+    ...(tuning.reviewerEffort == null ? {} : { reviewerEffort: tuning.reviewerEffort }),
+    ...(tuning.brief === undefined ? {} : { brief: tuning.brief }),
+  },
+})
+
+/** The built-in presets, each with the person's tuning where they set one. */
+export const builtInPresets = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const rows = yield* sql<{ presetId: string; parts: string }>`SELECT preset_id, parts FROM preset_tunings`
+  const tunings = new Map(
+    rows.flatMap((row) => {
+      const tuning = decodeTuning(row.parts)
+      return tuning._tag === 'Some' ? [[row.presetId, tuning.value] as const] : []
+    }),
+  )
+  return BUILT_IN.map((preset) => {
+    const tuning = tunings.get(preset.id)
+    return tuning === undefined ? preset : tunedOf(preset, tuning)
+  })
+})
+
+/**
+ * Tunes a built-in preset as the person's own, from Settings or on their word to the coordinator or a lead: its lead and
+ * reviewer (`agent/model`), their efforts, and its brief. Only what differs from the built-in is kept; nothing differing,
+ * it is back to its default. The built-in itself stays as it is, naming no model.
+ */
+export const tunePreset = (id: string, tuning: PresetTuning) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const preset = BUILT_IN.find((one) => one.id === id || one.name.toLowerCase() === id.trim().toLowerCase())
+    if (preset === undefined) return yield* new NotFound({ kind: 'preset', id })
+    const said = (value: string | null | undefined) => (value == null || value.trim() === '' ? undefined : value.trim())
+    const brief = tuning.brief?.trim()
+    const kept: PresetTuning = {
+      ...(said(tuning.lead) === undefined ? {} : { lead: said(tuning.lead) }),
+      ...(said(tuning.reviewer) === undefined ? {} : { reviewer: said(tuning.reviewer) }),
+      ...(said(tuning.effort) === undefined ? {} : { effort: said(tuning.effort) }),
+      ...(said(tuning.reviewerEffort) === undefined ? {} : { reviewerEffort: said(tuning.reviewerEffort) }),
+      ...(brief === undefined || brief === preset.parts.brief ? {} : { brief }),
+    }
+    if (Object.keys(kept).length === 0) {
+      yield* sql`DELETE FROM preset_tunings WHERE preset_id = ${preset.id}`
+      return preset
+    }
+    yield* sql`
+      INSERT INTO preset_tunings ${sql.insert({ presetId: preset.id, parts: JSON.stringify(kept), updatedAt: yield* timestamp })}
+      ON CONFLICT (preset_id) DO UPDATE SET parts = excluded.parts, updated_at = excluded.updated_at`
+    return tunedOf(preset, kept)
+  })
+
+/** Takes a built-in preset back to its default, the person's tuning gone. */
+export const resetPreset = (id: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const preset = BUILT_IN.find((one) => one.id === id || one.name.toLowerCase() === id.trim().toLowerCase())
+    if (preset === undefined) return yield* new NotFound({ kind: 'preset', id })
+    yield* sql`DELETE FROM preset_tunings WHERE preset_id = ${preset.id}`
+    return preset
+  })
 
 /**
  * The presets the person has in a project: the built-in ones, then their own, those kept to the project included. With no
@@ -126,12 +214,13 @@ export const presetsIn = (projectId: string | null) =>
           ]
         : []
     })
-    return [...BUILT_IN, ...own]
+    return [...(yield* builtInPresets), ...own]
   })
 
 /**
  * Edits one of the person's presets, as Settings does: its name, its parts, and whether it is kept to the project of the
- * task it was saved from. A built-in one stays as it is; a name another of theirs in the same place has is refused.
+ * task it was saved from. A built-in one stays as it is (the person tunes it with `tunePreset`); a name another of theirs in
+ * the same place has is refused.
  */
 export const editPreset = (input: {
   readonly id: string
@@ -211,10 +300,15 @@ const alike = (a: PresetParts, b: PresetParts) =>
   (a.lead === null || b.lead === null || a.lead === b.lead) &&
   (a.reviewer === null || b.reviewer === null || a.reviewer === b.reviewer)
 
-/** The preset a plan's parts are, as its card names it: the person's own first, then the built-in ones; Change where none fits. */
+/**
+ * The preset a plan's parts are, as its card names it: the person's own first, then the built-in ones, by their own parts
+ * (a prototype on another lead than the person tuned Prototype with is still a Prototype); Change where none fits.
+ */
 export const presetOf = (presets: ReadonlyArray<Preset>, parts: PresetParts) =>
-  [...presets.filter((one) => !one.builtin), ...presets.filter((one) => one.builtin)].find((one) => alike(one.parts, parts))?.name ??
-  'Change'
+  [
+    ...presets.filter((one) => !one.builtin),
+    ...presets.filter((one) => one.builtin).map((one) => BUILT_IN.find((built) => built.id === one.id) ?? one),
+  ].find((one) => alike(one.parts, parts))?.name ?? 'Change'
 
 /** Whether a plan's parts still have a preset's shape: where it works, how it's checked and ends, where it sits, and its kind; whoever leads it. */
 const shaped = (preset: PresetParts, parts: PresetParts) => alike({ ...preset, lead: null, reviewer: null }, parts)
@@ -384,10 +478,14 @@ export const offerPreset = (input: {
       SELECT id FROM record_events WHERE aggregate_type = 'project' AND aggregate_id = ${input.projectId}
         AND type = 'project.preset_offered' AND json_extract(payload, '$.signature') = ${signature} LIMIT 1`
     if (offered !== undefined) return
-    // One step from a built-in preset; one that names the same lead fits closer than one that names none.
+    // One step from a built-in preset; one the person tuned with the same lead fits closer, then one checked the same way.
     const near = presets
       .filter((one) => one.builtin)
-      .toSorted((a, b) => Number(b.parts.lead === parts.lead) - Number(a.parts.lead === parts.lead))
+      .toSorted(
+        (a, b) =>
+          Number(b.parts.lead === parts.lead) - Number(a.parts.lead === parts.lead) ||
+          Number(b.parts.checked === parts.checked) - Number(a.parts.checked === parts.checked),
+      )
       .flatMap((one) => {
         const differs = nearly(one, parts)
         return differs === null ? [] : [{ preset: one.name, differs }]
@@ -461,6 +559,12 @@ export const presetOfferOn = (projectId: string, taskId: string) =>
     }
   })
 
+/** A preset's `agent/model` in words: the model as people know it, else its id, else, on the agent's own model, the agent. */
+const whoOf = (named: string, models?: Omit<PresetModels, 'named' | 'reviewerFor'>) => {
+  const pick = pickOf(named)
+  return models?.nameOf(pick) ?? (pick.model === null ? `${pick.agentId}’s own model` : (pick.model.split('/').at(-1) ?? pick.model))
+}
+
 /**
  * What a preset holds, in words: where it works, how it's checked, how it ends, and who leads, its model as people know it
  * where `models` knows it (Claude Opus 5.5), else as its id.
@@ -477,8 +581,11 @@ export const describe = (parts: PresetParts, models?: Omit<PresetModels, 'named'
           ? 'a pull request ready for review'
           : 'a draft pull request',
     parts.lead === null
-      ? 'the coordinator picks its lead'
-      : `led by ${models?.nameOf(pickOf(parts.lead)) ?? parts.lead.split('/').at(-1) ?? parts.lead}`,
+      ? `the coordinator picks its lead${parts.effort == null ? '' : `, at ${parts.effort} effort`}`
+      : `led by ${whoOf(parts.lead, models)}${parts.effort == null ? '' : ` at ${parts.effort} effort`}`,
+    ...(parts.reviewer === null || parts.checked === 'none'
+      ? []
+      : [`reviewed by ${whoOf(parts.reviewer, models)}${parts.reviewerEffort == null ? '' : ` at ${parts.reviewerEffort} effort`}`]),
   ].join(', ')
 
 /** A plan's parameters, as a preset rewrites them: its steps, how it ends, where it works, and how it's checked. */
@@ -544,7 +651,22 @@ export const planFromPreset = <P extends PresetPlan>(
   const lead = before.steps.find((step) => step.key === 'implement')
   const review = before.steps.find((step) => step.key === 'review')
   const named = models?.named ?? ((pick: ModelPick) => pick)
-  const implement = lead === undefined ? undefined : { ...lead, ...(parts.lead === null ? {} : named(pickOf(parts.lead))), skipped: false }
+  const tunedLead = lead === undefined || parts.lead === null ? undefined : named(pickOf(parts.lead))
+  const implement =
+    lead === undefined
+      ? undefined
+      : {
+          ...lead,
+          ...tunedLead,
+          // The person's effort for its lead, where they tuned one; none tuned, an effort for another model than it had
+          // goes, so the new one runs at the person's or its own default.
+          ...(parts.effort != null
+            ? { effort: parts.effort }
+            : lead.effort != null && tunedLead !== undefined && (tunedLead.agentId !== lead.agentId || tunedLead.model !== lead.model)
+              ? { effort: null }
+              : {}),
+          skipped: false,
+        }
   const reviewer = reviewerOfPreset(before, parts, models)
   const reviewing =
     parts.checked === 'none'
@@ -559,6 +681,7 @@ export const planFromPreset = <P extends PresetPlan>(
             // Its effort was for the model it had.
             ...(review !== undefined && review.agentId === reviewer.agentId && review.model === reviewer.model ? review : {}),
             ...reviewer,
+            ...(parts.reviewerEffort == null ? {} : { effort: parts.reviewerEffort }),
             key: 'review' as const,
             // After the merge, nothing waits on it before: skipped in the run, read once the work merged.
             skipped: parts.checked === 'after',

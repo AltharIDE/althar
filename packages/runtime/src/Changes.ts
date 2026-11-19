@@ -343,6 +343,11 @@ export type PublishedOne =
     | { readonly kind: 'nothing' }
     /** Left on its branch: in a task of several repositories, one on no code host Althar knows. */
     | { readonly kind: 'branch' }
+    /**
+     * Kept on its branch here: it ends with its branch while a pull request stands open from it (a change stepped back to a
+     * prototype), so nothing went to that pull request, which stays as it is until the task ends in one again.
+     */
+    | { readonly kind: 'kept'; readonly pullRequest: string }
   ) & { readonly left: ReadonlyArray<string>; readonly repository: string }
 
 /** What publishing did in each of the task's repositories, the project's first first. */
@@ -870,6 +875,12 @@ export class Changes extends Context.Service<
      * request to measure it against.
      */
     onlyBaseWaits(taskId: string): Effect.Effect<boolean, unknown>
+    /**
+     * Whether the task stepped back from its pull request to end on its branch (a change made a prototype or a chat), leaving
+     * the one it has open as it is: then nothing pushes to it, not a lead's commits, a turn's end or Ship, until it ends in a
+     * pull request again.
+     */
+    keptOpen(taskId: string): Effect.Effect<boolean, unknown>
     /**
      * Sends what only brings the base branch in up to the task's open pull
      * requests, with no review, past the hold, and says so in the task's
@@ -1836,6 +1847,16 @@ export class Changes extends Context.Service<
        * Publishes one of the task's repositories: pushes its branch, and opens or adopts its pull request where the ending says to.
        * With `next`, its next pull request, after its last merged or closed: on a new branch, described from what came since.
        */
+      /** See `keptOpen`: the task's plan says so, as changing its ending to its branch from a pull request marks it. */
+      const keptOpenOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [plan] = yield* sql<{ kept: number | null }>`
+            SELECT json_extract(parameters, '$.keptOpen') AS kept FROM task_plans
+            WHERE task_id = ${taskId} AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1`
+          return plan?.kept === 1
+        })
+
       const publishOne = (
         input: PublishInput,
         given: PublishRow,
@@ -1886,6 +1907,10 @@ export class Changes extends Context.Service<
           // project says now: switching where a fork's work goes moves only its next ones (ADR-085). So does one opened from a
           // fork before its clone's remotes were renamed for the repository it came from.
           const standing = next === undefined ? yield* openFrom(input.taskId, task.workspaceId, task.branch) : undefined
+          // Ending with its branch while its pull request stands open (a change stepped back to prototyping): pushing the branch
+          // would send its work to that pull request, so nothing goes up; the work waits on its branch here until it ends in one again.
+          if (input.end === 'none' && standing !== undefined && standing.state === 'open' && (yield* keptOpenOf(input.taskId)))
+            return { kind: 'kept', pullRequest: `${standing.words.short} ${standing.words.prefix}${standing.number}`, left: [] } as const
           if (standing !== undefined) {
             repository = samePath(standing.repository, repository.path) ? repository : yield* host.repository(standing.repository)
             own = yield* branchRepositoryOf(input.taskId, host, repository, task.path, {
@@ -5473,7 +5498,16 @@ export class Changes extends Context.Service<
           // from what they saved, so a host's read that lags behind its merge doesn't open it again.
           const link = (yield* linksOf(asked.taskId)).find((candidate) => candidate.id === asked.id) ?? asked
           if (link.connectionId === null) return false
-          const adapters = yield* connections.adapters(link.connectionId)
+          // Read and acted on whole while its connection is there, or not at all: a removal waits for it, and none reads after one
+          // began. Nothing read through a connection being removed is half heard, so a connection made again hears it anew.
+          const polled = yield* connections.whileThere(link.connectionId, pollThrough(link, link.connectionId, how))
+          return Option.getOrElse(polled, () => false)
+        })
+
+      /** One look at a pull request through its connection, held by `poll` against the connection's removal. */
+      const pollThrough = (link: LinkRow, connectionId: string, how: { readonly force: boolean; readonly fresh: boolean }) =>
+        Effect.gen(function* () {
+          const adapters = yield* connections.adapters(connectionId)
           const host = adapters.host
           if (host === undefined) return false
           const account = adapters.info.account
@@ -7404,10 +7438,12 @@ export class Changes extends Context.Service<
             })}`
         })
 
-      /** The person stopped or interrupted a task's lead: what it was resolving waits for them, and checks that fail don't ask it again. */
-      const leadStopped = (taskId: string, how: 'stopped' | 'interrupted') =>
+      /**
+       * The person stopped or interrupted a task's lead, which `taken` recorded as they did: what it was resolving waits for
+       * them, and the checks of a round waiting on them are theirs.
+       */
+      const stoppedRounds = (taskId: string, how: 'stopped' | 'interrupted') =>
         Effect.gen(function* () {
-          yield* taken(taskId, how)
           for (const round of yield* underWay(taskId)) {
             if (round.state === 'resolving') {
               yield* settleRound(round.id, { why: `You ${how} the lead.`, stopped: true })
@@ -8176,6 +8212,8 @@ export class Changes extends Context.Service<
       const pushLeft = (taskId: string, late = false) =>
         Effect.gen(function* () {
           if (!(yield* pushesFor(taskId))) return
+          // Stepped back into prototyping: its pull request stays as it is, whatever its lead commits.
+          if (yield* keptOpenOf(taskId)) return
           if ((yield* publishing(taskId)) || (yield* roundUnderWay(taskId))) return
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
@@ -9528,6 +9566,14 @@ export class Changes extends Context.Service<
                 )
                 const seen = yield* urlsOf(taskId)
                 if (seen.length === 0) return yield* new NotFound({ kind: 'pull request', id: taskId })
+                // Stepped back into prototyping: nothing goes to its pull request until it is a change again.
+                if (yield* keptOpenOf(taskId))
+                  return `Nothing pushed: this task ends on its branch now (stepped back from its pull request, as for prototyping), so ${seen
+                    .filter((one) => one.state === 'open')
+                    .map(nameOf)
+                    .join(
+                      ' and ',
+                    )} stays as it is and your commits wait on the branch here. Once the person picks a direction, change_part with preset Change (or ending draft or ready) takes it back to its pull request, and Ship reviews and sends what waits.`
                 // In a turn the person's words began, what it committed so far is held now, before its end would hold it.
                 yield* holdBeforePush(taskId)
                 const several = seen.length > 1
@@ -9694,6 +9740,12 @@ export class Changes extends Context.Service<
           provide(
             locked(taskId)(
               Effect.gen(function* () {
+                // Stepped back into prototyping: its pull request stays as it is, whoever asks, until it is a change again.
+                if (yield* keptOpenOf(taskId))
+                  return yield* new ToolRefused({
+                    message:
+                      'Nothing pushed: this task ends on its branch now, stepped back from its pull request (as for prototyping), so its pull request stays as it is. Make it a change again (change_part with preset Change, or ending draft or ready) and Ship sends what waits there, after its review.',
+                  })
                 if ((yield* holdsOf(taskId)).length > 0) return yield* new ShipRefused({ taskId, why: 'held' })
                 yield* taken(taskId, 'pushed')
                 return yield* push(taskId, head, url)
@@ -9705,6 +9757,7 @@ export class Changes extends Context.Service<
         waitingChanges: (taskId, change) => provide(waitingChanges(taskId, change)),
         aheadOfOpen: (taskId) => provide(shipToOpen(taskId, false)),
         onlyBaseWaits: (taskId) => provide(onlyBaseWaitsOf(taskId)),
+        keptOpen: (taskId) => provide(keptOpenOf(taskId)),
         sendBaseOnly: (taskId) => provide(locked(taskId)(sendBaseOnly(taskId))),
         releaseHolds: (taskId, why, only, heads) => provide(locked(taskId)(releaseHolds(taskId, why, only, heads))),
         replace: (taskId, head, replaces, url) =>
@@ -9801,25 +9854,28 @@ export class Changes extends Context.Service<
           ),
         stopListening: (taskId, url) => provide(locked(taskId)(stopListening(taskId, url))),
         attach: (input) => provide(locked(input.taskId)(attaching.withPermits(1)(attach(input)))),
-        // Behind the press: it waits for the task's lock, which the pull request's own work (its checks, a push) can hold for
-        // seconds while agents are at work, and Stop and Interrupt answer once their lead is told. What it records, that the
-        // person took the task, only a turn's end reads, and a turn the person interrupted is theirs anyway (`look`).
+        // That the person took the task is recorded as they press, taking no lock: a look at its pull request under way, which
+        // holds the task's lock for seconds while agents are at work, then finds its checks theirs (`fixesOf`), rather than
+        // telling the lead they failed. Its rounds are settled behind the press, behind that lock, and Stop and Interrupt
+        // answer once their lead is told.
         leadStopped: (where, how = 'stopped') =>
-          Effect.asVoid(
-            Effect.forkIn(
-              provide(
-                Effect.gen(function* () {
-                  const sql = yield* SqlClient.SqlClient
-                  const [task] =
-                    'taskId' in where
-                      ? [{ taskId: where.taskId }]
-                      : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId} AND task_id IS NOT NULL`
-                  if (task !== undefined) yield* locked(task.taskId)(leadStopped(task.taskId, how))
-                }),
-              ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the lead stopped', cause))),
-              scope,
-            ),
-          ),
+          provide(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [task] =
+                'taskId' in where
+                  ? [{ taskId: where.taskId }]
+                  : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId} AND task_id IS NOT NULL`
+              if (task === undefined) return
+              yield* taken(task.taskId, how)
+              yield* Effect.forkIn(
+                provide(locked(task.taskId)(stoppedRounds(task.taskId, how))).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not settle what the stopped lead was resolving', cause)),
+                ),
+                scope,
+              )
+            }),
+          ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the lead stopped', cause))),
         resolveNow: (where, force) => Effect.asVoid(Effect.forkIn(provide(resolveNow(where, force)), scope)),
         setResolveConflicts: (input) => provide(setResolveConflicts(input)),
         // The person looking at the task counts as something happening on it.

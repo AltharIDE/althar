@@ -97,4 +97,6 @@ export const checksums: Readonly<Record<string, string>> = {
   '0091_clickup': '9d380e4871a714d04f9d9bcd642a55855fe05420b4121aec76f7f3df7980cb95',
   '0092_brought_in': '2f295d69e42c0a7637980466e966cfe5076fabd974a789f2fe3edbfd66f35d9e',
   '0093_runnable_task': '89c4231ffb6fcf0a3dc33f8ebfb6c9f954fae30ded5b5a8c9c5f5fff1145c50d',
+  '0094_preset_tunings': 'e415b238eb87c7ca10fe6b5fca58d13059dc9cf41e30a79e8f85669248cf2dce',
+  '0095_sessions_by_agent': 'bcfdc66359f3d62b1cade2085845e5d17c680adc6f3202560f6d4a0ac77b6b05',
 }
