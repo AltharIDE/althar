@@ -174,9 +174,10 @@ import { endingOf } from './signInEnding'
 import { describe, listSkills, type SkillsConfig } from './Skills'
 import { expected, words } from './words'
 import { makeBranch } from './newBranch'
-import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolRoles, syncIo } from './agentTools'
+import { agentTools, converseIn, forgetSkillRoles, setSkillRoles, setToolInProject, setToolRoles, syncIo } from './agentTools'
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
+import { checkSetup } from './setupHealth'
 import { Canvases } from './Canvases'
 import { Elsewhere } from './Elsewhere'
 import * as mcpSync from './mcpSync'
@@ -1448,6 +1449,21 @@ export const handlers = apiLayer(
             Effect.gen(function* () {
               const io = yield* syncIo
               if (io !== undefined) yield* Effect.promise(() => checkHealth(io))
+            }),
+          ).pipe(Effect.provideService(RuntimeConfig, config)),
+        ),
+      // What of the person's own setup Claude Code and Codex load, in their words, kept for Settings; a runtime that doesn't read their agents asks none.
+      CheckSetup: ({ commandId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const io = yield* syncIo
+              const configs = config.agentConfigs
+              if (io === undefined || configs === undefined) return
+              const converse = configs.converse ?? converseIn(configs.homeDir, configs.env ?? process.env)
+              // Kept as at when it was asked: a file changed while it answered is read again by Althar.
+              yield* Effect.promise(() => checkSetup(io, converse))
             }),
           ).pipe(Effect.provideService(RuntimeConfig, config)),
         ),

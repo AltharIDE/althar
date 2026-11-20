@@ -33,14 +33,16 @@ import s from './ToolTiles.module.css'
  * added from GitHub) and a repository's own (`.claude/skills`). A tile per
  * skill, as servers: the round switch gives it to every role or none, the
  * name opens it in place. Under it, who gets it and where, or Update ready
- * (violet) for one added from GitHub that has a newer version; those sort
- * first. Add from GitHub is the dashed tile, and Same skills everywhere sits
+ * (violet) for one added from GitHub that has a newer version; before both,
+ * Didn't load (red) for one of the person's own an agent leaves out or loads
+ * without what it sets. Those sort first. Add from GitHub is the dashed tile, and Same skills everywhere sits
  * beside it: it only links each skill into the agents' folders, so it turns
  * on at once, and asks on the way off whether its links stay.
  */
 
 export interface SkillTilesText extends ToolWordsText {
   updateReady: string
+  didntLoad: string
   add: string
   noneTitle: string
   noneLine: string
@@ -55,6 +57,7 @@ export interface SkillTilesText extends ToolWordsText {
 export const skillTilesText: SkillTilesText = {
   ...toolWordsText,
   updateReady: 'Update ready',
+  didntLoad: 'Didn’t load',
   add: 'Add from GitHub',
   noneTitle: 'No skills yet',
   noneLine: 'Add one from GitHub, or put a folder with a SKILL.md in any of your agents’ skill folders.',
@@ -93,6 +96,8 @@ export interface SkillTilesProps {
   text?: Partial<SkillTilesText>
 }
 
+const isFailed = (skill: SkillTileModel) => skill.failed !== undefined && skill.failed !== null
+
 /** Settings › Skills: the person's skills as tiles, a repository's own, and the switch that links them into every agent. */
 export function SkillTiles({
   skills,
@@ -125,7 +130,15 @@ export function SkillTiles({
       key={skill.id}
       tileKey={skill.id}
       name={skill.name}
-      line={skill.update ? <TileLine tone="yours">{t.updateReady}</TileLine> : reachOf(skill, projects, t)}
+      line={
+        isFailed(skill) ? (
+          <TileLine tone="failed">{t.didntLoad}</TileLine>
+        ) : skill.update ? (
+          <TileLine tone="yours">{t.updateReady}</TileLine>
+        ) : (
+          reachOf(skill, projects, t)
+        )
+      }
       on={skill.roles.length > 0}
       onChange={(on) => onRoles(skill, on ? TOOL_ROLES : [])}
       onOpen={sheet === undefined ? undefined : () => setOpen(skill.id)}
@@ -134,7 +147,12 @@ export function SkillTiles({
   const sorted = (list: readonly SkillTileModel[]) =>
     list
       .map((skill, at) => ({ skill, at }))
-      .sort((a, b) => Number(b.skill.update) - Number(a.skill.update) || a.skill.name.localeCompare(b.skill.name))
+      .sort(
+        (a, b) =>
+          Number(isFailed(b.skill)) - Number(isFailed(a.skill)) ||
+          Number(b.skill.update) - Number(a.skill.update) ||
+          a.skill.name.localeCompare(b.skill.name),
+      )
       .map((one) => one.skill)
   const same = (
     <div className={s.cell}>

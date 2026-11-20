@@ -18,7 +18,8 @@ import type { SkillTileModel, ToolAgentView, ToolProjectView, ToolRoleId } from 
 import s from './ToolTiles.module.css'
 
 /*
- * A skill, opened in place of the tiles: its SKILL.md as the agent reads it
+ * A skill, opened in place of the tiles: why an agent doesn't load it, where
+ * one doesn't; its SKILL.md as the agent reads it
  * (where it is, its name and description); where it came from on GitHub,
  * with Update where a newer version waits; who gets it; the projects that
  * get it; which of the person's agents have it, faint where one hasn't; and
@@ -27,6 +28,7 @@ import s from './ToolTiles.module.css'
  */
 
 export interface SkillSheetText extends ToolWordsText {
+  didntLoad: string
   from: string
   update: string
   agentsLabel: string
@@ -42,6 +44,7 @@ export interface SkillSheetText extends ToolWordsText {
 
 export const skillSheetText: SkillSheetText = {
   ...toolWordsText,
+  didntLoad: 'Didn’t load',
   from: 'From',
   update: 'Update',
   agentsLabel: 'Your agents',
@@ -97,6 +100,11 @@ export function SkillSheet({
     <div className={cx(s.opened, className)} onKeyDown={escapeBack(onBack)}>
       <ControlDetail title={skill.name} onBack={onBack} headingLevel={headingLevel} text={{ back: t.back }}>
         <div className={s.sheet}>
+          {skill.failed !== undefined && skill.failed !== null && (
+            <SheetFact label={t.didntLoad}>
+              <Problem as="span">{skill.failed.why}</Problem>
+            </SheetFact>
+          )}
           <article className={s.skillFile} aria-label={path}>
             <div className={s.fileHead}>
               <span className={s.fileMark} aria-hidden="true">

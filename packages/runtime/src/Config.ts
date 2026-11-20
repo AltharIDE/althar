@@ -27,6 +27,7 @@ import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
 import type { PageAnswer, PageCall } from './pageBridge'
 import type { SkillsConfig } from './Skills'
+import type { Converse } from './setupHealth'
 
 /** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
 export interface Shot {
@@ -129,6 +130,8 @@ export interface RuntimeOptions {
     readonly env?: Readonly<Record<string, string | undefined>>
     /** Runs one of the person's agents' own commands, as sync writes through them; the agents' own on this computer without it. */
     readonly run?: (command: string, args: ReadonlyArray<string>) => Promise<{ readonly code: number; readonly output: string }>
+    /** Talks to one of their agents' own commands, as a setup check asks what it loads (`setupHealth.ts`); the agents' own without it. */
+    readonly converse?: Converse
   }
   readonly appVersion: string
   /** What this device is called, when the profile is new. */

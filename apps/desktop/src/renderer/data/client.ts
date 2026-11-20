@@ -325,6 +325,8 @@ export interface Client {
   readonly getServerDetail: (name: string, repository: string | null) => Promise<ServerDetail>
   /** Asks each of the person's agents how its servers stand: signed in, or why one failed to start. */
   readonly checkServers: () => Promise<void>
+  /** Asks Claude Code and Codex what of the person's own setup they load. */
+  readonly checkSetup: () => Promise<void>
   /** Adds a server to each agent listed, in its own file. */
   readonly addServer: (server: NewServer, agents: ReadonlyArray<SyncedAgent>) => Promise<void>
   /** Takes a server out of every agent's file that has it. */
@@ -1120,6 +1122,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     setToolInProject: (kind, name, projectId, on) => command((commandId) => api.SetToolInProject({ commandId, kind, name, projectId, on })),
     getServerDetail: (name, repository) => settle(api.GetServerDetail({ name, repository })),
     checkServers: () => command((commandId) => api.CheckServers({ commandId })),
+    checkSetup: () => command((commandId) => api.CheckSetup({ commandId })),
     addServer: (server, agents) => command((commandId) => api.AddServer({ commandId, server, agents: [...agents] })),
     removeServer: (name) => command((commandId) => api.RemoveServer({ commandId, name })),
     setToolSync: (kind, on, takeBack) => command((commandId) => api.SetToolSync({ commandId, kind, on, takeBack })),

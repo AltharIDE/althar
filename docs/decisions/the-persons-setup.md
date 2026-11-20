@@ -203,6 +203,77 @@ push or merge. The irreversible list and git's guard are what hold.
 - Codex's own plugins' skills aren't listed, nor a Claude Code plugin's
   skills kept anywhere but its `skills/` folder.
 
+## When part of it doesn't load
+
+Every role gets the person's Claude Code settings, agents, commands, output
+styles and plugins, and Codex's `config.toml` and skills, linked into the
+home Althar makes. A broken file makes the agent skip it, or skip what it sets,
+and carry on, so nobody hears why a lead never used the reviewer agent the
+person wrote. Althar says so in Settings, in the agent's own words where it
+gives any (`setupHealth.ts`). It only reads the person's files. It never
+changes them, and never holds a task for them.
+
+**Settings.** Each agent's tab in Settings › Agents lists, under its accounts,
+each part of the person's own setup it doesn't load: a settings file, a hook,
+an agent, a command, an output style, a plugin, a `config.toml`. Each row has
+the file and why. Nothing shows while everything loads. A skill that doesn't
+load is marked on its own tile in Settings › Skills, as Didn't load, and its
+sheet says why. One broken file marks that file only.
+
+**What the agents say themselves** is asked, as how each MCP server stands
+is, as the skills or the agents open and at most every five minutes, and kept
+in Althar's own folder (`setup-health.json`). It is kept for a day where an
+agent can't be asked again, and stands for a file only while that file hasn't
+changed since.
+
+- Claude Code (read against 2.1.326 and 2.1.309): its own `claude`, else the
+  copy Althar's sessions run, in print mode, sent only `initialize` and
+  `get_settings`. No turn runs and no model is called. `--strict-mcp-config`
+  starts none of the person's servers, and `disableAllHooks` runs none of
+  their hooks, which would otherwise run SessionStart's as it starts. It
+  answers with the agents it loaded and each settings file it skipped, with
+  the field and why ("Claude Code skips the whole file:
+  permissions.defaultMode: Invalid value…"). An agent file whose name isn't
+  among those it loaded is one it left out.
+- Codex (read against 0.167): `codex app-server`, sent `initialize` and
+  `skills/list`. Its `configWarning` says a `config.toml` it can't read
+  ("Invalid configuration; using defaults." with the line), and `skills/list`
+  says each skill it leaves out ("missing field `description`"). Where its
+  `config.toml` can't be read it lists no skill at all, and Althar reads the
+  skills itself.
+
+**What Althar reads itself**, each time, where the agent says nothing:
+
+- Frontmatter as Claude Code reads it: YAML, then again with each value taken
+  as written (`description: [x` loads). Claude Code leaves out an agent
+  without frontmatter, a name or a description, or whose frontmatter can't be
+  read. It loads a command, an output style or a skill whose frontmatter
+  can't be read, but ignores what that frontmatter sets. Codex leaves out a
+  skill without a name or a description.
+- A settings file that isn't JSON, which Claude Code skips whole.
+- A hook matcher on a tool's event (PreToolUse, PostToolUse,
+  PostToolUseFailure, PermissionRequest, PermissionDenied) that names a slip
+  of one of Claude Code's tools ("Bashh", "bash"), against its SDK's
+  `BUILTIN_TOOL_NAMES` and former names (`setupNames.ts`), or a pattern that
+  can't be read. That list isn't complete, so a name close to none of it is
+  left alone.
+- The `plugin.json` of each plugin that is on: one that isn't JSON or names
+  no plugin keeps it from loading, and a field of the wrong kind is ignored.
+- A `config.toml` that can't be parsed.
+
+Skills Althar installs are checked as they are installed
+(`skills/src/validate.ts`) and aren't read again here.
+
+**Not built yet:**
+
+- A task whose lead started without part of the setup saying so once,
+  quietly, in its thread, and again only if the reason changes.
+- The plugin errors Claude Code reports in a turn's `system/init`
+  (`plugin_errors`). claude-agent-acp 0.108.0 only logs them, so a session's
+  own report doesn't reach Althar yet.
+- Codex's `prompts` and `rules`, and the length of `AGENTS.md` and
+  `CLAUDE.md`, aren't read.
+
 ## Skill and OpenSpec files in a change
 
 Skill and OpenSpec files an agent writes (`.claude/skills/`,
@@ -272,3 +343,4 @@ goes on is open.
 - 8 Nov 2026: Althar ships no skills of its own. The curated catalog, its packaging and its install are removed, and the first start after the update takes the older installs out of the store.
 - 8 Nov 2026: skills have role and project holdings. Every skill the person has is one list, and a session holds back, in its agent, each one its role or project doesn't get.
 - 8 Nov 2026: where the build of direction A went another way than the prototype's README. Dictation, which had a section of its own for a day, is part of This Mac, and its old address opens there. The servers in a repository's own `.mcp.json` start off in every role and go only to that project's own sessions, never to the review of an outside author's pull request, whose repository never loads its MCP config. How a server stands is read from each agent's own list command and kept, with what a Claude Code session says of one as it starts, rather than asked of every server one by one; a tool count is read only where Althar's own check can start the server and sign in, and is left out where it can't. A skill's one on-off switch is gone: each role's switch takes its place, and the person's skills are held back per agent only where that agent has a way to hold one back. A project's Finished sentence stays one sentence in its Tasks, not a row of its own.
+- 20 Nov 2026: when part of the person's own setup doesn't load (DEV-269). Claude Code and Codex are asked what they load, without a turn, a hook or a server, and Althar reads the rest itself. Settings marks each part under its agent's accounts, and a skill on its tile.

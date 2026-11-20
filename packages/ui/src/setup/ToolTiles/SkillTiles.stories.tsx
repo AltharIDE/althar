@@ -201,3 +201,29 @@ export const Narrow: Story = { decorators: [width(708)] }
 export const Dark: Story = { globals: { theme: 'dark' } }
 
 export const DarkEmpty: Story = { args: { skills: [] }, globals: { theme: 'dark' } }
+
+/** One of the person's own that Codex leaves out: Didn't load in red, first; opened, Codex's words for why. */
+const NOT_LOADED: readonly SkillTileModel[] = SKILLS.map((one) =>
+  one.name === 'release-notes'
+    ? { ...one, about: '', failed: { agent: 'codex', why: 'Codex leaves it out: missing field `description`' } }
+    : one,
+)
+
+export const DidntLoad: Story = {
+  args: { skills: NOT_LOADED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByRole('switch')[0]).toHaveAccessibleName('release-notes')
+    await expect(canvas.getByText('Didn’t load')).toBeVisible()
+  },
+}
+
+export const DidntLoadOpened: Story = {
+  args: { skills: NOT_LOADED, defaultOpen: 'release-notes' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Codex leaves it out: missing field `description`')).toBeVisible()
+  },
+}
+
+export const DarkDidntLoad: Story = { args: { skills: NOT_LOADED }, globals: { theme: 'dark' } }

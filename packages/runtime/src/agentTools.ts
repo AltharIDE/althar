@@ -1,10 +1,23 @@
-import { execFile } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { execFile, spawn } from 'node:child_process'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
-import type { AgentTools, SyncSettle, SyncView, ToolFailure, ToolHere, ToolRole, ToolRow, ToolSignIn, ToolSource } from '@althar/contracts'
+import type {
+  AgentTools,
+  SetupPart,
+  SyncSettle,
+  SyncView,
+  ToolFailure,
+  ToolHere,
+  ToolRole,
+  ToolRow,
+  ToolSignIn,
+  ToolSource,
+} from '@althar/contracts'
 import {
   agentServers,
+  cleanUp,
   type HeldSkill,
   type McpServer,
   referenceOf,
@@ -20,6 +33,7 @@ import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig, type RuntimeOptions } from './Config'
 import { type HealthRecord, readHealth } from './mcpHealth'
+import { type Converse, type Part, readSetup, setupParts } from './setupHealth'
 import * as mcp from './mcpSync'
 import * as skills from './skillSync'
 import { describe as describeInstall } from './Skills'
@@ -184,6 +198,13 @@ const failedOf = (health: HealthRecord, name: string, agents: ReadonlyArray<Sync
     })
     .reduce<ToolFailure | null>((latest, each) => (latest === null || each.at > latest.at ? each : latest), null)
 
+/** Why an agent doesn't load one of the person's skills, where one doesn't: the one that leaves it out first, then the one that ignores what it sets. */
+const skillFailureOf = (parts: ReadonlyArray<Part>, name: string): ToolFailure | null => {
+  const found = parts.filter((part) => part.kind === 'skill' && part.name === name)
+  const first = found.find((part) => part.agent === 'codex') ?? found[0]
+  return first === undefined ? null : { agent: first.by, why: first.why, at: first.at }
+}
+
 const NO_SIGN_IN: ToolRow['signIn'] = { claude: 'unknown', codex: 'unknown', opencode: 'unknown' }
 
 export const FILES: Readonly<Record<SyncedAgent, string>> = {
@@ -254,6 +275,53 @@ export const runIn =
           })
         resolve({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 1, output: `${stdout}${stderr}` })
       })
+    })
+
+/** The most a command a setup check talks to may print, and how long it is given to answer. */
+const PRINTED_AT_MOST = 4 * 1024 * 1024
+const CONVERSE_FOR = 30_000
+
+/**
+ * Talks to one of the person's agents' own commands, as a setup check asks it what it loads (`setupHealth.ts`): in
+ * an empty folder of its own, in the same environment sync runs them in, stopped once it has said enough or its time is
+ * up. One that isn't on this computer gives undefined.
+ */
+export const converseIn =
+  (homeDir: string, env: Readonly<Record<string, string | undefined>> = process.env): Converse =>
+  (command, args, lines, done, extra = {}) =>
+    new Promise((resolve) => {
+      let cwd: string
+      try {
+        cwd = mkdtempSync(join(tmpdir(), 'althar-setup-'))
+      } catch {
+        return resolve(undefined)
+      }
+      let printed = ''
+      let settled = false
+      const child = spawn(command, [...args], { cwd, env: { ...commandEnv(homeDir, env), ...extra }, stdio: ['pipe', 'pipe', 'ignore'] })
+      const finish = (value: string | undefined) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        child.kill()
+        Effect.runFork(cleanUp(cwd, 'the empty folder a setup check ran in'))
+        resolve(value)
+      }
+      // oxlint-disable-next-line althar/one-clock -- a child's time to answer is kept by Node, outside any effect.
+      const timer = setTimeout(() => finish(printed), CONVERSE_FOR)
+      child.on('error', (error: NodeJS.ErrnoException) => finish(error.code === 'ENOENT' ? undefined : printed))
+      child.on('close', () => finish(printed))
+      child.stdin.on('error', () => undefined)
+      child.stdout.on('data', (chunk: Buffer) => {
+        printed += chunk.toString('utf8')
+        if (printed.length > PRINTED_AT_MOST || done(printed)) finish(printed)
+      })
+      // Its input stays open: Claude Code in print mode stops reading at its end, before it has answered.
+      child.stdin.write(
+        lines(cwd)
+          .map((line) => `${line}\n`)
+          .join(''),
+      )
     })
 
 const ioOf = (configs: NonNullable<RuntimeOptions['agentConfigs']>, now: string): mcp.SyncIo & skills.SkillIo => ({
@@ -585,6 +653,8 @@ export const agentTools = (projectId: string | null) =>
         skillSync: empty,
         places: [],
         checkedAt: null,
+        setup: [],
+        setupCheckedAt: null,
       } satisfies AgentTools
     // While a switch is on, what the person changed in their agents since is brought in step as Settings reads them.
     yield* refresh(io)
@@ -665,7 +735,13 @@ export const agentTools = (projectId: string | null) =>
     }
     const skillRecord = skills.readSkillRecord(io)
     const skillPlan = skills.planSkills(io, skillRecord)
-    const skillRows: Array<ToolRow> = (yield* skillsFound(io, roles, projectId, (yield* RuntimeConfig).skills?.root)).map((one) => one.row)
+    const parts = setupParts(io)
+    const skillRows: Array<ToolRow> = (yield* skillsFound(io, roles, projectId, (yield* RuntimeConfig).skills?.root)).map((one) =>
+      one.row.repository === null &&
+      one.row.sources.every((source) => source.from === 'claude' || source.from === 'codex' || source.from === 'opencode')
+        ? { ...one.row, failed: skillFailureOf(parts, one.row.name) }
+        : one.row,
+    )
     const skillSync: SyncView = {
       on: skillRecord.on,
       settle: skillPlan.settle.map((each) => ({
@@ -697,6 +773,9 @@ export const agentTools = (projectId: string | null) =>
       skillSync,
       places,
       checkedAt: health.checkedAt,
+      // A skill's is on its own tile, where the person looks for it.
+      setup: parts.filter((part) => part.kind !== 'skill').map(({ at: _at, ...part }): SetupPart => part),
+      setupCheckedAt: readSetup(io).checkedAt,
     } satisfies AgentTools
   })
 

@@ -1079,6 +1079,8 @@ export const agentTools: AgentTools = {
     { agent: 'opencode', file: '~/.config/opencode/opencode.json', folder: '~/.config/opencode/skills' },
   ],
   checkedAt: null,
+  setup: [],
+  setupCheckedAt: null,
 }
 
 export const fakeClient = (overrides: Partial<Client> = {}) => {
@@ -1207,6 +1209,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setToolInProject: vi.fn(async () => {}),
     getServerDetail: vi.fn(async (name: string) => ({ name, runs: '', files: [], tools: null, toolsWhy: null })),
     checkServers: vi.fn(async () => {}),
+    checkSetup: vi.fn(async () => {}),
     addServer: vi.fn(async () => {}),
     removeServer: vi.fn(async () => {}),
     setToolSync: vi.fn(async () => {}),

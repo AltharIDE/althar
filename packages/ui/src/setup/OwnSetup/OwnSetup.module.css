@@ -1,0 +1,58 @@
+/* One row a part that didn't load: the danger mark, then the file in mono over why, in the secondary ink. */
+.group {
+  min-width: 0;
+}
+.list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr);
+  column-gap: 10px;
+  row-gap: 3px;
+  align-items: baseline;
+  padding: 10px 0;
+}
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+.mark {
+  grid-row: 1 / span 2;
+  align-self: start;
+  margin-top: 2px;
+  color: var(--danger);
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.path {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.dir {
+  color: var(--t-3);
+}
+.name {
+  color: var(--t-1);
+}
+.own {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.why {
+  grid-column: 2;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+}

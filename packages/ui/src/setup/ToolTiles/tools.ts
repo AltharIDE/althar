@@ -84,6 +84,8 @@ export interface SkillTileModel {
   from: string | null
   /** A newer version of one added from GitHub waits there. */
   update: boolean
+  /** One of the person's own that an agent doesn't load, or loads without what it sets: why, and the agent that said so (null where Althar read it). */
+  failed?: { agent: string | null; why: string } | null
 }
 
 /** One agent's own file, as it keeps an opened server. */

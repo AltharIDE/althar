@@ -14,7 +14,9 @@ import { useServices } from '../../data/services'
  * person's own files and only it knows what went through; what didn't is said
  * in its words. As the servers open, each agent is asked through its own
  * command how its servers stand (signed in, failed to start); that reads, and
- * what it says shows on the tiles when it is back.
+ * what it says shows on the tiles when it is back. As the skills or the agents
+ * open, Claude Code and Codex are asked the same way what of the person's own
+ * setup they load.
  */
 
 export interface AgentToolsModel {
@@ -42,7 +44,7 @@ const said = (error: unknown) => (error instanceof Error ? error.message : Strin
 /** The agents are asked how their servers stand at most this often as the person opens the servers. */
 const CHECK_EVERY = 5 * 60_000
 
-export const useAgentTools = (options: { readonly check?: boolean } = {}): AgentToolsModel => {
+export const useAgentTools = (options: { readonly check?: boolean; readonly setup?: boolean } = {}): AgentToolsModel => {
   const { client, cache } = useServices()
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -60,6 +62,18 @@ export const useAgentTools = (options: { readonly check?: boolean } = {}): Agent
     if (age < CHECK_EVERY) return
     client.checkServers().then(reload, () => undefined)
   }, [client, enabled, last, options.check, reload])
+
+  // What of the person's own setup their agents load: asked as the skills or the agents open, at most as often. Their
+  // commands start and answer without a turn, a hook or a server, so it is quick; the marks show once it is back.
+  const setupChecked = useRef<number | null>(null)
+  const setupLast = query.data?.setupCheckedAt ?? null
+  useEffect(() => {
+    if (options.setup !== true || !enabled || setupChecked.current !== null) return
+    const age = setupLast === null ? Number.POSITIVE_INFINITY : Date.now() - new Date(setupLast).getTime()
+    setupChecked.current = Date.now()
+    if (age < CHECK_EVERY) return
+    client.checkSetup().then(reload, () => undefined)
+  }, [client, enabled, setupLast, options.setup, reload])
 
   const after = useCallback(
     (change: Promise<unknown>) => {

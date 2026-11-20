@@ -150,6 +150,17 @@ describe('what Settings reads', () => {
           ['notes', ''],
         ],
       )
+      // Codex leaves out a skill with no frontmatter, which Claude Code loads: its tile says why; the rest load.
+      assert.deepStrictEqual(
+        tools.skills.map((one) => [one.name, one.failed === null ? null : { agent: one.failed.agent, why: one.failed.why }]),
+        [
+          ['bare', null],
+          ['design-review', null],
+          ['notes', { agent: null, why: 'It has no frontmatter, so Codex leaves it out.' }],
+        ],
+      )
+      // A skill's is on its own tile, not among the rest of the setup.
+      assert.deepStrictEqual(tools.setup, [])
       assert.deepStrictEqual(tools.skillSync.settle, [
         {
           kind: 'differs',

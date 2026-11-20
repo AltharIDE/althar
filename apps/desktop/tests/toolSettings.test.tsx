@@ -372,3 +372,67 @@ describe('Settings › Skills', () => {
     expect(await main().findByRole('button', { name: /^impeccable/ })).toBeTruthy()
   })
 })
+
+describe('the person’s own setup', () => {
+  const part = (over: Partial<AgentTools['setup'][number]> = {}): AgentTools['setup'][number] => ({
+    agent: 'claude',
+    kind: 'agent',
+    name: 'review-agent.md',
+    where: '~/.claude/agents/review-agent.md',
+    why: 'Its frontmatter can’t be read, so Claude Code leaves it out.',
+    by: null,
+    ...over,
+  })
+
+  it('marks a skill an agent doesn’t load, first, with why when it is opened, and asks the agents what they load', async () => {
+    const fine = row('impeccable', { home: '~/.claude/skills/impeccable' })
+    const left = row('release-notes', {
+      home: '~/.agents/skills/release-notes',
+      failed: { agent: 'codex', why: 'Codex leaves it out: missing field `description`', at: '2026-11-08T09:00:00.000Z' },
+    })
+    const { client } = fakeClient({ getAgentTools: vi.fn(async () => tools({ skills: [fine, left] })) })
+    withServices(<Settings at="skills" />, client)
+    await waitFor(() => expect(main().getAllByRole('switch')[0]?.getAttribute('aria-label')).toBe('release-notes'))
+    expect(main().getByText('Didn’t load')).toBeTruthy()
+    expect(client.checkSetup).toHaveBeenCalledTimes(1)
+    await userEvent.click(main().getByRole('button', { name: /^release-notes/ }))
+    expect(await main().findByText('Codex leaves it out: missing field `description`')).toBeTruthy()
+  })
+
+  it('lists under an agent’s accounts each part of it that doesn’t load, and none of another agent’s', async () => {
+    const setup = [
+      part(),
+      part({
+        kind: 'hook',
+        name: 'hooks.PreToolUse',
+        where: '~/.claude/settings.json',
+        why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”.',
+      }),
+      part({
+        agent: 'codex',
+        kind: 'config',
+        name: 'config.toml',
+        where: '~/.codex/config.toml',
+        why: 'Invalid configuration.',
+        by: 'codex',
+      }),
+    ]
+    const { client } = fakeClient({ getAgentTools: vi.fn(async () => tools({ setup })) })
+    withServices(<Settings at="agents" />, client)
+    await userEvent.click(await main().findByRole('tab', { name: /^Claude Code/ }))
+    const group = await main().findByRole('region', { name: 'Didn’t load' })
+    expect(within(group).getByText('Its frontmatter can’t be read, so Claude Code leaves it out.')).toBeTruthy()
+    expect(within(group).getByText('hooks.PreToolUse')).toBeTruthy()
+    expect(within(group).queryByText('Invalid configuration.')).toBeNull()
+    expect(within(group).getAllByRole('listitem')).toHaveLength(2)
+    expect(client.checkSetup).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows nothing while all of it loads', async () => {
+    const { client } = fakeClient({ getAgentTools: vi.fn(async () => tools()) })
+    withServices(<Settings at="agents" />, client)
+    await waitFor(() => expect(client.getAgentTools).toHaveBeenCalled())
+    await waitFor(() => expect(client.checkSetup).toHaveBeenCalled())
+    expect(screen.queryByRole('region', { name: 'Didn’t load' })).toBeNull()
+  })
+})

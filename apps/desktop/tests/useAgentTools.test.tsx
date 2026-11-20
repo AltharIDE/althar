@@ -168,3 +168,21 @@ describe('how the servers stand', () => {
     expect(result.current.loadFailed).toBe(false)
   })
 })
+
+describe('what of the person’s own setup loads', () => {
+  it('is asked of the agents as the skills or the agents open, once, and not again while it was a few minutes ago', async () => {
+    const { client } = fakeClient({ getAgentTools: vi.fn(async () => tools()) })
+    const { result, rerender } = hook(client, { setup: true })
+    await waitFor(() => expect(client.checkSetup).toHaveBeenCalledTimes(1))
+    rerender()
+    await waitFor(() => expect(result.current.tools).toBeDefined())
+    expect(client.checkSetup).toHaveBeenCalledTimes(1)
+    expect(client.checkServers).not.toHaveBeenCalled()
+
+    const lately = new Date(Date.now() - 60_000).toISOString()
+    const fresh = fakeClient({ getAgentTools: vi.fn(async () => tools({ setupCheckedAt: lately })) })
+    const again = hook(fresh.client, { setup: true })
+    await waitFor(() => expect(again.result.current.tools?.setupCheckedAt).toBe(lately))
+    expect(fresh.client.checkSetup).not.toHaveBeenCalled()
+  })
+})
