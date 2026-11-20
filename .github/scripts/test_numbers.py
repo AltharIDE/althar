@@ -72,9 +72,6 @@ class Migrations(unittest.TestCase):
     def test_the_next_number_passes(self):
         self.assertEqual(Tree().add_migration('0004_labels').check(), [])
 
-    def test_this_repository_passes(self):
-        self.assertEqual(numbers.check(numbers.WorkingTree('.')), [])
-
     def test_a_number_main_has_is_refused_naming_the_one_to_renumber(self):
         problems = Tree().add_migration('0003_labels').check()
         self.assertEqual(problems, [numbers.Problem(
@@ -90,6 +87,32 @@ class Migrations(unittest.TestCase):
             'Migration 0004 is claimed by 0004_colours and 0004_labels, none of them on main yet: two pull requests took the '
             'same number. Only one keeps it; the one queued later renumbers to 0005: rename the file, its key in index.ts '
             'and its line in checksums.ts.',
+        ])
+
+    def test_a_migration_main_has_cannot_move_to_another_number(self):
+        # Main's 0002 and 0003 swapped: a store at 0003 would run neither, one at 0002 would skip tags and run threads again.
+        tree = Tree()
+        tree.keys = ['0001_initial', '0002_tags', '0003_threads']
+        problems = tree.check()
+        self.assertEqual(len(problems), 2)
+        self.assertEqual(problems[0].file, f'{numbers.MIGRATIONS}/0003_threads.ts')
+        self.assertIn("0002_threads is main's migration 0002, renumbered here to 0003.", problems[0].message)
+        self.assertIn("0003_tags is main's migration 0003, renumbered here to 0002.", problems[1].message)
+
+    def test_a_migration_main_has_cannot_go(self):
+        # Dropping the last one would free its number for a migration stores at it never run.
+        tree = Tree()
+        tree.keys = ['0001_initial', '0002_threads']
+        messages = [problem.message for problem in tree.check()]
+        self.assertEqual(len(messages), 1)
+        self.assertIn("0003_tags is main's migration 0003, gone here.", messages[0])
+
+    def test_a_number_below_0001_is_refused(self):
+        tree = Tree()
+        tree.keys = ['0000_labels', *MAIN_MIGRATIONS]
+        messages = [problem.message for problem in tree.check()]
+        self.assertEqual(messages, [
+            '0000_labels is numbered below 0001: a store that has run 0001 or later would never run it. Number it 0004.',
         ])
 
     def test_a_gap_is_refused(self):

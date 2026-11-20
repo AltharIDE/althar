@@ -89,6 +89,24 @@ def check_migrations(tree, on_main):
         'Migration', by_number, main_keys, following, RENUMBER_MIGRATION, lambda key: f'{MIGRATIONS}/{key}.ts', lambda n: f'{n:04d}'
     )
 
+    # A store that ran a migration main has never runs it again, nor anything numbered below it: main's stay as they are.
+    for key in sorted(main_keys - set(keys)):
+        moved = [other for other in keys if other[5:] == key[5:]]
+        problems.append(Problem(
+            f'{MIGRATIONS}/{moved[0] if moved else key}.ts',
+            f'{key} is main\'s migration {key[:4]}, '
+            + (f'renumbered here to {moved[0][:4]}. ' if moved else 'gone here. ')
+            + 'A migration main has keeps its name and number: a store that ran it would never run what takes its place, '
+            'and would run it again under a new number. Put it back, and give a new migration the next number.',
+        ))
+
+    for number in sorted(number for number in by_number if number < 1):
+        for key in by_number[number]:
+            problems.append(Problem(
+                f'{MIGRATIONS}/{key}.ts',
+                f'{key} is numbered below 0001: a store that has run 0001 or later would never run it. Number it {following}.',
+            ))
+
     missing = [number for number in range(1, max(by_number) + 1) if number not in by_number]
     if missing:
         problems.append(Problem(
