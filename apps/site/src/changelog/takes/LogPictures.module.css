@@ -756,6 +756,7 @@
 .hoLog { display: grid; gap: 0.25em; margin: 0; padding: 0.6em 0.7em; border-radius: 0.45em; background: #0f0e0c; list-style: none; font-family: var(--mono); font-size: 0.76em; letter-spacing: 0; color: var(--t2); }
 /* Every line keeps its room from the start, wrapping where it must, so the box never grows as they come in. */
 .hoLog li { overflow-wrap: anywhere; line-height: 1.4; opacity: 0; transform: translateY(0.3em); transition: opacity 0.45s, transform 0.55s var(--ease-out); }
+.hoLog li span { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 .hoLog li[data-typed='true'] { color: var(--t1); }
 .hoLog li[data-typed='true']::before { content: '$ '; color: var(--t4); }
 .hoLog li[data-shown='true'] { opacity: 1; transform: none; }

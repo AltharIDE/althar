@@ -1,6 +1,6 @@
 import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, undoTurnText } from '@althar/ui'
 import { sealSvg } from '@althar/ui/seal'
-import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, Fragment as Piece, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Agent, AGENTS } from '../../content/agents'
 import { Fragment } from '../../home/bodies/desktop/Fragment'
@@ -1185,14 +1185,19 @@ const ON_HOME = [
   { name: 'Payout export', agent: Agent.Claude, done: null },
 ] as const
 
-/** The home's command line: what you type, what it answers, and the beat each line comes on. */
+/** The worker's and project's IDs, and the run's, in the forms the home gives them. */
+const RUNNER = 'wrk_5b0e2c7a91d34f68a2c1e9b07d4f3a16'
+const TALLY = 'proj_8c41f9e2a07b4d35b6e1c2f08a9d7e43'
+const ATTEMPT = 'wpr_3f9c1a7e5d2b4c80a6e1f94b7c02d58e'
+
+/** The home's command line, as its preview is run today: what you type, what it answers, and the beat each line comes on. */
 const CHECK = [
-  { at: 2, line: 'althar-host worker-project-run --command-name check', typed: true },
-  { at: 3, line: 'Project run queued as run_7f3k', typed: false },
-  { at: 3, line: 'althar-host worker-log --attempt-id run_7f3k', typed: true },
+  { at: 2, line: `althar-host worker-project-run --worker-id ${RUNNER} --project-id ${TALLY} --command-name check`, typed: true },
+  { at: 3, line: `Project run queued as ${ATTEMPT}`, typed: false },
+  { at: 3, line: `althar-host worker-log --attempt-id ${ATTEMPT}`, typed: true },
   { at: 4, line: '✓ 23 passed  refunds, settlement', typed: false },
-  { at: 5, line: 'althar-host worker-result --attempt-id run_7f3k', typed: true },
-  { at: 5, line: 'run_7f3k succeeded', typed: false },
+  { at: 5, line: `althar-host worker-result --attempt-id ${ATTEMPT}`, typed: true },
+  { at: 5, line: `${ATTEMPT} succeeded`, typed: false },
 ] as const
 
 function Home() {
@@ -1310,7 +1315,13 @@ function Home() {
             <ol className={p.hoLog}>
               {CHECK.map((line) => (
                 <li key={line.line} data-shown={at(line.at)} data-typed={line.typed}>
-                  {line.line}
+                  {/* Each word whole: a line breaks between its arguments, never inside a flag or an ID. */}
+                  {line.line.split(' ').map((word, i) => (
+                    <Piece key={i}>
+                      {i > 0 && ' '}
+                      <span>{word}</span>
+                    </Piece>
+                  ))}
                 </li>
               ))}
             </ol>

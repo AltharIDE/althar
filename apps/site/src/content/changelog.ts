@@ -139,7 +139,7 @@ export const RELEASES: readonly Release[] = [
       { kind: 'fixed', text: 'Keep for later is offered for every kind of finished task again.' },
       {
         kind: 'fixed',
-        text: 'A task card in the thread says handed-back work as the board does, Not ready to accept or Merge conflict, rather than Needs you.',
+        text: 'A ready task’s card in the thread says where it stands as the board does: Checks running, Not ready to accept with the check that failed, or Merge conflict, rather than Needs you.',
       },
       { kind: 'fixed', text: 'Failing checks always reach the lead or you, never a card saying Fixing the checks while nobody was told.' },
       { kind: 'fixed', text: 'Runs a task kept stop when its worktree is cleaned up.' },
