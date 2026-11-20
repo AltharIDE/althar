@@ -2430,6 +2430,8 @@ export const Queued = Schema.Struct({
   busy: Schema.Int,
   atOnce: Schema.Int,
   holders: Schema.optional(Schema.Array(Holder)),
+  configured: Schema.optional(Schema.Int),
+  offline: Schema.optional(Schema.Boolean),
 })
 export const WorkPlaces = Schema.Struct({
   ...Queued.fields,

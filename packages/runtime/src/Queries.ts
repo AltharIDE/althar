@@ -2306,7 +2306,7 @@ export class Queries extends Context.Service<
       const queuedNow = (taskId: string) =>
         Effect.map(workPlaces, (now) => {
           const holders = now.holders.filter((holder) => holder.taskId !== taskId)
-          return { busy: holders.length, atOnce: now.atOnce, holders }
+          return { ...now, busy: holders.length, holders }
         })
 
       /** A project's line, read once in a read: the cards that read it at once share it. */

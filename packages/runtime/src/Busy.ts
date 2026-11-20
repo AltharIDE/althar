@@ -412,8 +412,7 @@ export class Busy extends Context.Service<
         return { count: own ?? machine.count, own, machine } satisfies AtOnce
       })
 
-      // Automatic pacing belongs to the machine's default. An explicit number is the person's admission limit.
-      const capacity = ({ count, own }: AtOnce) => own ?? pressure.capacity(count)
+      const capacity = ({ count }: AtOnce) => pressure.capacity(count)
       const admission = Effect.map(atOnce, capacity)
       /**
        * Reads the CPU of what sessions left running, and keeps whether each is at work. A server that sits idle isn't:
@@ -478,7 +477,9 @@ export class Busy extends Context.Service<
           UNION ALL
           SELECT c.task_id, t.id, 0, NULL FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
           WHERE c.state = 'resolving' AND c.waiting IS NULL
-            AND NOT EXISTS (SELECT 1 FROM turn_deliveries d WHERE d.thread_id = t.id AND d.requested_at >= c.updated_at)
+            -- A round reserves its place until the turn carrying its ask takes over.
+            AND NOT EXISTS (SELECT 1 FROM user_inputs i JOIN turn_delivery_inputs di ON di.user_input_id = i.id
+              WHERE i.thread_id = t.id AND i.sequence = c.asked_sequence)
           UNION ALL
           -- A helper starting takes a place of its own, by its thread (ADR-087).
           SELECT h.task_id, h.id, h.kind = 'step' AND coalesce(h.node_key, '') NOT LIKE 'helper:%',
@@ -517,20 +518,21 @@ export class Busy extends Context.Service<
             )
             .map((task) => task.id),
         )
-        // An open question or permission releases the agent's place immediately. The person's answer can always go first.
+        // A turn waiting on the person releases its place. An open call can outlive the session or be set aside.
         const asking = new Set(
-          (yield* sql<{ threadId: string | null }>`
-            SELECT json_extract(payload, '$.threadId') AS thread_id FROM attention_requests WHERE kind = 'question'
+          (yield* sql<{ sessionId: string | null }>`
+            SELECT json_extract(payload, '$.sessionId') AS session_id FROM attention_requests WHERE kind = 'question'
               AND (state = 'open'
                 OR (state = 'answered' AND json_extract(payload, '$.waitsForPlace') IS NOT NULL))
             UNION ALL
-            SELECT s.thread_id FROM attention_requests q JOIN permission_requests r ON r.id = q.permission_request_id
-            JOIN provider_sessions s ON s.id = r.provider_session_id
-            WHERE q.kind = 'permission' AND q.state = 'open'`).map((row) => row.threadId),
+            SELECT r.provider_session_id FROM attention_requests q JOIN permission_requests r ON r.id = q.permission_request_id
+            WHERE q.kind = 'permission' AND q.state = 'open' AND coalesce(json_extract(q.payload, '$.setAside'), 0) != 1`).map(
+            (row) => row.sessionId,
+          ),
         )
         const holders = new Map<string, Holder>()
         const take = (taskId: string, review: boolean, threadId: string | null, reason: Holder['reason'], helper?: string) => {
-          if (chatting({ taskId, review, helper }, scratch) || (threadId !== null && asking.has(threadId))) return
+          if (chatting({ taskId, review, helper }, scratch)) return
           const key = keyOf(taskId, review, helper)
           const held = holders.get(key)
           if (held === undefined || reason === 'turn' || (held.threadId === null && reason === 'starting'))
@@ -567,8 +569,9 @@ export class Busy extends Context.Service<
         )
         for (const session of taskSessions) {
           const helper = session.helper ? session.threadId : undefined
-          if (session.turnRunning) take(session.taskId, session.reviewer, session.threadId, 'turn', helper)
-          else if (session.acceptingTurns !== false && told.has(session.threadId))
+          if (session.turnRunning && !asking.has(session.sessionId))
+            take(session.taskId, session.reviewer, session.threadId, 'turn', helper)
+          else if (!session.turnRunning && session.acceptingTurns !== false && told.has(session.threadId))
             take(session.taskId, session.reviewer, session.threadId, 'starting', helper)
           else if (!finished.has(session.taskId) && session.background && (sampled.get(session.threadId)?.working ?? true))
             take(session.taskId, session.reviewer, session.threadId, 'background', helper)
@@ -706,13 +709,7 @@ export class Busy extends Context.Service<
                 yield* Queue.take(pressureWakes)
                 return
               }
-              const settings = yield* atOnce
-              if (settings.own !== null) {
-                pressure.reset()
-                yield* Queue.take(pressureWakes)
-                return
-              }
-              const configured = settings.count
+              const configured = (yield* atOnce).count
               const reading = yield* observe
               warned = false
               if (pressure.observe(reading, configured, active.length)) yield* wake

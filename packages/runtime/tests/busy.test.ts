@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ActorId, ProjectId } from '@althar/domain'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Fiber, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy, type Waiter } from '../src/Busy'
@@ -13,7 +13,9 @@ import type { BusyOptions } from '../src/Config'
 import { touchTask } from '../src/cards'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
+import { Permissions } from '../src/Permissions'
 import { Plans } from '../src/Plans'
+import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Questions } from '../src/Questions'
 import { Runs } from '../src/Runs'
@@ -450,6 +452,52 @@ describe('Agents at once', () => {
       )
       yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
     }).pipe(Effect.provide(machine(1, ':memory:', { every: Duration.minutes(1) }))),
+  )
+
+  it.live('counts a working lead again when its open permission is set aside', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      yield* (yield* Policies).set(
+        projectId,
+        { permissions: 'ask', allowEverything: false, commands: [{ pattern: 'git status', decision: 'ask' }] },
+        (yield* Instance).personId,
+      )
+      const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
+      yield* until(turnsOn(first.threadId), (rows) => rows.some((row) => row.state === 'delivered'))
+      const sessions = yield* Sessions
+      const busy = yield* Busy
+      assert.strictEqual((yield* busy.now).holders.find((holder) => holder.taskId === first.taskId)?.reason, 'turn')
+      const asked = yield* Effect.forkChild(
+        sessions.askPermission(first.threadId, {
+          sessionId: 'fake',
+          toolCallId: 'waiting-permission',
+          title: 'Run git status',
+          kind: 'execute',
+          rawInput: { command: 'git status' },
+          paths: [],
+          options: [
+            { optionId: 'allow_once', name: 'Yes', kind: 'allow_once' },
+            { optionId: 'decline', name: 'No', kind: 'reject_once' },
+          ],
+        }),
+      )
+      const queries = yield* Queries
+      const [call] = yield* Effect.raceFirst(
+        until(
+          Effect.map(queries.thread(first.threadId), (thread) => thread.attention),
+          (calls) => calls.length === 1,
+        ),
+        Fiber.join(asked).pipe(Effect.flatMap((decision) => Effect.die(new Error(`Permission answered too soon: ${decision.reason}`)))),
+      )
+      if (call === undefined) return yield* Effect.die(new Error('The permission did not open'))
+      assert.strictEqual((yield* busy.now).busy, 0)
+      assert.isTrue(yield* (yield* Permissions).setAside(call.id))
+      assert.strictEqual((yield* Fiber.join(asked)).decision, 'reject')
+      assert.isTrue((yield* queries.thread(first.threadId)).attention.find((attention) => attention.id === call.id)?.setAside)
+      assert.strictEqual((yield* busy.now).holders.find((holder) => holder.taskId === first.taskId)?.reason, 'turn')
+      const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+      assert.strictEqual(second.outcome, 'waiting')
+    }).pipe(Effect.provide(machine(1))),
   )
 
   it.live('tell the person’s answer to its lead at once, though every place is taken', () =>

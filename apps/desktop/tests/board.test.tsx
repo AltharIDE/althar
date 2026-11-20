@@ -436,23 +436,19 @@ describe('the board’s lanes', () => {
         expect(holders.getByText('Reviewer · Starting')).toBeTruthy()
       })
 
-      it('moves into Running when admitted while the pointer is in Up next', async () => {
-        const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
-        // Its turn has its place: it is at work.
-        const after = lanesOf(
+      it('moves into Running on its admission update alone while the pointer is in Up next', async () => {
+        const getBoard = vi.fn(async () => board({ tasks: [working, continuing('x', 1)], calls: [] }))
+        const { client, emit } = fakeClient({ getBoard })
+        withServices(<Project />, client)
+        await pickLayout('Conversation')
+        await screen.findByRole('region', { name: 'The project’s work' })
+        const region = (name: string) => within(screen.getByRole('region', { name }))
+        await userEvent.hover(await region('Up next').findByText('Going on x'))
+        getBoard.mockResolvedValue(
           board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),
         )
-        const services = servicesFor(fakeClient().client)
-        const view = (lanes: typeof before) => (
-          <ServicesProvider value={services}>
-            <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />
-          </ServicesProvider>
-        )
-        const { rerender } = render(view(before))
-        const region = (name: string) => within(screen.getByRole('region', { name }))
-        await userEvent.hover(region('Up next').getByText('Going on x'))
-        rerender(view(after))
-        expect(region('Running').getByText('Going on x')).toBeTruthy()
+        await act(async () => emit(changed('card', 'x', 'th-x')))
+        expect(await region('Running').findByText('Going on x')).toBeTruthy()
         expect(region('Up next').queryByText('Going on x')).toBeNull()
       })
       it('shows admitted work in Running when a kept board reopens', async () => {

@@ -1156,7 +1156,7 @@ export function BoardView({
   now: string
   /** Opens a task, by its thread. */
   onOpen: (threadId: string) => void
-  /** Loads the next page of settled work; absent where every settled task is already lanes. */
+  /** Loads the next page of settled work; absent where every settled task is already shown. */
   onShowOlder?: () => void
   /** Closing a settled task's pull request still open on its host, from its row; absent where it can't be. */
   closing?: ClosingPullRequests
@@ -1164,7 +1164,7 @@ export function BoardView({
   actions?: CardActions
   /** Putting the line of tasks waiting for a free agent in the person's order; without it, the line stays as it is. */
   line?: LineActions
-  /** The lanes the person collapsed and opened, where they are kept; without them, the board keeps them while it is lanes. */
+  /** The lanes the person collapsed and opened, where they are kept; without them, the board keeps them while it is shown. */
   folds?: BoardFolds
   onFoldsChange?: (folds: BoardFolds) => void
   /** Puts the person in the coordinator's composer, from Up next while the board has nothing on it; without it, Up next says how work gets here and offers nothing to press. */
@@ -1313,7 +1313,7 @@ export function BoardView({
       label={text.label}
       {...(folds === undefined ? {} : { folds })}
       {...(onFoldsChange === undefined ? {} : { onFoldsChange })}
-      // What moves its cards: the lanes as lanes, the shelf Settled shows, and what grows or shrinks a card (a press under
+      // What moves its cards: the lanes as shown, the shelf Settled shows, and what grows or shrinks a card (a press under
       // way, what failed); not the clock, nor anything drawn again around it.
       version={[
         lanes,

@@ -31,8 +31,8 @@ its installs, builds and tests easily takes several GB and many cores.
   number that fits.
 - **The person can set their own number,** from 1 to 16, in Settings, which
   says the number and why ("4: this Mac has 16 GB and 10 cores"). It is kept
-  per computer, not per project, since the computer is what runs out. It overrides automatic
-  admission pacing and takes effect at once. When it is lowered, what is at work carries on and nothing
+  per computer, not per project, since the computer is what runs out. It takes
+  effect at once. When it is lowered, what is at work carries on and nothing
   new starts until there is room. When it is raised, what waits starts.
 - **The number limits what Althar starts by itself.** It is not a hard
   ceiling. What the person does can take the computer past it for a while (see
@@ -117,7 +117,9 @@ waiting round keeps what it will ask its lead. After a restart they wait on in
 the same order. A waiting task can be stopped, and resumed it waits again.
 While its first step waits, its plan can still be changed. Its card and view
 say what it waits for, such as "Waiting: 4 of 4 agents busy on this Mac". A
-waiting task is left out of its own count, so it never waits behind itself. Up next shows the machine-wide count and lists each occupied place while work waits.
+waiting task is left out of its own count, so it never waits behind itself.
+Up next shows the machine-wide count and any temporary limit from host pressure,
+and lists each occupied place while work waits.
 
 ## The quick lane
 
@@ -429,4 +431,4 @@ how it stands.
 
 ADR-106 gives each provider session a worker identity. Commands and ordinary child processes share that worker's CPU allocation where the platform supports it: delegated CPU groups on Linux, optional shared CPU-weight jobs on Windows, and background policy on macOS. Native tool calls from the same session share an identity. Background priority remains the fallback, so a new language needs no scheduler adapter or resource setup.
 
-With the machine default, sustained contention or memory pressure temporarily paces additional autonomous work through the existing queue; recovery restores admission within the person's configured cap. Existing builds keep running, the saved setting stays intact, and direct user actions retain their priority. Idle CPU remains available. External services can escape a worker's process family, so this is automatic best-effort scheduling rather than a hard memory or universal CPU guarantee. [ADR-106](proposed/106-builds-and-tests-share-a-host-resource-budget.md) describes the controls, failure handling and native validation.
+Sustained contention or memory pressure temporarily paces additional autonomous work through the existing queue; recovery restores admission within the person's configured cap. Existing builds keep running, the saved setting stays intact, and direct user actions retain their priority. Idle CPU remains available. External services can escape a worker's process family, so this is automatic best-effort scheduling rather than a hard memory or universal CPU guarantee. [ADR-106](proposed/106-builds-and-tests-share-a-host-resource-budget.md) describes the controls, failure handling and native validation.

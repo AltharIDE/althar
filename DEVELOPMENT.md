@@ -92,7 +92,7 @@ Each app and package has its own `ARCHITECTURE.md` for what is specific to it. B
 
 ### Background work shares the machine
 
-Althar automatically runs agent process families at background priority and uses CPU weights where delegated Linux groups or Windows jobs permit them; macOS also attempts its background scheduling policy. Native commands from one session share a worker identity, independent of the language or runner. With the machine default, sustained machine pressure temporarily reduces new autonomous admissions. A manually set cap takes effect immediately. Missing OS controls keep the normal priority and admission fallback. No project worker flags or extra resource setup are required. [ADR-106](docs/decisions/proposed/106-builds-and-tests-share-a-host-resource-budget.md) describes the platform limits and tests.
+Althar automatically runs agent process families at background priority and uses CPU weights where delegated Linux groups or Windows jobs permit them; macOS also attempts its background scheduling policy. Native commands from one session share a worker identity, independent of the language or runner. Sustained machine pressure temporarily reduces new autonomous admissions and recovery restores them, without rewriting the agent cap or killing running builds. Missing OS controls keep the normal priority and admission fallback. No project worker flags or extra resource setup are required. [ADR-106](docs/decisions/proposed/106-builds-and-tests-share-a-host-resource-budget.md) describes the platform limits and tests.
 
 ### Tests that hold
 
