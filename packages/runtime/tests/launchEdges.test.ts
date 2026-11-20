@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { ProjectId } from '@althar/domain'
@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { Launches } from '../src/Launches'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
-import { repository, runtime } from './support'
+import { repository, runtime, until } from './support'
 
 /*
  * The project run by Althar itself, where launches.test.ts and
@@ -46,6 +46,22 @@ describe('running the project', () => {
       const started = yield* launches.start({ projectId, taskId: null, threadId: null })
       assert.deepInclude(started, { taskId: null, where: 'main', ended: null })
       yield* launches.stop(started.id)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live.skipIf(process.platform === 'win32')('stops a server if another directory replaces its run copy', () =>
+    Effect.gen(function* () {
+      const launches = yield* Launches
+      const { projectId } = yield* open(running('node -e "setInterval(() => {}, 1000)"'))
+      const started = yield* launches.start({ projectId, taskId: null, threadId: null })
+      const { path: folder } = yield* launches.terminalFolder({ projectId, taskId: null, launchId: started.id })
+      const sql = yield* SqlClient.SqlClient
+      const [row] = yield* sql<{ pid: number }>`SELECT pid FROM processes WHERE id = ${started.id}`
+      if (row === undefined) throw new Error('The run has no recorded process')
+      renameSync(folder, `${folder}-old`)
+      mkdirSync(folder)
+      yield* until(sql<{ state: string }>`SELECT state FROM processes WHERE id = ${started.id}`, ([one]) => one?.state === 'killed')
+      assert.throws(() => process.kill(row.pid, 0), /ESRCH/)
     }).pipe(Effect.provide(runtime())),
   )
 })

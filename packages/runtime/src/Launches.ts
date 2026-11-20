@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
@@ -19,7 +20,7 @@ import { filesNamed } from './keptRuns'
 import { makeKeyedLock } from './keyedLock'
 import { NotFound } from './errors'
 import { endingLine, printedMore, readable, servingAt, uncoloured } from './leftRunning'
-import { WORK, workOf } from './machine'
+import { RUN, WORK, workOf } from './machine'
 import { addItem, updateItem } from './threads'
 import { Live } from './Live'
 import { change, fact, timestamp } from './records'
@@ -88,6 +89,14 @@ export interface ShownRunnable {
 /** A branch or a pull request a run was asked for, as its card keeps it to run it again. */
 type Ref = { readonly kind: 'branch' | 'pull_request'; readonly which: string }
 
+const sameFolder = (folder: string, directory: { readonly dev: number; readonly ino: number }) =>
+  Effect.promise(() =>
+    stat(folder).then(
+      (current) => current.dev === directory.dev && current.ino === directory.ino,
+      (error: NodeJS.ErrnoException) => (error.code === 'ENOENT' || error.code === 'ENOTDIR' ? false : null),
+    ),
+  )
+
 interface Launch {
   readonly id: string
   readonly projectId: string
@@ -104,8 +113,10 @@ interface Launch {
   readonly command: string
   /** The folder it runs in: where a terminal opened from it opens. */
   readonly folder: string
+  /** The directory it started in, even if another is later put at the same path. */
+  readonly directory: { readonly dev: number; readonly ino: number }
   readonly startedAt: string
-  readonly scope: Scope.Closeable
+  readonly close: Effect.Effect<void>
   /** Its process, the leader of its group. */
   readonly pid: number
   /** Its card, in the thread it was asked for in; null where it was asked for in none. */
@@ -290,7 +301,7 @@ export class Launches extends Context.Service<
       const toolServer = yield* ToolServer
       const fetches = yield* Fetches
       // Every run lives in this scope: closed, as Althar stops, each run's process group is stopped.
-      const launchesScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
+      const launchesScope = yield* Scope.fork(yield* Effect.scope, 'parallel')
       const launches = new Map<string, Launch>()
       // Runs that left the list, the latest last: what each printed is still read from its card.
       const leftBehind = new Map<string, Launch>()
@@ -709,9 +720,12 @@ export class Launches extends Context.Service<
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
             const { id, run, folder, binding } = input
+            const directory = yield* Effect.tryPromise(() => stat(folder))
+            const copy = input.copy
+            const copyDirectory = copy === null || copy === folder ? directory : yield* Effect.tryPromise(() => stat(copy))
             const line = lineOf(run)
             // Whose work it is, in its environment, so all it starts is counted as that work's however it runs (MachineLoad.ts).
-            const spec = runSpec(line, { [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) })
+            const spec = runSpec(line, { [RUN]: id, [WORK]: workOf({ kind: 'run', projectId: input.projectId, taskId: input.taskId }) })
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
             yield* sql`INSERT INTO processes ${sql.insert({
               id,
@@ -726,98 +740,120 @@ export class Launches extends Context.Service<
               launchedAt: yield* timestamp,
             })}`
             const scope = yield* Scope.fork(launchesScope, 'sequential')
-            // Its copy goes once its process group has: the scope's finalizers run last added first.
-            const copy = input.copy
-            if (copy !== null) yield* Scope.addFinalizer(scope, removeCopy(copy))
-            // What it writes to stderr is what it printed too, as a terminal shows both: a run that fails mostly says why there.
-            const printed = { early: '', to: undefined as Launch | undefined }
-            const print = (text: string) => {
-              if (printed.to === undefined) printed.early = printedMore(printed.early, text)
-              else printed.to.printed = printedMore(printed.to.printed, text)
-            }
-            const owned = yield* spawnOwned(spec, folder, { stderr: print }).pipe(
-              Scope.provide(scope),
-              Effect.tapError(() =>
-                Effect.andThen(
-                  Scope.close(scope, Exit.void),
-                  Effect.flatMap(timestamp, (endedAt) => change('processes', id, { state: 'unknown', endedAt })),
-                ),
-              ),
-            )
-            yield* change('processes', id, {
-              pid: owned.pid,
-              processGroupId: owned.pid,
-              osStartedAt: owned.osStartedAt ?? null,
-              environmentDigest: owned.environmentDigest,
-              state: 'running',
-            })
-            const launch: Launch = {
-              id,
-              projectId: input.projectId,
-              taskId: input.taskId,
-              runnableId: input.kept.id,
-              name: input.kept.name,
-              where: input.where,
-              branch: input.branch?.label ?? null,
-              commit: input.branch?.commit ?? null,
-              ref: input.branch?.ref ?? null,
-              bindingId: binding.id,
-              command: run.command,
-              folder,
-              startedAt: yield* timestamp,
-              scope,
-              pid: owned.pid,
-              card: null,
-              printed: printed.early,
-              stderr: owned.stderrTail,
-              url: null,
-              ended: null,
-              stopped: false,
-            }
-            printed.to = launch
-            launches.set(id, launch)
-            // Its card goes in the thread it was asked for in; a run doesn't wait on its card.
-            if (input.threadId !== null)
-              launch.card = yield* addItem(
-                { projectId: input.projectId as ProjectId, threadId: input.threadId },
-                'run',
-                cardOf(launch),
-              ).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not post a run’s card', cause), null)))
-            // What it prints is read as it comes, so it never waits on a full pipe.
-            const output = yield* Effect.forkIn(
-              Effect.promise(async () => {
-                const reader = owned.stdout.getReader()
-                const decoder = new TextDecoder()
-                for (;;) {
-                  const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }))
-                  if (done || value === undefined) return
-                  print(decoder.decode(value, { stream: true }))
-                }
-              }),
-              launchesScope,
-            )
-            yield* Effect.forkIn(watchServing(launch), scope)
-            // Ended by itself, it stays, to say how, and anything it left behind is stopped with its group.
-            yield* Effect.forkIn(
-              provide(
-                Effect.gen(function* () {
-                  const exit = yield* Deferred.await(owned.exited)
-                  // Exit can precede the last pipe read. Stop descendants that kept it open, then drain it before
-                  // recording the final card; closing the process scope must not interrupt this reader.
-                  yield* Scope.close(scope, Exit.void)
-                  yield* Fiber.join(output)
-                  if (!launches.has(id)) return
-                  const at = yield* timestamp
-                  launch.ended = { at, code: exit.code, signal: exit.signal }
-                  yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
-                  yield* toldCard(launch)
-                  yield* told(input.projectId)
+            const close = yield* Effect.cached(Scope.close(scope, Exit.void))
+            return yield* Effect.gen(function* () {
+              // Its copy goes once its process group has: the scope's finalizers run last added first.
+              if (copy !== null)
+                yield* Scope.addFinalizer(
+                  scope,
+                  Effect.flatMap(sameFolder(copy, copyDirectory), (stillThere) => (stillThere === true ? removeCopy(copy) : Effect.void)),
+                )
+              // What it writes to stderr is what it printed too, as a terminal shows both: a run that fails mostly says why there.
+              const printed = { early: '', to: undefined as Launch | undefined }
+              const print = (text: string) => {
+                if (printed.to === undefined) printed.early = printedMore(printed.early, text)
+                else printed.to.printed = printedMore(printed.to.printed, text)
+              }
+              const owned = yield* spawnOwned(spec, folder, { stderr: print, stopWithOwner: true }).pipe(Scope.provide(scope))
+              yield* change('processes', id, {
+                pid: owned.pid,
+                processGroupId: owned.pid,
+                osStartedAt: owned.osStartedAt ?? null,
+                environmentDigest: owned.environmentDigest,
+                state: 'running',
+              })
+              const launch: Launch = {
+                id,
+                projectId: input.projectId,
+                taskId: input.taskId,
+                runnableId: input.kept.id,
+                name: input.kept.name,
+                where: input.where,
+                branch: input.branch?.label ?? null,
+                commit: input.branch?.commit ?? null,
+                ref: input.branch?.ref ?? null,
+                bindingId: binding.id,
+                command: run.command,
+                folder,
+                directory,
+                startedAt: yield* timestamp,
+                close,
+                pid: owned.pid,
+                card: null,
+                printed: printed.early,
+                stderr: owned.stderrTail,
+                url: null,
+                ended: null,
+                stopped: false,
+              }
+              printed.to = launch
+              launches.set(id, launch)
+              // Removing a project also stops its runs. If that happened while this one was starting and wasn't
+              // in the list yet, close it here.
+              const [project] = yield* sql`SELECT 1 FROM projects WHERE id = ${input.projectId} AND archived_at IS NULL`
+              if (project === undefined) return yield* new LaunchRefused({ why: 'elsewhere', message: 'This project has been removed.' })
+              // Its card goes in the thread it was asked for in; a run doesn't wait on its card.
+              if (input.threadId !== null)
+                launch.card = yield* addItem(
+                  { projectId: input.projectId as ProjectId, threadId: input.threadId },
+                  'run',
+                  cardOf(launch),
+                ).pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not post a run’s card', cause), null)))
+              // What it prints is read as it comes, so it never waits on a full pipe.
+              const output = yield* Effect.forkIn(
+                Effect.promise(async (signal) => {
+                  const reader = owned.stdout.getReader()
+                  const decoder = new TextDecoder()
+                  const cancel = () => void reader.cancel().catch(() => {})
+                  signal.addEventListener('abort', cancel, { once: true })
+                  try {
+                    for (;;) {
+                      const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }))
+                      if (done || value === undefined) return
+                      print(decoder.decode(value, { stream: true }))
+                    }
+                  } finally {
+                    signal.removeEventListener('abort', cancel)
+                    reader.releaseLock()
+                  }
                 }),
+                launchesScope,
+              )
+              yield* Effect.forkIn(watchServing(launch), scope)
+              // Ended by itself, it stays, to say how, and anything it left behind is stopped with its group.
+              yield* Effect.forkIn(
+                provide(
+                  Effect.gen(function* () {
+                    const exit = yield* Deferred.await(owned.exited)
+                    // Exit can precede the last pipe read. Stop descendants that kept it open, then drain it before
+                    // recording the final card. A detached descendant can still hold the pipe, so the drain is bounded.
+                    yield* close
+                    yield* Fiber.join(output).pipe(Effect.timeoutOption('1 second'))
+                    yield* Fiber.interrupt(output)
+                    const at = yield* timestamp
+                    if (!launches.has(id) || launch.stopped) return
+                    launch.ended = { at, code: exit.code, signal: exit.signal }
+                    yield* change('processes', id, { state: 'exited', exitCode: exit.code, signal: exit.signal, endedAt: at })
+                    yield* toldCard(launch)
+                    yield* told(input.projectId)
+                  }),
+                ),
+                launchesScope,
+              )
+              yield* Effect.forkIn(checkRunFolder(launch), launchesScope)
+              yield* told(input.projectId)
+              return shown(launch)
+            }).pipe(
+              Effect.onExit((exit) =>
+                Exit.isSuccess(exit)
+                  ? Effect.void
+                  : Effect.gen(function* () {
+                      launches.delete(id)
+                      yield* close
+                      yield* Effect.ignore(Effect.flatMap(timestamp, (endedAt) => change('processes', id, { state: 'unknown', endedAt })))
+                    }),
               ),
-              launchesScope,
             )
-            yield* told(input.projectId)
-            return shown(launch)
           }),
         )
 
@@ -934,18 +970,32 @@ export class Launches extends Context.Service<
           Effect.gen(function* () {
             const launch = launches.get(id)
             if (launch === undefined) return
-            forget(launch)
             if (launch.ended === null) {
-              yield* Scope.close(launch.scope, Exit.void)
+              launch.stopped = true
+              yield* launch.close
+              if (!launches.has(id)) return
+              forget(launch)
               const at = yield* timestamp
               yield* change('processes', id, { state: 'killed', endedAt: at })
               launch.ended = { at, code: null, signal: null }
-              launch.stopped = true
               yield* toldCard(launch)
-            }
+            } else forget(launch)
             yield* told(launch.projectId)
           }),
-        ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not stop a run', cause)))
+        ).pipe(
+          Effect.uninterruptible,
+          Effect.catchCause((cause) => Effect.logWarning('Could not stop a run', cause)),
+        )
+
+      // Althar stops runs before removing their folders. Also catch folders deleted or replaced outside Althar.
+      const checkRunFolder = (launch: Launch) =>
+        Effect.gen(function* () {
+          for (;;) {
+            yield* Effect.sleep('2 seconds')
+            if (launch.ended !== null || !launches.has(launch.id)) return
+            if ((yield* sameFolder(launch.folder, launch.directory)) === false) return yield* stop(launch.id)
+          }
+        })
 
       const clear = (id: string) =>
         Effect.gen(function* () {
