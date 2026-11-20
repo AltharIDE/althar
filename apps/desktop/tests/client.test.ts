@@ -236,6 +236,7 @@ describe('the client', () => {
           WatchFrom: () => Stream.die('unused'),
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
+          TrustBot: () => Effect.die('unused'),
           GetTaskFindings: () => Effect.die('unused'),
           GetLineComments: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
