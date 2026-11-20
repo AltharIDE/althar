@@ -453,6 +453,8 @@ const SETTLED_AGAIN = 'This task is settled:'
 
 /** How the runtime's reminder to report begins, which the person's words waiting for the turn go after (the runtime's Runs.ts). */
 const REMINDED = /^Your (step|review) isn't done until you call Althar's /
+/** The line Althar puts first in a turn to tell the time again (the runtime's `timeAgainLine`), with the blank line after it. */
+const TIME_AGAIN = /^\(It is now [^\n]* on the person's computer\.\)\n\n/
 
 /** What `bun dev` prints, coloured as Vite colours it. */
 const SERVING =
@@ -1908,7 +1910,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
       const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
-      const whole = filled === null ? prompted : prompted.slice(0, filled.index)
+      // Told the time first, on a new day or after a long gap (the runtime's localTime.ts), it reads what it was asked after it:
+      // the time is no part of the ask, so a check that fails just after midnight is fixed as at any other time.
+      const whole = (filled === null ? prompted : prompted.slice(0, filled.index)).replace(TIME_AGAIN, '')
       // Started again on a task that settled, it does what it is asked now, after its brief, as its brief tells it: what the task
       // first asked, the lead before it did. It plays the role its brief gives it all the same.
       const again = whole.includes(SETTLED_AGAIN)
