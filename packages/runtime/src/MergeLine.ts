@@ -20,6 +20,7 @@ import { type AskedAction, type AskedResult, type ErrandStep, Errands, type Fres
 import { contained } from './Failures'
 import { Instance } from './Instance'
 import { errandTaskPull } from './errandTask'
+import { taskWaitsReady } from './errandWaits'
 import { watchReleaseErrands } from './errandWatch'
 import { makeKeyedLock } from './keyedLock'
 import { checksOf, nameOf } from './pullRequestWords'
@@ -91,6 +92,7 @@ interface Holder {
 /** One merge errand's waiting step, as the store has it. */
 interface Entry {
   readonly errandId: string
+  readonly stepKey: string
   readonly threadId: string
   readonly state: 'open' | 'paused'
   readonly createdAt: string
@@ -100,6 +102,7 @@ interface Entry {
   readonly branch: string
   readonly request: MergeRequest
   readonly raw: Readonly<Record<string, unknown>>
+  readonly waits: string
 }
 
 /** What a fresh read says of a step: for Errands, and for the line, what comes next and why. */
@@ -164,7 +167,7 @@ const standsOf = (seen: Pick<Look, 'next' | 'why'>, entry: { readonly request: {
 
 const short = (sha: string | null | undefined) => (sha == null ? 'no commit' : sha.slice(0, 12))
 const lineOf = (entry: Pick<Entry, 'request' | 'branch'>) => `${entry.request.repository} ${entry.branch}`
-const stepOf = (entry: Pick<Entry, 'errandId'>) => `${entry.errandId}/${STEP}`
+const stepOf = (entry: Pick<Entry, 'errandId' | 'stepKey'>) => `${entry.errandId}/${entry.stepKey}`
 const refused = (message: string) => new ToolRefused({ message })
 /** Anything but a refusal said in words is said as Althar's own failure, never as what the host or the store said. */
 const asRefused = (error: unknown) =>
@@ -245,6 +248,7 @@ const entriesOf = (projectId: string) =>
     const sql = yield* SqlClient.SqlClient
     const rows = yield* sql<{
       errandId: string
+      stepKey: string
       threadId: string
       state: 'open' | 'paused'
       createdAt: string
@@ -253,8 +257,9 @@ const entriesOf = (projectId: string) =>
       head: string | null
       branch: string | null
       request: string
+      waits: string
     }>`
-      SELECT e.id AS errand_id, e.thread_id, e.state, e.created_at, s.task_id, s.target, s.head, s.target_branch AS branch, s.request
+      SELECT e.id AS errand_id, s.step_key, e.thread_id, e.state, e.created_at, s.task_id, s.target, s.head, s.target_branch AS branch, s.request, s.waits
       FROM errands e JOIN errand_steps s ON s.errand_id = e.id
       WHERE e.project_id = ${projectId} AND e.state IN ('open', 'paused') AND s.tool = ${MERGE_TOOL} AND s.state = 'waiting'
         AND NOT EXISTS (SELECT 1 FROM errand_steps earlier WHERE earlier.errand_id = e.id
@@ -313,7 +318,7 @@ const note = (projectId: string, subject: string, kind: string, id: string, payl
  * Notes where a step stands, as it changes, and tells its task's card to read it again: the card's words come from it
  * (errandWords), and nothing else need change on the task when only this does.
  */
-const standAt = (projectId: string, entry: Pick<Entry, 'errandId' | 'taskId'>, state: string) =>
+const standAt = (projectId: string, entry: Pick<Entry, 'errandId' | 'stepKey' | 'taskId'>, state: string) =>
   Effect.gen(function* () {
     if ((yield* latest(stepOf(entry), 'stands'))?.state === state) return
     yield* note(projectId, stepOf(entry), 'stands', `stands:${state}:${yield* timestamp}`, { state })
@@ -795,7 +800,7 @@ export class MergeLine extends Context.Service<
       /** The errand's step, as Errands takes it: its recorded target, head, branch and arguments, with a fresh read and the act on it. */
       const actionOf = (projectId: string, entry: Entry, seen: Holder): AskedAction => ({
         errandId: entry.errandId,
-        step: STEP,
+        step: entry.stepKey,
         target: entry.target,
         head: entry.head,
         branch: entry.branch,
@@ -890,7 +895,8 @@ export class MergeLine extends Context.Service<
           if (asked.errand !== undefined) {
             const entry = (yield* provide(entriesOf(access.projectId))).find((one) => one.errandId === asked.errand)
             if (entry === undefined) return yield* refused('That errand has no merge waiting. read_errands shows the open ones.')
-            if (asked.step !== undefined && asked.step !== STEP) return yield* refused(`A merge errand’s step is "${STEP}".`)
+            if (asked.step !== undefined && asked.step !== entry.stepKey)
+              return yield* refused(`The waiting merge step is "${entry.stepKey}".`)
             return yield* step(access, entry)
           }
           if (asked.message === undefined)
@@ -1020,7 +1026,7 @@ export class MergeLine extends Context.Service<
               },
               message: { type: 'string', description: "The person's message id in this turn, from read_turn." },
               errand: { type: 'string', description: 'A merge errand, as Althar’s news names it, to take its step.' },
-              step: { type: 'string', description: `Its step: "${STEP}".` },
+              step: { type: 'string', description: 'The key of its waiting merge step, as news gives it.' },
             },
           },
           call: mergeTool,
@@ -1255,15 +1261,23 @@ export class MergeLine extends Context.Service<
         })
 
       /** Task slugs can be kept before a PR exists. Bind it once ready; the usual line then reads checks and review gates. */
-      const bindTaskMerges = (projectId: string) =>
+      const bindTaskMerges = (projectId: string, ready: ReadonlySet<string>) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const pending = yield* sql<{ errandId: string; stepKey: string; taskId: string; request: string; threadId: string }>`
-          SELECT s.errand_id, s.step_key, s.task_id, s.request, e.thread_id FROM errand_steps s JOIN errands e ON e.id = s.errand_id
+          const pending = yield* sql<{
+            errandId: string
+            stepKey: string
+            taskId: string
+            request: string
+            threadId: string
+            waits: string
+          }>`
+          SELECT s.errand_id, s.step_key, s.task_id, s.request, e.thread_id, s.waits FROM errand_steps s JOIN errands e ON e.id = s.errand_id
           WHERE e.project_id = ${projectId} AND e.state = 'open' AND s.state = 'waiting' AND s.tool = ${MERGE_TOOL}
             AND s.target LIKE 'task:%' AND NOT EXISTS (SELECT 1 FROM errand_steps earlier
               WHERE earlier.errand_id = e.id AND earlier.position < s.position AND earlier.state <> 'done')`
-          for (const kept of pending)
+          for (const kept of pending) {
+            if (!taskWaitsReady(ready, kept)) continue
             yield* Effect.gen(function* () {
               const pull = yield* errandTaskPull(projectId, kept.taskId)
               if (pull === null) return
@@ -1312,6 +1326,7 @@ export class MergeLine extends Context.Service<
                 }),
               ),
             )
+          }
         })
 
       const tickProject = (projectId: string) =>
@@ -1319,14 +1334,16 @@ export class MergeLine extends Context.Service<
           projectId,
           provide(
             Effect.gen(function* () {
-              yield* bindTaskMerges(projectId)
-              const entries = yield* entriesOf(projectId)
+              const taskNews = yield* errands.taskNews(projectId)
+              yield* bindTaskMerges(projectId, taskNews.ready)
+              const entries = (yield* entriesOf(projectId)).filter((entry) => taskWaitsReady(taskNews.ready, entry))
               const wakes = new Map<string, Array<string>>()
               const wakeOf = (threadId: string) => {
                 const found = wakes.get(threadId) ?? []
                 wakes.set(threadId, found)
                 return found
               }
+              for (const { threadId, body } of taskNews.wakes) wakeOf(threadId).push(body)
               const take = (entry: Entry, why: string) =>
                 Effect.gen(function* () {
                   if (
@@ -1339,7 +1356,7 @@ export class MergeLine extends Context.Service<
                     )
                   )
                     wakeOf(entry.threadId).push(
-                      `- Errand ${entry.errandId}, step ${STEP}: ${why} Take it now: merge_pull_request with errand "${entry.errandId}" and step "${STEP}".`,
+                      `- Errand ${entry.errandId}, step ${entry.stepKey}: ${why} Take it now: merge_pull_request with errand ${JSON.stringify(entry.errandId)} and step ${JSON.stringify(entry.stepKey)}.`,
                     )
                 })
               const lines = [...new Set(entries.map(lineOf))]
@@ -1449,7 +1466,7 @@ export class MergeLine extends Context.Service<
                   Effect.catchCause((cause) => Effect.logWarning('Could not show the merge line', cause)),
                 )
               }
-              yield* watchReleaseErrands(projectId, errands, (threadId, said) => wakeOf(threadId).push(said))
+              yield* watchReleaseErrands(projectId, errands, taskNews.ready, (threadId, said) => wakeOf(threadId).push(said))
               for (const [threadId, said] of wakes) yield* wake(threadId, said)
             }),
           ),

@@ -7,7 +7,9 @@ import { Cause, Context, Crypto, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchTask } from './cards'
-import { errandWaitKinds } from './errandWaits'
+import { taskForWait, taskWaitStatus, unreachableTaskWait } from './errandTaskWaits'
+import { errandWaitKinds, releaseWaitKinds, taskEventWaitKinds } from './errandWaits'
+import { recordErrandWake } from './errandWake'
 import {
   afterStep,
   calledOffNote,
@@ -123,6 +125,13 @@ interface StepRow {
   readonly position: number
 }
 
+interface TaskWaitNews {
+  readonly ready: ReadonlySet<string>
+  readonly wakes: ReadonlyArray<{ readonly threadId: string; readonly body: string }>
+}
+
+const waitsOf = (step: Pick<StepRow, 'waits'>) => JSON.parse(step.waits) as ErrandStep['waits']
+
 /** A step as kept, for the lines the person reads. */
 const said = (step: StepRow): SaidStep => ({
   tool: step.tool,
@@ -228,6 +237,8 @@ export class Errands extends Context.Service<
     ): Effect.Effect<string, ToolRefused>
     /** The shared news watch calls this even when a poll has no changes. No session or agent place is held. */
     remind(projectId: string): Effect.Effect<void, ToolRefused>
+    /** Read the next step's task waits before the merge and release watchers run. */
+    taskNews(projectId: string): Effect.Effect<TaskWaitNews, ToolRefused>
     /** Every poll change touching a target refreshes this clock; wake its thread separately for a fresh/terminal read. */
     news(id: string): Effect.Effect<void, ToolRefused>
   }
@@ -350,8 +361,7 @@ export class Errands extends Context.Service<
                 steps.push(step)
                 continue
               }
-              const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE project_id = ${access.projectId}
-                AND (id = ${step.taskId} OR slug = ${step.taskId})`
+              const task = yield* taskForWait(access.projectId, step.taskId)
               if (task === undefined) return yield* refused(`This project has no task ${step.taskId}. list_tasks shows them.`)
               steps.push({ ...step, taskId: task.id })
             }
@@ -361,18 +371,11 @@ export class Errands extends Context.Service<
               if (step.target === '' || step.tool === '' || step.key === '' || step.waits.length === 0)
                 return yield* refused('Each step needs a tool, target and what it waits on.')
               if (step.target.startsWith('task:')) {
-                if (
-                  step.tool !== 'merge_pull_request' ||
-                  step.key !== 'merge' ||
-                  step.taskId === undefined ||
-                  step.head !== undefined ||
-                  step.branch !== undefined
-                )
+                if (step.tool !== 'merge_pull_request' || step.taskId === undefined || step.head !== undefined || step.branch !== undefined)
                   return yield* refused(
-                    'A task PR merge uses key merge, tool merge_pull_request, taskId, target task:<slug>, request {method?, now?}, and no head or branch.',
+                    'A task PR merge uses tool merge_pull_request, taskId, target task:<slug>, request {method?, now?}, and no head or branch.',
                   )
-                const [target] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE project_id = ${access.projectId}
-                  AND (id = ${step.target.slice(5)} OR slug = ${step.target.slice(5)})`
+                const target = yield* taskForWait(access.projectId, step.target.slice(5))
                 if (target?.id !== step.taskId) return yield* refused('The task target must name the same task as taskId.')
                 if (
                   Object.keys(step.request).some((key) => key !== 'method' && key !== 'now') ||
@@ -383,7 +386,7 @@ export class Errands extends Context.Service<
                   return yield* refused('A task PR merge request is {method?: "merge" | "squash" | "rebase", now?: boolean}.')
                 if (
                   step.waits.every((wait) => errandWaitKinds.includes(wait.kind)) &&
-                  step.waits.some((wait) => wait.kind !== 'task_pull_request')
+                  step.waits.some((wait) => wait.kind !== 'task_pull_request' && !taskEventWaitKinds.includes(wait.kind))
                 )
                   return yield* refused('A task PR merge waits on task_pull_request, targeting that task’s slug.')
               }
@@ -391,9 +394,13 @@ export class Errands extends Context.Service<
                 if (!errandWaitKinds.includes(wait.kind))
                   return yield* refused(`Althar cannot watch wait kind "${wait.kind}". Watched kinds: ${errandWaitKinds.join(', ')}.`)
                 if (wait.target.trim() === '') return yield* refused('Each wait needs a nonempty target.')
+                if (taskEventWaitKinds.includes(wait.kind)) {
+                  const task = yield* taskForWait(access.projectId, wait.target)
+                  if (task === undefined) return yield* refused(`This project has no task ${wait.target}. list_tasks shows them.`)
+                  continue
+                }
                 if (wait.kind === 'task_pull_request' || wait.kind === 'task_merged') {
-                  const [task] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE project_id = ${access.projectId}
-                    AND (id = ${wait.target} OR slug = ${wait.target})`
+                  const task = yield* taskForWait(access.projectId, wait.target)
                   if (task === undefined || (step.taskId !== undefined && task.id !== step.taskId))
                     return yield* refused('The wait must name this step’s task in this project, by slug or id.')
                   if (wait.kind === 'task_pull_request' && (step.tool !== 'merge_pull_request' || !step.target.startsWith('task:')))
@@ -401,12 +408,7 @@ export class Errands extends Context.Service<
                   if (wait.kind === 'task_merged' && step.tool !== 'push_tag')
                     return yield* refused('task_merged watches a push_tag step after the task’s merge.')
                 }
-                const releaseKinds: Record<string, ReadonlyArray<string>> = {
-                  push_tag: ['task_merged', 'checks', 'post-merge', 'required-check-missing'],
-                  approve_release_run: ['run'],
-                  publish_release: ['draft'],
-                }
-                const kinds = releaseKinds[step.tool]
+                const kinds = releaseWaitKinds.get(step.tool)
                 if (kinds !== undefined && !kinds.includes(wait.kind))
                   return yield* refused(`Althar cannot watch ${wait.kind} for ${step.tool}. Use: ${kinds.join(', ')}.`)
                 if (['post-merge', 'run', 'draft'].includes(wait.kind) && kinds === undefined)
@@ -503,6 +505,11 @@ export class Errands extends Context.Service<
                 return yield* refused(`This errand is ${errand.state}: ${errand.reason ?? errand.words}`)
               if (steps.some((s) => s.position < step!.position && s.state !== 'done'))
                 return yield* refused('An earlier step still waits.')
+              if (step.state !== 'done') {
+                const status = yield* taskWaitStatus(access.projectId, waitsOf(step))
+                if (status.state === 'unreachable') return yield* refused(status.reason)
+                if (status.state === 'waiting') return yield* refused('This step still waits for its task. Nothing was changed.')
+              }
               return errand.words
             })
             const words = yield* authorize
@@ -765,6 +772,46 @@ export class Errands extends Context.Service<
               }),
             ),
           ),
+        taskNews: (projectId) =>
+          provide(
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const ready = new Set<string>()
+                const wakes: Array<TaskWaitNews['wakes'][number]> = []
+                const steps = yield* sql<ErrandRow & Pick<StepRow, 'stepKey' | 'tool' | 'request' | 'waits'>>`
+                  SELECT e.*, s.step_key, s.tool, s.request, s.waits FROM errands e JOIN errand_steps s ON s.errand_id = e.id
+                  WHERE e.project_id = ${projectId} AND e.state = 'open' AND s.state = 'waiting'
+                    AND NOT EXISTS (SELECT 1 FROM errand_steps earlier WHERE earlier.errand_id = e.id
+                      AND earlier.position < s.position AND earlier.state <> 'done')
+                    AND EXISTS (SELECT 1 FROM json_each(s.waits) w
+                      WHERE json_extract(w.value, '$.kind') IN ${sql.in(taskEventWaitKinds)})
+                  ORDER BY e.created_at, e.rowid`
+                for (const step of steps) {
+                  const waits = waitsOf(step)
+                  const status = yield* taskWaitStatus(projectId, waits)
+                  if (status.state === 'unreachable') {
+                    yield* set(step, 'paused', `${unreachableTaskWait} ${status.reason}`, () => ({
+                      why: status.reason,
+                      can: 'Ask again with a different wait.',
+                    }))
+                  }
+                  if (status.state !== 'ready') continue
+                  ready.add(`${step.id}/${step.stepKey}`)
+                  // Merge and release tools keep their own wake and fresh reads for their other gates.
+                  if (step.tool === 'merge_pull_request' || releaseWaitKinds.has(step.tool)) continue
+                  if (!waits.every((wait) => taskEventWaitKinds.includes(wait.kind))) continue
+                  if (!(yield* recordErrandWake(projectId, step.id, step.stepKey))) continue
+                  yield* change('errands', step.id, { newsAt: yield* timestamp })
+                  const request = JSON.parse(step.request) as Record<string, unknown>
+                  wakes.push({
+                    threadId: step.threadId,
+                    body: `- Errand ${step.id}, step ${step.stepKey}: its waits are met. Take it now: ${step.tool} with ${JSON.stringify({ ...request, errand: step.id, step: step.stepKey })}.`,
+                  })
+                }
+                return { ready, wakes }
+              }),
+            ),
+          ),
         remind: (projectId) =>
           provide(
             sql.withTransaction(
@@ -774,6 +821,7 @@ export class Errands extends Context.Service<
                   ErrandRow & { newsAt: string; remindedAt: string | null }
                 >`SELECT * FROM errands WHERE project_id = ${projectId} AND state IN ('open', 'paused')`
                 for (const row of rows) {
+                  if (row.state === 'paused' && row.reason?.startsWith(unreachableTaskWait) === true) continue
                   const steps = (yield* stepsOf(row.id)).filter((s) => s.state !== 'done')
                   const unsupported = steps.flatMap((s) =>
                     (JSON.parse(s.waits) as Array<{ kind: string }>)
@@ -788,6 +836,18 @@ export class Errands extends Context.Service<
                       (left) => unwatched(left, errandWaitKinds),
                     )
                     continue
+                  }
+                  const next = steps[0]
+                  if (row.state === 'open' && next !== undefined) {
+                    const waits = waitsOf(next)
+                    if (waits.some((wait) => taskEventWaitKinds.includes(wait.kind))) {
+                      const status = yield* taskWaitStatus(projectId, waits)
+                      if (
+                        status.state === 'unreachable' ||
+                        (status.state === 'ready' && waits.every((wait) => taskEventWaitKinds.includes(wait.kind)))
+                      )
+                        continue
+                    }
                   }
                   const missing = steps.some((s) =>
                     (JSON.parse(s.waits) as Array<{ kind: string; since?: string }>).some(
