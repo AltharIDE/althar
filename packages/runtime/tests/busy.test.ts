@@ -226,12 +226,11 @@ const answerIt = (attentionId: string) =>
     })
   })
 
-/** A lead at work on its step, asking the person something between turns: its first turn interrupted, then asked. */
-const asking = (threadId: string) =>
+/** A lead asking a follow-up question. Its implementation is done, so it owes no later step reminder. */
+const asking = (taskId: string, threadId: string) =>
   Effect.gen(function* () {
-    yield* until(turnsOn(threadId), (rows) => rows.some((row) => row.state === 'delivered'))
-    yield* (yield* Sessions).interrupt(threadId)
-    yield* until(turnsOn(threadId), (rows) => rows.every((row) => row.state !== 'delivered'))
+    yield* until(attempts(taskId), (rows) => rows.at(-1)?.state === 'succeeded')
+    yield* idle(threadId)
     yield* say(threadId, scenarios.question, 'after_current')
     return yield* askedOn(threadId)
   })
@@ -503,9 +502,8 @@ describe('Agents at once', () => {
   it.live('tell the person’s answer to its lead at once, though every place is taken', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
-      const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
-      yield* working(first.taskId)
-      const question = yield* asking(first.threadId)
+      const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      const question = yield* asking(first.taskId, first.threadId)
       // An open question has already freed the place, before the person answers.
       assert.notInclude(
         (yield* (yield* Busy).now).holders.map((holder) => holder.taskId),
@@ -530,9 +528,8 @@ describe('Agents at once', () => {
     Effect.gen(function* () {
       const busy = yield* Busy
       const { projectId } = yield* opened
-      const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
-      yield* working(first.taskId)
-      const question = yield* asking(first.threadId)
+      const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      const question = yield* asking(first.taskId, first.threadId)
       const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
       yield* working(second.taskId)
       // An answer kept for a place, as one was before the person's answers went on at once: it is theirs, and goes now.

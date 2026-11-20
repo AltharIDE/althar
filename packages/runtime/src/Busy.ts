@@ -467,12 +467,22 @@ export class Busy extends Context.Service<
           JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
           LEFT JOIN threads s ON s.task_id = r.task_id AND s.kind = 'step' AND s.node_key = 'review'
           WHERE r.state = 'running' AND a.state IN ('admitted', 'running') AND n.node_key IN ('implement', 'settle', 'review')
-            -- The attempt reserves startup until its first turn takes over. A running step can outlive its turns.
+            -- Reserve startup until a turn takes over this admission. Resuming can reuse the attempt and the session.
             AND (a.state = 'admitted' OR (EXISTS (
               SELECT 1 FROM provider_sessions p WHERE p.id = a.provider_session_id AND p.state = 'active'
             ) AND NOT EXISTS (
-              SELECT 1 FROM turn_deliveries d WHERE d.provider_session_id = a.provider_session_id
-                AND d.requested_at >= a.admitted_at
+              SELECT 1 FROM record_events requested
+              WHERE requested.aggregate_type = 'turn_delivery' AND requested.type = 'turn_delivery.requested'
+                AND requested.aggregate_id = (
+                  SELECT d.id FROM turn_deliveries d WHERE d.provider_session_id = a.provider_session_id
+                    AND d.requested_at >= a.admitted_at ORDER BY d.rowid DESC LIMIT 1
+                )
+                AND requested.sequence > coalesce((
+                  SELECT admitted.sequence FROM record_events admitted
+                  WHERE admitted.aggregate_type = 'node_attempt' AND admitted.aggregate_id = a.id
+                    AND admitted.type IN ('node_attempt.admitted', 'node_attempt.resumed', 'node_attempt.external_ready')
+                  ORDER BY admitted.sequence DESC LIMIT 1
+                ), 0)
             )))
           UNION ALL
           SELECT c.task_id, t.id, 0, NULL FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
