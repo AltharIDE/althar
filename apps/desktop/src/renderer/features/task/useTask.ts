@@ -811,7 +811,10 @@ export const useTask = (threadId: string): TaskModel => {
     })
     let accepted = false
     const accept = (reading = true) => {
-      accepted = true
+      if (!accepted) {
+        accepted = true
+        images?.onAccepted?.()
+      }
       if (!reading) {
         setSnapshot((current) => ({ ...current, items: releasedReadings(current.items, [`message:${id}`]) }))
       }

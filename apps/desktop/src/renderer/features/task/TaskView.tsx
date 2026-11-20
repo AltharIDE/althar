@@ -930,6 +930,7 @@ export function TaskView({
       sent: [...own.sent, ...crops.sent],
       pictures: [...own.pictures, ...crops.pictures],
       canvasComments: canvasCommentsOf(gathered),
+      onAccepted: () => batch.finish(true),
       ...(lines.length === 0 ? {} : { comments: lines }),
     }
     const restore = () => {
@@ -959,7 +960,14 @@ export function TaskView({
     const batch = takeComments(kept, true)
     const comments = batch.taken.filter(isDiffDraft).map(toLineComment)
     if (comments.length === 0) return
-    const outgoing: Outgoing = { sent: [], pictures: [], files: [], attached: [], comments }
+    const outgoing: Outgoing = {
+      sent: [],
+      pictures: [],
+      files: [],
+      attached: [],
+      comments,
+      onAccepted: () => batch.finish(true),
+    }
     setSendingComments(true)
     void model.send('', session === null || !session.held ? (chosen ?? undefined) : undefined, outgoing).then(
       (accepted) => {

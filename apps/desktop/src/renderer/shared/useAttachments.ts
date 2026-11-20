@@ -56,6 +56,8 @@ export interface Outgoing {
   readonly comments?: ReadonlyArray<LineComment>
   /** The person's comments on canvases, kept with the message as it is sent (ADR-104). */
   readonly canvasComments?: ReadonlyArray<SentCanvasComment>
+  /** Runs in the window as soon as the runtime accepts the message. */
+  readonly onAccepted?: () => void
 }
 
 /** What a send or a switch carries of a message's images, files and comments on the diff and of its being dictated: nothing where it has none. */

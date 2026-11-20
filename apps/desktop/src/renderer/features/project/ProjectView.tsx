@@ -719,6 +719,7 @@ export function ProjectView({
       sent: [...own.sent, ...crops.sent],
       pictures: [...own.pictures, ...crops.pictures],
       canvasComments: canvasCommentsOf(gathered),
+      onAccepted: () => batch.finish(true),
     }
     const words = withComments(body, gathered, own.sent.length, pictures)
     const restore = () => {

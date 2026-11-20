@@ -243,10 +243,12 @@ export const takeComments = (key: string, onlyDiff = false) => {
   const ids = new Set(taken.map((one) => one.id))
   for (const id of ids) thread.sending.add(id)
   if (ids.size > 0) publish(key, thread)
+  let finished = false
   return {
     taken,
     finish: (accepted: boolean) => {
-      if (ids.size === 0 || threads.get(key) !== thread) return
+      if (finished || ids.size === 0 || threads.get(key) !== thread) return
+      finished = true
       for (const id of ids) thread.sending.delete(id)
       if (accepted) {
         for (const one of taken) removeCrop(one.cropId)
