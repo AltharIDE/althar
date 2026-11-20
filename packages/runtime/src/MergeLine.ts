@@ -20,6 +20,7 @@ import { type AskedAction, type AskedResult, type ErrandStep, Errands, type Fres
 import { contained } from './Failures'
 import { Instance } from './Instance'
 import { errandTaskPull } from './errandTask'
+import { taskWaitStatus } from './errandTaskWaits'
 import { taskWaitsReady } from './errandWaits'
 import { watchReleaseErrands } from './errandWatch'
 import { makeKeyedLock } from './keyedLock'
@@ -626,7 +627,9 @@ export class MergeLine extends Context.Service<
             (other) =>
               Effect.gen(function* () {
                 if ((yield* inFlight(other)) !== undefined) return true
-                return other.state === 'open' && !entry.request.now && placeIn(other) < placeIn(entry) && !(yield* isOut(other))
+                if (other.state !== 'open' || entry.request.now || placeIn(other) >= placeIn(entry) || (yield* isOut(other))) return false
+                const waits = JSON.parse(other.waits) as ErrandStep['waits']
+                return (yield* taskWaitStatus(projectId, waits)).state === 'ready'
               }),
           )
           if (holding.length > 0) {
@@ -1336,7 +1339,11 @@ export class MergeLine extends Context.Service<
             Effect.gen(function* () {
               const taskNews = yield* errands.taskNews(projectId)
               yield* bindTaskMerges(projectId, taskNews.ready)
-              const entries = (yield* entriesOf(projectId)).filter((entry) => taskWaitsReady(taskNews.ready, entry))
+              const entries = yield* Effect.filter(yield* entriesOf(projectId), (entry) =>
+                entry.state === 'paused' || taskWaitsReady(taskNews.ready, entry)
+                  ? Effect.succeed(true)
+                  : Effect.map(inFlight(entry), (flight) => flight !== undefined),
+              )
               const wakes = new Map<string, Array<string>>()
               const wakeOf = (threadId: string) => {
                 const found = wakes.get(threadId) ?? []
@@ -1379,7 +1386,8 @@ export class MergeLine extends Context.Service<
                 let defaultBranch: string | undefined
                 let held = false
                 for (const entry of here) {
-                  const paused = entry.state === 'paused'
+                  // An accepted merge still holds its slot if a task wait stops being met.
+                  const paused = entry.state === 'paused' || !taskWaitsReady(taskNews.ready, entry)
                   const flight = paused ? yield* inFlight(entry) : undefined
                   if (paused && flight === undefined) {
                     const settled = yield* latest(stepOf(entry), 'flight_settled')

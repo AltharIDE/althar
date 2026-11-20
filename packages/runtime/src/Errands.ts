@@ -837,6 +837,17 @@ export class Errands extends Context.Service<
                     )
                     continue
                   }
+                  const missing = steps.some((s) =>
+                    (JSON.parse(s.waits) as Array<{ kind: string; since?: string }>).some(
+                      (w) =>
+                        w.kind === 'required-check-missing' && w.since !== undefined && Date.parse(at) - Date.parse(w.since) >= 3_600_000,
+                    ),
+                  )
+                  if (
+                    (!missing && Date.parse(at) - Date.parse(row.newsAt) < 86_400_000) ||
+                    (row.remindedAt !== null && Date.parse(at) - Date.parse(row.remindedAt) < 86_400_000)
+                  )
+                    continue
                   const next = steps[0]
                   if (row.state === 'open' && next !== undefined) {
                     const waits = waitsOf(next)
@@ -849,17 +860,6 @@ export class Errands extends Context.Service<
                         continue
                     }
                   }
-                  const missing = steps.some((s) =>
-                    (JSON.parse(s.waits) as Array<{ kind: string; since?: string }>).some(
-                      (w) =>
-                        w.kind === 'required-check-missing' && w.since !== undefined && Date.parse(at) - Date.parse(w.since) >= 3_600_000,
-                    ),
-                  )
-                  if (
-                    (!missing && Date.parse(at) - Date.parse(row.newsAt) < 86_400_000) ||
-                    (row.remindedAt !== null && Date.parse(at) - Date.parse(row.remindedAt) < 86_400_000)
-                  )
-                    continue
                   const left = steps.map(said)
                   yield* say(
                     row,
