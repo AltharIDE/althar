@@ -1058,6 +1058,7 @@ export class Sessions extends Context.Service<
      */
     readonly onTasks: Effect.Effect<
       ReadonlyArray<{
+        readonly sessionId: string
         readonly threadId: string
         readonly taskId: string
         /** A task's reviewer, not its lead. */
@@ -5633,6 +5634,7 @@ export class Sessions extends Context.Service<
               ? []
               : [
                   {
+                    sessionId: running.sessionId,
                     threadId: running.thread.threadId,
                     taskId: running.thread.taskId,
                     reviewer: running.thread.role === 'reviewer',
