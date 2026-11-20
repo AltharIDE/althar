@@ -1571,7 +1571,7 @@ export const handlers = apiLayer(
                 if (task?.taskId != null && (yield* cancelWaitingTurn(busy, sessions, sql)(task.taskId)) > 0) return
               }
               yield* pullRequests.leadStopped({ threadId }, 'interrupted')
-              yield* sessions.interrupt(threadId)
+              yield* sessions.interrupt(threadId, 'person')
             }),
           ),
         ),
