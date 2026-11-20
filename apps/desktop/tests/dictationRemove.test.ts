@@ -15,7 +15,12 @@ import { PARAKEET } from '../src/speech/model'
 
 const electron = vi.hoisted(() => ({
   handlers: new Map<string, (event: unknown, ...args: Array<unknown>) => Promise<unknown>>(),
-  children: [] as Array<unknown>,
+  children: [] as Array<{
+    killed: boolean
+    modelThere: boolean | undefined
+    lastRequest: { id: string; type: string } | undefined
+    emit: (name: string, message: unknown) => boolean
+  }>,
   models: '',
   /* Message types the fake speech process never answers. */
   silent: new Set<string>(),
@@ -34,9 +39,12 @@ vi.mock('electron', async () => {
         const child = Object.assign(new EventEmitter(), {
           killed: false,
           modelThere: undefined as boolean | undefined,
-          postMessage: (message: { id: string; type: string }) =>
-            !electron.silent.has(message.type) &&
-            queueMicrotask(() => child.emit('message', { type: 'answer', id: message.id, value: undefined })),
+          lastRequest: undefined as { id: string; type: string } | undefined,
+          postMessage: (message: { id: string; type: string }) => {
+            child.lastRequest = message
+            if (!child.killed && !electron.silent.has(message.type))
+              queueMicrotask(() => child.emit('message', { type: 'answer', id: message.id, value: undefined }))
+          },
           kill: () => {
             child.killed = true
             // It takes a moment to go, and the folder must still be whole until it has.
@@ -57,12 +65,15 @@ vi.mock('electron', async () => {
 const dir = mkdtempSync(join(tmpdir(), 'althar-dictation-'))
 Object.assign(electron, { models: dir })
 
+const setup = async () => {
+  const { startDictation } = await import('../src/main/dictation')
+  startDictation({ script: 'speech.js', models: () => dir, mine: () => true, fakeModel: true, fakeMicrophone: true })
+  return (name: string, ...args: Array<unknown>) => electron.handlers.get(`althar:dictation-${name}`)?.({ sender: {} }, ...args)
+}
+
 describe('removing the speech model', () => {
   it('waits for the speech process to go, deletes the folder, then downloads again on the next dictation', async () => {
-    const { startDictation } = await import('../src/main/dictation')
-    startDictation({ script: 'speech.js', models: () => dir, mine: () => true, fakeModel: true, fakeMicrophone: true })
-    const call = (name: string, ...args: Array<unknown>) => electron.handlers.get(`althar:dictation-${name}`)?.({ sender: {} }, ...args)
-
+    const call = await setup()
     // The test may run again in the same process: count from where the speech processes stand now.
     const before = electron.children.length
     const folder = join(dir, PARAKEET.id)
@@ -75,10 +86,10 @@ describe('removing the speech model', () => {
     expect(electron.children).toHaveLength(before + 1)
 
     await call('remove')
-    const first = electron.children[before] as { killed: boolean; modelThere: boolean | undefined }
-    expect(first.killed).toBe(true)
+    const first = electron.children[before]
+    expect(first?.killed).toBe(true)
     // The folder was still there when the process exited, and gone once Remove returned.
-    expect(first.modelThere).toBe(true)
+    expect(first?.modelThere).toBe(true)
     expect(existsSync(folder)).toBe(false)
     expect(await call('state')).toMatchObject({ model: { ready: false, got: 0, downloading: false } })
 
@@ -90,12 +101,6 @@ describe('removing the speech model', () => {
 })
 
 describe('removing the speech model while it is in use', () => {
-  const setup = async () => {
-    const { startDictation } = await import('../src/main/dictation')
-    startDictation({ script: 'speech.js', models: () => dir, mine: () => true, fakeModel: true, fakeMicrophone: true })
-    return (name: string, ...args: Array<unknown>) => electron.handlers.get(`althar:dictation-${name}`)?.({ sender: {} }, ...args)
-  }
-
   it('refuses while another window is writing down speech, and keeps the speech process', async () => {
     const call = await setup()
     const before = electron.children.length
@@ -103,7 +108,7 @@ describe('removing the speech model while it is in use', () => {
     const pending = call('transcribe', new Float32Array(1), 16_000)
     await Promise.resolve()
     await expect(call('remove')).rejects.toThrow(/writing down speech/)
-    expect((electron.children[before] as { killed: boolean }).killed).toBe(false)
+    expect(electron.children[before]?.killed).toBe(false)
     electron.silent.delete('transcribe')
     void pending
   })
@@ -123,4 +128,30 @@ describe('removing the speech model while it is in use', () => {
     expect(electron.children).toHaveLength(spawned + 1)
     expect(existsSync(join(dir, PARAKEET.id))).toBe(false)
   })
+})
+
+it('resumes dictation while the idle speech process is still exiting', async () => {
+  vi.useFakeTimers()
+  electron.silent.add('transcribe')
+  try {
+    const call = await setup()
+    await call('prepare')
+    const previous = electron.children.at(-1)
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(previous?.killed).toBe(true)
+
+    const pending = call('transcribe', new Float32Array(1), 16_000)
+    await Promise.resolve()
+    const current = electron.children.at(-1)
+    expect(current).not.toBe(previous)
+    const written = expect(pending).resolves.toBe('A fresh process.')
+
+    // Let the retiring process exit before the new one replies.
+    await vi.advanceTimersByTimeAsync(20)
+    current?.emit('message', { type: 'answer', id: current.lastRequest?.id, value: 'A fresh process.' })
+    await written
+  } finally {
+    vi.useRealTimers()
+    electron.silent.delete('transcribe')
+  }
 })
