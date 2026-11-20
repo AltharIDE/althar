@@ -261,6 +261,8 @@ const Snapshot = Schema.Struct({
    * opens another.
    */
   attached: Schema.optional(Schema.Boolean),
+  /** Attached to a contributor's fork using the pull request's maintainer edit setting. */
+  maintainerEdit: Schema.optional(Schema.Boolean),
   /**
    * In its target branch's merge queue, as Althar put it there or its host
    * says it is, however it got there: the host merges it once the queue's
@@ -633,6 +635,7 @@ const snapshotOf = (
   source: change.source,
   ...(change.queued === true ? { queued: true } : {}),
   ...(change.headRepository !== undefined ? { head: change.headRepository } : before?.head !== undefined ? { head: before.head } : {}),
+  ...(before?.maintainerEdit === true ? { maintainerEdit: true } : {}),
   // What merging needs stays as last read until it is read again, on its own turn (DEV-204).
   ...(before?.rules === undefined || change.state !== 'open' ? {} : { rules: before.rules }),
 })
@@ -1950,7 +1953,7 @@ export class Changes extends Context.Service<
             return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: `${own.path.join('/')}/${task.branch}` })
           // Attached to an open pull request it didn't open, its branch goes there, and nothing else opens (ADR-052).
           const attached = next === undefined ? yield* attachedOf(input.taskId, task.workspaceId) : undefined
-          if (attached !== undefined) return yield* publishAttached(input, task, attached, pushTarget)
+          if (attached !== undefined) return yield* publishAttached(input, task, attached, pushTarget, { host, repository, own })
           // The next pull request describes only accepted commits, before a rebranch gives them new identities.
           const described =
             next === undefined || task.acceptedHead === undefined
@@ -2288,13 +2291,14 @@ export class Changes extends Context.Service<
         task: PublishRow,
         attached: { readonly record: string; readonly sent: string | null; readonly link: LinkRow; readonly snapshot: Snapshot },
         pushTarget: { readonly url: string; readonly header: string | null },
+        destination: { readonly host: CodeHost; readonly repository: Repository; readonly own: Repository },
       ) =>
         Effect.gen(function* () {
           const { link, snapshot } = attached
           const pictures = yield* evidencePaths(input.taskId)
           const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures(task.path, file))
           const onto = sourceOf(snapshot, task.branch)
-          const tip = yield* remoteTip(task.path, pushTarget, onto)
+          const tip = yield* tipBeforePush(input.taskId, snapshot, task.path, pushTarget, onto, destination)
           const { head, settle } = yield* credited(task.path, task.branch, task.acceptedHead ?? (yield* commitOf(task.path, 'HEAD')), [
             task.baseCommit,
             attached.sent,
@@ -2327,9 +2331,8 @@ export class Changes extends Context.Service<
       /**
        * Attaches one of the task's repositories to an open pull request it
        * didn't open, by its link or its number (ADR-052): one opened by hand,
-       * or from a fork into the repository it came from, whose branch is on
-       * the fork this clone pushes to. Its branch must be one the task pushes
-       * to; another task following it keeps it. The task's branch, where it
+       * or from a fork into the repository it came from. A contributor's
+       * fork requires maintainer edits. Another task following it keeps it. The task's branch, where it
        * isn't based on that pull request's head, starts from it only with
        * `start`, the person's word: its own commits that aren't in the head
        * go on top, one by one, and where they conflict, or the worktree has
@@ -2437,8 +2440,8 @@ export class Changes extends Context.Service<
           // One whose branch is a change's own is that change's: recorded on it, in place of any open one it had, and the task
           // follows the rest as before (a task is a conversation plus parts).
           row = rows.find((one) => one.bindingId === row.bindingId && one.branch === pull.source && existsSync(one.path)) ?? row
-          // Its branch is on the repository this clone pushes to, or nowhere Althar can push: the fork, else the repository itself;
-          // for a fork whose branches go to the repository it came from (ADR-085), that one too, as the person can push there.
+          // Its branch is on the repository this clone pushes to, or on a contributor's fork that lets maintainers edit.
+          // Where the project sends branches upstream (ADR-085), the upstream repository can have its own branches too.
           // Where the host doesn't say which repository it is on, a branch of the same name here may be another's: none is pushed to.
           const pushes = fork?.fork.path ?? found.path
           const headOn = pull.headRepository
@@ -2447,10 +2450,20 @@ export class Changes extends Context.Service<
           if (headOn !== null && headOn.length === 0) return yield* refuse(`${name}’s branch was on a fork that is gone.`)
           const headPath = headOn ?? path
           const upstreamBranches = fork !== null && row.changeTarget === 'upstream_branch' && same(headPath, fork.upstream.path)
-          if (!same(headPath, pushes) && !(upstreamBranches && repository.canPush))
+          const outside = !same(headPath, pushes) && !(upstreamBranches && repository.canPush)
+          const maintainerEdit = outside && !same(headPath, path)
+          if (maintainerEdit) {
+            if (pull.maintainerEdits !== true)
+              return yield* refuse(
+                `${name} is from ${headPath.join('/')} and maintainer edits are disabled. Ask the author to allow maintainer edits, then attach it.`,
+              )
+            if (!repository.canPush)
+              return yield* refuse(`Your account can’t push to ${path.join('/')}. Sign in with an account that can edit ${name}’s branch.`)
+          } else if (outside) {
             return yield* refuse(
               `${name}’s branch, ${pull.source}, is on ${headPath.join('/')}, which this task doesn’t push to: it pushes to ${pushes.join('/')}.`,
             )
+          }
           const own = same(headPath, pushes) ? pushes : headPath
           const [other] = yield* sql<{ slug: string }>`
             SELECT k.slug FROM external_links x JOIN tasks k ON k.id = x.task_id
@@ -2527,7 +2540,12 @@ export class Changes extends Context.Service<
             yield* git(row.path, 'checkout', '-q', '-b', row.branch)
           }
           const kept = yield* commitsAhead(row.path, tip, 'HEAD').pipe(Effect.orElseSucceed(() => 0))
-          const snapshot: Snapshot = { ...snapshotOf(pull, path, host.words, null), headSha: tip, attached: true }
+          const snapshot: Snapshot = {
+            ...snapshotOf(pull, path, host.words, null),
+            headSha: tip,
+            attached: true,
+            ...(maintainerEdit ? { maintainerEdit: true } : {}),
+          }
           const followed = yield* sql<{ id: string; projectId: ProjectId; taskId: string }>`
             SELECT DISTINCT l.id, l.project_id, l.task_id FROM external_links l JOIN repository_changes c ON c.pull_request_url = l.url
             WHERE l.task_id = ${input.taskId} AND l.kind = 'change' AND l.listening = 1 AND l.url <> ${pull.url}
@@ -3297,6 +3315,33 @@ export class Changes extends Context.Service<
         pull: { readonly number: number; readonly source: string; readonly head?: ReadonlyArray<string> | null | undefined },
       ) => Effect.flatMap(branchRepositoryOf(taskId, host, repository, path, pull), (on) => host.pushTarget(on))
 
+      /** A contributor can revoke maintainer edits, close the pull request or delete its branch after a task attaches. */
+      const tipBeforePush = (
+        taskId: string,
+        snapshot: Snapshot,
+        path: string,
+        target: { readonly url: string; readonly header: string | null },
+        onto: string,
+        { host, repository, own }: { readonly host: CodeHost; readonly repository: Repository; readonly own: Repository },
+      ) =>
+        Effect.gen(function* () {
+          if (snapshot.maintainerEdit !== true) return yield* remoteTip(path, target, onto)
+          const remote = nameOf(snapshot)
+          const now = yield* host.change(repository, snapshot.number)
+          if (now.state !== 'open' || now.source !== onto) return yield* new ChangedSinceSeen({ taskId })
+          if (now.maintainerEdits !== true) return yield* new PushRefused({ taskId, why: 'maintainer_edits_disabled', remote })
+          if (!repository.canPush) return yield* new PushRefused({ taskId, why: 'forbidden', remote })
+          const head = now.headRepository
+          if (head?.length === 0) return yield* new PushRefused({ taskId, why: 'fork_gone', remote })
+          if (head == null || !samePath(head, own.path)) return yield* new PushRefused({ taskId, why: 'unplaced', remote })
+          if (onto === own.defaultBranch) return yield* new PushRefused({ taskId, why: 'protected', remote })
+          const tip = yield* askedRemoteTip(path, target, onto).pipe(
+            Effect.catchTag('GitFailed', (failed) => refusal(taskId, remote, failed)),
+          )
+          if (tip === null) return yield* new PushRefused({ taskId, why: 'refused', remote, said: 'the contributor’s branch is gone' })
+          return tip
+        })
+
       /** A commit, and what crediting made it from (credit.ts): the branch stays on that until it moves onto what was sent. */
       const madeFrom = (commit: string) =>
         Effect.gen(function* () {
@@ -3440,11 +3485,19 @@ export class Changes extends Context.Service<
           const workspace = yield* worktreeOf(taskId, snapshot.url)
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
           // A pull request from a fork into the repository it was forked from takes its commits on the fork.
-          const pushTarget = yield* pushTargetOf(taskId, host, repository, workspace.path, {
+          const own = yield* branchRepositoryOf(taskId, host, repository, workspace.path, {
             ...snapshot,
             source: sourceOf(snapshot, workspace.branch),
           })
-          return { link, snapshot, workspace, pushTarget, sent: yield* sentTo(link.projectId, snapshot.url) }
+          const pushTarget = yield* host.pushTarget(own)
+          return {
+            link,
+            snapshot,
+            workspace,
+            pushTarget,
+            sent: yield* sentTo(link.projectId, snapshot.url),
+            destination: { host, repository, own },
+          }
         })
 
       /**
@@ -3505,11 +3558,11 @@ export class Changes extends Context.Service<
       const push = (taskId: string, seen: string, url?: string, by: 'person' | 'althar' | 'ship' = 'person') =>
         Effect.gen(function* () {
           if (by !== 'ship') yield* holdBeforePush(taskId)
-          const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
+          const { link, snapshot, workspace, pushTarget, sent, destination } = yield* pushingTo(taskId, url)
           if (workspace.heldAt !== null && by !== 'ship') return yield* new ShipRefused({ taskId, why: 'held' })
           // Onto the pull request's own branch, which for one attached to the task may be called otherwise (ADR-052).
           const onto = sourceOf(snapshot, workspace.branch)
-          const tip = yield* remoteTip(workspace.path, pushTarget, onto)
+          const tip = yield* tipBeforePush(taskId, snapshot, workspace.path, pushTarget, onto, destination)
           const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [snapshot.headSha, sent, tip])
           // What Althar last pushed before what it last saw: a pull request read before that push is behind it.
           yield* stillOnHead(taskId, snapshot.url, workspace.path, seen, head, tip, [sent, snapshot.headSha])
@@ -3546,6 +3599,7 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
           const where = nameOf(snapshot)
+          if (snapshot.maintainerEdit === true) return yield* new PushRefused({ taskId, why: 'contributor_force_push', remote: where })
           const { rules } = yield* (yield* Policies).current(link.projectId)
           if (ruleSetOf(rules).never.includes('force-push')) return yield* new PushRefused({ taskId, why: 'never', remote: where })
           const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [replaces, sent])
@@ -7854,6 +7908,7 @@ export class Changes extends Context.Service<
           if (ahead.kind === 'behind') return `Someone else pushed to ${name}`
           if (ahead.kind === 'rewritten') return `Pushing to ${name} would need forcing`
           if (ahead.kind === 'unknown') return `Althar can't tell what ${name} has`
+          if (snapshot.maintainerEdit === true) return 'Changes to a contributor’s fork wait for your push'
           const { host, repository } = yield* current(taskId, snapshot.url)
           const onto = sourceOf(snapshot, branch)
           if (onto === repository.defaultBranch || onto === snapshot.target) return `${name} is from ${onto}`
@@ -9729,7 +9784,7 @@ export class Changes extends Context.Service<
                 // has looked: its fix goes up at once (ADR-040, ADR-070), unless the person said something on the task since those
                 // checks came, when what it committed may be for that, or the branch had commits not pushed yet when the lead was told,
                 // which the fix would take up with it. Anything else waits for the person, as ever.
-                const fixing = pushes ? null : yield* fixingOn(link)
+                const fixing = pushes || snapshot.maintainerEdit === true ? null : yield* fixingOn(link)
                 const earlier =
                   fixing !== null && fixing.open && fixing.failing && !fixing.spoken
                     ? yield* pendingAtFailure(link, snapshot.headSha, path, ahead.from)

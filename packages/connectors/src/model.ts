@@ -166,6 +166,8 @@ export const ChangeRequest = Schema.Struct({
    * repository's own; absent where the host doesn't say, as a list may not.
    */
   headRepository: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+  /** Whether the author lets maintainers of the target repository push to the source branch. */
+  maintainerEdits: Schema.optional(Schema.Boolean),
   /**
    * Whether it is in its target branch's merge queue, which merges it once
    * the queue's own checks pass on that branch as it will be: true as a

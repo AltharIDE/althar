@@ -434,6 +434,16 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('reads GitLab’s maintainer edit setting and its older name', () =>
+    Effect.gen(function* () {
+      const answers = [request({ allow_collaboration: true }), request({ allow_maintainer_to_push: false }), request()]
+      const { host } = gitlab([['GET', `${PROJECT}/merge_requests/12`, () => ({ json: answers.shift() })]])
+      assert.isTrue((yield* host.change(repository, 12)).maintainerEdits)
+      assert.isFalse((yield* host.change(repository, 12)).maintainerEdits)
+      assert.notProperty(yield* host.change(repository, 12), 'maintainerEdits')
+    }),
+  )
+
   it.effect('marks a draft ready by taking the prefix off its title as it is now', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([

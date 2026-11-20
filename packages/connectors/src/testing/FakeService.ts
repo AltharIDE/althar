@@ -368,7 +368,7 @@ export interface FakeControls {
   /** Someone changes a change's title or description on the host itself. */
   editByHand(number: number, set: { readonly title?: string; readonly body?: string }): void
   /** The account may push to the branch of a change from a fork (an outside author's, which allows it): by default it may not. */
-  allowForkPush(number: number): void
+  allowForkPush(number: number, allow?: boolean): void
   /** Every branch brought up to date, in order, by the number of the change and the commit it is at after. */
   readonly branchesUpdated: ReadonlyArray<{ readonly number: number; readonly head: string }>
   /** Every picture uploaded, in order, with the address the host gave it. */
@@ -738,6 +738,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ...(head === null ? {} : { headSha: head }),
           ...(conflicts === undefined ? {} : { conflicts }),
           ...(options.saysHead === false ? {} : { headRepository: fork === undefined ? null : fork === '' ? [] : fork.split('/') }),
+          ...(fork === undefined ? {} : { maintainerEdits: pushable.has(number) }),
           ...(ask?.queue === true && queues && found.state === 'open'
             ? { queued: inQueue.has(number), leftQueue: leftQueue.get(number) ?? null, queueSha: queueShas.get(number) ?? null }
             : {}),
@@ -1522,8 +1523,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     },
     pushByHand: (number) => update(number, { headSha: `${changeNumbered(number).headSha ?? 'head'}-pushed` }),
     editByHand: (number, set) => update(number, set),
-    allowForkPush: (number) => {
-      pushable.add(number)
+    allowForkPush: (number, allow = true) => {
+      if (allow) pushable.add(number)
+      else pushable.delete(number)
     },
     get branchesUpdated() {
       return [...updated]

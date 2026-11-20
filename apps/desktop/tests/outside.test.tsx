@@ -1213,6 +1213,24 @@ describe('a task’s pull request', () => {
     )
   })
 
+  it('offers to merge a rewritten branch from a contributor’s fork', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: {
+            ...snapshot().task,
+            phase: 'ready',
+            changes: [change({ localHead: 'def456', maintainerEdit: true, diverged: { kind: 'rewritten', local: 5, onPullRequest: 4 } })],
+            commits: 5,
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByRole('button', { name: 'Ask the lead to merge instead' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Replace the pull request’s commits' })).toBeNull()
+  })
+
   it('says a push refused for commits pushed from elsewhere in a sentence, and offers to bring them in', async () => {
     const url = 'https://github.com/meridian/api/pull/12'
     const { client } = fakeClient({
