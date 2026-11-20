@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { CanvasAnchor } from '@althar/contracts'
 
@@ -15,13 +15,15 @@ import {
   forgetComments,
   gather,
   type GatheredComment,
-  giveBack,
+  markEarlier,
   type PageSpot,
   pageCommentsOf,
   rewrite,
-  takeAll,
+  takeComments,
   withComments,
 } from '../src/renderer/shared/comments'
+import { draftCrop } from '../src/renderer/shared/draftCrops'
+import { draftOf, setDraftText } from '../src/renderer/shared/drafts'
 import type { ReadImage } from '../src/renderer/shared/images'
 
 /*
@@ -110,11 +112,92 @@ describe('comments waiting in a draft', () => {
 
   it('are taken as their message goes, and come back first where Althar didn’t take it', () => {
     gather('task:t', comment('a', 'First'))
-    const taken = takeAll('task:t')
+    const batch = takeComments('task:t')
     expect(commentsOf('task:t')).toEqual([])
     gather('task:t', comment('b', 'Made since'))
-    giveBack('task:t', taken)
+    batch.finish(false)
     expect(commentsOf('task:t').map((one) => one.id)).toEqual(['a', 'b'])
+  })
+  it('restores comment-only drafts synchronously, keeping their order and original anchors', () => {
+    const key = 'thread:restart'
+    const page = comment('page', 'Check the banner', { on: { kind: 'page', picked, address: 'https://example.com/', viewport: 'phone' } })
+    const line: GatheredComment = {
+      id: 'diff',
+      note: 'Check the new call',
+      crop: null,
+      on: {
+        kind: 'diff',
+        line: { path: 'src/pay.ts', side: 'old', start: 2, end: 2, under: 1, code: [{ kind: 'removed', text: 'charge()' }] },
+      },
+    }
+    const canvas: GatheredComment = {
+      id: 'canvas',
+      note: 'Check this title',
+      crop: null,
+      on: {
+        kind: 'canvas',
+        canvasId: 'cnv_1',
+        name: 'sign-in',
+        title: 'Sign-in flow',
+        version: 2,
+        anchor: { kind: 'passage', text: 'Continue', heading: 'Sign in' },
+      },
+    }
+    for (const one of [page, line, canvas]) gather(key, one)
+    gather('thread:other', comment('other', 'Stays with its thread'))
+    markEarlier(
+      key,
+      new Map([
+        ['diff', true],
+        ['canvas', true],
+      ]),
+    )
+    expect(window.localStorage.getItem('althar.drafts.comments:' + key)).not.toContain(crop.src)
+
+    forgetComments(false)
+    const restored = commentsOf(key)
+    expect(restored.map(({ id, note, on }) => ({ id, note, on }))).toEqual(
+      [page, line, canvas].map(({ id, note, on }) => ({ id, note, on })),
+    )
+    expect(draftOf(key).text).toBe('')
+    expect(composerComment(restored[0]!, 1).status).toBe('Crop is gone')
+    expect(composerComment(restored[1]!, 2).status).toBe('On an earlier version')
+    expect(composerComment(restored[2]!, 3).status).toBe('On an earlier version')
+    expect(canvasCommentsOf(restored)).toEqual([])
+    expect(commentsText(restored, 0, false)).toContain('Check this title')
+    expect(commentsOf('thread:other').map((one) => one.id)).toEqual(['other'])
+  })
+
+  it('keeps comments through an interrupted send, and clears accepted or removed comments on restart', () => {
+    const key = 'thread:interrupted'
+    setDraftText(key, 'Draft words')
+    gather(key, comment('a', 'Send me'))
+    gather(key, comment('b', 'Remove me'))
+    expect(takeComments(key).taken).toHaveLength(2)
+    expect(commentsOf(key)).toHaveLength(0)
+    forgetComments(false)
+    expect(draftOf(key).text).toBe('Draft words')
+    expect(commentsOf(key).map((one) => one.id)).toEqual(['a', 'b'])
+
+    drop(key, 'b')
+    takeComments(key).finish(true)
+    forgetComments(false)
+    expect(commentsOf(key)).toEqual([])
+  })
+
+  it('marks a crop as gone when its bytes could not be restored, and still sends the note', async () => {
+    const read = vi.spyOn(draftCrop, 'read').mockResolvedValue(null)
+    try {
+      gather('thread:crop', comment('a', 'The note survives', { crop: null, cropId: 'missing' }))
+      forgetComments(false)
+      const batch = takeComments('thread:crop')
+      const taken = await new Promise<ReadonlyArray<GatheredComment>>((resolve) => batch.withCrops(true, resolve))
+      expect(taken[0]).toMatchObject({ crop: null, cropLost: true, note: 'The note survives' })
+      batch.finish(false)
+      expect(composerComment(commentsOf('thread:crop')[0]!, 1).status).toBe('Crop is gone')
+    } finally {
+      read.mockRestore()
+    }
   })
 })
 

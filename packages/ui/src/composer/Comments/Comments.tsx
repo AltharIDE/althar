@@ -28,6 +28,8 @@ export interface ComposerComment {
   note: string
   /** Where it is, at a glance: `span.needs`. */
   place: string
+  /** Availability of the original spot or its crop. */
+  status?: string
   /** A picture of the spot, with its size in pixels. */
   crop?: { readonly src: string; readonly width: number; readonly height: number }
   /** What its card lists, in order. */
@@ -60,7 +62,12 @@ export function CommentChip({ comment, onOpen, onRemove, text }: CommentChipProp
   return (
     <span className={s.chip}>
       <HoverCard card={<CommentCard comment={comment} />} placement="above" width={316}>
-        <button type="button" className={s.open} aria-label={t.open(comment.n, comment.note)} onClick={onOpen}>
+        <button
+          type="button"
+          className={s.open}
+          aria-label={[t.open(comment.n, comment.note), comment.status].filter(Boolean).join(' · ')}
+          onClick={onOpen}
+        >
           <span className={s.thumb} aria-hidden="true">
             {comment.crop === undefined ? <span className={s.n}>{comment.n}</span> : <img src={comment.crop.src} alt="" />}
           </span>
@@ -68,7 +75,7 @@ export function CommentChip({ comment, onOpen, onRemove, text }: CommentChipProp
             <span className={s.note}>
               {comment.n}. {comment.note}
             </span>
-            <span className={s.place}>{comment.place}</span>
+            <span className={s.place}>{comment.status ?? comment.place}</span>
           </span>
         </button>
       </HoverCard>
@@ -90,6 +97,7 @@ export function CommentCard({ comment }: { comment: ComposerComment }) {
         <span className={s.n}>{comment.n}</span>
         <span>{comment.note}</span>
       </span>
+      {comment.status !== undefined && <span className={s.place}>{comment.status}</span>}
       <KeyValues
         className={s.facts}
         keyWidth={78}

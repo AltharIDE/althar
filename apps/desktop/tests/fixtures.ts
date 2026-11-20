@@ -1491,7 +1491,7 @@ export const fakePagesHost = (overrides: Partial<PagesHost> = {}): PagesHost => 
   viewport: vi.fn(async () => {}),
   point: vi.fn(async () => null),
   stopPointing: vi.fn(async () => {}),
-  pins: vi.fn(async () => {}),
+  pins: vi.fn(async () => null),
   find: vi.fn(async () => null),
   still: vi.fn(async () => null),
   cover: vi.fn(async () => {}),

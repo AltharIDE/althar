@@ -1,12 +1,14 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ChangedFile, LineCommentNow, ThreadItem, ThreadSnapshot } from '@althar/contracts'
 
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { viewedSent } from '../src/renderer/features/task/useLineComments'
+import { forgetComments, gather } from '../src/renderer/shared/comments'
+import { draftKey } from '../src/renderer/shared/drafts'
 import { queuedOf } from '../src/renderer/shared/items'
 import { outgoingOf } from '../src/renderer/shared/useAttachments'
 import { fakeClient, items, snapshot } from './fixtures'
@@ -56,7 +58,36 @@ const sentComment: LineCommentNow = {
   addressed: false,
 }
 
+afterEach(forgetComments)
+
 describe('comments on the diff', () => {
+  it('restores a draft in the composer when its line changed and sends the original quote only on Send', async () => {
+    const user = userEvent.setup()
+    const { id: _id, note, path, side, start, end, code } = sentComment
+    const line = { path, side, start, end, code }
+    gather(draftKey.task('th1'), { id: 'restored', note, on: { kind: 'diff', line }, crop: null })
+    forgetComments(false)
+
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ready()),
+      getFileDiff: vi.fn(async () => ({
+        ...diff,
+        lines: diff.lines.map((one) => (one.kind === 'added' ? { ...one, text: '  return retryWithBackoff(charge)' } : one)),
+      })),
+    })
+    withServices(<Task />, client)
+
+    const chip = await screen.findByRole('button', { name: /^Comment 1: Cap the retries.*On an earlier version$/ })
+    expect(client.send).not.toHaveBeenCalled()
+    await user.click(chip)
+    const changes = await screen.findByRole('dialog', { name: 'Changes' })
+    expect(within(changes).getByText('On an earlier version')).toBeVisible()
+    await user.click(within(changes).getByRole('button', { name: 'Close' }))
+    await user.click(screen.getByRole('button', { name: /^Send$/ }))
+    await waitFor(() => expect(client.send).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(client.send).mock.calls[0]?.[0].comments).toEqual([{ ...line, note }])
+  })
+
   it('gathers comments on lines and sends them to the lead in one message, each with its file, lines and code', async () => {
     const user = userEvent.setup()
     const { client } = fakeClient({ getThread: vi.fn(async () => ready()), getFileDiff: vi.fn(async () => diff) })

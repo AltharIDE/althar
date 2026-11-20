@@ -57,18 +57,10 @@ import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { Foot } from '../foot/Foot'
 import { useFootShown } from '../foot/shown'
 import { pages, usePage } from '../browser/pages'
+import { useDraftCanvasVersions } from '../canvases/draftVersions'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import { ArtifactsView } from '../canvases/ArtifactsView'
-import {
-  composerComment,
-  cropsOf,
-  drop,
-  giveBack as giveCommentsBack,
-  takeAll,
-  useComments,
-  withComments,
-  canvasCommentsOf,
-} from '../../shared/comments'
+import { composerComment, cropsOf, drop, takeComments, useComments, withComments, canvasCommentsOf } from '../../shared/comments'
 import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
@@ -467,6 +459,7 @@ export function ProjectView({
   }, [pageWhere, beforeKey, about])
   const navigate = useNavigate()
   const comments = useComments(draftOf)
+  useDraftCanvasVersions(draftOf, comments)
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
   // What the coordinator's thread opens: a picture in the lightbox, a file it names beside the thread, a page.
   const shown = useThreadHost(
@@ -699,36 +692,38 @@ export function ProjectView({
     // Images that can't go yet hold the message back, and the composer says why.
     const own = images.take(receiver)
     if (own === null) return
-    // The comments made on a page beside the conversation go after the person's words, their crops after the person's own pictures.
-    const gathered = takeAll(draftOf)
+    const batch = takeComments(draftOf)
     const pictures = receiver.takes !== false
-    const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
-    const outgoing: Outgoing = {
-      ...own,
-      sent: [...own.sent, ...crops.sent],
-      pictures: [...own.pictures, ...crops.pictures],
-      // Comments on canvases are kept with the message itself, in its command, and nowhere before (ADR-104).
-      canvasComments: canvasCommentsOf(gathered),
-    }
-    const words = withComments(body, gathered, own.sent.length, pictures)
     setDraft('')
     images.clear()
     const picked = waiting
     if (picked !== null) setHandover(null)
-    const said =
-      picked !== null ? model.handOver(picked, words, outgoing) : now ? model.sayNow(words, outgoing) : model.say(words, chosen, outgoing)
     // Sent from under the board, the coordinator's conversation comes back for the answer.
     if (docked) {
       asides.back()
       togglePane('talk')
     }
-    // One Althar doesn't take goes back in the composer: its words, its images and comments, and the agent picked to take over.
-    void said.then((accepted) => {
-      if (accepted) return
-      setDraft((current) => withQueued(current, body))
-      images.giveBack(own)
-      giveCommentsBack(draftOf, gathered)
-      if (picked !== null) setHandover(picked)
+    batch.withCrops(pictures, (gathered) => {
+      const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
+      const outgoing: Outgoing = {
+        ...own,
+        sent: [...own.sent, ...crops.sent],
+        pictures: [...own.pictures, ...crops.pictures],
+        canvasComments: canvasCommentsOf(gathered),
+      }
+      const words = withComments(body, gathered, own.sent.length, pictures)
+      const restore = () => {
+        batch.finish(false)
+        setDraft((current) => withQueued(current, body))
+        images.giveBack(own)
+        if (picked !== null) setHandover(picked)
+      }
+      const said =
+        picked !== null ? model.handOver(picked, words, outgoing) : now ? model.sayNow(words, outgoing) : model.say(words, chosen, outgoing)
+      void said.then((accepted) => {
+        if (accepted) batch.finish(true)
+        else restore()
+      }, restore)
     })
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
@@ -852,13 +847,16 @@ export function ProjectView({
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
           if (about === null) return
-          // Pressed, a comment opens again on its page beside the conversation.
-          pages.place(about, 'beside')
+          const spot = comments.find((one) => one.id === id)?.on
           setRoom((was) => {
             rememberRoom(was)
             return Room.Talk
           })
-          pages.reopen(about, id)
+          if (spot?.kind === 'canvas') shown.openCanvas(spot.canvasId, spot.version, false)
+          if (spot?.kind === 'page') {
+            pages.place(about, 'beside')
+            pages.reopen(about, id)
+          }
         }}
         onRemoveComment={(id) => drop(draftOf, id)}
         {...(busy && talkingTo.kind !== 'new' ? { onStopAgent: () => void model.interrupt() } : {})}

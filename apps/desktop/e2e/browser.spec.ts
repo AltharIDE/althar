@@ -305,6 +305,12 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     await shoot(page, electronApp, 'test-results/browser-comment-card.png')
     await page.mouse.move(10, 10)
 
+    // Reloading the renderer brings back the chip and its crop before anything is sent.
+    await reloading(page, () => reloadWindow(electronApp))
+    await expect(chip).toBeVisible()
+    await expect(chip.locator('img')).toBeVisible()
+    await chip.screenshot({ path: 'test-results/browser-comment-restored.png', scale: 'css' })
+
     // Sent, the person's words go first, then the comment, with its crop as a picture: the lead gets them all.
     await say(page, 'Two things on the refunds page.')
     await expect(shown(page, /saw images: image\/png \d+ B/).last()).toBeVisible()

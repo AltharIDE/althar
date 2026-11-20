@@ -89,7 +89,7 @@ const fakePages = () => {
     viewport: vi.fn(async () => {}),
     point: vi.fn(async () => pointed),
     stopPointing: vi.fn(async () => {}),
-    pins: vi.fn(async () => {}),
+    pins: vi.fn(async () => null),
     find: vi.fn(async () => pointed),
     still: vi.fn(async () => 'data:image/jpeg;base64,BBBB'),
     cover: vi.fn(async () => {}),
