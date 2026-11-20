@@ -53,12 +53,13 @@ export const NearlyOut: Story = {
   },
 }
 
-/** Opened: the level and a row per agent, least room first. */
+/** Opened: a row per agent, least room first. */
 export const Open: Story = {
   args: { agents: [CODEX_NEARLY, CLAUDE_TWO], defaultOpen: true },
   play: async () => {
     const page = within(document.body)
-    await expect(page.getByText('Codex is nearly out')).toBeInTheDocument()
+    await expect(page.getByText('Plan usage', { selector: 'h2' })).toBeInTheDocument()
+    await expect(page.queryByText('Codex is nearly out')).toBeNull()
     await expect(page.getByText('Personal · Weekly limit · until Fri 09:00')).toBeInTheDocument()
     // An agent opens in place to every account and window, an old one saying so.
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
@@ -78,7 +79,6 @@ export const SignedOut: Story = {
     await expect(
       within(canvasElement).getByRole('button', { name: 'Plan usage: Claude Code has 62% left, until 17:00' }),
     ).toBeInTheDocument()
-    await expect(page.getByText('Plenty left')).toBeInTheDocument()
     await userEvent.click(page.getByRole('button', { name: 'Sign in again' }))
     await expect(args.onSignIn).toHaveBeenCalledWith(CODEX_SIGNED_OUT.id)
     // Its saved numbers stay in its detail, with why it runs nothing.
@@ -93,7 +93,6 @@ export const AllSignedOut: Story = {
   args: { agents: [CODEX_OUT], defaultOpen: true, onSignIn: fn() },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Codex can’t start work' })).toBeInTheDocument()
-    await expect(within(document.body).getByText('Codex can’t start work')).toBeInTheDocument()
     await expect(within(document.body).queryByText('Plenty left')).toBeNull()
   },
 }
@@ -141,11 +140,13 @@ export const AllUnread: Story = {
   },
 }
 
-/** Nothing read yet: the gauge unlit, and the peek says so. */
+/** Nothing read yet: the gauge unlit and named so, and the peek is its heading alone. */
 export const NothingRead: Story = {
   args: { agents: [], defaultOpen: true },
-  play: async () => {
-    await expect(within(document.body).getByText('Nothing read yet')).toBeInTheDocument()
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Nothing read yet' })).toBeInTheDocument()
+    await expect(within(document.body).getByText('Plan usage', { selector: 'h2' })).toBeInTheDocument()
+    await expect(within(document.body).queryByText('Nothing read yet')).toBeNull()
   },
 }
 
@@ -165,7 +166,6 @@ export const OpenCodeGoConnected: Story = {
   args: { agents: [CLAUDE_PLENTY, OPENCODE_GO_CONNECTED], defaultOpen: true },
   play: async () => {
     const page = within(document.body)
-    await expect(page.getByText('Plenty left')).toBeInTheDocument()
     await expect(page.getByText('Connected')).toBeInTheDocument()
     await userEvent.click(page.getByRole('button', { name: /^OpenCode Go/ }))
     await expect(page.getByText(/only through an OpenCode Console sign-in/)).toBeInTheDocument()
