@@ -38,6 +38,7 @@
     "@tanstack/react-router": "^1.170.46",
     "effect": "4.0.7",
     "electron-updater": "6.8.11",
+    "node-pty": "1.1.0",
     "posthog-node": "5.73.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

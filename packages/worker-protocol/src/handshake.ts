@@ -26,7 +26,14 @@ export const validWorkerProtocolId = (value: string, prefix: string): boolean =>
   value.startsWith(prefix) && value.length === prefix.length + 32 && /^[a-f0-9]{32}$/.test(value.slice(prefix.length))
 
 /** The caller must authenticate the worker and allocate its session before accepting its first frame. */
-export const negotiateWorkerHello = (bytes: Uint8Array, binding: WorkerSessionBinding, diagnostics = false): HomeFrame => {
+export const negotiateWorkerHello = (
+  bytes: Uint8Array,
+  binding: WorkerSessionBinding,
+  diagnostics = false,
+  renewals = false,
+  logs = false,
+  projectCommands = false,
+): HomeFrame => {
   if (
     !validWorkerProtocolId(binding.homeId, 'home_') ||
     !validWorkerProtocolId(binding.workerId, 'wrk_') ||
@@ -46,10 +53,20 @@ export const negotiateWorkerHello = (bytes: Uint8Array, binding: WorkerSessionBi
   if (hello.workerId !== binding.workerId) throw new WorkerHandshakeError('WrongWorker')
   if (hello.minVersion < 1 || hello.minVersion > WORKER_PROTOCOL_VERSION || hello.maxVersion < WORKER_PROTOCOL_VERSION)
     throw new WorkerHandshakeError('IncompatibleVersion')
+  const supportsDiagnostics = diagnostics && hello.acceptsDiagnostics
+  const supportsDiagnosticLeaseRenewal = supportsDiagnostics && renewals && hello.renewsDiagnosticLease
+  const supportsDiagnosticLogs = supportsDiagnosticLeaseRenewal && logs && hello.streamsDiagnosticLogs
   return create(HomeFrameSchema, {
     payload: {
       case: 'hello',
-      value: { ...binding, version: WORKER_PROTOCOL_VERSION, supportsDiagnostics: diagnostics && hello.acceptsDiagnostics },
+      value: {
+        ...binding,
+        version: WORKER_PROTOCOL_VERSION,
+        supportsDiagnostics,
+        supportsDiagnosticLeaseRenewal,
+        supportsDiagnosticLogs,
+        supportsProjectCommands: supportsDiagnosticLogs && projectCommands && hello.acceptsProjectCommands,
+      },
     },
   })
 }

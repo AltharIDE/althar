@@ -165,7 +165,8 @@ describe('adding something to run', () => {
       phase: 'ready',
       scratch: true,
       state: 'active',
-      createdAt: '2026-11-12T10:00:00Z',
+      // Started just now, on the real clock the project reads: a fixed date drops it to the older asides a week later.
+      createdAt: new Date().toISOString(),
       settledAt: null,
       changed: null,
       here: [],

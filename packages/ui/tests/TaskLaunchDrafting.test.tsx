@@ -148,3 +148,46 @@ describe('a node being chosen', () => {
     expect(choosing()).toBe(still)
   })
 })
+
+describe('a task card whose drafting stopped short of a plan', () => {
+  it('says it has no plan, rather than sizing it for ever, and offers to plan or discard it', async () => {
+    const onPlan = vi.fn()
+    const onDiscard = vi.fn()
+    const { container } = card({
+      title: 'Explore: what the team looks like before multiplayer',
+      steps: [lead(false), review(false)],
+      drafting: { phase: 'sizing', ended: 'unplanned' },
+      held: true,
+      onPlan,
+      onDiscard,
+    })
+    expect(screen.getByText('No plan yet')).toBeInTheDocument()
+    expect(screen.getByText('Draft')).toBeInTheDocument()
+    // Nothing goes on: no phase, no light passing over words, no seat being chosen, not busy, not held for a plan to come.
+    expect(screen.queryByText(/Sizing it/)).toBeNull()
+    expect(screen.queryByText('Putting a team together')).toBeNull()
+    expect(screen.queryByText('Held · starts when you say')).toBeNull()
+    expect(container.querySelector('[data-words]')).toBeNull()
+    expect(container.querySelector('[data-state="next"], [data-state="choosing"]')).toBeNull()
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
+    expect(onPlan).toHaveBeenCalledOnce()
+    await userEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    expect(onDiscard).toHaveBeenCalledOnce()
+  })
+
+  it('says it was discarded, with nothing to do, whatever it was at', () => {
+    const { container } = card({
+      title: 'Explore: roles and guardrails for non-engineers',
+      steps: [lead(false), review(false)],
+      drafting: { phase: 'sizing', ended: 'discarded' },
+      held: true,
+      onPlan: vi.fn(),
+      onDiscard: vi.fn(),
+    })
+    expect(screen.getByText('Discarded')).toBeInTheDocument()
+    expect(screen.queryByText(/Sizing it/)).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(container.querySelector('[data-words]')).toBeNull()
+  })
+})

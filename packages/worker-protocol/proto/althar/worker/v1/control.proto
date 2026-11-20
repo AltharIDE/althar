@@ -13,6 +13,8 @@ message WorkerFrame {
     WorkerHello hello = 1;
     DiagnosticClaim diagnostic_claim = 2;
     DiagnosticResult diagnostic_result = 3;
+    DiagnosticRenew diagnostic_renew = 4;
+    DiagnosticLog diagnostic_log = 5;
   }
 }
 
@@ -21,6 +23,7 @@ message HomeFrame {
     HomeHello hello = 1;
     DiagnosticOffer diagnostic_offer = 2;
     DiagnosticStart diagnostic_start = 3;
+    DiagnosticLease diagnostic_lease = 4;
   }
 }
 
@@ -31,6 +34,9 @@ message WorkerHello {
   uint32 min_version = 2;
   uint32 max_version = 3;
   bool accepts_diagnostics = 4;
+  bool renews_diagnostic_lease = 5;
+  bool streams_diagnostic_logs = 6;
+  bool accepts_project_commands = 7;
 }
 
 // The first home frame binds this stream to one authenticated, negotiated session.
@@ -40,6 +46,9 @@ message HomeHello {
   string session_id = 3;
   uint32 version = 4;
   bool supports_diagnostics = 5;
+  bool supports_diagnostic_lease_renewal = 6;
+  bool supports_diagnostic_logs = 7;
+  bool supports_project_commands = 8;
 }
 
 // A lease of zero requests reconciliation without granting a new start.
@@ -47,6 +56,13 @@ message DiagnosticOffer {
   string attempt_id = 1;
   string fence = 2;
   uint32 claimable_for_ms = 3;
+  ProjectCommand project_command = 4;
+}
+
+// The worker operator resolves this reference locally. No paths or argv are sent.
+message ProjectCommand {
+  string project_id = 1;
+  string command_name = 2;
 }
 
 message DiagnosticClaim {
@@ -66,11 +82,38 @@ enum DiagnosticOutcome {
   DIAGNOSTIC_OUTCOME_SUCCEEDED = 1;
   DIAGNOSTIC_OUTCOME_FAILED = 2;
   DIAGNOSTIC_OUTCOME_UNKNOWN = 3;
+  DIAGNOSTIC_OUTCOME_CANCELLED = 4;
 }
 
 message DiagnosticResult {
   string attempt_id = 1;
   string fence = 2;
   DiagnosticOutcome outcome = 3;
+  bytes output = 4;
+}
+
+// Available only when both peers negotiate renewal. Sequence starts at one.
+// A request is only valid on the stream that received the original start.
+message DiagnosticRenew {
+  string attempt_id = 1;
+  string fence = 2;
+  uint32 sequence = 3;
+}
+
+// A renewal confirms the current authority and never authorizes another start.
+// A zero grant requests cancellation only for a negotiated project command.
+message DiagnosticLease {
+  string attempt_id = 1;
+  string fence = 2;
+  uint32 sequence = 3;
+  uint32 run_for_ms = 4;
+}
+
+// Raw stdout, emitted before the result on the claiming stream. Offsets are
+// contiguous byte offsets from zero, independent of character encoding.
+message DiagnosticLog {
+  string attempt_id = 1;
+  string fence = 2;
+  uint32 offset = 3;
   bytes output = 4;
 }

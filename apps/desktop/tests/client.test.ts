@@ -161,7 +161,8 @@ describe('the client', () => {
     await client.send({ threadId: coordinator.threadId, body: 'Add a retry. [coordinator:plan]', disposition: 'after_current' })
     const planned = await waitFor(
       () => client.getCoordinator(project.id, { limit: 50 }),
-      (snapshot) => snapshot.items.some((item) => item.kind === 'task'),
+      // Its plan, not only its card: the card is there from when the task is drafted, before its plan comes.
+      (snapshot) => snapshot.items.some((item) => item.kind === 'task' && item.content.plan != null),
     )
     const card = planned.items.find((item) => item.kind === 'task')
     const planId = card?.kind === 'task' ? (card.content.plan?.id ?? '') : ''
@@ -484,6 +485,13 @@ describe('the client', () => {
           RunProject: () => Effect.die('unused'),
           StopLaunch: () => Effect.die('unused'),
           ReadLaunchOutput: () => Effect.die('unused'),
+          ListLaunches: () => Effect.die('unused'),
+          OpenTerminal: () => Effect.die('unused'),
+          ListTerminals: () => Effect.die('unused'),
+          AttachTerminal: () => Stream.die('unused'),
+          WriteTerminal: () => Effect.die('unused'),
+          ResizeTerminal: () => Effect.die('unused'),
+          CloseTerminal: () => Effect.die('unused'),
           KeepRunnable: () => Effect.die('unused'),
           DropRunnable: () => Effect.die('unused'),
           OrderRunnables: () => Effect.die('unused'),

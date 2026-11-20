@@ -8,6 +8,9 @@ export default defineConfig({
   test: {
     ...testing('medium'),
     sequence: { sequencer: DurationSequencer },
+    // On Windows, the keeper the agents' processes run under is built once before the workers start: a test that starts
+    // a real agent, as the ACP checks do, times only its own work, and the workers don't all compile it at once.
+    globalSetup: ['./tests/keeperFirst.ts'],
     // The fake agents only, so it runs in CI; the real ones run with `bun run test:agents`.
     include: ['tests/*.test.ts'],
     environment: 'node',

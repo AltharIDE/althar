@@ -2680,6 +2680,13 @@ export const TaskCard = Schema.Struct({
    * repository. Absent otherwise.
    */
   settingUp: Schema.optional(Schema.Literals(['install', 'kept'])),
+  /** Discarded: settled without its work, whatever it stood at then (drafted, planned, held or at work). Absent otherwise. */
+  discarded: Schema.optional(Schema.Literal(true)),
+  /**
+   * Drafted, and its plan never came: no plan proposed or started, nothing run. Its card says so and offers to plan or
+   * discard it, rather than that it stopped. Absent otherwise, and while its plan is still on its way.
+   */
+  unplanned: Schema.optional(Schema.Literal(true)),
   /** What it makes, read from what it has now: its card's word, and what the card shows. */
   kind: TaskKind,
   /** The task whose lead started it (ADR-097: leads start tasks), which its card names; absent for one the person or the coordinator started. */
@@ -4476,8 +4483,47 @@ export const Draft = Schema.Struct({
   planned: Schema.Boolean,
   /** The person held it while it was drafted: its plan comes held. */
   held: Schema.Boolean,
+  /** Its plan's call failed and no other has begun: it says it has no plan, rather than sizing it for ever. */
+  unplanned: Schema.optional(Schema.Boolean),
+  /** Its task was discarded while it was drafted. */
+  discarded: Schema.optional(Schema.Boolean),
 })
 export type Draft = typeof Draft.Type
+
+/**
+ * A terminal the person opened in a project: a shell of their own in a
+ * pseudo-terminal, in the task's worktree, the project's repository, or the
+ * folder a run ran in. It lives while Althar runs; none outlives it.
+ */
+export const ShownTerminal = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  /** The task whose worktree it opened in; null on the project. */
+  taskId: Schema.NullOr(Schema.String),
+  /** The run it was opened from, in that run's folder; null for none. */
+  launchId: Schema.NullOr(Schema.String),
+  /** The folder it opened in. */
+  folder: Schema.String,
+  /** Where that is, in words: the run's, the task's title, or the repository's name. */
+  where: Schema.String,
+  /** What runs in it in front now: the shell, or the program the person started from it (`vim`, `bun`). */
+  title: Schema.String,
+  /** Something besides the shell runs in it now: closing it stops that too. */
+  busy: Schema.Boolean,
+  startedAt: Schema.String,
+  /** How its shell ended, where it did by itself and not well; one that ended well is gone. */
+  exited: Schema.NullOr(Schema.Struct({ code: Schema.Number })),
+})
+export type ShownTerminal = typeof ShownTerminal.Type
+
+/** What a terminal prints, as it comes: what it printed so far first, then each piece; and once, how its shell ended. */
+export const TerminalChunk = Schema.Union([
+  Schema.Struct({ _tag: Schema.Literal('Data'), data: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal('Exit'), code: Schema.Number }),
+])
+export type TerminalChunk = typeof TerminalChunk.Type
+
+const TerminalSize = Schema.Int.check(Schema.isBetween({ minimum: 2, maximum: 2_000 }))
 
 export const WatchEvent = Schema.Union([
   Schema.Struct({
@@ -4516,6 +4562,8 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('Background'), threadId: Schema.String, background: Schema.Array(BackgroundCommand) }),
   /** What Althar runs of a project itself, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
+  /** A project's terminals, whole each time one opens, closes, ends or starts or ends a program in front. */
+  Schema.Struct({ _tag: Schema.Literal('Terminals'), projectId: Schema.String, terminals: Schema.Array(ShownTerminal) }),
   /** Every account's plan usage, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('PlanUsage'), usage: PlanUsage }),
   /** The tasks a coordinator thread is drafting now, as far as written, whole each time they change. */
@@ -6226,6 +6274,36 @@ const WorkApi = RpcGroup.make(
   command('ClearLaunch', { id: Schema.String }, Schema.Void),
   /** What a run of the project has printed so far, the end of it; readable a while after it leaves the list, while Althar runs. */
   call('ReadLaunchOutput', { id: Schema.String }, OutputText),
+  /**
+   * Opens a terminal, by the id the client gave it, so the client shows it
+   * at once: in the folder the run named ran in, else in the task's
+   * worktree, else in the project's repository. One by that id already open
+   * is the one returned.
+   */
+  command(
+    'OpenTerminal',
+    {
+      id: Schema.String.check(Schema.isPattern(/^term_[A-Za-z0-9_-]{6,64}$/)),
+      projectId: Schema.String,
+      taskId: Schema.NullOr(Schema.String),
+      launchId: Schema.optional(Schema.String),
+      cols: TerminalSize,
+      rows: TerminalSize,
+    },
+    ShownTerminal,
+  ),
+  /** The project's terminals, in the order they opened. */
+  call('ListTerminals', { projectId: Schema.String }, Schema.Array(ShownTerminal)),
+  /** What Althar runs of the project itself, its tasks' too, in the order they started. */
+  call('ListLaunches', { projectId: Schema.String }, Schema.Array(Launch)),
+  /** What a terminal prints: what it printed so far, kept to its end, then each piece as it comes, until it ends or is closed. */
+  Rpc.make('AttachTerminal', { payload: { id: Schema.String }, success: TerminalChunk, error: ApiError, stream: true }),
+  /** What the person typed or pasted into a terminal, as its keys send it. */
+  call('WriteTerminal', { id: Schema.String, data: Schema.String.check(Schema.isMaxLength(1_000_000)) }, Schema.Void),
+  /** A terminal's new size, in characters. */
+  call('ResizeTerminal', { id: Schema.String, cols: TerminalSize, rows: TerminalSize }, Schema.Void),
+  /** Closes a terminal, stopping its shell and whatever runs in it. */
+  command('CloseTerminal', { id: Schema.String }, Schema.Void),
   /** The skills a task's lead is given: what the person added from GitHub and turned on. */
   call('ListSkills', {}, SkillList),
   /** The skill folders in a GitHub repository (a URL or `owner/name`), at the ref given or its default branch. */

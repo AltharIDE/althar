@@ -305,6 +305,67 @@ describe('presets', () => {
     }).pipe(Effect.provide(runtimeWith(github)))
   })
 
+  it.live('name the one a plan was planned from on its card, whoever leads it, until its parts no longer have its shape', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* opened(working)
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      yield* callTool(coordinator, 'draft_task', { title: 'Explore the team view' })
+      // Codex's models known first, as the coordinator reads them before naming one.
+      yield* until(callTool(coordinator, 'list_models', {}), (said) => said.includes('OpenAI\n- Large'))
+      const said = yield* callTool(coordinator, 'propose_plan', {
+        task: 'explore-the-team-view',
+        lead: { agent: 'codex', model: 'large' },
+        review: null,
+        preset: 'Prototype',
+      })
+      assert.include(said, 'As Prototype.')
+      const [row] = yield* sql<{ id: string; parameters: string }>`SELECT id, parameters FROM task_plans ORDER BY rowid DESC LIMIT 1`
+      const plan = JSON.parse(row?.parameters ?? '{}') as {
+        steps: ReadonlyArray<{ key: 'implement' | 'review'; agentId: string; model: string | null; skipped: boolean }>
+      }
+      assert.strictEqual((yield* until(cards(projectId), (all) => all[0]?.plan != null))[0]?.plan?.preset, 'Prototype')
+      // Another lead than the preset names, as the coordinator or the person picks one: still the prototype it was planned as.
+      const led = plan.steps.map((step) => (step.key === 'implement' ? { ...step, agentId: 'codex', model: 'large' } : step))
+      yield* (yield* Plans).change(row?.id ?? '', led, instance.personId)
+      yield* until(cards(projectId), (all) => all[0]?.plan?.steps[0]?.agentId === 'codex')
+      assert.strictEqual((yield* cards(projectId))[0]?.plan?.preset, 'Prototype')
+      // Pointed at a pull request, it is a prototype no longer: its card names what its parts are.
+      yield* (yield* Plans).change(row?.id ?? '', led, instance.personId, 'draft')
+      yield* until(cards(projectId), (all) => all[0]?.plan?.end === 'draft')
+      assert.strictEqual((yield* cards(projectId))[0]?.plan?.preset, 'Change')
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
+  it.live('keep on its card the plan a task was discarded with, held before it began, naming its preset', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* opened(working)
+      yield* callTool(coordinator, 'draft_task', { title: 'Explore the roles' })
+      yield* until(callTool(coordinator, 'list_models', {}), (said) => said.includes('OpenAI\n- Large'))
+      yield* callTool(coordinator, 'propose_plan', {
+        task: 'explore-the-roles',
+        lead: { agent: 'codex', model: 'large' },
+        review: null,
+        preset: 'Prototype',
+      })
+      yield* callTool(coordinator, 'hold_task', { task: 'explore-the-roles' })
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'held')
+      yield* callTool(coordinator, 'settle_task', { task: 'explore-the-roles', how: 'discard', why: 'one task, not five' })
+      const [card] = yield* until(cards(projectId), (all) => all[0]?.discarded === true)
+      assert.strictEqual(card?.phase, 'settled')
+      assert.strictEqual(card?.plan?.preset, 'Prototype')
+      // Its team as planned, not open seats.
+      assert.isString(card?.plan?.steps[0]?.agentId)
+      assert.isNull(card?.plan?.startsAt)
+    }).pipe(Effect.provide(runtimeWith(github)))
+  })
+
   it.live('end as the project says, unless the person set an ending on one of their own', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })

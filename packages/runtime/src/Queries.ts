@@ -114,7 +114,7 @@ import { commitOf, commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRe
 import { reachedRemote } from './sshHosts'
 import { commandIn, shortCommand } from './rules'
 import { reviewBriefOf } from './Reviews'
-import { partsOfPlan, presetOf, presetOfferOn, presetsIn } from './presets'
+import { partsOfPlan, presetOfferOn, presetOfPlan, presetsIn } from './presets'
 import { Sessions } from './Sessions'
 import { teamLeadsOf } from './teamLead'
 import { spendingOf } from './Spending'
@@ -2546,7 +2546,11 @@ export class Queries extends Context.Service<
             FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
-            LEFT JOIN task_plans p ON p.id = (SELECT id FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted') ORDER BY proposed_at DESC LIMIT 1)
+            -- Its plan; discarded before it began, the one it was discarded with, which discarding declined: its card keeps it.
+            LEFT JOIN task_plans p ON p.id = (
+              SELECT id FROM task_plans
+              WHERE task_id = k.id AND (state IN ('proposed', 'accepted') OR (k.state = 'abandoned' AND state = 'declined'))
+              ORDER BY state IN ('proposed', 'accepted') DESC, proposed_at DESC LIMIT 1)
             LEFT JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
             WHERE k.id = ${taskId}`
           if (task === undefined) return undefined
@@ -2592,7 +2596,9 @@ export class Queries extends Context.Service<
           // What the person asked of its lead, its turn not begun yet: Fix it on a review after a merge, which says so from the
           // moment it is answered until the turn that takes it is over (its folder coming back, its lead starting, are on the
           // way meanwhile); or a message waiting for a lead that holds a session. Under way, as the turn is, so a merged task
-          // is never settled, nor stopped, in the moment between the asking and the turn.
+          // is never settled, nor stopped, in the moment between the asking and the turn. Words whose latest turn failed, as on a
+          // lost connection outside any step, wait for Try again or the person's next message, not for a turn: the turn is over,
+          // failed, and says so with its Try again. Unless that failure goes again by itself.
           const [askedOf] = yield* sql<{ fixSince: string | null; told: number; takenSince: string | null }>`
             SELECT
               (SELECT r.updated_at FROM merge_reviews r WHERE r.task_id = ${taskId} AND r.state = 'fixing'
@@ -2600,7 +2606,18 @@ export class Queries extends Context.Service<
                   AND d.ended_at IS NOT NULL AND d.ended_at >= r.updated_at)
                 ORDER BY r.updated_at DESC LIMIT 1) AS fix_since,
               EXISTS (SELECT 1 FROM user_inputs i WHERE i.thread_id = ${task.threadId} AND i.state = 'queued'
-                AND i.sender_kind IN ('window', 'paired_device')) AS told,
+                AND i.sender_kind IN ('window', 'paired_device')
+                AND NOT EXISTS (SELECT 1 FROM turn_deliveries d
+                  WHERE d.id = (SELECT di.delivery_id FROM turn_delivery_inputs di JOIN turn_deliveries l ON l.id = di.delivery_id
+                    WHERE di.user_input_id = i.id ORDER BY l.requested_at DESC, l.rowid DESC LIMIT 1)
+                    AND d.state = 'failed'
+                    -- What goes again by itself: a usage limit's reset, a fresh session for a lost one, a refused prompt shortly,
+                    -- and a step held for its connection, which carries on once it is back (ADR-060).
+                    AND coalesce(d.error_class, '') NOT IN ('usage_limit', 'session_lost', 'turn_in_progress')
+                    AND NOT (d.error_class = 'transient' AND EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+                      JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
+                      WHERE a.provider_session_id = d.provider_session_id AND r.state = 'running'
+                        AND (a.state IN ('admitted', 'running') OR (a.state = 'held' AND a.hold_reason = 'agent_unavailable')))))) AS told,
               (SELECT d.requested_at FROM turn_deliveries d WHERE d.thread_id = ${task.threadId} AND d.origin = 'person'
                 AND d.state IN ('pending', 'delivered') AND d.ended_at IS NULL
                 ORDER BY d.requested_at DESC LIMIT 1) AS taken_since
@@ -2957,24 +2974,24 @@ export class Queries extends Context.Service<
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                     ...(field(parameters, 'reviewAfterMerge') === true ? { reviewAfterMerge: true } : {}),
                     // The preset its parts are, which the card's kicker names first (a task is a conversation plus parts).
-                    preset:
-                      field(parameters, 'smallChange') === true
-                        ? 'Small change'
-                        : presetOf(
-                            yield* presetsIn(task.projectId),
-                            partsOfPlan(
-                              {
-                                steps: planned,
-                                end: end ?? null,
-                                here: field(parameters, 'here') === true,
-                                reads: field(parameters, 'reads') === true,
-                                reviewAfterMerge: field(parameters, 'reviewAfterMerge') === true,
-                                worksIn: text(parameters, 'worksIn'),
-                              },
-                              task.shelf,
-                              '',
-                            ),
-                          ),
+                    // The one it was planned from, while its parts keep that preset's shape; else the one they are.
+                    preset: yield* Effect.gen(function* () {
+                      const shape = {
+                        steps: planned,
+                        end: end ?? null,
+                        here: field(parameters, 'here') === true,
+                        reads: field(parameters, 'reads') === true,
+                        reviewAfterMerge: field(parameters, 'reviewAfterMerge') === true,
+                        worksIn: text(parameters, 'worksIn'),
+                      }
+                      const recorded = text(parameters, 'preset')
+                      return presetOfPlan(yield* presetsIn(task.projectId), {
+                        small: field(parameters, 'smallChange') === true,
+                        ...(recorded === '' ? {} : { recorded }),
+                        // Its ending counts where it was chosen: a prototype pointed at a pull request is no prototype.
+                        parts: partsOfPlan({ ...shape, endChosen: field(parameters, 'endChosen') === true }, task.shelf, ''),
+                      })
+                    }),
                     // Any agent may lead a review: the card offers them all.
                     ...(field(parameters, 'reads') === true
                       ? {}
@@ -3103,6 +3120,16 @@ export class Queries extends Context.Service<
             // Not looked at for a conflict, whatever its host says: why, beside Look again.
             ...(round?.state === 'unchecked' ? { conflictUnchecked: round.why } : {}),
             ...(phase === 'kept' ? { keptAt: task.keptAt } : {}),
+            ...(task.state === 'abandoned' ? { discarded: true as const } : {}),
+            // Drafted, and its plan didn't come: the person's, to plan or discard, not to resume. Its card is in the thread from
+            // its drafting on: while the coordinator's turn that made it is open, its plan is still on its way, and its card says
+            // it is being drafted (a window opened then has no live draft yet); a draft no turn made says so once its moment is.
+            ...((phase === 'stopped' || (phase === 'drafting' && madeInOpenTurn === 0)) &&
+            task.state === 'draft' &&
+            task.planState === null &&
+            task.runState === null
+              ? { unplanned: true as const }
+              : {}),
             automation: yield* fromAutomation(taskId),
             // Its parts, offered to keep as a preset, while they are.
             ...offering(yield* presetOfferOn(task.projectId, taskId)),
@@ -3288,6 +3315,11 @@ export class Queries extends Context.Service<
       const keptCards = new Map<string, Kept>()
       /** The cards being worked out now, by task: a read that wants one meanwhile waits for it, and reads it as kept. */
       const workingOut = new Map<string, Deferred.Deferred<void>>()
+      /**
+       * How many cards have been worked out to their end. A read that found its card no longer held, and finds one worked
+       * out since, as the watcher's while its look at git was under way, reads what that kept rather than work it out again.
+       */
+      let workedOutCount = 0
       const timeNow = Clock.clockWith((clock) => Effect.sync(() => clock.currentTimeMillisUnsafe()))
       const keptForMs = Duration.toMillis(config.keptFor ?? KEPT_FOR)
 
@@ -3351,13 +3383,38 @@ export class Queries extends Context.Service<
           return kept
         })
 
-      /** Works a task's card out once, whoever asks meanwhile: they wait for it, and read it as kept. */
-      const once = <A, E, R>(taskId: string, work: Effect.Effect<A, E, R>, kept: Effect.Effect<A | undefined, E, R>) =>
+      /**
+       * `effect`, its looks taken afresh rather than as this read first took them, and kept so for the rest of the read. For
+       * a card another read worked out meanwhile: what that one read (a worktree's facts worked out again among it) says
+       * now, which what this read took before it would refuse.
+       */
+      const lookingAgain = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         Effect.gen(function* () {
+          const read = yield* ReadAt
+          if (read === null) return yield* effect
+          const again: { at?: number; readonly looked: Map<string, Promise<string>> } = {
+            ...(read.at === undefined ? {} : { at: read.at }),
+            looked: new Map(),
+          }
+          const value = yield* Effect.provideService(effect, ReadAt, again)
+          if (read.at === undefined && again.at !== undefined) read.at = again.at
+          for (const [key, look] of again.looked) read.looked.set(key, look)
+          return value
+        })
+
+      /**
+       * A task's card as kept, where it still holds, else worked out once, whoever asks meanwhile: they wait for it, and
+       * read it as kept. One worked out to its end while this looked whether its own still held is read as kept too.
+       */
+      const keptOrOnce = <A, E, R>(taskId: string, kept: Effect.Effect<A | undefined, E, R>, work: Effect.Effect<A, E, R>) =>
+        Effect.gen(function* () {
+          const since = workedOutCount
+          const held = yield* kept
+          if (held !== undefined) return held
           const under = workingOut.get(taskId)
-          if (under !== undefined) {
-            yield* Deferred.await(under)
-            const found = yield* kept
+          if (under !== undefined) yield* Deferred.await(under)
+          if (under !== undefined || workedOutCount !== since) {
+            const found = yield* lookingAgain(kept)
             if (found !== undefined) return found
           }
           const done = Deferred.makeUnsafe<void>()
@@ -3366,6 +3423,7 @@ export class Queries extends Context.Service<
             Effect.ensuring(
               Effect.andThen(
                 Effect.sync(() => {
+                  workedOutCount += 1
                   if (workingOut.get(taskId) === done) workingOut.delete(taskId)
                 }),
                 Deferred.succeed(done, undefined),
@@ -3380,23 +3438,19 @@ export class Queries extends Context.Service<
        */
       const keptCard = (taskId: string, links?: Parameters<typeof standingFor>[1]) => {
         const served = Effect.map(keptOf(taskId), (kept): TaskCard | undefined => kept?.card)
-        return Effect.flatMap(served, (card) =>
-          card !== undefined
-            ? Effect.succeed(card)
-            : once(
-                taskId,
-                Effect.gen(function* () {
-                  const cursor = yield* readAt
-                  const memory = yield* agentsOf(taskId)
-                  const at = yield* timeNow
-                  const [found, on] = yield* cardWorkedOut(taskId, standingFor(taskId, links))
-                  if (found === undefined) keptCards.delete(taskId)
-                  else keepCard(taskId, { projectId: found.projectId, cursor, at, on, memory, card: found.card, row: found.row })
-                  const made: TaskCard | undefined = found?.card
-                  return made
-                }),
-                served,
-              ),
+        return keptOrOnce(
+          taskId,
+          served,
+          Effect.gen(function* () {
+            const cursor = yield* readAt
+            const memory = yield* agentsOf(taskId)
+            const at = yield* timeNow
+            const [found, on] = yield* cardWorkedOut(taskId, standingFor(taskId, links))
+            if (found === undefined) keptCards.delete(taskId)
+            else keepCard(taskId, { projectId: found.projectId, cursor, at, on, memory, card: found.card, row: found.row })
+            const made: TaskCard | undefined = found?.card
+            return made
+          }),
         )
       }
 
@@ -3418,34 +3472,30 @@ export class Queries extends Context.Service<
           const shown: Shown | undefined = board
           return shown
         })
-        return Effect.flatMap(served, (board) =>
-          board !== undefined
-            ? Effect.succeed(board)
-            : once(
-                row.id,
-                Effect.gen(function* () {
-                  const cursor = yield* readAt
-                  const memory = yield* agentsOf(row.id)
-                  const at = yield* timeNow
-                  const [found, on] = yield* cardWorkedOut(
-                    row.id,
-                    Effect.gen(function* () {
-                      const standing = yield* standingFor(row.id)
-                      return standing === undefined ? undefined : { ...standing, read: yield* boardOf(row, standing.card) }
-                    }),
-                  )
-                  if (found === undefined) {
-                    keptCards.delete(row.id)
-                    const none: Shown = { read: [], json: '[]' }
-                    return none
-                  }
-                  const board = { read: [found.read], json: JSON.stringify([found.read]) }
-                  keepCard(row.id, { projectId: found.projectId, cursor, at, on, memory, card: found.card, row: found.row, board })
-                  const shown: Shown = board
-                  return shown
-                }),
-                served,
-              ),
+        return keptOrOnce(
+          row.id,
+          served,
+          Effect.gen(function* () {
+            const cursor = yield* readAt
+            const memory = yield* agentsOf(row.id)
+            const at = yield* timeNow
+            const [found, on] = yield* cardWorkedOut(
+              row.id,
+              Effect.gen(function* () {
+                const standing = yield* standingFor(row.id)
+                return standing === undefined ? undefined : { ...standing, read: yield* boardOf(row, standing.card) }
+              }),
+            )
+            if (found === undefined) {
+              keptCards.delete(row.id)
+              const none: Shown = { read: [], json: '[]' }
+              return none
+            }
+            const board = { read: [found.read], json: JSON.stringify([found.read]) }
+            keepCard(row.id, { projectId: found.projectId, cursor, at, on, memory, card: found.card, row: found.row, board })
+            const shown: Shown = board
+            return shown
+          }),
         )
       }
 

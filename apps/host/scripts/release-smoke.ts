@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash, generateKeyPairSync, verify } from 'node:crypto'
-import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 
@@ -107,6 +107,8 @@ try {
       { mode: 0o600 },
     )
   }
+  const preview = process.env.ALTHAR_HOST_PREVIEW_DIRECTORY
+  if (preview) cpSync(unpacked, preview, { recursive: true, force: false, errorOnExist: true })
   process.stdout.write('Signed portable host release verified outside the workspace.\n')
 } finally {
   rmSync(root, { recursive: true, force: true })

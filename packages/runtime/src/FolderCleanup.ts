@@ -21,6 +21,7 @@ import { git, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { quickIn } from './kinds'
 import { Launches } from './Launches'
+import { Terminals } from './Terminals'
 import { change, fact, timestamp } from './records'
 import { reviewCopyOf } from './reviewCopy'
 import { Sessions } from './Sessions'
@@ -83,7 +84,7 @@ const KEY = 'folder_wait'
 
 const DAY = Duration.toMillis(Duration.days(1))
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | RuntimeConfig | Sessions | Launches | Changes
+type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | RuntimeConfig | Sessions | Launches | Terminals | Changes
 
 /** Why a folder went: its wait was up, the disk ran low, the person cleaned up, or removed it by hand. */
 type Why = 'wait' | 'low' | 'clean' | 'hand'
@@ -326,6 +327,7 @@ export class FolderCleanup extends Context.Service<
       const config = yield* RuntimeConfig
       const sessions = yield* Sessions
       const launches = yield* Launches
+      const terminals = yield* Terminals
       const changes = yield* Changes
       const scope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const diskAt = config.disk ?? diskOf
@@ -617,8 +619,9 @@ export class FolderCleanup extends Context.Service<
                   return new ChangedSinceSeen({ taskId: now.taskId, what: 'folder' })
               } else if ((yield* runningFrom(now)) || holdOf(false, lost, yield* openedLately(now)) !== null || (yield* unshippedOf(now)))
                 return null
-              // What still runs from them, from before it settled, stops first.
+              // What still runs from them, from before it settled, stops first, and the person's terminals in them close.
               yield* launches.stopAll(now.projectId, now.taskId)
+              yield* terminals.closeAll(now.projectId, now.taskId)
               // Measured again, as it is now: what it holds may have changed since it was listed.
               const bytes = yield* sizeOfAll(now)
               yield* removeFolders(now, why === 'hand' && lost?.why === 'unreadable', why, bytes, actorId)

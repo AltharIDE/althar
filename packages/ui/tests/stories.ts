@@ -46,6 +46,10 @@ const BROWSER_ONLY = new Set<string>([
   'board/NextLine/NextLine.stories.tsx#DifferentHeights',
   'board/NextLine/NextLine.stories.tsx#Scrolling',
   'board/NextLine/NextLine.stories.tsx#DraggedAcrossGroups',
+  'board/BoardCard/BoardCard.stories.tsx#StartedByALongTitle',
+  'board/BoardCard/BoardCard.stories.tsx#StartedByALongTitleNoLink',
+  'board/BoardCard/BoardCard.stories.tsx#LongFooters',
+  'board/BoardCard/BoardCard.stories.tsx#CrowdedMarks',
 ])
 
 /**

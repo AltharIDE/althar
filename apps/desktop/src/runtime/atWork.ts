@@ -1,4 +1,4 @@
-import { Busy, Launches, Sessions } from '@althar/runtime'
+import { Busy, Launches, Sessions, Terminals } from '@althar/runtime'
 import { Effect, Option } from 'effect'
 
 import type { Work } from '../main/quitWork'
@@ -7,8 +7,9 @@ import type { Work } from '../main/quitWork'
  * What Quit would stop (DEV-118), for the main process, which asks before it
  * lets the runtime shut down: the leads and reviewers at work, as Busy counts
  * them (in a step or a turn, or starting one, not only waiting for a place),
- * the project runs still going, and what agents left running in the
- * background. Counts alone, never what anyone wrote. The coordinator and the
+ * the project runs still going, what agents left running in the background,
+ * and the terminals running something in front of their shell (an idle shell
+ * holds nothing to lose). Counts alone, never what anyone wrote. The coordinator and the
  * permission judge are not counted: they hold no work of a task's to lose.
  */
 export const runtimeWork = Effect.gen(function* () {
@@ -29,5 +30,6 @@ export const runtimeWork = Effect.gen(function* () {
     })
   }
   const runs = (yield* launches.processes()).length
-  return { leads, reviews, runs, left } satisfies Work
+  const terminals = yield* (yield* Terminals).busy
+  return { leads, reviews, runs, left, terminals } satisfies Work
 })

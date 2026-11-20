@@ -153,14 +153,18 @@ export const listenWorkers = (options: HostOptions, homeId: string) =>
     (listener) => Effect.sync(() => listener?.close()),
   )
 
-export const workerOperation = <A>(profile: string, operation: (store: Awaited<ReturnType<typeof openWorkerStore>>) => A | Promise<A>) =>
+export const workerOperation = <A>(
+  profile: string,
+  operation: (store: Awaited<ReturnType<typeof openWorkerStore>>) => A | Promise<A>,
+  projectId?: string,
+) =>
   Effect.gen(function* () {
     // The live runtime holds its database exclusively. Use its authenticated
     // local endpoint, and read the offline identity only while it is stopped.
-    const homeId = yield* hostStatus(profile).pipe(
+    const homeId = yield* hostStatus(profile, false, projectId).pipe(
       Effect.map((ready) => ready.homeId),
       Effect.catchIf(
-        (error) => error.code === 'HostUnavailable',
+        (error) => projectId === undefined && error.code === 'HostUnavailable',
         () => Effect.try({ try: () => readHomeId(join(profile, 'althar.sqlite')), catch: storageFailure }),
       ),
     )

@@ -102,6 +102,8 @@ interface Launch {
   readonly ref: Ref | null
   readonly bindingId: string
   readonly command: string
+  /** The folder it runs in: where a terminal opened from it opens. */
+  readonly folder: string
   readonly startedAt: string
   readonly scope: Scope.Closeable
   /** Its process, the leader of its group. */
@@ -207,6 +209,18 @@ export class Launches extends Context.Service<
     stopAll(projectId: string, taskId?: string, startedBy?: string): Effect.Effect<void>
     /** The project's runs, in the order they started. */
     ofProject(projectId: string): Effect.Effect<ReadonlyArray<ShownLaunch>>
+    /**
+     * Where a terminal opens: the folder the run named ran in, while it is
+     * there; else the task's worktree, or the project's own repository, at
+     * the folder in it the project is about; the first repository of several.
+     * With where that is, in words: the run's, the task's title, or the
+     * repository's name.
+     */
+    terminalFolder(input: {
+      readonly projectId: string
+      readonly taskId: string | null
+      readonly launchId?: string
+    }): Effect.Effect<{ readonly path: string; readonly where: string }, unknown>
     /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
     processes(): Effect.Effect<ReadonlyArray<{ readonly pid: number; readonly projectId: string; readonly taskId: string | null }>>
     /**
@@ -749,6 +763,7 @@ export class Launches extends Context.Service<
               ref: input.branch?.ref ?? null,
               bindingId: binding.id,
               command: run.command,
+              folder,
               startedAt: yield* timestamp,
               scope,
               pid: owned.pid,
@@ -1650,6 +1665,27 @@ export class Launches extends Context.Service<
           }),
         stopAll,
         ofProject: (projectId) => Effect.sync(() => ofProject(projectId)),
+        terminalFolder: ({ projectId, taskId, launchId }) =>
+          provide(
+            Effect.gen(function* () {
+              const launch = launchId === undefined ? undefined : (launches.get(launchId) ?? leftBehind.get(launchId))
+              if (launch !== undefined && existsSync(launch.folder)) return { path: launch.folder, where: launch.where }
+              const [place] = yield* placesOf(projectId, taskId, undefined)
+              if (place === undefined)
+                return yield* new LaunchRefused({
+                  why: 'elsewhere',
+                  message:
+                    taskId === null ? 'The project has no repository on this computer.' : 'The task has no worktree on this computer.',
+                })
+              const sql = yield* SqlClient.SqlClient
+              const [task] = taskId === null ? [] : yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${taskId}`
+              // A finished task's folder that was removed opens in its repository's own folder, as its runs say (ADR-056).
+              return {
+                path: within(place.binding, existsSync(place.root) ? place.root : place.binding.repository),
+                where: task?.title ?? place.binding.name,
+              }
+            }),
+          ),
         processes: () =>
           Effect.sync(() =>
             [...launches.values()].flatMap((launch) =>
