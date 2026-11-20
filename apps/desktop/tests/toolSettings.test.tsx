@@ -421,7 +421,7 @@ describe('the person’s own setup', () => {
       part(),
       part({
         kind: 'hook',
-        name: 'hooks.PreToolUse',
+        name: 'hooks.PreToolUse[0]',
         where: '~/.claude/settings.json',
         why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”.',
       }),
@@ -439,7 +439,7 @@ describe('the person’s own setup', () => {
     await userEvent.click(await main().findByRole('tab', { name: /^Claude Code/ }))
     const group = await main().findByRole('region', { name: 'Didn’t load as written' })
     expect(within(group).getByText('Its frontmatter can’t be read, so Claude Code leaves it out.')).toBeTruthy()
-    expect(within(group).getByText('hooks.PreToolUse')).toBeTruthy()
+    expect(within(group).getByText('hooks.PreToolUse[0]')).toBeTruthy()
     expect(within(group).queryByText('Invalid configuration.')).toBeNull()
     expect(within(group).getAllByRole('listitem')).toHaveLength(2)
     expect(client.checkSetup).toHaveBeenCalledTimes(1)

@@ -219,15 +219,21 @@ file, a hook, an agent, a command, an output style, a plugin, a `config.toml`.
 Each row has the file and why. Nothing shows while everything loads. A skill an
 agent leaves out is marked on its own tile in Settings › Skills, as Didn't load;
 one Claude Code loads without the frontmatter it can't read, as Frontmatter
-ignored. Its sheet says why. One broken file marks that file only. A skill's
-failure goes on the tile of the same file, so a healthy skill is never marked
-for a broken one of its name elsewhere. A broken skill no tile is of, such as
-one in Codex's home's own `skills`, is listed with the rest.
+ignored. Its sheet says why. One broken file marks that file only. A tile is
+of the one file it shows (its home, in an agent's own folder), so a healthy
+skill is never marked for a broken copy of its name elsewhere. Any other
+failure keeps its own row with its file in the rest of the list: one of a copy
+in another agent's folder, in Codex's home's own `skills`, or under a tile of
+Althar's store, and a second agent's failure of the same file.
 
 **When it is read.** Each time the skills or the agents open, the runtime reads
 the files again, and asks the agents themselves at most every five minutes.
 Both happen on the command Settings sends (`CheckSetup`), with the file
-system's asynchronous reads. What was found is kept in Althar's own folder
+system's asynchronous reads. Parsing stays short on the runtime's thread: of
+an agent, a command, an output style or a skill only the first 64 KB are read,
+where its frontmatter is, and a settings file, a `plugin.json` or a
+`config.toml` longer than 512 KB isn't parsed. What can't be told from that
+much isn't judged. What was found is kept in Althar's own folder
 (`setup-health.json`) beside what the agents said, and Settings reads that
 record. No folder is walked as the window asks for the tools. What an agent
 said is kept for a day where it can't be asked again, and stands for a file
@@ -246,7 +252,10 @@ come whole: a check stopped halfway keeps what the agent said before.
 - Codex (read against 0.167): `codex app-server`, sent `initialize` and
   `skills/list`. In the Flatpak it is the Codex on the device, through the
   bridge its sessions run it by (`CODEX_PATH`, `flatpak/codex-host.sh`), in a
-  folder under Althar's own, which the device sees at the same path. Its `configWarning` says a `config.toml` it can't read
+  folder under Althar's own, which the device sees at the same path. The
+  Flatpak doesn't show Althar the device's `config.toml`, so a warning of it
+  stands for as long as the ask it came with, five minutes at most. Its
+  `configWarning` says a `config.toml` it can't read
   ("Invalid configuration; using defaults." with the line), and `skills/list`
   says each skill it leaves out ("missing field `description`"). Where its
   `config.toml` can't be read it lists no skill at all, and Althar reads the
@@ -262,7 +271,9 @@ come whole: a check stopped halfway keeps what the agent said before.
   skill without a name or a description.
 - A settings file that isn't JSON, which Claude Code skips whole.
 - A file that is there but can't be opened, such as one without read
-  permission. What an agent said of it still stands.
+  permission. What an agent said of it still stands, but an agent that said
+  nothing of it doesn't hide it: a change of who may read a file leaves its
+  time as it was.
 - A hook matcher on a tool's event (PreToolUse, PostToolUse,
   PostToolUseFailure, PermissionRequest, PermissionDenied) that names a slip
   of one of Claude Code's tools ("Bashh", "bash"), against its SDK's
@@ -270,7 +281,8 @@ come whole: a check stopped halfway keeps what the agent said before.
   can't be read. A matcher of several names is read as a whole: it never runs
   only where every name is a slip ("Edit|write" still runs for Edit). That
   list isn't complete, so a name close to none of it is left alone. Each
-  broken matcher of an event is in that event's row.
+  broken matcher is a row of its own, named by where it is
+  (`hooks.PreToolUse[2]`).
 - The `plugin.json` of each plugin that is on, as Claude Code 2.1.326 reads it
   (its manifest schema and `manifest-field-ignored`). One that isn't JSON,
   names no plugin, has a space in its name, or has a `version`,

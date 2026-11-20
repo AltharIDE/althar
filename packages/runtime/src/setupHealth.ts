@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, open, readdir, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
+import { setImmediate as nextTurn } from 'node:timers/promises'
 
 import type { SetupPart } from '@althar/contracts'
 import { bundledClaude, CLAUDE_TOOL_HOOK_EVENTS, CLAUDE_TOOL_NAMES, tomlProblem } from '@althar/provider-adapters'
@@ -81,6 +82,13 @@ export const ASK_EVERY = 5 * 60 * 1000
 const WORDS_LENGTH = 300
 /** The most files read in one folder. */
 const FILES_AT_MOST = 500
+/**
+ * The most of a file read, in bytes, so parsing it on the runtime's thread stays short: the head of an agent, a
+ * command, an output style or a skill, where its frontmatter is; and the whole of a settings file, a plugin.json or a
+ * config.toml. A file longer than that is read only as far, and what can't be told from that much isn't judged.
+ */
+const HEAD_BYTES = 64 * 1024
+const WHOLE_BYTES = 512 * 1024
 
 const setupPath = (io: Pick<SetupIo, 'folder'>) => join(io.folder, 'setup-health.json')
 
@@ -100,15 +108,32 @@ const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =
 const strings = (value: unknown): ReadonlyArray<string> | undefined =>
   Array.isArray(value) ? value.filter((one): one is string => typeof one === 'string') : undefined
 
-/** A file as read: its text; missing (nothing there to load); or not opened, with why. */
+/** A file as read: its text, and whether it goes on past it (`cut`); missing (nothing there to load); or not opened, with why. */
 type Read =
-  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'text'; readonly text: string; readonly cut: boolean }
   | { readonly kind: 'missing' }
   | { readonly kind: 'failed'; readonly why: string }
 
-const readText = async (path: string): Promise<Read> => {
+/**
+ * A file's first `bytes` at most, read by the file system's own work. Each read gives the thread back before what
+ * reads it parses, so a check of many files never holds it for long.
+ */
+const readText = async (path: string, bytes: number = WHOLE_BYTES): Promise<Read> => {
   try {
-    return { kind: 'text', text: await readFile(path, 'utf8') }
+    const handle = await open(path, 'r')
+    try {
+      const buffer = Buffer.alloc(bytes + 1)
+      let got = 0
+      while (got < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, got, buffer.length - got, got)
+        if (bytesRead === 0) break
+        got += bytesRead
+      }
+      await nextTurn()
+      return { kind: 'text', text: buffer.toString('utf8', 0, Math.min(got, bytes)), cut: got > bytes }
+    } finally {
+      await handle.close()
+    }
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code
     if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'missing' }
@@ -125,7 +150,7 @@ const unopened = (why: string, agent: string) => `It can’t be opened (${why}),
 
 const readJson = async (path: string): Promise<unknown> => {
   const read = await readText(path)
-  if (read.kind !== 'text') return undefined
+  if (read.kind !== 'text' || read.cut) return undefined
   try {
     return JSON.parse(read.text)
   } catch {
@@ -256,6 +281,15 @@ export const frontOf = (text: string): Front => {
   return lenient === null ? { kind: 'unreadable' } : { kind: 'read', data: lenient.data }
 }
 
+/**
+ * The frontmatter of a file read only as far as its head: undefined where the head opens it but doesn't close it, as
+ * a file longer than that may, so nothing is said of it.
+ */
+const headFront = (read: { readonly text: string; readonly cut: boolean }): Front | undefined => {
+  const front = frontOf(read.text)
+  return read.cut && front.kind === 'none' && /^\uFEFF?---[ \t]*\r?\n/.test(read.text) ? undefined : front
+}
+
 const said = (data: Readonly<Record<string, unknown>>, key: string) => (typeof data[key] === 'string' ? data[key].trim() : '')
 
 /** Why an agent or a skill file wouldn't load where its agent wants a name and a description: undefined where it would. */
@@ -329,32 +363,34 @@ export const matcherProblem = (matcher: string): MatcherProblem | undefined => {
   }
 }
 
-/** The hooks of a settings file whose matchers never match, or match less than they name: one part an event, with each such matcher. */
+/**
+ * The hooks of a settings file whose matchers never match, or match less than they name: one part each such matcher,
+ * named by where it is in the file (`hooks.PreToolUse[2]`), so none is cut from another's words.
+ */
 const hookParts = (io: SetupIo, settings: unknown, file: string, at: string): ReadonlyArray<Part> => {
   const hooks = record(record(settings)?.['hooks'])
   if (hooks === undefined) return []
   return CLAUDE_TOOL_HOOK_EVENTS.flatMap((event): ReadonlyArray<Part> => {
     const entries = hooks[event]
     if (!Array.isArray(entries)) return []
-    const problems = entries.flatMap((entry) => {
+    return entries.flatMap((entry, index): ReadonlyArray<Part> => {
       const matcher = record(entry)?.['matcher']
       const problem = typeof matcher === 'string' ? matcherProblem(matcher) : undefined
-      return problem === undefined ? [] : [problem]
+      if (problem === undefined) return []
+      return [
+        {
+          agent: 'claude',
+          kind: 'hook',
+          name: `hooks.${event}[${index}]`,
+          where: named(io, file),
+          why: oneLine(problem.why),
+          loads: problem.runs,
+          by: null,
+          at,
+          file,
+        },
+      ]
     })
-    if (problems.length === 0) return []
-    return [
-      {
-        agent: 'claude',
-        kind: 'hook',
-        name: `hooks.${event}`,
-        where: named(io, file),
-        why: oneLine(problems.map((one) => one.why).join(' ')),
-        loads: problems.every((one) => one.runs),
-        by: null,
-        at,
-        file,
-      },
-    ]
   })
 }
 
@@ -479,6 +515,9 @@ const claudeParts = async (io: SetupIo, heard: ClaudeHeard | undefined, now: str
     if (settingsRead.kind === 'failed') {
       if (!skipped) part('settings', settingsFile, unopened(settingsRead.why, 'Claude Code'), false, null)
       skipped = true
+    } else if (settingsRead.cut) {
+      // Too long to parse here: neither it nor its hooks and plugins are judged.
+      skipped = true
     } else
       try {
         settings = JSON.parse(settingsRead.text)
@@ -492,13 +531,14 @@ const claudeParts = async (io: SetupIo, heard: ClaudeHeard | undefined, now: str
   // Its agents: those it didn't load, where it said which it did; else those whose frontmatter it can't take.
   const loaded = heard?.agents === undefined ? undefined : new Set(heard.agents)
   for (const file of await markdownIn(join(home, 'agents'))) {
-    const read = await readText(file)
+    const read = await readText(file, HEAD_BYTES)
     if (read.kind === 'missing') continue
     if (read.kind === 'failed') {
       part('agent', file, unopened(read.why, 'Claude Code'), false, null)
       continue
     }
-    const front = frontOf(read.text)
+    const front = headFront(read)
+    if (front === undefined) continue
     const problem = definitionProblem(front, 'Claude Code')
     if (loaded !== undefined && heard !== undefined && (await unchangedSince(file, heard.at))) {
       const name = front.kind === 'read' ? said(front.data, 'name') : ''
@@ -514,15 +554,14 @@ const claudeParts = async (io: SetupIo, heard: ClaudeHeard | undefined, now: str
   ] as const
   for (const [kind, files] of kinds)
     for (const file of files) {
-      const read = await readText(file)
+      const read = await readText(file, HEAD_BYTES)
       if (read.kind === 'failed') part(kind, file, unopened(read.why, 'Claude Code'), false, null)
-      else if (read.kind === 'text' && frontOf(read.text).kind === 'unreadable') part(kind, file, IGNORED, true, null)
+      else if (read.kind === 'text' && headFront(read)?.kind === 'unreadable') part(kind, file, IGNORED, true, null)
     }
   for (const skill of await skillsIn(join(home, 'skills'))) {
-    const read = await readText(skill.file)
+    const read = await readText(skill.file, HEAD_BYTES)
     if (read.kind === 'failed') part('skill', skill.file, unopened(read.why, 'Claude Code'), false, null, now, skill.name)
-    else if (read.kind === 'text' && frontOf(read.text).kind === 'unreadable')
-      part('skill', skill.file, IGNORED, true, null, now, skill.name)
+    else if (read.kind === 'text' && headFront(read)?.kind === 'unreadable') part('skill', skill.file, IGNORED, true, null, now, skill.name)
   }
 
   // Its plugins that are on: a manifest that keeps one from loading, or a field of it from counting.
@@ -532,7 +571,7 @@ const claudeParts = async (io: SetupIo, heard: ClaudeHeard | undefined, now: str
       const read = await readText(manifest)
       if (read.kind === 'failed')
         part('plugin', manifest, `Its plugin.json can’t be opened (${read.why}), ${REFUSED}`, false, null, now, plugin.name)
-      const problem = read.kind === 'text' ? pluginProblem(read.text) : undefined
+      const problem = read.kind === 'text' && !read.cut ? pluginProblem(read.text) : undefined
       if (problem !== undefined) part('plugin', manifest, problem.why, problem.loads, null, now, plugin.name)
     }
   return parts
@@ -544,18 +583,23 @@ const codexParts = async (io: SetupIo, heard: CodexHeard | undefined, now: strin
   const part = adder(io, 'codex', parts, now)
   const configFile = join(codexHome(io), 'config.toml')
   const configRead = await readText(configFile)
-  if (configRead.kind !== 'missing') {
-    let said = false
-    if (heard !== undefined && (await unchangedSince(configFile, heard.at))) {
-      const file = await real(configFile)
-      const words: Array<string> = []
-      for (const one of heard.config) if ((await real(one.path)) === file) words.push(one.words)
-      if (words.length > 0) part('config', configFile, oneLine(words.join(' ')), false, 'codex', heard.at)
-      // Codex was asked after it last changed, and warned of nothing: its word stands.
-      said = true
-    }
-    if (!said && configRead.kind === 'failed') part('config', configFile, unopened(configRead.why, 'Codex'), false, null)
-    else if (!said && configRead.kind === 'text') {
+  // What Codex warned of this file, where it was asked: by the file it named, as Althar sees it or as named.
+  const file = await real(configFile)
+  const warned: Array<string> = []
+  if (heard !== undefined)
+    for (const one of heard.config) if (one.path === configFile || (await real(one.path)) === file) warned.push(one.words)
+  if (configRead.kind === 'missing') {
+    // In the Flatpak Codex runs on the device, whose config.toml Althar may not see: its warning stands while it is
+    // of the last ask, a few minutes at most, as there is no file here to tell whether it changed since.
+    if (heard !== undefined && warned.length > 0 && fresh(heard.at, now, ASK_EVERY))
+      part('config', configFile, oneLine(warned.join(' ')), false, 'codex', heard.at)
+  } else {
+    const asked = heard !== undefined && (await unchangedSince(configFile, heard.at))
+    if (asked && warned.length > 0) part('config', configFile, oneLine(warned.join(' ')), false, 'codex', heard.at)
+    // A file Althar can't open says so, whatever Codex said before: a change of who may read it leaves its time as it was.
+    else if (configRead.kind === 'failed') part('config', configFile, unopened(configRead.why, 'Codex'), false, null)
+    // Codex was asked since it last changed and warned of nothing: its word stands over Althar's reading.
+    else if (!asked && !configRead.cut) {
       const problem = tomlProblem(configRead.text)
       if (problem !== undefined)
         part('config', configFile, oneLine(`Codex can’t read it, so it uses its defaults: ${problem}`), false, null)
@@ -567,19 +611,21 @@ const codexParts = async (io: SetupIo, heard: CodexHeard | undefined, now: strin
       const file = await real(skill.file)
       if (seen.has(file)) continue
       seen.add(file)
+      const read = await readText(skill.file, HEAD_BYTES)
       if (heard?.skills !== undefined && (await unchangedSince(skill.file, heard.at))) {
         let error: { readonly path: string; readonly message: string } | undefined
         for (const one of heard.skills) if (error === undefined && (await real(one.path)) === file) error = one
         if (error !== undefined)
           part('skill', skill.file, oneLine(`Codex leaves it out: ${error.message}`), false, 'codex', heard.at, skill.name)
+        else if (read.kind === 'failed') part('skill', skill.file, unopened(read.why, 'Codex'), false, null, now, skill.name)
         continue
       }
-      const read = await readText(skill.file)
       if (read.kind === 'failed') {
         part('skill', skill.file, unopened(read.why, 'Codex'), false, null, now, skill.name)
         continue
       }
-      const problem = read.kind === 'text' ? definitionProblem(frontOf(read.text), 'Codex') : undefined
+      const front = read.kind === 'text' ? headFront(read) : undefined
+      const problem = front === undefined ? undefined : definitionProblem(front, 'Codex')
       if (problem !== undefined) part('skill', skill.file, problem, false, null, now, skill.name)
     }
   return parts

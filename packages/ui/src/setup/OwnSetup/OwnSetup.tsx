@@ -16,7 +16,7 @@ import s from './OwnSetup.module.css'
 
 export interface OwnSetupPartView {
   id: string
-  /** What it is, as the person names it: review-agent.md, settings.json, hooks.PreToolUse, a plugin's name. */
+  /** What it is, as the person names it: review-agent.md, settings.json, hooks.PreToolUse[0], a plugin's name. */
   name: string
   /** The file, as the person names it: ~/.claude/agents/review-agent.md. */
   where: string

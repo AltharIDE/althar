@@ -121,6 +121,8 @@ describe('what Settings reads', () => {
     skills(join('.claude', 'skills'), 'bare', 'no frontmatter at all\n')
     skills(join('.claude', 'skills'), 'notes', 'one version\n')
     skills(join('.agents', 'skills'), 'notes', 'another version\n')
+    // Only in Codex's folder, its tile shows that file.
+    skills(join('.agents', 'skills'), 'solo', 'no frontmatter either\n')
     // Codex's home's own folder, which no tile is of: one broken alone, and one beside a healthy one of the same name.
     skills(join('.codex', 'skills'), 'lonely', '---\nname: lonely\n---\n')
     skills(join('.agents', 'skills'), 'twin', '---\nname: twin\ndescription: Fine.\n---\n')
@@ -155,24 +157,28 @@ describe('what Settings reads', () => {
           ['bare', ''],
           ['design-review', 'Reviews a design against DESIGN.md'],
           ['notes', ''],
+          ['solo', ''],
           ['twin', 'Fine.'],
         ],
       )
-      // Codex leaves out a skill with no frontmatter, which Claude Code loads: its tile says why; the rest load. The
-      // healthy twin's tile isn't marked for the broken one of its name elsewhere.
+      // Codex leaves out a skill with no frontmatter, which Claude Code loads: the tile of that file says why. A tile
+      // is of the one file it shows: `notes` shows Claude Code's copy, which loads, so Codex's broken copy isn't put
+      // on it; nor is the healthy twin's tile marked for the broken one of its name elsewhere.
       assert.deepStrictEqual(
-        tools.skills.map((one) => [one.name, one.failed === null ? null : { agent: one.failed.agent, why: one.failed.why }]),
+        tools.skills.map((one) => [one.name, one.home, one.failed === null ? null : { agent: one.failed.agent, why: one.failed.why }]),
         [
-          ['bare', null],
-          ['design-review', null],
-          ['notes', { agent: null, why: 'It has no frontmatter, so Codex leaves it out.' }],
-          ['twin', null],
+          ['bare', '~/.claude/skills/bare', null],
+          ['design-review', '~/.claude/skills/design-review', null],
+          ['notes', '~/.claude/skills/notes', null],
+          ['solo', '~/.agents/skills/solo', { agent: null, why: 'It has no frontmatter, so Codex leaves it out.' }],
+          ['twin', '~/.agents/skills/twin', null],
         ],
       )
-      // A skill's is on its own tile; one of a file no tile is of is listed with the rest of the setup, each by its file.
+      // A skill's is on the tile of its file; one of a file no tile shows is listed with the rest of the setup, by its file.
       assert.deepStrictEqual(
         tools.setup.map((one) => [one.kind, one.name, one.where]),
         [
+          ['skill', 'notes', '~/.agents/skills/notes/SKILL.md'],
           ['skill', 'lonely', '~/.codex/skills/lonely/SKILL.md'],
           ['skill', 'twin', '~/.codex/skills/twin/SKILL.md'],
         ],

@@ -15,7 +15,7 @@ import { OwnSetup, type OwnSetupPartView, type OwnSetupProps } from './OwnSetup'
 const CLAUDE_PARTS: readonly OwnSetupPartView[] = [
   {
     id: 'hook',
-    name: 'hooks.PreToolUse',
+    name: 'hooks.PreToolUse[0]',
     where: '~/.claude/settings.json',
     why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”.',
   },

@@ -249,14 +249,23 @@ describe('the parts of the person’s setup that don’t load', () => {
     )
     const parts = (await scanSetup(io)).map(({ at: _at, file: _file, ...part }) => part)
     expect(parts).toEqual([
+      // Each broken matcher of the event, a row of its own, by where it is.
       {
         agent: 'claude',
         kind: 'hook',
-        name: 'hooks.PreToolUse',
+        name: 'hooks.PreToolUse[0]',
         where: '~/.claude/settings.json',
-        // Each broken matcher of the event, not only the first.
-        why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”. “wrte” in its matcher “Edit|wrte” matches no tool: Claude Code calls it “Write”. It still runs for the rest.',
+        why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”.',
         loads: false,
+        by: null,
+      },
+      {
+        agent: 'claude',
+        kind: 'hook',
+        name: 'hooks.PreToolUse[2]',
+        where: '~/.claude/settings.json',
+        why: '“wrte” in its matcher “Edit|wrte” matches no tool: Claude Code calls it “Write”. It still runs for the rest.',
+        loads: true,
         by: null,
       },
       expect.objectContaining({
@@ -358,6 +367,64 @@ describe('the parts of the person’s setup that don’t load', () => {
   it('what an agent said a day ago no longer stands', async () => {
     const io = homeWith({ '.claude/agents/shadowed.md': agent('shadowed') })
     keep(io, { checkedAt: '2026-11-06T09:00:00.000Z', claude: { at: '2026-11-06T09:00:00.000Z', agents: [] } })
+    expect(await scanSetup(io)).toEqual([])
+  })
+
+  it('many broken matchers of one event are each said whole, however many', async () => {
+    const tools = ['Bashh', 'Wrtie', 'Glbo', 'Grpe', 'Edti', 'Raed', 'WebFecth', 'WebSaerch', 'NotebookEditt']
+    const io = homeWith({
+      '.claude/settings.json': JSON.stringify({
+        hooks: { PreToolUse: tools.map((matcher) => ({ matcher, hooks: [{ type: 'command', command: 'true' }] })) },
+      }),
+    })
+    const parts = await scanSetup(io)
+    expect(parts.map((part) => part.name)).toEqual(tools.map((_, index) => `hooks.PreToolUse[${index}]`))
+    expect(parts.at(-1)?.why).toBe('Its matcher “NotebookEditt” matches no tool, so it never runs. Claude Code calls it “NotebookEdit”.')
+  })
+
+  it('reads only so much of a file, and says nothing of what it can’t tell from that', async () => {
+    const long = 'x'.repeat(70 * 1024)
+    const io = homeWith({
+      // Its frontmatter goes on past what is read: not judged.
+      '.claude/agents/long.md': `---\nname: long\ndescription: ${long}\n---\nb`,
+      // Its frontmatter closes within it: judged, however long its body.
+      '.claude/agents/short.md': `---\nname: short\n---\n${long}`,
+      // Too long to parse here: neither it nor its hooks are judged.
+      '.claude/settings.json': JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bashh', hooks: [] }] }, pad: 'x'.repeat(600 * 1024) }),
+    })
+    expect((await scanSetup(io)).map((part) => part.name)).toEqual(['short.md'])
+  })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a file made unreadable after a clean answer says so, though its time is as it was',
+    async () => {
+      const io = homeWith({ '.codex/config.toml': 'model = "o3"\n', '.agents/skills/fine/SKILL.md': agent('fine') })
+      keep(io, { checkedAt: ASKED, codex: { at: ASKED, config: [], skills: [] } })
+      expect(await scanSetup(io)).toEqual([])
+      for (const path of ['.codex/config.toml', '.agents/skills/fine/SKILL.md']) {
+        chmodSync(join(io.homeDir, path), 0)
+        utimesSync(join(io.homeDir, path), BEFORE, BEFORE)
+      }
+      expect((await scanSetup(io)).map(({ kind, why, by }) => ({ kind, why, by }))).toEqual([
+        { kind: 'config', why: 'It can’t be opened (permission denied), so Codex can’t read it.', by: null },
+        { kind: 'skill', why: 'It can’t be opened (permission denied), so Codex can’t read it.', by: null },
+      ])
+    },
+  )
+
+  it('keeps what the Codex on the device said of a config.toml Althar can’t see, for as long as that ask stands', async () => {
+    const io = homeWith({})
+    const warned = (at: string) => ({
+      checkedAt: at,
+      codex: { at, config: [{ path: join(io.homeDir, '.codex/config.toml'), words: 'invalid type: integer `3`, expected a string' }] },
+    })
+    const lately = new Date(Date.parse(NOW) - ASK_EVERY / 2).toISOString()
+    keep(io, warned(lately))
+    expect((await scanSetup(io)).map(({ kind, where, why, by }) => ({ kind, where, why, by }))).toEqual([
+      { kind: 'config', where: '~/.codex/config.toml', why: 'invalid type: integer `3`, expected a string', by: 'codex' },
+    ])
+    // Older than the last ask would be: nothing here says whether it was fixed since.
+    keep(io, warned(ASKED))
     expect(await scanSetup(io)).toEqual([])
   })
 

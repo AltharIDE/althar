@@ -200,17 +200,24 @@ const failedOf = (health: HealthRecord, name: string, agents: ReadonlyArray<Sync
     })
     .reduce<ToolFailure | null>((latest, each) => (latest === null || each.at > latest.at ? each : latest), null)
 
-/**
- * Why an agent doesn't load one of the person's skills, by the files its tile is of (each agent's own folder that has
- * it): one that leaves it out first, then one that loads it without what its frontmatter sets. A failure of a file no
- * tile is of (Codex's home's own `skills`, say) isn't here: it is listed with the rest of the setup.
- */
-const skillFailureOf = (parts: ReadonlyArray<Part>): ToolFailure | null => {
-  const first = parts.find((part) => !part.loads) ?? parts[0]
-  return first === undefined ? null : { agent: first.by, why: first.why, at: first.at, ...(first.loads ? { loads: true } : {}) }
+/** A skill's failure as its tile shows it: one that leaves it out first, then one that loads it without what its frontmatter sets. */
+const skillFailureOf = (parts: ReadonlyArray<Part>): Part | undefined => parts.find((part) => !part.loads) ?? parts[0]
+
+/** The same file whichever way it is named. */
+const realOf = (path: string) => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
 }
 
-/** Each of the person's own skill tiles with why an agent doesn't load it, and the skills' failures that are of no tile. */
+/**
+ * Each of the person's own skill tiles with why an agent doesn't load it, and the skills' failures no tile shows. A
+ * tile is of the one file it shows (its `home`, in an agent's own folder): a failure of another file of the same name,
+ * a copy in Codex's home or one under a tile of Althar's store, keeps its own row in the rest of the setup, as does a
+ * second failure of the file beside the one its tile shows.
+ */
 const withSkillFailures = (
   io: mcp.SyncIo & skills.SkillIo,
   rows: ReadonlyArray<ToolRow>,
@@ -218,21 +225,18 @@ const withSkillFailures = (
 ): { readonly rows: Array<ToolRow>; readonly unmatched: ReadonlyArray<Part> } => {
   const folders = skills.skillFolders(io)
   const failing = parts.filter((part) => part.kind === 'skill')
+  if (failing.length === 0) return { rows: [...rows], unmatched: [] }
+  const realFile = new Map(failing.map((part) => [part, realOf(part.file)]))
   const placed = new Set<Part>()
   const marked = rows.map((row) => {
     if (row.repository !== null) return row
-    // The files it is of: its SKILL.md in each agent's own folder it was found in.
-    const files = new Set(
-      row.sources.flatMap((source) =>
-        source.from === 'claude' || source.from === 'codex' || source.from === 'opencode'
-          ? [join(folders[source.from], row.name, 'SKILL.md')]
-          : [],
-      ),
-    )
-    if (files.size === 0) return row
-    const its = failing.filter((part) => files.has(part.file))
-    for (const part of its) placed.add(part)
-    return { ...row, failed: skillFailureOf(its) }
+    const agent = SYNCED_AGENTS.find((one) => row.home === `${FOLDERS[one]}/${row.name}`)
+    if (agent === undefined) return row
+    const file = realOf(join(folders[agent], row.name, 'SKILL.md'))
+    const shown = skillFailureOf(failing.filter((part) => realFile.get(part) === file))
+    if (shown === undefined) return row
+    placed.add(shown)
+    return { ...row, failed: { agent: shown.by, why: shown.why, at: shown.at, ...(shown.loads ? { loads: true } : {}) } }
   })
   return { rows: marked, unmatched: failing.filter((part) => !placed.has(part)) }
 }
