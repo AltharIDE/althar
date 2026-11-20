@@ -52,7 +52,14 @@ const meta = {
     inProgress: 3,
     room: Room.Both,
     onRoom: fn(),
-    panes: { shown: { talk: true, board: true }, onToggle: fn(), swapped: false, onSwap: fn(), keys: { talk: 'c', board: 'b' } },
+    panes: {
+      shown: { talk: true, board: true },
+      onToggle: fn(),
+      swapped: false,
+      onSwap: fn(),
+      keys: { talk: 'c', board: 'b' },
+      foot: { shown: true, onToggle: fn(), key: 't' },
+    },
     parts: PARTS,
     run,
   },
@@ -157,6 +164,37 @@ export const BoardAlone: Story = {
     await expect(within(menu).getByRole('menuitemcheckbox', { name: 'Conversation on the right' })).toHaveAttribute('aria-disabled', 'true')
     await userEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Conversation' }))
     await expect(args.panes?.onToggle).toHaveBeenCalledWith('talk')
+  },
+}
+
+/** The terminal bar is a check of Layout with its key: checked while it shows, unchecked once hidden, and a press asks to change it. */
+export const TerminalBar: Story = {
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'More' }))
+    const menu = await screen.findByRole('menu', { name: 'More' })
+    const entry = within(menu).getByRole('menuitemcheckbox', { name: /Terminal bar/ })
+    await expect(entry).toHaveAttribute('aria-checked', 'true')
+    await expect(entry).toHaveTextContent('t')
+    await userEvent.click(entry)
+    await expect(args.panes?.foot?.onToggle).toHaveBeenCalledOnce()
+  },
+}
+
+/** Hidden, the terminal bar's entry is unchecked. */
+export const TerminalBarHidden: Story = {
+  args: {
+    panes: {
+      shown: { talk: true, board: true },
+      onToggle: fn(),
+      swapped: false,
+      onSwap: fn(),
+      foot: { shown: false, onToggle: fn(), key: 't' },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'More' }))
+    const menu = await screen.findByRole('menu', { name: 'More' })
+    await expect(within(menu).getByRole('menuitemcheckbox', { name: /Terminal bar/ })).toHaveAttribute('aria-checked', 'false')
   },
 }
 

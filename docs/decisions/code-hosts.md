@@ -154,11 +154,38 @@ person's agent there ([packaging](packaging.md)).
 
 ### A fork's branches
 
-Althar knows a fork from its clone's remotes: an `upstream` beside
-`origin` on the same host. Where a fork's work goes is a per-project
-choice with three answers: pull requests on the fork, pull requests
-upstream from the fork's branches, or branches and pull requests both
-upstream.
+Althar knows a fork as its code host says, where one is connected
+(DEV-171). It asks `origin`'s host whether that repository is a fork, of
+what, and, where the host says (GitHub's `source`), what the root of its
+forks is. The answer is kept for the whole run of Althar, an hour before it
+is asked again; a host that gave none (it failed, hung, or doesn't say) is
+asked again only after five minutes, so it holds nothing up twice. Only an
+answer reached through `origin`'s own address counts, never a mirror's.
+Without an answer, the remotes' names say, as before: an `upstream` beside
+`origin` on the same host, naming another repository. Where a fork's work
+goes is a per-project choice with three answers: pull requests on the fork,
+pull requests upstream from the fork's branches, or branches and pull
+requests both upstream.
+
+- **The parent is found among the remotes by address**, whatever the remote
+  is called (`upstream`, `base`, an owner's name): at an address the host
+  gave for it, or at its path on `origin`'s host as the host's addresses
+  are written there, with exactly the server's own path in front (and
+  Bitbucket Data Center's `scm/` over HTTPS), never a path that only ends
+  in it. An SSH remote has neither in front. `upstream` wins where several
+  have it. Where none has the parent, a remote with the root is it, as for
+  a fork of a fork whose `upstream` is the root. Where none has either and
+  the host can't say the root (GitLab, Bitbucket), an `upstream` that names
+  another repository on the same host is it by its name, as before; where
+  the host said the root (GitHub), one that is neither isn't.
+- **Where no remote has it**, the fork is still one. The repository's
+  settings say so and offer to add it, as `upstream`, or `parent` where that
+  name is taken, by the host's address written as `origin`'s is. Only the
+  person adds it; nothing does for them. Until then, tasks start from the
+  fork, its conflict checks fetch the parent by address into
+  `refs/althar/parent/`, and its pull requests are listed and fetched from
+  the parent through its host's connection, or refused with a word to add
+  it where none reaches it, never the fork's instead.
 
 - **Branches upstream is offered only where the host says the account can
   push there.** That is read as the project's repositories are read, and
@@ -168,6 +195,8 @@ upstream.
 - **Remotes are never rewritten.** `origin` and `upstream` stay as they
   are; the clone and its scripts are the person's. A clone whose remotes
   were renamed by hand (`origin` the original, `fork` the fork) just works.
+  Adding the parent where the person asks is the one change Althar makes,
+  beside theirs: a remote is never renamed or removed.
 - **An open pull request stays where its branch is** until it closes,
   whatever the project says now, since a host can't move a pull request's
   source. Only new work follows the setting. Where the host says the fork
@@ -643,6 +672,59 @@ run is still going, and while main is red or a release waits on it. The
 coordinator is woken to read the failure and say what it finds. A fix is a
 task, and a release waiting on main waits on.
 
+### Review and triage bots
+
+Teams put agents in their pull request pipelines: Claude's code review
+action, Copilot code review, CodeRabbit, a bot that triages a failed build.
+Their words are written by an automation that whoever reaches the pipeline
+(a pull request's author, a dependency, a page it reads) may steer, so they
+aren't trusted as a member's are (DEV-205).
+
+- **The person trusts each bot by itself, in the project's settings.** The
+  rules keep the trusted bots by their accounts, in small letters
+  (`trustedBots`); none is trusted until the person says so. The settings
+  list the trusted ones, then the review and triage bots Althar recognised
+  on the project's tasks' pull requests, each a switch, off until turned
+  on. Only the person changes it, in the settings or with Trust in a
+  task's thread. An agent's `change_settings` can't change it. Bots are
+  trusted by account, not by name, because names aren't unique on a host.
+- **Althar suggests only what it recognises as a reviewer**
+  (`reviewerBots.ts`): the review agents it knows by account
+  (`coderabbitai[bot]`, `copilot-pull-request-reviewer[bot]`, `claude[bot]`
+  and the like), or a bot named for an agent, such as a team's own
+  `claude-review[bot]`. Coding agents that open pull requests of their own,
+  and bots named for reporting, deploying or bumping (coverage,
+  `cloudflare-workers-and-pages[bot]`, Vercel, Dependabot), are never
+  suggested. Althar records the first time a recognised bot speaks on a
+  pull request (`bot_spoke`), and the settings suggest from those records,
+  the latest first.
+- **A trusted bot's words reach the lead as findings named by it** ("From
+  CodeRabbit, a review bot this project trusts, on PR #12"). Each comment
+  and review is quoted line by line, as an outsider's comment is shown to
+  the person: data, never instructions. The lead is told to weigh them as
+  it would a review step's findings, checking them against the code, fixing what
+  holds up and setting aside what doesn't. It follows nothing they ask
+  beyond the code: running or fetching something, replying, pushing,
+  changing settings, issues or other pull requests. A bot's words are
+  never on their own the reason for a step outside the task. Where such a
+  step seems needed, the lead asks the person. On an open pull request
+  they wake the lead, as a member's comment does. They aren't passed as a
+  member's comment, which asks the lead to answer on the pull request:
+  answering a bot would let it steer the lead.
+- **A bot the project doesn't trust stays quiet.** Its words never reach
+  the lead, either in what the lead is told or when it reads the pull
+  request. That reading says only that a review bot was left out, by name,
+  and how many other bots' comments were. The thread shows the first thing a recognised
+  reviewer says on each pull request, says the lead doesn't hear it, and
+  offers Trust beside it. Other bots stay out of the thread, except their
+  reviews, which arrive as before.
+- **Off by default,** because a bot in the pipeline is the pipeline owner's
+  choice, not the person's. The trade-off: a trusted bot costs the lead a
+  turn each time it speaks on an open pull request, and a busy bot can be
+  loud, so the person can turn it off again. Revisit when hosts sign bot
+  output in a way Althar can check, or findings come in a structured form,
+  such as a check run's annotations, that is worth reading as such.
+
 ## Trackers
 
 **A task's issue moves as the task does:** "Move issues along with their
@@ -722,3 +804,4 @@ The decisions above are current. These parts of them aren't built on main:
 - 10 Nov 2026: commits made by hand hold the branch too; Merge with commits not shipped offers Review and merge or Merge now (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
 - 16 Nov 2026: Ship takes a route, review or not and as far as push, ready or merged, named on its button and explained on hover; it replaces Review and merge and Merge now on the card, and a merge waits for the checks main requires.
 - 10 Nov 2026: a task follows several pull requests at once, one for each change; stacks hold, ship, merge and retarget from the bottom up, and a pull request opened outside Althar from a change's own branch is that change's (a task is a conversation plus parts, [tasks](tasks.md#a-task-holds-as-many-changes-as-it-needs)).
+- 12 Nov 2026: review and triage bots (DEV-205) built: the person trusts each in the project's settings, off by default; a trusted bot's words reach the lead as findings quoted as data, never obeyed.

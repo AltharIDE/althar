@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type BoardTask } from '@althar/contracts'
+import { ApiError, type BoardTask, type CodeFound } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
 import { useBoard } from '../src/renderer/features/board/useBoard'
@@ -12,7 +12,7 @@ import { useProject } from '../src/renderer/features/project/useProject'
 import { card, coordinatorSnapshot, fakeClient, items, snapshot, task } from './fixtures'
 import { useSettingsOf, withServices } from './render'
 
-function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void } = {}) {
+function Project({ onTask = vi.fn(), room = Room.Talk }: { onTask?: (threadId: string) => void; room?: Room } = {}) {
   return (
     <ProjectView
       model={useProject('p1')}
@@ -20,7 +20,7 @@ function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void } =
       connections={useConnections()}
       settings={useSettingsOf('p1')}
       onTask={onTask}
-      room={Room.Talk}
+      room={room}
     />
   )
 }
@@ -41,6 +41,40 @@ const aside: BoardTask = {
 }
 
 describe('asides in the project’s conversation', () => {
+  it.each([Room.Both, Room.Talk])('opens a file from the selected aside in layout %s', async (room) => {
+    const file: CodeFound = {
+      kind: 'file',
+      name: 'index.md',
+      path: 'index.md',
+      byName: false,
+      bytes: 12,
+      lines: 1,
+      content: 'text',
+      changed: null,
+      since: null,
+    }
+    const thread = snapshot()
+    const { client } = fakeClient({
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [aside], calls: [], settledTotal: 0 })),
+      getThread: vi.fn(async () => ({
+        ...thread,
+        threadId: aside.threadId,
+        task: { ...thread.task, id: aside.taskId, scratch: true },
+        items: [items.says('Read `index.md`.')],
+      })),
+      findCode: vi.fn(async (_threadId: string, messages: ReadonlyArray<unknown>) => ({
+        place: { kind: 'task' as const, repositories: [] },
+        messages: messages.map(() => ({ found: [file] })),
+      })),
+    })
+    withServices(<Project room={room} />, client)
+    await userEvent.click(await screen.findByRole('tab', { name: 'Retry' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open index.md' }))
+    expect(screen.getByRole('complementary', { name: 'index.md' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('tab', { name: 'Coordinator' }))
+    expect(screen.queryByRole('complementary', { name: 'index.md' })).toBeNull()
+  })
+
   it('starts from the project’s composer, sends to the aside, and returns to the coordinator', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.says('The coordinator is here.')] })),

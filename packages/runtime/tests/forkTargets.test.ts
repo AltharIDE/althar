@@ -6,12 +6,13 @@ import { join } from 'node:path'
 
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
+import { afterEach } from 'vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
 import type { ChangeTarget, ProjectId } from '@althar/domain'
-import { baseBranch, forkOf, workRemotes } from '../src/forks'
+import { baseBranch, forgetTold, forkOf, tell, workRemotes } from '../src/forks'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ask, cards, connect, git, pushByHand, runtimeWith } from './changesSupport'
@@ -48,10 +49,13 @@ const forkClone = (
     readonly saysHead?: boolean
     /** What the host says the pull request's head is, where not the commit its branch on the fork is at. */
     readonly headOf?: () => string | undefined
+    /** What the clone calls the repository it came from; and whether its host says the fork is one of that repository. */
+    readonly parent?: string
+    readonly saysParent?: boolean
   } = {},
 ) => {
   const { working, bare: fork } = hosted(FORK)
-  git(working, 'remote', 'add', 'upstream', `${HOST}/${UPSTREAM.join('/')}.git`)
+  git(working, 'remote', 'add', options.parent ?? 'upstream', `${HOST}/${UPSTREAM.join('/')}.git`)
   git(working, 'config', 'user.name', 'Fake')
   git(working, 'config', 'user.email', 'fake@althar.test')
   const upstream = mkdtempSync(join(tmpdir(), 'althar-remote-'))
@@ -69,6 +73,11 @@ const forkClone = (
   github.addRepository(FORK)
   github.addRepository(UPSTREAM, options.upstreamDefault)
   github.letPush(UPSTREAM, options.canPush ?? true)
+  if (options.saysParent === true) {
+    github.forkFrom(FORK, UPSTREAM)
+    // As reading the project's repositories asked it, before the person chose where its work goes.
+    tell(`${HOST}/${FORK.join('/')}.git`, { path: UPSTREAM }, Date.now())
+  }
   return { working, fork, upstream, pushedTo: pushes.pushedTo, github }
 }
 
@@ -109,6 +118,36 @@ const pushOneMore = (projectId: string, taskId: string, here: string, subject: s
   })
 
 describe('where a fork’s tasks’ branches go', () => {
+  afterEach(() => forgetTold())
+
+  it.live('opens its pull request on the repository its host says it came from, the clone calling it base', () => {
+    const { working, fork, upstream, pushedTo, github } = forkClone({ parent: 'base', saysParent: true })
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream')
+      const { url } = yield* taskToPullRequest(working)
+      assert.strictEqual(url, 'https://github.com/meridian/api/pull/1')
+      assert.strictEqual(github.forkOf(1), FORK.join('/'))
+      assert.deepStrictEqual(pushedTo(), [FORK.join('/')])
+      assert.isTrue(hasBranch(fork))
+      assert.isFalse(hasBranch(upstream))
+      // Its remotes are as the person left them.
+      assert.deepStrictEqual(git(working, 'remote').split('\n'), ['base', 'origin'])
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('pushes its branches to that repository by that name, where the person chose that and can', () => {
+    const { working, fork, upstream, pushedTo, github } = forkClone({ parent: 'base', saysParent: true })
+    return Effect.gen(function* () {
+      yield* opened(working, 'upstream_branch')
+      const { url } = yield* taskToPullRequest(working)
+      assert.strictEqual(url, 'https://github.com/meridian/api/pull/1')
+      assert.isNull(github.forkOf(1))
+      assert.deepStrictEqual(pushedTo(), [UPSTREAM.join('/')])
+      assert.isTrue(hasBranch(upstream))
+      assert.isFalse(hasBranch(fork))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('without access, a project still set to push there keeps its branches on the fork, its pull requests where they were', () => {
     const { working, fork, upstream, pushedTo, github } = forkClone({ canPush: false })
     return Effect.gen(function* () {

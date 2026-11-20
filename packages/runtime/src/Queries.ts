@@ -65,6 +65,7 @@ import {
   plainTitle,
   shipsToOpen,
   toolPhrase,
+  type WorkPlaces,
 } from '@althar/contracts'
 import { Cause, Clock, Context, Deferred, Duration, Effect, Layer, Option, Schema, Semaphore } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -322,6 +323,51 @@ const mcpOf = (kept: unknown) => {
     },
   }
 }
+
+/** A search on the web or a page read, as `threads.ts` keeps it; nothing for anything else. */
+const webOf = (kept: unknown) => {
+  const action = text(kept, 'action')
+  if (action === 'search') return { web: { action: 'search' as const, query: text(kept, 'query') } }
+  const url = text(kept, 'url')
+  return action === 'fetch' && /^https?:\/\//.test(url) ? { web: { action: 'fetch' as const, url } } : {}
+}
+
+/** A sub-agent the agent started, as `threads.ts` keeps it, and the call that made a sub-agent's call. */
+const subAgentOf = (kept: unknown, parent: unknown) => {
+  const label = text(kept, 'label')
+  const type = text(kept, 'type')
+  const model = text(kept, 'model')
+  const said = text(kept, 'said')
+  return {
+    ...(label === ''
+      ? {}
+      : {
+          subAgent: {
+            label,
+            ...(type === '' ? {} : { type }),
+            ...(model === '' ? {} : { model }),
+            ...(said === '' ? {} : { said }),
+          },
+        }),
+    ...(typeof parent === 'string' && parent !== '' ? { parent } : {}),
+  }
+}
+
+const COMPACTION_STATUSES = ['in_progress', 'completed', 'failed', 'cancelled'] as const
+
+/** How a compaction stood, as `threads.ts` keeps it on its notice. */
+const compactionOf = (kept: unknown) => {
+  const said = text(kept, 'status')
+  const status = COMPACTION_STATUSES.find((one) => one === said)
+  if (status === undefined) return {}
+  const summary = text(kept, 'summary')
+  const error = text(kept, 'error')
+  return { compaction: { status, ...(summary === '' ? {} : { summary }), ...(error === '' ? {} : { error }) } }
+}
+
+const ROLES = new Set(['aside', 'relayed', 'folder', 'compacted', 'interrupted'] as const)
+type Role = typeof ROLES extends Set<infer R> ? R : never
+const isRole = (role: string): role is Role => ROLES.has(role as Role)
 
 const skillOf = (skill: unknown) => {
   const names = field(skill, 'names')
@@ -704,6 +750,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           ...(allowedBy === undefined ? {} : { allowedBy }),
           ...skillOf(field(content, 'skill')),
           ...mcpOf(field(content, 'mcp')),
+          ...webOf(field(content, 'web')),
+          ...subAgentOf(field(content, 'subAgent'), field(content, 'parent')),
           pictures: picturesOf(field(content, 'pictures')),
           files: filesOf(field(content, 'files')),
           output: outputOf(field(content, 'output')),
@@ -754,7 +802,8 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           severity: severity === 'error' || severity === 'warning' ? severity : 'info',
           title: text(content, 'title'),
           description: description === '' ? null : description,
-          ...(role === 'aside' || role === 'relayed' || role === 'folder' ? { role } : {}),
+          ...(isRole(role) ? { role } : {}),
+          ...(role === 'compacted' ? compactionOf(field(content, 'compaction')) : {}),
           ...(failure === undefined || failure === '' ? {} : { failure }),
           ...Option.match(decodeNoticeTask(field(content, 'task')), { onNone: () => ({}), onSome: (task) => ({ task }) }),
           ...Option.match(decodeNoticeOffer(field(content, 'offer')), {
@@ -1073,7 +1122,11 @@ interface Shown {
  * Where the read under way stands in the change feed, as it first asked: the cards it gives out are as of then, at least.
  * And what its kept cards' looks said (standsOn.ts), each looked at once however many cards stood on it.
  */
-const ReadAt = Context.Reference<{ at?: number; readonly looked: Map<string, Promise<string>> } | null>('@althar/runtime/Queries/ReadAt', {
+const ReadAt = Context.Reference<{
+  at?: number
+  places?: Deferred.Deferred<WorkPlaces, SqlError.SqlError>
+  readonly looked: Map<string, Promise<string>>
+} | null>('@althar/runtime/Queries/ReadAt', {
   defaultValue: () => null,
 })
 
@@ -2257,33 +2310,51 @@ export class Queries extends Context.Service<
             : { id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content },
         )
 
-      /**
-       * Why a task's work waits for a place: how many are busy, and who holds them, the task itself left out: it never
-       * waits behind itself. What a holder left running is listed where it alone keeps the place, to stop it from here.
-       */
+      /** The machine-wide places from the same count that admits work. */
+      const readWorkPlaces = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const sessions = yield* Sessions
+        const now = yield* (yield* Busy).now
+        const ids = new Set(now.holders.map((holder) => holder.taskId))
+        const tasks =
+          ids.size === 0 ? [] : yield* sql<{ id: string; title: string }>`SELECT id, title FROM tasks WHERE id IN ${sql.in([...ids])}`
+        const titles = new Map(tasks.map((task) => [task.id, task.title]))
+        return {
+          ...now,
+          holders: yield* Effect.forEach(now.holders, (holder) =>
+            Effect.gen(function* () {
+              const live = holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
+              return {
+                taskId: holder.taskId,
+                title: titles.get(holder.taskId) ?? '',
+                threadId: holder.threadId,
+                kept: holder.kept,
+                role:
+                  holder.helper !== undefined ? ('helper' as const) : holder.review === true ? ('reviewer' as const) : ('lead' as const),
+                reason: holder.reason,
+                ...(Option.isSome(live) ? { agentId: live.value.agentId } : {}),
+                running: holder.kept && Option.isSome(live) ? live.value.background.filter((left) => left.ended === null) : [],
+              }
+            }),
+          ),
+        }
+      })
+
+      // Cards on the same read see the same holders even if an agent starts while the board is being assembled.
+      const workPlaces = Effect.gen(function* () {
+        const read = yield* ReadAt
+        if (read === null) return yield* readWorkPlaces
+        if (read.places !== undefined) return yield* Deferred.await(read.places)
+        const places = Deferred.makeUnsafe<WorkPlaces, SqlError.SqlError>()
+        read.places = places
+        return yield* readWorkPlaces.pipe(Effect.onExit((exit) => Deferred.done(places, exit)))
+      })
+
+      /** A task never waits behind itself. Its own places are shown in the board's machine-wide total. */
       const queuedNow = (taskId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const sessions = yield* Sessions
-          const now = yield* (yield* Busy).now
+        Effect.map(workPlaces, (now) => {
           const holders = now.holders.filter((holder) => holder.taskId !== taskId)
-          return {
-            busy: now.busy - (now.holders.length - holders.length),
-            atOnce: now.atOnce,
-            holders: yield* Effect.forEach(holders, (holder) =>
-              Effect.gen(function* () {
-                const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${holder.taskId}`
-                const live = holder.kept && holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
-                return {
-                  taskId: holder.taskId,
-                  title: task?.title ?? '',
-                  threadId: holder.threadId,
-                  kept: holder.kept,
-                  running: Option.isSome(live) ? live.value.background.filter((left) => left.ended === null) : [],
-                }
-              }),
-            ),
-          }
+          return { ...now, busy: holders.length, holders }
         })
 
       /** A project's line, read once in a read: the cards that read it at once share it. */
@@ -3582,9 +3653,11 @@ export class Queries extends Context.Service<
           const onIt = new Set(rows.map((row) => row.id))
           forget((owner) => owner.projectId === projectId && !onIt.has(owner.taskId))
           const calls = yield* callsIn(projectId)
+          const cards = tasks.flat()
           return {
             cursor: at,
-            tasks: tasks.flat(),
+            tasks: cards,
+            ...(cards.some((task) => task.queued !== null) ? { workPlaces: yield* workPlaces } : {}),
             calls: calls.map((one) => one.call),
             settledTotal: counted?.total ?? 0,
           } satisfies BoardSnapshot

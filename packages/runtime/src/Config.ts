@@ -289,8 +289,6 @@ export interface BusyOptions {
   readonly sample?: Duration.Duration
   /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
   readonly quiet?: Duration.Duration
-  /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
-  readonly askGrace?: Duration.Duration
   /** How many automations' tasks may be at work at once: one. */
   readonly automations?: number
   /** How many places beyond the number tasks planned small may take (quickLane.ts): one; none turns the quick lane off. */

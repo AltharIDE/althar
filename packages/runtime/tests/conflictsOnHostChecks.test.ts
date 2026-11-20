@@ -5,7 +5,7 @@ import { SqlClient } from 'effect/sql'
 import { Changes } from '../src/Changes'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
-import { hosted, items, notices, until } from './support'
+import { hosted, items, notices, turns, until } from './support'
 import {
   runtimeWith,
   git,
@@ -130,6 +130,21 @@ describe('a conflict its pull request’s host reports, and the checks on its me
       assert.isFalse(said.some((body) => body.includes('the person looks at it and pushes it')))
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.unpushed === 0)
     }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('has the lead fix the checks on the merge within the round on a new day, told the time first', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) && !holdsFix(bare, sha) ? FAILED : PASSED))
+    // The person's day moves on once the merge is up, as at midnight: the lead's next turn is told the time before the round's ask.
+    const zone = () => (holdsMain(bare, 'althar/add-a-retry') ? 'Etc/GMT-14' : 'Etc/GMT+12')
+    return Effect.gen(function* () {
+      const { threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead fixed the checks on the merge, and pushed the fix to PR #1.')
+      assert.isTrue(holdsFix(bare, 'althar/add-a-retry'))
+      const fix = (yield* turns(threadId)).find((turn) => turn.prompt?.includes('Checks failed on the merge Althar pushed') === true)
+      assert.match(fix?.prompt ?? '', /^\(It is now .+ on the person's computer\.\)\n\nChecks failed on the merge Althar pushed to PR #1/)
+    }).pipe(Effect.provide(runtimeWith({ github }, {}, undefined, {}, undefined, zone)))
   })
 
   it.live('gives the round to the person when the checks fail on the fix too', () => {

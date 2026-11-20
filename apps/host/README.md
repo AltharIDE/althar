@@ -1,165 +1,79 @@
-# @althar/host
+# Run an Althar home on Linux
 
-A persistent Althar project home under plain Node on Linux. The service owns the runtime, SQLite writer, projects and agent processes; an attached client does not own their lifetime. It uses the existing versioned private API and its socket authority rules.
+An Althar **home** is where your projects, task history and running sessions live. Put a home on a Linux machine if you want your work to keep going when you close the desktop window. You can come back to it from the desktop or the command line.
 
-This is the host service foundation of [ADR-103](../../docs/decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md), including signed portable releases and a managed updater. The [SSH bootstrap protocol](bootstrap/README.md) supports desktop-driven installation. Protected client enrollment, remote files and previews, and managed worker pools still need implementation. The native Linux worker supports direct connections and the worker relay. Real provider subscription login/refresh and systemd reboot on a personal VPS remain release gates. Tests use temporary profiles; release smoke checks probe real bundled provider binaries without credentials.
+A **worker** runs a command you choose in a project checkout. It can run beside the home or on a different Linux machine. The home remembers the run and its result, and the worker does the work.
 
 ## Try the host and worker preview
 
-The [Linux preview](preview/README.md) bundles the host, its Node runtime,
-and the native worker. Its demo verifies a project run, output, reconnect,
-and cancellation using the supplied binaries.
+Start here if you're curious about how the pieces fit. The download includes both binaries and a demo. In one terminal you can see a Git check run, the worker reconnect after a home restart and a long-running command stop on cancellation. [Download and test the preview](preview/README.md)
+
+Once you've tried that, you can connect the desktop to a test home over SSH or use a checkout of your own. [Desktop test](preview/README.md#connect-the-desktop-to-a-test-home-over-ssh) · [Project command](#run-a-project-command-on-a-linux-worker)
 
 ## Build and initialize
 
-Use the pinned Bun and Node versions in the repository. Linux, git and Node 24.22 or the repository's newer pinned Node are required. systemd user services need a user manager and `systemd-notify`; encrypted user credentials additionally need a systemd version supporting user-scoped sealing.
-
-From the repository root:
+The preview includes a ready-to-run `./althar-host`. For a source build, use Linux, Git and the Node and Bun versions pinned in the repository. Run these from the repository root.
 
 ```sh
 bun install --frozen-lockfile
 bun --filter @althar/host build
-node apps/host/dist/althar-host.js init --project /absolute/path/to/repository
+node apps/host/dist/althar-host.js init --project /absolute/path/to/repository --json
 node apps/host/dist/althar-host.js serve
 ```
 
-`--project` is repeatable and opens existing repositories. It does not clone, move or upload a desktop project. Repeated initialization preserves identity and keys. Stop the running host before provisioning more projects, because the database allows one writer.
+`init` registers a checkout that's already on the home machine. Pass `--project` again for each checkout you want to open. Keep the `homeId` and project IDs it prints. You can initialize again with the same profile to add projects while the service is stopped. The home keeps its identity and key.
 
-Defaults are deliberately separate from the desktop:
+`serve` runs in the foreground. You can stop it with Ctrl-C. For a home that stays up on its own, install the service below.
 
-| State | Location |
+### Where the home keeps its files
+
+| What | Default |
 | --- | --- |
-| Profile, SQLite, artifacts, encrypted connector secrets and backups | `$XDG_DATA_HOME/althar-host`, falling back to `~/.local/share/althar-host` |
+| Home profile, including its database, artifacts, encrypted connector secrets and backups | `${XDG_DATA_HOME:-$HOME/.local/share}/althar-host` |
 | Task worktrees | `<profile>/worktrees` |
-| Separate master key | `$XDG_CONFIG_HOME/althar-host/master-key`, falling back to `~/.config/althar-host/master-key` |
-| User unit | `$XDG_CONFIG_HOME/systemd/user/althar-host.service` |
-| Managed program, staged releases and update recovery journal | `$XDG_DATA_HOME/althar-host-program`, falling back to `~/.local/share/althar-host-program` |
+| Master key for connector secrets | `${XDG_CONFIG_HOME:-$HOME/.config}/althar-host/master-key` |
+| systemd user unit | `${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/althar-host.service` |
+| Managed program and update files | `${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program` |
 
-`--profile`, `--worktrees` and `--key-file` accept custom paths. The worktree location is recorded in `host.json`; subsequent launches reuse it. An explicit different location is refused. Move workspaces deliberately while the service is stopped, repair git worktree references, update the stored location and validate before starting. A missing recorded directory fails startup rather than being recreated. The host does not migrate desktop keyring ciphertext.
+Use a profile of its own for the home. It has its own database and key, separate from the desktop. Use `--profile`, `--worktrees` and `--key-file` if you need different paths. Keep the master key outside the profile, backups and project checkouts. Back it up separately. The home checks the key's file permissions and fingerprint at startup.
 
-Keep the master key outside the profile, its backup folders, all project repositories and task worktrees. Startup checks its ownership, mode, type, size and vault fingerprint. It never generates a replacement key during `serve`, or during `init` when vault metadata already exists. Do not point this host at the desktop's profile.
+The home records the worktree path in `host.json` and expects that directory on the next start. To move it, stop the home, repair the Git worktree references, update the recorded path and check the new location before restarting.
 
 ## Supervision
 
-After initialization, install a systemd **user** unit, with absolute Node and built-entry paths captured from the command that installs it:
+A systemd **user** service lets the home keep running in the background. It needs a reachable user service manager and `systemd-notify`. In the unpacked preview, run these after initialization. For a source build, use `node apps/host/dist/althar-host.js` in place of `./althar-host`.
 
 ```sh
-node apps/host/dist/althar-host.js install-service
-systemctl --user enable --now althar-host.service
-node apps/host/dist/althar-host.js status --wait --json
-journalctl --user -u althar-host.service -f
-systemctl --user stop althar-host.service
+./althar-host install-service --start
+./althar-host status --wait --json
 ```
 
-`install-service --start` combines installation and explicit enable/start. Without that flag it only writes the managed unit and reloads the user manager. Updating a running unit does not implicitly restart its runtime: use `systemctl --user restart althar-host.service` deliberately. Put overrides in a systemd drop-in; reinstalling replaces the Althar-managed unit. Unrelated unit files are refused. Custom `--service-name` supports separate profiles; never run two services on the same profile.
-
-If the user manager must survive logout or start at boot, the server administrator must configure lingering for the host's OS user (usually `loginctl enable-linger <user>`). Installation does not change system-wide policy or enable lingering itself. A source installation needs its built entry, installed dependencies and Node at the captured paths. Converting to managed updates below captures a complete portable bootstrap, including Node and the locked ACP dependency closure.
-
-The unit delivers the protected key through `LoadCredential`; the process uses `%d/master-key`. There is no interactive desktop keyring dependency. `CREDENTIALS_DIRECTORY` is also recognized for a manually configured service's `serve` command. The host removes supervisor credential and notification variables before starting the runtime's agents. API readiness is announced only after storage, reconciliation and the private socket have started. Health calls `GetConnectionInfo`, without provider probes or access to the master key. Readiness waits end after 30 seconds.
-
-SIGTERM and SIGINT close the runtime scope, its agent sessions, private endpoint and database lock. systemd kills the entire service cgroup after its bounded shutdown timeout, including detached agent children. It restarts transient failures with bounded start retries; usage/configuration refusals do not create a restart loop. `PrivateTmp` is intentionally absent: the private Unix socket must be reachable by clients outside the unit. The unit exposes no public TCP API.
-
-Exit codes: 0 success or graceful service stop, 64 invalid command/configuration syntax, 75 unavailable service/storage or occupied profile, 78 missing/unsafe initialization or incompatible encryption, 130 interrupted finite command, 1 unexpected failure. Runtime diagnostic logs go to stderr, and command results go to stdout; `--json` emits command results as JSON lines.
-
-## Managed releases and updates
-
-Obtain the Ed25519 **public** release key through an independently trusted channel. Do not trust a key supplied by the update feed itself. The repository does not contain a provisional production key. The release operator must provision the signing secret and publish the corresponding public key before this can use official releases.
-
-After initialization, stop the host once its work has finished, then convert it using an official Node distribution (including its `LICENSE`) and a built checkout with frozen dependencies:
+Look for `"state":"ready"` and the home ID. The check waits up to 30 seconds for storage and the private API to be ready. If the service fails to start, look at its journal.
 
 ```sh
-systemctl --user stop althar-host.service
-node apps/host/dist/althar-host.js configure-updates --release-key /trusted/host-release.pub
-systemctl --user enable --now althar-host.service
-sh "$HOME/.local/share/althar-host-program/launcher" update-status
-```
-
-Use `--installation /absolute/program/path` on commands if overriding the default. Keep that directory outside the profile, worktrees and credential files. Custom profile, service name and credential options must match the initialized service. For an OS-sealed key, pass `--encrypted-credential` during conversion too. Configuration changes preserve the original home identity, data, key and worktrees. The first captured executable is trusted local code; all subsequent downloaded code requires a valid pinned-key signature.
-
-The installed timer checks and stages hourly, with startup delay/jitter. It downloads and verifies without stopping the host. Explicit requests use a durable queue and an independent updater unit:
-
-```sh
-# Check/download/verify now, without applying.
-sh "$HOME/.local/share/althar-host-program/launcher" update --wait
-# Explicit maintenance: stops the host and its agents, then starts the new release.
-sh "$HOME/.local/share/althar-host-program/launcher" update --apply --wait
-journalctl --user -u althar-host-update.service
-```
-
-The default is **explicit application**. `configure-updates --automatic-updates` opts into activating a verified compatible staged release on the next service start, before accepting work. `--manual-updates` switches back. Automatic mode does not restart a running host; an idle-time restart needs an admission/drain barrier that is separate work. `update --apply` deliberately interrupts running work, so schedule it after work finishes. A release changing the API or storage fingerprint always requires explicit `--apply --allow-incompatible`, including in automatic mode. Check client compatibility and retain an independent export before that maintenance.
-
-Before activation the controller reserves storage, stops the service, takes a SQLite snapshot and runs only the candidate's storage migration/validation. No agents or external runtime effects run in that preparation step. The new service confirms its home and authenticated API readiness before becoming current. The separate updater process survives stopping the host; a kernel lock and durable phase journal support interruption/reboot recovery.
-
-- A preparation failure restores the pre-start SQLite snapshot before restarting the previous code.
-- A compatible startup failure reverts code while retaining newer database writes.
-- An incompatible failure after runtime startup leaves the service stopped and data preserved. `update-status` reports recovery required. Stage a corrected newer release and explicitly apply it with `--allow-incompatible`; do not point old code at migrated data or remove the reservation to bypass recovery. If manual restore is necessary, stop both host/updater units and restore a compatible, complete export deliberately.
-- A missing/foreign database reservation blocks automatic restoration. Older code also refuses a database with newer recorded migrations.
-
-Installed releases remain usable offline after their manifests expire; a newly activated release must still be fresh. Signed metadata binds version/sequence, platform, API/storage compatibility, archive digest/size and extraction inventory. Downgrades, conflicting sequence numbers, unsafe archive paths/links and incomplete bundles are refused. Active/bootstrap/staged/quarantined/recovery references are retained, with three additional historical releases, three historical updater snapshots and 100 completed request receipts. This retention is not an export or full-profile backup. Use journal policy for log rotation.
-
-For key rotation, rerun `configure-updates --release-key /trusted/new-release.pub` before signing with that key. Previous public keys stay pinned for retained release verification (up to eight). This handles routine rotation; compromised-key recovery requires deliberate operator intervention and replacing affected trusted installations.
-
-## Producing a release
-
-`host-release.yml` uses independent `host-v<apps/host version>` tags, requires the exact main commit's host and post-merge validation, builds natively on Linux x64/arm64 and creates one **draft**, never the desktop's latest release. Official Node and Linux glibc are the packaging target. The protected `release` environment must require review and contain `ALTHAR_HOST_RELEASE_SIGNING_KEY`, an Ed25519 private PEM. Keep its recovery copy offline and distribute only the public verification key independently. Never put the private key in arguments, repository files, release assets or logs.
-
-Raise the host version, add `release-notes/<version>.md`, merge and wait for main validation, then tag that commit `host-v<version>` (or dispatch from main). Complete real VPS/systemd reboot and provider headless sign-in/refresh validation before publishing the draft manually. Published versions and signed assets are immutable; a corrected build gets a new version and sequence. Expiring unpublished drafts may need a fresh version. Nothing in this change provisions a production key or publishes a release.
-
-`bun run release:smoke` builds a complete portable release using a throwaway signing key, verifies signature/hash and runs its bundled adapters/native CLIs outside the workspace, with no provider credentials. CI runs it natively on x64 and arm64 on every host verification. It requires an official Node installation with its license file.
-
-## OS-sealed keys and recovery
-
-Prefer `LoadCredentialEncrypted` when the server's systemd supports **user-scoped** encryption and decryption. Follow that system's credential policy; do not use null-key encryption. For versions supporting `systemd-creds --user`, an operator can seal the existing key under the credential name `master-key`, then install:
-
-```sh
-umask 077
-systemd-creds --user encrypt --name=master-key /private/master-key /private/host.cred
-node apps/host/dist/althar-host.js install-service --encrypted-credential /private/host.cred
+journalctl --user -u althar-host.service -n 60
 systemctl --user restart althar-host.service
+systemctl --user stop althar-host.service
 ```
 
-The service never falls back from the encrypted credential to the original plaintext file. Installation validates the private sealed file and metadata; systemd's ability to unseal it and the matching vault fingerprint are verified at actual service startup. Check readiness after restarting. Once startup is proven, the live plaintext source can be removed **only after** keeping a secure, separate recovery copy. Manual `init` or `serve` without the delivered credential still requires the original key via `--key-file`. OS sealing may be machine/user bound; a ciphertext blob alone is not a portable recovery key.
+- The unit remembers the absolute paths to Node and the host entry point. Keep them at those paths while it is installed.
+- Omitting `--start` writes the unit and reloads systemd. Restart deliberately after changing a running installation. Put your own unit settings in a [systemd drop-in](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html).
+- Use `--service-name` with a separate `--profile` for a second home. Give each profile one running service.
+- Ask the server administrator to enable lingering with `loginctl enable-linger <user>` if the service should survive the last logout and start after a reboot.
 
-For a consistent export, stop the service and copy the whole profile, original project repositories and task worktrees, preserving ownership and private permissions. The profile includes encrypted connector secrets and `host-vault.json`. Provider tools own their sign-in stores separately; use each provider's supported reauthentication on the restored host. SQLite's automatic database backups do not back up secrets, artifacts, repositories, provider sign-ins or the key. Back up the master key separately from the export; never include it in an image or worktree. Restore original absolute paths, or deliberately migrate the worktree and git references before starting. A wrong or missing key cannot decrypt old secrets and is never automatically repaired.
-
-Encryption protects copied secret files while the key stays separate. It does not protect against an administrator, a compromised OS user, or a disk copy containing both. Agents currently run as the service's OS user and are trusted with that user's files; private modes and stripped environment variables are not isolation against that same user. Use a dedicated OS account for a trusted personal host. Do not accept untrusted tenants or shared-worker workloads here; isolated workers, short-lived credential grants and tenant boundaries are later work. Connector secrets use this encrypted store; provider tools retain their own credential storage.
-
-## Development
-
-```sh
-cd apps/host
-bun run check
-bun run test tests/vault.test.ts tests/home.test.ts --maxWorkers=1
-bun run test tests/process.test.ts --maxWorkers=1
-```
-
-Both `test` and `test:coverage` build the Node entry first, including when the repository's changed-test stress runner invokes them on a clean checkout. CI's dedicated `host.yml` gates type-aware checks, the build, process/integration tests and at least 90% line and branch coverage on pull requests, in the merge queue and on main. No real service is installed by tests; service manager calls are injected, while the built process, signals, git, database and socket are exercised directly. Real VPS/systemd reboot and real-provider validation must precede a supported personal-host release.
+The service gets its key through systemd credentials. On stop, it closes its API and releases the database. systemd also stops child processes, including detached agents. For unit behavior and recovery details, see the [host architecture](ARCHITECTURE.md).
 
 ## SSH clients
 
-The running service accepts attached clients through `connect-stdio`, a framed
-noninteractive helper launched over system OpenSSH. It requires an explicit
-`--home-id` and `--client-api-version`; it opens only the private API connection
-and never starts a second runtime. Its stdout is protocol data, not terminal
-text. The private endpoint secret stays on the host. SSH access conveys socket
-authority, so it cannot approve permissions or pair a device.
+If you already sign in to your server over SSH, you can use the same connection to open its running home. First check that your desktop can sign in with its SSH key and that it knows the server's host key. Then enter the same SSH target in **Homes → Connect a home… → SSH**. Compare the home ID shown by **Check host** with `althar-host status` on the server before connecting. [Step-by-step desktop test](preview/README.md#connect-the-desktop-to-a-test-home-over-ssh)
 
-See the [CLI attachment guide](../cli/README.md#attach-to-a-running-home) for
-inspection, home pinning and task attachment, and the [transport architecture](../../packages/transport-node/ARCHITECTURE.md)
-for lifecycle and protocol limits. Disconnecting the SSH client leaves the
-service and its sessions running. Existing service updates are unchanged: an
-explicit apply restarts the service and disconnects attached clients, which
-check the new host identity/API version when reconnecting. A newer incompatible
-API requires a compatible client before attachment.
+The desktop and CLI use the host's `connect-stdio` command for the session. This command checks the expected home ID and API version. When you disconnect, the home and its running sessions carry on. SSH lets you work with the home under a restricted role. Permission answers and device pairing require a client with the person's authority. [CLI attachment](../cli/README.md#attach-to-a-running-home) · [Transport reference](../../packages/transport-node/ARCHITECTURE.md)
+
+Desktop-driven setup uses SSH to install a signed host on a new server. It needs a published release and a trusted release key. [SSH setup reference](bootstrap/README.md)
 
 ## Direct HTTPS/WSS and device pairing
 
-Direct access is opt-in. Supply a matching RSA or ECDSA PEM certificate and key as private
-regular files (mode 0600); keep the TLS key outside the profile and worktrees.
-The leaf certificate may be private or self-signed and can be up to 4 KiB
-in DER form. The pairing code carries the certificate and pins its public
-key. Reachability can use Tailscale, another private network or a direct
-HTTPS address. No relay or Althar account is required.
+If your desktop can reach the home over a private network such as Tailscale, you can connect with a pairing code. Use a matching RSA or ECDSA PEM certificate and key for the HTTPS name. A private or self-signed leaf certificate of up to 4 KiB in DER form works. Keep the files private with mode 0600 and put the key outside the profile and worktrees.
 
 ```sh
 althar-host configure-network --profile /path/to/profile \
@@ -169,17 +83,9 @@ systemctl --user restart althar-host.service
 althar-host pair --profile /path/to/profile
 ```
 
-In the desktop, open **Homes → Connect a home…** (also available from **File → Homes…**). Choose **Pairing code**. Paste the code,
-check the destination, name the home and choose **Pair and open**. A home opens
-in its own window; its projects stay on the host. SSH remains another route.
-A code enrolls one device key and expires after five minutes or on host restart.
-A lost reply may retry with the same saved pending key while the code is valid.
-The desktop requires an OS keyring and never saves plaintext connection keys.
+In the desktop, open **Homes → Connect a home… → Pairing code**. Paste the code, check the destination, give the home a name and choose **Pair and open**. The home opens in its own window. Its projects stay on the server.
 
-These devices can work with existing projects/tasks, but cannot approve
-permissions or enroll trusted approval devices. Desktop file transfers,
-previews, provider setup and protected approval enrollment are separate work.
-A personal host remains a trusted OS-user boundary, not an isolated worker.
+A code ties the connection to the home certificate's public key. It enrolls one device and expires after five minutes or when the home restarts. If a reply gets lost, the desktop can retry with the same pending key while the code is valid. The desktop stores the device key in its OS keyring. These paired devices get the restricted role for existing projects and tasks. Protected approval enrollment is separate work.
 
 ```sh
 althar-host devices --profile /path/to/profile
@@ -187,113 +93,193 @@ althar-host revoke-device --profile /path/to/profile --device-id dev_...
 althar-host disable-network --profile /path/to/profile
 ```
 
-Revocation ends the device's streams and prevents reconnect immediately;
-commands already admitted may finish. `devices` is paged: use its returned
-`next` value with `--after`. Disabling/reconfiguring the listener takes an
-explicit service restart. Existing updater policy stays unchanged. Compatible
-updates and restarts preserve registered devices. Pair again after changing
-the TLS key or replacing a self-signed certificate. Renewals with the same
-key and a still-trusted certificate chain reconnect normally. Keep the
-desktop keyring and home database in their respective
-recovery plans. Invitations are deliberately not restored after a restart.
+Use the `next` value from `devices` with `--after` for another page. Revocation ends that device's connections right away. Work the home already accepted may finish. Restart the service after changing or disabling the listener.
+
+Pair again if you change the TLS key or replace a self-signed certificate. Renewals with the same key and trusted chain keep working. Back up the home database and desktop keyring according to your usual recovery plan.
 
 ## Native worker diagnostic
 
-The worker listener is opt-in and uses a separate gRPC port. Provision a CA
-and a server certificate with a subject alternative name matching the URL
-that workers will use. Give each worker its own client certificate and
-private key. Keep PEM files at mode 0600 and keep the server key outside
-the home profile and worktrees. Use a dedicated OS account for each worker
-and keep its credentials and journal private to that account.
+Before running one of your own commands, ask the worker to identify its operating system. It runs `uname -s`, so the expected output is `Linux`. This is a quick way to check the certificates, the connection and the worker's enrollment.
 
-For a worker on the same Linux machine, use a server certificate valid for
-`localhost` and bind to loopback. For a worker on another machine, choose a
-reachable private IP and the matching certificate name.
+Start with the home and worker on one Linux machine. You need a certificate authority (CA), a home certificate valid for `localhost`, and a client certificate and key for the worker. The home and worker each present a certificate so both know who is connecting. Use a dedicated, unprivileged worker user for ongoing use. Keep PEM files at mode 0600 and the home key outside the profile and worktrees.
+
+<details>
+<summary>Make certificates for a localhost test</summary>
+
+Run this on the Linux machine that will run both the home and worker. It creates a test CA, a home certificate for `localhost`, and one client certificate. The certificates last one day. Keep the CA's private key in that directory.
 
 ```sh
-althar-host configure-workers --profile /path/to/profile \
-  --worker-ca /private/tls/ca.pem --tls-certificate /private/tls/home.pem \
-  --tls-key /private/tls/home.key
-althar-host enroll-worker --profile /path/to/profile \
-  --worker-certificate /private/tls/client.pem
-systemctl --user restart althar-host.service
-althar-host worker-run --profile /path/to/profile --worker-id "$WORKER_ID"
+tls=$(mktemp -d "$HOME/althar-worker-tls.XXXXXX")
+(
+  cd "$tls" || exit 1
+  umask 077
+  openssl req -new -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
+    -subj '/CN=Althar trial CA' -keyout ca.key -out ca.pem \
+    -addext 'basicConstraints=critical,CA:true' -addext 'keyUsage=critical,keyCertSign'
+  printf 'basicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:localhost\n' > home.ext
+  printf 'basicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth\n' > client.ext
+  for name in home client; do
+    openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+      -subj "/CN=Althar trial $name" -keyout "$name.key" -out "$name.csr"
+    openssl x509 -req -in "$name.csr" -CA ca.pem -CAkey ca.key -CAcreateserial \
+      -extfile "$name.ext" -days 1 -out "$name.pem"
+  done
+)
+printf 'Certificate directory %s\n' "$tls"
 ```
 
-Use the ID printed by `enroll-worker` as `WORKER_ID` and the ID from
-`althar-host status` as `HOME_ID`. On the worker, invoke the Linux binary
-once to pick up the queued diagnostic. Keep the same journal directory on
-subsequent invocations so the worker can replay a recorded result.
+</details>
 
-```sh
-cargo build --locked --release -p althar-worker
-target/release/althar-worker https://localhost:6770 "$HOME_ID" "$WORKER_ID" \
-  /private/tls/ca.pem /private/tls/client.pem /private/tls/client.key /private/worker-journal
-althar-host worker-result --profile /path/to/profile --attempt-id "$ATTEMPT_ID"
-```
+1. On the home, configure the listener and enroll the worker certificate. These examples use the default home profile and port 6770. Set `tls` to your certificate directory, or keep the value from the test above. For a custom profile, add `--profile /path/to/profile` to each host command and restart its own service. If you unpacked the preview, use `./althar-host`.
 
-Use the attempt ID from `worker-run` as `ATTEMPT_ID`. A `succeeded` result
-contains the diagnostic output. An `unknown` result means the home could
-not confirm execution, including when a start grant was lost or an offer
-expired. Each attempt gets at most one start grant. Enrollment and attempt
-state survive home restarts in `workers/ledger.sqlite`. Preserve that
-ledger and the worker journal when recovering an installation.
+   ```sh
+   althar-host configure-workers \
+     --worker-ca "$tls/ca.pem" --tls-certificate "$tls/home.pem" \
+     --tls-key "$tls/home.key"
+   althar-host enroll-worker --worker-certificate "$tls/client.pem" --json
+   systemctl --user restart althar-host.service
+   althar-host status --wait --json
+   ```
 
-Use `revoke-worker --worker-id "$WORKER_ID"` to reject the certificate on new
-connections and at the next message on an existing stream. A replacement
-certificate gets a fresh enrollment. Use `disable-workers` and restart the
-home to close the listener. The worker runs independently of host updates. The Linux preview bundles a worker for manual deployment.
+   Set `WORKER_ID` to the `workerId` from enrollment and `HOME_ID` to the `homeId` from status.
 
-Use the [outbound worker relay](../../packages/worker-protocol/README.md#outbound-worker-relay)
-when the worker and home can each reach a gateway and the home's worker
-listener is private.
+2. On the home, queue the diagnostic and save the printed attempt ID as `ATTEMPT_ID`.
+
+   ```sh
+   althar-host worker-run --worker-id "$WORKER_ID" --json
+   ```
+
+3. On the worker, use `./althar-worker` from the preview or build it from the repository root with `cargo build --locked --release -p althar-worker`. From the bundle directory, run it once with the IDs from step 1. If you built from source, use `target/release/althar-worker`.
+
+   ```sh
+   ./althar-worker https://localhost:6770 "$HOME_ID" "$WORKER_ID" \
+     "$tls/ca.pem" "$tls/client.pem" "$tls/client.key" "$HOME/althar-worker-journal"
+   ```
+
+   Keep the worker's private key and journal with its OS account. Reuse the journal each time so a reconnect can report a result the worker already saved.
+
+4. Back on the home, read the result.
+
+   ```sh
+   althar-host worker-result --attempt-id "$ATTEMPT_ID"
+   ```
+
+   A pass says `succeeded` and shows `Linux`. An `unknown` result means the home lost its chance to confirm the outcome, for example after a disconnect or an expired offer. Queue a new attempt if you want to try again.
+
+For a worker on another machine, use a reachable private bind address on the home and a name covered by its certificate. Each worker gets its own client certificate. If both machines can reach a gateway, you can use the [worker relay](../../packages/worker-protocol/README.md#outbound-worker-relay).
+
+Use `revoke-worker --worker-id "$WORKER_ID"` to cut off an enrolled certificate on new connections and on the next message of an existing connection. Enroll a replacement certificate separately. To close the listener, run `disable-workers` and restart the home. Preserve the home ledger at `workers/ledger.sqlite` and each worker's journal when recovering an installation.
 
 ## Run a project command on a Linux worker
 
-The manual pilot uses the worker enrollment above, Linux with cgroup v2 and
-a systemd 254 or newer user service manager, and a checkout already on the
-worker. Run the worker as a dedicated, unprivileged OS user. Use trusted
-project code and tools. The command runs as that user, with its file access,
-inside a service that controls the lifetime of all its processes.
+Once the diagnostic works, pick a quick command from a trusted checkout. The worker needs cgroup v2 and systemd 254 or later with a user service manager. The command runs as the worker's OS user and has that user's file access. A separate user service tracks all the command's processes so cancellation can stop even a detached child.
 
-Use the home project ID printed by `althar-host init --json --project <path>`
-when registering the project, or read the ID of an existing project from the
-home API. On the worker, create a mode 0600 UTF-8 file outside the checkout.
-Its first four lines are the project ID, command name, absolute checkout path
-and absolute executable path. Each following line becomes one argument. For
-example, to check a Git checkout:
+1. Set `PROJECT_ID` to the ID in the output of `althar-host init --json --project <path>` or from the home API. On the worker, create a private UTF-8 file outside the checkout with mode 0600. Put the project ID, command name, absolute checkout path and absolute executable path on the first four lines. Use one line for each argument after that.
 
-```text
-proj_0123456789abcdef0123456789abcdef
-check
-/srv/checkouts/example
-/usr/bin/git
-diff
---check
-```
+   For a Git check, use this shape and replace the first and third lines.
 
-On the home, queue the command while the home is serving its API:
+   ```text
+   proj_0123456789abcdef0123456789abcdef
+   check
+   /srv/checkouts/example
+   /usr/bin/git
+   diff
+   --check
+   ```
+
+2. On the worker, start the same command you used for the diagnostic and add `--project-config /private/project-command --watch`. Watch mode waits for later runs and reconnects after an interruption.
+
+3. On the home, request the command by its name and save the returned ID as `ATTEMPT_ID`.
+
+   ```sh
+   althar-host worker-project-run \
+     --worker-id "$WORKER_ID" --project-id "$PROJECT_ID" --command-name check --json
+   ```
+
+4. On the home, check the output and outcome. Use `worker-cancel` while a run is active if you want to stop it.
+
+   ```sh
+   althar-host worker-log --attempt-id "$ATTEMPT_ID"
+   althar-host worker-result --attempt-id "$ATTEMPT_ID"
+   althar-host worker-cancel --attempt-id "$ATTEMPT_ID"
+   ```
+
+The preview runs one configured command per worker with a one-minute budget. The home keeps up to 64 KiB of combined stdout and stderr in up to 1,024 chunks. To read new output only, use `worker-log --json` and pass its `nextOffset` back as `--offset` on the next call. A run becomes `cancelled` after the worker confirms systemd has stopped all of its processes. After a disconnect or crash, the worker's permission to run expires and systemd stops the command. Reconnect with the same journal to settle the result.
+
+## Managed releases and updates
+
+A managed home checks for a new release, downloads it and verifies its signature. **You choose when to apply it by default.** That lets you finish active work before the home restarts. The managed updater uses the host release feed and an Ed25519 public key you obtained from a trusted source independently of that feed. The worker runs and updates separately.
+
+To convert a source installation, use a built checkout with frozen dependencies and an official Node distribution with its `LICENSE`. Let active work finish before stopping the service.
 
 ```sh
-althar-host worker-project-run --profile /path/to/profile \
-  --worker-id "$WORKER_ID" --project-id "$PROJECT_ID" --command-name check
+systemctl --user stop althar-host.service
+node apps/host/dist/althar-host.js configure-updates --release-key /trusted/host-release.pub
+systemctl --user enable --now althar-host.service
+sh "$HOME/.local/share/althar-host-program/launcher" update-status
 ```
 
-Run the worker as above and add `--project-config /private/project-command`
-to pick up the run. The home sends the project ID and command name. The
-worker finds the executable and arguments in the private file.
+The conversion keeps your home ID, profile, key and worktrees. Use `--installation /absolute/program/path` to override where the managed program lives. Keep it separate from the profile, worktrees and keys. Match any custom profile, unit or credential options you installed with, including `--encrypted-credential` if you use it.
 
-Use the returned `ATTEMPT_ID` on the home to follow or stop the run:
+The timer checks roughly once an hour and stages a verified release while the home runs. You can check immediately or choose to apply a staged release.
 
 ```sh
-althar-host worker-log --profile /path/to/profile --attempt-id "$ATTEMPT_ID" --json
-althar-host worker-cancel --profile /path/to/profile --attempt-id "$ATTEMPT_ID"
-althar-host worker-result --profile /path/to/profile --attempt-id "$ATTEMPT_ID"
+sh "$HOME/.local/share/althar-host-program/launcher" update --wait
+sh "$HOME/.local/share/althar-host-program/launcher" update --apply --wait
+journalctl --user -u althar-host-update.service
 ```
 
-Poll `worker-log` with `--offset` set to the previous `nextOffset`. It retains
-up to 64 KiB of combined stdout and stderr, in at most 1,024 chunks. The
-execution budget is one minute. A claimed run reports `cancelled` after the
-worker confirms the control group has stopped. If the worker loses its
-connection or crashes, the local grant expires and systemd stops the command.
-Run the worker again with the same journal to reconcile the result.
+`configure-updates --automatic-updates` lets a compatible staged release activate at the next service start. Use `--manual-updates` to return to explicit application. Changes to the API or database format always need `--apply --allow-incompatible`. Check the clients and make a separate export first.
+
+### If an update stops partway through
+
+The updater reserves storage, stops the old service and snapshots its SQLite database. It prepares and checks storage before the new service accepts work. It activates the candidate only after confirming the expected home identity and a ready API.
+
+- If preparation fails, the updater restores the snapshot and restarts the previous code.
+- If a compatible release fails to start, it switches back to the previous code and keeps newer database writes.
+- If an incompatible release fails after starting, the updater preserves the data and leaves the service stopped. Check `update-status`, then stage a corrected release for explicit application. If you need to restore an export, stop both the host and updater first.
+
+An installed release can run offline after its manifest expires. A release needs a fresh manifest to be activated. Keep a separate profile export for recovery. The updater's retained releases, snapshots and request receipts support update recovery.
+
+For a planned key rotation, run `configure-updates --release-key /trusted/new-release.pub` before signing with the new key. The updater keeps up to eight verification keys for retained releases. If a signing key is compromised, replace the trust anchor on the affected installations. [Update and recovery reference](ARCHITECTURE.md#immutable-releases-and-recovery)
+
+## OS-sealed keys and recovery
+
+On Linux systems that support user-scoped `systemd-creds`, you can seal the existing master key for the service. Follow your system's credential policy and use a real encryption key.
+
+```sh
+umask 077
+systemd-creds --user encrypt --name=master-key /private/master-key /private/host.cred
+node apps/host/dist/althar-host.js install-service --encrypted-credential /private/host.cred
+systemctl --user restart althar-host.service
+node apps/host/dist/althar-host.js status --wait --json
+```
+
+Keep a separate recovery copy of the original key. A sealed copy can be tied to a machine or user. Manual `init` or `serve` outside the service still needs the original key passed with `--key-file`.
+
+To back up a home, stop it and copy its full profile, project repositories and task worktrees with ownership and private permissions preserved. Save the master key separately. Restore the original paths or repair the Git worktree references after moving them. Provider tools own their sign-ins separately. Use the provider's sign-in command on the restored machine.
+
+The host and its agents run as the home user and share that user's file access. Use a dedicated OS account and trusted code for a personal home.
+
+## Producing a release
+
+The [host release workflow](../../.github/workflows/host-release.yml) builds native Linux x64 and arm64 releases and opens a draft after the exact `main` commit passes host and post-merge validation.
+
+1. Bump the version in `apps/host/package.json` and add `release-notes/<version>.md`.
+2. After validation, tag that commit `host-v<version>` or dispatch the workflow on `main`.
+3. Use the protected `release` environment with `ALTHAR_HOST_RELEASE_SIGNING_KEY` set to the Ed25519 private PEM. Keep the private key out of Git, logs and release assets. Distribute the public key separately.
+4. Verify a reboot on a personal VPS and actual provider sign-in and refresh on a headless host. Publish the draft after those checks. Give a corrected release a new version and sequence so published signed assets stay immutable.
+
+`bun run release:smoke` builds a portable release with a throwaway key, verifies its signature and archive and checks the bundled provider binaries outside the workspace. Use an official Node installation with its license file.
+
+## Development
+
+From `apps/host`:
+
+```sh
+bun run check
+bun run test tests/vault.test.ts tests/home.test.ts --maxWorkers=1
+bun run test tests/process.test.ts --maxWorkers=1
+```
+
+The test commands build the host entry first. CI runs the Linux host checks, measures line and branch coverage, and exercises the signed SSH install with systemd. See the [architecture](ARCHITECTURE.md) for the runtime, storage, updates and trust boundaries. [ADR-103](../../docs/decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md) covers the wider design.

@@ -65,6 +65,12 @@ const slowDictation = () => {
       const one = await next()
       await act(async () => one.failed())
     },
+    exhaust: async () => {
+      for (let i = 0; i < 3; i += 1) {
+        const one = await next()
+        await act(async () => one.failed())
+      }
+    },
   }
 }
 
@@ -213,12 +219,34 @@ describe.each([
 })
 
 describe('when it can’t be written down', () => {
+  it('recovers on its own after the speech process stops and sends once with no error', async () => {
+    const { speech, onSubmit } = open({ attached: true, typed: 'Look at this.' })
+    await recording()
+    fireEvent.keyDown(field(), { key: 'Enter' })
+    await speech.failed()
+
+    expect(finishing()).toBeTruthy()
+    expect(screen.queryByText('Couldn’t write that down')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    await speech.heard('check the retry path')
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledExactlyOnceWith('Look at this. check the retry path'))
+    expect(speech.dictation.transcribe).toHaveBeenCalledTimes(2)
+    const calls = vi.mocked(speech.dictation.transcribe).mock.calls
+    expect(calls[1]?.[0]).toBe(calls[0]?.[0])
+    expect(calls[1]?.[1]).toBe(calls[0]?.[1])
+    expect(screen.queryByText('Couldn’t write that down')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
   it('sends nothing, keeps the attachment, and says why', async () => {
     const { speech, onSubmit } = open({ attached: true, typed: 'Look at this.' })
     await userEvent.click(await recording())
     fireEvent.keyDown(field(), { key: 'Enter' })
-    await speech.failed()
+    await speech.exhaust()
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', expect.stringContaining('Not sent'))
+    expect(speech.dictation.transcribe).toHaveBeenCalledTimes(3)
     expect(onSubmit).not.toHaveBeenCalled()
     expect(finishing()).toBeNull()
     // What was typed and attached is where it was, and what was said is kept to try again.
@@ -235,7 +263,7 @@ describe('when it can’t be written down', () => {
     const { speech, onSubmit } = open({ attached: true })
     await userEvent.click(await recording())
     fireEvent.keyDown(field(), { key: 'Enter' })
-    await speech.failed()
+    await speech.exhaust()
     await screen.findByText('Couldn’t write that down')
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await speech.heard('check the retry path')
@@ -250,7 +278,7 @@ describe('when it can’t be written down', () => {
   it('doesn’t hold back what is said after an earlier one that failed', async () => {
     const { speech, onSubmit } = open({ attached: true })
     await userEvent.click(await recording())
-    await speech.failed()
+    await speech.exhaust()
     await screen.findByText('Couldn’t write that down')
     // The first is kept; a second one is written down, and goes.
     await recording()

@@ -209,6 +209,28 @@ describe('compacting an agent’s context', () => {
     }).pipe(Effect.provide(oneAtOnce())),
   )
 
+  it.live('keeps a compaction the agent reports as one as its own line, with its summary, and how far it took the context under it', () =>
+    Effect.gen(function* () {
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      yield* answered(task.threadId, 1)
+      yield* say(task.threadId, 'Look again. [lead:compact-reports] [context:50/1000000]')
+      yield* answered(task.threadId, 2)
+      yield* compact(task.threadId)
+      yield* answered(task.threadId, 3)
+      const compacted = (yield* notices(task.threadId)).filter((notice) => notice['role'] === 'compacted')
+      assert.lengthOf(compacted, 1)
+      assert.deepStrictEqual(compacted[0]?.['compaction'] as unknown, {
+        status: 'completed',
+        summary: 'We were fixing the checkout retry.',
+      })
+      assert.strictEqual(compacted[0]?.['title'], 'Context compacted.')
+      assert.strictEqual(compacted[0]?.['description'], '500k → 100k tokens')
+      // Its own line says it: no second one.
+      assert.isFalse((yield* titles(task.threadId)).some((title) => title?.startsWith('Compacted') === true))
+    }).pipe(Effect.provide(oneAtOnce())),
+  )
+
   it.live('takes a coordinator’s first message of /compact as its own turn, and its brief with the next', () =>
     Effect.gen(function* () {
       const projects = yield* Projects

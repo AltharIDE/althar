@@ -699,7 +699,7 @@ export class SettingsTools extends Context.Service<
                   yield* projects.setRepository({
                     projectId,
                     repositoryId: repository.id,
-                    setup: (value as { copy: ReadonlyArray<string>; commands: ReadonlyArray<string> } | null) ?? { copy: [], commands: [] },
+                    setup: value as { copy: ReadonlyArray<string>; commands: ReadonlyArray<string> } | null,
                   })
             }),
         },
@@ -1496,6 +1496,7 @@ export const SCREEN_CHANGES: Readonly<Record<string, string>> = {
   cloneRepository: 'person: cloning a repository into the project is adding one, the person’s (project/code says so)',
   prepareFolder: 'person: gives a repository cloned into the project its first commit, as part of adding it, the person’s',
   leaveOutRepository: 'person: leaving a repository out is the person’s (project/code says so)',
+  addParentRemote: 'person: adds a remote to the person’s clone, for the repository a fork came from; never done for them',
   // project/rules
   setProjectRules: 'project/rules.never',
   // project/notes

@@ -1049,6 +1049,10 @@ export const RepositorySetup = Schema.Struct({
 })
 export type RepositorySetup = typeof RepositorySetup.Type
 
+/** A repository's kept setup as the settings show it: who has it as it is, a lead who recorded it or the person who edited it (an agent asks before replacing the person's). */
+export const KeptSetup = Schema.Struct({ ...RepositorySetup.fields, by: Schema.Literals(['agent', 'person']) })
+export type KeptSetup = typeof KeptSetup.Type
+
 export const ProjectRepository = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -1062,14 +1066,17 @@ export const ProjectRepository = Schema.Struct({
   host: Schema.NullOr(RepositoryHost),
   role: RepositoryRole,
   /**
-   * The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its work goes; whether
-   * its host says the person can push to the repository it was forked from, null where Althar couldn't ask; and whether Althar
-   * offers, once, to push its tasks' branches there now that they can (ADR-085).
+   * The fork it is, as its host says, else as its remotes' names say (an `upstream` beside `origin`), by each one's path on its
+   * host, and where its work goes; the clone's remote the repository it was forked from is on, by whatever name, null where none
+   * is, which AddParentRemote adds; whether its host says the person can push to the repository it was forked from, null where
+   * Althar couldn't ask; and whether Althar offers, once, to push its tasks' branches there now that they can (ADR-085).
    */
   fork: Schema.NullOr(
     Schema.Struct({
       fork: Schema.String,
       upstream: Schema.String,
+      remote: Schema.NullOr(Schema.String),
+      by: Schema.Literals(['host', 'names']),
       target: ChangeTarget,
       canPush: Schema.NullOr(Schema.Boolean),
       offer: Schema.Boolean,
@@ -1078,7 +1085,7 @@ export const ProjectRepository = Schema.Struct({
   /** Tasks under way that change it: they keep it if it is left out. */
   tasks: Schema.Number,
   /** How each new task's folder of it gets ready (ADR-080): the files copied from the checkout here, and the commands; null until a lead records it. */
-  setup: Schema.NullOr(RepositorySetup),
+  setup: Schema.NullOr(KeptSetup),
   /** Its default branch, as its remote says: main. */
   defaultBranch: Schema.optional(Schema.String),
   /** The branch new tasks work toward there, where it isn't the default (ADR-093): release/0.8.0; null or absent for the default. */
@@ -1300,6 +1307,15 @@ export const RepositoryFilesSetting = Schema.Struct({
 })
 export type RepositoryFilesSetting = typeof RepositoryFilesSetting.Type
 
+/** A bot a project's leads may hear (code-hosts § Review and triage bots): its account on the host, and what it is called. */
+export const TrustedBot = Schema.Struct({
+  /** In small letters: `coderabbitai[bot]`. */
+  login: Schema.String,
+  /** CodeRabbit. */
+  name: Schema.String,
+})
+export type TrustedBot = typeof TrustedBot.Type
+
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
   /** Which revision of the rules these are: a change that replaces a list names it, so one made meanwhile isn't lost. */
@@ -1326,6 +1342,10 @@ export const ProjectRulesView = Schema.Struct({
   pushCommits: Schema.Boolean,
   /** Whether a task's screenshots go in a comment on its open pull request on their own, kept as Outputs shows them (ADR-077). */
   postScreenshots: Schema.Boolean,
+  /** The bots whose comments and reviews its leads hear, as findings framed as data (code-hosts § Review and triage bots), by their accounts; none unless trusted. */
+  trustedBots: Schema.Array(TrustedBot),
+  /** Review and triage bots Althar recognised on its tasks' pull requests that aren't trusted yet, the latest first. */
+  suggestedBots: Schema.Array(TrustedBot),
   leadsReachWeb: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
@@ -2058,6 +2078,28 @@ export const ToolCallItem = Schema.Struct({
         link: Schema.optional(Schema.String),
       }),
     ),
+    /** A search on the web, by its query, or a page the agent read, by its address without its query: what the thread shows of it. */
+    web: Schema.optional(
+      Schema.Union([
+        Schema.Struct({ action: Schema.Literal('search'), query: Schema.String }),
+        Schema.Struct({ action: Schema.Literal('fetch'), url: Schema.String }),
+      ]),
+    ),
+    /**
+     * A sub-agent the agent started: what it was asked to do, in a line, its
+     * kind and model where the agent says, and the start of what it reported
+     * back once it ended.
+     */
+    subAgent: Schema.optional(
+      Schema.Struct({
+        label: Schema.String,
+        type: Schema.optional(Schema.String),
+        model: Schema.optional(Schema.String),
+        said: Schema.optional(Schema.String),
+      }),
+    ),
+    /** The sub-agent's call that made it, by that call's item, where the agent says which (Claude Code): it stands under it. */
+    parent: Schema.optional(Schema.String),
     ...handedFields,
     output: Schema.NullOr(CommandOutput),
     exit: Schema.NullOr(Schema.Number),
@@ -2146,11 +2188,24 @@ export const NoticeItem = Schema.Struct({
     /**
      * How the thread draws it, where not as Althar's own line: an aside in the
      * work, what the coordinator relayed, or its task's folder going or coming
-     * back, a line across the thread (ADR-056). What was brought in from another
-     * tool, and where from, is Althar's own line (`brought`, workspaces-and-runs,
-     * "Bringing in other tools' work").
+     * back, a line across the thread (ADR-056); the agent's context compacted,
+     * a line with its summary behind it; or its turn interrupted by the person.
+     * What was brought in from another tool, and where from, is Althar's own
+     * line (`brought`, workspaces-and-runs, "Bringing in other tools' work").
      */
-    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'brought'])),
+    role: Schema.optional(Schema.Literals(['aside', 'relayed', 'folder', 'compacted', 'interrupted', 'brought'])),
+    /**
+     * For the agent compacting its context (`compacted`): how it stands, the
+     * summary it kept where it said one, and why it failed. Its description
+     * says how far it took the context, where Althar knows.
+     */
+    compaction: Schema.optional(
+      Schema.Struct({
+        status: Schema.Literals(['in_progress', 'completed', 'failed', 'cancelled']),
+        summary: Schema.optional(Schema.String),
+        error: Schema.optional(Schema.String),
+      }),
+    ),
     /** A task the line is about, which it links to: one this task's lead started (ADR-097), once. */
     task: Schema.optional(Schema.Struct({ taskId: Schema.String, slug: Schema.String, title: Schema.String, threadId: Schema.String })),
     /**
@@ -2396,6 +2451,11 @@ export const ArrivalItem = Schema.Struct({
     url: Schema.NullOr(Schema.String),
     /** Said by someone who can't write to the repository, as anyone can on a public one: not passed to the lead, for the person to pass on. */
     outsider: Schema.Boolean,
+    /**
+     * Said by a review or triage bot (code-hosts § Review and triage bots): `trusted`, it reached the lead as findings; not, it didn't, and this, the first it
+     * said on the pull request, offers to trust it. Absent for anyone else, and for a bot Althar doesn't recognise as a reviewer.
+     */
+    bot: Schema.optional(Schema.Struct({ login: Schema.String, name: Schema.String, trusted: Schema.Boolean })),
   }),
 })
 
@@ -2441,6 +2501,9 @@ export const Holder = Schema.Struct({
   /** The thread its agent is on, where what it left running is stopped; null where it has no session yet. */
   threadId: Schema.NullOr(Schema.String),
   kept: Schema.Boolean,
+  agentId: Schema.optional(Schema.String),
+  role: Schema.optional(Schema.Literals(['lead', 'reviewer', 'helper'])),
+  reason: Schema.optional(Schema.Literals(['starting', 'turn', 'background'])),
   running: Schema.Array(BackgroundCommand),
 })
 export type Holder = typeof Holder.Type
@@ -2451,7 +2514,20 @@ export type Holder = typeof Holder.Type
  * places, and how many the machine runs at once. It starts on its own, oldest
  * first, when one is free.
  */
-export const Queued = Schema.Struct({ busy: Schema.Int, atOnce: Schema.Int, holders: Schema.optional(Schema.Array(Holder)) })
+export const Queued = Schema.Struct({
+  busy: Schema.Int,
+  atOnce: Schema.Int,
+  holders: Schema.optional(Schema.Array(Holder)),
+  configured: Schema.optional(Schema.Int),
+  offline: Schema.optional(Schema.Boolean),
+})
+export const WorkPlaces = Schema.Struct({
+  ...Queued.fields,
+  holders: Schema.Array(Holder),
+  configured: Schema.Int,
+  offline: Schema.Boolean,
+})
+export type WorkPlaces = typeof WorkPlaces.Type
 export type Queued = typeof Queued.Type
 
 /**
@@ -4398,6 +4474,8 @@ export const BoardSnapshot = Schema.Struct({
   position: Schema.optional(FeedPosition),
   tasks: Schema.Array(BoardTask),
   calls: Schema.Array(BoardCall),
+  /** The machine-wide places while a task on this board waits for one. */
+  workPlaces: Schema.optional(WorkPlaces),
   /** How many tasks the project has settled (done or abandoned), in all: `tasks` holds only the most recent of them. */
   settledTotal: Schema.Number,
 })
@@ -5167,12 +5245,18 @@ const ProjectApi = RpcGroup.make(
       role: Schema.optional(RepositoryRole),
       changeTarget: Schema.optional(ChangeTarget),
       notNow: Schema.optional(Schema.Boolean),
-      setup: Schema.optional(RepositorySetup),
+      /** The setup the person edited, kept as theirs; null clears it, so a lead records it again. Worktrees made already are left as they are. */
+      setup: Schema.optional(Schema.NullOr(RepositorySetup)),
       /** The branch new tasks work toward there (ADR-093); null for its default branch. Tasks made already keep theirs. */
       workToward: Schema.optional(Schema.NullOr(Schema.String)),
     },
     Schema.Void,
   ),
+  /**
+   * Adds the repository a fork was forked from as a remote of its clone, where its host says it is a fork and none of its remotes
+   * has that repository: as `upstream`, or `parent` where that is taken. The person's own remotes stay as they are.
+   */
+  command('AddParentRemote', { projectId: Schema.String, repositoryId: Schema.String }, Schema.Void),
   /**
    * Makes a branch on the code host, from the remote's default branch, where
    * the repository's tasks start (ADR-093): a name typed in a branch list
@@ -6038,6 +6122,8 @@ const WorkApi = RpcGroup.make(
       pushCommits: Schema.optional(Schema.Boolean),
       /** Turned on, each open task's screenshots go up to its pull request now, not when they next change. */
       postScreenshots: Schema.optional(Schema.Boolean),
+      /** The bots its leads hear, by their accounts, the list whole. */
+      trustedBots: Schema.optional(Schema.Array(Schema.String)),
       leadsReachWeb: Schema.optional(Schema.Boolean),
       usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
@@ -6057,6 +6143,11 @@ const WorkApi = RpcGroup.make(
     },
     ProjectRulesView,
   ),
+  /**
+   * Trusts a bot in a task's project (code-hosts § Review and triage bots), from the thread where it spoke: its leads hear its comments and reviews from
+   * then on, as findings framed as data. A new revision of the project's rules, the person's, its other trusted bots kept.
+   */
+  command('TrustBot', { taskId: Schema.String, login: Schema.String }, Schema.Void),
   /** Whether work moves on to an agent's next account in the project, and which accounts each agent may use there (null: every one). */
   command(
     'SetProjectAccounts',

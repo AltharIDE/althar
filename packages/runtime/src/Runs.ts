@@ -4786,6 +4786,8 @@ export class Runs extends Context.Service<
        * Holds a step until the reset of the account that stopped it: what
        * waits for it, and what brings it back if handing it over doesn't go
        * through. `low`, it was held before it started, its agent nearly out.
+       * `notice`, what the thread says of it, written in the hold's
+       * transaction, so nothing reads the step held without it.
        */
       const holdForLimit = (
         on: LimitedStep,
@@ -4795,6 +4797,7 @@ export class Runs extends Context.Service<
         why?: HoldWhy,
         choices?: LimitCall['choices'],
         low?: Room,
+        notice?: { readonly said: string },
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -4826,6 +4829,7 @@ export class Runs extends Context.Service<
                 payload: { reason: 'usage_limit', agentId, until },
                 actorId: instance.systemId,
               })
+              if (notice !== undefined) yield* sayOut(on.run.threadId, on.run.projectId, notice.said)
             }),
           )
         })
@@ -4931,21 +4935,14 @@ export class Runs extends Context.Service<
             )
           // Waiting, it says why: the project waits for resets, or nothing else was free to move it to or to ask about.
           const nothingFree = policy === 'move' || noOne
-          yield* holdForLimit(on, agentId, accountId, out, nothingFree ? 'nothing_free' : 'waits', choices, low)
-          yield* sayOut(
-            on.run.threadId,
-            on.run.projectId,
-            low === undefined
-              ? outWords({
-                  from,
-                  resetsAt,
-                  now: yield* Clock.currentTimeMillis,
-                  ...(step === undefined ? {} : { step }),
-                  waits: 'step',
-                  nothingFree,
-                })
-              : lowWords({ from, room: low, now: yield* Clock.currentTimeMillis, ...(step === undefined ? {} : { step }) }),
-          )
+          const now = yield* Clock.currentTimeMillis
+          // Said with the hold, in its transaction: whoever sees the step held reads why in its thread too.
+          yield* holdForLimit(on, agentId, accountId, out, nothingFree ? 'nothing_free' : 'waits', choices, low, {
+            said:
+              low === undefined
+                ? outWords({ from, resetsAt, now, ...(step === undefined ? {} : { step }), waits: 'step', nothingFree })
+                : lowWords({ from, room: low, now, ...(step === undefined ? {} : { step }) }),
+          })
           yield* touchCard(on.run.taskId)
           yield* Queue.offer(holdsChanged, undefined)
         })
@@ -8184,6 +8181,7 @@ export class Runs extends Context.Service<
             }),
           )
           if (!taken) return
+          yield* Effect.ignore(touchCard(current.taskId))
           const { place } = waited
           switch (place.how) {
             case 'start':

@@ -202,12 +202,9 @@ export function PlanPeek({ agents, headingLevel = 2, onSignIn, text, className, 
   const t = { ...planPeekText, ...text }
   return (
     <div className={cx(s.peek, className)} {...rest}>
-      <span className={s.head}>
-        <Heading level={headingLevel} className={s.heading}>
-          {t.heading}
-        </Heading>
-        <span className={s.level}>{levelOf(agents, t)}</span>
-      </span>
+      <Heading level={headingLevel} className={s.heading}>
+        {t.heading}
+      </Heading>
       {agents.length > 0 && (
         <ul className={s.agents}>
           {agents.map((agent) => (

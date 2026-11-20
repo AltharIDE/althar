@@ -1,19 +1,43 @@
 # Install an Althar home over SSH
 
-The desktop opens its authenticated SSH connection and sends `ssh.sh` to `sh -s -- <operation> <arguments>`. Use an ordinary Linux login or explicitly begin with a root login that can create the dedicated `althar` account. The script assumes 64-bit Linux with systemd, OpenSSH and the usual core utilities. It uses `curl` for a server-side download. Upload works when the server has no internet access or lacks `curl`.
+If you already have SSH access to a Linux server, Althar can use that login to set up a home. Setup checks the machine, verifies the host download, installs the service and waits for it to be ready. It can carry on when the SSH connection drops, and you can reconnect to see how far it got.
+
+Start with a regular user on a 64-bit Linux server with Git, systemd and OpenSSH. Server-side download uses `curl`. The desktop can upload the verified archive if the server can't download it. If your server gives you root access first, setup can create a dedicated `althar` user, add your SSH public key and switch to that login.
+
+Setup needs a published signed release and a public release key you trust. To try the downloadable preview and connect to it from the desktop, use the [test guide](../preview/README.md#connect-the-desktop-to-a-test-home-over-ssh).
 
 ## Desktop protocol version 1
 
-Quote each argument independently before passing the remote command string to SSH. Use the same login and its usual home and XDG directories throughout. The script writes JSON lines to stdout. The desktop owns SSH reachability and host-key verification and reports failures that occur before the script runs.
+The desktop verifies the SSH host key and passes `ssh.sh` to `sh -s -- <operation> <arguments>`. Quote each argument separately. Continue with the same login and its usual home and XDG directories once you have selected the installation user. Read progress as JSON lines on stdout. For errors before the script starts, check SSH on the desktop.
 
-1. Send `probe`. The `look done` event reports `os`, `arch`, `login`, `root`, `systemdUserManager`, `freeKiB`, `git`, and `linger`. Unsupported OS and architecture, an unavailable user manager, and insufficient disk space have distinct failure codes. The script repeats the disk check against the actual release before a download or upload.
-2. If `root` is true, send `root-login <public-key>`. Use the complete bare public key corresponding to the intended SSH identity, with its type and base64 data and without its comment. The script creates `althar`, installs that key, and enables linger. It reports `login: "althar"`. Reconnect as that user with the same SSH key before installing the home. A pre-existing unrelated account named `althar` is an `AccountConflict`.
-3. On the desktop, fetch and verify the Ed25519 release envelope against the independently trusted release key. Check platform, target architecture, freshness and manifest format. The existing host verifier in `apps/host/src/updates/release.ts` defines the signed bytes and policy. Derive the digest, compressed and unpacked size, and source URL exclusively from the verified manifest. Supply the original envelope and pinned public key as standard, single-line base64. A signature failure must stop setup with `SignatureMismatch`.
-4. Send `install download <sha256> <bytes> <unpackedBytes> <url> <envelope-base64> <key-base64>` to download on the server. `get progress` includes `bytes` and `totalBytes`. After `CannotDownload`, the desktop can offer upload. Fetch and verify the archive on the desktop, send `prepare-upload <bytes> <unpackedBytes>`, and upload by SFTP to the returned `uploadPath`. After the upload completes, send `install upload <sha256> <bytes> <unpackedBytes> <uploadId> <envelope-base64> <key-base64>`. The server checks exact size and digest before extracting or executing the archive. Report upload bytes from the SFTP transfer. A truncated or mismatched archive stops with `SignatureMismatch`.
-5. Once the install operation returns `setup started` with `detached: true`, poll `status` with the same login. This forwards `althar-host setup status --json` where a bootstrapped release exists. The status object contains `protocol`, `state`, `events`, and `rawOutput`. `state` is `absent`, `queued`, `running`, `interrupted`, `failed`, or `done`. The final `identity done` event contains `homeId`, `hostDeviceId`, `apiVersion`, and `version`. Before a release is staged, `status` returns the stored transfer JSON lines if available.
-6. Use `resume` after an interrupted install once the archive was verified and staged. It forwards `althar-host setup --resume --json`. Before staging, repeat the transfer using the already verified descriptor. `LockHeld` means the current setup is still running. Poll it. Each attempt keeps the existing home ID, and a completed setup returns its recorded identity on rerun. Existing updater settings are preserved. A new installation defaults to manual update application.
+1. **Check the server.** Send `probe`. The `look done` event reports `os`, `arch`, `login`, `root`, `systemdUserManager`, `freeKiB`, `git` and `linger`. The script reports unsupported systems, a missing user manager and insufficient disk space separately. It checks space against the actual release again before transfer.
 
-For a normal login with linger off, `look done` includes `action.code: "LingerOff"` and the exact `loginctl` command. The current SSH session can install and start the home. For the user manager to survive the last logout or restart automatically after reboot, the administrator must run that command. Until then, an interrupted setup can resume on reconnect. The ordinary-user script makes no system-wide changes.
+2. **Choose the installation user.** If `root` is true, send `root-login <public-key>` with the key type and base64 data from your SSH public key. Leave off its comment. The script creates the `althar` user, adds that key and enables lingering. When it reports `login: "althar"`, reconnect with the same SSH key as that user. An existing unrelated `althar` account produces `AccountConflict`.
+
+   For a regular login with lingering off, `look done` includes `action.code: "LingerOff"` and the exact `loginctl` command. The current SSH session can install and start the home. Ask the server administrator to run the command so the user service can survive the last logout and start after a reboot.
+
+3. **Verify the release on the desktop.** Check the Ed25519 signature with a trusted release key, then verify the platform, architecture, freshness and manifest format. Use the digest, compressed size, unpacked size and URL from the verified manifest. Send the original envelope and the pinned public key as standard, single-line base64. Stop with `SignatureMismatch` if the signature fails. [Release verifier](../src/updates/release.ts)
+
+4. **Transfer the archive.** Start with a server-side download. `get progress` reports `bytes` and `totalBytes`.
+
+   ```text
+   install download <sha256> <bytes> <unpackedBytes> <url> <envelope-base64> <key-base64>
+   ```
+
+   After `CannotDownload`, the desktop can fetch and verify the archive, prepare an upload and send it by SFTP to the returned `uploadPath`. Use the upload ID to complete the install. Report upload progress from SFTP.
+
+   ```text
+   prepare-upload <bytes> <unpackedBytes>
+   install upload <sha256> <bytes> <unpackedBytes> <uploadId> <envelope-base64> <key-base64>
+   ```
+
+   The server checks the archive's size and digest before extracting and running it. A truncated or mismatched archive produces `SignatureMismatch`.
+
+5. **Follow progress.** After `setup started` with `detached: true`, send `status` under the same login. Before the release is staged this can return the saved transfer events. Once the host exists, it runs `althar-host setup status --json` and returns `protocol`, `state`, `events` and `rawOutput`. The final `identity done` event reports `homeId`, `hostDeviceId`, `apiVersion` and `version`.
+
+6. **Pick up where setup stopped.** If the archive is staged, send `resume` to run `althar-host setup --resume --json`. Before staging, retry the transfer with the verified manifest. If you see `LockHeld`, check status. A rerun preserves the home ID and any updater settings. A new installation asks for explicit update application by default.
+
+The setup state is one of `absent`, `queued`, `running`, `interrupted`, `failed` or `done`.
 
 ## Events and failure codes
 
@@ -31,4 +55,4 @@ Events have `protocol: 1`, `step`, and `state`. The steps are `reach`, `look`, `
 | `DedicatedUserRequired`, `AccountConflict`, `AccountCreationFailed`, `AccountKeyFailed`, `AccountLingerFailed`, `InvalidPublicKey` | Show the account or public-key issue before connecting again. |
 | `InvalidRequest`, `InvalidLogin`, `UnsafeState`, `SetupNotFound` | Check the operation, login, or setup state before retrying. |
 
-Publishing the release and distributing its public trust anchor are separate release tasks. Once setup returns the home identity, the desktop can use the existing SSH stdio connection. The default launcher is `${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher`.
+Once setup returns the home identity, use the SSH connection to open that home. The default launcher is `${XDG_DATA_HOME:-$HOME/.local/share}/althar-host-program/launcher`.

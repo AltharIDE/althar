@@ -671,6 +671,7 @@ describe('the API', () => {
               KeepTaskForLater: () => Effect.void,
               SettledWithOnePress: () => Effect.void,
               RenameTask: () => Effect.void,
+              TrustBot: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
               Send: ({ body, images }) =>
@@ -726,6 +727,7 @@ describe('the API', () => {
               GetRepositories: () => Effect.die('unused'),
               AddRepositories: () => Effect.die('unused'),
               LeaveOutRepository: () => Effect.die('unused'),
+              AddParentRemote: () => Effect.die('unused'),
               SetRepository: () => Effect.die('unused'),
               CreateBranch: () => Effect.die('unused'),
               SetProjectRules: () => Effect.die('unused'),

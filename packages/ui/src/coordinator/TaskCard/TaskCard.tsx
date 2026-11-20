@@ -63,6 +63,11 @@ export interface TaskCardProps {
   effort?: string
   /** A question, not a change: its lead is who answered it. */
   question?: boolean
+  /**
+   * Whether its way in answers what it asks: so by default where it waits on the person. One that waits on them for something
+   * else, as failing checks its lead brought to them, opens instead: nothing asks for an answer.
+   */
+  asks?: boolean
   /** Where it came from. */
   from?: IssueRefProps
   pr?: string
@@ -91,6 +96,7 @@ export function TaskCard({
   lead,
   effort,
   question,
+  asks,
   from,
   pr,
   meta,
@@ -104,6 +110,7 @@ export function TaskCard({
 }: TaskCardProps) {
   const t = { ...taskCardText, ...text }
   const yours = status === TaskStatus.Yours
+  const answers = asks ?? yours
   const titleId = useId()
   return (
     <article
@@ -152,7 +159,7 @@ export function TaskCard({
         {onOpen && (
           <NextSteps className={s.next}>
             <NextStep signal={yours} arrow onPress={() => onOpen(task)}>
-              {yours ? t.answer : t.open}
+              {answers ? t.answer : t.open}
             </NextStep>
           </NextSteps>
         )}

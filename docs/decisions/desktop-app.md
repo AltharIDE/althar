@@ -723,9 +723,8 @@ way of what is done often. The tokens and their values are in
 - **Lists move as a whole** (`ListMotion`): an item keyed by `data-move`
   slides when its place changes, and a board card that changes lanes travels
   there as a copy above the board. The board, Home's calls, the tabs and the
-  composer's attachments use it. A card stays in its lane while the pointer
-  is in Up next or Running, and travels once it leaves. A drag owns what it
-  drags.
+  composer's attachments use it. The board moves a card as soon as the
+  runtime admits its work, including while the pointer rests in a lane.
 - **What lands in a thread rises into its place** (`useArrivals`), but not as
   the thread opens, not many at once, and not streaming words.
 - **Still, on purpose:** switching tabs, projects and rooms, opening Home or

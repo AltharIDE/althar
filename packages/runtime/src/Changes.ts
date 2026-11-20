@@ -22,6 +22,7 @@ import {
   type Product,
   products,
   type Repository,
+  type Review,
   parseRemote,
 } from '@althar/connectors'
 import { knownModelName, PushRequestItem, standsFor } from '@althar/contracts'
@@ -94,7 +95,7 @@ import {
   ShipRefused,
 } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
-import { baseBranch, forkOf, workRemotes } from './forks'
+import { baseBranch, forkOf, fromParent, tellOf, workRemotes } from './forks'
 import { makeKeyedLock } from './keyedLock'
 import { quickIn } from './kinds'
 import {
@@ -129,6 +130,7 @@ import { onlyBase, ownCommits } from './baseOnly'
 import { outward, reconcileOutward } from './outward'
 import {
   answerHint,
+  botFindingsForLead,
   baseChecksForLead,
   bodyOf,
   checksForLead,
@@ -152,6 +154,7 @@ import {
   sendBackHint,
   nameOf,
   outsidersLine,
+  quietBotsLine,
   queuedNote,
   reviewForLead,
   reviewLine,
@@ -174,7 +177,8 @@ import { type Answers, answersOf, followUpBody, followUpWords } from './followUp
 import { indexTask } from './Search'
 import { IssueChanges } from './IssueChanges'
 import { FastLane } from './fastLane'
-import { linksIssues, Policies, pushesCommits, resolvesConflictsFor, ruleSetOf } from './Policies'
+import { linksIssues, Policies, pushesCommits, resolvesConflictsFor, ruleSetOf, trustedBotsOf } from './Policies'
+import { reviewerBot, trusts } from './reviewerBots'
 import { guardPush } from './repositoryGuard'
 import { pushDetailOf, pushFailureOf } from './pushFailure'
 import { Sessions } from './Sessions'
@@ -1874,11 +1878,11 @@ export class Changes extends Context.Service<
           // A fork's branch goes to the fork, whatever else its clone's remotes name, unless the project sends it to the repository
           // it was forked from; its pull request, where the project says.
           const named = yield* namedRemotes(task.path).pipe(Effect.orElseSucceed(() => []))
-          const fork = forkOf(named)
+          const told = forkOf(named)
           const remotes =
-            fork === null
+            told === null
               ? workRemotes(named, Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes))
-              : [fork.fork.url]
+              : [told.fork.url]
           // A connection there that needs signing in again, made with gh's or glab's sign-in, takes the tool's again where it can:
           // publishing, and trying again after it couldn't, need no more of the person than that.
           const found = yield* connections.hostOf(remotes, { fromCli: true })
@@ -1895,6 +1899,12 @@ export class Changes extends Context.Service<
           }
           const { host } = found
           const forked = yield* host.repository(found.path)
+          // What the host says of it now, whether it is a fork and of what, is kept, and goes for where its work goes from now: only
+          // where that host is origin's, reached through its address, as another remote's (a mirror's at the same path) says
+          // nothing of origin.
+          const origin = named.find((remote) => remote.name === 'origin')
+          if (origin !== undefined && found.remote === origin.url) tellOf(origin.url, forked, yield* Clock.currentTimeMillis, host.product)
+          const fork = forkOf(named)
           const upstream =
             fork !== null && (task.changeTarget === 'upstream' || task.changeTarget === 'upstream_branch')
               ? yield* host.repository(fork.upstream.path)
@@ -1927,12 +1937,14 @@ export class Changes extends Context.Service<
           const target =
             task.toward ??
             (fork === null || !samePath(repository.path, fork.upstream.path)
-              ? baseBranch(task.baseRef ?? '', task.baseRef != null && (yield* branchExists(task.path, task.baseRef))) ||
+              ? baseBranch(
+                  task.baseRef ?? '',
+                  task.baseRef != null && (yield* branchExists(task.path, task.baseRef)),
+                  named.map((remote) => remote.name),
+                ) ||
                 task.defaultBase ||
                 repository.defaultBranch
-              : task.baseRef?.startsWith('upstream/') === true
-                ? task.baseRef.slice('upstream/'.length)
-                : repository.defaultBranch)
+              : (fromParent(task.baseRef ?? null, fork) ?? repository.defaultBranch))
           // Never onto a default branch, wherever the branch goes (ADR-071): a task's branch is its own.
           if (task.branch === own.defaultBranch || (from === undefined && task.branch === target))
             return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: `${own.path.join('/')}/${task.branch}` })
@@ -4920,14 +4932,36 @@ export class Changes extends Context.Service<
           }
           const activity = yield* host.activity(repository, snapshot.number, null)
           const replies = yield* repliesOf(link.id)
-          // What anyone else said isn't read to the lead: on a public repository, anyone can comment.
-          const reviews = activity.reviews.filter((review) => voiceOf(review, account, replies) !== 'outsider')
+          const trusted = trustedBotsOf((yield* (yield* Policies).current(link.projectId)).rules)
+          // What anyone else said isn't read to the lead: on a public repository, anyone can comment. Nor what a bot the project
+          // doesn't trust said; a trusted one's words are its findings, named by it and framed as data (code-hosts § Review and triage bots).
+          const quiet = new Set<string>()
+          let otherBots = 0
+          const heardBots = new Map<string, { readonly name: string; readonly said: Array<Comment | Review> }>()
+          const sorted = (said: Comment | Review, voice: ReturnType<typeof voiceOf>): 'say' | 'bot' | 'out' => {
+            if (voice === 'outsider') return 'out'
+            if (voice !== 'bot') return 'say'
+            const recognised = reviewerBot(said.author.login)
+            if (!trusts(trusted, said.author.login)) {
+              if (recognised === null) otherBots += 1
+              else quiet.add(recognised.name)
+              return 'bot'
+            }
+            const name = recognised?.name ?? said.author.login
+            const heard = heardBots.get(said.author.login) ?? { name, said: [] }
+            heard.said.push(said)
+            heardBots.set(said.author.login, heard)
+            return 'bot'
+          }
+          const reviews = activity.reviews.filter((review) => sorted(review, voiceOf(review, account, replies)) === 'say')
+          let outsiders = activity.reviews.filter((review) => voiceOf(review, account, replies) === 'outsider').length
           const comments = activity.comments.flatMap((comment) => {
             const voice = voiceOf(comment, account, replies)
-            if (voice === 'outsider') return []
+            const where = sorted(comment, voice)
+            if (where === 'out') outsiders += 1
+            if (where !== 'say') return []
             return [{ at: comment.at, text: commentLine(comment, voice === 'althar' ? 'you, through Althar' : undefined) }]
           })
-          const outsiders = activity.reviews.length - reviews.length + activity.comments.length - comments.length
           const said = [...reviews.map((review) => ({ at: review.at, text: reviewLine(review) })), ...comments]
             .toSorted((a, b) => (a.at < b.at ? -1 : 1))
             .slice(-COMMENTS_SHOWN)
@@ -4936,7 +4970,12 @@ export class Changes extends Context.Service<
               ? 'Nobody has said anything on it.'
               : `What people said, oldest first:\n${said.map((entry) => entry.text).join('\n')}`,
           )
+          for (const bot of heardBots.values())
+            lines.push(
+              botFindingsForLead(bot.name, nameOf(snapshot), bot.said.toSorted((a, b) => (a.at < b.at ? -1 : 1)).slice(-COMMENTS_SHOWN)),
+            )
           if (outsiders > 0) lines.push(outsidersLine(outsiders))
+          if (quiet.size > 0 || otherBots > 0) lines.push(quietBotsLine([...quiet], otherBots))
           return lines.join('\n\n')
         })
 
@@ -5662,11 +5701,36 @@ export class Changes extends Context.Service<
           }
           const activity = yield* host.activity(repository, before.number, link.cursor)
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
-          // Only new words from the person or members, or a queue return, wake a stopped lead.
-          // Approvals, bots, outsiders and state/check updates alone leave a merged task asleep.
+          const trusted = trustedBotsOf((yield* (yield* Policies).current(link.projectId)).rules)
+          // What each bot the project trusts said that its lead hears, by its account, as findings framed as data (code-hosts § Review and triage bots).
+          const fromBots = new Map<string, { readonly name: string; readonly said: Array<Comment | Review> }>()
+          /*
+           * How a bot that spoke is heard (code-hosts § Review and triage bots): trusted, its words go to the lead as findings; a review or triage agent
+           * Althar recognises but the project doesn't trust stays quiet, and the thread says once, per pull request, that it
+           * spoke, with a way to trust it, where it is suggested in the project's settings too; any other bot stays quiet.
+           */
+          const botOf = (said: Comment | Review) =>
+            Effect.gen(function* () {
+              const login = said.author.login.trim().toLowerCase()
+              const recognised = reviewerBot(login)
+              const trustedNow = trusts(trusted, login)
+              const name = recognised?.name ?? said.author.login
+              const first = recognised === null ? false : yield* heard(link, 'bot_spoke', `bot:${login}`, { login, name: recognised.name })
+              return { login, name, trusted: trustedNow, recognised: recognised !== null, first }
+            })
+          const fromBot = (bot: { readonly login: string; readonly name: string }, said: Comment | Review) => {
+            const heard = fromBots.get(bot.login) ?? { name: bot.name, said: [] }
+            heard.said.push(said)
+            fromBots.set(bot.login, heard)
+          }
+          // Only new words from the person, members or a trusted bot, or a queue return, wake a stopped lead.
+          // Approvals, other bots, outsiders and state/check updates alone leave a merged task asleep.
           let addressed = false
           for (const review of activity.reviews) {
             const voice = voiceOf(review, account, replies)
+            const bot = voice === 'bot' ? yield* botOf(review) : null
+            // A trusted bot's bare approval asks nothing: it isn't passed on, and its card doesn't say it was.
+            const passes = bot?.trusted === true && (review.verdict !== 'approved' || review.body.trim() !== '')
             if (
               voice === 'althar' ||
               !(yield* heard(link, 'review', `review:${review.id}`, {
@@ -5685,15 +5749,22 @@ export class Changes extends Context.Service<
               text: review.body,
               url: review.url,
               outsider: voice === 'outsider',
+              ...(bot === null || !(passes || (!bot.trusted && bot.first))
+                ? {}
+                : { bot: { login: bot.login, name: bot.name, trusted: bot.trusted } }),
             })
             if ((voice === 'person' || voice === 'member') && review.verdict !== 'approved') {
               addressed = true
               forLead.push(reviewForLead(review, name))
             }
+            if (bot !== null && passes) fromBot(bot, review)
           }
           for (const comment of activity.comments) {
             const voice = voiceOf(comment, account, replies)
-            if (voice === 'althar' || voice === 'bot') continue
+            if (voice === 'althar') continue
+            const bot = voice === 'bot' ? yield* botOf(comment) : null
+            // A bot the project doesn't trust stays quiet; one Althar recognises as a reviewer is shown once, to be trusted.
+            if (bot !== null && !bot.trusted && !bot.first) continue
             if (!(yield* heard(link, 'comment', `comment:${comment.id}`, { author: comment.author.login }))) continue
             happened = true
             yield* arrive(link, {
@@ -5705,13 +5776,20 @@ export class Changes extends Context.Service<
               line: comment.line,
               url: comment.url,
               outsider: voice === 'outsider',
+              ...(bot === null ? {} : { bot: { login: bot.login, name: bot.name, trusted: bot.trusted } }),
             })
             if (voice === 'person' || voice === 'member') {
               addressed = true
               forLead.push(commentForLead(comment, name))
             }
+            if (bot?.trusted === true) fromBot(bot, comment)
           }
           if (forLead.some((part) => !part.startsWith('Checks failed'))) forLead.push(answerHint)
+          // A trusted bot's findings come after the hint for what people said: they are weighed, not answered as asked.
+          for (const bot of fromBots.values()) {
+            if (now.state === 'open') addressed = true
+            forLead.push(botFindingsForLead(bot.name, name, bot.said))
+          }
           // Out of its merge queue as it merged, though read open still a moment, it is in it until a read says merged. Out of it
           // otherwise, open, the queue took it out unmerged: it is the person's to merge again. Where the host didn't say, it is
           // where it was. Put in from outside Althar, it is in it as one Althar put there, said once.
@@ -7018,6 +7096,9 @@ export class Changes extends Context.Service<
        * repository share what one fetched. Where it couldn't be fetched, git's
        * failure, which its caller puts in words.
        */
+      /** Where the branch a fork's pull request goes into is fetched, where none of its clone's remotes has its parent. */
+      const PARENT_FETCHED = 'refs/althar/parent/'
+
       const baseOf = (
         workspace: { readonly path: string; readonly binding: string },
         host: CodeHost,
@@ -7031,7 +7112,12 @@ export class Changes extends Context.Service<
           const at = yield* Clock.currentTimeMillis
           const known = fetchedAt.get(key)
           if (!fresh && known !== undefined && at - known.at < baseEvery) return known.tip
-          const tip = yield* fetchedInto(workspace.path, yield* host.pushTarget(repository), branch, `refs/remotes/${ref}`)
+          const tip = yield* fetchedInto(
+            workspace.path,
+            yield* host.pushTarget(repository),
+            branch,
+            ref.startsWith('refs/') ? ref : `refs/remotes/${ref}`,
+          )
           fetchedAt.set(key, { at, tip })
           return tip
         })
@@ -7091,14 +7177,18 @@ export class Changes extends Context.Service<
           // Without its folder here, nothing can be merged: the card says why nothing happens.
           if (workspace === undefined)
             return yield* Effect.as(couldnt(`Its folder isn’t on this computer, so Althar can’t merge ${now.target} into it here.`), false)
-          // Into the repository a fork came from, its branch is upstream's; otherwise origin's, as `git fetch` names them.
+          // Into the repository a fork came from, its branch is that remote's, by whatever name the clone has it; otherwise origin's,
+          // as `git fetch` names them. A parent among none of the clone's remotes has its branch fetched beside them, never into
+          // origin's, which is the fork's.
           const fork = yield* namedRemotes(workspace.path).pipe(
-            Effect.map(forkOf),
+            Effect.map((remotes) => forkOf(remotes)),
             Effect.orElseSucceed(() => null),
           )
           const remote =
-            fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase() ? 'upstream' : 'origin'
-          const ref = `${remote}/${now.target}`
+            fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase()
+              ? fork.upstream.remote
+              : 'origin'
+          const ref = remote === null ? `${PARENT_FETCHED}${now.target}` : `${remote}/${now.target}`
           // Where either can't be had, the card says what git said, and the log keeps all of it.
           const fetched = yield* baseOf(workspace, host, repository, now.target, ref, how.fresh || says).pipe(
             Effect.map((tip) => ({ tip })),

@@ -3,11 +3,14 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
+import { Ids, newId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Fiber } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Projects } from '../src/Projects'
+import { Questions } from '../src/Questions'
+import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { copyablePath, copyInto, lineOf, type Recorded, recordedOf, type SetUp } from '../src/Setups'
 import { Sessions } from '../src/Sessions'
@@ -53,6 +56,15 @@ const taskIn = (path: string, title = 'Retry checkout') =>
     })
     const lead: ToolAccess = { role: 'lead', projectId: project.projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
     return { project, task, lead }
+  })
+
+/** A lead's session on its thread, for the questions Althar asks in its name. */
+const withSession = (lead: ToolAccess) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const sessionId = yield* newId(Ids.providerSession)
+    yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: sessionId, projectId: lead.projectId, threadId: lead.threadId, agentId: 'codex', state: 'active', startedAt: yield* timestamp })}`
+    return { ...lead, sessionId } satisfies ToolAccess
   })
 
 /** How the task's worktree was set up, once it has been. */
@@ -137,7 +149,7 @@ describe('a setup the person changes in the project’s settings', () => {
       yield* callTool(first.lead, 'record_setup', { copy: ['.env'], commands: [step('one')] })
       const projects = yield* Projects
       const [repository] = yield* projects.repositories(first.project.projectId)
-      assert.deepStrictEqual(repository?.setup, { copy: ['.env'], commands: [step('one')] })
+      assert.deepStrictEqual(repository?.setup, { copy: ['.env'], commands: [step('one')], by: 'agent' })
 
       yield* projects.setRepository({
         projectId: first.project.projectId,
@@ -150,7 +162,7 @@ describe('a setup the person changes in the project’s settings', () => {
         taskId: null,
       })
       const [read] = yield* projects.repositories(first.project.projectId)
-      assert.deepStrictEqual(read?.setup, { copy: ['.env'], commands: [step('two'), step('three')] })
+      assert.deepStrictEqual(read?.setup, { copy: ['.env'], commands: [step('two'), step('three')], by: 'person' })
 
       const later = yield* taskIn(path, 'Refund over budget')
       assert.deepInclude(yield* setUpOf(later.task.taskId), { code: 0 })
@@ -174,6 +186,158 @@ describe('a setup the person changes in the project’s settings', () => {
       )
       assert.deepInclude(refused, { _tag: 'ProjectRefused', reason: 'bad_setup' })
       assert.isNull(yield* recordedIn(project.projectId))
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('a setup the person edited', () => {
+  /** Runs a lead's record_setup, answers Althar's question to the person as `choice`, and gives what the lead was told. */
+  const recordAnswering = (
+    lead: ToolAccess,
+    commands: ReadonlyArray<string>,
+    choice: 'replace' | 'keep',
+    meanwhile?: Effect.Effect<void, unknown, any>,
+    copy: ReadonlyArray<string> = [],
+  ) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const questions = yield* Questions
+      const fiber = yield* Effect.forkChild(callTool(lead, 'record_setup', { commands, copy }))
+      const [asked] = yield* until(
+        sql<{ id: string; payload: string }>`
+          SELECT id, payload FROM attention_requests WHERE kind = 'question' AND state = 'open' AND task_id = ${lead.taskId}`,
+        (rows) => rows.length > 0,
+        'Althar asked the person',
+      )
+      const payload = JSON.parse(asked?.payload ?? '{}') as { message: string }
+      // Something done while the question waits: the person edits or clears the setup.
+      if (meanwhile !== undefined) yield* meanwhile
+      yield* questions.answer({
+        envelope: yield* Runtime.envelope('attention.answer_question', {}),
+        attentionId: asked?.id ?? '',
+        answers: { replace: { values: [choice] } },
+      })
+      return { told: yield* Fiber.join(fiber), asked: payload.message }
+    })
+
+  const noticesOf = (threadId: string) =>
+    Effect.map(items(threadId), (rows) => rows.flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : [])))
+
+  const editedByPerson = () =>
+    Effect.gen(function* () {
+      const path = withEnv()
+      const first = yield* taskIn(path)
+      yield* setUpOf(first.task.taskId)
+      yield* callTool(first.lead, 'record_setup', { commands: [step('lead')] })
+      const projects = yield* Projects
+      const [repository] = yield* projects.repositories(first.project.projectId)
+      yield* projects.setRepository({
+        projectId: first.project.projectId,
+        repositoryId: repository?.id ?? '',
+        setup: { copy: [], commands: [step('mine')] },
+      })
+      return { path, first }
+    })
+
+  it.live('isn’t replaced where the person, asked by Althar, keeps theirs', () =>
+    Effect.gen(function* () {
+      const { path, first } = yield* editedByPerson()
+      const later = yield* taskIn(path, 'Refund over budget')
+      const lead = yield* withSession(later.lead)
+      const { told, asked } = yield* recordAnswering(lead, [step('lead again')], 'keep')
+      // The question shows both, and the lead is told theirs stayed.
+      assert.include(asked, step('mine'))
+      assert.include(asked, step('lead again'))
+      assert.include(told, 'kept theirs')
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('mine')], taskId: null })
+      assert.deepStrictEqual(yield* noticesOf(later.task.threadId), [])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('is replaced once the person, asked by Althar, says so, and they are told; a flag the agent sets means nothing', () =>
+    Effect.gen(function* () {
+      const { path, first } = yield* editedByPerson()
+      const later = yield* taskIn(path, 'Refund over budget')
+      const lead = yield* withSession(later.lead)
+      const { told } = yield* recordAnswering(lead, [step('agreed')], 'replace')
+      assert.include(told, 'Recorded')
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('agreed')], taskId: later.task.taskId })
+      assert.isTrue(
+        (yield* noticesOf(later.task.threadId)).some((title) => title.includes('Replaced your setup') && title.includes(step('agreed'))),
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('is not replaced where the person changed or cleared it while Althar was asking: their answer was about the older one', () =>
+    Effect.gen(function* () {
+      const { path, first } = yield* editedByPerson()
+      const projects = yield* Projects
+      const [repository] = yield* projects.repositories(first.project.projectId)
+      const set = (setup: { copy: Array<string>; commands: Array<string> } | null) =>
+        Effect.asVoid(projects.setRepository({ projectId: first.project.projectId, repositoryId: repository?.id ?? '', setup }))
+      const later = yield* taskIn(path, 'Refund over budget')
+      const lead = yield* withSession(later.lead)
+      const edited = yield* recordAnswering(lead, [step('stale')], 'replace', set({ copy: [], commands: [step('mine again')] }))
+      assert.include(edited.told, 'while Althar was asking')
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('mine again')], taskId: null })
+      assert.deepStrictEqual(yield* noticesOf(later.task.threadId), [])
+
+      // Called again, it asks about the current one; the person clears it meanwhile, and nothing of theirs is left to replace.
+      const cleared = yield* recordAnswering(lead, [step('fresh')], 'replace', set(null))
+      assert.include(cleared.told, 'Recorded')
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('fresh')], taskId: later.task.taskId })
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('says what a copy-only setup copies when it replaces the person’s', () =>
+    Effect.gen(function* () {
+      const { path } = yield* editedByPerson()
+      const later = yield* taskIn(path, 'Refund over budget')
+      const lead = yield* withSession(later.lead)
+      yield* recordAnswering(lead, [], 'replace', undefined, ['.env'])
+      const [notice] = yield* noticesOf(later.task.threadId)
+      assert.include(notice, 'copies: .env')
+      assert.notInclude(notice, 'nothing')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('stays where the lead only claims the person agreed', () =>
+    Effect.gen(function* () {
+      const { path, first } = yield* editedByPerson()
+      const later = yield* taskIn(path, 'Refund over budget')
+      const lead = yield* withSession(later.lead)
+      const sql = yield* SqlClient.SqlClient
+      // An input the tool no longer takes: the lead can't answer for the person; Althar asks, and no one answers, so it waits.
+      const fiber = yield* Effect.forkChild(callTool(lead, 'record_setup', { commands: [step('sneaky')], person_agreed: true }))
+      yield* Effect.sleep('300 millis')
+      const [open] = yield* sql<{ id: string }>`SELECT id FROM attention_requests WHERE kind = 'question' AND state = 'open'`
+      assert.isDefined(open)
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('mine')], taskId: null })
+      yield* Fiber.interrupt(fiber)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('is cleared, so the next lead is asked again and may record freely; worktrees made already keep theirs', () =>
+    Effect.gen(function* () {
+      const path = withEnv()
+      const first = yield* taskIn(path)
+      yield* setUpOf(first.task.taskId)
+      const projects = yield* Projects
+      const [repository] = yield* projects.repositories(first.project.projectId)
+      const repositoryId = repository?.id ?? ''
+      yield* projects.setRepository({ projectId: first.project.projectId, repositoryId, setup: { copy: [], commands: [step('mine')] } })
+      const before = yield* setUpOf(first.task.taskId)
+
+      yield* projects.setRepository({ projectId: first.project.projectId, repositoryId, setup: null })
+      assert.isNull(yield* recordedIn(first.project.projectId))
+      assert.isNull((yield* projects.repositories(first.project.projectId))[0]?.setup)
+      assert.deepStrictEqual(yield* setUpOf(first.task.taskId), before)
+
+      const later = yield* taskIn(path, 'Refund over budget')
+      yield* setUpOf(later.task.taskId)
+      assert.include(yield* brief(later.task.threadId), 'No setup is recorded for the repository yet')
+      yield* callTool(later.lead, 'record_setup', { commands: [step('lead')] })
+      assert.deepInclude((yield* recordedIn(first.project.projectId)) ?? {}, { commands: [step('lead')], taskId: later.task.taskId })
     }).pipe(Effect.provide(runtime())),
   )
 })

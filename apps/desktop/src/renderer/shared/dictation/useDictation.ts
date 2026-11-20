@@ -60,6 +60,8 @@ import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabul
 const LONGEST = 5 * 60
 /* Shorter than this is a tap on the button, not something said. */
 const SHORTEST = 0.3
+/* Retry a failed pass after stopping, while the recording is still being written down. */
+const RETRY_DELAYS = [100, 250]
 type Problem =
   | { readonly kind: 'denied' }
   | { readonly kind: 'noMicrophone' }
@@ -201,7 +203,21 @@ export const writeIn = async (thread: string, said: Said, now = handlesOf(thread
   held.writer = null
   changeSession(thread, { phase: 'writing' })
   try {
-    const text = now !== null ? await now.finish(said) : await (held.transcribe ?? nothingToWriteWith)(said)
+    const transcribe = held.transcribe
+    if (transcribe === null) throw new Error('Nothing to write it down with.')
+    const retry = async (recorded: Recorded) => {
+      let attempt = 0
+      for (;;) {
+        try {
+          return await transcribe(recorded)
+        } catch (error) {
+          const delay = RETRY_DELAYS[attempt++]
+          if (delay === undefined) throw error
+          await new Promise((resolve) => setTimeout(resolve, delay))
+        }
+      }
+    }
+    const text = now !== null ? await now.finish(said, retry) : await retry(said)
     // The window forgot the thread's dictation meanwhile: nothing to land in.
     if (handlesOf(thread) !== held) return
     // Nothing was heard: nothing to carry either.
@@ -216,8 +232,6 @@ export const writeIn = async (thread: string, said: Said, now = handlesOf(thread
     changeSession(thread, (now) => ({ phase: 'idle', interim: '', failed: together(now.failed, said) }))
   }
 }
-
-const nothingToWriteWith = () => Promise.reject(new Error('Nothing to write it down with.'))
 
 const stopClock = (held: Handles) => {
   if (held.clock === null) return

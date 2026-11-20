@@ -1539,7 +1539,7 @@ describe('dialogs the page opens', () => {
   })
 
   it('leaves a page that asks to stay as the lead’s action leaves it, and says so; the person’s own leaving stays the page’s to stop', async () => {
-    const { pages, id, contents } = await shown()
+    const { pages, options, id, contents } = await shown()
     const asked: Array<{ preventDefault: ReturnType<typeof vi.fn> }> = []
     const unload = () => {
       const event = { preventDefault: vi.fn() }
@@ -1554,7 +1554,8 @@ describe('dialogs the page opens', () => {
       'The page asked to stay, as a page does when something in it isn’t saved; it was left all the same.',
     )
     expect(asked[0]?.preventDefault).toHaveBeenCalled()
-    await new Promise((resolve) => setTimeout(resolve, NOW.fade + 20))
+    // Once the page no longer says the lead is at work, as it says a moment after the action (not by a guess at that moment).
+    await vi.waitFor(() => expect(options.tell).toHaveBeenLastCalledWith(expect.objectContaining({ working: false })))
     unload()
     expect(asked[1]?.preventDefault).not.toHaveBeenCalled()
     contents.onCommand = () => undefined

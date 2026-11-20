@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { type Dirent, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseRemote, type Product, products } from '@althar/connectors'
@@ -49,11 +49,6 @@ export interface Edits {
   readonly removed: ReadonlyArray<string>
 }
 
-/**
- * Commands every lead runs outside its sandbox: `ps`, as a Mac's sandbox
- * can't list processes, and `env -i`, the clean environment a test run of a
- * desktop app starts from; what it runs still meets the rules.
- */
 const SERVERS_AND_TESTS = [
   'vite',
   'next dev',
@@ -70,9 +65,18 @@ const SERVERS_AND_TESTS = [
   'vp dev',
   'vp test',
 ]
+
+const MACOS_COMMANDS = ['open', 'osascript', 'docker', 'docker-compose']
+
+/**
+ * Default reach even without a repository match. Seatbelt blocks process
+ * listing with `ps`, Launch Services and Apple Events, and container daemon
+ * sockets. Desktop tests use `env -i` to start with a clean environment.
+ */
 export const ALWAYS: ReadonlyArray<string> = [
   'ps',
   'env -i',
+  ...(process.platform === 'darwin' ? MACOS_COMMANDS : []),
   ...SERVERS_AND_TESTS.flatMap((command) => [command, ...['npx', 'bunx', 'pnpm exec', 'yarn'].map((runner) => `${runner} ${command}`)]),
   ...['npm', 'pnpm', 'yarn'].flatMap((manager) =>
     ['dev', 'start', 'test'].flatMap((script) => [`${manager} run ${script}`, `${manager} ${script}`]),
@@ -90,8 +94,88 @@ const TOOLS: ReadonlyArray<{ readonly packages: ReadonlyArray<string>; readonly 
 /** How each package manager runs a package's own command. */
 const RUNNERS: Readonly<Record<string, string>> = { bun: 'bunx', npm: 'npx', pnpm: 'pnpm exec', yarn: 'yarn' }
 
+const GRADLE_FILES = ['gradlew', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts']
+const ANDROID_FILES = ['app/src/main/AndroidManifest.xml', 'src/main/AndroidManifest.xml']
+const DEPENDENCY_DIRS = new Set(['node_modules', 'Pods', 'vendor'])
+
+const hasFile = (folder: string, files: ReadonlyArray<string>) => files.some((file) => existsSync(join(folder, file)))
+
+const entriesIn = (folder: string) => {
+  try {
+    return readdirSync(folder, { withFileTypes: true })
+  } catch {
+    return []
+  }
+}
+
+const isIosProject = (entries: ReadonlyArray<Dirent>) =>
+  entries.some(
+    (entry) =>
+      (entry.name === 'Podfile' && (entry.isFile() || entry.isSymbolicLink())) ||
+      (entry.isDirectory() && /\.(xcodeproj|xcworkspace)$/.test(entry.name)),
+  )
+
+const projectDirectory = (entry: Dirent) => entry.isDirectory() && !entry.name.startsWith('.') && !DEPENDENCY_DIRS.has(entry.name)
+
+/** A native checkout, a named app folder, or a project under ios/, such as ios/App. */
+const hasIosProject = (folder: string) => {
+  const entries = entriesIn(folder)
+  return (
+    isIosProject(entries) ||
+    entries.filter(projectDirectory).some((entry) => {
+      const child = join(folder, entry.name)
+      const children = entriesIn(child)
+      return (
+        isIosProject(children) ||
+        children.some(
+          (sub) => (entry.name === 'ios' || sub.name === 'ios') && projectDirectory(sub) && isIosProject(entriesIn(join(child, sub.name))),
+        )
+      )
+    })
+  )
+}
+
+/** Native tools that need macOS services or their normal build caches, by the projects that use them. */
+const nativeReachIn = (folder: string, root: string, packages: ReadonlySet<string>, runner: string) => {
+  const folders = [...new Set([folder, root])]
+  const androidFolders = folders.map((at) => join(at, 'android'))
+  const expo = packages.has('expo')
+  const reactNative = packages.has('@react-native-community/cli') || (!expo && packages.has('react-native'))
+  const capacitorIos = packages.has('@capacitor/ios')
+  const capacitorAndroid = packages.has('@capacitor/android')
+  const ios = expo || reactNative || capacitorIos || packages.has('react-native-macos') || folders.some(hasIosProject)
+  const android =
+    expo ||
+    reactNative ||
+    capacitorAndroid ||
+    folders.some((at) => hasFile(at, ANDROID_FILES)) ||
+    androidFolders.some((at) => hasFile(at, [...GRADLE_FILES, ...ANDROID_FILES]))
+  const gradle = android || folders.some((at) => hasFile(at, GRADLE_FILES))
+  const withRunners = (commands: ReadonlyArray<string>) =>
+    commands.flatMap((command) => [command, `npx ${command}`, `${runner} ${command}`])
+  const capacitor = [
+    ...(capacitorIos ? ['run ios'] : []),
+    ...(capacitorAndroid ? ['run android'] : []),
+    ...(capacitorIos || capacitorAndroid ? ['sync'] : []),
+  ]
+  const commands = [
+    ...(ios ? ['xcrun simctl', 'xcodebuild', 'pod install', 'bundle exec pod install', 'xcrun devicectl', 'xcrun xctrace'] : []),
+    ...(android ? ['emulator'] : []),
+    ...(gradle ? ['gradle', './gradlew'] : []),
+    ...(android ? ['./android/gradlew'] : []),
+    ...(expo ? withRunners(['expo run:ios', 'expo run:android']) : []),
+    ...(reactNative ? withRunners(['react-native', 'rnc-cli'].flatMap((bin) => [`${bin} run-ios`, `${bin} run-android`])) : []),
+    ...(reactNative ? ['npx @react-native-community/cli run-ios', 'npx @react-native-community/cli run-android'] : []),
+    ...withRunners(capacitor.map((command) => `cap ${command}`)),
+  ]
+  return { commands, ios, android }
+}
+
 /** A script that runs tests or drives a browser, by its name: `test`, `test:e2e`, `e2e`, `playwright`. */
 const testing = (name: string) => /^(dev|start|serve|test)(:|$)/.test(name) || /e2e|playwright|screenshot/.test(name)
+
+const nativeScript = (name: string, native: ReturnType<typeof nativeReachIn> | undefined) =>
+  (native?.ios === true && /^ios(:|$)/.test(name)) || (native?.android === true && /^android(:|$)/.test(name))
 
 const recordOf = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Readonly<Record<string, unknown>>) : {}
@@ -108,28 +192,39 @@ const tidy = (line: string) => line.trim().replace(/\s+/g, ' ')
 
 /**
  * The commands the repository in `folder` runs outside a lead's sandbox, as
- * what is in it says: the tools its packages bring that start a browser,
- * Electron or a test runner, run by its package manager, and its test and
- * end-to-end scripts, run from where they are. Bun's scripts by what they
+ * what is in it says: its native tools, the tools its packages bring that
+ * start a browser or test runner, and its test and end-to-end scripts, run
+ * from where they are. Bun's scripts by what they
  * run, as Claude Code keeps a line that starts with `bun` in its sandbox:
  * `node scripts/e2e.ts`, `bunx vp test run`.
  */
-export const commandsIn = (folder: string, root: string = folder): ReadonlyArray<string> => {
+export const commandsIn = (folder: string, root: string = folder, platform: NodeJS.Platform = process.platform): ReadonlyArray<string> => {
   const manager = managerIn(folder, root) ?? 'npm'
   const runner = RUNNERS[manager] ?? 'npx'
   const packages = packagesIn(folder)
+  const native = platform === 'darwin' ? nativeReachIn(folder, root, packages, runner) : undefined
   const brought = TOOLS.filter((tool) => tool.packages.some((name) => packages.has(name)))
-  const tools = brought.map((tool) => `${runner} ${tool.bin}`)
-  const tests = scriptsIn(folder, root).filter((script) => testing(script.name))
+  const tools = [...brought.map((tool) => `${runner} ${tool.bin}`), ...(native?.commands ?? [])]
   // A package's own command as a lead types it, through the runner; anything else, `node scripts/e2e.ts`, as it is.
   const ownCommand = (program: string) =>
     packages.has(program) ||
     brought.some((tool) => tool.bin === program) ||
     [folder, root].some((at) => existsSync(join(at, 'node_modules', '.bin', program)))
-  const typed = (part: string) => (ownCommand(part.split(' ')[0] ?? '') ? `${runner} ${part}` : part)
-  // By name, as run where the script is: a workspace's in its folder runs as the root's does.
-  const scripts =
-    manager === 'bun' ? tests.flatMap((script) => partsOf(script.body).map(typed)) : tests.map((script) => `${manager} run ${script.name}`)
+  const startsWith = (command: string, start: string) => command === start || command.startsWith(`${start} `)
+  const typed = (part: string) => {
+    const throughRunner = `${runner} ${part}`
+    return ownCommand(part.split(' ')[0] ?? '') || native?.commands.some((command) => startsWith(throughRunner, command))
+      ? throughRunner
+      : part
+  }
+  const scripts = scriptsIn(folder, root).flatMap((script) => {
+    const isNative = nativeScript(script.name, native)
+    if (!isNative && !testing(script.name)) return []
+    if (manager === 'bun') return partsOf(script.body).map(typed)
+    const local = `${manager} run ${script.name}`
+    if (!isNative) return [local]
+    return [local, script.command, ...(manager === 'yarn' || manager === 'pnpm' ? [`${manager} ${script.name}`] : [])]
+  })
   // Without what a tool already covers: `bunx playwright test` runs outside as `bunx playwright` does.
   const covered = (command: string) => tools.some((tool) => command.startsWith(`${tool} `))
   return [...new Set([...tools, ...scripts])].filter((command) => runsOutside(command) && !covered(command))
