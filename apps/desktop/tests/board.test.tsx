@@ -394,30 +394,68 @@ describe('the board’s lanes', () => {
         expect(next.queryByText(/^Continues/)).toBeNull()
       })
 
-      it('stays in the lane it was in while the person points at the board, and moves once they look away', async () => {
+      it('lists every machine-wide place while work waits', () => {
+        const lanes = lanesOf(
+          board({
+            tasks: [working, continuing('x', 1)],
+            workPlaces: {
+              busy: 2,
+              atOnce: 2,
+              configured: 5,
+              offline: false,
+              holders: [
+                {
+                  taskId: 'elsewhere',
+                  title: 'An agent in another project',
+                  threadId: 't1',
+                  role: 'lead',
+                  reason: 'turn',
+                  kept: false,
+                  running: [],
+                },
+                {
+                  taskId: 'elsewhere',
+                  title: 'An agent in another project',
+                  threadId: 't2',
+                  role: 'reviewer',
+                  reason: 'starting',
+                  kept: false,
+                  running: [],
+                },
+              ],
+            },
+          }),
+        )
+        withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+        const next = within(screen.getByRole('region', { name: 'Up next' }))
+        const summary = next.getByText('2 of 5 agent places in use · Temporarily limited to 2')
+        summary.closest('details')!.open = true
+        const holders = within(next.getByRole('list', { name: 'Agents using a place' }))
+        expect(holders.getAllByText('An agent in another project')).toHaveLength(2)
+        expect(holders.getByText('Lead · In a turn')).toBeTruthy()
+        expect(holders.getByText('Reviewer · Starting')).toBeTruthy()
+      })
+
+      it('moves into Running when admitted while the pointer is in Up next', async () => {
         const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
         // Its turn has its place: it is at work.
         const after = lanesOf(
           board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),
         )
-        let change: (lanes: typeof before) => void = () => undefined
-        function Changing() {
-          const [lanes, setLanes] = useState(before)
-          change = setLanes
-          return <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />
-        }
-        withServices(<Changing />, fakeClient().client)
+        const services = servicesFor(fakeClient().client)
+        const view = (lanes: typeof before) => (
+          <ServicesProvider value={services}>
+            <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />
+          </ServicesProvider>
+        )
+        const { rerender } = render(view(before))
         const region = (name: string) => within(screen.getByRole('region', { name }))
         await userEvent.hover(region('Up next').getByText('Going on x'))
-        act(() => change(after))
-        expect(region('Up next').getByText('Going on x')).toBeTruthy()
-        expect(region('Running').queryByText('Going on x')).toBeNull()
-        await userEvent.unhover(screen.getByRole('region', { name: 'Up next' }))
-        await userEvent.hover(document.body)
-        await waitFor(() => expect(region('Running').getByText('Going on x')).toBeTruthy())
+        rerender(view(after))
+        expect(region('Running').getByText('Going on x')).toBeTruthy()
         expect(region('Up next').queryByText('Going on x')).toBeNull()
       })
-      it('lets go once its screen hides with the pointer on it, as kept (`KeptScreens`), and moves as it shows again', async () => {
+      it('shows admitted work in Running when a kept board reopens', async () => {
         const before = lanesOf(board({ tasks: [working, continuing('x', 1)], calls: [] }))
         const after = lanesOf(
           board({ tasks: [working, continuing('x', 1, { queued: null, continues: undefined, place: undefined })], calls: [] }),

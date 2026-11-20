@@ -2413,6 +2413,9 @@ export const Holder = Schema.Struct({
   /** The thread its agent is on, where what it left running is stopped; null where it has no session yet. */
   threadId: Schema.NullOr(Schema.String),
   kept: Schema.Boolean,
+  agentId: Schema.optional(Schema.String),
+  role: Schema.optional(Schema.Literals(['lead', 'reviewer', 'helper'])),
+  reason: Schema.optional(Schema.Literals(['starting', 'turn', 'background'])),
   running: Schema.Array(BackgroundCommand),
 })
 export type Holder = typeof Holder.Type
@@ -2423,7 +2426,18 @@ export type Holder = typeof Holder.Type
  * places, and how many the machine runs at once. It starts on its own, oldest
  * first, when one is free.
  */
-export const Queued = Schema.Struct({ busy: Schema.Int, atOnce: Schema.Int, holders: Schema.optional(Schema.Array(Holder)) })
+export const Queued = Schema.Struct({
+  busy: Schema.Int,
+  atOnce: Schema.Int,
+  holders: Schema.optional(Schema.Array(Holder)),
+})
+export const WorkPlaces = Schema.Struct({
+  ...Queued.fields,
+  holders: Schema.Array(Holder),
+  configured: Schema.Int,
+  offline: Schema.Boolean,
+})
+export type WorkPlaces = typeof WorkPlaces.Type
 export type Queued = typeof Queued.Type
 
 /**
@@ -4370,6 +4384,8 @@ export const BoardSnapshot = Schema.Struct({
   position: Schema.optional(FeedPosition),
   tasks: Schema.Array(BoardTask),
   calls: Schema.Array(BoardCall),
+  /** The machine-wide places while a task on this board waits for one. */
+  workPlaces: Schema.optional(WorkPlaces),
   /** How many tasks the project has settled (done or abandoned), in all: `tasks` holds only the most recent of them. */
   settledTotal: Schema.Number,
 })

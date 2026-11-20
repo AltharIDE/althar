@@ -4,6 +4,7 @@ import {
   type BoardTask,
   type ChangeSummary,
   type HeldForShip,
+  type WorkPlaces,
   issuesWordOf,
   type PlanStep,
   type ReviewBrief,
@@ -49,7 +50,7 @@ import {
   Wait,
   Problem,
 } from '@althar/ui'
-import { type ComponentProps, Fragment, type ReactNode, useEffect, useMemo, useState } from 'react'
+import { type ComponentProps, Fragment, type ReactNode, useEffect, useState } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
 import { abandonedBlocker, blockerText, blockerWords } from '../../shared/blockers'
@@ -80,7 +81,7 @@ import { text as stuckText } from '../task/StuckCall'
 import { canHold, teamChangeOf, TeamMenu } from '../team/Team'
 import { arrivesQuietly, markArrived, watch } from './arrived'
 import s from './Board.module.css'
-import { type Held, heldOf, holding, type Lanes, movesInLine, type Waiting, yoursOf } from './lanes'
+import { type Lanes, movesInLine, type Waiting, yoursOf } from './lanes'
 import type { LineActions } from './useBoard'
 import type { WorkActions } from './useWorkActions'
 
@@ -1099,6 +1100,41 @@ const readyOf = (work: BoardTask, change: ChangeSummary, actions: CardActions | 
   }
 }
 
+const roleWords = { lead: 'Lead', reviewer: 'Reviewer', helper: 'Helper' } as const
+const placeWords = { starting: 'Starting', turn: 'In a turn', background: 'Background work' } as const
+
+function AgentPlaces({ places, name }: { readonly places: WorkPlaces; readonly name: (id: string) => string }) {
+  const limit = places.atOnce < places.configured ? ` · Temporarily limited to ${places.atOnce}` : ''
+  const title = `${places.busy} of ${places.configured} agent places in use`
+  if (places.holders.length === 0 && limit === '' && !places.offline) return <p className={s.places}>{title}</p>
+  return (
+    <details className={s.places}>
+      <summary>
+        {title}
+        {limit}
+      </summary>
+      {places.offline && <p>Waiting for the connection</p>}
+      {limit !== '' && <p>New work is paced while this computer is under load.</p>}
+      {places.holders.length > 0 && (
+        <ul aria-label="Agents using a place">
+          {places.holders.map((holder) => (
+            <li key={`${holder.taskId}/${holder.role ?? ''}/${holder.threadId ?? ''}`}>
+              <span className={s.placeTask} title={holder.title}>
+                {holder.title || 'Untitled task'}
+              </span>
+              <span className={s.placeRole}>
+                {roleWords[holder.role ?? 'lead']}
+                {holder.agentId === undefined ? '' : ` · ${name(holder.agentId)}`} ·{' '}
+                {placeWords[holder.reason ?? (holder.kept ? 'background' : 'turn')]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  )
+}
+
 export function BoardView({
   lanes,
   agents,
@@ -1120,7 +1156,7 @@ export function BoardView({
   now: string
   /** Opens a task, by its thread. */
   onOpen: (threadId: string) => void
-  /** Loads the next page of settled work; absent where every settled task is already shown. */
+  /** Loads the next page of settled work; absent where every settled task is already lanes. */
   onShowOlder?: () => void
   /** Closing a settled task's pull request still open on its host, from its row; absent where it can't be. */
   closing?: ClosingPullRequests
@@ -1128,7 +1164,7 @@ export function BoardView({
   actions?: CardActions
   /** Putting the line of tasks waiting for a free agent in the person's order; without it, the line stays as it is. */
   line?: LineActions
-  /** The lanes the person collapsed and opened, where they are kept; without them, the board keeps them while it is shown. */
+  /** The lanes the person collapsed and opened, where they are kept; without them, the board keeps them while it is lanes. */
   folds?: BoardFolds
   onFoldsChange?: (folds: BoardFolds) => void
   /** Puts the person in the coordinator's composer, from Up next while the board has nothing on it; without it, Up next says how work gets here and offers nothing to press. */
@@ -1173,23 +1209,14 @@ export function BoardView({
 
   // The plans starting from their rows, by id, until the runtime has answered.
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set())
-  // While the person points at Up next or Running, or drags in the line, what would move between them stays where it was.
-  const [held, setHeld] = useState<Held | null>(null)
-  // The same lanes as long as neither changes, so the board's cards are measured only where they can have moved.
-  const shown = useMemo(() => (held === null ? lanes : holding(lanes, held)), [lanes, held])
-  const { continuing, free, paused } = shown
+  const { continuing, free, paused } = lanes
   // What waits for an agent's place, what continues and the line in the one order places are given in; then the plans.
-  const waitingRows = shown.next.slice(0, continuing + free)
-  const planRows = shown.next.slice(continuing + free, shown.next.length - paused)
+  const waitingRows = lanes.next.slice(0, continuing + free)
+  const planRows = lanes.next.slice(continuing + free, lanes.next.length - paused)
   // What is paused for a limit or the connection, and, under a divider of its own, what waits for its checkout (ADR-091).
-  const pausedRows = shown.next.slice(shown.next.length - paused)
+  const pausedRows = lanes.next.slice(lanes.next.length - paused)
   const halted = pausedRows.filter((work) => work.waitsForCheckout == null)
   const forLocal = pausedRows.filter((work) => work.waitsForCheckout != null)
-  const pointed = (lane: BoardLane | null) =>
-    setHeld((was) => (lane === BoardLane.Next || lane === BoardLane.Running ? (was ?? heldOf(lanes)) : null))
-  // Hidden while its screen is kept (`KeptScreens`), with the pointer still on it, nothing says it looked away: it lets go.
-  useEffect(() => () => setHeld(null), [])
-
   const nextRow = (work: BoardTask, index: number) => {
     const startsAt = work.plan?.startsAt ?? null
     const kind = kindWordOf(work)
@@ -1286,11 +1313,10 @@ export function BoardView({
       label={text.label}
       {...(folds === undefined ? {} : { folds })}
       {...(onFoldsChange === undefined ? {} : { onFoldsChange })}
-      onPointerLane={pointed}
-      // What moves its cards: the lanes as shown, the shelf Settled shows, and what grows or shrinks a card (a press under
+      // What moves its cards: the lanes as lanes, the shelf Settled shows, and what grows or shrinks a card (a press under
       // way, what failed); not the clock, nor anything drawn again around it.
       version={[
-        shown,
+        lanes,
         shelf,
         starting,
         closing?.busy,
@@ -1307,8 +1333,8 @@ export function BoardView({
     >
       <BoardColumn
         lane={BoardLane.Next}
-        count={shown.upNext}
-        filled={shown.next.length > 0 || lanes.stopped.length > 0}
+        count={lanes.upNext}
+        filled={lanes.next.length > 0 || lanes.stopped.length > 0}
         // Chats on Scratch, off the lanes: one chip, opened in place, by their latest exchange; Clear settles one. It heads
         // Up next whether anything waits there or not.
         lead={
@@ -1329,7 +1355,7 @@ export function BoardView({
           />
         }
         // Whenever nothing is in Up next, it says where work comes from.
-        {...(shown.next.length === 0 && lanes.stopped.length === 0
+        {...(lanes.next.length === 0 && lanes.stopped.length === 0
           ? {
               empty: (
                 <BoardEmpty
@@ -1342,8 +1368,9 @@ export function BoardView({
             }
           : {})}
       >
+        {waitingRows.length > 0 && lanes.workPlaces !== undefined && <AgentPlaces places={lanes.workPlaces} name={name} />}
         {line?.failed != null && <Problem className={s.failure}>{line.failed}</Problem>}
-        {line !== undefined && shown.reordered && waitingRows.length > 1 && (
+        {line !== undefined && lanes.reordered && waitingRows.length > 1 && (
           <BoardDivider end={<LinkButton onClick={line.oldestFirst}>{text.oldestFirst}</LinkButton>}>{text.yourOrder}</BoardDivider>
         )}
         {waitingRows.length + planRows.length > 0 && (
@@ -1358,7 +1385,7 @@ export function BoardView({
             heads={{ planned: <BoardDivider>{text.planned}</BoardDivider> }}
             // While a row is dragged, each says the place it would take.
             render={(id, place) => {
-              const work = shown.next.find((one) => one.taskId === id)
+              const work = lanes.next.find((one) => one.taskId === id)
               return work === undefined ? null : nextRow(work, place - 1)
             }}
             {...(line === undefined
@@ -1375,7 +1402,7 @@ export function BoardView({
                     return waitingRows.some((work) => work.taskId === id) || to <= waits ? to : null
                   },
                   more: (id: string) => {
-                    const work = shown.next.find((one) => one.taskId === id)
+                    const work = lanes.next.find((one) => one.taskId === id)
                     return work?.turnWaits === true && waitingRows.includes(work) ? (
                       <MenuItem icon="close" onSelect={() => line.cancelTurn(work.threadId)}>
                         {text.cancelTurn}
@@ -1405,14 +1432,14 @@ export function BoardView({
             rows.length > 0 && (
               <Fragment key={at === 0 ? 'paused' : 'local'}>
                 <BoardDivider>{at === 0 ? text.paused : text.forLocal}</BoardDivider>
-                <BoardList>{rows.map((work) => nextRow(work, shown.next.indexOf(work)))}</BoardList>
+                <BoardList>{rows.map((work) => nextRow(work, lanes.next.indexOf(work)))}</BoardList>
               </Fragment>
             ),
         )}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Running} count={shown.atWork} filled={shown.running.length > 0}>
-        {shown.running.map((work) => (
+      <BoardColumn lane={BoardLane.Running} count={lanes.atWork} filled={lanes.running.length > 0}>
+        {lanes.running.map((work) => (
           <BoardCard
             taskId={work.taskId}
             key={work.taskId}

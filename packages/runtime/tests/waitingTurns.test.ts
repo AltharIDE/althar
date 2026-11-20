@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ProjectId } from '@althar/domain'
 import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
@@ -366,7 +366,7 @@ describe('an answer kept for a place, as answers once were', () => {
         'sqlite',
       )
       assert.lengthOf(yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${first.threadId}`, 2)
-    }).pipe(Effect.provide(oneAtOnce({ askGrace: Duration.millis(0) }))),
+    }).pipe(Effect.provide(oneAtOnce())),
   )
 })
 

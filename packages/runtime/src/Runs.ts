@@ -8184,6 +8184,7 @@ export class Runs extends Context.Service<
             }),
           )
           if (!taken) return
+          yield* Effect.ignore(touchCard(current.taskId))
           const { place } = waited
           switch (place.how) {
             case 'start':

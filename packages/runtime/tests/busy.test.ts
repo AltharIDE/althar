@@ -293,6 +293,15 @@ describe('Agents at once', () => {
           ['Second', false],
         ],
       )
+      const board = yield* (yield* Queries).board(projectId)
+      assert.deepStrictEqual(countsOf(board.workPlaces), { busy: 2, atOnce: 2 })
+      assert.deepStrictEqual(
+        board.workPlaces?.holders.map(({ title, role }) => [title, role]),
+        [
+          ['First', 'lead'],
+          ['Second', 'lead'],
+        ],
+      )
       assert.isNull(card?.waits)
       assert.deepStrictEqual(countsOf((yield* onHome(third.taskId))?.queued), { busy: 2, atOnce: 2 })
       assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
@@ -423,28 +432,24 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('count a lead waiting on the person’s answer to a question a few minutes, while it is warm, and then not', () =>
+  it.live('wakes the next task after a turn ends while its step record is still running', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
       const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
       yield* working(first.taskId)
       const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
       yield* waiting(second.taskId)
-      // Its step still under way between turns, the first's lead holds its place: the second waits on.
-      yield* (yield* Sessions).interrupt(first.threadId)
-      yield* until(turnsOn(first.threadId), (rows) => rows.every((row) => row.state !== 'delivered'))
-      yield* waiting(second.taskId)
-      // Then its lead asks the person something: an answer soon goes on where it was, so it keeps its place a while.
-      yield* say(first.threadId, scenarios.question, 'after_current')
-      yield* askedOn(first.threadId)
-      yield* Effect.sleep('400 millis')
-      assert.deepStrictEqual((yield* attempts(second.taskId))[0], { step: 'implement', state: 'held', holdReason: 'machine_busy' })
-      // Past that, it isn't using the machine while it waits on them: the second starts.
+      const sessions = yield* Sessions
+      yield* until(sessions.busy(first.threadId), Boolean)
+      yield* sessions.interrupt(first.threadId)
+      yield* until(turnsOn(first.threadId), (rows) => rows.some((row) => row.state === 'interrupted'))
+      assert.strictEqual((yield* attempts(first.taskId))[0]?.state, 'running')
+      assert.notInclude(
+        (yield* (yield* Busy).now).holders.map((holder) => holder.taskId),
+        first.taskId,
+      )
       yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-      const sql = yield* SqlClient.SqlClient
-      const asked = yield* sql<{ id: string }>`SELECT id FROM attention_requests WHERE kind = 'question' AND state = 'open'`
-      assert.lengthOf(asked, 1)
-    }).pipe(Effect.provide(machine(1, ':memory:', { askGrace: Duration.seconds(1), every: Duration.millis(100) }))),
+    }).pipe(Effect.provide(machine(1, ':memory:', { every: Duration.minutes(1) }))),
   )
 
   it.live('tell the person’s answer to its lead at once, though every place is taken', () =>
@@ -453,7 +458,11 @@ describe('Agents at once', () => {
       const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
       yield* working(first.taskId)
       const question = yield* asking(first.threadId)
-      // Its lead waits on the person, past the minutes it keeps its place: the second takes the place.
+      // An open question has already freed the place, before the person answers.
+      assert.notInclude(
+        (yield* (yield* Busy).now).holders.map((holder) => holder.taskId),
+        first.taskId,
+      )
       const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
       yield* working(second.taskId)
       // Answered now, the first's lead goes on at once, as a second agent at work: what the person does never waits.
@@ -466,7 +475,7 @@ describe('Agents at once', () => {
       assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
       // The second worked on all along.
       assert.strictEqual((yield* attempts(second.taskId))[0]?.state, 'running')
-    }).pipe(Effect.provide(machine(1, ':memory:', { askGrace: Duration.millis(0) }))),
+    }).pipe(Effect.provide(machine(1))),
   )
 
   it.live('tell an answer kept to wait for a place, as answers once were, at once', () =>
@@ -492,7 +501,7 @@ describe('Agents at once', () => {
       )
       assert.deepStrictEqual(yield* questionOf(question), { state: 'answered', kept: false })
       assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
-    }).pipe(Effect.provide(machine(1, ':memory:', { askGrace: Duration.millis(0) }))),
+    }).pipe(Effect.provide(machine(1))),
   )
 
   it.live('deliver what the person says to an idle lead at once, though every place is taken', () =>
