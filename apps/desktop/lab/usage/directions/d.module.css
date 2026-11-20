@@ -1,0 +1,292 @@
+/* D · Compare: the scoreboard, where the time to merge goes, how tasks ended, what moved, every day. */
+
+.versus {
+  margin: 0 0 14px;
+  font-size: 13px;
+}
+.now {
+  font-weight: 550;
+  color: var(--t-1);
+}
+.before {
+  color: var(--t-2);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--line-2);
+}
+.tile {
+  min-width: 0;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.tile:not(:nth-child(4n + 1)) {
+  border-left: 1px solid var(--line);
+}
+.tile:nth-child(4n + 1) {
+  padding-left: 0;
+}
+@container (max-width: 860px) {
+  .board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .tile:not(:nth-child(4n + 1)) {
+    border-left: none;
+  }
+  .tile:nth-child(even) {
+    border-left: 1px solid var(--line);
+  }
+  .tile:nth-child(odd) {
+    padding-left: 0;
+  }
+}
+.tileValue {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.delta[data-tone='better'] {
+  color: var(--ok-ink);
+}
+.delta[data-tone='worse'] {
+  color: var(--danger);
+}
+.spark {
+  margin-top: 10px;
+}
+.sparkLegend {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+/* ——— the time to merge ——— */
+
+.split {
+  display: grid;
+  gap: 10px;
+}
+.splitRow {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr) 72px;
+  align-items: center;
+  gap: 16px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.splitRow > :last-child {
+  text-align: right;
+  color: var(--t-1);
+  font-weight: 550;
+}
+.splitLabel {
+  white-space: nowrap;
+}
+.splitBar {
+  min-width: 0;
+}
+
+/* ——— how tasks ended, and what moved ——— */
+
+.pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 40px;
+  margin-top: 40px;
+}
+.pair > section {
+  margin-top: 0;
+}
+@container (max-width: 860px) {
+  .pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.endings {
+  display: grid;
+  gap: 8px;
+}
+.ending {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) 72px;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.ending > :last-child {
+  text-align: right;
+  color: var(--t-1);
+}
+.endingLabel {
+  white-space: nowrap;
+}
+.endingBars {
+  display: grid;
+  gap: 2px;
+}
+.barNow,
+.barBefore {
+  display: block;
+  min-width: 2px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--t-2);
+}
+.barBefore {
+  height: 4px;
+  background: var(--t-4);
+  opacity: 0.6;
+}
+.moves {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-2);
+}
+.moves li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 52px;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--t-1);
+}
+.moveWhat {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.moveDelta {
+  text-align: right;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.moveDelta[data-up] {
+  color: var(--t-1);
+}
+
+/* ——— every day ——— */
+
+.everyDay {
+  display: grid;
+  grid-template-columns: auto minmax(0, 320px);
+  justify-content: space-between;
+  align-items: start;
+  gap: 40px;
+}
+@container (max-width: 860px) {
+  .everyDay {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+.busiest {
+  font-size: 12.5px;
+}
+.busiestHead {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.busiest ol {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-2);
+}
+.busiest li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--t-1);
+}
+
+.calendar {
+  display: grid;
+  grid-template-columns: 28px auto;
+  justify-content: start;
+  gap: 8px;
+  overflow-x: auto;
+}
+.calDays {
+  display: grid;
+  grid-template-rows: 16px repeat(7, 15px);
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--t-3);
+}
+.calDays::before {
+  content: '';
+}
+.calDays span {
+  display: flex;
+  align-items: center;
+}
+.calGrid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--weeks), 15px);
+  gap: 3px;
+  padding-bottom: 32px;
+}
+.calWeek {
+  display: grid;
+  grid-template-rows: 16px repeat(7, 15px);
+  gap: 3px;
+}
+.calMonth {
+  font-size: 10.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.calDay {
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--project-clay) var(--heat, 0%), var(--n-1));
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.calDay[data-future] {
+  background: none;
+  box-shadow: none;
+}
+.calDay:not([data-future]):hover {
+  box-shadow: inset 0 0 0 1.5px var(--t-1);
+}
+.calSpan {
+  position: absolute;
+  bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  height: 20px;
+  padding-top: 6px;
+  border-top: 2px solid var(--t-4);
+  font-size: 11px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.calSpan[data-now] {
+  border-top-color: var(--t-1);
+  color: var(--t-1);
+  font-weight: 550;
+}

@@ -1,0 +1,157 @@
+/* B · The team: leads and reviewers as tables with thin bars, who reviews whom, who led week by week. */
+
+.table {
+  display: grid;
+  border-top: 1px solid var(--line-2);
+}
+.head,
+.row {
+  display: grid;
+  grid-template-columns: var(--cols);
+  align-items: center;
+  gap: 20px;
+  padding: 0 4px;
+}
+.head {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row {
+  min-height: 52px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--t-1);
+}
+.model {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-weight: 500;
+}
+.note {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--t-3);
+}
+.cell {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.track {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--track);
+}
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+/* ——— who reviews whom ——— */
+
+.matrix {
+  display: grid;
+  gap: 4px;
+}
+.corner {
+  align-self: end;
+  padding-bottom: 6px;
+  font-size: 11px;
+  color: var(--t-4);
+  white-space: nowrap;
+}
+.colHead {
+  align-self: end;
+  padding: 0 0 6px 10px;
+  font-size: 12px;
+}
+.rowHead {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+}
+.pair {
+  display: grid;
+  gap: 1px;
+  padding: 8px 10px;
+  border-radius: var(--r);
+  background: color-mix(in srgb, var(--project-clay) calc(var(--heat, 0%) * 0.32), var(--n-1));
+  box-shadow: 0 0 0 1px var(--line);
+}
+.pair[data-few] {
+  opacity: 0.55;
+}
+.pair[data-none] {
+  background: none;
+  box-shadow: none;
+  color: var(--t-4);
+  font-size: 12px;
+}
+.pairValue {
+  font-size: 15px;
+  font-weight: 550;
+  color: var(--t-1);
+  font-variant-numeric: tabular-nums;
+}
+.pairNote {
+  font-size: 11px;
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ——— who led ——— */
+
+.mix {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  height: 180px;
+  margin-bottom: 24px;
+  padding-top: 4px;
+  border-bottom: 1px solid var(--line-2);
+}
+.mixCol {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.mixStack {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+}
+.mixPart {
+  min-height: 2px;
+  border-radius: 2px;
+}
+.mixPart:hover {
+  filter: brightness(1.1);
+}
+.mixLabel {
+  position: absolute;
+  bottom: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.mixCol:nth-child(even) .mixLabel {
+  visibility: var(--every-other, visible);
+}
+
