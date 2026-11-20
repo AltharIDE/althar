@@ -17,7 +17,7 @@
     "./windowActions": "./src/windowActions.ts"
   },
   "scripts": {
-    "check": "vp check",
+    "check": "vp check && bun scripts/check-source-size.ts",
     "fix": "vp check --fix",
     "test": "vp test run",
     "probe:tools": "bun scripts/probe-tools.ts",
