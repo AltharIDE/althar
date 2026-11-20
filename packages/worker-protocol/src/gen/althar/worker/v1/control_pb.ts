@@ -12,7 +12,7 @@ import type { Message, UnknownEnum } from '@bufbuild/protobuf'
 export const file_althar_worker_v1_control: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'Ch5hbHRoYXIvd29ya2VyL3YxL2NvbnRyb2wucHJvdG8SEGFsdGhhci53b3JrZXIudjEihwIKC1dvcmtlckZyYW1lEi4KBWhlbGxvGAEgASgLMh0uYWx0aGFyLndvcmtlci52MS5Xb3JrZXJIZWxsb0gAEj0KEGRpYWdub3N0aWNfY2xhaW0YAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNDbGFpbUgAEj8KEWRpYWdub3N0aWNfcmVzdWx0GAMgASgLMiIuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljUmVzdWx0SAASPQoQZGlhZ25vc3RpY19yZW5ldxgEIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY1JlbmV3SABCCQoHcGF5bG9hZCKBAgoJSG9tZUZyYW1lEiwKBWhlbGxvGAEgASgLMhsuYWx0aGFyLndvcmtlci52MS5Ib21lSGVsbG9IABI9ChBkaWFnbm9zdGljX29mZmVyGAIgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT2ZmZXJIABI9ChBkaWFnbm9zdGljX3N0YXJ0GAMgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljU3RhcnRIABI9ChBkaWFnbm9zdGljX2xlYXNlGAQgASgLMiEuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljTGVhc2VIAEIJCgdwYXlsb2FkIogBCgtXb3JrZXJIZWxsbxIRCgl3b3JrZXJfaWQYASABKAkSEwoLbWluX3ZlcnNpb24YAiABKA0SEwoLbWF4X3ZlcnNpb24YAyABKA0SGwoTYWNjZXB0c19kaWFnbm9zdGljcxgEIAEoCBIfChdyZW5ld3NfZGlhZ25vc3RpY19sZWFzZRgFIAEoCCKdAQoJSG9tZUhlbGxvEg8KB2hvbWVfaWQYASABKAkSEQoJd29ya2VyX2lkGAIgASgJEhIKCnNlc3Npb25faWQYAyABKAkSDwoHdmVyc2lvbhgEIAEoDRIcChRzdXBwb3J0c19kaWFnbm9zdGljcxgFIAEoCBIpCiFzdXBwb3J0c19kaWFnbm9zdGljX2xlYXNlX3JlbmV3YWwYBiABKAgiTgoPRGlhZ25vc3RpY09mZmVyEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSGAoQY2xhaW1hYmxlX2Zvcl9tcxgDIAEoDSI0Cg9EaWFnbm9zdGljQ2xhaW0SEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCSJICg9EaWFnbm9zdGljU3RhcnQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRISCgpydW5fZm9yX21zGAMgASgNInsKEERpYWdub3N0aWNSZXN1bHQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRI0CgdvdXRjb21lGAMgASgOMiMuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT3V0Y29tZRIOCgZvdXRwdXQYBCABKAwiRgoPRGlhZ25vc3RpY1JlbmV3EhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0iWgoPRGlhZ25vc3RpY0xlYXNlEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0SEgoKcnVuX2Zvcl9tcxgEIAEoDSqYAQoRRGlhZ25vc3RpY091dGNvbWUSIgoeRElBR05PU1RJQ19PVVRDT01FX1VOU1BFQ0lGSUVEEAASIAocRElBR05PU1RJQ19PVVRDT01FX1NVQ0NFRURFRBABEh0KGURJQUdOT1NUSUNfT1VUQ09NRV9GQUlMRUQQAhIeChpESUFHTk9TVElDX09VVENPTUVfVU5LTk9XThADMmEKFFdvcmtlckNvbnRyb2xTZXJ2aWNlEkkKB0Nvbm5lY3QSHS5hbHRoYXIud29ya2VyLnYxLldvcmtlckZyYW1lGhsuYWx0aGFyLndvcmtlci52MS5Ib21lRnJhbWUoATABYgZwcm90bzM',
+    'Ch5hbHRoYXIvd29ya2VyL3YxL2NvbnRyb2wucHJvdG8SEGFsdGhhci53b3JrZXIudjEiwgIKC1dvcmtlckZyYW1lEi4KBWhlbGxvGAEgASgLMh0uYWx0aGFyLndvcmtlci52MS5Xb3JrZXJIZWxsb0gAEj0KEGRpYWdub3N0aWNfY2xhaW0YAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNDbGFpbUgAEj8KEWRpYWdub3N0aWNfcmVzdWx0GAMgASgLMiIuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljUmVzdWx0SAASPQoQZGlhZ25vc3RpY19yZW5ldxgEIAEoCzIhLmFsdGhhci53b3JrZXIudjEuRGlhZ25vc3RpY1JlbmV3SAASOQoOZGlhZ25vc3RpY19sb2cYBSABKAsyHy5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNMb2dIAEIJCgdwYXlsb2FkIoECCglIb21lRnJhbWUSLAoFaGVsbG8YASABKAsyGy5hbHRoYXIud29ya2VyLnYxLkhvbWVIZWxsb0gAEj0KEGRpYWdub3N0aWNfb2ZmZXIYAiABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNPZmZlckgAEj0KEGRpYWdub3N0aWNfc3RhcnQYAyABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNTdGFydEgAEj0KEGRpYWdub3N0aWNfbGVhc2UYBCABKAsyIS5hbHRoYXIud29ya2VyLnYxLkRpYWdub3N0aWNMZWFzZUgAQgkKB3BheWxvYWQiywEKC1dvcmtlckhlbGxvEhEKCXdvcmtlcl9pZBgBIAEoCRITCgttaW5fdmVyc2lvbhgCIAEoDRITCgttYXhfdmVyc2lvbhgDIAEoDRIbChNhY2NlcHRzX2RpYWdub3N0aWNzGAQgASgIEh8KF3JlbmV3c19kaWFnbm9zdGljX2xlYXNlGAUgASgIEh8KF3N0cmVhbXNfZGlhZ25vc3RpY19sb2dzGAYgASgIEiAKGGFjY2VwdHNfcHJvamVjdF9jb21tYW5kcxgHIAEoCCLiAQoJSG9tZUhlbGxvEg8KB2hvbWVfaWQYASABKAkSEQoJd29ya2VyX2lkGAIgASgJEhIKCnNlc3Npb25faWQYAyABKAkSDwoHdmVyc2lvbhgEIAEoDRIcChRzdXBwb3J0c19kaWFnbm9zdGljcxgFIAEoCBIpCiFzdXBwb3J0c19kaWFnbm9zdGljX2xlYXNlX3JlbmV3YWwYBiABKAgSIAoYc3VwcG9ydHNfZGlhZ25vc3RpY19sb2dzGAcgASgIEiEKGXN1cHBvcnRzX3Byb2plY3RfY29tbWFuZHMYCCABKAgiiQEKD0RpYWdub3N0aWNPZmZlchISCgphdHRlbXB0X2lkGAEgASgJEg0KBWZlbmNlGAIgASgJEhgKEGNsYWltYWJsZV9mb3JfbXMYAyABKA0SOQoPcHJvamVjdF9jb21tYW5kGAQgASgLMiAuYWx0aGFyLndvcmtlci52MS5Qcm9qZWN0Q29tbWFuZCI6Cg5Qcm9qZWN0Q29tbWFuZBISCgpwcm9qZWN0X2lkGAEgASgJEhQKDGNvbW1hbmRfbmFtZRgCIAEoCSI0Cg9EaWFnbm9zdGljQ2xhaW0SEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCSJICg9EaWFnbm9zdGljU3RhcnQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRISCgpydW5fZm9yX21zGAMgASgNInsKEERpYWdub3N0aWNSZXN1bHQSEgoKYXR0ZW1wdF9pZBgBIAEoCRINCgVmZW5jZRgCIAEoCRI0CgdvdXRjb21lGAMgASgOMiMuYWx0aGFyLndvcmtlci52MS5EaWFnbm9zdGljT3V0Y29tZRIOCgZvdXRwdXQYBCABKAwiRgoPRGlhZ25vc3RpY1JlbmV3EhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0iWgoPRGlhZ25vc3RpY0xlYXNlEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSEAoIc2VxdWVuY2UYAyABKA0SEgoKcnVuX2Zvcl9tcxgEIAEoDSJSCg1EaWFnbm9zdGljTG9nEhIKCmF0dGVtcHRfaWQYASABKAkSDQoFZmVuY2UYAiABKAkSDgoGb2Zmc2V0GAMgASgNEg4KBm91dHB1dBgEIAEoDCq6AQoRRGlhZ25vc3RpY091dGNvbWUSIgoeRElBR05PU1RJQ19PVVRDT01FX1VOU1BFQ0lGSUVEEAASIAocRElBR05PU1RJQ19PVVRDT01FX1NVQ0NFRURFRBABEh0KGURJQUdOT1NUSUNfT1VUQ09NRV9GQUlMRUQQAhIeChpESUFHTk9TVElDX09VVENPTUVfVU5LTk9XThADEiAKHERJQUdOT1NUSUNfT1VUQ09NRV9DQU5DRUxMRUQQBDJhChRXb3JrZXJDb250cm9sU2VydmljZRJJCgdDb25uZWN0Eh0uYWx0aGFyLndvcmtlci52MS5Xb3JrZXJGcmFtZRobLmFsdGhhci53b3JrZXIudjEuSG9tZUZyYW1lKAEwAWIGcHJvdG8z',
   )
 
 /**
@@ -50,6 +50,13 @@ export type WorkerFrame = Message<'althar.worker.v1.WorkerFrame'> & {
          */
         value: DiagnosticRenew
         case: 'diagnosticRenew'
+      }
+    | {
+        /**
+         * @generated from field: althar.worker.v1.DiagnosticLog diagnostic_log = 5;
+         */
+        value: DiagnosticLog
+        case: 'diagnosticLog'
       }
     | { case: undefined; value?: undefined }
 }
@@ -136,6 +143,16 @@ export type WorkerHello = Message<'althar.worker.v1.WorkerHello'> & {
    * @generated from field: bool renews_diagnostic_lease = 5;
    */
   renewsDiagnosticLease: boolean
+
+  /**
+   * @generated from field: bool streams_diagnostic_logs = 6;
+   */
+  streamsDiagnosticLogs: boolean
+
+  /**
+   * @generated from field: bool accepts_project_commands = 7;
+   */
+  acceptsProjectCommands: boolean
 }
 
 /**
@@ -179,6 +196,16 @@ export type HomeHello = Message<'althar.worker.v1.HomeHello'> & {
    * @generated from field: bool supports_diagnostic_lease_renewal = 6;
    */
   supportsDiagnosticLeaseRenewal: boolean
+
+  /**
+   * @generated from field: bool supports_diagnostic_logs = 7;
+   */
+  supportsDiagnosticLogs: boolean
+
+  /**
+   * @generated from field: bool supports_project_commands = 8;
+   */
+  supportsProjectCommands: boolean
 }
 
 /**
@@ -207,6 +234,11 @@ export type DiagnosticOffer = Message<'althar.worker.v1.DiagnosticOffer'> & {
    * @generated from field: uint32 claimable_for_ms = 3;
    */
   claimableForMs: number
+
+  /**
+   * @generated from field: althar.worker.v1.ProjectCommand project_command = 4;
+   */
+  projectCommand?: ProjectCommand | undefined
 }
 
 /**
@@ -214,6 +246,29 @@ export type DiagnosticOffer = Message<'althar.worker.v1.DiagnosticOffer'> & {
  * Use `create(DiagnosticOfferSchema)` to create a new message.
  */
 export const DiagnosticOfferSchema: GenMessage<DiagnosticOffer> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 4)
+
+/**
+ * The worker operator resolves this reference locally. No paths or argv are sent.
+ *
+ * @generated from message althar.worker.v1.ProjectCommand
+ */
+export type ProjectCommand = Message<'althar.worker.v1.ProjectCommand'> & {
+  /**
+   * @generated from field: string project_id = 1;
+   */
+  projectId: string
+
+  /**
+   * @generated from field: string command_name = 2;
+   */
+  commandName: string
+}
+
+/**
+ * Describes the message althar.worker.v1.ProjectCommand.
+ * Use `create(ProjectCommandSchema)` to create a new message.
+ */
+export const ProjectCommandSchema: GenMessage<ProjectCommand> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 5)
 
 /**
  * @generated from message althar.worker.v1.DiagnosticClaim
@@ -234,7 +289,7 @@ export type DiagnosticClaim = Message<'althar.worker.v1.DiagnosticClaim'> & {
  * Describes the message althar.worker.v1.DiagnosticClaim.
  * Use `create(DiagnosticClaimSchema)` to create a new message.
  */
-export const DiagnosticClaimSchema: GenMessage<DiagnosticClaim> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 5)
+export const DiagnosticClaimSchema: GenMessage<DiagnosticClaim> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 6)
 
 /**
  * A home persists the claim before sending this once. Zero means reconcile.
@@ -262,7 +317,7 @@ export type DiagnosticStart = Message<'althar.worker.v1.DiagnosticStart'> & {
  * Describes the message althar.worker.v1.DiagnosticStart.
  * Use `create(DiagnosticStartSchema)` to create a new message.
  */
-export const DiagnosticStartSchema: GenMessage<DiagnosticStart> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 6)
+export const DiagnosticStartSchema: GenMessage<DiagnosticStart> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 7)
 
 /**
  * @generated from message althar.worker.v1.DiagnosticResult
@@ -293,7 +348,7 @@ export type DiagnosticResult = Message<'althar.worker.v1.DiagnosticResult'> & {
  * Describes the message althar.worker.v1.DiagnosticResult.
  * Use `create(DiagnosticResultSchema)` to create a new message.
  */
-export const DiagnosticResultSchema: GenMessage<DiagnosticResult> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 7)
+export const DiagnosticResultSchema: GenMessage<DiagnosticResult> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 8)
 
 /**
  * Available only when both peers negotiate renewal. Sequence starts at one.
@@ -322,10 +377,11 @@ export type DiagnosticRenew = Message<'althar.worker.v1.DiagnosticRenew'> & {
  * Describes the message althar.worker.v1.DiagnosticRenew.
  * Use `create(DiagnosticRenewSchema)` to create a new message.
  */
-export const DiagnosticRenewSchema: GenMessage<DiagnosticRenew> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 8)
+export const DiagnosticRenewSchema: GenMessage<DiagnosticRenew> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 9)
 
 /**
  * A renewal confirms the current authority and never authorizes another start.
+ * A zero grant requests cancellation only for a negotiated project command.
  *
  * @generated from message althar.worker.v1.DiagnosticLease
  */
@@ -355,7 +411,41 @@ export type DiagnosticLease = Message<'althar.worker.v1.DiagnosticLease'> & {
  * Describes the message althar.worker.v1.DiagnosticLease.
  * Use `create(DiagnosticLeaseSchema)` to create a new message.
  */
-export const DiagnosticLeaseSchema: GenMessage<DiagnosticLease> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 9)
+export const DiagnosticLeaseSchema: GenMessage<DiagnosticLease> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 10)
+
+/**
+ * Raw stdout, emitted before the result on the claiming stream. Offsets are
+ * contiguous byte offsets from zero, independent of character encoding.
+ *
+ * @generated from message althar.worker.v1.DiagnosticLog
+ */
+export type DiagnosticLog = Message<'althar.worker.v1.DiagnosticLog'> & {
+  /**
+   * @generated from field: string attempt_id = 1;
+   */
+  attemptId: string
+
+  /**
+   * @generated from field: string fence = 2;
+   */
+  fence: string
+
+  /**
+   * @generated from field: uint32 offset = 3;
+   */
+  offset: number
+
+  /**
+   * @generated from field: bytes output = 4;
+   */
+  output: Uint8Array
+}
+
+/**
+ * Describes the message althar.worker.v1.DiagnosticLog.
+ * Use `create(DiagnosticLogSchema)` to create a new message.
+ */
+export const DiagnosticLogSchema: GenMessage<DiagnosticLog> = /*@__PURE__*/ messageDesc(file_althar_worker_v1_control, 11)
 
 /**
  * @generated from enum althar.worker.v1.DiagnosticOutcome
@@ -380,6 +470,11 @@ export const DiagnosticOutcome = {
    * @generated from enum value: DIAGNOSTIC_OUTCOME_UNKNOWN = 3;
    */
   UNKNOWN: 3,
+
+  /**
+   * @generated from enum value: DIAGNOSTIC_OUTCOME_CANCELLED = 4;
+   */
+  CANCELLED: 4,
 } as const
 
 /**

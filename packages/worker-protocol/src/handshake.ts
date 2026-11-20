@@ -31,6 +31,8 @@ export const negotiateWorkerHello = (
   binding: WorkerSessionBinding,
   diagnostics = false,
   renewals = false,
+  logs = false,
+  projectCommands = false,
 ): HomeFrame => {
   if (
     !validWorkerProtocolId(binding.homeId, 'home_') ||
@@ -52,6 +54,8 @@ export const negotiateWorkerHello = (
   if (hello.minVersion < 1 || hello.minVersion > WORKER_PROTOCOL_VERSION || hello.maxVersion < WORKER_PROTOCOL_VERSION)
     throw new WorkerHandshakeError('IncompatibleVersion')
   const supportsDiagnostics = diagnostics && hello.acceptsDiagnostics
+  const supportsDiagnosticLeaseRenewal = supportsDiagnostics && renewals && hello.renewsDiagnosticLease
+  const supportsDiagnosticLogs = supportsDiagnosticLeaseRenewal && logs && hello.streamsDiagnosticLogs
   return create(HomeFrameSchema, {
     payload: {
       case: 'hello',
@@ -59,7 +63,9 @@ export const negotiateWorkerHello = (
         ...binding,
         version: WORKER_PROTOCOL_VERSION,
         supportsDiagnostics,
-        supportsDiagnosticLeaseRenewal: supportsDiagnostics && renewals && hello.renewsDiagnosticLease,
+        supportsDiagnosticLeaseRenewal,
+        supportsDiagnosticLogs,
+        supportsProjectCommands: supportsDiagnosticLogs && projectCommands && hello.acceptsProjectCommands,
       },
     },
   })

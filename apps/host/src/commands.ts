@@ -111,12 +111,46 @@ export const runCommand = (options: HostOptions, io: HostIO, dependencies: HostD
         const attemptId = yield* workerOperation(configured.profile, (store) => store.enqueue(options.workerId ?? ''))
         return yield* out({ attemptId, state: 'queued' }, `Diagnostic queued as ${attemptId}`)
       }
+      case 'worker-project-run': {
+        const configured = yield* configuredHome(options)
+        const command = options.workerProject
+        if (command === undefined) return yield* new HostError({ code: 'InvalidConfig', message: 'Choose a project and command name' })
+        const attemptId = yield* workerOperation(
+          configured.profile,
+          (store) => store.enqueue(options.workerId ?? '', command),
+          command.projectId,
+        )
+        return yield* out({ attemptId, state: 'queued' }, `Project run queued as ${attemptId}`)
+      }
+      case 'worker-cancel': {
+        const configured = yield* configuredHome(options)
+        const result = yield* workerOperation(configured.profile, (store) => store.cancel(options.workerAttemptId ?? ''))
+        return yield* out(
+          result,
+          `${result.attemptId} ${result.state === 'claimed' && result.cancellationRequested ? 'cancellation requested' : result.state}`,
+        )
+      }
       case 'worker-result': {
         const configured = yield* configuredHome(options)
         const result = yield* workerOperation(configured.profile, (store) => store.result(options.workerAttemptId ?? ''))
         return yield* out(
           result,
           `${result.attemptId} ${result.state}${result.output === null ? '' : `\n${JSON.stringify(result.output)}`}`,
+        )
+      }
+      case 'worker-log': {
+        const configured = yield* configuredHome(options)
+        const log = yield* workerOperation(configured.profile, (store) =>
+          store.log(options.workerAttemptId ?? '', options.workerLogOffset ?? 0),
+        )
+        const readable = JSON.stringify(Buffer.from(log.bytesBase64, 'base64').toString('utf8')).replace(
+          /[\p{Cc}\p{Cf}]/gu,
+          (character) => `\\u{${character.codePointAt(0)?.toString(16)}}`,
+        )
+        return yield* out(
+          log,
+          `${log.attemptId} ${log.state} (${log.offset}–${log.nextOffset})
+${readable}`,
         )
       }
       case 'pair': {

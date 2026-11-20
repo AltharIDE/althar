@@ -32,18 +32,15 @@ export const privateDirectory = async (path: string, create = false): Promise<st
 }
 
 /** Reads at most maximum+1 bytes, even if the file grows after stat. Never follows a substituted link. */
-export const readPrivate = async (path: string, maximum: number, singleLink = false): Promise<Buffer | null> => {
+export const readPrivate = async (path: string, maximum: number, links: boolean | 'snapshot' = false): Promise<Buffer | null> => {
   let handle: fs.FileHandle | undefined
   try {
     handle = await fs.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
     const stat = await handle.stat()
-    if (
-      !stat.isFile() ||
-      !owned(stat.uid) ||
-      (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) ||
-      (singleLink && stat.nlink !== 1)
-    )
-      throw unsafe()
+    // A published snapshot can be replaced after open. The old descriptor
+    // still holds the complete, private file even when its last name is gone.
+    const unexpectedLinks = links === 'snapshot' ? stat.nlink > 1 : links && stat.nlink !== 1
+    if (!stat.isFile() || !owned(stat.uid) || (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) || unexpectedLinks) throw unsafe()
     if (stat.size > maximum) throw new HostError({ code: 'CorruptVault', message: 'A private host file exceeds its size limit.' })
     const buffer = Buffer.alloc(maximum + 1)
     let length = 0

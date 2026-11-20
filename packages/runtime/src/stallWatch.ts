@@ -246,7 +246,7 @@ export const makeStallWatch = (limits: StallLimits) => {
   /** What happened, at `now`: what to do about it. */
   const observe = (event: LiveEvent, now: number): ReadonlyArray<StallAction> => {
     // What Althar runs of a project itself is no thread's, and no turn's work.
-    if (event._tag === 'Launches' || event._tag === 'PlanUsage') return []
+    if (event._tag === 'Launches' || event._tag === 'Terminals' || event._tag === 'PlanUsage') return []
     // A draft as far as written is what an agent's own events said, heard already.
     if (event._tag === 'Drafting') return []
     // Nor is the computer's connection.

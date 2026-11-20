@@ -60,7 +60,7 @@ const locked = () => failure('LockHeld', 'Another host setup is running. Check s
 const invalidRelease = (detail: string) =>
   failure('SignatureMismatch', `The portable release failed signature, expiration or platform verification. ${detail}`)
 const readState = async (root: string): Promise<State | null> => {
-  const bytes = await readPrivate(statePath(root), 32 * 1024, true)
+  const bytes = await readPrivate(statePath(root), 32 * 1024, 'snapshot')
   if (bytes === null) return null
   return Schema.decodeUnknownSync(State)(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)))
 }
@@ -72,7 +72,7 @@ const unitActive = async (system: SetupSystem) => {
     return false
   }
 }
-const readOutput = async (root: string) => (await readPrivate(logPath(root), LOG_LIMIT, true))?.toString('utf8') ?? ''
+const readOutput = async (root: string) => (await readPrivate(logPath(root), LOG_LIMIT, 'snapshot'))?.toString('utf8') ?? ''
 const appendOutput = async (root: string, text: string) => {
   const next = Buffer.from((await readOutput(root)) + text)
   await writePrivate(logPath(root), next.subarray(Math.max(0, next.length - LOG_LIMIT)), true)

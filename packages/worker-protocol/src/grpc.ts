@@ -13,6 +13,7 @@ import {
   WorkerHandshakeError,
   negotiateWorkerHello,
   validWorkerProtocolId,
+  type DiagnosticLog,
   type DiagnosticOffer,
   type DiagnosticResult,
   type HomeFrame,
@@ -37,18 +38,25 @@ interface HomeWorkerTransport {
   /** Look up a currently enrolled worker by SHA-256 of its verified certificate in DER format. */
   readonly workerForCertificate: (fingerprint: string) => string | undefined
   readonly diagnostics?: {
-    readonly next: (workerId: string) => Omit<DiagnosticOffer, '$typeName'> | undefined
+    readonly cancellationRequested?: (workerId: string, attemptId: string, fence: string) => boolean
+    readonly next: (workerId: string, supportsProjectCommands?: boolean) => Omit<DiagnosticOffer, '$typeName'> | undefined
     readonly claim: (workerId: string, attemptId: string, fence: string, maximumMs?: number) => number
     readonly renew?: (workerId: string, attemptId: string, fence: string, maximumMs: number) => number
+    readonly appendLog?: (workerId: string, chunk: DiagnosticLog) => boolean
     readonly complete: (workerId: string, result: DiagnosticResult) => boolean
   }
 }
 
 export const MAX_DIAGNOSTIC_OUTPUT = 1024
+export const MAX_PROJECT_LOG_BYTES = 64 * 1024
+export const MAX_DIAGNOSTIC_LOG_CHUNK = 256
 export const DIAGNOSTIC_LEASE_MS = 15_000
 export const DIAGNOSTIC_RENEWAL_MS = 2_000
+export const PROJECT_RUNTIME_MS = 60_000
 const DIAGNOSTIC_RUNTIME_MS = 3_000
 const MAX_DIAGNOSTIC_RENEWALS = 8
+const MAX_DIAGNOSTIC_LOG_CHUNKS = 16
+const MAX_PROJECT_LOG_CHUNKS = 1024
 const frame = (payload: HomeFrame['payload']) => Buffer.from(toBinary(HomeFrameSchema, create(HomeFrameSchema, { payload })))
 
 export const workerCertificateFingerprint = (der: Uint8Array): string => createHash('sha256').update(der).digest('hex')
@@ -86,6 +94,9 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
         let offer: Omit<DiagnosticOffer, '$typeName'> | undefined
         let askedToStart = false
         let supportsRenewal = false
+        let supportsLogs = false
+        let logChunks = 0
+        let cancellationSent = false
         let execution: { until: number; budget: number; sequence: number } | undefined
         let finished = false
         const reject = (code: status, message: string): void => {
@@ -128,18 +139,23 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
                 { homeId: home.homeId, workerId, sessionId: `wsn_${randomUUID().replaceAll('-', '')}` },
                 diagnostics !== undefined,
                 diagnostics?.renew !== undefined,
+                diagnostics?.appendLog !== undefined,
+                diagnostics?.cancellationRequested !== undefined,
               )
               call.write(Buffer.from(toBinary(HomeFrameSchema, reply)))
               if (reply.payload.case === 'hello' && reply.payload.value.supportsDiagnostics) {
                 supportsRenewal = reply.payload.value.supportsDiagnosticLeaseRenewal
+                supportsLogs = reply.payload.value.supportsDiagnosticLogs
                 if (connected.has(workerId)) return reject(status.ALREADY_EXISTS, 'This worker already has an active exchange')
                 connected.add(workerId)
                 ownsStream = true
-                offer = diagnostics?.next(workerId)
+                offer = diagnostics?.next(workerId, reply.payload.value.supportsProjectCommands)
+                if (offer?.projectCommand !== undefined && !reply.payload.value.supportsProjectCommands)
+                  return reject(status.FAILED_PRECONDITION, 'This worker does not support project commands')
               }
               if (offer === undefined) return finish()
               clear()
-              timer = setTimeout(expired, DIAGNOSTIC_LEASE_MS + 5_000)
+              timer = setTimeout(expired, DIAGNOSTIC_LEASE_MS + 5_000 + (offer.projectCommand === undefined ? 0 : PROJECT_RUNTIME_MS))
               call.write(frame({ case: 'diagnosticOffer', value: create(DiagnosticOfferSchema, offer) }))
               return
             }
@@ -147,7 +163,10 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
             if (
               offer === undefined ||
               diagnostics === undefined ||
-              (payload.case !== 'diagnosticClaim' && payload.case !== 'diagnosticRenew' && payload.case !== 'diagnosticResult') ||
+              (payload.case !== 'diagnosticClaim' &&
+                payload.case !== 'diagnosticRenew' &&
+                payload.case !== 'diagnosticLog' &&
+                payload.case !== 'diagnosticResult') ||
               payload.value.attemptId !== offer.attemptId ||
               payload.value.fence !== offer.fence
             ) {
@@ -160,7 +179,12 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
               const at = performance.now()
               const runForMs = diagnostics.claim(workerId, attemptId, fence, supportsRenewal ? DIAGNOSTIC_RENEWAL_MS : undefined)
               if (runForMs === 0) return reject(status.FAILED_PRECONDITION, 'The start lease is no longer available')
-              if (supportsRenewal) execution = { until: at + runForMs, budget: at + DIAGNOSTIC_RUNTIME_MS, sequence: 0 }
+              if (supportsRenewal)
+                execution = {
+                  until: at + runForMs,
+                  budget: at + (offer.projectCommand === undefined ? DIAGNOSTIC_RUNTIME_MS : PROJECT_RUNTIME_MS),
+                  sequence: 0,
+                }
               call.write(frame({ case: 'diagnosticStart', value: create(DiagnosticStartSchema, { attemptId, fence, runForMs }) }))
               return
             }
@@ -169,26 +193,63 @@ export const bindWorkerHandshake = async (address: string, home: HomeWorkerTrans
               const at = performance.now()
               if (
                 execution === undefined ||
+                cancellationSent ||
                 sequence !== execution.sequence + 1 ||
-                sequence > MAX_DIAGNOSTIC_RENEWALS ||
+                sequence > (offer.projectCommand === undefined ? MAX_DIAGNOSTIC_RENEWALS : PROJECT_RUNTIME_MS / 250) ||
                 at >= execution.until
               ) {
                 return reject(status.FAILED_PRECONDITION, 'There is no current execution lease to renew on this stream')
               }
+              const project = offer.projectCommand !== undefined
+              const worker = workerId
+              const sendCancellation = () => {
+                if (!project || !diagnostics.cancellationRequested?.(worker, attemptId, fence)) return false
+                cancellationSent = true
+                call.write(
+                  frame({ case: 'diagnosticLease', value: create(DiagnosticLeaseSchema, { attemptId, fence, sequence, runForMs: 0 }) }),
+                )
+                return true
+              }
+              if (sendCancellation()) return
               const maximumMs = Math.min(DIAGNOSTIC_RENEWAL_MS, Math.floor(execution.budget - at))
               if (maximumMs <= 0) return reject(status.FAILED_PRECONDITION, 'The diagnostic has reached its execution limit')
               const runForMs = diagnostics.renew?.(workerId, attemptId, fence, maximumMs) ?? 0
-              if (runForMs === 0) return reject(status.FAILED_PRECONDITION, 'The execution lease has expired')
+              if (runForMs === 0) {
+                if (sendCancellation()) return
+                return reject(status.FAILED_PRECONDITION, 'The execution lease has expired')
+              }
               execution = { ...execution, until: at + runForMs, sequence }
               call.write(frame({ case: 'diagnosticLease', value: create(DiagnosticLeaseSchema, { attemptId, fence, sequence, runForMs }) }))
               return
             }
+            if (payload.case === 'diagnosticLog') {
+              if (!supportsLogs || execution === undefined || performance.now() >= execution.until) {
+                return reject(status.FAILED_PRECONDITION, 'This stream has no live grant for diagnostic logs')
+              }
+              const chunk = payload.value
+              if (
+                logChunks >= (offer.projectCommand === undefined ? MAX_DIAGNOSTIC_LOG_CHUNKS : MAX_PROJECT_LOG_CHUNKS) ||
+                chunk.output.length === 0 ||
+                chunk.output.length > MAX_DIAGNOSTIC_LOG_CHUNK ||
+                chunk.offset + chunk.output.length > (offer.projectCommand === undefined ? MAX_DIAGNOSTIC_OUTPUT : MAX_PROJECT_LOG_BYTES)
+              ) {
+                return reject(status.INVALID_ARGUMENT, 'The diagnostic log chunk exceeds its size limit')
+              }
+              if (!diagnostics.appendLog?.(workerId, chunk)) {
+                return reject(status.FAILED_PRECONDITION, 'The diagnostic log cursor or lease is no longer current')
+              }
+              logChunks += 1
+              return
+            }
             const result = payload.value
             if (
-              !validWorkerProtocolId(result.attemptId, 'watt_') ||
+              !validWorkerProtocolId(result.attemptId, offer.projectCommand === undefined ? 'watt_' : 'wpr_') ||
               !validWorkerProtocolId(result.fence, 'wfn_') ||
-              ![DiagnosticOutcome.SUCCEEDED, DiagnosticOutcome.FAILED, DiagnosticOutcome.UNKNOWN].some(
-                (outcome) => outcome === result.outcome,
+              !(
+                [DiagnosticOutcome.SUCCEEDED, DiagnosticOutcome.FAILED, DiagnosticOutcome.UNKNOWN].some(
+                  (outcome) => outcome === result.outcome,
+                ) ||
+                (offer.projectCommand !== undefined && result.outcome === DiagnosticOutcome.CANCELLED)
               ) ||
               result.output.length > MAX_DIAGNOSTIC_OUTPUT ||
               (result.outcome === DiagnosticOutcome.UNKNOWN && result.output.length !== 0)
