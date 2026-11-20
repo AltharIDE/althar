@@ -1,11 +1,13 @@
-import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import {
+  ASK_EVERY,
   checkSetup,
+  codexCommand,
   type Converse,
   frontOf,
   matcherProblem,
@@ -13,6 +15,7 @@ import {
   parseCodexAnswers,
   pluginProblem,
   readSetup,
+  scanSetup,
   type SetupIo,
   setupParts,
 } from '../src/setupHealth'
@@ -60,10 +63,28 @@ describe('frontmatter as Claude Code reads it', () => {
 })
 
 describe('a hook matcher', () => {
-  it('that names a slip of one of Claude Code’s tools never matches', () => {
-    expect(matcherProblem('Bashh')).toBe('Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”.')
-    expect(matcherProblem('Edit|write')).toBe('Its matcher “write” matches no tool, so it never runs. Claude Code calls it “Write”.')
-    expect(matcherProblem('(unclosed')).toBe('Its matcher “(unclosed” can’t be read as a pattern, so it never runs.')
+  it('that names only slips of Claude Code’s tools never matches', () => {
+    expect(matcherProblem('Bashh')).toEqual({
+      why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”.',
+      runs: false,
+    })
+    expect(matcherProblem('bash|wrte')).toEqual({
+      why: 'Its matcher “bash|wrte” matches no tool, so it never runs. Claude Code calls them “Bash” and “Write”.',
+      runs: false,
+    })
+    expect(matcherProblem('(unclosed')).toEqual({
+      why: 'Its matcher “(unclosed” can’t be read as a pattern, so it never runs.',
+      runs: false,
+    })
+  })
+
+  it('read as a whole: one that also names a tool it has still runs for that one', () => {
+    expect(matcherProblem('Edit|write')).toEqual({
+      why: '“write” in its matcher “Edit|write” matches no tool: Claude Code calls it “Write”. It still runs for the rest.',
+      runs: true,
+    })
+    // A name Althar doesn't know may be a tool it hasn't heard of: the hook may run for it.
+    expect(matcherProblem('MyOwnTool|Bashh')?.runs).toBe(true)
   })
 
   it('that matches every tool, a tool it has, a server’s, a pattern, or one Althar doesn’t know, is left alone', () => {
@@ -72,15 +93,53 @@ describe('a hook matcher', () => {
   })
 })
 
-describe('a plugin’s manifest', () => {
-  it('that keeps the plugin from loading, or a field from counting', () => {
-    expect(pluginProblem('{ nope')).toBe('Its plugin.json isn’t valid JSON, so Claude Code doesn’t load the plugin.')
-    expect(pluginProblem('{"version":"1.0.0"}')).toBe('Its plugin.json gives no name, so Claude Code doesn’t load the plugin.')
-    expect(pluginProblem('{"name":"p","version":1}')).toBe('Its plugin.json’s “version” isn’t text, so Claude Code ignores it.')
-    expect(pluginProblem('{"name":"p","keywords":["a",2]}')).toBe(
-      'Its plugin.json’s “keywords” isn’t a list of words, so Claude Code ignores it.',
+describe('a plugin’s manifest, as Claude Code 2.1.326 reads it', () => {
+  it('that keeps the plugin from loading', () => {
+    const refused = (text: string) => {
+      const problem = pluginProblem(text)
+      expect(problem?.loads).toBe(false)
+      return problem?.why
+    }
+    expect(refused('{ nope')).toBe('Its plugin.json isn’t valid JSON, so Claude Code doesn’t load the plugin.')
+    expect(refused('{"version":"1.0.0"}')).toBe('Its plugin.json gives no name, so Claude Code doesn’t load the plugin.')
+    expect(refused('{"name":"my plugin"}')).toBe(
+      'Its plugin.json’s name “my plugin” has a space in it, so Claude Code doesn’t load the plugin.',
     )
-    expect(pluginProblem('{"name":"p","version":"1","repository":{"url":"x"},"keywords":["a"]}')).toBeUndefined()
+    // `version` isn't one of the fields it drops: of the wrong kind, the whole manifest fails.
+    expect(refused('{"name":"p","version":1}')).toBe('Its plugin.json’s “version” isn’t text, so Claude Code doesn’t load the plugin.')
+    expect(refused('{"name":"p","defaultEnabled":"yes"}')).toBe(
+      'Its plugin.json’s “defaultEnabled” isn’t true or false, so Claude Code doesn’t load the plugin.',
+    )
+  })
+
+  it('whose fields it drops, loading the plugin without them', () => {
+    const ignored = (text: string) => {
+      const problem = pluginProblem(text)
+      expect(problem?.loads).toBe(true)
+      return problem?.why
+    }
+    expect(ignored('{"name":"p","keywords":"a, b"}')).toBe(
+      '“keywords” in its plugin.json is malformed, so Claude Code ignores it. The plugin still loads.',
+    )
+    for (const keywords of ['["a",2]', '3', '{"a":1}', 'null'])
+      expect(ignored(`{"name":"p","keywords":${keywords}}`)).toMatch(/^“keywords” in its plugin.json is malformed/)
+    expect(ignored('{"name":"p","description":{"en":"x"},"homepage":"not a link","author":"me"}')).toBe(
+      '“description”, “author” and “homepage” in its plugin.json are malformed, so Claude Code ignores them. The plugin still loads.',
+    )
+    expect(ignored('{"name":"p","engines":{"claude-code":2}}')).toBe(
+      'Its plugin.json’s Claude Code range (“engines”) isn’t text, so Claude Code ignores it. The plugin still loads.',
+    )
+    expect(ignored('{"name":"p","engines":">=2.1"}')).toBe(
+      'Its plugin.json’s “engines” isn’t an object, so Claude Code ignores it. The plugin still loads.',
+    )
+  })
+
+  it('that it reads whole', () => {
+    expect(
+      pluginProblem(
+        '{"name":"p","version":"1","description":"d","author":{"name":"A","email":"a@b.c"},"homepage":"https://x.dev","repository":"https://github.com/a/b","license":"MIT","keywords":["a"],"engines":{"claude-code":">=2.1.0","other":3}}',
+      ),
+    ).toBeUndefined()
   })
 })
 
@@ -152,10 +211,16 @@ describe('what the agents say', () => {
 })
 
 describe('the parts of the person’s setup that don’t load', () => {
-  it('by Althar’s own reading, before any agent is asked: one part each broken file', () => {
+  it('by Althar’s own reading, before any agent is asked: one part each broken file', async () => {
     const io = homeWith({
       '.claude/settings.json': JSON.stringify({
-        hooks: { PreToolUse: [{ matcher: 'Bashh', hooks: [{ type: 'command', command: 'true' }] }] },
+        hooks: {
+          PreToolUse: [
+            { matcher: 'Bashh', hooks: [{ type: 'command', command: 'true' }] },
+            { matcher: 'Edit', hooks: [{ type: 'command', command: 'true' }] },
+            { matcher: 'Edit|wrte', hooks: [{ type: 'command', command: 'true' }] },
+          ],
+        },
         enabledPlugins: { 'fine@market': true, 'off@market': false },
       }),
       '.claude/agents/review-agent.md': '---\nname: review-agent\n\tdescription: x\n---\nb',
@@ -182,14 +247,16 @@ describe('the parts of the person’s setup that don’t load', () => {
         },
       }),
     )
-    const parts = setupParts(io).map(({ at: _at, ...part }) => part)
+    const parts = (await scanSetup(io)).map(({ at: _at, file: _file, ...part }) => part)
     expect(parts).toEqual([
       {
         agent: 'claude',
         kind: 'hook',
         name: 'hooks.PreToolUse',
         where: '~/.claude/settings.json',
-        why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”.',
+        // Each broken matcher of the event, not only the first.
+        why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”. “wrte” in its matcher “Edit|wrte” matches no tool: Claude Code calls it “Write”. It still runs for the rest.',
+        loads: false,
         by: null,
       },
       expect.objectContaining({
@@ -203,10 +270,16 @@ describe('the parts of the person’s setup that don’t load', () => {
         name: 'review-agent.md',
         where: '~/.claude/agents/review-agent.md',
         why: 'Its frontmatter can’t be read, so Claude Code leaves it out.',
+        loads: false,
         by: null,
       },
-      expect.objectContaining({ kind: 'command', name: 'broken.md', where: '~/.claude/commands/deep/broken.md' }),
-      expect.objectContaining({ kind: 'plugin', name: 'fine', why: 'Its plugin.json’s “version” isn’t text, so Claude Code ignores it.' }),
+      expect.objectContaining({ kind: 'command', name: 'broken.md', where: '~/.claude/commands/deep/broken.md', loads: true }),
+      expect.objectContaining({
+        kind: 'plugin',
+        name: 'fine',
+        why: 'Its plugin.json’s “version” isn’t text, so Claude Code doesn’t load the plugin.',
+        loads: false,
+      }),
       expect.objectContaining({ agent: 'codex', kind: 'config', name: 'config.toml', where: '~/.codex/config.toml', by: null }),
       {
         agent: 'codex',
@@ -214,20 +287,21 @@ describe('the parts of the person’s setup that don’t load', () => {
         name: 'half',
         where: '~/.agents/skills/half/SKILL.md',
         why: 'Its frontmatter gives no description, so Codex leaves it out.',
+        loads: false,
         by: null,
       },
     ])
     expect(parts.find((part) => part.kind === 'config')?.why).toMatch(/^Codex can’t read it, so it uses its defaults: /)
   })
 
-  it('a settings file that isn’t JSON is one part, and nothing in it is read further', () => {
+  it('a settings file that isn’t JSON is one part, and nothing in it is read further', async () => {
     const io = homeWith({ '.claude/settings.json': '{ "hooks": ' })
-    expect(setupParts(io).map((part) => [part.kind, part.why])).toEqual([
+    expect((await scanSetup(io)).map((part) => [part.kind, part.why])).toEqual([
       ['settings', 'It isn’t valid JSON, so Claude Code skips the whole file.'],
     ])
   })
 
-  it('by what the agents said, while each file is as it was when they said it', () => {
+  it('by what the agents said, while each file is as it was when they said it', async () => {
     const io = homeWith({
       '.claude/settings.json': JSON.stringify({ permissions: { defaultMode: 'weird' } }),
       '.claude/agents/good.md': agent('good'),
@@ -258,7 +332,7 @@ describe('the parts of the person’s setup that don’t load', () => {
         skills: [{ path: join(io.homeDir, '.agents/skills/bad/SKILL.md'), message: 'invalid YAML' }],
       },
     })
-    expect(setupParts(io).map(({ kind, name, why, by }) => ({ kind, name, why, by }))).toEqual([
+    expect((await scanSetup(io)).map(({ kind, name, why, by }) => ({ kind, name, why, by }))).toEqual([
       {
         kind: 'settings',
         name: 'settings.json',
@@ -278,19 +352,78 @@ describe('the parts of the person’s setup that don’t load', () => {
       ['.claude/agents/shadowed.md', agent('shadowed')],
     ] as const)
       writeFileSync(join(io.homeDir, path), text)
-    expect(setupParts(io)).toEqual([])
+    expect(await scanSetup(io)).toEqual([])
   })
 
-  it('what an agent said a day ago no longer stands', () => {
+  it('what an agent said a day ago no longer stands', async () => {
     const io = homeWith({ '.claude/agents/shadowed.md': agent('shadowed') })
     keep(io, { checkedAt: '2026-11-06T09:00:00.000Z', claude: { at: '2026-11-06T09:00:00.000Z', agents: [] } })
-    expect(setupParts(io)).toEqual([])
+    expect(await scanSetup(io)).toEqual([])
   })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a file that is there but can’t be opened says so, and what an agent said of it still stands',
+    async () => {
+      const io = homeWith({
+        '.claude/settings.json': '{}',
+        '.claude/agents/locked.md': agent('locked'),
+        '.codex/config.toml': 'model = 3\n',
+      })
+      for (const path of ['.claude/settings.json', '.claude/agents/locked.md', '.codex/config.toml']) chmodSync(join(io.homeDir, path), 0)
+      expect((await scanSetup(io)).map(({ kind, why, by }) => ({ kind, why, by }))).toEqual([
+        { kind: 'settings', why: 'It can’t be opened (permission denied), so Claude Code can’t read it.', by: null },
+        { kind: 'agent', why: 'It can’t be opened (permission denied), so Claude Code can’t read it.', by: null },
+        { kind: 'config', why: 'It can’t be opened (permission denied), so Codex can’t read it.', by: null },
+      ])
+      keep(io, {
+        checkedAt: ASKED,
+        claude: {
+          at: ASKED,
+          errors: [{ file: join(io.homeDir, '.claude/settings.json'), path: '', message: 'EACCES: permission denied' }],
+        },
+        codex: { at: ASKED, config: [{ path: join(io.homeDir, '.codex/config.toml'), words: 'Codex couldn’t read it.' }] },
+      })
+      expect((await scanSetup(io)).filter((part) => part.by !== null).map(({ kind, why }) => [kind, why])).toEqual([
+        ['settings', 'Claude Code skips the whole file: EACCES: permission denied'],
+        ['config', 'Codex couldn’t read it.'],
+      ])
+    },
+  )
 
   it('a damaged record is none at all', () => {
     const io = homeWith({})
     keep(io, 'not a record')
     expect(readSetup(io)).toEqual({ checkedAt: null })
+  })
+})
+
+describe('what the agents say, as it comes', () => {
+  it('waits for each answer whole: an id in the first piece is never taken for the answer', () => {
+    const answer =
+      '{"id":2,"result":{"data":[{"errors":[{"path":"/h/.agents/skills/bad/SKILL.md","message":"missing field `description`"}]}]}}'
+    const first = `{"id":1,"result":{}}\n${answer.slice(0, 20)}`
+    // A Codex that stopped there said nothing that is kept.
+    expect(parseCodexAnswers(first, { homeDir: '/h' })).toBeUndefined()
+    expect(parseCodexAnswers(`${first}${answer.slice(20)}\n`, { homeDir: '/h' })?.skills).toEqual([
+      { path: '/h/.agents/skills/bad/SKILL.md', message: 'missing field `description`' },
+    ])
+    const settings = JSON.stringify({
+      type: 'control_response',
+      response: { subtype: 'success', request_id: 'althar-settings', response: { errors: [] } },
+    })
+    const started = JSON.stringify({
+      type: 'control_response',
+      response: { subtype: 'success', request_id: 'althar-initialize', response: { agents: [] } },
+    })
+    expect(parseClaudeAnswers(`${started}\n${settings.slice(0, 60)}`)).toBeUndefined()
+    expect(parseClaudeAnswers(`${started}\n${settings}`)).toEqual({ agents: [], errors: [] })
+  })
+
+  it('asks the Codex on the device in a Flatpak, by the bridge its sessions run it by', () => {
+    expect(codexCommand({})).toBe('codex')
+    // Outside a Flatpak a person's own CODEX_PATH never changes which Codex is asked.
+    expect(codexCommand({ CODEX_PATH: '/x/codex' })).toBe('codex')
+    expect(codexCommand({ FLATPAK_ID: 'dev.althar.app', CODEX_PATH: '/app/bin/althar-host-codex' })).toBe('/app/bin/althar-host-codex')
   })
 })
 
@@ -314,7 +447,12 @@ describe('asking the agents', () => {
       return printed
     }
     const kept = await checkSetup(io, converse)
-    expect(kept).toEqual({ checkedAt: NOW, claude: { at: NOW, agents: ['a'], errors: [] }, codex: { at: NOW, config: [], skills: [] } })
+    expect(kept).toEqual({
+      checkedAt: NOW,
+      claude: { at: NOW, agents: ['a'], errors: [] },
+      codex: { at: NOW, config: [], skills: [] },
+      parts: [],
+    })
     expect(readSetup(io)).toEqual(kept)
     const claude = asked.find((one) => one.command === 'claude')!
     expect(claude.args).toEqual(expect.arrayContaining(['-p', '--strict-mcp-config', '--settings', '{"disableAllHooks":true}']))
@@ -329,6 +467,32 @@ describe('asking the agents', () => {
     keep(io, { checkedAt: ASKED, claude: { at: ASKED, agents: ['kept'] }, codex: { at: ASKED, config: [] } })
     const converse: Converse = async (command) => (command === 'codex' ? 'error: no such command' : undefined)
     const kept = await checkSetup(io, converse)
-    expect(kept).toEqual({ checkedAt: NOW, claude: { at: ASKED, agents: ['kept'] }, codex: { at: ASKED, config: [] } })
+    expect(kept).toEqual({ checkedAt: NOW, claude: { at: ASKED, agents: ['kept'] }, codex: { at: ASKED, config: [] }, parts: [] })
+  })
+
+  it('asks the agents at most every few minutes, and reads the files each time, keeping what it found for Settings', async () => {
+    const io = homeWith({ '.claude/agents/nodesc.md': '---\nname: nodesc\n---\nb' })
+    const lately = new Date(Date.parse(NOW) - ASK_EVERY / 2).toISOString()
+    keep(io, { checkedAt: lately, claude: { at: lately, agents: [] } })
+    let asked = 0
+    const converse: Converse = async () => {
+      asked += 1
+      return undefined
+    }
+    const first = await checkSetup(io, converse)
+    expect(asked).toBe(0)
+    expect(first.parts?.map((part) => part.name)).toEqual(['nodesc.md'])
+    // Settings reads what was found, without reading the files again.
+    expect(setupParts(io).map((part) => part.name)).toEqual(['nodesc.md'])
+    writeFileSync(join(io.homeDir, '.claude/agents/nodesc.md'), agent('nodesc'))
+    expect(setupParts(io).map((part) => part.name)).toEqual(['nodesc.md'])
+    expect((await checkSetup(io, converse)).parts).toEqual([])
+    expect(setupParts(io)).toEqual([])
+    expect(asked).toBe(0)
+
+    // Its last ask a while ago, both are asked (Claude Code's own, then the copy Althar's sessions run on).
+    keep(io, { checkedAt: ASKED })
+    await checkSetup(io, converse)
+    expect(asked).toBeGreaterThanOrEqual(2)
   })
 })

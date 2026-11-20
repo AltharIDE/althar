@@ -7,13 +7,17 @@ import { AgentTabList, AgentTabPanel, AgentTabs } from '../AgentTabs/AgentTabs'
 import { ModelSwitches } from '../ModelSwitches/ModelSwitches'
 import { OwnSetup, type OwnSetupPartView, type OwnSetupProps } from './OwnSetup'
 
-/** What of the person's own Claude Code setup it doesn't load, as the runtime says it: the agent's words, else Althar's. */
+/**
+ * What of the person's own Claude Code setup it doesn't load as written, as the runtime says it: the agent's words,
+ * else Althar's. Its settings.json loads, so its hooks and the plugins it turns on are read; one it skips whole is
+ * `SkippedSettings`, where neither is.
+ */
 const CLAUDE_PARTS: readonly OwnSetupPartView[] = [
   {
-    id: 'settings',
-    name: 'settings.json',
+    id: 'hook',
+    name: 'hooks.PreToolUse',
     where: '~/.claude/settings.json',
-    why: 'Claude Code skips the whole file: permissions.defaultMode: Invalid value. Expected one of: "acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"',
+    why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”.',
   },
   {
     id: 'agent',
@@ -22,16 +26,16 @@ const CLAUDE_PARTS: readonly OwnSetupPartView[] = [
     why: 'Its frontmatter can’t be read, so Claude Code leaves it out.',
   },
   {
-    id: 'hook',
-    name: 'hooks.PreToolUse',
-    where: '~/.claude/settings.json',
-    why: 'Its matcher “Bashh” matches no tool, so it never runs. Claude Code calls it “Bash”.',
+    id: 'command',
+    name: 'ship.md',
+    where: '~/.claude/commands/ship.md',
+    why: 'Its frontmatter can’t be read, so Claude Code ignores what it sets.',
   },
   {
     id: 'plugin',
     name: 'release-tools',
     where: '~/.claude/plugins/cache/charrette/release-tools/1.2.0/.claude-plugin/plugin.json',
-    why: 'Its plugin.json’s “version” isn’t text, so Claude Code ignores it.',
+    why: '“keywords” in its plugin.json is malformed, so Claude Code ignores it. The plugin still loads.',
   },
 ]
 
@@ -71,7 +75,7 @@ type Story = StoryObj<typeof meta>
 export const InAgentsTab: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    const group = within(c.getByRole('region', { name: 'Didn’t load' }))
+    const group = within(c.getByRole('region', { name: 'Didn’t load as written' }))
     await expect(group.getAllByRole('listitem')).toHaveLength(4)
     await expect(c.getByText('Its frontmatter can’t be read, so Claude Code leaves it out.')).toBeVisible()
     // Quiet: it is there to read, not announced.
@@ -80,6 +84,20 @@ export const InAgentsTab: Story = {
 }
 
 export const Dark: Story = { globals: { theme: 'dark' } }
+
+/** A settings file Claude Code skips whole, in its own words: what it sets, its hooks and plugins among them, isn't read. */
+export const SkippedSettings: Story = {
+  args: {
+    parts: [
+      {
+        id: 'settings',
+        name: 'settings.json',
+        where: '~/.claude/settings.json',
+        why: 'Claude Code skips the whole file: permissions.defaultMode: Invalid value. Expected one of: "acceptEdits", "auto", "bypassPermissions", "default", "dontAsk", "plan"',
+      },
+    ],
+  },
+}
 
 /** Codex's own words, for its config.toml. */
 export const Codex: Story = {
@@ -102,6 +120,6 @@ export const Narrow: Story = { render: (args) => <InTab parts={args.parts} width
 export const AllLoaded: Story = {
   args: { parts: [] },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).queryByRole('heading', { name: 'Didn’t load' })).toBeNull()
+    await expect(within(canvasElement).queryByRole('heading', { name: 'Didn’t load as written' })).toBeNull()
   },
 }

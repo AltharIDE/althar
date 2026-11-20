@@ -214,17 +214,25 @@ gives any (`setupHealth.ts`). It only reads the person's files. It never
 changes them, and never holds a task for them.
 
 **Settings.** Each agent's tab in Settings › Agents lists, under its accounts,
-each part of the person's own setup it doesn't load: a settings file, a hook,
-an agent, a command, an output style, a plugin, a `config.toml`. Each row has
-the file and why. Nothing shows while everything loads. A skill that doesn't
-load is marked on its own tile in Settings › Skills, as Didn't load, and its
-sheet says why. One broken file marks that file only.
+each part of the person's own setup it doesn't load as written: a settings
+file, a hook, an agent, a command, an output style, a plugin, a `config.toml`.
+Each row has the file and why. Nothing shows while everything loads. A skill an
+agent leaves out is marked on its own tile in Settings › Skills, as Didn't load;
+one Claude Code loads without the frontmatter it can't read, as Frontmatter
+ignored. Its sheet says why. One broken file marks that file only. A skill's
+failure goes on the tile of the same file, so a healthy skill is never marked
+for a broken one of its name elsewhere. A broken skill no tile is of, such as
+one in Codex's home's own `skills`, is listed with the rest.
 
-**What the agents say themselves** is asked, as how each MCP server stands
-is, as the skills or the agents open and at most every five minutes, and kept
-in Althar's own folder (`setup-health.json`). It is kept for a day where an
-agent can't be asked again, and stands for a file only while that file hasn't
-changed since.
+**When it is read.** Each time the skills or the agents open, the runtime reads
+the files again, and asks the agents themselves at most every five minutes.
+Both happen on the command Settings sends (`CheckSetup`), with the file
+system's asynchronous reads. What was found is kept in Althar's own folder
+(`setup-health.json`) beside what the agents said, and Settings reads that
+record. No folder is walked as the window asks for the tools. What an agent
+said is kept for a day where it can't be asked again, and stands for a file
+only while that file hasn't changed since. An answer is kept only once it has
+come whole: a check stopped halfway keeps what the agent said before.
 
 - Claude Code (read against 2.1.326 and 2.1.309): its own `claude`, else the
   copy Althar's sessions run, in print mode, sent only `initialize` and
@@ -236,7 +244,9 @@ changed since.
   permissions.defaultMode: Invalid value…"). An agent file whose name isn't
   among those it loaded is one it left out.
 - Codex (read against 0.167): `codex app-server`, sent `initialize` and
-  `skills/list`. Its `configWarning` says a `config.toml` it can't read
+  `skills/list`. In the Flatpak it is the Codex on the device, through the
+  bridge its sessions run it by (`CODEX_PATH`, `flatpak/codex-host.sh`), in a
+  folder under Althar's own, which the device sees at the same path. Its `configWarning` says a `config.toml` it can't read
   ("Invalid configuration; using defaults." with the line), and `skills/list`
   says each skill it leaves out ("missing field `description`"). Where its
   `config.toml` can't be read it lists no skill at all, and Althar reads the
@@ -251,14 +261,24 @@ changed since.
   can't be read, but ignores what that frontmatter sets. Codex leaves out a
   skill without a name or a description.
 - A settings file that isn't JSON, which Claude Code skips whole.
+- A file that is there but can't be opened, such as one without read
+  permission. What an agent said of it still stands.
 - A hook matcher on a tool's event (PreToolUse, PostToolUse,
   PostToolUseFailure, PermissionRequest, PermissionDenied) that names a slip
   of one of Claude Code's tools ("Bashh", "bash"), against its SDK's
   `BUILTIN_TOOL_NAMES` and former names (`setupNames.ts`), or a pattern that
-  can't be read. That list isn't complete, so a name close to none of it is
-  left alone.
-- The `plugin.json` of each plugin that is on: one that isn't JSON or names
-  no plugin keeps it from loading, and a field of the wrong kind is ignored.
+  can't be read. A matcher of several names is read as a whole: it never runs
+  only where every name is a slip ("Edit|write" still runs for Edit). That
+  list isn't complete, so a name close to none of it is left alone. Each
+  broken matcher of an event is in that event's row.
+- The `plugin.json` of each plugin that is on, as Claude Code 2.1.326 reads it
+  (its manifest schema and `manifest-field-ignored`). One that isn't JSON,
+  names no plugin, has a space in its name, or has a `version`,
+  `defaultEnabled` or `dependencies` of the wrong kind keeps the plugin from
+  loading. A malformed `$schema`, `displayName`, `description`, `author`,
+  `homepage`, `repository`, `license` or `keywords` is dropped and the plugin
+  still loads, as is an `engines` that isn't an object or a Claude Code range
+  that isn't text. A range the running version is outside isn't read yet.
 - A `config.toml` that can't be parsed.
 
 Skills Althar installs are checked as they are installed

@@ -15,8 +15,7 @@ import { useServices } from '../../data/services'
  * in its words. As the servers open, each agent is asked through its own
  * command how its servers stand (signed in, failed to start); that reads, and
  * what it says shows on the tiles when it is back. As the skills or the agents
- * open, Claude Code and Codex are asked the same way what of the person's own
- * setup they load.
+ * open, what of the person's own setup Claude Code and Codex load is read again.
  */
 
 export interface AgentToolsModel {
@@ -63,17 +62,15 @@ export const useAgentTools = (options: { readonly check?: boolean; readonly setu
     client.checkServers().then(reload, () => undefined)
   }, [client, enabled, last, options.check, reload])
 
-  // What of the person's own setup their agents load: asked as the skills or the agents open, at most as often. Their
-  // commands start and answer without a turn, a hook or a server, so it is quick; the marks show once it is back.
-  const setupChecked = useRef<number | null>(null)
-  const setupLast = query.data?.setupCheckedAt ?? null
+  // What of the person's own setup their agents load: read again each time the skills or the agents open, so a file
+  // they fixed shows fixed. The runtime asks the agents themselves at most every few minutes, off the thread that
+  // answers; what was there shows meanwhile, and the marks change once it is back.
+  const setupChecked = useRef(false)
   useEffect(() => {
-    if (options.setup !== true || !enabled || setupChecked.current !== null) return
-    const age = setupLast === null ? Number.POSITIVE_INFINITY : Date.now() - new Date(setupLast).getTime()
-    setupChecked.current = Date.now()
-    if (age < CHECK_EVERY) return
+    if (options.setup !== true || !enabled || setupChecked.current) return
+    setupChecked.current = true
     client.checkSetup().then(reload, () => undefined)
-  }, [client, enabled, setupLast, options.setup, reload])
+  }, [client, enabled, options.setup, reload])
 
   const after = useCallback(
     (change: Promise<unknown>) => {

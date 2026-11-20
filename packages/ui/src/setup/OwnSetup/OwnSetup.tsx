@@ -7,9 +7,9 @@ import s from './OwnSetup.module.css'
 
 /*
  * Settings › Agents, under an agent's accounts: the parts of the person's own
- * setup that agent doesn't load (a settings file, a hook, an agent, a command,
- * a plugin, a config.toml), each with why, in the agent's own words where it
- * said. One broken file is one row. Nothing shows while everything loads: it
+ * setup that agent doesn't load, or loads without part of what they set (a
+ * settings file, a hook, an agent, a command, a plugin, a config.toml), each
+ * with why, in the agent's own words where it said. One broken file is one row. Nothing shows while everything loads: it
  * is there to act on, and the person changes their own file; Althar never
  * does, and tasks go on without the part. A skill's is on its own tile.
  */
@@ -30,8 +30,8 @@ export interface OwnSetupText {
 }
 
 export const ownSetupText: OwnSetupText = {
-  title: 'Didn’t load',
-  note: 'From your own setup. Tasks go on without these until you change the files.',
+  title: 'Didn’t load as written',
+  note: 'From your own setup. Tasks go on without these, or without what they set, until you change the files.',
 }
 
 export interface OwnSetupProps {

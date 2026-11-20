@@ -34,8 +34,9 @@ import s from './ToolTiles.module.css'
  * skill, as servers: the round switch gives it to every role or none, the
  * name opens it in place. Under it, who gets it and where, or Update ready
  * (violet) for one added from GitHub that has a newer version; before both,
- * Didn't load (red) for one of the person's own an agent leaves out or loads
- * without what it sets. Those sort first. Add from GitHub is the dashed tile, and Same skills everywhere sits
+ * Didn't load (red) for one of the person's own an agent leaves out, or
+ * Frontmatter ignored for one it loads without what its frontmatter sets.
+ * Those sort first. Add from GitHub is the dashed tile, and Same skills everywhere sits
  * beside it: it only links each skill into the agents' folders, so it turns
  * on at once, and asks on the way off whether its links stay.
  */
@@ -43,6 +44,7 @@ import s from './ToolTiles.module.css'
 export interface SkillTilesText extends ToolWordsText {
   updateReady: string
   didntLoad: string
+  frontIgnored: string
   add: string
   noneTitle: string
   noneLine: string
@@ -58,6 +60,7 @@ export const skillTilesText: SkillTilesText = {
   ...toolWordsText,
   updateReady: 'Update ready',
   didntLoad: 'Didn’t load',
+  frontIgnored: 'Frontmatter ignored',
   add: 'Add from GitHub',
   noneTitle: 'No skills yet',
   noneLine: 'Add one from GitHub, or put a folder with a SKILL.md in any of your agents’ skill folders.',
@@ -132,7 +135,7 @@ export function SkillTiles({
       name={skill.name}
       line={
         isFailed(skill) ? (
-          <TileLine tone="failed">{t.didntLoad}</TileLine>
+          <TileLine tone="failed">{skill.failed?.loads === true ? t.frontIgnored : t.didntLoad}</TileLine>
         ) : skill.update ? (
           <TileLine tone="yours">{t.updateReady}</TileLine>
         ) : (

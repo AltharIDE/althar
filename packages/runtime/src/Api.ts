@@ -1461,7 +1461,7 @@ export const handlers = apiLayer(
               const io = yield* syncIo
               const configs = config.agentConfigs
               if (io === undefined || configs === undefined) return
-              const converse = configs.converse ?? converseIn(configs.homeDir, configs.env ?? process.env)
+              const converse = configs.converse ?? converseIn(configs.homeDir, configs.env ?? process.env, configs.folder)
               // Kept as at when it was asked: a file changed while it answered is read again by Althar.
               yield* Effect.promise(() => checkSetup(io, converse))
             }),

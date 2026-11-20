@@ -227,3 +227,27 @@ export const DidntLoadOpened: Story = {
 }
 
 export const DarkDidntLoad: Story = { args: { skills: NOT_LOADED }, globals: { theme: 'dark' } }
+
+/** One Claude Code loads, but without what its frontmatter sets, which it can't read: said so, not that it didn't load. */
+const FRONT_IGNORED: readonly SkillTileModel[] = SKILLS.map((one) =>
+  one.name === 'release-notes'
+    ? { ...one, failed: { agent: null, why: 'Its frontmatter can’t be read, so Claude Code ignores what it sets.', loads: true } }
+    : one,
+)
+
+export const FrontmatterIgnored: Story = {
+  args: { skills: FRONT_IGNORED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Frontmatter ignored')).toBeVisible()
+    await expect(canvas.queryByText('Didn’t load')).toBeNull()
+  },
+}
+
+export const FrontmatterIgnoredOpened: Story = {
+  args: { skills: FRONT_IGNORED, defaultOpen: 'release-notes' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Its frontmatter can’t be read, so Claude Code ignores what it sets.')).toBeVisible()
+  },
+}

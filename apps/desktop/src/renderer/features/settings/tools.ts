@@ -78,7 +78,7 @@ export const skillTileOf = (row: ToolRow, update: boolean): SkillTileModel => ({
   home: row.home,
   from: row.from === null ? null : row.from.repo,
   update,
-  failed: row.failed === null ? null : { agent: row.failed.agent, why: row.failed.why },
+  failed: row.failed === null ? null : { agent: row.failed.agent, why: row.failed.why, loads: row.failed.loads === true },
 })
 
 /** The registry's id for each agent whose own setup Althar reads. */

@@ -380,6 +380,7 @@ describe('the person’s own setup', () => {
     name: 'review-agent.md',
     where: '~/.claude/agents/review-agent.md',
     why: 'Its frontmatter can’t be read, so Claude Code leaves it out.',
+    loads: false,
     by: null,
     ...over,
   })
@@ -397,6 +398,22 @@ describe('the person’s own setup', () => {
     expect(client.checkSetup).toHaveBeenCalledTimes(1)
     await userEvent.click(main().getByRole('button', { name: /^release-notes/ }))
     expect(await main().findByText('Codex leaves it out: missing field `description`')).toBeTruthy()
+  })
+
+  it('says of a skill Claude Code loads without its frontmatter that it is ignored, not that it didn’t load', async () => {
+    const half = row('release-notes', {
+      home: '~/.claude/skills/release-notes',
+      failed: {
+        agent: null,
+        why: 'Its frontmatter can’t be read, so Claude Code ignores what it sets.',
+        at: '2026-11-08T09:00:00.000Z',
+        loads: true,
+      },
+    })
+    const { client } = fakeClient({ getAgentTools: vi.fn(async () => tools({ skills: [half] })) })
+    withServices(<Settings at="skills" />, client)
+    expect(await main().findByText('Frontmatter ignored')).toBeTruthy()
+    expect(main().queryByText('Didn’t load')).toBeNull()
   })
 
   it('lists under an agent’s accounts each part of it that doesn’t load, and none of another agent’s', async () => {
@@ -420,7 +437,7 @@ describe('the person’s own setup', () => {
     const { client } = fakeClient({ getAgentTools: vi.fn(async () => tools({ setup })) })
     withServices(<Settings at="agents" />, client)
     await userEvent.click(await main().findByRole('tab', { name: /^Claude Code/ }))
-    const group = await main().findByRole('region', { name: 'Didn’t load' })
+    const group = await main().findByRole('region', { name: 'Didn’t load as written' })
     expect(within(group).getByText('Its frontmatter can’t be read, so Claude Code leaves it out.')).toBeTruthy()
     expect(within(group).getByText('hooks.PreToolUse')).toBeTruthy()
     expect(within(group).queryByText('Invalid configuration.')).toBeNull()
@@ -433,6 +450,6 @@ describe('the person’s own setup', () => {
     withServices(<Settings at="agents" />, client)
     await waitFor(() => expect(client.getAgentTools).toHaveBeenCalled())
     await waitFor(() => expect(client.checkSetup).toHaveBeenCalled())
-    expect(screen.queryByRole('region', { name: 'Didn’t load' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Didn’t load as written' })).toBeNull()
   })
 })

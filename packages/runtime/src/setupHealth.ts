@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
+import { mkdir, readdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 
 import type { SetupPart } from '@althar/contracts'
@@ -14,9 +15,10 @@ import { parseFrontmatter } from '@althar/skills'
  * In the agents' own words where they say it, asked as `mcpHealth.ts` asks about servers and kept beside its record
  * (`setup-health.json`): Claude Code's `initialize` and `get_settings` (which agents it loaded, and each settings file it
  * skipped, with why), and Codex's app-server (`configWarning`, and each skill `skills/list` couldn't load). Neither
- * runs a turn, a hook or a server. The rest Althar reads itself, each time: frontmatter as Claude Code reads it, a hook
- * matcher against the tools Claude Code has, a plugin's `plugin.json`, a `config.toml`. What an agent said of a file
- * stands only while the file hasn't changed since.
+ * runs a turn, a hook or a server, and they are asked at most every few minutes. The rest Althar reads itself, each
+ * check: frontmatter as Claude Code reads it, a hook matcher against the tools Claude Code has, a plugin's
+ * `plugin.json`, a `config.toml`. What an agent said of a file stands only while the file hasn't changed since. What
+ * was found is kept with what they said, and Settings reads that: no folder is walked as it asks.
  */
 
 /** Starts one of the person's agents' commands in an empty folder (`cwd`), writes it `lines`, and gives back what it printed once `done` says it has enough, or at the end of its time; undefined where it isn't on this computer. */
@@ -57,20 +59,24 @@ interface CodexHeard {
   readonly skills?: ReadonlyArray<{ readonly path: string; readonly message: string }>
 }
 
+/** A part that doesn't load, with when that was known (when the agent said it, or when Althar read it), and its file as found. */
+export type Part = SetupPart & { readonly at: string; readonly file: string }
+
 export interface SetupRecord {
   /** When the agents were last asked; null before the first time. */
   readonly checkedAt: string | null
   readonly claude?: ClaudeHeard
   readonly codex?: CodexHeard
+  /** Each part that didn't load when the setup was last read, by what the agents said and Althar's own reading; absent before the first time. */
+  readonly parts?: ReadonlyArray<Part>
 }
 
 export const emptySetup: SetupRecord = { checkedAt: null }
 
-/** A part that doesn't load, with when that was known: when the agent said it, or now for Althar's own reading. */
-export type Part = SetupPart & { readonly at: string }
-
 /** How long what an agent last said is kept while it can't be asked. */
 const KEPT_FOR = 24 * 60 * 60 * 1000
+/** How often the agents are asked again, at most: the files are read each time. */
+export const ASK_EVERY = 5 * 60 * 1000
 /** The most of the agent's words kept, in characters. */
 const WORDS_LENGTH = 300
 /** The most files read in one folder. */
@@ -84,34 +90,53 @@ const oneLine = (words: string) => {
   return one.length > WORDS_LENGTH ? `${one.slice(0, WORDS_LENGTH - 1).trimEnd()}…` : one
 }
 
+/** Words as a list reads: a, b and c. */
+const andList = (words: ReadonlyArray<string>) =>
+  words.length <= 1 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`
+
 const record = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined
 
 const strings = (value: unknown): ReadonlyArray<string> | undefined =>
   Array.isArray(value) ? value.filter((one): one is string => typeof one === 'string') : undefined
 
-const readText = (path: string): string | undefined => {
+/** A file as read: its text; missing (nothing there to load); or not opened, with why. */
+type Read =
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'failed'; readonly why: string }
+
+const readText = async (path: string): Promise<Read> => {
   try {
-    return readFileSync(path, 'utf8')
-  } catch {
-    return undefined
+    return { kind: 'text', text: await readFile(path, 'utf8') }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return { kind: 'missing' }
+    return {
+      kind: 'failed',
+      why:
+        code === 'EACCES' || code === 'EPERM' ? 'permission denied' : code === 'EISDIR' ? 'it is a folder' : (code ?? 'it can’t be read'),
+    }
   }
 }
 
-const readJson = (path: string): unknown => {
-  const text = readText(path)
-  if (text === undefined) return undefined
+/** Why a file that is there can't be read, as a part says it. */
+const unopened = (why: string, agent: string) => `It can’t be opened (${why}), so ${agent} can’t read it.`
+
+const readJson = async (path: string): Promise<unknown> => {
+  const read = await readText(path)
+  if (read.kind !== 'text') return undefined
   try {
-    return JSON.parse(text)
+    return JSON.parse(read.text)
   } catch {
     return undefined
   }
 }
 
 /** The same file whichever way it is named: through a link, or not. */
-const real = (path: string) => {
+const real = async (path: string) => {
   try {
-    return realpathSync(path)
+    return await realpath(path)
   } catch {
     return path
   }
@@ -129,27 +154,27 @@ const named = (io: Pick<SetupIo, 'homeDir'>, path: string) =>
   (path.startsWith(io.homeDir) ? `~${path.slice(io.homeDir.length)}` : path).replaceAll('\\', '/')
 
 /** Whether what an agent said at `at` still stands for this file: it hasn't changed since. */
-const unchangedSince = (path: string, at: string) => {
+const unchangedSince = async (path: string, at: string) => {
   try {
-    return statSync(path).mtimeMs <= Date.parse(at)
+    return (await stat(path)).mtimeMs <= Date.parse(at)
   } catch {
     return false
   }
 }
 
-const fresh = (at: string, now: string) => {
+const fresh = (at: string, now: string, kept = KEPT_FOR) => {
   const then = Date.parse(at)
   const current = Date.parse(now)
-  return Number.isFinite(then) && Number.isFinite(current) && current - then < KEPT_FOR
+  return Number.isFinite(then) && Number.isFinite(current) && current - then < kept
 }
 
 /** The `.md` files in a folder, and in its folders where `deep`. */
-const markdownIn = (folder: string, deep = false): ReadonlyArray<string> => {
+const markdownIn = async (folder: string, deep = false): Promise<ReadonlyArray<string>> => {
   const found: Array<string> = []
-  const walk = (at: string, depth: number) => {
+  const walk = async (at: string, depth: number) => {
     let entries
     try {
-      entries = readdirSync(at, { withFileTypes: true }).toSorted((a, b) => a.name.localeCompare(b.name))
+      entries = (await readdir(at, { withFileTypes: true })).toSorted((a, b) => a.name.localeCompare(b.name))
     } catch {
       return
     }
@@ -161,34 +186,43 @@ const markdownIn = (folder: string, deep = false): ReadonlyArray<string> => {
       let file = entry.isFile()
       if (entry.isSymbolicLink())
         try {
-          const target = statSync(path)
+          const target = await stat(path)
           folderHere = target.isDirectory()
           file = target.isFile()
         } catch {
           continue
         }
       if (file && entry.name.endsWith('.md')) found.push(path)
-      else if (folderHere && deep && depth < 4) walk(path, depth + 1)
+      else if (folderHere && deep && depth < 4) await walk(path, depth + 1)
     }
   }
-  walk(folder, 0)
+  await walk(folder, 0)
   return found
 }
 
 /** The skill folders in a folder: each with a `SKILL.md`, by its folder's name. */
-const skillsIn = (folder: string): ReadonlyArray<{ readonly name: string; readonly file: string }> => {
+const skillsIn = async (folder: string): Promise<ReadonlyArray<{ readonly name: string; readonly file: string }>> => {
+  let names: ReadonlyArray<string>
   try {
-    return readdirSync(folder)
+    names = (await readdir(folder))
       .filter((name) => !name.startsWith('.'))
       .toSorted()
       .slice(0, FILES_AT_MOST)
-      .flatMap((name) => {
-        const file = join(folder, name, 'SKILL.md')
-        return existsSync(file) ? [{ name, file }] : []
-      })
   } catch {
     return []
   }
+  const found: Array<{ readonly name: string; readonly file: string }> = []
+  for (const name of names) {
+    const file = join(folder, name, 'SKILL.md')
+    try {
+      await stat(file)
+      found.push({ name, file })
+    } catch (error) {
+      // A SKILL.md that is there but can't be looked at is still one of theirs.
+      if ((error as NodeJS.ErrnoException).code === 'EACCES') found.push({ name, file })
+    }
+  }
+  return found
 }
 
 /* ---- frontmatter, as Claude Code reads it --------------------------------------------- */
@@ -256,52 +290,80 @@ const meant = (name: string): string | undefined =>
   CLAUDE_TOOL_NAMES.find((tool) => tool.toLowerCase() === name.toLowerCase()) ??
   (name.length < 4 ? undefined : CLAUDE_TOOL_NAMES.find((tool) => distance(tool, name) <= 2))
 
+/** What is wrong with a hook's matcher: why, and whether the hook still runs for some tool. */
+export interface MatcherProblem {
+  readonly why: string
+  readonly runs: boolean
+}
+
 /**
- * Why a hook's matcher never matches, where Althar can tell: a tool's name that is a slip of one Claude Code has
- * (`Bashh`, `bash`), or a pattern that can't be read. A name close to none may be a tool Althar doesn't know, and a
- * pattern matches what it matches: neither is judged.
+ * What is wrong with a hook's matcher, where Althar can tell: a tool's name that is a slip of one Claude Code has
+ * (`Bashh`, `bash`), or a pattern that can't be read. A matcher of several names is read as a whole: it never runs only
+ * where every name is such a slip, and otherwise still runs for the rest. A name close to none may be a tool Althar
+ * doesn't know, and a pattern matches what it matches: neither is judged.
  */
-export const matcherProblem = (matcher: string): string | undefined => {
+export const matcherProblem = (matcher: string): MatcherProblem | undefined => {
   const trimmed = matcher.trim()
   if (trimmed === '' || trimmed === '*') return undefined
   if (/^[A-Za-z0-9_|]+$/.test(trimmed)) {
-    for (const name of trimmed.split('|')) {
-      if (name === '' || name.startsWith('mcp__') || CLAUDE_TOOL_NAMES.includes(name)) continue
+    const names = trimmed.split('|').filter((name) => name !== '')
+    const slips = names.flatMap((name) => {
+      if (name.startsWith('mcp__') || CLAUDE_TOOL_NAMES.includes(name)) return []
       const tool = meant(name)
-      if (tool !== undefined) return `Its matcher “${name}” matches no tool, so it never runs. Claude Code calls it “${tool}”.`
+      return tool === undefined ? [] : [{ name, tool }]
+    })
+    if (slips.length === 0) return undefined
+    const calls = `Claude Code calls ${slips.length === 1 ? 'it' : 'them'} ${andList(slips.map((one) => `“${one.tool}”`))}`
+    if (slips.length === names.length) return { why: `Its matcher “${trimmed}” matches no tool, so it never runs. ${calls}.`, runs: false }
+    const which = andList(slips.map((one) => `“${one.name}”`))
+    return {
+      why: `${which} in its matcher “${trimmed}” ${slips.length === 1 ? 'matches' : 'match'} no tool: ${calls}. It still runs for the rest.`,
+      runs: true,
     }
-    return undefined
   }
   try {
     new RegExp(trimmed)
     return undefined
   } catch {
-    return `Its matcher “${trimmed}” can’t be read as a pattern, so it never runs.`
+    return { why: `Its matcher “${trimmed}” can’t be read as a pattern, so it never runs.`, runs: false }
   }
 }
 
-/** Each hook of a settings file whose matcher never matches: by its event, once an event. */
+/** The hooks of a settings file whose matchers never match, or match less than they name: one part an event, with each such matcher. */
 const hookParts = (io: SetupIo, settings: unknown, file: string, at: string): ReadonlyArray<Part> => {
   const hooks = record(record(settings)?.['hooks'])
   if (hooks === undefined) return []
   return CLAUDE_TOOL_HOOK_EVENTS.flatMap((event): ReadonlyArray<Part> => {
     const entries = hooks[event]
     if (!Array.isArray(entries)) return []
-    for (const entry of entries) {
+    const problems = entries.flatMap((entry) => {
       const matcher = record(entry)?.['matcher']
-      const why = typeof matcher === 'string' ? matcherProblem(matcher) : undefined
-      if (why !== undefined) return [{ agent: 'claude', kind: 'hook', name: `hooks.${event}`, where: named(io, file), why, by: null, at }]
-    }
-    return []
+      const problem = typeof matcher === 'string' ? matcherProblem(matcher) : undefined
+      return problem === undefined ? [] : [problem]
+    })
+    if (problems.length === 0) return []
+    return [
+      {
+        agent: 'claude',
+        kind: 'hook',
+        name: `hooks.${event}`,
+        where: named(io, file),
+        why: oneLine(problems.map((one) => one.why).join(' ')),
+        loads: problems.every((one) => one.runs),
+        by: null,
+        at,
+        file,
+      },
+    ]
   })
 }
 
 /* ---- plugins -------------------------------------------------------------------------- */
 
 /** The plugins Claude Code has on, from its `settings.json`, each where it is installed (`plugins/installed_plugins.json`). */
-const enabledPlugins = (home: string, settings: unknown): ReadonlyArray<{ readonly name: string; readonly at: string }> => {
+const enabledPlugins = async (home: string, settings: unknown): Promise<ReadonlyArray<{ readonly name: string; readonly at: string }>> => {
   const enabled = record(record(settings)?.['enabledPlugins']) ?? {}
-  const installed = record(record(readJson(join(home, 'plugins', 'installed_plugins.json')))?.['plugins']) ?? {}
+  const installed = record(record(await readJson(join(home, 'plugins', 'installed_plugins.json')))?.['plugins']) ?? {}
   return Object.entries(installed).flatMap(([key, entries]) => {
     if (enabled[key] !== true) return []
     const at = (Array.isArray(entries) ? entries : [entries])
@@ -311,177 +373,237 @@ const enabledPlugins = (home: string, settings: unknown): ReadonlyArray<{ readon
   })
 }
 
-/** The fields of a plugin's manifest that Claude Code reads as words, and those it reads as a list of them. */
-const PLUGIN_WORDS = ['version', 'description', 'homepage', 'repository', 'license']
-const PLUGIN_LISTS = ['keywords']
+const isText = (value: unknown) => typeof value === 'string'
 
-/** Why a plugin's `plugin.json` keeps it from loading, or keeps a field of it from counting: undefined where neither. */
-export const pluginProblem = (text: string): string | undefined => {
+/**
+ * The fields of a plugin's manifest that Claude Code 2.1.326 drops where they are malformed, loading the plugin
+ * without them (its `manifest-field-ignored`), each with the shape it takes.
+ */
+const PLUGIN_SHOWN: Readonly<Record<string, (value: unknown) => boolean>> = {
+  $schema: isText,
+  displayName: isText,
+  description: isText,
+  author: (value) => {
+    const author = record(value)
+    return (
+      author !== undefined &&
+      typeof author['name'] === 'string' &&
+      author['name'] !== '' &&
+      (author['email'] === undefined || isText(author['email'])) &&
+      (author['url'] === undefined || isText(author['url']))
+    )
+  },
+  homepage: (value) => typeof value === 'string' && URL.canParse(value),
+  repository: isText,
+  license: isText,
+  keywords: (value) => Array.isArray(value) && value.every(isText),
+}
+
+/** The fields that keep the plugin from loading where they are of the wrong kind, each with what it must be. */
+const PLUGIN_NEEDED: ReadonlyArray<readonly [string, (value: unknown) => boolean, string]> = [
+  ['version', isText, 'isn’t text'],
+  ['defaultEnabled', (value) => typeof value === 'boolean', 'isn’t true or false'],
+  ['dependencies', Array.isArray, 'isn’t a list'],
+]
+
+const REFUSED = 'so Claude Code doesn’t load the plugin.'
+
+/** What is wrong with a plugin's `plugin.json`, as Claude Code reads it: why, and whether the plugin still loads. */
+export interface PluginProblem {
+  readonly why: string
+  readonly loads: boolean
+}
+
+/** What keeps a plugin's `plugin.json` from loading the plugin, or a field of it from counting: undefined where neither. */
+export const pluginProblem = (text: string): PluginProblem | undefined => {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
   } catch {
-    return 'Its plugin.json isn’t valid JSON, so Claude Code doesn’t load the plugin.'
+    return { why: `Its plugin.json isn’t valid JSON, ${REFUSED}`, loads: false }
   }
   const manifest = record(parsed)
-  if (manifest === undefined) return 'Its plugin.json isn’t an object, so Claude Code doesn’t load the plugin.'
-  if (typeof manifest['name'] !== 'string' || manifest['name'].trim() === '')
-    return 'Its plugin.json gives no name, so Claude Code doesn’t load the plugin.'
-  const word = PLUGIN_WORDS.find((key) => key in manifest && typeof manifest[key] !== 'string' && record(manifest[key]) === undefined)
-  if (word !== undefined) return `Its plugin.json’s “${word}” isn’t text, so Claude Code ignores it.`
-  const list = PLUGIN_LISTS.find(
-    (key) => key in manifest && strings(manifest[key])?.length !== (manifest[key] as unknown[] | undefined)?.length,
-  )
-  if (list !== undefined) return `Its plugin.json’s “${list}” isn’t a list of words, so Claude Code ignores it.`
-  return undefined
+  if (manifest === undefined) return { why: `Its plugin.json isn’t an object, ${REFUSED}`, loads: false }
+  const name = manifest['name']
+  if (typeof name !== 'string' || name.trim() === '') return { why: `Its plugin.json gives no name, ${REFUSED}`, loads: false }
+  if (/\s/.test(name)) return { why: `Its plugin.json’s name “${name}” has a space in it, ${REFUSED}`, loads: false }
+  for (const [key, fits, isnt] of PLUGIN_NEEDED)
+    if (key in manifest && !fits(manifest[key])) return { why: `Its plugin.json’s “${key}” ${isnt}, ${REFUSED}`, loads: false }
+  const said: Array<string> = []
+  const shown = Object.keys(PLUGIN_SHOWN).filter((key) => key in manifest && !PLUGIN_SHOWN[key]!(manifest[key]))
+  if (shown.length > 0)
+    said.push(
+      `${andList(shown.map((key) => `“${key}”`))} in its plugin.json ${shown.length === 1 ? 'is' : 'are'} malformed, so Claude Code ignores ${shown.length === 1 ? 'it' : 'them'}.`,
+    )
+  // Its engines: anything but an object is passed over, and a Claude Code range that isn't text is ignored.
+  if ('engines' in manifest) {
+    const engines = record(manifest['engines'])
+    if (engines === undefined) said.push('Its plugin.json’s “engines” isn’t an object, so Claude Code ignores it.')
+    else if ('claude-code' in engines && !isText(engines['claude-code']))
+      said.push('Its plugin.json’s Claude Code range (“engines”) isn’t text, so Claude Code ignores it.')
+  }
+  return said.length === 0 ? undefined : { why: `${said.join(' ')} The plugin still loads.`, loads: true }
 }
 
 /* ---- the parts ------------------------------------------------------------------------ */
 
+type Add = (kind: Part['kind'], path: string, why: string, loads: boolean, by: Part['by'], at?: string, name?: string) => void
+
+const adder =
+  (io: SetupIo, agent: Part['agent'], parts: Array<Part>, now: string): Add =>
+  (kind, path, why, loads, by, at = now, name = basename(path)) =>
+    parts.push({ agent, kind, name, where: named(io, path), why, loads, by, at, file: path })
+
 /** Claude Code's parts that don't load: by what it said where that still stands, else by Althar's own reading. */
-const claudeParts = (io: SetupIo, heard: ClaudeHeard | undefined, now: string): ReadonlyArray<Part> => {
+const claudeParts = async (io: SetupIo, heard: ClaudeHeard | undefined, now: string): Promise<ReadonlyArray<Part>> => {
   const home = claudeHome(io)
   const parts: Array<Part> = []
-  const part = (kind: Part['kind'], path: string, why: string, by: Part['by'], at = now, name = basename(path)) =>
-    parts.push({ agent: 'claude', kind, name, where: named(io, path), why, by, at })
+  const part = adder(io, 'claude', parts, now)
 
-  // Its settings: what it skipped, in its words, else whether the file is JSON at all.
+  // Its settings: what it skipped, in its words, else whether Althar can open the file, and whether it is JSON.
   const settingsFile = join(home, 'settings.json')
-  const settingsText = readText(settingsFile)
+  const settingsRead = await readText(settingsFile)
   let settings: unknown
   let skipped = false
-  if (settingsText !== undefined) {
-    const errors = (heard?.errors ?? []).filter((one) => real(one.file) === real(settingsFile))
-    if (heard?.errors !== undefined && unchangedSince(settingsFile, heard.at)) {
+  if (settingsRead.kind !== 'missing') {
+    if (heard?.errors !== undefined && (await unchangedSince(settingsFile, heard.at))) {
+      const file = await real(settingsFile)
+      const errors: Array<SettingsError> = []
+      for (const one of heard.errors) if ((await real(one.file)) === file) errors.push(one)
       if (errors.length > 0) {
         const words = errors.map((one) => (one.path === '' ? one.message : `${one.path}: ${one.message}`)).join(' ')
-        part('settings', settingsFile, oneLine(`Claude Code skips the whole file: ${words}`), 'claude', heard.at)
+        part('settings', settingsFile, oneLine(`Claude Code skips the whole file: ${words}`), false, 'claude', heard.at)
         skipped = true
       }
     }
-    try {
-      settings = JSON.parse(settingsText)
-    } catch {
-      if (!skipped) part('settings', settingsFile, 'It isn’t valid JSON, so Claude Code skips the whole file.', null)
+    if (settingsRead.kind === 'failed') {
+      if (!skipped) part('settings', settingsFile, unopened(settingsRead.why, 'Claude Code'), false, null)
       skipped = true
-    }
+    } else
+      try {
+        settings = JSON.parse(settingsRead.text)
+      } catch {
+        if (!skipped) part('settings', settingsFile, 'It isn’t valid JSON, so Claude Code skips the whole file.', false, null)
+        skipped = true
+      }
     if (!skipped) parts.push(...hookParts(io, settings, settingsFile, now))
   }
 
   // Its agents: those it didn't load, where it said which it did; else those whose frontmatter it can't take.
   const loaded = heard?.agents === undefined ? undefined : new Set(heard.agents)
-  for (const file of markdownIn(join(home, 'agents'))) {
-    const text = readText(file)
-    if (text === undefined) continue
-    const front = frontOf(text)
+  for (const file of await markdownIn(join(home, 'agents'))) {
+    const read = await readText(file)
+    if (read.kind === 'missing') continue
+    if (read.kind === 'failed') {
+      part('agent', file, unopened(read.why, 'Claude Code'), false, null)
+      continue
+    }
+    const front = frontOf(read.text)
     const problem = definitionProblem(front, 'Claude Code')
-    if (loaded !== undefined && heard !== undefined && unchangedSince(file, heard.at)) {
+    if (loaded !== undefined && heard !== undefined && (await unchangedSince(file, heard.at))) {
       const name = front.kind === 'read' ? said(front.data, 'name') : ''
       if (name === '' || !loaded.has(name))
-        part('agent', file, problem ?? 'Claude Code leaves it out.', problem === undefined ? 'claude' : null, heard.at)
-    } else if (problem !== undefined) part('agent', file, problem, null)
+        part('agent', file, problem ?? 'Claude Code leaves it out.', false, problem === undefined ? 'claude' : null, heard.at)
+    } else if (problem !== undefined) part('agent', file, problem, false, null)
   }
 
   // Its commands, output styles and skills load without frontmatter they can't read: what it sets is ignored.
-  for (const [kind, files] of [
-    ['command', markdownIn(join(home, 'commands'), true)],
-    ['output-style', markdownIn(join(home, 'output-styles'))],
-  ] as const)
+  const kinds = [
+    ['command', await markdownIn(join(home, 'commands'), true)],
+    ['output-style', await markdownIn(join(home, 'output-styles'))],
+  ] as const
+  for (const [kind, files] of kinds)
     for (const file of files) {
-      const text = readText(file)
-      if (text !== undefined && frontOf(text).kind === 'unreadable') part(kind, file, IGNORED, null)
+      const read = await readText(file)
+      if (read.kind === 'failed') part(kind, file, unopened(read.why, 'Claude Code'), false, null)
+      else if (read.kind === 'text' && frontOf(read.text).kind === 'unreadable') part(kind, file, IGNORED, true, null)
     }
-  for (const skill of skillsIn(join(home, 'skills'))) {
-    const text = readText(skill.file)
-    if (text !== undefined && frontOf(text).kind === 'unreadable') part('skill', skill.file, IGNORED, null, now, skill.name)
+  for (const skill of await skillsIn(join(home, 'skills'))) {
+    const read = await readText(skill.file)
+    if (read.kind === 'failed') part('skill', skill.file, unopened(read.why, 'Claude Code'), false, null, now, skill.name)
+    else if (read.kind === 'text' && frontOf(read.text).kind === 'unreadable')
+      part('skill', skill.file, IGNORED, true, null, now, skill.name)
   }
 
   // Its plugins that are on: a manifest that keeps one from loading, or a field of it from counting.
   if (!skipped)
-    for (const plugin of enabledPlugins(home, settings)) {
+    for (const plugin of await enabledPlugins(home, settings)) {
       const manifest = join(plugin.at, '.claude-plugin', 'plugin.json')
-      const text = readText(manifest)
-      const why = text === undefined ? undefined : pluginProblem(text)
-      if (why !== undefined) part('plugin', manifest, why, null, now, plugin.name)
+      const read = await readText(manifest)
+      if (read.kind === 'failed')
+        part('plugin', manifest, `Its plugin.json can’t be opened (${read.why}), ${REFUSED}`, false, null, now, plugin.name)
+      const problem = read.kind === 'text' ? pluginProblem(read.text) : undefined
+      if (problem !== undefined) part('plugin', manifest, problem.why, problem.loads, null, now, plugin.name)
     }
   return parts
 }
 
 /** Codex's parts that don't load: by what it said where that still stands, else by Althar's own reading. */
-const codexParts = (io: SetupIo, heard: CodexHeard | undefined, now: string): ReadonlyArray<Part> => {
+const codexParts = async (io: SetupIo, heard: CodexHeard | undefined, now: string): Promise<ReadonlyArray<Part>> => {
   const parts: Array<Part> = []
+  const part = adder(io, 'codex', parts, now)
   const configFile = join(codexHome(io), 'config.toml')
-  const configText = readText(configFile)
-  if (configText !== undefined) {
-    if (heard !== undefined && unchangedSince(configFile, heard.at)) {
-      const words = heard.config.filter((one) => real(one.path) === real(configFile)).map((one) => one.words)
-      if (words.length > 0)
-        parts.push({
-          agent: 'codex',
-          kind: 'config',
-          name: 'config.toml',
-          where: named(io, configFile),
-          why: oneLine(words.join(' ')),
-          by: 'codex',
-          at: heard.at,
-        })
-    } else {
-      const problem = tomlProblem(configText)
+  const configRead = await readText(configFile)
+  if (configRead.kind !== 'missing') {
+    let said = false
+    if (heard !== undefined && (await unchangedSince(configFile, heard.at))) {
+      const file = await real(configFile)
+      const words: Array<string> = []
+      for (const one of heard.config) if ((await real(one.path)) === file) words.push(one.words)
+      if (words.length > 0) part('config', configFile, oneLine(words.join(' ')), false, 'codex', heard.at)
+      // Codex was asked after it last changed, and warned of nothing: its word stands.
+      said = true
+    }
+    if (!said && configRead.kind === 'failed') part('config', configFile, unopened(configRead.why, 'Codex'), false, null)
+    else if (!said && configRead.kind === 'text') {
+      const problem = tomlProblem(configRead.text)
       if (problem !== undefined)
-        parts.push({
-          agent: 'codex',
-          kind: 'config',
-          name: 'config.toml',
-          where: named(io, configFile),
-          why: oneLine(`Codex can’t read it, so it uses its defaults: ${problem}`),
-          by: null,
-          at: now,
-        })
+        part('config', configFile, oneLine(`Codex can’t read it, so it uses its defaults: ${problem}`), false, null)
     }
   }
   const seen = new Set<string>()
   for (const folder of codexSkillFolders(io))
-    for (const skill of skillsIn(folder)) {
-      const file = real(skill.file)
+    for (const skill of await skillsIn(folder)) {
+      const file = await real(skill.file)
       if (seen.has(file)) continue
       seen.add(file)
-      if (heard?.skills !== undefined && unchangedSince(skill.file, heard.at)) {
-        const error = heard.skills.find((one) => real(one.path) === file)
+      if (heard?.skills !== undefined && (await unchangedSince(skill.file, heard.at))) {
+        let error: { readonly path: string; readonly message: string } | undefined
+        for (const one of heard.skills) if (error === undefined && (await real(one.path)) === file) error = one
         if (error !== undefined)
-          parts.push({
-            agent: 'codex',
-            kind: 'skill',
-            name: skill.name,
-            where: named(io, skill.file),
-            why: oneLine(`Codex leaves it out: ${error.message}`),
-            by: 'codex',
-            at: heard.at,
-          })
+          part('skill', skill.file, oneLine(`Codex leaves it out: ${error.message}`), false, 'codex', heard.at, skill.name)
         continue
       }
-      const text = readText(skill.file)
-      const problem = text === undefined ? undefined : definitionProblem(frontOf(text), 'Codex')
-      if (problem !== undefined)
-        parts.push({ agent: 'codex', kind: 'skill', name: skill.name, where: named(io, skill.file), why: problem, by: null, at: now })
+      const read = await readText(skill.file)
+      if (read.kind === 'failed') {
+        part('skill', skill.file, unopened(read.why, 'Codex'), false, null, now, skill.name)
+        continue
+      }
+      const problem = read.kind === 'text' ? definitionProblem(frontOf(read.text), 'Codex') : undefined
+      if (problem !== undefined) part('skill', skill.file, problem, false, null, now, skill.name)
     }
   return parts
 }
 
 /**
- * Each part of the person's own setup that doesn't load, Claude Code's first: what the agents last said, where it
- * still stands, and Althar's own reading of each file. Never runs a command; never throws.
+ * Reads each part of the person's own setup that doesn't load, Claude Code's first: what the agents last said, where
+ * it still stands, and Althar's own reading of each file, off the thread that answers (every read is the file
+ * system's own work). Never runs a command; never throws.
  */
-export const setupParts = (io: SetupIo): ReadonlyArray<Part> => {
+export const scanSetup = async (io: SetupIo, kept: SetupRecord = readSetup(io)): Promise<ReadonlyArray<Part>> => {
   try {
-    const kept = readSetup(io)
     const now = io.now()
     const claude = kept.claude !== undefined && fresh(kept.claude.at, now) ? kept.claude : undefined
     const codex = kept.codex !== undefined && fresh(kept.codex.at, now) ? kept.codex : undefined
-    return [...claudeParts(io, claude, now), ...codexParts(io, codex, now)]
+    const [ofClaude, ofCodex] = await Promise.all([claudeParts(io, claude, now), codexParts(io, codex, now)])
+    return [...ofClaude, ...ofCodex]
   } catch {
     return []
   }
 }
+
+/** What was found of the setup when it was last read, as Settings shows it: one small file, no folder walked. */
+export const setupParts = (io: Pick<SetupIo, 'folder'>): ReadonlyArray<Part> => readSetup(io).parts ?? []
 
 /* ---- asking the agents ---------------------------------------------------------------- */
 
@@ -512,7 +634,8 @@ export const parseClaudeAnswers = (printed: string): Omit<ClaudeHeard, 'at'> | u
   const messages = messagesIn(printed)
   const started = claudeAnswer(messages, 'althar-initialize')
   const settings = claudeAnswer(messages, 'althar-settings')
-  if (started === undefined && settings === undefined) return undefined
+  // Both whole, or it hasn't answered: a half is never kept as what it said.
+  if (started === undefined || settings === undefined) return undefined
   const agents = Array.isArray(started?.['agents'])
     ? started['agents'].flatMap((one) => {
         const name = record(one)?.['name']
@@ -539,7 +662,8 @@ export const parseCodexAnswers = (printed: string, io: Pick<SetupIo, 'homeDir'>)
   const messages = messagesIn(printed)
   const listed = messages.find((message) => message['id'] === 2)
   const started = messages.some((message) => message['id'] === 1 && record(message['result']) !== undefined)
-  if (!started) return undefined
+  // Its skills' answer whole, or it hasn't answered: a start alone is never kept as what it said.
+  if (!started || listed === undefined) return undefined
   const config = messages.flatMap((message) => {
     if (message['method'] !== 'configWarning') return []
     const params = record(message['params'])
@@ -595,7 +719,8 @@ const CLAUDE_ARGS = [
 const CLAUDE_ENV = { DISABLE_TELEMETRY: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }
 
 const askClaude = async (converse: Converse): Promise<Omit<ClaudeHeard, 'at'> | undefined> => {
-  const done = (printed: string) => printed.includes('"althar-settings"') && printed.includes('"althar-initialize"')
+  // Once both answers have come whole, each on a line of its own: never on a request's id alone, which may come in a piece.
+  const done = (printed: string) => parseClaudeAnswers(printed) !== undefined
   try {
     // The person's own Claude Code, else the copy Althar's sessions run on.
     let printed = await converse('claude', CLAUDE_ARGS, () => CLAUDE_LINES, done, CLAUDE_ENV)
@@ -607,14 +732,23 @@ const askClaude = async (converse: Converse): Promise<Omit<ClaudeHeard, 'at'> | 
   }
 }
 
-const askCodex = async (converse: Converse, io: Pick<SetupIo, 'homeDir'>): Promise<Omit<CodexHeard, 'at'> | undefined> => {
+/**
+ * The Codex to ask: in a Flatpak, the one on the device, through the bridge its sessions run it by (`CODEX_PATH`,
+ * flatpak/codex-host.sh), as Codex can't run in the sandbox and is mostly installed outside it; else the person's own.
+ */
+export const codexCommand = (env: Readonly<Record<string, string | undefined>> = {}) =>
+  env['FLATPAK_ID'] !== undefined && env['CODEX_PATH'] ? env['CODEX_PATH'] : 'codex'
+
+const askCodex = async (converse: Converse, io: Pick<SetupIo, 'homeDir' | 'env'>): Promise<Omit<CodexHeard, 'at'> | undefined> => {
   const lines = (cwd: string) => [
     JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'althar', version: '1' } } }),
     JSON.stringify({ jsonrpc: '2.0', method: 'initialized' }),
     JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'skills/list', params: { cwds: [cwd] } }),
   ]
   try {
-    const printed = await converse('codex', ['app-server'], lines, (text) => /"id":\s*2\b/.test(text))
+    const printed = await converse(codexCommand(io.env), ['app-server'], lines, (text) =>
+      messagesIn(text).some((message) => message['id'] === 2),
+    )
     return printed === undefined ? undefined : parseCodexAnswers(printed, io)
   } catch {
     return undefined
@@ -654,9 +788,35 @@ const codexHeardOf = (value: unknown): CodexHeard | undefined => {
   return { at: kept['at'], config: pairs(kept['config'], 'path', 'words') ?? [], ...(skills === undefined ? {} : { skills }) }
 }
 
+const AGENTS: ReadonlyArray<Part['agent']> = ['claude', 'codex']
+const KINDS: ReadonlyArray<Part['kind']> = ['settings', 'hook', 'agent', 'command', 'output-style', 'skill', 'plugin', 'config']
+const BY: ReadonlyArray<string> = ['claude', 'codex', 'opencode']
+
+const partOf = (value: unknown): ReadonlyArray<Part> => {
+  const one = record(value)
+  if (one === undefined) return []
+  const { agent, kind, name, where, why, loads, by, at, file } = one
+  return AGENTS.includes(agent as Part['agent']) &&
+    KINDS.includes(kind as Part['kind']) &&
+    typeof name === 'string' &&
+    typeof where === 'string' &&
+    typeof why === 'string' &&
+    typeof loads === 'boolean' &&
+    (by === null || BY.includes(by as string)) &&
+    typeof at === 'string' &&
+    typeof file === 'string'
+    ? [{ agent, kind, name, where, why, loads, by, at, file } as Part]
+    : []
+}
+
 /** What was last kept; empty where nothing was, or where the file is damaged. Never runs a command. */
 export const readSetup = (io: Pick<SetupIo, 'folder'>): SetupRecord => {
-  const kept = record(readJson(setupPath(io)))
+  let kept: Readonly<Record<string, unknown>> | undefined
+  try {
+    kept = record(JSON.parse(readFileSync(setupPath(io), 'utf8')))
+  } catch {
+    return emptySetup
+  }
   if (kept === undefined) return emptySetup
   const claude = claudeHeardOf(kept['claude'])
   const codex = codexHeardOf(kept['codex'])
@@ -664,23 +824,20 @@ export const readSetup = (io: Pick<SetupIo, 'folder'>): SetupRecord => {
     checkedAt: typeof kept['checkedAt'] === 'string' ? kept['checkedAt'] : null,
     ...(claude === undefined ? {} : { claude }),
     ...(codex === undefined ? {} : { codex }),
+    ...(Array.isArray(kept['parts']) ? { parts: kept['parts'].flatMap(partOf) } : {}),
   }
 }
 
 /** Writes the record whole or not at all: to a file beside it, then moved over it. */
-const writeSetup = (io: Pick<SetupIo, 'folder'>, kept: SetupRecord) => {
-  mkdirSync(io.folder, { recursive: true })
+const writeSetup = async (io: Pick<SetupIo, 'folder'>, kept: SetupRecord) => {
+  await mkdir(io.folder, { recursive: true })
   const path = setupPath(io)
   const next = `${path}.${randomBytes(6).toString('hex')}.tmp`
   try {
-    writeFileSync(next, `${JSON.stringify(kept, null, 2)}\n`)
-    renameSync(next, path)
+    await writeFile(next, `${JSON.stringify(kept, null, 2)}\n`)
+    await rename(next, path)
   } catch (error) {
-    try {
-      unlinkSync(next)
-    } catch {
-      // Never written, or gone already.
-    }
+    await unlink(next).catch(() => undefined)
     throw error
   }
 }
@@ -690,9 +847,15 @@ const running = new Map<string, Promise<SetupRecord>>()
 
 const checkNow = async (io: SetupIo, converse: Converse): Promise<SetupRecord> => {
   try {
+    const before = readSetup(io)
+    // The agents at most every few minutes; the files each time, so a file the person fixed shows fixed.
+    if (before.checkedAt !== null && fresh(before.checkedAt, io.now(), ASK_EVERY)) {
+      const next: SetupRecord = { ...before, parts: await scanSetup(io, before) }
+      await writeSetup(io, next)
+      return next
+    }
     const [claude, codex] = await Promise.all([askClaude(converse), askCodex(converse, io)])
     const now = io.now()
-    const before = readSetup(io)
     // An agent that couldn't be asked keeps what it last said, for a day.
     const keptClaude =
       claude !== undefined
@@ -702,12 +865,13 @@ const checkNow = async (io: SetupIo, converse: Converse): Promise<SetupRecord> =
           : undefined
     const keptCodex =
       codex !== undefined ? { at: now, ...codex } : before.codex !== undefined && fresh(before.codex.at, now) ? before.codex : undefined
-    const next: SetupRecord = {
+    const heard: SetupRecord = {
       checkedAt: now,
       ...(keptClaude === undefined ? {} : { claude: keptClaude }),
       ...(keptCodex === undefined ? {} : { codex: keptCodex }),
     }
-    writeSetup(io, next)
+    const next: SetupRecord = { ...heard, parts: await scanSetup(io, heard) }
+    await writeSetup(io, next)
     return next
   } catch {
     return readSetup(io)
@@ -715,8 +879,9 @@ const checkNow = async (io: SetupIo, converse: Converse): Promise<SetupRecord> =
 }
 
 /**
- * Asks Claude Code and Codex, through their own commands, what of the person's setup they load, and keeps what they
- * said. Never throws: an agent that couldn't be asked keeps what it last said.
+ * Asks Claude Code and Codex, through their own commands, what of the person's setup they load, where they weren't
+ * asked in the last few minutes, reads the rest of it, and keeps both for Settings. Never throws: an agent that
+ * couldn't be asked keeps what it last said.
  */
 export const checkSetup = (io: SetupIo, converse: Converse): Promise<SetupRecord> => {
   const before = running.get(io.folder)

@@ -29,6 +29,7 @@ import s from './ToolTiles.module.css'
 
 export interface SkillSheetText extends ToolWordsText {
   didntLoad: string
+  frontIgnored: string
   from: string
   update: string
   agentsLabel: string
@@ -45,6 +46,7 @@ export interface SkillSheetText extends ToolWordsText {
 export const skillSheetText: SkillSheetText = {
   ...toolWordsText,
   didntLoad: 'Didn’t load',
+  frontIgnored: 'Frontmatter ignored',
   from: 'From',
   update: 'Update',
   agentsLabel: 'Your agents',
@@ -101,7 +103,7 @@ export function SkillSheet({
       <ControlDetail title={skill.name} onBack={onBack} headingLevel={headingLevel} text={{ back: t.back }}>
         <div className={s.sheet}>
           {skill.failed !== undefined && skill.failed !== null && (
-            <SheetFact label={t.didntLoad}>
+            <SheetFact label={skill.failed.loads === true ? t.frontIgnored : t.didntLoad}>
               <Problem as="span">{skill.failed.why}</Problem>
             </SheetFact>
           )}

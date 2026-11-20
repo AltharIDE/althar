@@ -631,6 +631,8 @@ export const ToolFailure = Schema.Struct({
   agent: Schema.NullOr(SyncedAgent),
   why: Schema.String,
   at: Schema.String,
+  /** One of the person's skills that an agent loads, but without what its frontmatter sets; absent or false where it isn't loaded at all. */
+  loads: Schema.optional(Schema.Boolean),
 })
 export type ToolFailure = typeof ToolFailure.Type
 
@@ -649,6 +651,8 @@ export const SetupPart = Schema.Struct({
   where: Schema.String,
   /** Why, in a sentence: the agent's own words where it said, else Althar's. */
   why: Schema.String,
+  /** It loads, but without part of what it sets: a field of a plugin.json, frontmatter, a hook that runs for some of what it names. False where the agent skips it, or it never runs. */
+  loads: Schema.Boolean,
   /** Whose words `why` has: the agent's, or null for Althar's own reading of the file. */
   by: Schema.NullOr(SyncedAgent),
 })
