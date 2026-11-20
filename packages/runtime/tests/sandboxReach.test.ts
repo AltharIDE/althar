@@ -129,6 +129,58 @@ describe('what a repository says its leads run outside the sandbox', () => {
     assert.deepStrictEqual(commandsIn(folder({ name: 'tool', devDependencies: { electron: '38' } })), ['npx electron'])
   })
 
+  it('finds native commands for an Expo workspace before prebuild, including its package runner', () => {
+    const root = folder(
+      { name: 'shop', workspaces: ['apps/*'] },
+      {
+        'bun.lock': '',
+        'apps/mobile/package.json': JSON.stringify({ name: 'mobile', dependencies: { expo: '58', 'react-native': '0.88' } }),
+      },
+    )
+    assert.sameMembers(
+      [...commandsIn(root, root, 'darwin')],
+      [
+        'xcrun simctl',
+        'xcodebuild',
+        'pod install',
+        'bundle exec pod install',
+        'xcrun devicectl',
+        'xcrun xctrace',
+        'expo run:ios',
+        'npx expo run:ios',
+        'bunx expo run:ios',
+        'emulator',
+        'gradle',
+        './gradlew',
+        './android/gradlew',
+        'expo run:android',
+        'npx expo run:android',
+        'bunx expo run:android',
+      ],
+    )
+    assert.deepStrictEqual(commandsIn(root, root, 'linux'), [])
+  })
+
+  it('recognizes native iOS files and React Native packages without opting other repositories into Expo', () => {
+    const apple = folder({ name: 'native' }, { 'ios/Native.xcodeproj/project.pbxproj': '' })
+    const pods = folder({ name: 'pods' }, { Podfile: '' })
+    const reactNative = folder({ name: 'react-native-app', dependencies: { 'react-native': '0.88' } })
+    for (const root of [apple, pods, reactNative]) {
+      assert.includeMembers([...commandsIn(root, root, 'darwin')], ['xcrun simctl', 'xcodebuild', 'pod install', 'xcrun devicectl'])
+      assert.notInclude(commandsIn(root, root, 'darwin'), 'expo run:ios')
+    }
+    assert.notInclude(commandsIn(apple, apple, 'darwin'), 'emulator')
+    const unrelated = folder({ name: 'web' }, { 'app.json': '{}', 'ios/README.md': '' })
+    assert.deepStrictEqual(commandsIn(unrelated, unrelated, 'darwin'), [])
+  })
+
+  it('distinguishes Android projects from other Gradle builds and sees files at the repository root', () => {
+    const android = folder({ name: 'native' }, { 'android/settings.gradle.kts': '', 'app/package.json': '{}' })
+    assert.sameMembers([...commandsIn(join(android, 'app'), android, 'darwin')], ['emulator', 'gradle', './gradlew', './android/gradlew'])
+    const gradle = folder({ name: 'jvm' }, { 'build.gradle': '' })
+    assert.deepStrictEqual(commandsIn(gradle, gradle, 'darwin'), ['gradle', './gradlew'])
+  })
+
   it('reads a kept setup by how each command starts, and a kept run command whole, without what only tests or changes folder', () => {
     assert.deepStrictEqual(setupCommandsOf('test -d node_modules || bun install --frozen-lockfile'), ['bun install'])
     assert.deepStrictEqual(setupCommandsOf('if not exist node_modules npm ci'), ['npm ci'])
@@ -154,6 +206,13 @@ describe('what a repository says its leads run outside the sandbox', () => {
       ],
     )
     assert.isTrue(ALWAYS.every(runsOutside))
+  })
+
+  it('routes Launch Services, AppleScript and Docker clients on macOS while keeping other native tools project-specific', () => {
+    for (const command of ['open', 'osascript', 'docker', 'docker-compose']) {
+      assert.strictEqual(ALWAYS.includes(command), process.platform === 'darwin')
+    }
+    assert.notIncludeMembers([...ALWAYS], ['xcrun simctl', 'emulator', 'gradle', 'security', 'screencapture'])
   })
 })
 
@@ -266,15 +325,15 @@ const linear = Effect.gen(function* () {
   })}`
 })
 
-/** A task on a desktop app with Claude Code leading it, its project's rules as given; what its lead's session was started with. */
-const leading = (rules: Parameters<Policies['Service']['set']>[1]) =>
+/** A task with Claude Code leading it and the given project rules; what its lead's session was started with. */
+const leading = (rules: Parameters<Policies['Service']['set']>[1], path = desktopApp()) =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const policies = yield* Policies
     const instance = yield* Instance
     const sessions = yield* Sessions
     yield* linear
-    const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: desktopApp() })
+    const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
     yield* policies.set(project.projectId, rules, instance.personId)
     const made = yield* projects.createTask({
       envelope: yield* Runtime.envelope('task.create', { title: 'Retry checkout' }),
@@ -290,6 +349,24 @@ const leading = (rules: Parameters<Policies['Service']['set']>[1]) =>
   })
 
 describe('a lead’s session', () => {
+  it.live('passes the project’s native commands to the lead at launch and honors a removed command', () =>
+    Effect.gen(function* () {
+      const path = repository()
+      writeFileSync(join(path, 'package.json'), JSON.stringify({ name: 'mobile', dependencies: { expo: '58' } }))
+      git(path, 'add', 'package.json')
+      git(path, 'commit', '-q', '-m', 'Expo app')
+      const sandbox = yield* leading(
+        { permissions: 'rules', allowEverything: false, sandbox: { commands: { added: [], removed: ['pod install'] } } },
+        path,
+      )
+      assert.isDefined(sandbox)
+      for (const command of ['xcrun simctl', 'xcrun devicectl', 'npx expo run:ios', 'npx expo run:android']) {
+        assert.strictEqual(sandbox?.commands.includes(command), process.platform === 'darwin')
+      }
+      assert.notInclude(sandbox?.commands ?? [], 'pod install')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('waits for its agent’s sandbox probe before it works out what the sandbox holds and what the session starts with', () =>
     Effect.gen(function* () {
       const projects = yield* Projects
@@ -421,8 +498,8 @@ describe('a lead’s session', () => {
 describe('a lead’s brief', () => {
   it('names what runs outside its sandbox, how one does, and that its network is open', () => {
     assert.strictEqual(
-      upFrontSaid({ commands: ['bunx playwright', 'ps'], hosts: ['github.com', 'registry.npmjs.org'], writes: [] }),
-      "These commands run outside your sandbox from the start, so they don't fail inside it first: `bunx playwright`, `ps`. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, `cd` or a pipe into `tail` included, stays in the sandbox, so change folder in a call of its own first. On macOS, Electron and Chromium can't start inside the sandbox at all (it never lets them register a Mach service), so run the project's end-to-end tests this way. A line that starts with `bun` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here. Your sandbox reaches any host without asking: the network is open.",
+      upFrontSaid({ commands: ['bunx playwright', 'xcrun simctl', 'npx expo run:ios'], hosts: ['github.com'], writes: [] }),
+      "Run these commands directly. They start outside your sandbox and still meet the project's rules: `bunx playwright`, `xcrun simctl`, `npx expo run:ios`. Give each command its own call, including a separate call for `cd`, and leave off pipes. For a `bun` script, run its listed command directly from the script's folder. Your sandbox reaches any host without asking: the network is open.",
     )
     assert.strictEqual(upFrontSaid({ commands: ['ps'], hosts: [], writes: [] }).includes('hosts'), false)
     assert.include(

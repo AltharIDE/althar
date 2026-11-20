@@ -406,7 +406,7 @@ export const upFrontSaid = (upFront: Reach): string =>
   [
     upFront.commands.length === 0
       ? ''
-      : `These commands run outside your sandbox from the start, so they don't fail inside it first: ${upFront.commands.map((command) => `\`${command}\``).join(', ')}. Each still asks, and meets the project's rules. One runs outside only on a line of its own: a line that runs anything else with it, \`cd\` or a pipe into \`tail\` included, stays in the sandbox, so change folder in a call of its own first. On macOS, Electron and Chromium can't start inside the sandbox at all (it never lets them register a Mach service), so run the project's end-to-end tests this way. A line that starts with \`bun\` always stays in the sandbox: run what its script runs instead, from the script's folder, as listed here.`,
+      : `Run these commands directly. They start outside your sandbox and still meet the project's rules: ${upFront.commands.map((command) => `\`${command}\``).join(', ')}. Give each command its own call, including a separate call for \`cd\`, and leave off pipes. For a \`bun\` script, run its listed command directly from the script's folder.`,
     'Your sandbox reaches any host without asking: the network is open.',
     upFront.writes.length === 0
       ? ''

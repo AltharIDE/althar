@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseRemote, type Product, products } from '@althar/connectors'
@@ -50,9 +50,7 @@ export interface Edits {
 }
 
 /**
- * Commands every lead runs outside its sandbox: `ps`, as a Mac's sandbox
- * can't list processes, and `env -i`, the clean environment a test run of a
- * desktop app starts from; what it runs still meets the rules.
+ * Commands that need to run outside even without a matching repository.
  */
 const SERVERS_AND_TESTS = [
   'vite',
@@ -70,9 +68,14 @@ const SERVERS_AND_TESTS = [
   'vp dev',
   'vp test',
 ]
+
+/** Launch Services, Apple Events and container daemon sockets are used across projects. */
+const MACOS_COMMANDS = ['open', 'osascript', 'docker', 'docker-compose']
+
 export const ALWAYS: ReadonlyArray<string> = [
   'ps',
   'env -i',
+  ...(process.platform === 'darwin' ? MACOS_COMMANDS : []),
   ...SERVERS_AND_TESTS.flatMap((command) => [command, ...['npx', 'bunx', 'pnpm exec', 'yarn'].map((runner) => `${runner} ${command}`)]),
   ...['npm', 'pnpm', 'yarn'].flatMap((manager) =>
     ['dev', 'start', 'test'].flatMap((script) => [`${manager} run ${script}`, `${manager} ${script}`]),
@@ -89,6 +92,44 @@ const TOOLS: ReadonlyArray<{ readonly packages: ReadonlyArray<string>; readonly 
 
 /** How each package manager runs a package's own command. */
 const RUNNERS: Readonly<Record<string, string>> = { bun: 'bunx', npm: 'npx', pnpm: 'pnpm exec', yarn: 'yarn' }
+
+const GRADLE_FILES = ['gradlew', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts']
+const ANDROID_FILES = ['app/src/main/AndroidManifest.xml', 'src/main/AndroidManifest.xml']
+
+const hasFile = (folder: string, files: ReadonlyArray<string>) => files.some((file) => existsSync(join(folder, file)))
+
+const hasXcodeProject = (folder: string) => {
+  try {
+    return readdirSync(folder, { withFileTypes: true }).some(
+      (entry) => entry.isDirectory() && /\.(xcodeproj|xcworkspace)$/.test(entry.name),
+    )
+  } catch {
+    return false
+  }
+}
+
+/** Native tools that need macOS services or their normal build caches, by the projects that use them. */
+const nativeCommandsIn = (folder: string, root: string, packages: ReadonlySet<string>, runner: string): ReadonlyArray<string> => {
+  const folders = [...new Set([folder, root])]
+  const iosFolders = [...folders, ...folders.map((at) => join(at, 'ios'))]
+  const androidFolders = folders.map((at) => join(at, 'android'))
+  const expo = packages.has('expo')
+  const mobile = expo || packages.has('react-native')
+  const ios = mobile || iosFolders.some((at) => hasFile(at, ['Podfile']) || hasXcodeProject(at))
+  const android =
+    mobile ||
+    folders.some((at) => hasFile(at, ANDROID_FILES)) ||
+    androidFolders.some((at) => hasFile(at, [...GRADLE_FILES, ...ANDROID_FILES]))
+  const gradle = android || folders.some((at) => hasFile(at, GRADLE_FILES))
+  const expoRun = (platform: 'ios' | 'android') => ['', 'npx ', `${runner} `].map((prefix) => `${prefix}expo run:${platform}`)
+  return [
+    ...(ios ? ['xcrun simctl', 'xcodebuild', 'pod install', 'bundle exec pod install', 'xcrun devicectl', 'xcrun xctrace'] : []),
+    ...(android ? ['emulator'] : []),
+    ...(gradle ? ['gradle', './gradlew'] : []),
+    ...(android ? ['./android/gradlew'] : []),
+    ...(expo ? [...expoRun('ios'), ...expoRun('android')] : []),
+  ]
+}
 
 /** A script that runs tests or drives a browser, by its name: `test`, `test:e2e`, `e2e`, `playwright`. */
 const testing = (name: string) => /^(dev|start|serve|test)(:|$)/.test(name) || /e2e|playwright|screenshot/.test(name)
@@ -108,18 +149,19 @@ const tidy = (line: string) => line.trim().replace(/\s+/g, ' ')
 
 /**
  * The commands the repository in `folder` runs outside a lead's sandbox, as
- * what is in it says: the tools its packages bring that start a browser,
- * Electron or a test runner, run by its package manager, and its test and
- * end-to-end scripts, run from where they are. Bun's scripts by what they
+ * what is in it says: its native tools, the tools its packages bring that
+ * start a browser or test runner, and its test and end-to-end scripts, run
+ * from where they are. Bun's scripts by what they
  * run, as Claude Code keeps a line that starts with `bun` in its sandbox:
  * `node scripts/e2e.ts`, `bunx vp test run`.
  */
-export const commandsIn = (folder: string, root: string = folder): ReadonlyArray<string> => {
+export const commandsIn = (folder: string, root: string = folder, platform: NodeJS.Platform = process.platform): ReadonlyArray<string> => {
   const manager = managerIn(folder, root) ?? 'npm'
   const runner = RUNNERS[manager] ?? 'npx'
   const packages = packagesIn(folder)
+  const native = platform === 'darwin' ? nativeCommandsIn(folder, root, packages, runner) : []
   const brought = TOOLS.filter((tool) => tool.packages.some((name) => packages.has(name)))
-  const tools = brought.map((tool) => `${runner} ${tool.bin}`)
+  const tools = [...brought.map((tool) => `${runner} ${tool.bin}`), ...native]
   const tests = scriptsIn(folder, root).filter((script) => testing(script.name))
   // A package's own command as a lead types it, through the runner; anything else, `node scripts/e2e.ts`, as it is.
   const ownCommand = (program: string) =>
