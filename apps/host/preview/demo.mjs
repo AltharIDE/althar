@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const exec = promisify(execFile)
+const say = (line) => process.stdout.write(`${line}\n`)
 const product = fileURLToPath(new URL('.', import.meta.url))
 const waitFor = async (read, description, signal) => {
   const expires = performance.now() + 15_000
@@ -165,7 +166,7 @@ const demo = async () => {
     const { child: serving, ready } = await start()
     equal(ready.homeId, home.homeId)
     ok(ready.workerPort > 0)
-    console.log(`Home ready ${ready.homeId}`)
+    say(`Home ready ${ready.homeId}`)
 
     const command = path('check.sh')
     writeFileSync(
@@ -212,8 +213,9 @@ const demo = async () => {
     const log = async (attempt) => Buffer.from((await host('worker-log', '--attempt-id', attempt)).bytesBase64, 'base64').toString()
     const first = await queue()
     await until(async () => (await result(first)).state === 'succeeded', 'The worker did not complete the registered command.')
-    deepEqual((await log(first)).split('\n'), ['true', 'Project check completed', ''])
-    console.log(`Run ${first} succeeded\n${(await log(first)).trimEnd()}`)
+    const output = await log(first)
+    deepEqual(output.split('\n'), ['true', 'Project check completed', ''])
+    say(`Run ${first} succeeded\n${output.trimEnd()}`)
 
     await stop(serving)
     await until(() => workerOutput.includes('Worker connection failed:'), 'The worker did not observe the home restart.')
@@ -222,7 +224,7 @@ const demo = async () => {
     equal(restarted.homeId, ready.homeId)
     equal(restarted.workerPort, ready.workerPort)
     equal((await result(first)).state, 'succeeded')
-    console.log('The restarted home kept its identity and the completed run.')
+    say('The restarted home kept its identity and the completed run.')
 
     writeFileSync(join(checkout, 'hold'), '')
     const second = await queue()
@@ -244,8 +246,8 @@ const demo = async () => {
     } catch (error) {
       if (error.code !== 'ENOENT') throw error
     }
-    console.log(`Run ${second} cancelled and its detached child stopped`)
-    console.log('Host and worker preview passed.')
+    say(`Run ${second} cancelled and its detached child stopped`)
+    say('Host and worker preview passed.')
   } catch (error) {
     if (workerOutput) console.error(workerOutput.trimEnd())
     if (error.stderr) console.error(error.stderr.trimEnd())
