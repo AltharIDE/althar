@@ -8,7 +8,6 @@ const limit = 4_000
 // Remove each entry when its file fits the shared limit.
 const legacyLimits: Readonly<Record<string, number>> = {
   'Queries.ts': 5_050,
-  'rules.ts': 5_400,
 }
 
 const paths = globSync('**/*.{ts,tsx,mts,cts}', { cwd: source })
