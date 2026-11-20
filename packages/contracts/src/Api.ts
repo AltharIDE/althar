@@ -631,8 +631,32 @@ export const ToolFailure = Schema.Struct({
   agent: Schema.NullOr(SyncedAgent),
   why: Schema.String,
   at: Schema.String,
+  /** One of the person's skills that an agent loads, but without what its frontmatter sets; absent or false where it isn't loaded at all. */
+  loads: Schema.optional(Schema.Boolean),
 })
 export type ToolFailure = typeof ToolFailure.Type
+
+/**
+ * A part of the person's own setup that the agent it is for doesn't load, or loads without what it sets
+ * (docs/decisions/the-persons-setup.md, "When part of it doesn't load"): Claude Code's settings, hooks, agents, commands,
+ * output styles, skills and plugins, and Codex's `config.toml` and skills. One broken file is one part.
+ */
+export const SetupPart = Schema.Struct({
+  /** The agent it is for. */
+  agent: Schema.Literals(['claude', 'codex']),
+  kind: Schema.Literals(['settings', 'hook', 'agent', 'command', 'output-style', 'skill', 'plugin', 'config']),
+  /** What it is, as the person names it: review-agent.md, settings.json; a skill's folder name; a plugin's name. */
+  name: Schema.String,
+  /** Where it is, as the person names it: ~/.claude/agents/review-agent.md. */
+  where: Schema.String,
+  /** Why, in a sentence: the agent's own words where it said, else Althar's. */
+  why: Schema.String,
+  /** It loads, but without part of what it sets: a field of a plugin.json, frontmatter, a hook that runs for some of what it names. False where the agent skips it, or it never runs. */
+  loads: Schema.Boolean,
+  /** Whose words `why` has: the agent's, or null for Althar's own reading of the file. */
+  by: Schema.NullOr(SyncedAgent),
+})
+export type SetupPart = typeof SetupPart.Type
 
 /**
  * One of the person's MCP servers or skills, a tile of Settings: where it was found, which roles get it and where,
@@ -654,7 +678,7 @@ export const ToolRow = Schema.Struct({
   way: Schema.Literals(['command', 'address']),
   /** A server: signed in or not, by agent, for the agents that run it. A skill: every agent unknown. */
   signIn: Schema.Record(SyncedAgent, ToolSignIn),
-  /** A server: why its last start failed, while it has; null otherwise. */
+  /** A server: why its last start failed, while it has. One of the person's skills: why an agent doesn't load it, where one doesn't. Null otherwise. */
   failed: Schema.NullOr(ToolFailure),
   /** A skill: where it lives, as the person names it (a folder, a plugin, Althar's store); a server: null. */
   home: Schema.NullOr(Schema.String),
@@ -775,6 +799,10 @@ export const AgentTools = Schema.Struct({
   places: Schema.Array(Schema.Struct({ agent: SyncedAgent, file: Schema.String, folder: Schema.String })),
   /** When the agents' own checks last ran, for the sign-ins and failures the rows say; null before the first. */
   checkedAt: Schema.NullOr(Schema.String),
+  /** The parts of the person's own setup that don't load, but for skills, which their own rows mark (`failed`). */
+  setup: Schema.Array(SetupPart),
+  /** When the agents were last asked what of the person's setup they load; null before the first. */
+  setupCheckedAt: Schema.NullOr(Schema.String),
 })
 export type AgentTools = typeof AgentTools.Type
 
@@ -5577,6 +5605,8 @@ const ProjectApi = RpcGroup.make(
   call('GetServerDetail', { name: Schema.String, repository: Schema.NullOr(Schema.String) }, ServerDetail),
   /** Asks each of the person's agents, through its own command, how each server stands: signed in, or why it failed to start. */
   command('CheckServers', {}, Schema.Void),
+  /** Asks Claude Code and Codex, through their own commands, what of the person's own setup they load, and keeps what they say. */
+  command('CheckSetup', {}, Schema.Void),
   /** Adds a server to each of the agents listed, in its own file, as the person's own there. Refused where the name is taken in one of them. */
   command('AddServer', { server: NewServer, agents: Schema.Array(SyncedAgent) }, Schema.Void),
   /** Takes a server out of every one of the agents' files that has it, and out of what sync keeps for it. */

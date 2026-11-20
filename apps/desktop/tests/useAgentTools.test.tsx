@@ -168,3 +168,21 @@ describe('how the servers stand', () => {
     expect(result.current.loadFailed).toBe(false)
   })
 })
+
+describe('what of the person’s own setup loads', () => {
+  it('is read again as the skills or the agents open, once an opening, whenever the agents were last asked', async () => {
+    const { client } = fakeClient({ getAgentTools: vi.fn(async () => tools()) })
+    const { result, rerender } = hook(client, { setup: true })
+    await waitFor(() => expect(client.checkSetup).toHaveBeenCalledTimes(1))
+    rerender()
+    await waitFor(() => expect(result.current.tools).toBeDefined())
+    expect(client.checkSetup).toHaveBeenCalledTimes(1)
+    expect(client.checkServers).not.toHaveBeenCalled()
+
+    // The runtime decides whether to ask the agents again: the files are read each opening.
+    const lately = new Date(Date.now() - 60_000).toISOString()
+    const fresh = fakeClient({ getAgentTools: vi.fn(async () => tools({ setupCheckedAt: lately })) })
+    hook(fresh.client, { setup: true })
+    await waitFor(() => expect(fresh.client.checkSetup).toHaveBeenCalledTimes(1))
+  })
+})

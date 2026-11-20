@@ -1,6 +1,7 @@
-import type { AgentStatus, AgentTools, ServerDetail, SyncedAgent, SyncSince, SyncView, ToolRow } from '@althar/contracts'
+import type { AgentStatus, AgentTools, ServerDetail, SetupPart, SyncedAgent, SyncSince, SyncView, ToolRow } from '@althar/contracts'
 import {
   Brand,
+  type OwnSetupPartView,
   type ServerTileModel,
   type SkillTileModel,
   type ToolAgentView,
@@ -77,7 +78,17 @@ export const skillTileOf = (row: ToolRow, update: boolean): SkillTileModel => ({
   home: row.home,
   from: row.from === null ? null : row.from.repo,
   update,
+  failed: row.failed === null ? null : { agent: row.failed.agent, why: row.failed.why, loads: row.failed.loads === true },
 })
+
+/** The registry's id for each agent whose own setup Althar reads. */
+const SETUP_AGENTS: Readonly<Record<string, SetupPart['agent']>> = { 'claude-code': 'claude', codex: 'codex' }
+
+/** What of the person's own setup an agent, by the registry's id, doesn't load, as its tab lists it. */
+export const ownSetupOf = (tools: AgentTools | undefined, agentId: string): ReadonlyArray<OwnSetupPartView> =>
+  (tools?.setup ?? [])
+    .filter((part) => part.agent === SETUP_AGENTS[agentId])
+    .map((part) => ({ id: `${part.kind}:${part.where}:${part.name}`, name: part.name, where: part.where, why: part.why }))
 
 /** An agent's own file, as the opened server shows it. */
 export const filesOf = (detail: ServerDetail): ReadonlyArray<ToolFileView> =>
