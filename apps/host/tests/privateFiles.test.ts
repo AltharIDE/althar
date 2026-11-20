@@ -1,11 +1,17 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, linkSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import * as fs from 'node:fs/promises'
 import { join, parse } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { privateDirectory, readPrivate, removePrivate, writePrivate } from '../src/privateFiles'
 import { temporary } from './support'
+
+vi.mock(import('node:fs/promises'), async (importOriginal) => {
+  const actual = await importOriginal()
+  return { ...actual, open: vi.fn(actual.open) }
+})
 
 describe('private durable host files', () => {
   it('publishes a complete private file, never clobbers on creation, replaces atomically and removes idempotently', async () => {
@@ -39,6 +45,25 @@ describe('private durable host files', () => {
     await expect(privateDirectory(join(root, 'missing'))).rejects.toMatchObject({ code: 'NotInitialized' })
   })
 
+  it.skipIf(process.platform === 'win32')('reads a private checkpoint replaced while its descriptor is open', async () => {
+    const root = temporary()
+    const checkpoint = join(root, 'setup.json')
+    const staged = join(root, 'new.json')
+    const original = vi.mocked(fs.open).getMockImplementation()!
+    for (const mode of ['snapshot', true] as const) {
+      writeFileSync(checkpoint, 'previous', { mode: 0o600 })
+      writeFileSync(staged, 'next', { mode: 0o600 })
+      vi.mocked(fs.open).mockImplementationOnce(async (...args) => {
+        const opened = await original(...args)
+        renameSync(staged, checkpoint)
+        return opened
+      })
+      if (mode === 'snapshot') expect((await readPrivate(checkpoint, 10, mode))?.toString()).toBe('previous')
+      else await expect(readPrivate(checkpoint, 10, mode)).rejects.toMatchObject({ code: 'UnsafePermissions' })
+      expect((await readPrivate(checkpoint, 10, mode))?.toString()).toBe('next')
+    }
+  })
+
   it.skipIf(process.platform === 'win32')(
     'rejects exposed files, symlinks, multiply-linked master keys, oversized data and FIFOs without blocking',
     async () => {
@@ -51,6 +76,7 @@ describe('private durable host files', () => {
       chmodSync(file, 0o600)
       linkSync(file, join(root, 'hardlink'))
       await expect(readPrivate(file, 10, true)).rejects.toMatchObject({ code: 'UnsafePermissions' })
+      await expect(readPrivate(file, 10, 'snapshot')).rejects.toMatchObject({ code: 'UnsafePermissions' })
       symlinkSync(file, join(root, 'link'))
       await expect(readPrivate(join(root, 'link'), 10)).rejects.toMatchObject({ code: 'UnsafePermissions' })
       symlinkSync(root, join(root, 'directory-link'))
