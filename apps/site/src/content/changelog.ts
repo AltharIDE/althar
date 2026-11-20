@@ -51,13 +51,16 @@ export const RELEASES: readonly Release[] = [
       },
       {
         kind: 'new',
-        text: 'Workers, in preview: enroll a Linux machine of your own, and the home runs your project’s check on it, its output live and every run kept. Cancel stops every process it started.',
+        text: 'Workers, in preview: enroll a Linux machine of your own, then run your project’s check on it from the home’s command line and read back what it printed and how it ended, every run kept. Cancel stops every process it started.',
       },
       {
         kind: 'new',
-        text: 'A worker connects straight to its home, or both dial out to a relay. For now each runs one command you name, for up to a minute, started from the home’s command line.',
+        text: 'A worker connects straight to its home, or both dial out to a relay. For now each runs the one command you set it up with, for up to a minute.',
       },
-      { kind: 'new', text: 'A home’s updates are signed, checked as they download, and applied when you say.' },
+      {
+        kind: 'new',
+        text: 'A managed home can take signed updates: give it a release key and a release feed, and each update is checked as it downloads and applied when you say.',
+      },
       {
         kind: 'new',
         text: 'More agents: connect any coding agent from the ACP registry, or your own by its command. Althar checks it can do the work before it gets any.',
@@ -102,6 +105,23 @@ export const RELEASES: readonly Release[] = [
       },
       { kind: 'improved', text: 'Leads and the coordinator know your local date and time.' },
       { kind: 'improved', text: 'Up next starts work as soon as an agent is free.' },
+      {
+        kind: 'improved',
+        text: 'A task’s shape changes in place, either way: a change stepped back into a prototype keeps its pull request, and carries on in it once it’s a change again.',
+      },
+      {
+        kind: 'improved',
+        text: 'Stopped work waits in Up next with Resume, out of Needs you unless it asks something. Choosing a task’s review, or none, lives in Change the team.',
+      },
+      {
+        kind: 'improved',
+        text: 'Markdown files draw their HTML as GitHub does: a README’s banner, tables of pictures, and alerts as callouts.',
+      },
+      {
+        kind: 'improved',
+        text: 'Running settings: long lists search, and Ask the coordinator puts your request in its composer, unsent.',
+      },
+      { kind: 'improved', text: 'An issue’s card says what merging does to it: Closes it, or Part of it.' },
       { kind: 'improved', text: 'When git fails, its own error says why, and a worktree whose link broke is repaired.' },
       { kind: 'improved', text: 'The conversation bar lists recent conversations, with a search.' },
       { kind: 'improved', text: 'Merge shows the queue at once, and lands with a burst.' },
@@ -116,6 +136,12 @@ export const RELEASES: readonly Release[] = [
       { kind: 'fixed', text: 'A review of your own pull request posts on GitHub as a comment, its verdict labeled.' },
       { kind: 'fixed', text: 'GitHub Copilot’s enterprise sign-in goes to your enterprise’s host.' },
       { kind: 'fixed', text: 'Discarded and unplanned tasks no longer linger as held.' },
+      { kind: 'fixed', text: 'Keep for later is offered for every kind of finished task again.' },
+      {
+        kind: 'fixed',
+        text: 'A task card in the thread says handed-back work as the board does, Not ready to accept or Merge conflict, rather than Needs you.',
+      },
+      { kind: 'fixed', text: 'Failing checks always reach the lead or you, never a card saying Fixing the checks while nobody was told.' },
       { kind: 'fixed', text: 'Runs a task kept stop when its worktree is cleaned up.' },
       { kind: 'fixed', text: 'Canvases step aside for dialogs, and an aside’s canvases and files open beside its thread.' },
       { kind: 'fixed', text: 'Closing the browser beside a task brings the board back.' },

@@ -36,6 +36,8 @@ const LATEST = RELEASES[0]!
 const FIRST = RELEASES[RELEASES.length - 1]!
 /** The launch: when the first build was published. */
 const LAUNCH = Date.parse(PUBLISHED[FIRST.version] ?? `${FIRST.date}T00:00:00Z`)
+/** The newest release that is out: its publish time from GitHub is recorded. The newest entry may be written before it goes out. */
+const CURRENT = RELEASES.find((release) => release.version in PUBLISHED) ?? FIRST
 
 /** A day as the log writes it: 20 Oct 2026, or 20 Oct. */
 const dated = (iso: string, year = true) => {
@@ -53,8 +55,8 @@ const elapsed = (ms: number, seconds = true) => {
   return `T+${d}d ${hm}${seconds ? `:${two(all % 60)}` : ''}`
 }
 
-/** When a release went out, on the mission's clock: from GitHub, or its day. */
-const wentOut = (release: Release) => elapsed(Date.parse(PUBLISHED[release.version] ?? `${release.date}T12:00:00Z`), false)
+/** When a release went out, on the mission's clock, from GitHub. */
+const wentOut = (published: string) => elapsed(Date.parse(published), false)
 
 /** A line's words, its `code` set as code. */
 function Words({ text }: { text: string }) {
@@ -126,12 +128,12 @@ function Clock() {
 }
 
 /** An entry's stamp: the mission's time and the date along a rule, and its link at the end. */
-function Stamp({ at, date, note, link, className }: { at: string; date: string; note?: string; link?: ReactNode; className?: string }) {
+function Stamp({ at, date, note, link, className }: { at: string; date?: string; note?: string; link?: ReactNode; className?: string }) {
   return (
     <p className={cx(s.stamp, className)}>
       {/* The mission's time keeps its small d: T+7d. */}
       <span className={cx(s.t, at.startsWith('T+') && s.met)}>{at}</span>
-      <span>{date}</span>
+      {date && <span>{date}</span>}
       {note && <span className={s.note}>{note}</span>}
       <span className={s.rule} aria-hidden="true" />
       {link}
@@ -139,11 +141,13 @@ function Stamp({ at, date, note, link, className }: { at: string; date: string; 
   )
 }
 
-/** A release's stamp: when it went out, on the mission's clock and by date, and its release on GitHub. */
+/** A release's stamp: when it went out, on the mission's clock and by date, and its release on GitHub. Before it goes out, neither: it says it's coming. */
 function Released({ release, className }: { release: Release; className?: string }) {
+  const published = PUBLISHED[release.version]
+  if (!published) return <Stamp at="Coming" note="Not released yet" className={className} />
   return (
     <Stamp
-      at={wentOut(release)}
+      at={wentOut(published)}
       date={dated(release.date)}
       note={release === FIRST ? 'Launch' : undefined}
       className={className}
@@ -170,8 +174,8 @@ function Opening() {
           <Readout label="Launch" href={`#v${FIRST.version}`} at="mid">
             <b>{dated(FIRST.date)}</b>
           </Readout>
-          <Readout label="Current version" href="#changes" at="end">
-            <b>{LATEST.version}</b>
+          <Readout label="Current version" href={CURRENT === LATEST ? '#changes' : `#v${CURRENT.version}`} at="end">
+            <b>{CURRENT.version}</b>
           </Readout>
         </>
       }
@@ -377,7 +381,7 @@ function End() {
   return (
     <div className={s.endRow}>
       <p>
-        <span className={s.v}>{LATEST.version}</span> is the latest release.
+        <span className={s.v}>{CURRENT.version}</span> is the latest release.
       </p>
       <div className={s.ways}>
         <a className={s.primary} href={download.href}>

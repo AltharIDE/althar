@@ -754,8 +754,10 @@
 .hoRun .hoState { min-width: 8.2em; justify-content: flex-end; }
 .hoRun .hoState:not([data-done='true']):not(:has(i)) { color: var(--t4); }
 .hoLog { display: grid; gap: 0.25em; margin: 0; padding: 0.6em 0.7em; border-radius: 0.45em; background: #0f0e0c; list-style: none; font-family: var(--mono); font-size: 0.76em; letter-spacing: 0; color: var(--t2); }
-.hoLog li { height: 1.4em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; opacity: 0; transform: translateY(0.3em); transition: opacity 0.45s, transform 0.55s var(--ease-out); }
-.hoLog li:first-child { color: var(--t3); }
+/* Every line keeps its room from the start, wrapping where it must, so the box never grows as they come in. */
+.hoLog li { overflow-wrap: anywhere; line-height: 1.4; opacity: 0; transform: translateY(0.3em); transition: opacity 0.45s, transform 0.55s var(--ease-out); }
+.hoLog li[data-typed='true'] { color: var(--t1); }
+.hoLog li[data-typed='true']::before { content: '$ '; color: var(--t4); }
 .hoLog li[data-shown='true'] { opacity: 1; transform: none; }
 
 /* Narrow: the window over the server, the wire between them standing up. */
