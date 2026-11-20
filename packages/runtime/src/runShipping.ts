@@ -1,3 +1,4 @@
+import { namedByFindings } from './findingPaths'
 import type { ShipRoute } from '@althar/contracts'
 import {
   type ActorId,
@@ -220,7 +221,7 @@ export const makeRunShipping = (dependencies: RunShippingDependencies) => {
           return typeof file === 'string' && file !== '' ? [file.replace(/^\.?\//, '')] : []
         },
       )
-      const namedBy = (path: string) => named.some((file) => file === path || file.endsWith(`/${path}`) || path.endsWith(`/${file}`))
+      const namedBy = (path: string) => namedByFindings(named, path)
       let lines = 0
       const files: Array<string> = []
       for (const worktree of yield* worktreesOf(run.taskId)) {
