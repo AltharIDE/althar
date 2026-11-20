@@ -55,6 +55,7 @@ import { useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { Foot } from '../foot/Foot'
+import { useFootShown } from '../foot/shown'
 import { pages, usePage } from '../browser/pages'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import { ArtifactsView } from '../canvases/ArtifactsView'
@@ -342,6 +343,7 @@ export function ProjectView({
   const [home, setHome] = useState<HomeRoom>(asked !== undefined && isHome(asked) ? asked : Room.Both)
   if (isHome(room) && room !== home) setHome(room)
   const [swapped, swap] = useSwapped()
+  const [footShown, setFootShown] = useFootShown()
   const panes = shownOf(room)
   const both = panes.talk && panes.board
   const coordinatorFace = useRef<HTMLDivElement>(null)
@@ -375,10 +377,17 @@ export function ProjectView({
   const closing = useClosePullRequests()
   /** A pane shown or hidden, from ⋯ or its key. */
   const togglePane = useCallback((pane: Pane) => setRoom((was) => toggled(was, home, pane)), [home])
-  // c and b toggle the conversation and the board, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
+  // c and b toggle the conversation and the board, t the terminal bar, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.key !== 'b' && event.key !== 'c') || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return
+      if (
+        (event.key !== 'b' && event.key !== 'c' && event.key !== 't') ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.defaultPrevented
+      )
+        return
       const target = event.target
       if (
         target instanceof HTMLElement &&
@@ -386,11 +395,12 @@ export function ProjectView({
       )
         return
       event.preventDefault()
-      togglePane(event.key === 'c' ? 'talk' : 'board')
+      if (event.key === 't') setFootShown(!footShown)
+      else togglePane(event.key === 'c' ? 'talk' : 'board')
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePane])
+  }, [togglePane, footShown, setFootShown])
   // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
   // What was said in every conversation, for the bar's search: read as it opens (the finder's catalog, kept a moment), the
@@ -936,7 +946,14 @@ export function ProjectView({
       room={room}
       // Home is the home as it was last laid out.
       onRoom={(next) => setRoom(next === Room.Both ? home : next)}
-      panes={{ shown: panes, onToggle: togglePane, swapped, onSwap: swap, keys: { talk: 'c', board: 'b' } }}
+      panes={{
+        shown: panes,
+        onToggle: togglePane,
+        swapped,
+        onSwap: swap,
+        keys: { talk: 'c', board: 'b' },
+        foot: { shown: footShown, onToggle: () => setFootShown(!footShown), key: 't' },
+      }}
       settingsNeedYou={settingsNeedYou}
       automationsNeedYou={automations.needsYou}
       parts={partsOf({

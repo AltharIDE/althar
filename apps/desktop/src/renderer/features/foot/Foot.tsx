@@ -19,6 +19,7 @@ import { useServices } from '../../data/services'
 import { useRunOutput } from '../../shared/RunOf'
 import type { RunContent } from '../../shared/thread'
 import { usePageOpener } from '../browser/opener'
+import { useFootShown } from './shown'
 import { type FootStore, type FootTerminal, footStoreOf } from './store'
 import s from './Foot.module.css'
 
@@ -100,6 +101,7 @@ export function Foot({ projectId, taskId, where, onHelp, onRunAgain }: FootProps
   const now = useNow(state.launches.some((launch) => launch.ended === null && launch.url === null))
   const foot = useRef<HTMLDivElement>(null)
   const room = useRoom(foot, state.raised)
+  const [shown, setShown] = useFootShown()
 
   // A link pressed in a terminal opens where this screen opens a run's. A hidden screen runs no effects: the one on show says.
   useEffect(() => {
@@ -110,11 +112,13 @@ export function Foot({ projectId, taskId, where, onHelp, onRunAgain }: FootProps
     const onKey = (event: KeyboardEvent) => {
       if (!event.ctrlKey || event.metaKey || event.altKey || (event.key !== '`' && event.code !== 'Backquote')) return
       event.preventDefault()
+      // Hidden, the terminal key brings the bar back with it.
+      setShown(true)
       toggleTerminal(store, { taskId, where }, event.shiftKey)
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [store, taskId, where])
+  }, [store, taskId, where, setShown])
 
   const names = terminalNames(state.terminals)
   const items: ReadonlyArray<StatusItem> = [
@@ -137,7 +141,7 @@ export function Foot({ projectId, taskId, where, onHelp, onRunAgain }: FootProps
       ...(one.exited === null ? {} : { code: one.exited.code }),
     })),
   ]
-  if (items.length === 0) return null
+  if (!shown || items.length === 0) return null
   const chosenId = state.raised ? state.chosen?.id : undefined
   const run = state.chosen?.kind === 'run' ? state.launches.find((one) => one.id === state.chosen?.id) : undefined
   const terminal = state.chosen?.kind === 'terminal' ? state.terminals.find((one) => one.id === state.chosen?.id) : undefined
