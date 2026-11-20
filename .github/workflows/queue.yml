@@ -15,9 +15,10 @@ name: queue
 # tests, the other packages' coverage and the packages run after merge, in post-merge.yml.
 #
 # Main's rules require one check, `merge queue`. On a pull request it passes once the pull request's own stress run
-# has (or it has none), and the Windows smoke test hasn't failed: waited for here, on the pull request, a stress run
-# no longer holds the queue, where every entry behind a waiting one waited too. In the
-# queue, it passes once every check that ran there did, and the stress run it reads again has long finished.
+# has (or it has none), the Windows smoke test hasn't failed and its migration and ADR numbers are free (`numbers`):
+# waited for here, on the pull request, a stress run no longer holds the queue, where every entry behind a waiting one
+# waited too. In the queue, it passes once every check that ran there did, and the stress run it reads again has long
+# finished.
 on:
   pull_request:
     # And when a draft is ready for review, which is when its stress run starts (stress.yml).
@@ -117,10 +118,41 @@ jobs:
     if: needs.changes.outputs.worker == 'true'
     uses: ./.github/workflows/worker.yml
 
-  # The one check main's rules require: passes when nothing that ran failed. On a pull request, nothing above runs.
+  # Migration and ADR numbers, on every pull request and every group whatever they change: two pull requests that each
+  # pass alone can take the same number. On a pull request its tree is main with it merged in; in the queue, main with
+  # the group in, so the second of two that took a number is refused here before it lands
+  # (docs/decisions/foundations.md#numbers-that-cant-collide). On a pull request it also warns of an open one that adds
+  # the same number.
+  numbers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # On a pull request HEAD is its merge with main, and HEAD^1 is main.
+          fetch-depth: 2
+      - env:
+          BASE: ${{ github.event.merge_group.base_sha }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          python3 -m unittest discover -s .github/scripts -p 'test_numbers.py'
+          if [ "$GITHUB_EVENT_NAME" = merge_group ]; then
+            git fetch --no-tags --depth=1 origin "$BASE"
+            python3 .github/scripts/numbers.py --base FETCH_HEAD
+          else
+            python3 .github/scripts/numbers.py --base HEAD^1 --pr "$PR"
+          fi
+
+  # The one check main's rules require: passes when nothing that ran failed. On a pull request, only `numbers` above
+  # runs.
   merge-queue:
     name: merge queue
-    needs: [changes, desktop, harness, host, ui, site, brand, report, windows, worker]
+    needs: [changes, numbers, desktop, harness, host, ui, site, brand, report, windows, worker]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     # Long enough to wait out a stress run still going, whose own jobs take 75 minutes at most.
