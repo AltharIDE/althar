@@ -869,6 +869,11 @@ export class IssueDrafts extends Context.Service<
        * The account a connection's calls count against, for pacing its
        * filings: its tracker, its site, and who it signs in as. Two
        * connections of one account share its limits; others are paced apart.
+       * Its workspace is left out on purpose: trackers count calls by who
+       * makes them, not where. Linear's account is one of a workspace's own
+       * already, and Jira's sites differ by host; a ClickUp sign-in reaches
+       * several workspaces on one token, its limit counted once for all of
+       * them. Telling those apart would let them spend one limit twice.
        */
       const accountOf = (row: Row, info: { readonly webUrl: string; readonly account: { readonly id: string; readonly login: string } }) =>
         [row.product, hostOf(info.webUrl), info.account.id || info.account.login || row.connectionId].join(' ')

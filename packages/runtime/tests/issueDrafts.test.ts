@@ -818,8 +818,12 @@ describe('issue drafts', () => {
     const paced = (services: Services, database?: string) => withQueries(services, database, issuePace)
     const cardOf = (projectId: string, title: string) =>
       Effect.map(cardsOf(projectId), (cards) => cards.find((one) => one.title === title) ?? assert.fail(`no card ${title}`))
+    /** Waits for the card of a title to be there and pass the check: one drafted as it is filed is there only once its call drafts it. */
     const cardWhen = (projectId: string, title: string, check: (card: IssueDraftCard) => boolean) =>
-      until(cardOf(projectId, title), check, `the card of ${title}`)
+      Effect.map(
+        until(cardsOf(projectId), (cards) => cards.some((one) => one.title === title && check(one)), `the card of ${title}`),
+        (cards) => cards.find((one) => one.title === title && check(one)) ?? assert.fail(`no card ${title}`),
+      )
     /** Drafts each title on Linear, as a card, filing none. */
     const drafted = (access: ToolAccess, projectId: string, ...titles: ReadonlyArray<string>) =>
       Effect.forEach(titles, (title) =>
@@ -954,6 +958,37 @@ describe('issue drafts', () => {
           })
           yield* TestClock.adjust('20 seconds')
           assert.lengthOf(linear.created, 0)
+        }).pipe(Effect.provide(paced({ linear }))),
+      )
+    })
+
+    it.effect('filed at once, are said to the agent as they ended: discarded while they waited, or perhaps filed, never refused', () => {
+      const linear = linearWith(MERIDIAN)
+      return onTestClock(
+        Effect.gen(function* () {
+          yield* connect('linear')
+          const { projectId, access } = yield* project()
+          const drafts = yield* IssueDrafts
+          const instance = yield* Instance
+          linear.failNext('create', 'rate_limited', new Date((yield* Clock.currentTimeMillis) + 20_000).toISOString(), 429)
+          const asking = yield* Effect.forkChild(callTool(access, 'draft_issue', { title: 'First', tracker: 'linear', file_now: true }))
+          const waiting = yield* cardWhen(projectId, 'First', (card) => card.waitingUntil != null)
+          yield* drafts.discard(waiting.draftId, instance.personId)
+          yield* TestClock.adjust('20 seconds')
+          assert.strictEqual(
+            yield* Fiber.join(asking),
+            "Drafted the issue “First”, but the person discarded it while it waited its turn on Linear, so nothing was sent. Don't draft it again unless they ask.",
+          )
+          assert.lengthOf(linear.created, 0)
+
+          linear.failNext('create', 'unreachable')
+          const lost = yield* Effect.forkChild(callTool(access, 'draft_issue', { title: 'Second', tracker: 'linear', file_now: true }))
+          yield* TestClock.adjust('1 second')
+          assert.strictEqual(
+            yield* Fiber.join(lost),
+            "Drafted the issue “Second” and asked Linear to file it, but Althar can't tell whether it did: Its answer was lost, so Althar can’t tell whether Linear filed it. Look on Linear before you file it again. Its card says so. Don't draft or file it again: the person looks on Linear first.",
+          )
+          assert.strictEqual((yield* cardOf(projectId, 'Second')).state, 'uncertain')
         }).pipe(Effect.provide(paced({ linear }))),
       )
     })
