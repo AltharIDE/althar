@@ -27,7 +27,6 @@ import {
   IssuePart,
   LinkButton,
   type ModelInfo,
-  TaskFace,
   TaskHeader,
   type TaskHeaderStep,
   ReachLine,
@@ -77,7 +76,7 @@ import { usePrinted } from '../../shared/useOutputs'
 import { useStreaming } from '../../shared/useStreamed'
 import { type RoundBlock, roundsOf } from '../../shared/rounds'
 import { kindsOf, type PartsActions, partsOf } from './parts'
-import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
+import { ConversationFace, DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { pillOf, runIdOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
@@ -1758,32 +1757,27 @@ export function TaskView({
               {(blocks, versionOf, now) => {
                 const reading = readingAt(now)
                 return (
-                  <TaskFace
+                  <ConversationFace
+                    host={host}
                     className={s.face}
                     composer={composer}
                     // An aside sits under the conversation bar, which shades the thread scrolled beneath it.
                     under={embedded}
                     // A document the lead wrote, or a file it names, opens beside the thread on its workbench; a document follows its edits.
-                    // An aside's, in the coordinator's narrow pane, has no room for one.
-                    {...(embedded
-                      ? {}
-                      : {
-                          panel: host.workbench(
-                            host.doc && (
-                              <KeptDocumentPanel
-                                key={host.doc.source ?? host.doc.path ?? host.doc.title}
-                                threadId={snapshot.threadId}
-                                taskId={snapshot.task.id}
-                                worktree={snapshot.task.worktree}
-                                doc={host.doc}
-                                version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
-                                onClose={host.closeDoc}
-                                {...(openDoc === undefined ? {} : { onOpen: openDoc })}
-                              />
-                            ),
-                          ),
-                          panelWidth: host.bench.width,
-                        })}
+                    documentPanel={
+                      host.doc && (
+                        <KeptDocumentPanel
+                          key={host.doc.source ?? host.doc.path ?? host.doc.title}
+                          threadId={snapshot.threadId}
+                          taskId={snapshot.task.id}
+                          worktree={snapshot.task.worktree}
+                          doc={host.doc}
+                          version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
+                          onClose={host.closeDoc}
+                          {...(openDoc === undefined ? {} : { onOpen: openDoc })}
+                        />
+                      )
+                    }
                   >
                     <Thread label={text.thread} busy={busy}>
                       {opening}
@@ -1909,7 +1903,7 @@ export function TaskView({
                       </ThreadShellProvider>
                       {closing}
                     </Thread>
-                  </TaskFace>
+                  </ConversationFace>
                 )
               }}
             </LiveRounds>

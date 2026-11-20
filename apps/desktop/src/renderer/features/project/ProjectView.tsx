@@ -51,7 +51,7 @@ import { NOTHING_HEARD } from '../../shared/heard'
 import { Now } from '../../shared/Now'
 import { MINUTE, SECOND } from '../../shared/time'
 import { UnsentBringIn } from '../elsewhere/UnsentBringIn'
-import { useThreadHost } from '../../shared/ThreadHost'
+import { BoardWorkbench, ConversationFace, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { Foot } from '../foot/Foot'
@@ -243,32 +243,32 @@ const useBothWidth = () => {
 
 /**
  * The conversation's column, and beside the board its divider and what opens over the board against it. The width is
- * its own: a drag draws this again and nothing else, the thread and the board given as made (`children`, `over`), so a
- * long thread and a full board stay as they are while it moves. It is set as the column's `width`, not a custom
- * property, which every element of the thread would inherit and have its style worked out again for each move. While
- * its divider is dragged, the column is marked `data-resizing`, so the thread in it lays out only the turns on screen.
- * What opens over the board (`over`) is drawn again on each move, as it is placed by the width and as wide as the room
- * it leaves: with a file open on it, that file's panel is drawn again too.
+ * its own so dragging redraws only the column and the workbench beside it.
  */
-function TalkColumn({
-  beside,
-  swapped,
-  children,
-  over,
-}: {
-  beside: boolean
-  /** On the right of the board: dragged by its start, and what opens over the board opens on its left. */
-  swapped: boolean
-  children: ReactNode
-  /** What opens over the board, against the conversation: by the conversation's width and the window's (`room`). */
-  over: (width: number, room: number) => ReactNode
-}) {
+function TalkColumn({ beside, swapped, children }: { beside: boolean; swapped: boolean; children: ReactNode }) {
   const both = useBothWidth()
   const column = useRef<HTMLDivElement>(null)
+  const [target, setTarget] = useState<HTMLDivElement | null>(null)
+  const board = useMemo(
+    () =>
+      beside && target !== null
+        ? {
+            target,
+            over: {
+              room: both.room - both.width,
+              keep: WIDTH.lane,
+              edge: swapped ? ('start' as const) : ('end' as const),
+              className: classes(s.over, swapped && s.overLeft),
+              style: swapped ? { right: both.width } : { left: both.width },
+            },
+          }
+        : null,
+    [beside, target, both.room, both.width, swapped],
+  )
   return (
     <>
       <div ref={column} className={s.talk} style={beside ? { width: both.width } : undefined}>
-        {children}
+        <BoardWorkbench.Provider value={board}>{children}</BoardWorkbench.Provider>
         {beside && (
           <ResizeHandle
             value={both.width}
@@ -283,7 +283,7 @@ function TalkColumn({
           />
         )}
       </div>
-      {beside && over(both.width, both.room)}
+      {beside && <div ref={setTarget} style={{ display: 'contents' }} />}
     </>
   )
 }
@@ -1046,23 +1046,7 @@ export function ProjectView({
         ) : (
           <div className={classes(s.rooms, both && s.both, both && swapped && s.swapped)}>
             {panes.talk && (
-              <TalkColumn
-                beside={both}
-                swapped={swapped}
-                /*
-                 * Beside the board, a file the coordinator names opens over the board, against the conversation, dragged by its far
-                 * edge; where it would leave less of the board than a lane, as in a small window, it covers the board to the window's edge.
-                 */
-                over={(width, windowWidth) =>
-                  shown.workbench(null, {
-                    room: windowWidth - width,
-                    keep: WIDTH.lane,
-                    edge: swapped ? 'start' : 'end',
-                    className: classes(s.over, swapped && s.overLeft),
-                    style: swapped ? { right: width } : { left: width },
-                  })
-                }
-              >
+              <TalkColumn beside={both} swapped={swapped}>
                 {coordinator === null ? (
                   model.error === null ? (
                     <div className={s.reading}>
@@ -1120,13 +1104,7 @@ export function ProjectView({
                       </TaskFace>
                     ) : (
                       <div ref={coordinatorFace} className={s.coordinatorFace}>
-                        <TaskFace
-                          className={s.face}
-                          composer={composer}
-                          under
-                          // Beside the board, the conversation has no room to share: what it opens goes over the board instead.
-                          {...(both ? {} : { panel: shown.workbench(null), panelWidth: shown.bench.width })}
-                        >
+                        <ConversationFace className={s.face} composer={composer} under host={shown}>
                           <Thread label={text.conversation} busy={busy}>
                             {/* A new project's first word: what its tasks will need later, while its conversation hasn't begun. */}
                             {coordinator.items.length === 0 && !coordinator.earlier && !coordinator.view.cleared && (
@@ -1216,7 +1194,7 @@ export function ProjectView({
                               ))}
                             </ThreadShellProvider>
                           </Thread>
-                        </TaskFace>
+                        </ConversationFace>
                         <AskInAside within={coordinatorFace} onAsk={asides.begin} />
                       </div>
                     )}

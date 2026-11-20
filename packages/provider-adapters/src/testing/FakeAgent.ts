@@ -1180,6 +1180,10 @@ const playRole = async (
           }
         }
         if (text.includes('[lead:canvas-list]')) return await told('canvas_list', {})
+        if (text.includes('[lead:canvas-open]')) {
+          const answer = await told('canvas_open', { name: 'sign-in' })
+          return `${answer} The repository also has a \`README.md\`.`
+        }
         if (text.includes('[lead:canvas-again]')) {
           await told('canvas_get', { name: 'sign-in' })
           const read = await told('canvas_read', { name: 'sign-in' })
