@@ -77,18 +77,7 @@ def check_migrations(tree, on_main):
             problems.append(Problem(f'{MIGRATIONS}/{name}', f'{name} is not named as a migration: `<4-digit number>_<name>.ts`, such as 0096_task_tags.ts.'))
         else:
             keys.append(name[:-3])
-    if not keys:
-        return problems
-
-    by_number = defaultdict(list)
-    for key in keys:
-        by_number[int(key[:4])].append(key)
-    following = f'{max(by_number) + 1:04d}'
     main_keys = {name[:-3] for name in on_main if MIGRATION.match(name)}
-    problems += collisions(
-        'Migration', by_number, main_keys, following, RENUMBER_MIGRATION, lambda key: f'{MIGRATIONS}/{key}.ts', lambda n: f'{n:04d}'
-    )
-
     # A store that ran a migration main has never runs it again, nor anything numbered below it: main's stay as they are.
     for key in sorted(main_keys - set(keys)):
         moved = [other for other in keys if other[5:] == key[5:]]
@@ -99,6 +88,17 @@ def check_migrations(tree, on_main):
             + 'A migration main has keeps its name and number: a store that ran it would never run what takes its place, '
             'and would run it again under a new number. Put it back, and give a new migration the next number.',
         ))
+
+    if not keys:
+        return problems
+
+    by_number = defaultdict(list)
+    for key in keys:
+        by_number[int(key[:4])].append(key)
+    following = f'{max(by_number) + 1:04d}'
+    problems += collisions(
+        'Migration', by_number, main_keys, following, RENUMBER_MIGRATION, lambda key: f'{MIGRATIONS}/{key}.ts', lambda n: f'{n:04d}'
+    )
 
     for number in sorted(number for number in by_number if number < 1):
         for key in by_number[number]:

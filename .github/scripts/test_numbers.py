@@ -107,6 +107,15 @@ class Migrations(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("0003_tags is main's migration 0003, gone here.", messages[0])
 
+    def test_every_migration_main_has_cannot_go(self):
+        tree = Tree()
+        tree.keys = []
+        messages = [problem.message for problem in tree.check()]
+        self.assertEqual([message.split(',')[0] for message in messages], [
+            "0001_initial is main's migration 0001", "0002_threads is main's migration 0002", "0003_tags is main's migration 0003",
+        ])
+        self.assertTrue(all('gone here.' in message for message in messages))
+
     def test_a_number_below_0001_is_refused(self):
         tree = Tree()
         tree.keys = ['0000_labels', *MAIN_MIGRATIONS]
