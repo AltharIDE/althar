@@ -955,20 +955,26 @@ credential denials and the rules for irreversible operations remain.
 ADR-097 drops the coordinator's web mark (ADR-081) and leaves this switch
 as the person's control for that leak.
 
-**Known commands, and the open network.** Some commands can't work inside
-Claude's sandbox on a Mac (a browser, Electron, a test runner, `ps`). Each
-used to cost a failed try inside the sandbox, then a retry outside it that
-the rules allowed anyway. A lead's Claude Code session now starts with them
-in its settings (`sandboxReach.ts`):
+**Known commands, and the open network.** A lead's Claude Code session
+starts with settings for commands that need to run outside its sandbox
+(`sandboxReach.ts`), including browsers, Electron, test runners and `ps`.
+On macOS, Seatbelt also restricts Mach services used by Xcode, CoreSimulator,
+CoreDevice and the Android emulator. Native project files and their
+dependencies identify iOS and Android tools, Gradle and its wrappers, and
+Expo, React Native and Capacitor launchers. The project’s `ios` and `android`
+package scripts and their named variants run the same way. On macOS,
+`open` and `osascript` use Launch Services and Apple Events, while
+`docker` and `docker-compose` use the daemon’s Unix socket. These four
+commands start outside the sandbox in every project on that platform.
 
 - commands that run outside the sandbox from the start
   (`sandbox.excludedCommands`). Each still goes through Claude Code's
-  permission flow, so it asks and meets the rules as its second try would
-  have. Claude Code 2.1 runs a line outside only where every command in it
-  is on the list, never one with `cd`, and never one that starts with `bun`
-  (`bunx` it does), so a lead is told to run them on a line of their own,
-  and a Bun script is listed by what it runs (`node scripts/e2e.ts`, not
-  `bun run test:e2e`);
+  permission flow and meets the project's rules. The rules see the command
+  the lead typed. Opaque AppleScript bodies and processes launched by a
+  container are beyond the shell rules' inspection. The brief tells the
+  lead to call each command on its own, change folders separately, and
+  leave off pipes. For a Bun script, the brief lists the command the
+  script runs, such as `node scripts/e2e.ts` or `bunx expo run:ios`;
 - every host, with no list (`sandbox.network.allowedDomains: ['*']`). The
   one exception is a host the person put in Never, which is passed as a
   denied domain and refused with its name, so a blocked request says what
@@ -993,11 +999,10 @@ in its settings (`sandboxReach.ts`):
   something there that a later install of theirs picks up: the trade made
   so a task's folder gets ready without anyone.
 
-All the commands and caches are worked out from the project: the tools its
-packages bring, its test and end-to-end scripts, what is kept for how it runs
-and is set up, and the caches those tools use. The person adds to the commands
-and takes from them in the project's rules, under Sandbox, and those edits hold
-over what is worked out later; the caches follow the tools. Hosts are no longer
+Beyond the defaults, commands and caches follow the project’s packages,
+native files, scripts, and kept run and setup commands. The person adds to
+the commands and takes from them in the project's rules, under Sandbox, and
+those edits hold over what is worked out later. Hosts are no longer
 worked out or listed: every host is reachable but for the person's Never rules.
 A change applies from a lead's next session. Codex's
 `workspace-write` has no list of commands to run outside it, and its list
