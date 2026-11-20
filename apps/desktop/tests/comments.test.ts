@@ -1,3 +1,4 @@
+import { renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { CanvasAnchor } from '@althar/contracts'
@@ -20,6 +21,7 @@ import {
   pageCommentsOf,
   rewrite,
   takeComments,
+  useComments,
   withComments,
 } from '../src/renderer/shared/comments'
 import { draftCrop } from '../src/renderer/shared/draftCrops'
@@ -190,11 +192,12 @@ describe('comments waiting in a draft', () => {
     try {
       gather('thread:crop', comment('a', 'The note survives', { crop: null, cropId: 'missing' }))
       forgetComments(false)
+      const { result, unmount } = renderHook(() => useComments('thread:crop'))
+      await waitFor(() => expect(result.current[0]).toMatchObject({ crop: null, cropLost: true, note: 'The note survives' }))
+      unmount()
       const batch = takeComments('thread:crop')
-      const taken = await new Promise<ReadonlyArray<GatheredComment>>((resolve) => batch.withCrops(true, resolve))
-      expect(taken[0]).toMatchObject({ crop: null, cropLost: true, note: 'The note survives' })
-      batch.finish(false)
-      expect(composerComment(commentsOf('thread:crop')[0]!, 1).status).toBe('Crop is gone')
+      expect(batch.taken[0]).toMatchObject({ crop: null, cropLost: true, note: 'The note survives' })
+      expect(commentsText(batch.taken, 0, true)).toContain('The note survives')
     } finally {
       read.mockRestore()
     }

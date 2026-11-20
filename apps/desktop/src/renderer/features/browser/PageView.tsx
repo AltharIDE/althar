@@ -201,14 +201,20 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
         )
         markEarlier(
           draft,
-          new Map(comments.flatMap((one, index) => (earlier.has(index + 1) ? [[one.id, earlier.get(index + 1) === true] as const] : []))),
+          new Map(
+            comments.flatMap((one, index) =>
+              one.on.kind === 'page' && one.on.viewport === viewport && earlier.has(index + 1)
+                ? [[one.id, earlier.get(index + 1) === true] as const]
+                : [],
+            ),
+          ),
         )
       })
       .catch(() => undefined)
     return () => {
       current = false
     }
-  }, [browser, owner, draft, comments, pageAddress])
+  }, [browser, owner, draft, comments, pageAddress, viewport])
 
   const point = useCallback(async () => {
     if (browser === undefined || state === null || state.address === '') return
@@ -226,6 +232,7 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
     if (comment === undefined || comment.on.kind !== 'page') return
     const spot = comment.on
     void (async () => {
+      if (spot.viewport !== viewport) await browser.viewport(owner, spot.viewport).catch(() => undefined)
       const found = await browser.find(owner, spot.picked.selector, spot.address).catch(() => null)
       markEarlier(draft, new Map([[comment.id, found === null]]))
       if (found !== null) return setWriting({ pointed: found, comment, n: index + 1 })
@@ -246,7 +253,7 @@ export function PageView({ owner, kind, draft, where, onDock }: PageViewProps) {
         n: index + 1,
       })
     })()
-  }, [reopen, browser, owner, panel, writing, comments, draft])
+  }, [reopen, browser, owner, panel, writing, comments, draft, viewport])
 
   const submit = (note: string) => {
     if (writing === null) return

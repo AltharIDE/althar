@@ -131,7 +131,7 @@ export interface Attachments {
     readonly fileNote?: string
   }
   /** What goes with a message now; null where it can't go yet, with the composer saying why. */
-  readonly take: (receiver: Receiver) => Outgoing | null
+  readonly take: (receiver: Receiver, readingCrop?: boolean) => Outgoing | null
   /** Takes every image and file off, once its message is sent. */
   readonly clear: () => void
   /** Puts back what went with a message Althar didn't take, before any added since, bytes and all, to send again. */
@@ -277,7 +277,7 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
     }
   }
 
-  const take = (receiver: Receiver): Outgoing | null => {
+  const take = (receiver: Receiver, readingCrop = false): Outgoing | null => {
     if (waiting.length > 0 && receiver.takes === false) return null
     // More than a message carries, as after one given back beside others added meanwhile: none is dropped, and the person picks.
     if (waiting.length > MESSAGE_IMAGES.count) {
@@ -288,7 +288,7 @@ export function useAttachments(key: string, host: Attacher, shrink: Shrink = shr
       setNote(filesText.tooMany)
       return null
     }
-    if (waiting.some((one) => one.ready === null)) {
+    if (readingCrop || waiting.some((one) => one.ready === null)) {
       setNote(text.stillReading)
       return null
     }

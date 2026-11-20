@@ -131,6 +131,7 @@ import {
   giveBackLines,
   isDiffDraft,
   takeComments,
+  readingCommentCrops,
   toLineComment,
   useComments,
   withComments,
@@ -912,37 +913,36 @@ export function TaskView({
    * back in the composer, words, images and the agent picked to take over.
    */
   const submit = (body: string, now: boolean) => {
-    const own = images.take(receiver)
+    const pictures = receiver.takes !== false
+    const own = images.take(receiver, pictures && readingCommentCrops(kept))
     if (own === null) return
     turnUndo.dismiss()
     const batch = takeComments(kept)
-    const pictures = receiver.takes !== false
     setDraft('')
     images.clear()
     const picked = waiting
     if (picked !== null) setHandover(null)
-    batch.withCrops(pictures, (gathered) => {
-      const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
-      const lines = gathered.filter(isDiffDraft).map(toLineComment)
-      const outgoing: Outgoing = {
-        ...own,
-        sent: [...own.sent, ...crops.sent],
-        pictures: [...own.pictures, ...crops.pictures],
-        canvasComments: canvasCommentsOf(gathered),
-        ...(lines.length === 0 ? {} : { comments: lines }),
-      }
-      const restore = () => {
-        batch.finish(false)
-        setDraft((current) => withQueued(current, body))
-        images.giveBack(own)
-        if (picked !== null) setHandover(picked)
-      }
-      void deliver(withComments(body, gathered, own.sent.length, pictures), now, outgoing).then((accepted) => {
-        if (!accepted) return restore()
-        batch.finish(true)
-        if (lines.length > 0) lineComments.reread()
-      }, restore)
-    })
+    const gathered = batch.taken
+    const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
+    const lines = gathered.filter(isDiffDraft).map(toLineComment)
+    const outgoing: Outgoing = {
+      ...own,
+      sent: [...own.sent, ...crops.sent],
+      pictures: [...own.pictures, ...crops.pictures],
+      canvasComments: canvasCommentsOf(gathered),
+      ...(lines.length === 0 ? {} : { comments: lines }),
+    }
+    const restore = () => {
+      batch.finish(false)
+      setDraft((current) => withQueued(current, body))
+      images.giveBack(own)
+      if (picked !== null) setHandover(picked)
+    }
+    void deliver(withComments(body, gathered, own.sent.length, pictures), now, outgoing).then((accepted) => {
+      if (!accepted) return restore()
+      batch.finish(true)
+      if (lines.length > 0) lineComments.reread()
+    }, restore)
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {

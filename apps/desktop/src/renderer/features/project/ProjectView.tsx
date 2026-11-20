@@ -60,7 +60,16 @@ import { pages, usePage } from '../browser/pages'
 import { useDraftCanvasVersions } from '../canvases/draftVersions'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import { ArtifactsView } from '../canvases/ArtifactsView'
-import { composerComment, cropsOf, drop, takeComments, useComments, withComments, canvasCommentsOf } from '../../shared/comments'
+import {
+  composerComment,
+  cropsOf,
+  drop,
+  takeComments,
+  readingCommentCrops,
+  useComments,
+  withComments,
+  canvasCommentsOf,
+} from '../../shared/comments'
 import { AutomationInThread } from '../automations/AutomationInThread'
 import { AutomationsView } from '../automations/AutomationsView'
 import { useAutomationActions, useAutomations } from '../automations/useAutomations'
@@ -690,10 +699,10 @@ export function ProjectView({
       return
     }
     // Images that can't go yet hold the message back, and the composer says why.
-    const own = images.take(receiver)
+    const pictures = receiver.takes !== false
+    const own = images.take(receiver, pictures && readingCommentCrops(draftOf))
     if (own === null) return
     const batch = takeComments(draftOf)
-    const pictures = receiver.takes !== false
     setDraft('')
     images.clear()
     const picked = waiting
@@ -703,28 +712,27 @@ export function ProjectView({
       asides.back()
       togglePane('talk')
     }
-    batch.withCrops(pictures, (gathered) => {
-      const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
-      const outgoing: Outgoing = {
-        ...own,
-        sent: [...own.sent, ...crops.sent],
-        pictures: [...own.pictures, ...crops.pictures],
-        canvasComments: canvasCommentsOf(gathered),
-      }
-      const words = withComments(body, gathered, own.sent.length, pictures)
-      const restore = () => {
-        batch.finish(false)
-        setDraft((current) => withQueued(current, body))
-        images.giveBack(own)
-        if (picked !== null) setHandover(picked)
-      }
-      const said =
-        picked !== null ? model.handOver(picked, words, outgoing) : now ? model.sayNow(words, outgoing) : model.say(words, chosen, outgoing)
-      void said.then((accepted) => {
-        if (accepted) batch.finish(true)
-        else restore()
-      }, restore)
-    })
+    const gathered = batch.taken
+    const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
+    const outgoing: Outgoing = {
+      ...own,
+      sent: [...own.sent, ...crops.sent],
+      pictures: [...own.pictures, ...crops.pictures],
+      canvasComments: canvasCommentsOf(gathered),
+    }
+    const words = withComments(body, gathered, own.sent.length, pictures)
+    const restore = () => {
+      batch.finish(false)
+      setDraft((current) => withQueued(current, body))
+      images.giveBack(own)
+      if (picked !== null) setHandover(picked)
+    }
+    const said =
+      picked !== null ? model.handOver(picked, words, outgoing) : now ? model.sayNow(words, outgoing) : model.say(words, chosen, outgoing)
+    void said.then((accepted) => {
+      if (accepted) batch.finish(true)
+      else restore()
+    }, restore)
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {

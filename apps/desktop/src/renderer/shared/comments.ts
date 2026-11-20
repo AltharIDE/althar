@@ -87,7 +87,7 @@ interface ThreadComments {
   all: ReadonlyArray<GatheredComment>
   shown: ReadonlyArray<GatheredComment>
   readonly sending: Set<string>
-  readonly reading: Map<string, Promise<void>>
+  readonly reading: Set<string>
 }
 
 const prefix = 'althar.drafts.comments:'
@@ -155,7 +155,7 @@ const threadOf = (key: string): ThreadComments => {
   } catch {
     // No readable draft for this thread.
   }
-  const thread: ThreadComments = { all, shown: all, sending: new Set(), reading: new Map() }
+  const thread: ThreadComments = { all, shown: all, sending: new Set(), reading: new Set() }
   threads.set(key, thread)
   return thread
 }
@@ -245,11 +245,6 @@ export const takeComments = (key: string, onlyDiff = false) => {
   if (ids.size > 0) publish(key, thread)
   return {
     taken,
-    withCrops: (pictures: boolean, send: (comments: ReadonlyArray<GatheredComment>) => void) => {
-      const reading = pictures ? taken.flatMap((one) => loadCrop(key, thread, one) ?? []) : []
-      if (reading.length === 0) send(taken)
-      else void Promise.all(reading).then(() => send(thread.all.filter((one) => ids.has(one.id))))
-    },
     finish: (accepted: boolean) => {
       if (ids.size === 0 || threads.get(key) !== thread) return
       for (const id of ids) thread.sending.delete(id)
@@ -318,25 +313,26 @@ export const useComments = (key: string): ReadonlyArray<GatheredComment> => {
   return comments
 }
 
-const loadCrop = (key: string, thread: ThreadComments, one: GatheredComment, captured?: string): Promise<void> | undefined => {
+const needsCrop = (one: GatheredComment): one is GatheredComment & { readonly cropId: string } =>
+  one.cropId !== undefined && one.crop === null && one.cropLost !== true
+
+/** A crop still loading holds Send just like an image being read. */
+export const readingCommentCrops = (key: string) => commentsOf(key).some(needsCrop)
+
+const loadCrop = async (key: string, thread: ThreadComments, one: GatheredComment, captured?: string) => {
+  if (!needsCrop(one) || thread.reading.has(one.cropId)) return
   const id = one.cropId
-  if (id === undefined || one.crop !== null || one.cropLost === true) return
-  const reading = thread.reading.get(id)
-  if (reading !== undefined) return reading
-  const read = (async () => {
-    // Saving and converting the same capture run independently. A crop that can't be saved still works in this window.
-    if (captured !== undefined) void draftCrop.write(id, captured).catch(() => undefined)
-    const crop = await Promise.resolve()
-      .then(async () => cropOf(captured ?? (await draftCrop.read(id)), thread.all.indexOf(one) + 1))
-      .catch(() => null)
-    thread.reading.delete(id)
-    if (threads.get(key) !== thread || !thread.all.some((comment) => comment.cropId === id)) return
-    // Crop availability is checked anew at launch, separately from the saved comment.
-    thread.all = thread.all.map((comment) => (comment.cropId === id ? { ...comment, crop, cropLost: crop === null } : comment))
-    publish(key, thread)
-  })()
-  thread.reading.set(id, read)
-  return read
+  thread.reading.add(id)
+  // Saving and converting the same capture run independently. A crop that can't be saved still works in this window.
+  if (captured !== undefined) void draftCrop.write(id, captured).catch(() => undefined)
+  const crop = await Promise.resolve()
+    .then(async () => cropOf(captured ?? (await draftCrop.read(id)), thread.all.indexOf(one) + 1))
+    .catch(() => null)
+  thread.reading.delete(id)
+  if (threads.get(key) !== thread || !thread.all.some((comment) => comment.cropId === id)) return
+  // Crop availability is checked anew at launch, separately from the saved comment.
+  thread.all = thread.all.map((comment) => (comment.cropId === id ? { ...comment, crop, cropLost: crop === null } : comment))
+  publish(key, thread)
 }
 
 /** Gather the note immediately. Its crop follows when the picture can be read. */
