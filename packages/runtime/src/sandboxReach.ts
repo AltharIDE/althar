@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs'
+import { type Dirent, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { parseRemote, type Product, products } from '@althar/connectors'
@@ -49,9 +49,6 @@ export interface Edits {
   readonly removed: ReadonlyArray<string>
 }
 
-/**
- * Commands that need to run outside even without a matching repository.
- */
 const SERVERS_AND_TESTS = [
   'vite',
   'next dev',
@@ -69,9 +66,13 @@ const SERVERS_AND_TESTS = [
   'vp test',
 ]
 
-/** Launch Services, Apple Events and container daemon sockets are used across projects. */
 const MACOS_COMMANDS = ['open', 'osascript', 'docker', 'docker-compose']
 
+/**
+ * Default reach even without a repository match. Seatbelt blocks process
+ * listing with `ps`, Launch Services and Apple Events, and container daemon
+ * sockets. Desktop tests use `env -i` to start with a clean environment.
+ */
 export const ALWAYS: ReadonlyArray<string> = [
   'ps',
   'env -i',
@@ -95,44 +96,86 @@ const RUNNERS: Readonly<Record<string, string>> = { bun: 'bunx', npm: 'npx', pnp
 
 const GRADLE_FILES = ['gradlew', 'build.gradle', 'build.gradle.kts', 'settings.gradle', 'settings.gradle.kts']
 const ANDROID_FILES = ['app/src/main/AndroidManifest.xml', 'src/main/AndroidManifest.xml']
+const DEPENDENCY_DIRS = new Set(['node_modules', 'Pods', 'vendor'])
 
 const hasFile = (folder: string, files: ReadonlyArray<string>) => files.some((file) => existsSync(join(folder, file)))
 
-const hasXcodeProject = (folder: string) => {
+const entriesIn = (folder: string) => {
   try {
-    return readdirSync(folder, { withFileTypes: true }).some(
-      (entry) => entry.isDirectory() && /\.(xcodeproj|xcworkspace)$/.test(entry.name),
-    )
+    return readdirSync(folder, { withFileTypes: true })
   } catch {
-    return false
+    return []
   }
 }
 
+const isIosProject = (entries: ReadonlyArray<Dirent>) =>
+  entries.some(
+    (entry) =>
+      (entry.name === 'Podfile' && (entry.isFile() || entry.isSymbolicLink())) ||
+      (entry.isDirectory() && /\.(xcodeproj|xcworkspace)$/.test(entry.name)),
+  )
+
+const projectDirectory = (entry: Dirent) => entry.isDirectory() && !entry.name.startsWith('.') && !DEPENDENCY_DIRS.has(entry.name)
+
+/** A native checkout, a named app folder, or a project under ios/, such as ios/App. */
+const hasIosProject = (folder: string) => {
+  const entries = entriesIn(folder)
+  return (
+    isIosProject(entries) ||
+    entries.filter(projectDirectory).some((entry) => {
+      const child = join(folder, entry.name)
+      const children = entriesIn(child)
+      return (
+        isIosProject(children) ||
+        children.some(
+          (sub) => (entry.name === 'ios' || sub.name === 'ios') && projectDirectory(sub) && isIosProject(entriesIn(join(child, sub.name))),
+        )
+      )
+    })
+  )
+}
+
 /** Native tools that need macOS services or their normal build caches, by the projects that use them. */
-const nativeCommandsIn = (folder: string, root: string, packages: ReadonlySet<string>, runner: string): ReadonlyArray<string> => {
+const nativeReachIn = (folder: string, root: string, packages: ReadonlySet<string>, runner: string) => {
   const folders = [...new Set([folder, root])]
-  const iosFolders = [...folders, ...folders.map((at) => join(at, 'ios'))]
   const androidFolders = folders.map((at) => join(at, 'android'))
   const expo = packages.has('expo')
-  const mobile = expo || packages.has('react-native')
-  const ios = mobile || iosFolders.some((at) => hasFile(at, ['Podfile']) || hasXcodeProject(at))
+  const reactNative = packages.has('@react-native-community/cli') || (!expo && packages.has('react-native'))
+  const capacitorIos = packages.has('@capacitor/ios')
+  const capacitorAndroid = packages.has('@capacitor/android')
+  const ios = expo || reactNative || capacitorIos || packages.has('react-native-macos') || folders.some(hasIosProject)
   const android =
-    mobile ||
+    expo ||
+    reactNative ||
+    capacitorAndroid ||
     folders.some((at) => hasFile(at, ANDROID_FILES)) ||
     androidFolders.some((at) => hasFile(at, [...GRADLE_FILES, ...ANDROID_FILES]))
   const gradle = android || folders.some((at) => hasFile(at, GRADLE_FILES))
-  const expoRun = (platform: 'ios' | 'android') => ['', 'npx ', `${runner} `].map((prefix) => `${prefix}expo run:${platform}`)
-  return [
+  const withRunners = (commands: ReadonlyArray<string>) =>
+    commands.flatMap((command) => [command, `npx ${command}`, `${runner} ${command}`])
+  const capacitor = [
+    ...(capacitorIos ? ['run ios'] : []),
+    ...(capacitorAndroid ? ['run android'] : []),
+    ...(capacitorIos || capacitorAndroid ? ['sync'] : []),
+  ]
+  const commands = [
     ...(ios ? ['xcrun simctl', 'xcodebuild', 'pod install', 'bundle exec pod install', 'xcrun devicectl', 'xcrun xctrace'] : []),
     ...(android ? ['emulator'] : []),
     ...(gradle ? ['gradle', './gradlew'] : []),
     ...(android ? ['./android/gradlew'] : []),
-    ...(expo ? [...expoRun('ios'), ...expoRun('android')] : []),
+    ...(expo ? withRunners(['expo run:ios', 'expo run:android']) : []),
+    ...(reactNative ? withRunners(['react-native', 'rnc-cli'].flatMap((bin) => [`${bin} run-ios`, `${bin} run-android`])) : []),
+    ...(reactNative ? ['npx @react-native-community/cli run-ios', 'npx @react-native-community/cli run-android'] : []),
+    ...withRunners(capacitor.map((command) => `cap ${command}`)),
   ]
+  return { commands, ios, android }
 }
 
 /** A script that runs tests or drives a browser, by its name: `test`, `test:e2e`, `e2e`, `playwright`. */
 const testing = (name: string) => /^(dev|start|serve|test)(:|$)/.test(name) || /e2e|playwright|screenshot/.test(name)
+
+const nativeScript = (name: string, native: ReturnType<typeof nativeReachIn> | undefined) =>
+  (native?.ios === true && /^ios(:|$)/.test(name)) || (native?.android === true && /^android(:|$)/.test(name))
 
 const recordOf = (value: unknown): Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Readonly<Record<string, unknown>>) : {}
@@ -159,19 +202,29 @@ export const commandsIn = (folder: string, root: string = folder, platform: Node
   const manager = managerIn(folder, root) ?? 'npm'
   const runner = RUNNERS[manager] ?? 'npx'
   const packages = packagesIn(folder)
-  const native = platform === 'darwin' ? nativeCommandsIn(folder, root, packages, runner) : []
+  const native = platform === 'darwin' ? nativeReachIn(folder, root, packages, runner) : undefined
   const brought = TOOLS.filter((tool) => tool.packages.some((name) => packages.has(name)))
-  const tools = [...brought.map((tool) => `${runner} ${tool.bin}`), ...native]
-  const tests = scriptsIn(folder, root).filter((script) => testing(script.name))
+  const tools = [...brought.map((tool) => `${runner} ${tool.bin}`), ...(native?.commands ?? [])]
   // A package's own command as a lead types it, through the runner; anything else, `node scripts/e2e.ts`, as it is.
   const ownCommand = (program: string) =>
     packages.has(program) ||
     brought.some((tool) => tool.bin === program) ||
     [folder, root].some((at) => existsSync(join(at, 'node_modules', '.bin', program)))
-  const typed = (part: string) => (ownCommand(part.split(' ')[0] ?? '') ? `${runner} ${part}` : part)
-  // By name, as run where the script is: a workspace's in its folder runs as the root's does.
-  const scripts =
-    manager === 'bun' ? tests.flatMap((script) => partsOf(script.body).map(typed)) : tests.map((script) => `${manager} run ${script.name}`)
+  const startsWith = (command: string, start: string) => command === start || command.startsWith(`${start} `)
+  const typed = (part: string) => {
+    const throughRunner = `${runner} ${part}`
+    return ownCommand(part.split(' ')[0] ?? '') || native?.commands.some((command) => startsWith(throughRunner, command))
+      ? throughRunner
+      : part
+  }
+  const scripts = scriptsIn(folder, root).flatMap((script) => {
+    const isNative = nativeScript(script.name, native)
+    if (!isNative && !testing(script.name)) return []
+    if (manager === 'bun') return partsOf(script.body).map(typed)
+    const local = `${manager} run ${script.name}`
+    if (!isNative) return [local]
+    return [local, script.command, ...(manager === 'yarn' || manager === 'pnpm' ? [`${manager} ${script.name}`] : [])]
+  })
   // Without what a tool already covers: `bunx playwright test` runs outside as `bunx playwright` does.
   const covered = (command: string) => tools.some((tool) => command.startsWith(`${tool} `))
   return [...new Set([...tools, ...scripts])].filter((command) => runsOutside(command) && !covered(command))
