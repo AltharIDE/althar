@@ -2,7 +2,7 @@ diff --git a/dist/index.js b/dist/index.js
 index 0000000..0000000 100755
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -43885,12 +43885,18 @@
+@@ -44952,12 +44952,18 @@
      return await this.codexClient.runTurn({
        threadId: request.sessionId,
        input: input2,
