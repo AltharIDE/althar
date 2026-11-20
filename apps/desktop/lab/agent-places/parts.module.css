@@ -1,0 +1,149 @@
+/* ---- the places as cells: the bar's meters' steps, one a place ---- */
+.pips {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+.pips i {
+  display: block;
+  border-radius: 1px;
+  background: var(--track);
+  transition:
+    background var(--enter) var(--ease-out),
+    box-shadow var(--enter) var(--ease-out);
+}
+.small i {
+  width: 4px;
+  height: 9px;
+}
+.large {
+  gap: 3px;
+}
+.large i {
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+}
+.pips i[data-cell='on'] {
+  background: var(--live);
+}
+/* closed for now: only its outline, in warm, where a free place is a filled step */
+.pips i[data-cell='shut'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warm) 70%, transparent);
+}
+.large i[data-cell='shut'] {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--warm) 30%, transparent) 0 1.5px,
+    transparent 1.5px 4px
+  );
+}
+.held {
+  margin-top: 4px;
+}
+
+/* ---- the work holding the places, a row a task; its rows reach the edges, as the load peek's do ---- */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0 -6px;
+  padding: 0;
+  list-style: none;
+}
+/* the cells' column as wide as the most places one task holds, so every title starts in one line */
+.row {
+  display: grid;
+  grid-template-columns: var(--cells, 4px) minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.row:hover {
+  background: var(--hover-paper);
+}
+.words {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 520;
+  color: var(--t-1);
+}
+.mark {
+  flex-shrink: 0;
+  color: var(--t-3);
+}
+.titleText,
+.meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta {
+  font-size: 11px;
+  color: var(--t-3);
+}
+.command {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--t-2);
+}
+.figures {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.figure {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+}
+.figureQuiet {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.none {
+  margin: 0;
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+/* ---- the number lowered for a while ---- */
+.lowered {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.loweredIcon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--warm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pips i,
+  .row {
+    transition: none;
+  }
+}

@@ -1,0 +1,59 @@
+/* a cell under each number up to the person's, on the track's own scale */
+.cells {
+  position: relative;
+  height: 12px;
+  margin-top: 3px;
+}
+.cells i {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 12px;
+  margin-left: -4px;
+  border-radius: 2px;
+  background: var(--track);
+  transition:
+    background var(--enter) var(--ease-out),
+    left 120ms ease-out;
+}
+.cells i[data-cell='on'] {
+  background: var(--live);
+}
+.cells i[data-cell='shut'] {
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--warm) 34%, transparent) 0 1.5px,
+    transparent 1.5px 4px
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warm) 60%, transparent);
+}
+
+/* the number lowered for now: the track past it closed, in warm hatching over the fill */
+.closed {
+  position: absolute;
+  top: 7px;
+  height: 6px;
+  border-radius: 99px;
+  background: repeating-linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--warm) 80%, var(--paper)) 0 2px,
+    color-mix(in srgb, var(--warm) 25%, var(--paper)) 2px 4px
+  );
+  pointer-events: none;
+}
+.forNow {
+  position: absolute;
+  top: 3px;
+  width: 2px;
+  height: 14px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--warm);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cells i {
+    transition: none;
+  }
+}
