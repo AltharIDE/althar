@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
@@ -8,7 +8,7 @@ import { change, fakeClient, items, snapshot } from './fixtures'
 import type { ChangeSummary } from '@althar/contracts'
 import { ServicesProvider } from '../src/renderer/data/services'
 import { ApiError } from '@althar/contracts'
-import { useMerge } from '../src/renderer/data/merges'
+import { QUEUES_AFTER, useMerge } from '../src/renderer/data/merges'
 import { servicesFor, withServices } from './render'
 
 /*
@@ -353,6 +353,10 @@ describe('a task’s parts', () => {
       // Its branch merges through a queue, as its host said: Merge puts it there. Every read of it says open, never queued.
       const bound = change({ ...second, needs: [{ kind: 'merge_queue', state: 'met' }] })
       const one = vi.fn(async () => snapshot({ task: { ...base.task, changes: [bound] } }))
+      // Merge answers its press for a moment (QUEUES_AFTER) before it shows in its queue: that moment is the clock's, not the runner's.
+      beforeEach(() => void vi.useFakeTimers({ shouldAdvanceTime: true }))
+      afterEach(() => void vi.useRealTimers())
+      const answeredLongEnough = () => act(() => vi.advanceTimersByTimeAsync(QUEUES_AFTER))
 
       it('is in its queue just after Merge answers the press, before the host has answered or any read says so', async () => {
         const { merge } = held()
@@ -363,7 +367,8 @@ describe('a task’s parts', () => {
         // The press, answered at once where it was made.
         expect(await popover.findByText('Merging', said)).toBeTruthy()
         // Then into the queue, the host still holding the merge and every read still saying open, not queued.
-        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        await answeredLongEnough()
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
         expect(merge).toHaveBeenCalledOnce()
         expect(popover.queryByText('Merging', said)).toBeNull()
         expect(popover.queryByRole('button', { name: 'Merge' })).toBeNull()
@@ -375,7 +380,8 @@ describe('a task’s parts', () => {
         withServices(<Task />, client)
         const popover = await parts()
         await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
-        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        await answeredLongEnough()
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
         act(() => answers[0]!.reject(new ApiError({ reason: 'ConnectorFailed', message: 'The merge queue refused it.' })))
         expect(await screen.findByText('The merge queue refused it.')).toBeTruthy()
         await waitFor(() => expect(popover.queryByText('In the merge queue')).toBeNull())
@@ -395,7 +401,8 @@ describe('a task’s parts', () => {
         )
         const popover = await parts()
         await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
-        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        await answeredLongEnough()
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
         // The host has it in its queue, and a read says so.
         read = { ...bound, queued: true }
         act(() => answers[0]!.resolve())
@@ -422,7 +429,8 @@ describe('a task’s parts', () => {
         )
         const popover = await parts()
         await userEvent.click(popover.getByRole('button', { name: 'Merge' }))
-        expect(await popover.findByText('In the merge queue')).toBeTruthy()
+        await answeredLongEnough()
+        expect(popover.getByText('In the merge queue')).toBeTruthy()
         // A read has it in the queue, Merge still unanswered.
         read = { ...bound, queued: true }
         await act(() => services.cache.invalidateQueries())

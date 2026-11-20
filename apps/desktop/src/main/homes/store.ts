@@ -91,7 +91,7 @@ export const homeStore = (profile: string) => {
     )
       throw unsafe()
   }
-  const list = async (): Promise<ReadonlyArray<RemoteHome>> => {
+  const read = async (): Promise<ReadonlyArray<RemoteHome>> => {
     await directory()
     let handle
     try {
@@ -129,12 +129,21 @@ export const homeStore = (profile: string) => {
       await handle.close()
     }
   }
+  /**
+   * A read waits its turn behind the writes before it, and they behind it: Windows won't
+   * replace a file another handle has open, so a read beside a write fails its rename.
+   */
+  const list = (): Promise<ReadonlyArray<RemoteHome>> => {
+    const next = tail.then(read)
+    tail = next.catch(() => undefined)
+    return next
+  }
   const change = <A>(update: (homes: ReadonlyArray<RemoteHome>) => { homes: ReadonlyArray<RemoteHome>; result: A }): Promise<A> => {
     if (queued >= 16) return Promise.reject(new Error('Home connection settings are busy. Try again.'))
     queued++
     const next = tail
       .then(async () => {
-        const updated = update(await list())
+        const updated = update(await read())
         const contents = Buffer.from(JSON.stringify({ version: 2, homes: updated.homes }))
         if (updated.homes.length > MAX_HOMES || contents.length > MAX_BYTES)
           throw new Error('Forget an unused home before saving another connection.')
