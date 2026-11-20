@@ -236,10 +236,10 @@ export const drop = (key: string, id: string) => {
 }
 
 /** The chips go at once. Their saved copies go when the runtime accepts them. */
-export const takeComments = (key: string, onlyDiff = false, allowDiff = true) => {
+export const takeComments = (key: string, onlyDiff = false) => {
   const thread = threadOf(key)
   let lines = 0
-  const taken = thread.shown.filter((one) => (one.on.kind === 'diff' ? allowDiff && lines++ < LINE_COMMENTS.count : !onlyDiff))
+  const taken = thread.shown.filter((one) => (one.on.kind === 'diff' ? lines++ < LINE_COMMENTS.count : !onlyDiff))
   const ids = new Set(taken.map((one) => one.id))
   for (const id of ids) thread.sending.add(id)
   if (ids.size > 0) publish(key, thread)

@@ -915,7 +915,7 @@ export function TaskView({
     const own = images.take(receiver)
     if (own === null) return
     turnUndo.dismiss()
-    const batch = takeComments(kept, false, snapshot.task.phase !== 'settled')
+    const batch = takeComments(kept)
     const pictures = receiver.takes !== false
     setDraft('')
     images.clear()
@@ -2055,15 +2055,11 @@ export function TaskView({
               comment={commentShown}
               nextCommentNumber={comments.length + 1}
               onRemoveComment={lineComments.remove}
-              // Comments are on the task's own change: one settled takes none.
-              {...(snapshot.task.phase === 'settled'
-                ? {}
-                : {
-                    onComment: lineComments.add,
-                    onEditComment: lineComments.edit,
-                    onSendComments: sendComments,
-                    sendingComments,
-                  })}
+              onEditComment={lineComments.edit}
+              // oxlint-disable-next-line althar/press-at-once -- takeComments removes the waiting notes before the request starts.
+              onSendComments={sendComments}
+              sendingComments={sendingComments}
+              {...(snapshot.task.phase === 'settled' ? {} : { onComment: lineComments.add })}
               view={changes.view}
               onRetry={changes.retry}
               onClose={() => {

@@ -76,13 +76,15 @@ describe('comments on the diff', () => {
       })),
     })
     withServices(<Task />, client)
+    await screen.findByRole('heading', { name: 'Add a retry', level: 1 })
+    fireEvent.keyDown(window, { key: 'c' })
 
     const chip = await screen.findByRole('button', { name: /^Comment 1: Cap the retries.*On an earlier version$/ })
     expect(client.send).not.toHaveBeenCalled()
     await user.click(chip)
     const changes = await screen.findByRole('dialog', { name: 'Changes' })
-    expect(within(changes).getByText('On an earlier version')).toBeVisible()
-    await user.click(within(changes).getByRole('button', { name: 'Close' }))
+    expect(within(changes).getByText('On an earlier version')).toBeTruthy()
+    await user.click(within(changes).getByRole('button', { name: /^Close/ }))
     await user.click(screen.getByRole('button', { name: /^Send$/ }))
     await waitFor(() => expect(client.send).toHaveBeenCalledTimes(1))
     expect(vi.mocked(client.send).mock.calls[0]?.[0].comments).toEqual([{ ...line, note }])

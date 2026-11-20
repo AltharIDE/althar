@@ -75,7 +75,7 @@ export function CommentChip({ comment, onOpen, onRemove, text }: CommentChipProp
             <span className={s.note}>
               {comment.n}. {comment.note}
             </span>
-            <span className={s.place}>{comment.status ?? comment.place}</span>
+            <span className={comment.status === undefined ? s.place : s.status}>{comment.status ?? comment.place}</span>
           </span>
         </button>
       </HoverCard>
@@ -97,7 +97,7 @@ export function CommentCard({ comment }: { comment: ComposerComment }) {
         <span className={s.n}>{comment.n}</span>
         <span>{comment.note}</span>
       </span>
-      {comment.status !== undefined && <span className={s.place}>{comment.status}</span>}
+      {comment.status !== undefined && <span className={s.status}>{comment.status}</span>}
       <KeyValues
         className={s.facts}
         keyWidth={78}

@@ -418,7 +418,7 @@ describe('a comment on the page', () => {
     const box = await screen.findByRole('textbox', { name: 'Comment on div.banner' })
     await userEvent.clear(box)
     await userEvent.type(box, 'Changed{Enter}')
-    await waitFor(() => expect(commentsOf(DRAFT)[0]?.note).toBe('Changed'))
+    await waitFor(() => expect(commentsOf(DRAFT)[0]).toMatchObject({ note: 'Changed', earlier: true }))
   })
 
   it('starts dictation from anywhere at the page’s own key, where no composer shows', async () => {
