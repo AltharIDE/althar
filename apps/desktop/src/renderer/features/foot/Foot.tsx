@@ -19,7 +19,7 @@ import { useServices } from '../../data/services'
 import { useRunOutput } from '../../shared/RunOf'
 import type { RunContent } from '../../shared/thread'
 import { usePageOpener } from '../browser/opener'
-import { useFootShown } from './shown'
+import { footShown, useFootShown } from './shown'
 import { type FootStore, type FootTerminal, footStoreOf } from './store'
 import s from './Foot.module.css'
 
@@ -100,8 +100,8 @@ export function Foot({ projectId, taskId, where, onHelp, onRunAgain }: FootProps
   const opener = usePageOpener()
   const now = useNow(state.launches.some((launch) => launch.ended === null && launch.url === null))
   const foot = useRef<HTMLDivElement>(null)
-  const room = useRoom(foot, state.raised)
   const [shown, setShown] = useFootShown()
+  const room = useRoom(foot, state.raised && shown)
 
   // A link pressed in a terminal opens where this screen opens a run's. A hidden screen runs no effects: the one on show says.
   useEffect(() => {
@@ -112,9 +112,12 @@ export function Foot({ projectId, taskId, where, onHelp, onRunAgain }: FootProps
     const onKey = (event: KeyboardEvent) => {
       if (!event.ctrlKey || event.metaKey || event.altKey || (event.key !== '`' && event.code !== 'Backquote')) return
       event.preventDefault()
-      // Hidden, the terminal key brings the bar back with it.
+      // Hidden, the bar is as good as closed: the key brings it back with a terminal raised, never lowering one.
+      if (footShown()) return toggleTerminal(store, { taskId, where }, event.shiftKey)
       setShown(true)
-      toggleTerminal(store, { taskId, where }, event.shiftKey)
+      const last = store.get().terminals.at(-1)
+      if (event.shiftKey || last === undefined) store.openTerminal({ taskId, where })
+      else store.show({ kind: 'terminal', id: last.id })
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)

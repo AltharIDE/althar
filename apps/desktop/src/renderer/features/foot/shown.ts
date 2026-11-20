@@ -20,6 +20,9 @@ const read = (): boolean => {
 let current = read()
 const listeners = new Set<() => void>()
 
+/** Whether the bar shows now. */
+export const footShown = (): boolean => current
+
 /** Shows or hides the bar, at once, and keeps it. */
 export const setFootShown = (next: boolean): void => {
   if (next === current) return

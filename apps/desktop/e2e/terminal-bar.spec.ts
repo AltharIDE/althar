@@ -45,6 +45,13 @@ test('the Layout menu hides the terminal bar completely and brings it back', asy
     await item.click()
     await expect(line(page)).toBeVisible()
 
+    // Hidden with its drawer raised, Ctrl+` brings the bar back with the terminal raised, not lowered.
+    await expect(page.getByRole('region', { name: 'Runs and terminals drawer' })).toBeVisible()
+    await (await entry(page)).click()
+    await expect(line(page)).toHaveCount(0)
+    await page.keyboard.press('Control+Backquote')
+    await expect(page.getByRole('region', { name: 'Runs and terminals drawer' })).toBeVisible()
+
     // The key t hides it too, when nothing is being typed.
     await page.mouse.click(640, 300)
     await page.keyboard.press('t')
