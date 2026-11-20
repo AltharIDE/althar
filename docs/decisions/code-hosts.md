@@ -337,10 +337,11 @@ on the repository a fork sends its pull requests to.
   drafted to answer a review starts on its head. `find_pull_requests` lists
   a fork's upstream pull requests first, and says which task follows each.
 
-Pushes to a contributor's fork use the person's connected git sign-in and
-wait for their approval. Each push checks that the pull request is still open,
+Pushes to a contributor's fork wait for the person's approval. They use the
+person's connected sign-in, and try the device's git sign-in if that token
+can't reach the fork. Each push checks that the pull request is still open,
 its branch still exists and the author still allows maintainer edits. Althar
-never force-pushes to that branch.
+never force-pushes to that branch or pushes to the fork's default branch.
 
 ## Checks: Althar sees them through
 

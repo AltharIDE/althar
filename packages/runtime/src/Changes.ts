@@ -21,6 +21,7 @@ import {
   type Person,
   type Product,
   products,
+  type PushTarget,
   type Repository,
   type Review,
   parseRemote,
@@ -293,6 +294,19 @@ const samePath = (a: ReadonlyArray<string>, b: ReadonlyArray<string>) => a.join(
 
 /** The branch a pull request's commits go to on its host: its own, as last seen, else the task's, as one Althar opened has. */
 const sourceOf = (snapshot: Snapshot, branch: string) => snapshot.source ?? branch
+
+/** A connected token can be scoped to the target repository. The person's configured git can also sign in to the fork. */
+const withContributorGit = <A>(contributor: boolean, target: PushTarget, run: (target: PushTarget) => Effect.Effect<A, GitFailed>) =>
+  run(target).pipe(
+    Effect.catchIf(
+      (failed) => {
+        if (!contributor || target.header === null) return false
+        const why = pushFailureOf(failed)?.why
+        return why === 'denied' || why === 'forbidden' || /repository not found|returned error: 404/i.test(failed.stderr)
+      },
+      () => run({ ...target, header: null }),
+    ),
+  )
 
 /**
  * A host's no to one repository of a task's several, on one line: which
@@ -2307,9 +2321,9 @@ export class Changes extends Context.Service<
           ])
           // Already there, nothing goes up; else only as a fast-forward, in a sentence where it isn't one.
           if (tip !== head)
-            yield* pushTo(task.path, pushTarget, task.branch, head, undefined, onto).pipe(
-              Effect.catchTag('GitFailed', (failed) => refusal(input.taskId, nameOf(snapshot), failed)),
-            )
+            yield* withContributorGit(snapshot.maintainerEdit === true, pushTarget, (target) =>
+              pushTo(task.path, target, task.branch, head, undefined, onto),
+            ).pipe(Effect.catchTag('GitFailed', (failed) => refusal(input.taskId, nameOf(snapshot), failed)))
           yield* settle
           const { host, repository } = yield* current(input.taskId, snapshot.url)
           const read = yield* host.change(repository, snapshot.number)
@@ -2485,7 +2499,12 @@ export class Changes extends Context.Service<
             return yield* refuse(`Task ${sending.slug}’s work goes to ${name}. Abandon it first, or leave ${name} to it.`)
           const pushTarget = yield* fromHost(host.pushTarget(same(own, path) ? repository : yield* fromHost(host.repository(own))))
           // Its head as its branch has it now, fetched here: what the task's branch must be on for its pushes to add to it.
-          const tip = yield* fetchInto(row.path, pushTarget, pull.source, `refs/althar/pull-request/${pull.source}`)
+          const ref = `refs/althar/pull-request/${pull.source}`
+          const tip = yield* maintainerEdit
+            ? withContributorGit(true, pushTarget, (target) => fetchedInto(row.path, target, pull.source, ref)).pipe(
+                Effect.orElseSucceed(() => null),
+              )
+            : fetchInto(row.path, pushTarget, pull.source, ref)
           if (tip === null) return yield* refuse(`Althar couldn’t fetch ${name}’s branch, ${pull.source}, from ${own.join('/')}.`)
           let base = row.baseCommit
           let started = false
@@ -3335,7 +3354,7 @@ export class Changes extends Context.Service<
           if (head?.length === 0) return yield* new PushRefused({ taskId, why: 'fork_gone', remote })
           if (head == null || !samePath(head, own.path)) return yield* new PushRefused({ taskId, why: 'unplaced', remote })
           if (onto === own.defaultBranch) return yield* new PushRefused({ taskId, why: 'protected', remote })
-          const tip = yield* askedRemoteTip(path, target, onto).pipe(
+          const tip = yield* withContributorGit(true, target, (gitTarget) => askedRemoteTip(path, gitTarget, onto)).pipe(
             Effect.catchTag('GitFailed', (failed) => refusal(taskId, remote, failed)),
           )
           if (tip === null) return yield* new PushRefused({ taskId, why: 'refused', remote, said: 'the contributor’s branch is gone' })
@@ -3576,9 +3595,9 @@ export class Changes extends Context.Service<
             head,
           })
           // Refused, it says why in a sentence, not git's hint: the pull request has commits the branch doesn't.
-          yield* pushTo(workspace.path, pushTarget, workspace.branch, head, undefined, onto).pipe(
-            Effect.catchTag('GitFailed', (failed) => refusal(taskId, nameOf(snapshot), failed)),
-          )
+          yield* withContributorGit(snapshot.maintainerEdit === true, pushTarget, (target) =>
+            pushTo(workspace.path, target, workspace.branch, head, undefined, onto),
+          ).pipe(Effect.catchTag('GitFailed', (failed) => refusal(taskId, nameOf(snapshot), failed)))
           yield* settle
           return yield* pushedTo(taskId, link, snapshot, workspace.path, seen, head, by === 'althar' ? 'althar' : 'person')
         })
@@ -3657,7 +3676,9 @@ export class Changes extends Context.Service<
           const onto = sourceOf(snapshot, workspace.branch)
           const ref = `refs/althar/pull-request/${onto}`
           // Where it can't be fetched, git's own words say why.
-          const head = yield* fetchedInto(workspace.path, pushTarget, onto, ref)
+          const head = yield* withContributorGit(snapshot.maintainerEdit === true, pushTarget, (target) =>
+            fetchedInto(workspace.path, target, onto, ref),
+          )
           const where = nameOf(snapshot)
           const short = head.slice(0, 12)
           const rewritten = head === sent && !(yield* onHead(workspace.path, head))

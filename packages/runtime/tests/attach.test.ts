@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -64,7 +64,7 @@ const forked = (
   options: {
     readonly fork?: ReadonlyArray<string>
     readonly state?: 'open' | 'closed'
-    readonly host?: Pick<FakeServiceOptions, 'reviews' | 'saysHead'>
+    readonly host?: Pick<FakeServiceOptions, 'reviews' | 'saysHead' | 'pushHeader'>
   } = {},
 ) => {
   const { working, bare } = hosted(['you', 'api'])
@@ -138,8 +138,23 @@ const cardOf = (projectId: string, taskId: string) =>
 
 describe('a task attached to a pull request it didn’t open', () => {
   it.live('publishes to an editable contributor fork without replacing its history', () => {
-    const { bare, contributor, github, pull, head, working } = forked({ fork: ['dana', 'api'] })
+    const header = 'Authorization: Basic dGVzdA=='
+    const { bare, contributor, github, pull, head, working } = forked({ fork: ['dana', 'api'], host: { pushHeader: header } })
     github.allowForkPush(pull.number)
+    // A token scoped to the upstream repository cannot push to the fork. The device's git sign-in can.
+    writeFileSync(
+      join(contributor, 'hooks', 'pre-receive'),
+      `#!/bin/sh
+cat >/dev/null
+if [ "$GIT_CONFIG_VALUE_0" = '${header}' ]; then
+  echo 'connected token' >> auth-attempts
+  echo 'Write access to repository not granted.' >&2
+  exit 1
+fi
+echo 'configured git' >> auth-attempts
+`,
+      { mode: 0o755 },
+    )
     return Effect.gen(function* () {
       const { projectId, task, personId } = yield* project(working)
       const changes = yield* Changes
@@ -149,6 +164,7 @@ describe('a task attached to a pull request it didn’t open', () => {
       const next = commit(task.worktree, 'why.md', 'It restarts.\n')
       const [published] = yield* changes.publish({ projectId, taskId: task.taskId, runId: 'run_none', end: 'draft' })
       assert.isTrue(published?.kind === 'opened' && published.attached === true)
+      assert.strictEqual(readFileSync(join(contributor, 'auth-attempts'), 'utf8'), 'connected token\nconfigured git\n')
       assert.strictEqual(tipOf(contributor, 'fix-send-back'), next)
       assert.isNull(tipOf(bare, 'fix-send-back'))
       assert.isNull(tipOf(contributor, task.branch))
