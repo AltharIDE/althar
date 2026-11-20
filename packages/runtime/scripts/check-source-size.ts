@@ -7,7 +7,6 @@ const limit = 4_000
 // Existing files can shrink to the shared limit without blocking unrelated changes.
 const legacyLimits: Readonly<Record<string, number>> = {
   'Queries.ts': 5_039,
-  'Runs.ts': 9_323,
   'Sessions.ts': 5_691,
   'rules.ts': 5_376,
 }
