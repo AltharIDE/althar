@@ -193,7 +193,6 @@ What isn't alike, as read on 31 October 2026:
 
 | What | Where it's missing | Why | What follows |
 | --- | --- | --- | --- |
-| Reviewing a pull request Althar didn't open (`reviews`) | GitLab, Bitbucket Cloud and Data Center | Not built: each takes comments on lines | ADR-082, task 1 |
 | Running a failed check again | Bitbucket Cloud | Not built: its pipeline can run again, whole | ADR-081, task 1 |
 | Running a failed check again, and its log (`checkLogs`) | Bitbucket Data Center | Can't: its builds are another service's | Said, with the build's link |
 | A merge queue | GitHub without one on the branch, GitLab without merge trains, Bitbucket Cloud without one, and Data Center | GitHub's and GitLab's are the project's settings, and Data Center has none | Althar's merge line stands in, one merge at a time into each branch (ADR-081, task 5), with auto-merge as its merge on GitLab and on Data Center from 8.15 |
@@ -1094,8 +1093,11 @@ Althar narrows them itself. A listing refused for a scope says which
   repository or fork, and the base from the target repository; it exposes no
   pull-request Git ref. Every fetched head must match the provider's SHA,
   accepting Cloud's abbreviated hashes only against a full fetched commit.
-  Their native review adapters handle summaries,
-  inline comments and verdicts. GitLab request-changes needs its GraphQL
+  Their native review adapters handle summaries, inline comments and verdicts.
+  GitLab stages the summary and inline comments as private draft notes and
+  publishes them together. If the reviewer already has unpublished notes on
+  the merge request, Althar leaves them in GitLab and asks the reviewer to
+  publish or discard them first. GitLab request-changes needs its GraphQL
   mutation, whose availability and permission are the server's. Multi-call
   reviews that partly succeed remain uncertain; they are never automatically
   repeated. GitLab approvals and Data Center verdicts bind the reviewed SHA;
