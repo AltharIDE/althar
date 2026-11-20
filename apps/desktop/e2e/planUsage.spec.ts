@@ -25,7 +25,8 @@ test('shows the plan gauge once a plan is read, says who is nearly out, and open
     await gauge.click()
     const peek = page.getByRole('dialog', { name: 'Plan usage' })
     await expect(peek).toBeVisible()
-    await expect(peek.getByText(/is nearly out/)).toBeVisible()
+    await expect(peek.getByRole('heading', { name: 'Plan usage' })).toBeVisible()
+    await expect(peek.getByText(/is nearly out/)).toHaveCount(0)
     // The gauge and the peek under it, at 1×.
     const box = (await peek.boundingBox())!
     const at = (await gauge.boundingBox())!
