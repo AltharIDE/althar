@@ -22,6 +22,7 @@ export const PUBLISHED: Record<string, string> = {
 
 /** The pictures the highlights are shown with (LogPictures.tsx). */
 export type Picture =
+  | 'home'
   | 'undo'
   | 'browser'
   | 'canvas'
@@ -50,6 +51,14 @@ export interface Highlight {
  * opens the page, so its entry shows the rest and keeps the lead's lines.
  */
 export const HIGHLIGHTS: Record<string, readonly Highlight[]> = {
+  '0.10.0': [
+    {
+      title: 'Your own host, your own workers',
+      why: 'Run Althar’s host on a Linux server of yours, and your projects, tasks and agents live there. Close the laptop and the work goes on; open it again from Althar over SSH or with a pairing code. And enroll workers, Linux machines of your own that run your project’s checks, their output live.',
+      picture: 'home',
+      covers: [0, 1, 2, 3, 4, 5],
+    },
+  ],
   '0.9.0': [
     {
       title: 'Undo, files and all',

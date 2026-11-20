@@ -1166,7 +1166,155 @@ function Undo() {
   )
 }
 
+/* ---- 0.10.0: your own host, your own workers ---- */
+
+/*
+ * The beats: Althar on your computer, its window open on a home on your own
+ * server, a task at work there; the window closes, and the server carries
+ * on: its tasks keep working and its worker runs the project's check, line
+ * by line, to a pass, and the task finishes; the window opens again on the
+ * finished task. Then it holds, and clears.
+ */
+const HOSTED: Timeline = { beats: [0, 1800, 3000, 3800, 4600, 5600, 7000, 12600], loop: 13400, rest: 6 }
+
+/** The server's tasks, and the beat each finishes on, if it does. */
+const ON_HOME = [
+  { name: 'Partial refunds', agent: Agent.Claude, done: 5 },
+  { name: 'Webhook retries', agent: Agent.Codex, done: null },
+  { name: 'Payout export', agent: Agent.Claude, done: null },
+] as const
+
+/** What the worker's run prints, and the beat each line comes on. */
+const CHECK = [
+  { at: 2, line: '$ bun test src/refunds' },
+  { at: 3, line: '✓ refund.test.ts  14 passed' },
+  { at: 4, line: '✓ settled.test.ts  9 passed' },
+] as const
+
+function Home() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, HOSTED)
+  const out = beat === HOSTED.beats.length - 1
+  const at = (from: number) => beat >= from && !out
+  const closed = beat >= 1 && beat <= 5
+  const passed = at(5)
+  const running = at(2) && !passed
+  return (
+    <Frame
+      label="Your own host: Althar's window on a home on your Linux server closes, and the server carries on, its tasks at work and its worker running the project's check to a pass; the window opens again on the finished task"
+      w={64}
+      n={32}
+    >
+      <div ref={ref} className={p.hoStage}>
+        <div className={cx(p.win, p.hoWin)} data-closed={closed}>
+          <Bar end={<span className={p.hoChip}>build-01</span>}>
+            <Tab name="Tally" ink="#2f6f7a" on />
+          </Bar>
+          <div className={p.hoTalk}>
+            <div className={p.brTask}>
+              <b>Partial refunds</b>
+              <code>althar/partial-refunds</code>
+            </div>
+            <div className={p.unYou}>
+              <p>Let a refund be for part of a payment.</p>
+            </div>
+            <div className={p.brAfter}>
+              <span className={p.brLive} data-shown={!at(5)}>
+                <i />
+                <span>Writing src/refunds/refund.ts</span>
+              </span>
+              <div className={p.brLead} data-shown={at(5)}>
+                <span className={p.mk}>
+                  <AgentMark agent={Agent.Claude} size={13} />
+                </span>
+                <p>
+                  A refund takes an amount now, up to what’s left on the payment.{' '}
+                  <span className={p.diff}>
+                    <ins>+31</ins> <del>−3</del>
+                  </span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className={p.hoLink} data-closed={closed}>
+          <span className={p.hoWire} />
+          <span className={p.hoVia}>{closed ? 'Window closed' : 'SSH'}</span>
+        </div>
+        <div className={p.hoBox}>
+          <div className={p.hoHead}>
+            <span className={p.hoOs}>
+              <OsMark id="linux" size={15} />
+            </span>
+            <span className={p.who}>
+              <b>build-01</b>
+              <span>Your server · arm64</span>
+            </span>
+            <span className={p.hoReady}>Ready</span>
+          </div>
+          <span className={p.hoLabel}>Tasks</span>
+          <ul className={p.hoTasks}>
+            {ON_HOME.map((task) => {
+              const done = task.done !== null && at(task.done)
+              return (
+                <li key={task.name}>
+                  <span className={p.mk}>
+                    <AgentMark agent={task.agent} size={12} />
+                  </span>
+                  <span className={p.hoName}>{task.name}</span>
+                  <span key={String(done)} className={p.hoState} data-done={done}>
+                    {done ? (
+                      <>
+                        <Icon name="check" size={11} />
+                        Finished
+                      </>
+                    ) : (
+                      <>
+                        <i />
+                        At work
+                      </>
+                    )}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+          <span className={p.hoLabel}>Workers</span>
+          <div className={p.hoWorker}>
+            <div className={p.hoRun}>
+              <code>runner-1</code>
+              <span key={passed ? 'passed' : running ? 'running' : 'waiting'} className={p.hoState} data-done={passed}>
+                {passed ? (
+                  <>
+                    <Icon name="check" size={11} />
+                    Check passed
+                  </>
+                ) : running ? (
+                  <>
+                    <i />
+                    Running check
+                  </>
+                ) : (
+                  'Waiting'
+                )}
+              </span>
+            </div>
+            <ol className={p.hoLog}>
+              {CHECK.map((line) => (
+                <li key={line.line} data-shown={at(line.at)}>
+                  {line.line}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
 const PICTURES: Record<Picture, () => ReactNode> = {
+  home: Home,
   undo: Undo,
   browser: Browser,
   canvas: Canvas,
