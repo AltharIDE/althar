@@ -2,7 +2,8 @@
 // page logged as an error. Chromium can't start in an agent's sandbox on a Mac; run it outside.
 //
 //   node lab/usage/shoot.mjs                     every direction, light and dark, at 30 days
-//   node lab/usage/shoot.mjs one a dark 1440 900 "range=90&all=1"   one, as asked; full=1 for the whole page's height
+//   node lab/usage/shoot.mjs one a dark 1440 900 "range=90&all=1"   one, as asked; full=1 for the whole page's height,
+//                                                                  receipt=1 with A's costliest receipt open
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium } from '@playwright/test'
@@ -30,6 +31,14 @@ const shoot = async (name, query, width = 1440, height = 900, full = false) => {
     })
     await page.setViewportSize({ width, height: height + tall })
     await page.waitForTimeout(500)
+  }
+  if (query.includes('receipt=1')) {
+    // The costliest receipt, opened, in the middle of the window.
+    const row = page.locator('[data-direction] li button[aria-expanded]').first()
+    await row.click()
+    await page.waitForTimeout(600)
+    await row.evaluate((node) => node.scrollIntoView({ block: 'start' }))
+    await page.waitForTimeout(300)
   }
   await page.locator('[data-lab-window]').screenshot({ path: join(out, `${name}.png`) })
   await page.close()
