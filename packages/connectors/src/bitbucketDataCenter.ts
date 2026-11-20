@@ -66,6 +66,17 @@ const RepositoryAnswer = Schema.Struct({
   name: Schema.String,
   project: Schema.Struct({ key: Schema.String }),
   links: Schema.optional(Schema.Struct({ self: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
+  // The repository it was forked from, given only for a fork.
+  origin: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        slug: Schema.String,
+        project: Schema.Struct({ key: Schema.String }),
+        // Its addresses to clone it by, over HTTP (with scm/) and SSH.
+        links: Schema.optional(Schema.Struct({ clone: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
+      }),
+    ),
+  ),
 })
 
 /** A repository the account can read, as a list of them says it, for choosing one to clone. */
@@ -591,6 +602,15 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
           webUrl: webOf(answer),
           canPush: writable.values.some((found) => found.id === answer.id),
           merges: mergesOf(enabled, chosen),
+          parent:
+            answer.origin == null
+              ? null
+              : {
+                  path: [answer.origin.project.key, answer.origin.slug],
+                  ...((answer.origin.links?.clone ?? []).length === 0
+                    ? {}
+                    : { addresses: (answer.origin.links?.clone ?? []).map((link) => link.href) }),
+                },
         }
       }),
     findChange,

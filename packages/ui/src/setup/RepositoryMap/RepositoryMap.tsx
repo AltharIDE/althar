@@ -51,9 +51,10 @@ export interface MapRepository {
   remote?: { host: string; path: string; href?: string }
   /**
    * The fork it is: the repository it forks, on the same host, by its path there, where its work goes, and whether its host
-   * says the person can push to the repository it forks. Without that, it hasn't said.
+   * says the person can push to the repository it forks. Without that, it hasn't said. `remote` is what its clone calls the
+   * repository it forks, null where none of its remotes is that repository; without it, unsaid.
    */
-  fork?: { upstream: string; target: ChangeTarget; canPush?: boolean }
+  fork?: { upstream: string; target: ChangeTarget; canPush?: boolean; remote?: string | null }
 }
 
 /** A code host the repositories' work goes to. */
@@ -130,6 +131,11 @@ export interface RepositoryMapText {
   upstreamBranches: (upstream: string) => string
   /** Where the host says the person can't push to the repository it forks. */
   noPush: (upstream: string) => string
+  /** The repository it forks, where its clone calls it something other than `upstream`. */
+  upstreamAs: (remote: string) => string
+  /** Where none of its clone's remotes is the repository it forks. */
+  noRemote: string
+  addRemote: string
 }
 
 export const repositoryMapText: RepositoryMapText = {
@@ -177,6 +183,9 @@ export const repositoryMapText: RepositoryMapText = {
   staysHere: `Its work stays on ${device.this}.`,
   upstreamBranches: (upstream) => `${upstream}, branches too`,
   noPush: (upstream) => `You can’t push to ${upstream} yet. Its owners can give you access.`,
+  upstreamAs: (remote) => `The repository it forks, as ${remote}`,
+  noRemote: 'Your clone has no remote for it.',
+  addRemote: 'Add remote',
 }
 
 export type RepositoryMapProps = RootProps<
@@ -193,6 +202,8 @@ export type RepositoryMapProps = RootProps<
     /** Makes a branch the repository doesn't have, from its default, and works toward it. */
     onTowardCreate?: (id: string, branch: string) => void
     onTargetChange: (id: string, target: ChangeTarget) => void
+    /** Adds the repository a fork forks as a remote of its clone, where it has none. Without it, there is no way to here. */
+    onAddRemote?: (id: string) => void
     /** Leaves one out: offered in its menu, never for the last. */
     onLeaveOut?: (id: string) => void
     /** Opens a repository's page on its host. Without it, there is no way to. */
@@ -343,6 +354,7 @@ export function RepositoryMap({
   onTowardChange,
   onTowardCreate,
   onTargetChange,
+  onAddRemote,
   onLeaveOut,
   onOpen,
   onConnect,
@@ -549,7 +561,14 @@ export function RepositoryMap({
           return (
             <HostGroup key={host.id} host={host} level={below(headingLevel)} t={t}>
               {theirs.map((repository) => (
-                <Remotes key={repository.id} repository={repository} keep={keep} t={t} onTargetChange={onTargetChange} />
+                <Remotes
+                  key={repository.id}
+                  repository={repository}
+                  keep={keep}
+                  t={t}
+                  onTargetChange={onTargetChange}
+                  {...(onAddRemote === undefined ? {} : { onAddRemote })}
+                />
               ))}
               {host.reach !== HostReach.Connected && (
                 <div className={s.off}>
@@ -644,11 +663,13 @@ function Remotes({
   keep,
   t,
   onTargetChange,
+  onAddRemote,
 }: {
   repository: MapRepository
   keep: Keep
   t: RepositoryMapText
   onTargetChange: (id: string, target: ChangeTarget) => void
+  onAddRemote?: (id: string) => void
 }) {
   const { remote, fork } = repository
   if (remote === undefined) return null
@@ -666,8 +687,20 @@ function Remotes({
       </div>
       <div ref={keep('node', `${repository.id}:upstream`)} className={s.node}>
         <code>{fork.upstream}</code>
-        <span className={s.nodeNote}>{t.upstream}</span>
+        <span className={s.nodeNote}>
+          {typeof fork.remote === 'string' && fork.remote !== 'upstream' ? t.upstreamAs(fork.remote) : t.upstream}
+        </span>
       </div>
+      {fork.remote === null && (
+        <div className={s.noRemote}>
+          <p>{t.noRemote}</p>
+          {onAddRemote !== undefined && (
+            <Button size="small" onClick={() => onAddRemote(repository.id)}>
+              {t.addRemote}
+            </Button>
+          )}
+        </div>
+      )}
       <div className={s.target}>
         <span aria-hidden="true">{t.target}</span>
         <Select
