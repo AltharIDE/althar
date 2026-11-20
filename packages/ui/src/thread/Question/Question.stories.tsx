@@ -26,6 +26,23 @@ const SAID_SEVERAL: QuestionAnswer = {
 /** One question, each option with a note on what it implies. */
 export const Asks: Story = {}
 
+/** Before a lead replaces the setup the person edited, Althar asks (record_setup): both setups are in the question. */
+export const ReplaceSetup: Story = {
+  args: {
+    parts: [
+      {
+        id: 'replace',
+        header: 'Setup',
+        question: 'Replace your setup for althar with the one the lead worked out?',
+        options: [
+          { id: 'replace', label: 'Replace it', note: 'New tasks run the lead’s setup; worktrees already made keep theirs.' },
+          { id: 'keep', label: 'Keep mine' },
+        ],
+      },
+    ],
+  },
+}
+
 /** Brought here to answer it, from the home: its first choice has focus, so a key picks and Enter answers. */
 export const BroughtHere: Story = {
   args: { focusOnMount: true },
