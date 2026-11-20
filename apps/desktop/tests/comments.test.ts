@@ -20,6 +20,8 @@ import {
   type PageSpot,
   pageCommentsOf,
   rewrite,
+  readingCommentCrops,
+  savePageComment,
   takeComments,
   useComments,
   withComments,
@@ -185,6 +187,34 @@ describe('comments waiting in a draft', () => {
     takeComments(key).finish(true)
     forgetComments(false)
     expect(commentsOf(key)).toEqual([])
+  })
+
+  it('keeps the chip visible while its crop is being saved', async () => {
+    const key = 'thread:keeping-crop'
+    let kept: (id: string) => void = () => undefined
+    const write = vi.spyOn(draftCrop, 'write').mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          kept = resolve
+        }),
+    )
+    try {
+      savePageComment(
+        key,
+        null,
+        'Check the banner',
+        { kind: 'page', picked, address: 'https://example.com/', viewport: 'fit' },
+        dataUrl(png(616, 80)),
+      )
+      await waitFor(() => expect(write).toHaveBeenCalled())
+      expect(commentsOf(key)[0]).toMatchObject({ note: 'Check the banner', crop: null })
+      expect(readingCommentCrops(key)).toBe(true)
+      kept('saved')
+      await waitFor(() => expect(readingCommentCrops(key)).toBe(false))
+      expect(commentsOf(key)[0]?.crop).toMatchObject({ width: 616, height: 80 })
+    } finally {
+      write.mockRestore()
+    }
   })
 
   it('marks a crop as gone when its bytes could not be restored, and still sends the note', async () => {

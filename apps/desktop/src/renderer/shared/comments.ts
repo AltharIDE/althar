@@ -323,11 +323,15 @@ const loadCrop = async (key: string, thread: ThreadComments, one: GatheredCommen
   if (!needsCrop(one) || thread.reading.has(one.cropId)) return
   const id = one.cropId
   thread.reading.add(id)
-  // Saving and converting the same capture run independently. A crop that can't be saved still works in this window.
-  if (captured !== undefined) void draftCrop.write(id, captured).catch(() => undefined)
-  const crop = await Promise.resolve()
-    .then(async () => cropOf(captured ?? (await draftCrop.read(id)), thread.all.indexOf(one) + 1))
-    .catch(() => null)
+  const crop =
+    captured === undefined
+      ? await draftCrop.read(id).catch(() => null)
+      : await Promise.resolve()
+          .then(() => cropOf(captured, thread.all.indexOf(one) + 1))
+          .catch(() => null)
+  // Keep the processed image before showing its thumbnail. A crop the window couldn't save can still go in this launch.
+  if (captured !== undefined && crop !== null && thread.all.some((comment) => comment.cropId === id))
+    await draftCrop.write(id, crop).catch(() => undefined)
   thread.reading.delete(id)
   if (threads.get(key) !== thread || !thread.all.some((comment) => comment.cropId === id)) return
   // Crop availability is checked anew at launch, separately from the saved comment.

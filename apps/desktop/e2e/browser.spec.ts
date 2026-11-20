@@ -298,6 +298,7 @@ test('a task’s run opens beside its thread, isolated; a comment pointed on it 
     // It waits in the composer with its crop and number; pointed at, its card says what the lead will get.
     const chip = page.getByRole('button', { name: 'Comment 1: Say what happened: too many refunds at once.' })
     await expect(chip).toBeVisible()
+    await expect(chip.locator('img')).toBeVisible()
     await expect.poll(() => inPage<number>(electronApp, 'document.querySelectorAll("althar-overlay").length')).toBe(1)
     await chip.hover()
     await expect(shown(page, 'div[data-testid="error"]').first()).toBeVisible()
