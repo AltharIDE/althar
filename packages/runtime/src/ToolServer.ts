@@ -11,6 +11,7 @@ import { Context, Effect, Exit, Layer } from 'effect'
 import { Errands, type AskedAction, type TurnWord } from './Errands'
 import { errandTools } from './errandTools'
 import { ToolRefused } from './toolErrors'
+import { singleTypes } from './toolSchemas'
 export { ActionNotPerformed, ToolRefused } from './toolErrors'
 
 /*
@@ -149,7 +150,7 @@ export class ToolServer extends Context.Service<
             tools: allowed.map((tool) => ({
               name: tool.name,
               description: tool.description,
-              inputSchema: tool.input as { type: 'object' },
+              inputSchema: singleTypes(tool.input) as { type: 'object' },
             })),
           }
         })
