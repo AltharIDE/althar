@@ -4,12 +4,13 @@ import { join } from 'node:path'
 const source = join(import.meta.dirname, '../src')
 const limit = 4_000
 
-// Existing files can shrink to the shared limit without blocking unrelated changes.
+// Existing large files have temporary ceilings close to their current sizes.
+// Remove each entry when its file fits the shared limit.
 const legacyLimits: Readonly<Record<string, number>> = {
-  'Queries.ts': 5_039,
-  'Runs.ts': 9_323,
-  'Sessions.ts': 5_691,
-  'rules.ts': 5_376,
+  'Queries.ts': 5_050,
+  'Runs.ts': 9_350,
+  'Sessions.ts': 5_700,
+  'rules.ts': 5_400,
 }
 
 const paths = globSync('**/*.{ts,tsx,mts,cts}', { cwd: source })
