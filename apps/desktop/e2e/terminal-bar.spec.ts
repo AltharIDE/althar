@@ -4,8 +4,10 @@ import { join } from 'node:path'
 
 import { expect, type Page, test } from '@playwright/test'
 
+import { budget } from '@althar/testing/budget'
+
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, sizeWindow } from './support'
+import { launch, openFirstProject, sizeWindow, still } from './support'
 
 /*
  * The Layout group of ⋯ shows or hides the status line along the window's
@@ -28,19 +30,19 @@ test('the Layout menu hides the terminal bar completely and brings it back', asy
     await openFirstProject(electronApp, page, repo)
     await expect(async () => {
       if ((await line(page).count()) === 0) await page.keyboard.press('Control+Backquote')
-      await expect(line(page)).toBeVisible({ timeout: 3000 })
+      await expect(line(page)).toBeVisible({ timeout: budget.small })
     }).toPass()
 
     let item = await entry(page)
     await expect(item).toHaveAttribute('aria-checked', 'true')
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/terminal-bar-before.png', scale: 'css' })
     await item.click()
     await expect(line(page)).toHaveCount(0)
 
     item = await entry(page)
     await expect(item).toHaveAttribute('aria-checked', 'false')
-    await page.waitForTimeout(600)
+    await still(page)
     await page.screenshot({ path: 'test-results/terminal-bar-after.png', scale: 'css' })
     await item.click()
     await expect(line(page)).toBeVisible()
