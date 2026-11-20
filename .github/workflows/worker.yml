@@ -2,6 +2,7 @@ name: worker
 
 on:
   workflow_call:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'apps/worker/**'
@@ -71,3 +72,51 @@ jobs:
           bun run test
           bun run test:interop
           bun run test:execution
+
+  preview:
+    name: Linux preview (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile --ignore-scripts --filter althar --filter @althar/host
+      - name: Build the portable preview
+        run: bash apps/host/preview/package.sh "$RUNNER_TEMP/althar-preview"
+      - name: Validate the distributed package
+        env:
+          PREVIEW_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          name="althar-preview-linux-$PREVIEW_ARCH.tar.gz"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$name" althar-preview
+          mkdir "$RUNNER_TEMP/preview-test"
+          tar -xzf "$RUNNER_TEMP/$name" -C "$RUNNER_TEMP/preview-test"
+          sudo loginctl enable-linger "$(id -un)"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          cd "$RUNNER_TEMP/preview-test/althar-preview"
+          ./demo
+          cd "$RUNNER_TEMP"
+          sha256sum "$name" > "althar-preview-linux-$PREVIEW_ARCH.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: althar-preview-linux-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/althar-preview-linux-${{ matrix.arch }}.tar.gz
+            ${{ runner.temp }}/althar-preview-linux-${{ matrix.arch }}.sha256
+          if-no-files-found: error
+          retention-days: 30

@@ -7,9 +7,9 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
         project::{ProjectConfig, run_unit},
         relay::WorkerRelay,
     };
-    use std::{env, io, path::Path, process::ExitCode};
+    use std::{env, io, path::Path, process::ExitCode, time::Duration};
 
-    const USAGE: &str = "Usage: althar-worker <https-home:port> <home-id> <worker-id> <home-ca.pem> <worker-cert.pem> <worker-key.pem> <journal-dir> [--relay <wss-url> <relay-token-file> <relay-ca.pem>] [--project-config <private-file>]";
+    const USAGE: &str = "Usage: althar-worker <https-home:port> <home-id> <worker-id> <home-ca.pem> <worker-cert.pem> <worker-key.pem> <journal-dir> [--relay <wss-url> <relay-token-file> <relay-ca.pem>] [--project-config <private-file>] [--watch]";
     let raw = env::args_os().skip(1).collect::<Vec<_>>();
     if let [flag, executable, args @ ..] = raw.as_slice()
         && flag == "--project-unit"
@@ -32,6 +32,7 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
     };
     let mut relay_files = None;
     let mut project = None;
+    let mut watch = false;
     let mut options = &args[7..];
     loop {
         options = match options {
@@ -46,6 +47,10 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
             }
             [flag, path, rest @ ..] if flag == "--project-config" && project.is_none() => {
                 project = Some(ProjectConfig::read(Path::new(path))?);
+                rest
+            }
+            [flag, rest @ ..] if flag == "--watch" && !watch => {
+                watch = true;
                 rest
             }
             _ => return Err(io::Error::new(io::ErrorKind::InvalidInput, USAGE).into()),
@@ -69,31 +74,70 @@ async fn main() -> Result<std::process::ExitCode, Box<dyn std::error::Error + Se
         worker_private_key_pem: &read_credentials(Path::new(key), true)?,
     };
     let journal = DiagnosticJournal::open(Path::new(journal), &enrollment)?;
-    if let Some(result) = run_worker_once(
-        address,
-        enrollment,
-        &journal,
-        relay.as_ref(),
-        project.as_ref(),
-    )
-    .await?
-    {
+    let run = || {
+        run_worker_once(
+            address,
+            &enrollment,
+            &journal,
+            relay.as_ref(),
+            project.as_ref(),
+        )
+    };
+    let print_result = |result: althar_worker::wire::DiagnosticResult| {
         println!("{} {}", result.attempt_id, result.outcome().as_str_name());
-    } else {
-        println!(
-            "{}",
-            if project.is_some() {
-                "No queued worker run"
-            } else {
-                "No queued diagnostic"
-            }
-        );
+    };
+    if !watch {
+        if let Some(result) = run().await? {
+            print_result(result);
+        } else if project.is_some() {
+            println!("No queued worker run");
+        } else {
+            println!("No queued diagnostic");
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    // One journal and one exchange at a time. Dropping an in-flight exchange
+    // closes its unit's grant pipe, so service shutdown also stops the command.
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut stop = signal(SignalKind::terminate())?;
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    let work = async {
+        let mut failures = 0u32;
+        loop {
+            let delay = match run().await {
+                Ok(Some(result)) => {
+                    failures = 0;
+                    print_result(result);
+                    Duration::ZERO
+                }
+                Ok(None) => {
+                    failures = 0;
+                    Duration::from_secs(1)
+                }
+                Err(error) => {
+                    let seconds = 2u64.pow(failures.min(5)).min(30);
+                    if failures == 0 {
+                        eprintln!("Worker connection failed: {error}. Retrying.");
+                    }
+                    failures = failures.saturating_add(1);
+                    Duration::from_secs(seconds)
+                }
+            };
+            tokio::time::sleep(delay).await;
+        }
+    };
+    tokio::select! {
+        biased;
+        _ = stop.recv() => {},
+        _ = interrupt.recv() => {},
+        _ = work => {},
     }
     Ok(ExitCode::SUCCESS)
 }
 
 #[cfg(not(target_os = "linux"))]
 fn main() -> std::process::ExitCode {
-    eprintln!("The native diagnostic worker requires Linux");
+    eprintln!("The native Althar worker requires Linux");
     std::process::ExitCode::FAILURE
 }

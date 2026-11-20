@@ -2,7 +2,13 @@
 
 A persistent Althar project home under plain Node on Linux. The service owns the runtime, SQLite writer, projects and agent processes; an attached client does not own their lifetime. It uses the existing versioned private API and its socket authority rules.
 
-This is the host service foundation of [ADR-103](../../docs/decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md), including signed portable releases and a managed updater. The [SSH bootstrap protocol](bootstrap/README.md) supports desktop-driven installation. Protected client enrollment, remote files and previews, worker pools and relay transport still need implementation. Real provider subscription login/refresh and systemd reboot on a personal VPS remain release gates. Tests use temporary profiles; release smoke checks probe real bundled provider binaries without credentials.
+This is the host service foundation of [ADR-103](../../docs/decisions/proposed/103-projects-live-locally-or-on-a-host-and-place-work-in-pools.md), including signed portable releases and a managed updater. The [SSH bootstrap protocol](bootstrap/README.md) supports desktop-driven installation. Protected client enrollment, remote files and previews, and managed worker pools still need implementation. The native Linux worker supports direct connections and the worker relay. Real provider subscription login/refresh and systemd reboot on a personal VPS remain release gates. Tests use temporary profiles; release smoke checks probe real bundled provider binaries without credentials.
+
+## Try the host and worker preview
+
+The [Linux preview](preview/README.md) bundles the host, its Node runtime,
+and the native worker. Its demo verifies a project run, output, reconnect,
+and cancellation using the supplied binaries.
 
 ## Build and initialize
 
@@ -236,8 +242,7 @@ ledger and the worker journal when recovering an installation.
 Use `revoke-worker --worker-id "$WORKER_ID"` to reject the certificate on new
 connections and at the next message on an existing stream. A replacement
 certificate gets a fresh enrollment. Use `disable-workers` and restart the
-home to close the listener. The worker requires its own release artifact
-and rollout before it can participate in managed updates.
+home to close the listener. The worker runs independently of host updates. The Linux preview bundles a worker for manual deployment.
 
 Use the [outbound worker relay](../../packages/worker-protocol/README.md#outbound-worker-relay)
 when the worker and home can each reach a gateway and the home's worker

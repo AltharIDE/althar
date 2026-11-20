@@ -442,12 +442,12 @@ pub async fn run_diagnostic_with_transport(
     journal: &DiagnosticJournal,
     relay: Option<&WorkerRelay<'_>>,
 ) -> Result<Option<DiagnosticResult>, Failure> {
-    run_worker_once(address, enrollment, journal, relay, None).await
+    run_worker_once(address, &enrollment, journal, relay, None).await
 }
 
 pub async fn run_worker_once(
     address: &str,
-    enrollment: WorkerEnrollment<'_>,
+    enrollment: &WorkerEnrollment<'_>,
     journal: &DiagnosticJournal,
     relay: Option<&WorkerRelay<'_>>,
     project: Option<&ProjectConfig>,
@@ -462,7 +462,7 @@ pub async fn run_worker_once(
     tokio::time::timeout(
         Duration::from_secs(if project.is_some() { 90 } else { 25 }),
         async {
-            let endpoint = endpoint(address, &enrollment)?;
+            let endpoint = endpoint(address, enrollment)?;
             let channel = match relay {
                 Some(relay) => relay_channel(endpoint, relay).await?,
                 None => endpoint.connect().await?,
