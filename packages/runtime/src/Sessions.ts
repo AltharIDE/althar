@@ -524,12 +524,16 @@ export class Sessions extends Context.Service<
       const betweenAgents = (yield* RuntimeConfig).betweenAgents ?? Duration.millis(BETWEEN_AGENTS_MS)
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
+      const coordinatorIdle = Duration.toMillis(runtimeConfig.idle?.coordinator ?? Duration.minutes(30))
       const trailsFor = Duration.toMillis((yield* RuntimeConfig).idle?.trails ?? TRAILS_FOR)
       // The zone the person's local time is told in: the computer's, as its clock says now (localTime.ts).
       const zoneOf = runtimeConfig.zone ?? localZone
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
+      // A flush that meets an idle retirement starts the last coordinator again once its lifecycle lock is free.
+      const retired = new Set<string>()
+      let wakeRetired: (threadId: string) => Effect.Effect<void> = () => Effect.void
       // Snapshot the old queue before callers can add new work. Only input never dispatched is replayable; an uncertain
       // delivery belongs to the person or its workflow. First stop intent makes Stop durable even if cancellation crashed.
       const recoverable = sessionsSql<{ threadId: string; sessionId: string; inputId: string; projectId: ProjectId }>`
@@ -547,7 +551,7 @@ export class Sessions extends Context.Service<
           AND NOT EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
             WHERE di.user_input_id = i.id AND d.delivered_at IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id AND f.type = 'provider_session.stop_requested'
-            AND (json_extract(f.payload, '$.state') <> 'completed' OR coalesce(json_extract(f.payload, '$.reason'), '') <> 'shutdown'))
+            AND (json_extract(f.payload, '$.state') <> 'completed' OR coalesce(json_extract(f.payload, '$.reason'), '') NOT IN ('shutdown', 'idle')))
           AND ((s.state = 'completed' AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
               AND f.type = 'provider_session.completed' AND json_extract(f.payload, '$.reason') = 'shutdown'))
             OR (s.state IN ('lost', 'failed') AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
@@ -590,7 +594,10 @@ export class Sessions extends Context.Service<
       const inputBatches = makeInputBatches(sessionsScope, (threadId) =>
         Effect.gen(function* () {
           const running = threads.get(threadId)
-          if (running === undefined) return
+          if (running === undefined || running.stopping) {
+            if (retired.has(threadId)) yield* wakeRetired(threadId)
+            return
+          }
           const interrupting = yield* run(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
@@ -1505,7 +1512,7 @@ export class Sessions extends Context.Service<
             const brief = yield* (briefing === undefined ? briefFor(thread, { kind: 'start' }) : Fiber.join(briefing)).pipe(
               beforeTakingOver(connected),
             )
-            return yield* activate(
+            const activated = yield* activate(
               connected,
               {
                 text: brief,
@@ -1513,6 +1520,8 @@ export class Sessions extends Context.Service<
               },
               blocked,
             )
+            retired.delete(input.threadId)
+            return activated
           }),
         )
 
@@ -1704,6 +1713,7 @@ export class Sessions extends Context.Service<
             }),
           })
           const running = threads.get(input.threadId)
+          if (running !== undefined) running.idleTouchedAt = yield* Clock.currentTimeMillis
           if (running !== undefined && input.quiet !== true && input.envelope.actorId === instance.personId) {
             running.blockedInputs = undefined
             if (running.deliveryHeld === 'transient' || running.deliveryHeld === 'recovery') running.deliveryHeld = null
@@ -2088,8 +2098,10 @@ export class Sessions extends Context.Service<
             model: string | null
             effort: string | null
             startedAt: string
+            threadKind: string
           }>`
-            SELECT s.id, s.project_id, s.agent_id, s.account_id, s.model, s.effort, s.started_at FROM provider_sessions s
+            SELECT s.id, s.project_id, s.agent_id, s.account_id, s.model, s.effort, s.started_at, t.kind AS thread_kind
+            FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
             WHERE s.thread_id = ${threadId}
             ORDER BY (SELECT max(f.sequence) FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id) DESC,
               s.started_at DESC, s.rowid DESC LIMIT 1`
@@ -2149,10 +2161,105 @@ export class Sessions extends Context.Service<
             ...(recovering === undefined ? {} : { recovering }),
             ...(on.model === null ? {} : { model: on.model }),
             ...(on.effort == null ? {} : { effort: on.effort }),
+            ...(last.threadKind !== 'coordinator' || last.accountId === null || on.agentId !== last.agentId
+              ? {}
+              : { accountId: last.accountId }),
             ...(standing === undefined ? {} : { standsIn: standing }),
           })
           return true
         })
+
+      wakeRetired = (threadId) =>
+        Effect.asVoid(
+          Effect.forkIn(
+            run(Effect.flatMap(inputWaiting(threadId), (waiting) => (waiting ? startLast(threadId) : Effect.succeed(false)))).pipe(
+              Effect.catchTag('SessionRunning', () => Effect.succeed(true)),
+              Effect.catchCause((cause) => Effect.logWarning('Could not wake an idle coordinator', { threadId, cause })),
+            ),
+            sessionsScope,
+          ),
+        )
+
+      // The lock serializes retirement with starts and handovers. Mark it before the final queue check so a message
+      // accepted during shutdown arranges a fresh session as soon as its input burst is flushed.
+      const retire = (running: Running) =>
+        exclusive(
+          running.thread.threadId,
+          Effect.gen(function* () {
+            const threadId = running.thread.threadId
+            const now = yield* Clock.currentTimeMillis
+            // Another fiber can start a handover while the store or the busy check is read.
+            const handingOver = () => running.handover === 'under_way'
+            if (
+              threads.get(threadId) !== running ||
+              running.thread.role !== 'coordinator' ||
+              running.stopping ||
+              now - Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt) < coordinatorIdle ||
+              running.leadHeld ||
+              running.settingLead ||
+              handingOver() ||
+              running.deliveryHeld !== null ||
+              [...running.background.values()].some((left) => left.ended === null) ||
+              running.callsOpen.size > 0 ||
+              inputBatches.pending(threadId)
+            )
+              return
+            if ((yield* busyNow(threadId)) || (yield* inputWaiting(threadId))) return
+            if (
+              inputBatches.pending(threadId) ||
+              running.turnRunning ||
+              running.leadHeld ||
+              running.settingLead ||
+              handingOver() ||
+              running.deliveryHeld !== null ||
+              now - Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt) < coordinatorIdle ||
+              running.callsOpen.size > 0 ||
+              [...running.background.values()].some((left) => left.ended === null)
+            )
+              return
+            running.stopping = true
+            retired.add(threadId)
+            const waiting = yield* inputWaiting(threadId).pipe(
+              Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not check an idle coordinator’s queue', cause), true)),
+            )
+            if (
+              inputBatches.pending(threadId) ||
+              waiting ||
+              running.leadHeld ||
+              running.settingLead ||
+              handingOver() ||
+              running.deliveryHeld !== null ||
+              now - Math.max(running.turnEndedAt ?? running.openedAt, running.workedAt ?? 0, running.idleTouchedAt) < coordinatorIdle ||
+              running.callsOpen.size > 0 ||
+              [...running.background.values()].some((left) => left.ended === null) ||
+              (yield* busyNow(threadId))
+            ) {
+              running.stopping = false
+              retired.delete(threadId)
+              yield* Queue.offer(running.wake, undefined)
+              return
+            }
+            if (runtimeConfig.idle?.beforeCoordinatorStop !== undefined) yield* runtimeConfig.idle.beforeCoordinatorStop(threadId)
+            yield* stopRunning(running, { state: 'completed', reason: 'idle' })
+          }),
+        )
+      yield* Effect.forkIn(
+        Effect.forever(
+          Effect.sleep(Duration.millis(Math.max(1, Math.min(coordinatorIdle, Duration.toMillis(Duration.minutes(1)))))).pipe(
+            Effect.andThen(
+              Effect.suspend(() =>
+                Effect.forEach(
+                  [...threads.values()].filter((one) => one.thread.role === 'coordinator'),
+                  (one) =>
+                    run(retire(one)).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not retire an idle coordinator', cause))),
+                  { concurrency: 'unbounded', discard: true },
+                ),
+              ),
+            ),
+          ),
+        ),
+        sessionsScope,
+      )
 
       let recovering = false
       const recoverQueued = Effect.suspend(() => {

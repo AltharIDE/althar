@@ -757,6 +757,7 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
           })
         }),
       )
+      const openedAt = yield* Clock.currentTimeMillis
       const running: Running = {
         sessionId,
         entry,
@@ -802,6 +803,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         handover: 'none',
         turnStartedAt: null,
         turnEndedAt: null,
+        openedAt,
+        idleTouchedAt: openedAt,
         nextLead: undefined,
         leadLock: Semaphore.makeUnsafe(1),
         settingLead: false,

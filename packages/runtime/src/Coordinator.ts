@@ -508,10 +508,17 @@ export class Coordinator extends Context.Service<
               return yield* new CoordinatorUnavailable({ agentId: pick?.agentId ?? '', agentName: pick?.agentName ?? 'The agent' })
             // Queued first, so the coordinator's first turn is its brief with what the person said.
             if (input.quiet !== true) yield* sessions.send(input)
+            const [last] = yield* sql<{ accountId: string; agentId: string }>`
+              SELECT s.account_id, s.agent_id FROM provider_sessions s
+              JOIN agent_accounts a ON a.id = s.account_id
+              WHERE s.id = (SELECT id FROM provider_sessions WHERE thread_id = ${input.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1)
+                AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
+                  AND f.type = 'provider_session.stop_requested' AND json_extract(f.payload, '$.reason') = 'idle')`
             yield* sessions
               .start({
                 threadId: input.threadId,
                 agentId: pick.agentId,
+                ...(last?.agentId === pick.agentId ? { accountId: last.accountId } : {}),
                 ...(pick.model === null ? {} : { model: pick.model }),
                 ...(pick.effort === null ? {} : { effort: pick.effort }),
               })

@@ -256,6 +256,10 @@ export interface ConnectivityOptions {
 
 /** Each is the default unless a test says otherwise. */
 export interface IdleOptions {
+  /** How long an idle coordinator keeps its provider session: 30 minutes. */
+  readonly coordinator?: Duration.Duration
+  /** Holds retirement just before provider shutdown in a race test. */
+  readonly beforeCoordinatorStop?: (threadId: string) => Effect.Effect<void>
   /** How long an agent must say nothing outside a turn, once what it left running ended, to be taken as done: 30 seconds. */
   readonly quiet?: Duration.Duration
   /** How long a round waits for a lead that is still at work before it judges the branch as it is: 45 minutes. */
