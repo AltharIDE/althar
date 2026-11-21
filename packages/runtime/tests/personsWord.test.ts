@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { MessageSender } from '@althar/contracts'
 import { scenarios } from '@althar/provider-adapters/testing'
+import { readClock } from '@althar/testing/effect'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Clock, Deferred, Duration, Effect, Fiber, Option, Stream } from 'effect'
+import { Cause, Deferred, Duration, Effect, Fiber, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { ActionNotPerformed } from '../src/toolErrors'
@@ -41,24 +42,8 @@ const slowDays = (database?: string) => {
 }
 
 /** Advance the reminder timestamps without replaying scheduled background work. */
-const errandTime = <A, E, R>(test: (advance: (hours: number) => void) => Effect.Effect<A, E, R>) =>
-  Clock.clockWith((live) => {
-    let at = live.currentTimeMillisUnsafe()
-    const millis = () => at
-    const nanos = () => BigInt(at) * 1_000_000n
-    const clock: Clock.Clock = {
-      currentTimeMillisUnsafe: millis,
-      currentTimeMillis: Effect.sync(millis),
-      currentTimeNanosUnsafe: nanos,
-      currentTimeNanos: Effect.sync(nanos),
-      monotonicTimeNanosUnsafe: () => live.monotonicTimeNanosUnsafe(),
-      monotonicTimeNanos: live.monotonicTimeNanos,
-      sleep: (duration) => live.sleep(duration),
-    }
-    return test((hours) => {
-      at += Duration.toMillis(Duration.hours(hours))
-    }).pipe(Effect.provideService(Clock.Clock, clock))
-  })
+const errandTime = <A, E, R>(test: (advance: (duration: Duration.Input) => Effect.Effect<void>) => Effect.Effect<A, E, R>) =>
+  Effect.flatMap(readClock, (clock) => clock.run(test(clock.advance)))
 
 /** A live turn in the store, without an agent process; calls use the real HTTP MCP server. */
 const setup = (role: 'coordinator' | 'lead' = 'coordinator') =>
@@ -803,13 +788,13 @@ describe('the person’s word through the tool boundary', () => {
       Effect.gen(function* () {
         const s = yield* setup()
         const id = yield* s.errands.keep(s.access, yield* s.say(), [s.step])
-        advance(23)
+        yield* advance('23 hours')
         yield* s.errands.news(id)
-        advance(1)
+        yield* advance('1 hour')
         yield* s.errands.remind(s.access.projectId)
         const reminders = s.sql`SELECT id FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`
         assert.lengthOf(yield* reminders, 0)
-        advance(23)
+        yield* advance('23 hours')
         yield* s.errands.remind(s.access.projectId)
         assert.lengthOf(yield* reminders, 1)
       }).pipe(Effect.provide(slowDays())),
@@ -826,13 +811,13 @@ describe('the person’s word through the tool boundary', () => {
           { ...s.step, waits: [{ kind: 'required-check-missing', target: 'build', since }] },
         ])
         yield* s.sql`UPDATE turn_deliveries SET state = 'completed' WHERE thread_id = ${s.access.threadId}`
-        advance(1)
+        yield* advance('1 hour')
         yield* s.errands.remind(s.access.projectId)
         assert.lengthOf(
           yield* s.sql`SELECT id FROM thread_items WHERE thread_id = ${s.access.threadId} AND content LIKE '%Errand still waits%'`,
           1,
         )
-        advance(23)
+        yield* advance('23 hours')
         yield* s.errands.remind(s.access.projectId)
         yield* s.errands.remind(s.access.projectId)
         const lines = yield* s.sql<{

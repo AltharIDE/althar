@@ -17,6 +17,7 @@ import { Setups } from '../src/Setups'
 import { Tasks } from '../src/Tasks'
 import { retitleTask } from '../src/taskTitle'
 import { addItem } from '../src/threads'
+import { boardProjections } from '../src/boardProjections'
 import { repository, runtime, until } from './support'
 
 /*
@@ -144,6 +145,40 @@ const titleIn = (board: { readonly tasks: ReadonlyArray<{ readonly taskId: strin
   board.tasks.find((task) => task.taskId === taskId)?.title
 
 describe('a board read after one task moved', () => {
+  it.live('shows durable facts for unusable projections and bounds the saved-card cache', () =>
+    Effect.gen(function* () {
+      const queries = yield* Queries
+      const { projectId } = yield* tasks('Add a retry')
+      const [card] = (yield* queries.board(projectId)).tasks
+      assert.isDefined(card)
+      const projections = yield* boardProjections
+      const { taskId: id, state, createdAt, settledAt } = card!
+      const row = { id, state, createdAt, settledAt, view: JSON.stringify([card]) }
+      const facts = [{ ...card!, title: 'Durable facts' }]
+      const fallback = Effect.succeed(facts)
+      assert.strictEqual(yield* projections.read({ ...row, view: null }, fallback), facts)
+      assert.strictEqual(yield* projections.read({ ...row, view: '{}' }, fallback), facts)
+      assert.strictEqual(yield* projections.read({ ...row, state: 'done' }, fallback), facts)
+      assert.strictEqual(yield* projections.read({ ...row, settledAt: '2026-10-05T12:00:00Z' }, fallback), facts)
+      assert.deepEqual(projections.pending(10), [id])
+
+      const saved = yield* projections.read(row, fallback)
+      assert.deepEqual(saved, [card])
+      assert.strictEqual(yield* projections.read(row, fallback), saved)
+      yield* projections.checked(id)
+      for (let index = 0; index < 1_000; index += 1) {
+        const other = `task-${index}`
+        yield* projections.read({ ...row, id: other, view: JSON.stringify([{ ...card, taskId: other }]) }, fallback)
+        yield* projections.checked(other)
+      }
+      assert.deepEqual(projections.pending(10), [])
+      const reread = yield* projections.read(row, fallback)
+      assert.deepEqual(reread, [card])
+      assert.notStrictEqual(reread, saved)
+      assert.deepEqual(projections.pending(10), [id])
+    }).pipe(Effect.provide(keeping)),
+  )
+
   it.live('serves completed projections and publishes a replacement when one task changes', () => {
     const traced = cardsWorkedOut()
     return Effect.gen(function* () {
