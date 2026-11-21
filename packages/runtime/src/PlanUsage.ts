@@ -242,6 +242,7 @@ export class PlanUsage extends Context.Service<
         // A listing classifies connections; it doesn't measure usage. Retain it until the sign-in is checked again or
         // explicitly refreshed, while continuing to read Go's actual limits on the usual schedule.
         const listings = new Map<string, { readonly check: SignInCheck; readonly credentials: CredentialsRead }>()
+        const listingReads = new Map<string, number>()
         /* How many times sessions have said each account's windows: an endpoint's answer to a question asked before the last of them doesn't replace it. */
         const sayings = new Map<string, number>()
         /* Each account's windows, by the saying that last said each: those said since the endpoint was asked stay over its answer. */
@@ -524,12 +525,18 @@ export class PlanUsage extends Context.Service<
               // Its listing is OpenCode 2's: on 1.x the command fails with its help, and what it can list says no plan from a key.
               const cannotList = openCodeCannotList(definition.name, yield* agentMajorOf(definition))
               if (cannotList !== null) return yield* keep(account.id, fault('cannot_classify', cannotList))
-              const listed =
-                listing !== undefined && cached === listing.check
-                  ? listing.credentials
-                  : yield* Effect.promise(() => readCredentials(definition, env))
+              let listed: CredentialsRead
+              if (listing !== undefined && cached === listing.check) listed = listing.credentials
+              else {
+                const reading = (listingReads.get(account.id) ?? 0) + 1
+                listingReads.set(account.id, reading)
+                listings.delete(account.id)
+                listed = yield* Effect.promise(() => readCredentials(definition, env))
+                // A newer refresh or a forgotten connection owns its own result, even if this one finishes later.
+                if (listed.kind === 'credentials' && listingReads.get(account.id) === reading && (yield* signIns.cached(account)) === check)
+                  listings.set(account.id, { check, credentials: listed })
+              }
               if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
-              listings.set(account.id, { check, credentials: listed })
               // How each provider is paid, for what a task used of it (Spending): a turn is priced by the provider it ran on.
               // A provider with sign-ins paid two ways, or one Althar can't classify, is unknown: never taken for a key.
               const providers: Record<string, 'plan' | 'key' | 'unknown'> = {}

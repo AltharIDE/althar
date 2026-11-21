@@ -788,6 +788,27 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
     ),
   )
 
+  it.effect('tries a failed explicit listing again instead of returning to the old cached classification', () => {
+    let listings = 0
+    const layer = withUsage({
+      readCredentials: async () => (++listings === 2 ? { kind: 'failed', message: 'Listing failed.' } : credentials(['openai', 'key'])),
+    })
+    return onTestClock(
+      Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        yield* usage.now(true)
+        yield* TestClock.adjust(Duration.minutes(5))
+        assert.strictEqual(openCode(yield* usage.now(true)).fault?.kind, 'cannot_classify')
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* usage.now()
+        yield* until(
+          Effect.sync(() => listings),
+          (count) => count === 3,
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
   it.effect('are a fault for a sign-in whose method it cannot classify', () =>
     Effect.gen(function* () {
       assert.strictEqual(openCode(yield* (yield* PlanUsage).now(true)).fault?.kind, 'cannot_classify')
