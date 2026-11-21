@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from '@effect/vitest'
+import { removeTree } from '@althar/testing'
+import { until } from '@althar/testing/effect'
 import { Deferred, Effect, Fiber, Stream } from 'effect'
 
 import { connect } from '../src/AgentConnection'
@@ -18,6 +20,7 @@ describe('Althar’s native agent loop', () => {
   it.live('closes a native session’s MCP process and its child when its scope closes', () =>
     Effect.gen(function* () {
       const cwd = yield* Effect.promise(() => mkdtemp(join(tmpdir(), 'althar-native-idle-')))
+      yield* Effect.addFinalizer(() => Effect.promise(() => removeTree(cwd)))
       const script = join(cwd, 'server.cjs')
       const pidsFile = join(cwd, 'pids')
       yield* Effect.promise(() =>
@@ -47,10 +50,25 @@ describe('Althar’s native agent loop', () => {
           return false
         }
       }
+      const stopped: Array<boolean | undefined> = []
       const pids = yield* Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* connect({
-            transport: { _tag: 'InProcess', agent: nativeAgent(provider(async () => ({ text: 'Ready.', tools: [] }))) },
+            transport: {
+              _tag: 'InProcess',
+              agent: nativeAgent(
+                provider(async () => ({ text: 'Ready.', tools: [] })),
+                {
+                  processes: {
+                    starting: async () => 'fixture',
+                    started: async () => {},
+                    stopped: async (_id, report) => {
+                      stopped.push(report?.survivors)
+                    },
+                  },
+                },
+              ),
+            },
             onPermission: () => Effect.succeed({ decision: 'allow' }),
           })
           yield* connection.newSession({
@@ -64,8 +82,13 @@ describe('Althar’s native agent loop', () => {
           return found
         }),
       )
-      yield* Effect.promise(() => expect.poll(() => pids.some(alive)).toBe(false))
-    }),
+      expect([...stopped]).toEqual([false])
+      yield* until(
+        Effect.sync(() => pids.filter(alive)),
+        (remaining) => remaining.length === 0,
+        'the native MCP fixture and its child to exit',
+      )
+    }).pipe(Effect.scoped),
   )
 
   it.live('asks Althar before writing, sends the actual tool result to the model, and carries history into the next turn', () =>
