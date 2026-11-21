@@ -52,12 +52,14 @@ describe('running the project', () => {
   it.live.skipIf(process.platform === 'win32')('stops a server if another directory replaces its run copy', () =>
     Effect.gen(function* () {
       const launches = yield* Launches
-      const { projectId } = yield* open(running('node -e "setInterval(() => {}, 1000)"'))
+      const { projectId } = yield* open(running(`node -e "console.log('fixture running'); setInterval(() => {}, 1000)"`))
       const started = yield* launches.start({ projectId, taskId: null, threadId: null })
       const { path: folder } = yield* launches.terminalFolder({ projectId, taskId: null, launchId: started.id })
       const sql = yield* SqlClient.SqlClient
       const [row] = yield* sql<{ pid: number }>`SELECT pid FROM processes WHERE id = ${started.id}`
       if (row === undefined) throw new Error('The run has no recorded process')
+      // npm needs the original package.json until the dev script itself starts.
+      yield* until(launches.output(started.id), (output) => output.text.split('\n').includes('fixture running'), 'the dev script to start')
       renameSync(folder, `${folder}-old`)
       mkdirSync(folder)
       yield* until(sql<{ state: string }>`SELECT state FROM processes WHERE id = ${started.id}`, ([one]) => one?.state === 'killed')
