@@ -184,6 +184,24 @@ describe('a change whose only failures are optional checks (#1117)', () => {
     ])
   })
 
+  it('says a skipped required check is met, not passed, beside an optional failure: still ready, still not red', () => {
+    const skipped = checks({
+      ...site,
+      passed: 1,
+      list: [
+        { name: 'check', state: 'passed', summary: null },
+        { name: 'test', state: 'skipped', summary: null },
+        { name: 'Workers Builds: althar-site', state: 'failed', summary: null },
+      ],
+    })
+    const seen = change({ checks: skipped, needs })
+    expect(isBlocked(standingOf(seen))).toBe(false)
+    expect(factsOf(seen).map((fact) => [fact.words, fact.icon, fact.tone])).toEqual([
+      ['All 2 required checks met', 'check', 'ok'],
+      ['Optional Workers Builds: althar-site failed', undefined, 'quiet'],
+    ])
+  })
+
   it('says nothing green while a required check hasn’t reported yet, and counts each required name once', () => {
     // `lint` is required and not yet reported: still to come, not passed.
     const waiting = change({
