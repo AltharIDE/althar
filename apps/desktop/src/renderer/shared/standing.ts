@@ -7,6 +7,7 @@ import {
   type NextThing as Next,
   pushResolves,
   ranChecks,
+  requiredChecksOf,
   standingOf,
 } from '@althar/contracts'
 import type { IconName } from '@althar/ui'
@@ -14,6 +15,7 @@ import type { IconName } from '@althar/ui'
 // Where a change stands, and a ready task's word, are the one rule every place, the runtime's too, reads them by.
 export {
   type Blocker,
+  checkFailuresOf,
   forShip,
   goingUp,
   isBlocked,
@@ -22,6 +24,7 @@ export {
   ranChecks,
   readyText,
   readyWordOf,
+  requiredChecksOf,
   standingOf,
   type ChangeStanding as Standing,
   type NextThing as Next,
@@ -51,6 +54,10 @@ export const standingText = {
   cancelled: (cancelled: ReadonlyArray<string>) =>
     cancelled.length === 1 ? `${cancelled[0]} cancelled` : `${cancelled.length} checks cancelled`,
   passed: (n: number) => (n === 1 ? '1 check passed' : `All ${n} checks passed`),
+  /** Checks its host doesn't require that failed or were cancelled: nothing in the way, so no red (#1117). */
+  optional: (names: ReadonlyArray<string>) =>
+    names.length === 1 ? `Optional ${names[0]} failed` : `${names.length} optional checks failed`,
+  passedRequired: (n: number) => (n === 1 ? '1 required check passed' : `All ${n} required checks passed`),
   /** Some skipped, or said nothing: not all passed, though none is in the way. */
   soFar: (passed: number, total: number) => `${passed} of ${total} checks passed`,
   none: 'No checks ran',
@@ -151,7 +158,19 @@ export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(c
       if (together && one.kind === 'conflict') return { words: standingText.pushResolves(one.target), icon: 'up', tone: 'warm' }
       return saidOf(one, change)
     })
-  return facts.length === 0 ? [clearOf(change)] : facts
+  // Optional checks that failed hold nothing back: a quiet note after the rest, never red.
+  const optional: ReadonlyArray<Said> =
+    standing.optional === undefined ? [] : [{ words: standingText.optional(standing.optional), tone: 'quiet' }]
+  return facts.length === 0 ? [requiredClearOf(change, standing), ...optional] : [...facts, ...optional]
+}
+
+/** Nothing in the way where only optional checks failed: the required ones all passed, said as such. */
+const requiredClearOf = (change: ChangeSummary, standing: Standing): Said => {
+  const checks = change.checks
+  if (standing.optional === undefined || checks === null) return clearOf(change)
+  const required = requiredChecksOf(change)
+  const counted = checks.list.filter((check) => check.state !== 'skipped' && (required === null || required.includes(check.name)))
+  return counted.length === 0 ? clearOf(change) : { words: standingText.passedRequired(counted.length), icon: 'check', tone: 'ok' }
 }
 
 /** Whether the next thing is the person's own, done from where it is shown: pushing, merging and shipping. The others are the lead's, and open the task. */

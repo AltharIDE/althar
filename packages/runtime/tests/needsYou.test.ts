@@ -104,6 +104,16 @@ describe('a pull request that can be merged as it stands', () => {
     assert.isFalse(isMergeable(change({ state: 'merged' })))
     assert.isFalse(isMergeable(null))
   })
+
+  it('is so where only a check its host doesn’t require failed, and not where a required one did (#1117)', () => {
+    const preview = checks({ outcome: 'failed', passed: 1, failed: 1, total: 2, failing: ['preview'] })
+    const requiring = [{ kind: 'checks', state: 'met', have: 1, need: 1, required: ['test'] }] as const
+    assert.isTrue(isMergeable(change({ checks: preview, needs: requiring })))
+    assert.isNull(byItself(change({ checks: preview, needs: requiring })))
+    assert.isFalse(isMergeable(change({ checks: preview })))
+    const both = checks({ outcome: 'failed', passed: 0, failed: 2, total: 2, failing: ['test', 'preview'] })
+    assert.isFalse(isMergeable(change({ checks: both, needs: requiring })))
+  })
 })
 
 describe('a task between agents (DEV-173)', () => {
