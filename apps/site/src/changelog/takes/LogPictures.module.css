@@ -707,3 +707,71 @@
   .unAsk { transform: translate(-50%, -50%); }
   .unDraftWords, .unSum { animation: none; }
 }
+
+/* ---- 0.10.0: your own host, your own workers ---- */
+
+/* Your computer's window on the left, the wire, and your server on the right. Every row keeps its room, so what changes fades in place and nothing moves. */
+.hoStage { display: grid; grid-template-columns: minmax(0, 1fr) 6.4em minmax(0, 0.92fr); align-items: center; }
+.hoWin { transition: opacity 0.7s, transform 0.8s var(--ease-out), filter 0.7s; }
+/* Closed: the window steps back, dim, while the server carries on. */
+.hoWin[data-closed='true'] { opacity: 0.22; transform: scale(0.965); filter: saturate(0.4); }
+.hoChip { display: inline-flex; align-items: center; gap: 0.45em; height: 1.85em; padding: 0 0.7em; border-radius: 0.5em; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--t2); font-family: var(--mono); font-size: 0.9em; }
+.hoChip::before { content: ''; width: 0.5em; height: 0.5em; border-radius: 50%; background: var(--ok); }
+.hoTalk { display: flex; flex-direction: column; gap: 1.1em; height: 19em; padding: 1.3em 1.4em; font-size: 0.9em; }
+.hoTalk .unYou p { max-width: 15em; }
+.hoTalk .brLead p { color: var(--t1); }
+.hoTalk .diff { display: inline-flex; gap: 0.35em; font-family: var(--mono); font-size: 0.84em; }
+
+/* The wire between them: lit while the window is open, light running along it; dashed and dark once it's closed. */
+.hoLink { position: relative; display: grid; justify-items: center; gap: 0.6em; padding: 0 0.6em; }
+.hoWire { position: relative; overflow: hidden; width: 100%; height: 2px; border-radius: 1px; background: rgba(138, 149, 255, 0.45); box-shadow: 0 0 0.8em rgba(90, 104, 255, 0.55); transition: opacity 0.5s, background 0.5s, box-shadow 0.5s; }
+.hoWire::after { content: ''; position: absolute; top: 0; left: 0; width: 35%; height: 100%; background: linear-gradient(90deg, transparent, #dfe2ff, transparent); animation: hoRun 1.6s linear infinite; }
+.hoLink[data-closed='true'] .hoWire { background: transparent; box-shadow: none; background-image: linear-gradient(90deg, var(--line-3) 50%, transparent 0); background-size: 0.5em 2px; }
+.hoLink[data-closed='true'] .hoWire::after { opacity: 0; }
+.hoVia { font-size: 0.74em; color: var(--t3); white-space: nowrap; transition: color 0.5s; }
+.hoLink:not([data-closed='true']) .hoVia { color: var(--live); font-family: var(--mono); }
+@keyframes hoRun { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+
+/* The server: a machine of your own, the home on it and its worker. */
+.hoBox { display: grid; gap: 0.5em; padding: 1.2em 1.3em 1.3em; border-radius: 0.8em; background: linear-gradient(180deg, #201d1a, #181614); box-shadow: 0 0 0 1px rgba(255, 240, 215, 0.12), inset 0 1px 0 rgba(255, 240, 215, 0.07), 0 2.4em 4em -1.6em rgba(0, 0, 0, 0.85), 0 0 6em -2em rgba(60, 76, 255, 0.35); font-size: 0.9em; }
+.hoHead { display: grid; grid-template-columns: 2.1em minmax(0, 1fr) auto; align-items: center; gap: 0.7em; padding-bottom: 0.8em; margin-bottom: 0.2em; border-bottom: 1px solid var(--line); }
+.hoOs { display: grid; place-items: center; width: 2.1em; height: 2.1em; border-radius: 0.55em; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--t1); }
+.hoReady { display: inline-flex; align-items: center; gap: 0.4em; font-size: 0.8em; color: var(--ok); }
+.hoReady::before { content: ''; width: 0.45em; height: 0.45em; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0.6em var(--ok); }
+.hoLabel { margin-top: 0.3em; font-size: 0.72em; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--t4); }
+.hoTasks { display: grid; margin: 0; padding: 0; list-style: none; }
+.hoTasks li { display: grid; grid-template-columns: 1.4em minmax(0, 1fr) 6.2em; align-items: center; gap: 0.6em; padding: 0.42em 0; border-top: 1px solid var(--line); }
+.hoTasks li:first-child { border-top: 0; }
+.hoTasks .mk { width: 1.4em; height: 1.4em; border-radius: 0.4em; background: var(--raised); box-shadow: inset 0 0 0 1px var(--line-2); }
+.hoName { overflow: hidden; color: var(--t1); white-space: nowrap; text-overflow: ellipsis; }
+/* A state, in room kept for its longest words. */
+.hoState { display: inline-flex; align-items: center; gap: 0.4em; font-size: 0.8em; color: var(--live); white-space: nowrap; animation: rvIn 0.45s var(--ease-out) both; }
+.hoState i { width: 0.45em; height: 0.45em; border-radius: 50%; background: var(--live); box-shadow: 0 0 0.6em var(--live); animation: brBreathe 1.4s ease-in-out infinite; }
+.hoState[data-done='true'] { color: var(--ok); }
+.hoWorker { display: grid; gap: 0.55em; padding: 0.7em 0.8em; border-radius: 0.6em; background: var(--bar); box-shadow: inset 0 0 0 1px var(--line); }
+.hoRun { display: flex; align-items: center; justify-content: space-between; gap: 1em; }
+.hoRun code { color: var(--t1); }
+.hoRun .hoState { min-width: 8.2em; justify-content: flex-end; }
+.hoRun .hoState:not([data-done='true']):not(:has(i)) { color: var(--t4); }
+.hoLog { display: grid; gap: 0.25em; margin: 0; padding: 0.6em 0.7em; border-radius: 0.45em; background: #0f0e0c; list-style: none; font-family: var(--mono); font-size: 0.76em; letter-spacing: 0; color: var(--t2); }
+/* Every line keeps its room from the start, wrapping where it must, so the box never grows as they come in. */
+.hoLog li { overflow-wrap: anywhere; line-height: 1.4; opacity: 0; transform: translateY(0.3em); transition: opacity 0.45s, transform 0.55s var(--ease-out); }
+.hoLog li span { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+.hoLog li[data-typed='true'] { color: var(--t1); }
+.hoLog li[data-typed='true']::before { content: '$ '; color: var(--t4); }
+.hoLog li[data-shown='true'] { opacity: 1; transform: none; }
+
+/* Narrow: the window over the server, the wire between them standing up. */
+@container (max-width: 560px) {
+  .hoStage { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 4.2em auto; }
+  .hoTalk { height: 15em; }
+  .hoLink { grid-auto-flow: column; align-items: center; justify-content: center; gap: 0.8em; height: 100%; }
+  .hoWire { width: 2px; height: 100%; }
+  .hoWire::after { width: 100%; height: 35%; background: linear-gradient(180deg, transparent, #dfe2ff, transparent); animation-name: hoDown; }
+  .hoLink[data-closed='true'] .hoWire { background-image: linear-gradient(180deg, var(--line-3) 50%, transparent 0); background-size: 2px 0.5em; }
+}
+@keyframes hoDown { from { transform: translateY(-100%); } to { transform: translateY(300%); } }
+@media (prefers-reduced-motion: reduce) {
+  .hoWire::after, .hoState i { animation: none; }
+  .hoWin { transform: none; }
+}

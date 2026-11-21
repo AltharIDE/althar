@@ -1,6 +1,6 @@
 import { Brand, BrandMark, Icon, Logo, planPeekText, reportProblemText, undoTurnText } from '@althar/ui'
 import { sealSvg } from '@althar/ui/seal'
-import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, Fragment as Piece, type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Agent, AGENTS } from '../../content/agents'
 import { Fragment } from '../../home/bodies/desktop/Fragment'
@@ -1166,7 +1166,174 @@ function Undo() {
   )
 }
 
+/* ---- 0.10.0: your own host, your own workers ---- */
+
+/*
+ * The beats: Althar on your computer, its window open on a home on your own
+ * server, a task at work there; the window closes, and the server carries
+ * on: its tasks keep working and the task finishes. Beside them, on the
+ * home's command line, as the worker preview is run today: you queue the
+ * project's check on a worker, read its log and its result, a pass. The
+ * window opens again on the finished task. Then it holds, and clears.
+ */
+const HOSTED: Timeline = { beats: [0, 1800, 3000, 3800, 4600, 5600, 7000, 12600], loop: 13400, rest: 6 }
+
+/** The server's tasks, and the beat each finishes on, if it does. */
+const ON_HOME = [
+  { name: 'Partial refunds', agent: Agent.Claude, done: 4 },
+  { name: 'Webhook retries', agent: Agent.Codex, done: null },
+  { name: 'Payout export', agent: Agent.Claude, done: null },
+] as const
+
+/** The worker's and project's IDs, and the run's, in the forms the home gives them. */
+const RUNNER = 'wrk_5b0e2c7a91d34f68a2c1e9b07d4f3a16'
+const TALLY = 'proj_8c41f9e2a07b4d35b6e1c2f08a9d7e43'
+const ATTEMPT = 'wpr_3f9c1a7e5d2b4c80a6e1f94b7c02d58e'
+
+/** The home's command line, as its preview is run today: what you type, what it answers, and the beat each line comes on. */
+const CHECK = [
+  { at: 2, line: `althar-host worker-project-run --worker-id ${RUNNER} --project-id ${TALLY} --command-name check`, typed: true },
+  { at: 3, line: `Project run queued as ${ATTEMPT}`, typed: false },
+  { at: 3, line: `althar-host worker-log --attempt-id ${ATTEMPT}`, typed: true },
+  { at: 4, line: '✓ 23 passed  refunds, settlement', typed: false },
+  { at: 5, line: `althar-host worker-result --attempt-id ${ATTEMPT}`, typed: true },
+  { at: 5, line: `${ATTEMPT} succeeded`, typed: false },
+] as const
+
+function Home() {
+  const ref = useRef<HTMLDivElement>(null)
+  const beat = useBeat(ref, HOSTED)
+  const out = beat === HOSTED.beats.length - 1
+  const at = (from: number) => beat >= from && !out
+  const closed = beat >= 1 && beat <= 5
+  const passed = at(5)
+  const running = at(3) && !passed
+  const queued = at(2) && !running && !passed
+  return (
+    <Frame
+      label="Your own host: Althar's window on a home on your Linux server closes, and the server carries on, its tasks at work; on the home's command line, the project's check is queued on a worker, and its log and result read back, a pass; the window opens again on the finished task"
+      w={64}
+      n={32}
+    >
+      <div ref={ref} className={p.hoStage}>
+        <div className={cx(p.win, p.hoWin)} data-closed={closed}>
+          <Bar end={<span className={p.hoChip}>build-01</span>}>
+            <Tab name="Tally" ink="#2f6f7a" on />
+          </Bar>
+          <div className={p.hoTalk}>
+            <div className={p.brTask}>
+              <b>Partial refunds</b>
+              <code>althar/partial-refunds</code>
+            </div>
+            <div className={p.unYou}>
+              <p>Let a refund be for part of a payment.</p>
+            </div>
+            <div className={p.brAfter}>
+              <span className={p.brLive} data-shown={!at(4)}>
+                <i />
+                <span>Writing src/refunds/refund.ts</span>
+              </span>
+              <div className={p.brLead} data-shown={at(4)}>
+                <span className={p.mk}>
+                  <AgentMark agent={Agent.Claude} size={13} />
+                </span>
+                <p>
+                  A refund takes an amount now, up to what’s left on the payment.{' '}
+                  <span className={p.diff}>
+                    <ins>+31</ins> <del>−3</del>
+                  </span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className={p.hoLink} data-closed={closed}>
+          <span className={p.hoWire} />
+          <span className={p.hoVia}>{closed ? 'Window closed' : 'SSH'}</span>
+        </div>
+        <div className={p.hoBox}>
+          <div className={p.hoHead}>
+            <span className={p.hoOs}>
+              <OsMark id="linux" size={15} />
+            </span>
+            <span className={p.who}>
+              <b>build-01</b>
+              <span>Your server · arm64</span>
+            </span>
+            <span className={p.hoReady}>Ready</span>
+          </div>
+          <span className={p.hoLabel}>Tasks</span>
+          <ul className={p.hoTasks}>
+            {ON_HOME.map((task) => {
+              const done = task.done !== null && at(task.done)
+              return (
+                <li key={task.name}>
+                  <span className={p.mk}>
+                    <AgentMark agent={task.agent} size={12} />
+                  </span>
+                  <span className={p.hoName}>{task.name}</span>
+                  <span key={String(done)} className={p.hoState} data-done={done}>
+                    {done ? (
+                      <>
+                        <Icon name="check" size={11} />
+                        Finished
+                      </>
+                    ) : (
+                      <>
+                        <i />
+                        At work
+                      </>
+                    )}
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+          <span className={p.hoLabel}>Worker · preview</span>
+          <div className={p.hoWorker}>
+            <div className={p.hoRun}>
+              <code>runner-1</code>
+              <span key={passed ? 'passed' : running ? 'running' : queued ? 'queued' : 'idle'} className={p.hoState} data-done={passed}>
+                {passed ? (
+                  <>
+                    <Icon name="check" size={11} />
+                    Succeeded
+                  </>
+                ) : running ? (
+                  <>
+                    <i />
+                    Running check
+                  </>
+                ) : queued ? (
+                  'Queued'
+                ) : (
+                  'Idle'
+                )}
+              </span>
+            </div>
+            {/* The home's own terminal: the preview's runs are started and read from its command line. */}
+            <ol className={p.hoLog}>
+              {CHECK.map((line) => (
+                <li key={line.line} data-shown={at(line.at)} data-typed={line.typed}>
+                  {/* Each word whole: a line breaks between its arguments, never inside a flag or an ID. */}
+                  {line.line.split(' ').map((word, i) => (
+                    <Piece key={i}>
+                      {i > 0 && ' '}
+                      <span>{word}</span>
+                    </Piece>
+                  ))}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </div>
+    </Frame>
+  )
+}
+
 const PICTURES: Record<Picture, () => ReactNode> = {
+  home: Home,
   undo: Undo,
   browser: Browser,
   canvas: Canvas,
