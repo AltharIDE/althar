@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -39,6 +40,8 @@ describe('Althar’s native agent loop', () => {
       const alive = (pid: number) => {
         try {
           process.kill(pid, 0)
+          // Linux can retain an already-exited child as a zombie until its new parent reaps it.
+          if (process.platform === 'linux' && readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(-1)?.startsWith('Z')) return false
           return true
         } catch {
           return false
