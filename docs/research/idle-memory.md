@@ -17,6 +17,8 @@ The sampler summed the macOS physical footprint of the app, its descendants and 
 
 The final empty profile was 113 MiB above main at one hour. Its GPU and primary renderer accounted for 90 and 47 MiB more respectively. The populated profile was 18 MiB below main at one hour and 61 MiB above it at first screen. From minute 10 onward the final empty profile ranged from 626 to 677 MiB and the populated profile ranged from 404 to 430 MiB. Within that window the memory rose and fell. These individual runs establish which processes were retained and show how much total footprint can vary across launches.
 
+An additional short empty launch of the same main bundle used in the comparison reached 642 MiB after one minute, versus 542 MiB at one minute in the original main launch. Its GPU and primary renderer were 327 and 108 MiB, versus 263 and 67 MiB in the original. The final patch's one-minute figures were 604 MiB total, 312 MiB GPU and 108 MiB primary renderer. Thus main itself can show the larger GPU and renderer footprints: the hour's difference is not enough to attribute a regression to the patch. The short control did not run for an hour, so it cannot rule out an hour-specific difference. These are launch-to-launch observations, not a controlled isolation of which surface or Chromium allocation varies.
+
 | Process footprint at one hour | Empty main | Empty final | Populated main | Populated final |
 | --- | ---: | ---: | ---: | ---: |
 | Desktop main | 75.7 MiB | 72.1 MiB | 78.3 MiB | 72.4 MiB |
