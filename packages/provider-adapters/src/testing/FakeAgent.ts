@@ -1237,14 +1237,16 @@ const playRole = async (
             .find((line) => line.includes(` "${label}"`))
             ?.match(/^(e[0-9]+) /)?.[1]
           const dimensions = /Screenshot ([0-9]+)x([0-9]+)/.exec(snapshot)
+          // The Electron fixture needs renderer keyboard input. UIA can report a value that its renderer hasn't received.
+          const usePixels = visual && (args.op === 'type' || element === undefined)
           const at =
-            element !== undefined
-              ? { element }
-              : visual && dimensions !== null
-                ? { x: Math.floor(Number(dimensions[1]) * 0.5), y: Math.floor(Number(dimensions[2]) * (label === 'Note' ? 0.3 : 0.64)) }
-                : null
+            usePixels && dimensions !== null
+              ? { x: Math.floor(Number(dimensions[1]) * 0.5), y: Math.floor(Number(dimensions[2]) * (label === 'Note' ? 0.3 : 0.64)) }
+              : element === undefined
+                ? null
+                : { element }
           if (observation === undefined || at === null) return snapshot
-          return ask({ ...args, target, observation, at, foreground: visual && element === undefined })
+          return ask({ ...args, target, observation, at, foreground: usePixels })
         }
         const written = await input(writer.id, 'Note', { op: 'type', text: 'Reviewed report' })
         const observed = await ask({ op: 'observe', target: writer.id })

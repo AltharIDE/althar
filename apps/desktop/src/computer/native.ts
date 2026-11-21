@@ -228,7 +228,11 @@ export const nativeComputer = () => {
         }
       }
     })()
-    if (result.isError) throw new ComputerProblem('The driver could not confirm that action. Observe the app before retrying.')
+    if (result.isError) {
+      if (!foreground && result.errorCode === 'background_unavailable')
+        throw new ComputerProblem('The app needs foreground input for this action. Ask the person to approve it and observe the app again.')
+      throw new ComputerProblem('The driver could not confirm that action. Observe the app before retrying.')
+    }
     return { kind: 'acted', answer: { text: 'Input was attempted. Observe and verify the intended outcome.' } }
   }
 

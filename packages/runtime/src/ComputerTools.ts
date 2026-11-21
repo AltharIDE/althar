@@ -45,7 +45,7 @@ export class ComputerTools extends Context.Service<ComputerTools, object>()('@al
           {
             name: 'computer',
             description:
-              'Use native apps on this task’s computer. Start with status. Request access with a short reason and name the apps the person should select. Ask for desktop access only for work needing foreground input or a whole-display view. Once approved, observe an approved target for fresh observation and element references. After input observe again and verify its effect. Evidence keeps a selected screenshot in the task. Release returns control. Use page_* for the browser beside the conversation.',
+              'Use native apps on this task’s computer. Start with status. Request access with a short reason and name the apps the person should select. Ask for desktop access only for work needing foreground input or a whole-display view. Observe an approved target for fresh observation and element references. Verify each input in the app before continuing. If background typing fails to reach the field, request foreground input, observe with a screenshot, and target the field using screenshot coordinates. Evidence keeps a selected screenshot in the task. Release returns control. Use page_* for the browser beside the conversation.',
             input: computerInput,
             privateInput: true,
             cancelWithRequest: true,
