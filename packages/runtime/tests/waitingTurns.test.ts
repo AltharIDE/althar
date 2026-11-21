@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { ProjectId } from '@althar/domain'
 import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
@@ -264,14 +264,22 @@ describe('a task under way whose next turn waits for a place', () => {
         Effect.map(Effect.orDie(queries.board(projectId)), (board) => board.tasks.find((task) => task.taskId === taskId))
       assert.strictEqual((yield* card(first.taskId))?.phase, 'running')
       assert.isUndefined((yield* card(holder.taskId))?.continues)
+      const cursor = yield* queries.cursor
       // The place frees: its turn has it before the new work, and it leaves Up next, which the new work leads.
       yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: holder.taskId })
+      yield* until(queries.changesSince(cursor, 100), (changes) =>
+        changes.some((change) => change.aggregateType === 'card' && change.aggregateId === first.taskId),
+      )
       assert.deepStrictEqual(yield* until(upNext, (rows) => rows.length === 1), [['New work', 1, 'line']])
       const going = yield* card(first.taskId)
       assert.strictEqual(going?.phase, 'running')
       assert.isUndefined(going?.continues)
       assert.isUndefined(going?.place)
-      // Its answer held, the turn is still under way as the card is read.
+      // Its answer is held, so the turn still occupies the place the board just cleared it to take.
+      assert.deepStrictEqual(
+        (yield* queries.board(projectId)).workPlaces?.holders.map((holder) => holder.taskId),
+        [first.taskId],
+      )
     }).pipe(Effect.provide(oneAtOnce({}, ':memory:', { each: { codex: { holds: holds() } } }))),
   )
 })
@@ -366,7 +374,7 @@ describe('an answer kept for a place, as answers once were', () => {
         'sqlite',
       )
       assert.lengthOf(yield* sql`SELECT id FROM provider_sessions WHERE thread_id = ${first.threadId}`, 2)
-    }).pipe(Effect.provide(oneAtOnce({ askGrace: Duration.millis(0) }))),
+    }).pipe(Effect.provide(oneAtOnce())),
   )
 })
 

@@ -5,7 +5,7 @@ import { setPriority, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 
-import { Deferred, Duration, Effect, type Scope } from 'effect'
+import { Clock, Deferred, Duration, Effect, type Scope } from 'effect'
 
 import { AgentStartFailed } from './errors'
 import { platformTrees, type ProcessTrees, type StopReport, stopTree } from './processTrees'
@@ -124,6 +124,8 @@ export interface SpawnOptions {
   readonly stderr?: (chunk: string, pid: number) => void
   /** How its tree is reached: the platform's, unless a test says otherwise. */
   readonly trees?: ProcessTrees
+  /** On Unix, ties the process group to an OS pipe that closes if its launcher dies. */
+  readonly stopWithOwner?: boolean
   /**
    * Agents' work, run in the background (`BACKGROUND`): below what the person waits on, so Althar's window, and every
    * other app, answers while agents build and test. What the process starts takes its priority from it.
@@ -160,6 +162,16 @@ export const workerOwner = (env: Readonly<Record<string, string | undefined>>) =
 
 const STDERR_KEPT = 8_192
 
+// The watcher belongs to the run's group. Only it keeps the read end of fd 3, so closing the launcher's end
+// stops the group even if the command's shell already exited. The command keeps its original PID and stdio.
+const WATCH_OWNER = `
+(
+  IFS= read -r _ <&3
+  kill -KILL "-$$"
+) </dev/null >/dev/null 2>&1 &
+exec "$@" 3<&-
+`
+
 /** When the OS says a process started, as ISO 8601, or undefined if it can't say. With the pid, it tells a process from a later one given the same pid. */
 export const osStartTime = (pid: number, trees: ProcessTrees = platformTrees()): Effect.Effect<string | undefined> => trees.startedAt(pid)
 
@@ -189,6 +201,7 @@ export const spawnOwned = (
 ): Effect.Effect<OwnedProcess, AgentStartFailed, Scope.Scope> =>
   Effect.suspend(() => {
     let releaseScheduling: Effect.Effect<void> = Effect.void
+    let closeOwnerPipe = () => {}
     let schedulingReleased = false
     return Effect.acquireRelease(
       Effect.gen(function* () {
@@ -215,19 +228,27 @@ export const spawnOwned = (
           schedulingReleased = true
           return launch.release ?? Effect.void
         })
+        const watchOwner = options.stopWithOwner === true && launch.detached && process.platform !== 'win32'
         const child = yield* Effect.try({
           try: () =>
-            spawn(launch.command, [...launch.args], {
-              cwd,
-              detached: launch.detached,
-              windowsHide: true,
-              // Joined as they are, the program's own path quoted, as Node's own `shell: true` runs cmd.exe.
-              ...(launched.verbatim === true ? { windowsVerbatimArguments: true, argv0: `"${launch.command}"` } : {}),
-              stdio: ['pipe', 'pipe', 'pipe'],
-              env,
-            }),
+            spawn(
+              watchOwner ? '/bin/sh' : launch.command,
+              watchOwner ? ['-c', WATCH_OWNER, 'althar-run', launch.command, ...launch.args] : [...launch.args],
+              {
+                cwd,
+                detached: launch.detached,
+                windowsHide: true,
+                // Joined as they are, the program's own path quoted, as Node's own `shell: true` runs cmd.exe.
+                ...(launched.verbatim === true ? { windowsVerbatimArguments: true, argv0: `"${launch.command}"` } : {}),
+                stdio: watchOwner ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
+                env,
+              },
+            ),
           catch: (cause) => new AgentStartFailed({ command: launched.command, reason: String(cause) }),
         }).pipe(Effect.tapError(() => Effect.andThen(releaseScheduling, removeTemp(temp?.folder))))
+        const ownerPipe = child.stdio[3]
+        ownerPipe?.on('error', () => {}) // The watcher can go before the launcher closes its end.
+        closeOwnerPipe = () => void ownerPipe?.destroy()
         let stderr = ''
         child.stderr.on('data', (chunk: Buffer) => {
           const text = chunk.toString()
@@ -252,12 +273,8 @@ export const spawnOwned = (
             ),
           )
         })
-        // Lowered as soon as it is there, before it has started much of its own: what it starts inherits it.
-        if (options.background === true) (options.prioritize ?? setPriorityOf)(pid, BACKGROUND)
-        const osStartedAt = yield* osStartTime(pid, trees)
         return {
           pid,
-          ...(osStartedAt === undefined ? {} : { osStartedAt }),
           environmentDigest: environmentDigest(env),
           stdin,
           stdout,
@@ -266,7 +283,14 @@ export const spawnOwned = (
           stderrTail: () => stderr,
           ...(temp === undefined ? {} : { temp: temp.folder }),
         } satisfies OwnedProcess
-      }).pipe(Effect.onError(() => releaseScheduling)),
+      }).pipe(
+        Effect.onError(() =>
+          Effect.andThen(
+            Effect.sync(() => closeOwnerPipe()),
+            releaseScheduling,
+          ),
+        ),
+      ),
       (owned) =>
         Effect.gen(function* () {
           const stop = yield* stopProcessGroup(owned.pid, options.grace ?? Duration.seconds(2), options.trees)
@@ -277,7 +301,24 @@ export const spawnOwned = (
           // Its own temporary folder goes once nothing of it is left to use it.
           if (!stop.survivors) yield* removeTemp(owned.temp)
           yield* Deferred.succeed(owned.stopped, stop)
-        }).pipe(Effect.ensuring(releaseScheduling)),
+        }).pipe(
+          Effect.ensuring(
+            Effect.andThen(
+              Effect.sync(() => closeOwnerPipe()),
+              releaseScheduling,
+            ),
+          ),
+          Effect.provideService(Clock.Clock, Clock.Clock.defaultValue()),
+        ),
+    ).pipe(
+      Effect.flatMap((owned) =>
+        Effect.gen(function* () {
+          // The scope already owns the group. A failed lookup or interruption here cannot lose it.
+          if (options.background === true) (options.prioritize ?? setPriorityOf)(owned.pid, BACKGROUND)
+          const osStartedAt = yield* osStartTime(owned.pid, options.trees)
+          return osStartedAt === undefined ? owned : { ...owned, osStartedAt }
+        }),
+      ),
     )
   })
 

@@ -76,12 +76,13 @@ describe('pressure and the real admission queue', () => {
           const projects = yield* Projects
           const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
           const busy = yield* Busy
-          yield* busy.set(3)
+          yield* busy.set(5)
           const first = yield* start(project.projectId as ProjectId, 'First')
           yield* running(first.taskId)
           yield* tick
           yield* until(busy.now, (value) => value.atOnce === 1)
-          assert.strictEqual((yield* busy.atOnce).count, 3, 'the saved setting is not rewritten')
+          assert.strictEqual((yield* busy.now).configured, 5)
+          assert.strictEqual((yield* busy.atOnce).own, 5, 'pressure leaves the saved limit intact')
           const second = yield* start(project.projectId as ProjectId, 'Second')
           const cancelled = yield* start(project.projectId as ProjectId, 'Cancelled')
           yield* queued(second.taskId)
@@ -105,12 +106,14 @@ describe('pressure and the real admission queue', () => {
           if (recover === 'healthy') for (let n = 0; n < 7; n++) yield* tick
           else yield* tick
           yield* running(second.taskId)
-          assert.strictEqual((yield* busy.now).atOnce, recover === 'healthy' ? 2 : 3)
+          assert.strictEqual((yield* busy.now).atOnce, recover === 'healthy' ? 2 : 5)
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* sql`SELECT id FROM provider_sessions WHERE thread_id=${cancelled.threadId}`
           assert.strictEqual(sessions.length, 0, 'cancelled work never starts when capacity returns')
           assert.strictEqual((yield* attempt(first.taskId)).at(-1)?.state, 'running', 'pressure never kills the current build')
-        }).pipe(Effect.provide(runtime(':memory:', {}, { busy: { quick: 0, pressure: { read } } }))),
+        }).pipe(
+          Effect.provide(runtime(':memory:', {}, { busy: { machine: { cores: 8, memory: 16 * 2 ** 30 }, quick: 0, pressure: { read } } })),
+        ),
       )
     })
   }

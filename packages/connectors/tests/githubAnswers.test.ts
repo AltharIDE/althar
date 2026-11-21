@@ -68,6 +68,16 @@ const listed = (overrides: Record<string, unknown> = {}) => ({
 const check = (id: string): Check => ({ id, name: 'test', state: 'failed', url: null, summary: null })
 
 describe('GitHub answers that leave things out', () => {
+  it.effect('reads whether the pull request author allows maintainer edits', () =>
+    Effect.gen(function* () {
+      const answers = [pull({ maintainer_can_modify: true }), pull({ maintainer_can_modify: false }), pull()]
+      const { host } = github([['GET', `${REPO}/pulls/12`, () => ({ json: answers.shift() })]])
+      assert.isTrue((yield* host.change(repository, 12)).maintainerEdits)
+      assert.isFalse((yield* host.change(repository, 12)).maintainerEdits)
+      assert.notProperty(yield* host.change(repository, 12), 'maintainerEdits')
+    }),
+  )
+
   it.effect('keeps the landed commit separate from the PR head, and ignores an open PR’s test merge commit', () =>
     Effect.gen(function* () {
       for (const merged of [false, true]) {

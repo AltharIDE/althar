@@ -216,27 +216,28 @@ export class PullRequestScreenshots extends Context.Service<
               )
             let fitted = yield* prepare(limit)
             if (fitted !== null) {
-              const result = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
-              if (result._tag === 'Success') uploads[shot.digest] = result.success
-              else if (
-                (result.failure.reason === 'rejected' && result.failure.uploadLimit !== undefined) ||
-                result.failure.status === 413
-              ) {
-                const smaller = Math.min(result.failure.uploadLimit ?? limit / 2, fitted.picture.bytes.byteLength)
-                fitted = yield* prepare(smaller)
-                if (fitted !== null) {
-                  const retried = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
-                  if (retried._tag === 'Success') uploads[shot.digest] = retried.success
-                  else if (
-                    (retried.failure.reason !== 'rejected' || retried.failure.uploadLimit === undefined) &&
-                    retried.failure.status !== 413
-                  )
-                    return yield* retried.failure
+              let attemptedBytes = fitted.picture.bytes.byteLength
+              let result = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
+              if (result._tag === 'Failure') {
+                const smaller = retryPictureBelow(result.failure, attemptedBytes, limit)
+                if (smaller !== undefined) {
+                  fitted = yield* prepare(smaller)
+                  if (fitted !== null) {
+                    attemptedBytes = fitted.picture.bytes.byteLength
+                    result = yield* upload(on.repository, fitted.picture).pipe(Effect.result)
+                  }
                 }
-              } else return yield* result.failure
+              }
+              if (result._tag === 'Success') uploads[shot.digest] = result.success
+              else {
+                const { product, status, reason, message } = result.failure
+                yield* Effect.logWarning(`Could not upload PR picture ${shot.name}`, { product, status, reason, message, attemptedBytes })
+                if (reason !== 'rejected') return yield* result.failure
+                notes[shot.digest] = `Left out: ${shot.name}. ${hostName(product)} said: ${message}`
+              }
             }
             if (uploads[shot.digest] === undefined)
-              notes[shot.digest] = preparationFailed
+              notes[shot.digest] ??= preparationFailed
                 ? `Left out: ${shot.name}. The image processor could not prepare it. Try again.`
                 : `Left out: ${shot.name} could not fit the host's upload limit.`
             else if (fitted?.note) notes[shot.digest] = fitted.note
@@ -426,6 +427,13 @@ export class PullRequestScreenshots extends Context.Service<
       })
     }),
   )
+}
+
+/** Retry a host's size refusal only when the reported limit applies to what we sent. */
+const retryPictureBelow = (error: ConnectorFailed, bytes: number, knownLimit: number): number | undefined => {
+  if (error.reason !== 'rejected') return undefined
+  if (error.uploadLimit !== undefined) return error.uploadLimit <= bytes ? error.uploadLimit : undefined
+  if (error.status === 413) return Math.min(bytes, knownLimit / 2)
 }
 
 const refuse = (why: 'no_pictures', change: ChangeSummary) =>

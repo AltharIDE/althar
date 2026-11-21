@@ -2798,7 +2798,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'attach_pull_request',
-          "Attaches a task to an open pull request it didn't open, by its link or number: one opened by hand, or upstream from the fork the project pushes to. From then on the task follows it as one Althar opened: its reviews, comments, checks and conflicts are heard, its lead's pull request tools act on it, and publishing pushes to its branch, never opening another. For a task that follows the wrong pull request, or none. Where the task's branch isn't based on that pull request's head, in a turn the person's message started it starts from the head at once, its own commits kept on top; otherwise nothing changes: it says what starting from the head keeps, and you call it again with start_from_head once the person agrees.",
+          "Attaches a task to an open pull request it didn't open, by its link or number. A pull request from a contributor's fork can be attached when its author allows maintainer edits. From then on the task follows it as one Althar opened: its reviews, comments, checks and conflicts are heard, its lead's pull request tools act on it, and publishing pushes to its branch, never opening another. For a task that follows the wrong pull request, or none. Where the task's branch isn't based on that pull request's head, in a turn the person's message started it starts from the head at once, its own commits kept on top; otherwise nothing changes: it says what starting from the head keeps, and you call it again with start_from_head once the person agrees.",
           {
             type: 'object',
             properties: {

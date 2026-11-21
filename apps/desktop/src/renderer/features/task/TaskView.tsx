@@ -27,7 +27,6 @@ import {
   IssuePart,
   LinkButton,
   type ModelInfo,
-  TaskFace,
   TaskHeader,
   type TaskHeaderStep,
   ReachLine,
@@ -77,7 +76,7 @@ import { usePrinted } from '../../shared/useOutputs'
 import { useStreaming } from '../../shared/useStreamed'
 import { type RoundBlock, roundsOf } from '../../shared/rounds'
 import { kindsOf, type PartsActions, partsOf } from './parts'
-import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
+import { ConversationFace, DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, outgoingOf, takesImages, useAttachments } from '../../shared/useAttachments'
 import { pillOf, runIdOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
@@ -123,13 +122,17 @@ import { chooseFace, chosenFaces } from './chosenFaces'
 import { PageOpenerProvider, useOpener } from '../browser/opener'
 import { Foot } from '../foot/Foot'
 import { pages } from '../browser/pages'
+import { useDraftCanvasVersions } from '../canvases/draftVersions'
 import { useCanvasArrivals } from '../canvases/arrivals'
 import {
   composerComment,
   cropsOf,
   drop,
-  giveBack as giveCommentsBack,
-  takeAll,
+  giveBackLines,
+  isDiffDraft,
+  takeComments,
+  readingCommentCrops,
+  toLineComment,
   useComments,
   withComments,
   canvasCommentsOf,
@@ -629,6 +632,7 @@ export function TaskView({
   const opener = useOpener(taskId ?? null, showTalk)
   const navigate = useNavigate()
   const comments = useComments(kept)
+  useDraftCanvasVersions(kept, comments)
   // The page belongs to the conversation: Outputs and Graph leave it out, and coming back brings it as it was (ADR-100).
   const conversation = face === null || face === 'talk' || (face === 'graph' && (model.snapshot?.task.graph?.length ?? 0) === 0)
   // What the thread's parts open: a picture in the lightbox, a document or a file the lead names, or a page, beside the thread.
@@ -674,6 +678,8 @@ export function TaskView({
   const { show } = changes
   // The person's comments on its lines (DEV-175): gathered there, sent to the lead in one message, and read back where they are now.
   const lineComments = useLineComments(
+    kept,
+    comments,
     model.snapshot?.task.id ?? null,
     changes.open,
     // A commit moves no line against the base, but its files are no longer uncommitted: a comment it addressed is read again.
@@ -891,16 +897,15 @@ export function TaskView({
   const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
   const receiver = { name: agentName(receiving), takes: takesImages(models, receiving) }
   // With no lead working, what the person says starts the one picked, as its first turn; with another agent picked, that one takes over with it.
-  const send = (body: string, now: boolean, outgoing?: Outgoing) => {
-    setDraft('')
-    if (outgoing !== undefined) images.clear()
-    // Their comments went with it (taken as it was made, in submit).
+  const deliver = (body: string, now: boolean, outgoing?: Outgoing) => {
     if (session === null || !session.held) return model.send(body, chosen ?? undefined, outgoing)
-    if (waiting !== null) {
-      setHandover(null)
-      return model.handOver(waiting, body, outgoing)
-    }
+    if (waiting !== null) return model.handOver(waiting, body, outgoing)
     return now ? model.sendNow(body, outgoing) : model.send(body, undefined, outgoing)
+  }
+  const send = (body: string, now: boolean) => {
+    setDraft('')
+    if (waiting !== null) setHandover(null)
+    return deliver(body, now)
   }
   /**
    * What the composer sends: with its images, unless they can't go yet, when
@@ -908,29 +913,37 @@ export function TaskView({
    * back in the composer, words, images and the agent picked to take over.
    */
   const submit = (body: string, now: boolean) => {
-    const own = images.take(receiver)
+    const pictures = receiver.takes !== false
+    const own = images.take(receiver, pictures && readingCommentCrops(kept))
     if (own === null) return
     turnUndo.dismiss()
-    // The comments made beside the conversation go after the person's words, their crops after the person's own pictures where pictures go.
-    const gathered = takeAll(kept)
-    const pictures = receiver.takes !== false
+    const batch = takeComments(kept)
+    setDraft('')
+    images.clear()
+    const picked = waiting
+    if (picked !== null) setHandover(null)
+    const gathered = batch.taken
     const crops = pictures ? cropsOf(gathered) : { sent: [], pictures: [] }
+    const lines = gathered.filter(isDiffDraft).map(toLineComment)
     const outgoing: Outgoing = {
       ...own,
       sent: [...own.sent, ...crops.sent],
       pictures: [...own.pictures, ...crops.pictures],
-      // Comments on canvases are kept with the message itself, in its command, and nowhere before (ADR-104).
       canvasComments: canvasCommentsOf(gathered),
+      onAccepted: () => batch.finish(true),
+      ...(lines.length === 0 ? {} : { comments: lines }),
     }
-    const said = withComments(body, gathered, own.sent.length, pictures)
-    const picked = waiting
-    void send(said, now, outgoing).then((accepted) => {
-      if (accepted) return
+    const restore = () => {
+      batch.finish(false)
       setDraft((current) => withQueued(current, body))
       images.giveBack(own)
-      giveCommentsBack(kept, gathered)
       if (picked !== null) setHandover(picked)
-    })
+    }
+    void deliver(withComments(body, gathered, own.sent.length, pictures), now, outgoing).then((accepted) => {
+      if (!accepted) return restore()
+      batch.finish(true)
+      if (lines.length > 0) lineComments.reread()
+    }, restore)
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
@@ -944,15 +957,29 @@ export function TaskView({
   }
   // The comments gathered on the diff go to the lead in one message of their own, the composer left as it is; given back where Althar doesn't take them.
   const sendComments = () => {
-    const comments = lineComments.take()
+    const batch = takeComments(kept, true)
+    const comments = batch.taken.filter(isDiffDraft).map(toLineComment)
     if (comments.length === 0) return
-    const outgoing: Outgoing = { sent: [], pictures: [], files: [], attached: [], comments }
+    const outgoing: Outgoing = {
+      sent: [],
+      pictures: [],
+      files: [],
+      attached: [],
+      comments,
+      onAccepted: () => batch.finish(true),
+    }
     setSendingComments(true)
-    void model.send('', session === null || !session.held ? (chosen ?? undefined) : undefined, outgoing).then((accepted) => {
-      setSendingComments(false)
-      if (accepted) lineComments.reread()
-      else lineComments.giveBack(comments)
-    })
+    void model.send('', session === null || !session.held ? (chosen ?? undefined) : undefined, outgoing).then(
+      (accepted) => {
+        setSendingComments(false)
+        batch.finish(accepted)
+        if (accepted) lineComments.reread()
+      },
+      () => {
+        setSendingComments(false)
+        batch.finish(false)
+      },
+    )
   }
   // A queued message goes back in the composer to be changed, and out of the queue, at once. One the lead had already read
   // comes back where it was, the line saying why, and the composer goes back to what it held, unless written in since.
@@ -979,7 +1006,7 @@ export function TaskView({
     if (said.dictated === true) setDraftDictated(kept, true)
     const unimage = images.restore(said)
     // Its comments on the diff wait there again, to be sent with the next; taken off with the rest where it was refused.
-    const uncomment = said.comments === undefined ? () => undefined : lineComments.giveBack(said.comments)
+    const uncomment = said.comments === undefined ? () => undefined : giveBackLines(kept, said.comments)
     unrestore = () => {
       unimage()
       uncomment()
@@ -997,7 +1024,7 @@ export function TaskView({
       if (said.dictated === true) setDraftDictated(kept, true)
       images.restore(said)
       // Its comments on the diff wait there again, to be sent with the next.
-      if (said.comments !== undefined) lineComments.giveBack(said.comments)
+      if (said.comments !== undefined) giveBackLines(kept, said.comments)
     })
   }
 
@@ -1368,10 +1395,18 @@ export function TaskView({
         comments={comments.map((comment, index) => composerComment(comment, index + 1))}
         onOpenComment={(id) => {
           if (taskId === undefined) return
-          // Pressed, a comment opens again on its page beside the conversation.
-          pages.place(taskId, 'beside')
+          const spot = comments.find((one) => one.id === id)?.on
+          if (spot?.kind === 'diff') {
+            setCommentShown(id)
+            show(files.some((file) => file.path === spot.line.path) ? spot.line.path : undefined)
+            return
+          }
           setFace('talk')
-          pages.reopen(taskId, id)
+          if (spot?.kind === 'canvas') host.openCanvas(spot.canvasId, spot.version, false)
+          if (spot?.kind === 'page') {
+            pages.place(taskId, 'beside')
+            pages.reopen(taskId, id)
+          }
         }}
         onRemoveComment={(id) => drop(kept, id)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
@@ -1758,32 +1793,27 @@ export function TaskView({
               {(blocks, versionOf, now) => {
                 const reading = readingAt(now)
                 return (
-                  <TaskFace
+                  <ConversationFace
+                    host={host}
                     className={s.face}
                     composer={composer}
                     // An aside sits under the conversation bar, which shades the thread scrolled beneath it.
                     under={embedded}
                     // A document the lead wrote, or a file it names, opens beside the thread on its workbench; a document follows its edits.
-                    // An aside's, in the coordinator's narrow pane, has no room for one.
-                    {...(embedded
-                      ? {}
-                      : {
-                          panel: host.workbench(
-                            host.doc && (
-                              <KeptDocumentPanel
-                                key={host.doc.source ?? host.doc.path ?? host.doc.title}
-                                threadId={snapshot.threadId}
-                                taskId={snapshot.task.id}
-                                worktree={snapshot.task.worktree}
-                                doc={host.doc}
-                                version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
-                                onClose={host.closeDoc}
-                                {...(openDoc === undefined ? {} : { onOpen: openDoc })}
-                              />
-                            ),
-                          ),
-                          panelWidth: host.bench.width,
-                        })}
+                    documentPanel={
+                      host.doc && (
+                        <KeptDocumentPanel
+                          key={host.doc.source ?? host.doc.path ?? host.doc.title}
+                          threadId={snapshot.threadId}
+                          taskId={snapshot.task.id}
+                          worktree={snapshot.task.worktree}
+                          doc={host.doc}
+                          version={versionOf(wholePath(host.doc.source ?? host.doc.path ?? '', snapshot.task.worktree))}
+                          onClose={host.closeDoc}
+                          {...(openDoc === undefined ? {} : { onOpen: openDoc })}
+                        />
+                      )
+                    }
                   >
                     <Thread label={text.thread} busy={busy}>
                       {opening}
@@ -1822,6 +1852,7 @@ export function TaskView({
                               : { onTryAgain: () => void model.tryAgain(), onCompact: () => void model.compact() })}
                             {...(onSignIn === undefined || stuckOpen ? {} : { onSignIn })}
                             onPassOn={(words) => void model.send(words)}
+                            onTrustBot={(login) => client.trustBot(snapshot.task.id, login)}
                             {...(onOpenTask === undefined ? {} : { onOpenTask })}
                             {...(reading === null
                               ? {}
@@ -1909,7 +1940,7 @@ export function TaskView({
                       </ThreadShellProvider>
                       {closing}
                     </Thread>
-                  </TaskFace>
+                  </ConversationFace>
                 )
               }}
             </LiveRounds>
@@ -2031,16 +2062,13 @@ export function TaskView({
               onFinding={changes.goToFinding}
               comments={lineComments.comments}
               comment={commentShown}
-              // Comments are on the task's own change: one settled takes none.
-              {...(snapshot.task.phase === 'settled'
-                ? {}
-                : {
-                    onComment: lineComments.add,
-                    onEditComment: lineComments.edit,
-                    onRemoveComment: lineComments.remove,
-                    onSendComments: sendComments,
-                    sendingComments,
-                  })}
+              nextCommentNumber={comments.length + 1}
+              onRemoveComment={lineComments.remove}
+              onEditComment={lineComments.edit}
+              // oxlint-disable-next-line althar/press-at-once -- takeComments removes the waiting notes before the request starts.
+              onSendComments={sendComments}
+              sendingComments={sendingComments}
+              {...(snapshot.task.phase === 'settled' ? {} : { onComment: lineComments.add })}
               view={changes.view}
               onRetry={changes.retry}
               onClose={() => {

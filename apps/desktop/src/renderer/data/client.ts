@@ -146,7 +146,11 @@ import { RpcClient } from 'effect/rpc'
  */
 
 /** What may change of a project's rules at once: any of it. */
-export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox'>> & {
+export type ProjectRulesChange = { readonly projectId: string } & Partial<
+  Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox' | 'trustedBots' | 'suggestedBots'>
+> & {
+    /** The bots its leads hear, by their accounts, the list whole (code-hosts § Review and triage bots). */
+    readonly trustedBots?: ReadonlyArray<string>
     /** What the person changed of what leads' sandboxes let through: each list's edits, whole. */
     readonly sandbox?: { readonly commands?: SandboxEdits; readonly hosts?: SandboxEdits }
     /** The revision a change that replaces a list was made against: refused where the rules have moved on since. */
@@ -643,6 +647,8 @@ export interface Client {
   /** Adds the repositories at the folder a grant names. */
   readonly addRepositories: (projectId: string, grant: string) => Promise<void>
   readonly leaveOutRepository: (projectId: string, repositoryId: string) => Promise<void>
+  /** Adds the repository a fork was forked from as a remote of its clone, where none of its remotes is that repository. */
+  readonly addParentRemote: (projectId: string, repositoryId: string) => Promise<void>
   readonly setRepository: (input: {
     readonly projectId: string
     readonly repositoryId: string
@@ -650,7 +656,8 @@ export interface Client {
     readonly changeTarget?: ChangeTarget
     /** Answers the offer to push a fork's branches upstream with no. */
     readonly notNow?: boolean
-    readonly setup?: RepositorySetup
+    /** The setup the person edited; null clears it, for a lead to record again. */
+    readonly setup?: RepositorySetup | null
     /** The branch new tasks work toward there (ADR-093); null for its default branch. */
     readonly workToward?: string | null
   }) => Promise<void>
@@ -667,6 +674,8 @@ export interface Client {
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
   readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
+  /** Trusts a bot in a task's project, from the thread where it spoke: its leads hear it from then on (code-hosts § Review and triage bots). */
+  readonly trustBot: (taskId: string, login: string) => Promise<void>
   /** Adds an account to an agent: in the folder a grant names, or one Althar makes. */
   readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
@@ -1275,6 +1284,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
     leaveOutRepository: (projectId, repositoryId) => command((commandId) => api.LeaveOutRepository({ commandId, projectId, repositoryId })),
+    addParentRemote: (projectId, repositoryId) => command((commandId) => api.AddParentRemote({ commandId, projectId, repositoryId })),
     setRepository: (input) => command((commandId) => api.SetRepository({ commandId, ...input })),
     createBranch: (input) => command((commandId) => api.CreateBranch({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
@@ -1283,6 +1293,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     editProjectNote: (projectId, noteId, body) => command((commandId) => api.EditProjectNote({ commandId, projectId, noteId, body })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
+    trustBot: (taskId, login) => command((commandId) => api.TrustBot({ commandId, taskId, login })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
     removeAccount: (accountId, anyway) =>

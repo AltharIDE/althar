@@ -166,6 +166,7 @@ export const scenarios = {
    * `[lead:serve-apart]` runs a real server for it as Claude Code runs one:
    * under a shell in a process group of its own, which stopping the agent's
    * group misses, and stopping it ends the shell, not the server.
+   * `[lead:serve-apart-without-output]` starts the same server without reporting its output file.
    */
   background: 'background',
   /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
@@ -453,6 +454,8 @@ const SETTLED_AGAIN = 'This task is settled:'
 
 /** How the runtime's reminder to report begins, which the person's words waiting for the turn go after (the runtime's Runs.ts). */
 const REMINDED = /^Your (step|review) isn't done until you call Althar's /
+/** The line Althar puts first in a turn to tell the time again (the runtime's `timeAgainLine`), with the blank line after it. */
+const TIME_AGAIN = /^\(It is now [^\n]* on the person's computer\.\)\n\n/
 
 /** What `bun dev` prints, coloured as Vite colours it. */
 const SERVING =
@@ -468,7 +471,7 @@ const leaveRunning = async (
   session: SessionState,
   client: acp.AgentContext,
   as: 'claude' | 'codex',
-  options: { readonly exits?: boolean; readonly quiet?: boolean; readonly apart?: boolean } = {},
+  options: { readonly exits?: boolean; readonly quiet?: boolean; readonly apart?: boolean; readonly omitOutputPath?: boolean } = {},
 ) => {
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
@@ -530,7 +533,7 @@ const leaveRunning = async (
     canStop: true,
     toolCallId,
   })
-  await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+  if (options.omitOutputPath !== true) await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
   await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
   // Background work that isn't a command, as Claude Code reports some.
   await notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: `dream-${id}`, name: 'Dreaming', taskType: 'dream', canStop: true })
@@ -942,7 +945,7 @@ const untilStopped = async (session: SessionState, marker: string) => {
 const playRole = async (
   session: SessionState,
   text: string,
-  serve: (how: { readonly exits: boolean; readonly apart: boolean }) => Promise<void>,
+  serve: (how: { readonly exits: boolean; readonly apart: boolean; readonly omitOutputPath: boolean }) => Promise<void>,
   tests: (plan: {
     readonly lasts?: number
     readonly commits?: () => Promise<void>
@@ -1102,7 +1105,12 @@ const playRole = async (
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
-        await serve({ exits: text.includes('[lead:serve-exits]'), apart: text.includes('[lead:serve-apart]') })
+        const omitOutputPath = text.includes('[lead:serve-apart-without-output]')
+        await serve({
+          exits: text.includes('[lead:serve-exits]'),
+          apart: omitOutputPath || text.includes('[lead:serve-apart]'),
+          omitOutputPath,
+        })
       }
       // What a plain task's lead does in the turn it is asked, where the words it was given say so: writes a file in the
       // repository and leaves it uncommitted (`[lead:write]`), commits one on whatever its worktree is on (`[lead:commit]`),
@@ -1180,6 +1188,10 @@ const playRole = async (
           }
         }
         if (text.includes('[lead:canvas-list]')) return await told('canvas_list', {})
+        if (text.includes('[lead:canvas-open]')) {
+          const answer = await told('canvas_open', { name: 'sign-in' })
+          return `${answer} The repository also has a \`README.md\`.`
+        }
         if (text.includes('[lead:canvas-again]')) {
           await told('canvas_get', { name: 'sign-in' })
           const read = await told('canvas_read', { name: 'sign-in' })
@@ -1904,7 +1916,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
       // context that holds 4,000 tokens rather than CONTEXT_SIZE.
       const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
-      const whole = filled === null ? prompted : prompted.slice(0, filled.index)
+      // Told the time first, on a new day or after a long gap (the runtime's localTime.ts), it reads what it was asked after it:
+      // the time is no part of the ask, so a check that fails just after midnight is fixed as at any other time.
+      const whole = (filled === null ? prompted : prompted.slice(0, filled.index)).replace(TIME_AGAIN, '')
       // Started again on a task that settled, it does what it is asked now, after its brief, as its brief tells it: what the task
       // first asked, the lead before it did. It plays the role its brief gives it all the same.
       const again = whole.includes(SETTLED_AGAIN)
@@ -2007,6 +2021,22 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           })
           await update({ sessionUpdate: 'tool_call_update', toolCallId: 'compact', status: 'failed' })
           return ended()
+        }
+        // With `[lead:compact-reports]`, it reports the compaction as such (ACP's `compaction_update`), with its summary in
+        // pieces, as Claude Code, Codex and OpenCode do for a client that takes them.
+        if (session.markers.has('[lead:compact-reports]')) {
+          await update({ sessionUpdate: 'compaction_update', compactionId: 'compaction-1', status: 'in_progress' })
+          await update({
+            sessionUpdate: 'compaction_summary_chunk',
+            compactionId: 'compaction-1',
+            content: { type: 'text', text: 'We were ' },
+          })
+          await update({
+            sessionUpdate: 'compaction_summary_chunk',
+            compactionId: 'compaction-1',
+            content: { type: 'text', text: 'fixing the checkout retry.' },
+          })
+          await update({ sessionUpdate: 'compaction_update', compactionId: 'compaction-1', status: 'completed' })
         }
         await update({ sessionUpdate: 'usage_update', used: Math.round(session.contextSize / 10), size: session.contextSize })
         await say('Compacted the conversation.')

@@ -25,6 +25,6 @@ From `packages/persistence-sqlite`:
 | `bun run test:coverage` | The tests with the coverage gate: 90% of lines and branches |
 | `bun run verify` | Check and coverage, as CI runs them |
 
-To change the schema, add a migration in `src/migrations`, add its checksum to `src/migrations/checksums.ts` (the test prints the value it expects), and let the tests regenerate `schema.sql` (`bunx vitest run -u`). Once a version has shipped, its migrations are frozen: never renumber or edit one, and fix it with a new migration (see [ARCHITECTURE.md](ARCHITECTURE.md#the-schema)).
+To change the schema, add a migration in `src/migrations`, numbered one past main's last and listed at the end of `index.ts`, add its checksum to `src/migrations/checksums.ts` (the test prints the value it expects), and let the tests regenerate `schema.sql` (`bunx vitest run -u`). Once a version has shipped, its migrations are frozen: never renumber or edit one, and fix it with a new migration (see [ARCHITECTURE.md](ARCHITECTURE.md#the-schema)). Where another pull request took the same number first, CI's `numbers` check refuses yours and says which number to take: rename the file, its key in `index.ts` and its line in `checksums.ts`.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the rules this package follows.

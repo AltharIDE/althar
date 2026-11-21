@@ -42,9 +42,9 @@ its installs, builds and tests easily takes several GB and many cores.
 
 ### What counts as an agent at work
 
-- **These count:** a task's lead while a step of its run is under way, while
-  it resolves a conflict or fixes checks, or while it is in a turn. A task's
-  reviewer counts while a review is under way, or while it is in a turn.
+- **These count:** a task's lead or reviewer while starting or in a turn,
+  including turns to resolve conflicts or fix checks. A step reserves its place
+  until its first turn takes over.
   Each of a lead's helpers takes a place of its own while it starts or is in
   a turn, apart from its lead's and its reviewer's: four of a task's at
   once, the rest waiting their turn whatever is free ([tasks §
@@ -53,10 +53,8 @@ its installs, builds and tests easily takes several GB and many cores.
   Althar makes itself (`run_project`). They are light or the person's own, and
   counting the coordinator would let a task waiting on its plan deadlock the
   line.
-- **An agent waiting on the person keeps its place for five minutes**
-  (`askGrace`), on a question or a permission. An answer that comes soon then
-  goes on while the agent's prompt cache is still warm. After that the agent
-  takes no place.
+- **An agent waiting on the person releases its place immediately.** The
+  person's answer can start its next turn even if all places are in use.
 - **What an agent left running counts only while it works.** A test run in
   the background counts. A dev server waiting for a browser does not. Every 2
   seconds, while anything is left running, Althar reads the process tree with
@@ -120,6 +118,8 @@ the same order. A waiting task can be stopped, and resumed it waits again.
 While its first step waits, its plan can still be changed. Its card and view
 say what it waits for, such as "Waiting: 4 of 4 agents busy on this Mac". A
 waiting task is left out of its own count, so it never waits behind itself.
+Up next shows the machine-wide count and any temporary limit from host pressure,
+and lists each occupied place while work waits.
 
 ## The quick lane
 
@@ -199,10 +199,9 @@ that goes on by itself, in the order it will.
   ahead.
   Otherwise the person is told nothing names it, and its lead hears with its
   next turn.
-- **Nothing moves under the person.** While the pointer is over Running or Up
-  next, or a row is being dragged, a task that would change lanes stays where
-  it is and moves once the pointer leaves. When it moves, the card travels to
-  its new lane ([desktop-app.md](desktop-app.md) covers motion).
+- **The lanes follow admission immediately.** A task that starts moves
+  from Up next to Running, including while the pointer rests on the board.
+  The card travels to its new lane ([desktop-app.md](desktop-app.md) covers motion).
 
 ## A lost connection and a failing service
 

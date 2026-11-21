@@ -392,11 +392,15 @@ export class Models extends Context.Service<
             yield* setModelBlocked(entry.definition.id, input.model, input.blocked)
           }).pipe(Effect.provide(context)),
         forget: (agentId) =>
-          Effect.sync(() => {
-            probed.delete(agentId)
-            failedAt.delete(agentId)
-            probing.delete(agentId)
-          }),
+          signIns.forget(agentId).pipe(
+            Effect.andThen(
+              Effect.sync(() => {
+                probed.delete(agentId)
+                failedAt.delete(agentId)
+                probing.delete(agentId)
+              }),
+            ),
+          ),
       })
     }),
   )

@@ -110,6 +110,7 @@ export interface LineCommentsText {
   remove: string
   /** Each state, as a comment's note says it. */
   draft: string
+  earlier: string
   sent: string
   addressed: string
   /** Its lines aren't in the change any more. */
@@ -137,6 +138,7 @@ export const lineCommentsText: LineCommentsText = {
   edit: 'Edit',
   remove: 'Remove',
   draft: 'Not sent',
+  earlier: 'On an earlier version',
   sent: 'Sent',
   addressed: 'Addressed',
   gone: 'Its lines aren’t in the change any more.',
@@ -235,6 +237,7 @@ export interface LineCommentNoteProps {
   comment: ViewedComment
   /** The one opened from the thread: brought into view, marked. */
   current?: boolean
+  showPath?: boolean
   /** Opens one waiting to go again in its box, to change. */
   onEdit?: () => void
   /** Takes one waiting to go off. */
@@ -243,7 +246,7 @@ export interface LineCommentNoteProps {
 }
 
 /** A comment of the person's under its lines: what they said, and where it stands; one waiting to go can be changed or taken off. */
-export function LineCommentNote({ comment, current = false, onEdit, onRemove, text }: LineCommentNoteProps) {
+export function LineCommentNote({ comment, current = false, showPath = false, onEdit, onRemove, text }: LineCommentNoteProps) {
   const t = textOf(text)
   const ref = useRef<HTMLElement>(null)
   // The one opened from the thread comes into view once drawn: only the code's own scroll moves.
@@ -268,7 +271,10 @@ export function LineCommentNote({ comment, current = false, onEdit, onRemove, te
             {comment.n}
           </span>
         )}
-        <span className={s.where}>{t.lines(comment.side, comment.start, comment.end)}</span>
+        <span className={s.where}>
+          {showPath && <>{comment.path} · </>}
+          {t.lines(comment.side, comment.start, comment.end)}
+        </span>
         {draft && (onEdit !== undefined || onRemove !== undefined) && (
           <span className={s.ways}>
             {onEdit !== undefined && <LinkButton onClick={onEdit}>{t.edit}</LinkButton>}
@@ -277,7 +283,7 @@ export function LineCommentNote({ comment, current = false, onEdit, onRemove, te
         )}
         <span className={s.state}>
           {comment.state === 'addressed' && <Icon name="check" size={12} />}
-          {t[comment.state]}
+          {draft && comment.line === null ? t.earlier : t[comment.state]}
           {comment.state === 'sent' && comment.sentAt !== undefined && <span className={s.when}>{comment.sentAt}</span>}
         </span>
       </header>

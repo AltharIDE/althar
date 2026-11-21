@@ -1,6 +1,5 @@
 import { DevicePairings } from './DevicePairings'
 import { agentCatalogHandlers } from './AgentCatalog'
-import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
@@ -83,6 +82,8 @@ import { Launches } from './Launches'
 import { Terminals } from './Terminals'
 import { LeftBehind } from './LeftBehind'
 import { localTasksIn } from './local'
+import { PARENT_KEPT, tellOf, toldOf } from './forks'
+import { namedRemotes } from './git'
 import { MachineLoad } from './MachineLoad'
 import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
@@ -106,9 +107,11 @@ import {
   pushesCommits,
   postsScreenshots,
   ruleSetOf,
+  trustedBotsOf,
   usageLimitOf,
   afterMergeReviewOf,
 } from './Policies'
+import { botLogin, botName } from './reviewerBots'
 import { Models } from './Models'
 import { ModelFacts } from './ModelFacts'
 import { Installs } from './Installs'
@@ -208,6 +211,9 @@ const PUSHABLE_KEPT = 5 * 60_000
 
 /** How long a repository's page waits for a host to say who can push: it reads on without. */
 const PUSHABLE_WAIT = Duration.seconds(5)
+
+/** How long a host that didn't say whether a repository is a fork (it failed, took too long, or doesn't say) isn't asked again. */
+const PARENT_RETRY = 5 * 60_000
 
 /** A path as the file system has it, without symbolic links; as given, where it can't be read. */
 /** What an issue card's Always file at once and Always ask first say: to the coordinator, as the person, and to a task's lead. */
@@ -599,6 +605,52 @@ export const handlers = apiLayer(
         return can
       })
 
+    /** When each `origin` last had no answer from its host, by its address: asked again only after PARENT_RETRY. */
+    const unanswered = new Map<string, number>()
+
+    /**
+     * Asks the host of a repository's `origin` whether it is a fork, and of
+     * which repository, through the connection that reaches it, and keeps the
+     * answer (forks.ts) for PARENT_KEPT, so reading the project again doesn't
+     * ask again. A host that can't be reached, or doesn't say, leaves what was
+     * known: the remotes' names, or what a host said before; and isn't asked
+     * again for PARENT_RETRY, so one that hangs holds up reading a project's
+     * repositories once, not every time. True where the answer is new.
+     */
+    const askParent = (path: string | null) =>
+      Effect.gen(function* () {
+        if (path === null) return false
+        const origin = (yield* namedRemotes(path).pipe(Effect.orElseSucceed(() => []))).find((remote) => remote.name === 'origin')
+        if (origin === undefined) return false
+        const now = yield* Clock.currentTimeMillis
+        const kept = toldOf(origin.url)
+        if (kept !== undefined && now - kept.at < PARENT_KEPT) return false
+        const missed = unanswered.get(origin.url)
+        if (missed !== undefined && now - missed < PARENT_RETRY) return false
+        const found = yield* Effect.orElseSucceed(connections.hostOf([origin.url]), () => null)
+        if (found === null) return false
+        const read = yield* found.host.repository(found.path).pipe(
+          Effect.timeout(PUSHABLE_WAIT),
+          Effect.orElseSucceed(() => null),
+        )
+        const changed = read !== null && tellOf(origin.url, read, now, found.host.product)
+        if (toldOf(origin.url)?.at === now) unanswered.delete(origin.url)
+        else unanswered.set(origin.url, now)
+        return changed
+      })
+
+    /**
+     * A project's repositories as its page shows them, each fork as its host says, asked first, all at once: where a host's answer
+     * is new, they are read again with it.
+     */
+    const repositoriesShown = (projectId: string) =>
+      Effect.gen(function* () {
+        const first = yield* projects.repositories(projectId)
+        const asked = yield* Effect.forEach(first, (repository) => askParent(repository.path), { concurrency: 'unbounded' })
+        const list = asked.some(Boolean) ? yield* projects.repositories(projectId) : first
+        return yield* Effect.forEach(list, repositoryOf, { concurrency: 'unbounded' })
+      })
+
     /**
      * A repository as its page shows it: where its work goes, from its
      * remote, with the code host Althar knows there and who it is signed in
@@ -614,6 +666,8 @@ export const handlers = apiLayer(
             : yield* Effect.map(canPushTo(forked.upstreamUrl), (canPush) => ({
                 fork: forked.fork,
                 upstream: forked.upstream,
+                remote: forked.upstreamRemote,
+                by: forked.by,
                 target: forked.target,
                 canPush,
                 offer: canPush === true && forked.target !== 'upstream_branch' && !forked.offered,
@@ -672,13 +726,23 @@ export const handlers = apiLayer(
         }
         // How each kind of ask and refusal went lately, so the person can drop one that mostly gets worked around (ADR-071).
         const tally = yield* tallyOf(projectId).pipe(Effect.provideService(SqlClient.SqlClient, sql))
-        return { ...rulesFields(projectId, rules), revision, conventions, sandbox, tally }
+        // The review and triage bots that spoke on its tasks' pull requests, the latest first, but those it trusts (code-hosts § Review and triage bots).
+        const spoke = yield* sql<{ login: string | null; name: string | null }>`
+          SELECT json_extract(payload, '$.login') AS login, json_extract(payload, '$.name') AS name FROM observations
+          WHERE project_id = ${projectId} AND kind = 'bot_spoke' ORDER BY observed_at DESC, rowid DESC`
+        const trusted = new Set(trustedBotsOf(rules).map(botLogin))
+        const suggested = new Map<string, { readonly login: string; readonly name: string }>()
+        for (const one of spoke)
+          if (one.login !== null && !trusted.has(one.login) && !suggested.has(one.login))
+            suggested.set(one.login, { login: one.login, name: one.name ?? botName(one.login) })
+        const suggestedBots = [...suggested.values()]
+        return { ...rulesFields(projectId, rules), suggestedBots, revision, conventions, sandbox, tally }
       })
 
     const rulesFields = (
       projectId: string,
       rules: ProjectRules,
-    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally'> => {
+    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally' | 'suggestedBots'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
@@ -694,6 +758,7 @@ export const handlers = apiLayer(
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
         postScreenshots: postsScreenshots(rules),
+        trustedBots: trustedBotsOf(rules).map((login) => ({ login, name: botName(login) })),
         leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
@@ -744,17 +809,6 @@ export const handlers = apiLayer(
         ),
       )
 
-    /* Each agent's version, asked of its CLI once a launch. */
-    const versions = new Map<string, string | null>()
-    const versionOf = (entry: AgentEntry) =>
-      versions.has(entry.definition.id)
-        ? Effect.succeed(versions.get(entry.definition.id) ?? null)
-        : agentVersion(entry.definition).pipe(
-            Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))),
-            // Asked again next time: one that failed says no version, not a wrong one.
-            contained('Status.version', () => null, entry.definition.id),
-          )
-
     /*
      * An agent, with its accounts: each check starts the agent's own status
      * command, in the account's home. An agent that couldn't be looked at
@@ -777,7 +831,7 @@ export const handlers = apiLayer(
               : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
-          version: yield* versionOf(entry),
+          version: yield* installs.version(entry.definition).pipe(contained('Status.version', () => null, entry.definition.id)),
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
           addsAccounts: entry.definition.home.accounts !== 'one',
@@ -1157,8 +1211,7 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      GetRepositories: ({ projectId }) =>
-        api(Effect.flatMap(projects.repositories(projectId), (list) => Effect.forEach(list, repositoryOf))),
+      GetRepositories: ({ projectId }) => api(repositoriesShown(projectId)),
       AddRepositories: ({ commandId, projectId, grant }) =>
         once(
           commandId,
@@ -1205,6 +1258,16 @@ export const handlers = apiLayer(
                 ...(workToward === undefined ? {} : { workToward }),
                 commandId: said.commandId,
               })
+            }),
+          ),
+        ),
+      AddParentRemote: ({ commandId, projectId, repositoryId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.add_parent_remote', { projectId, repositoryId }, commandId)
+              yield* projects.addParentRemote(projectId, repositoryId, said.commandId)
             }),
           ),
         ),
@@ -1571,7 +1634,7 @@ export const handlers = apiLayer(
                 if (task?.taskId != null && (yield* cancelWaitingTurn(busy, sessions, sql)(task.taskId)) > 0) return
               }
               yield* pullRequests.leadStopped({ threadId }, 'interrupted')
-              yield* sessions.interrupt(threadId)
+              yield* sessions.interrupt(threadId, 'person')
             }),
           ),
         ),
@@ -2340,6 +2403,25 @@ export const handlers = apiLayer(
             }),
           ),
         ),
+      TrustBot: ({ commandId, taskId, login }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+              if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+              const { rules } = yield* policies.current(task.projectId as ProjectId)
+              const trusted = trustedBotsOf(rules)
+              if (trusted.map(botLogin).includes(botLogin(login))) return
+              yield* applyRules(task.projectId, { trustedBots: [...trusted, login] }, instance.personId).pipe(
+                Effect.provideService(Policies, policies),
+                Effect.provideService(Permissions, permissions),
+                Effect.provideService(Changes, pullRequests),
+                Effect.provideService(PullRequestScreenshots, screenshots),
+              )
+            }),
+          ),
+        ),
       SetProjectAccounts: ({ commandId, projectId, rotate, only }) =>
         once(commandId, api(policies.setAccounts(projectId, only === null ? { rotate } : { rotate, only }, actorId))),
       SetUsageLimit: ({ commandId, projectId, policy }) => once(commandId, api(policies.setUsageLimit(projectId, policy, actorId))),
@@ -2438,7 +2520,6 @@ export const handlers = apiLayer(
           Effect.gen(function* () {
             const entry = yield* agents.get(agentId)
             yield* installs.install(entry.definition)
-            versions.delete(agentId)
             yield* models.forget(agentId)
           }),
         ),

@@ -58,7 +58,63 @@ export interface HomesOverview {
   readonly projects: Readonly<Record<string, HomeProjects>>
   readonly opened: Readonly<Record<string, number>>
 }
+/**
+ * Setting a home up over SSH, as main runs it ([bootstrap/README.md](../../host/bootstrap/README.md)): its steps in
+ * order, each said as it goes. One at a time for the whole app, kept across a restart of Althar.
+ */
+export const SETUP_STEPS = ['reach', 'look', 'get', 'setup', 'start', 'identity'] as const
+export type SetupStep = (typeof SETUP_STEPS)[number]
+/** Going, waiting on the person's word for its host key, stopped on a trouble, paused, reconnecting, or set up. */
+export type SetupPhase = 'running' | 'trust' | 'failed' | 'stopped' | 'reconnecting' | 'done'
+export interface HomeSetup {
+  /** Where it's being set up, now: `althar@host` once Althar made that user for a root login. */
+  readonly target: SshHomeTarget
+  readonly phase: SetupPhase
+  /** The step it's on, by its index in SETUP_STEPS: those before it are done. */
+  readonly at: number
+  /** althar-host coming over, in bytes, where that's known. */
+  readonly progress?: { readonly bytes: number; readonly total: number }
+  /** Sent from this computer, as the server couldn't download it. */
+  readonly upload: boolean
+  /** The server's key, seen for the first time, for the person to trust. */
+  readonly hostKey?: { readonly host: string; readonly type: string; readonly fingerprint: string }
+  /** What stopped it: a code the window words (bootstrap/README.md's, and the desktop's own). */
+  readonly problem?: string
+  /** What the server is, as looked over. */
+  readonly facts?: { readonly arch: string; readonly freeKiB: number; readonly git: boolean }
+  /** Logged in as root: Althar made the home its own user, althar. */
+  readonly madeUser: boolean
+  /** The command that keeps it running after the last logout, where lingering is off and needs the server's administrator. */
+  readonly linger?: string
+  /** The release it installs, once found. */
+  readonly version?: string
+  /** The home it made, as the server said once it was done: what the window's own check must find there. */
+  readonly identity?: { readonly homeId: string; readonly hostDeviceId: string }
+  /** What it ran and what the server said, to show. */
+  readonly log: ReadonlyArray<string>
+}
+export type SetupAction = 'trust' | 'stop' | 'resume' | 'upload' | 'dismiss'
+/** Handed to a window that can't set a home up (the Flatpak: main/homes/setup.ts's canSetUp), so it doesn't offer it. */
+export const NO_SETUP_ARG = '--althar-no-home-setup'
+
+export const isHomeSetup = (value: unknown): value is HomeSetup | null => {
+  if (value === null) return true
+  if (typeof value !== 'object') return false
+  const setup = value as Partial<HomeSetup>
+  return (
+    typeof setup.target?.target === 'string' &&
+    typeof setup.at === 'number' &&
+    Array.isArray(setup.log) &&
+    ['running', 'trust', 'failed', 'stopped', 'reconnecting', 'done'].includes(setup.phase ?? '')
+  )
+}
+
 export interface HomesHost {
+  /** A home being set up over SSH, or none; with the calls that start and steer it. */
+  readonly setup?: () => Promise<HomeSetup | null>
+  readonly setUp?: (target: SshHomeTarget) => Promise<void>
+  readonly setupAct?: (action: SetupAction) => Promise<void>
+  readonly onSetup?: (listener: (setup: HomeSetup | null) => void) => () => void
   readonly state: () => Promise<HomeState>
   readonly list: () => Promise<ReadonlyArray<RemoteHome>>
   readonly pairingInfo?: (code: string) => Promise<{ origin: string; homeId: string; expiresAt: number }>

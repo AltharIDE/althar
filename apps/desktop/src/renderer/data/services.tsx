@@ -344,7 +344,7 @@ export interface PagesHost {
   readonly point: (owner: string) => Promise<Pointed | null>
   readonly stopPointing: (owner: string) => Promise<void>
   /** The comments' pins, each drawn on the page it was made on. */
-  readonly pins: (owner: string, pins: ReadonlyArray<PagePin>) => Promise<void>
+  readonly pins: (owner: string, pins: ReadonlyArray<PagePin>) => Promise<{ address: string; found: ReadonlyArray<number> } | null>
   /** An element found again on its page and brought into view, to write its comment again over; null where it is gone. */
   readonly find: (owner: string, selector: string, address: string) => Promise<Pointed | null>
   /** A picture of the page as it shows, for the window to show in its place while something of its own is over it. */
