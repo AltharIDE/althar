@@ -9,6 +9,15 @@ import { addItem } from '../src/threads'
 import { repository, runtime } from './support'
 
 describe('search documents', () => {
+  it.effect('finds a task’s latest item by date without scanning its history', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+        SELECT max(created_at) FROM thread_items WHERE thread_id = ${'thread'} AND created_at > ${'2026-01-01'}`
+      assert.isTrue(plan.some((row) => row.detail.includes('thread_items_by_thread_date')))
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.effect('pages every public local message, excludes thoughts and archived projects, and removes dropped notes', () =>
     Effect.gen(function* () {
       const projects = yield* Projects

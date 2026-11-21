@@ -1743,3 +1743,5 @@ CREATE TABLE preset_tunings (
 CREATE INDEX provider_sessions_by_agent ON provider_sessions (agent_id, started_at);
 
 CREATE INDEX thread_items_home_events ON thread_items (created_at DESC, sequence DESC) WHERE kind = 'step_result' OR (kind = 'notice' AND json_extract(content, '$.about') = 'stall');
+
+CREATE INDEX thread_items_by_thread_date ON thread_items (thread_id, created_at DESC);
