@@ -4,6 +4,12 @@ use prost::Message;
 use std::{error::Error, fmt};
 
 #[cfg(target_os = "linux")]
+pub mod agent;
+#[cfg(target_os = "linux")]
+mod agent_tools;
+#[cfg(target_os = "linux")]
+mod agent_workspace;
+#[cfg(target_os = "linux")]
 pub mod diagnostic;
 pub mod grpc;
 #[cfg(target_os = "linux")]

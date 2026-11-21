@@ -27,6 +27,7 @@ import type { PlanUsageOptions } from './PlanUsage'
 import type { ModelFactsOptions } from './ModelFacts'
 import type { PageAnswer, PageCall } from './pageBridge'
 import type { SkillsConfig } from './Skills'
+import type { WorkerExecutionPlatform } from './workerExecution'
 
 /** A screenshot an agent asks for: the page, the viewport it is drawn at, and what of it, all of it or one element. */
 export interface Shot {
@@ -50,6 +51,7 @@ export interface Screenshot {
 }
 
 export interface RuntimeOptions {
+  readonly workers?: WorkerExecutionPlatform
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
   readonly worktreeRoot: string
   /** The profile and the logs, which About › Storage measures beside the worktrees; without them it says it can't. */

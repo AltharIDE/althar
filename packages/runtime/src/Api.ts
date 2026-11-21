@@ -1285,6 +1285,7 @@ export const handlers = apiLayer(
             }),
           ),
         ),
+      ListProjectWorkers: ({ projectId }) => Effect.sync(() => config.workers?.list(projectId) ?? []),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
       GetSearchDocuments: ({ after }) =>
         api(
@@ -1839,7 +1840,20 @@ export const handlers = apiLayer(
         api(Effect.flatMap(envelope('thread.undo_turn', { itemId }, commandId), (said) => sessions.undoTurn({ envelope: said, itemId }))),
       GetCoordinator: ({ projectId, before, limit }) =>
         api(queries.coordinator(projectId, { ...(before === undefined ? {} : { before }), ...(limit === undefined ? {} : { limit }) })),
-      StartTask: ({ commandId, projectId, title, description, steps, issue: named, issues: others, end, repositories, chat, taskId }) =>
+      StartTask: ({
+        commandId,
+        projectId,
+        title,
+        description,
+        steps,
+        issue: named,
+        issues: others,
+        end,
+        repositories,
+        chat,
+        taskId,
+        workerId,
+      }) =>
         once(
           commandId,
           api(
@@ -1849,8 +1863,14 @@ export const handlers = apiLayer(
               const from = yield* issueFor(projectId, issue)
               yield* Effect.forEach(all.slice(1), (one) => issues.read(one, projectId), { concurrency: 4, discard: true })
               const aside = chat === true
+              if (workerId !== undefined) {
+                const worker = config.workers?.list(projectId).find((one) => one.workerId === workerId)
+                if (worker === undefined || worker.busy)
+                  return yield* new ApiError({ reason: 'Invalid', message: 'Choose an available worker assigned to this project.' })
+              }
+
               const created = yield* projects.createTask({
-                envelope: yield* envelope('task.create', { projectId, title, description, issue }, commandId),
+                envelope: yield* envelope('task.create', { projectId, title, description, issue, workerId }, commandId),
                 projectId,
                 title,
                 ...(description === undefined ? {} : { description }),
@@ -1874,6 +1894,7 @@ export const handlers = apiLayer(
                 reason: null,
                 actorId: actorId,
                 startsIn: Duration.zero,
+                ...(workerId === undefined ? {} : { held: true }),
                 // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done; it has its pill
                 // rather than a card, and the coordinator hears nothing of it.
                 ...(aside
@@ -1884,12 +1905,12 @@ export const handlers = apiLayer(
                       ...(end !== undefined && end !== projectEnd ? { endChosen: true } : {}),
                     }),
               })
-              yield* plans.start(planId, actorId)
+              yield* plans.start(planId, actorId, workerId)
               return yield* queries.task(created.taskId)
             }),
           ),
         ),
-      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId)))),
+      StartPlan: ({ commandId, planId, workerId }) => once(commandId, api(Effect.asVoid(plans.start(planId, actorId, workerId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, actorId))),
       // Its plan, waiting for nothing else now, starts as planned: the countdown hears the record change.
       StopWaiting: ({ commandId, taskId, on }) =>

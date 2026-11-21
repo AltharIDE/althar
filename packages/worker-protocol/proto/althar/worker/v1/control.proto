@@ -6,6 +6,145 @@ package althar.worker.v1;
 // a worker ID in a message is only a claim to check against that identity.
 service WorkerControlService {
   rpc Connect(stream WorkerFrame) returns (stream HomeFrame);
+  rpc RunAgent(stream AgentWorkerFrame) returns (stream AgentHomeFrame);
+  rpc AgentTools(stream AgentToolsRequest) returns (stream AgentToolsResponse);
+}
+
+// Separate from the diagnostic exchange. One stream advertises one agent
+// execution slot. A started slot is never reattached or reassigned.
+message AgentWorkerFrame {
+  oneof payload {
+    AgentWorkerHello hello = 1;
+    AgentRunReady ready = 2;
+    AgentRunBytes output = 3;
+    AgentRunExit exit = 4;
+    AgentWorkerHeartbeat heartbeat = 5;
+    AgentSnapshotResult snapshot = 6;
+    AgentRunBytes patch = 7;
+    AgentRunBytes commits = 8;
+  }
+}
+
+message AgentHomeFrame {
+  oneof payload {
+    AgentHomeHello hello = 1;
+    AgentRunStart start = 2;
+    AgentRunBytes input = 3;
+    AgentRunStop stop = 4;
+    AgentWorkerHeartbeat heartbeat = 5;
+    AgentRunReconcile reconcile = 6;
+    AgentRunBytes checkout = 7;
+    AgentSnapshotRequest snapshot = 8;
+  }
+}
+
+message AgentWorkerHello {
+  string worker_id = 1;
+  uint32 version = 2;
+  repeated AgentWorkerCapability capabilities = 3;
+  string journal_id = 4;
+}
+
+// A worker can only start a provider that its operator enabled for the project.
+message AgentWorkerCapability {
+  string project_id = 1;
+  string provider_id = 2;
+}
+
+message AgentHomeHello {
+  string home_id = 1;
+  string worker_id = 2;
+  uint32 version = 3;
+  uint32 lease_ms = 4;
+}
+
+// No command, arguments, path, or account credentials come from the home.
+message AgentRunStart {
+  string run_id = 1;
+  string project_id = 2;
+  string provider_id = 3;
+  string workspace_id = 4;
+  AgentWorkspaceSource source = 5;
+  bool tools = 6;
+}
+
+// A single Git bundle with one scoped snapshot ref, staged before launch.
+message AgentWorkspaceSource {
+  uint32 size = 1;
+  bytes sha256 = 2;
+  string head = 3;
+}
+
+message AgentRunReady {
+  string run_id = 1;
+  // The canonical absolute path of the leased workspace on the worker.
+  string workspace_path = 2;
+  uint32 tools_port = 3;
+}
+
+message AgentRunBytes {
+  string run_id = 1;
+  bytes data = 2;
+}
+
+message AgentRunStop {
+  string run_id = 1;
+}
+
+message AgentRunReconcile {
+  string run_id = 1;
+  string workspace_id = 2;
+}
+
+message AgentRunExit {
+  string run_id = 1;
+  AgentRunOutcome outcome = 2;
+  // Present only for a confirmed process exit with an exit code.
+  optional uint32 exit_code = 3;
+}
+
+enum AgentRunOutcome {
+  AGENT_RUN_OUTCOME_UNSPECIFIED = 0;
+  AGENT_RUN_OUTCOME_EXITED = 1;
+  AGENT_RUN_OUTCOME_STOPPED = 2;
+  AGENT_RUN_OUTCOME_START_FAILED = 3;
+  AGENT_RUN_OUTCOME_UNCONFIRMED = 4;
+}
+
+message AgentWorkerHeartbeat {
+  uint32 sequence = 1;
+}
+
+message AgentSnapshotRequest {
+  string run_id = 1;
+  string base_tree = 2;
+  string base_head = 3;
+}
+
+// A Git binary patch against the requested tree. The home verifies its own
+// workspace before applying it. Failure leaves the worker checkout in place.
+message AgentSnapshotResult {
+  string run_id = 1;
+  string tree = 2;
+  uint32 size = 3;
+  bytes sha256 = 4;
+  bool unavailable = 5;
+  string head = 6;
+  uint32 commits_size = 7;
+  bytes commits_sha256 = 8;
+}
+
+// A connection to just the home tool server for this active run. Tool
+// authority still travels in the request's session-specific bearer token.
+message AgentToolsRequest {
+  oneof payload {
+    string run_id = 1;
+    bytes data = 2;
+  }
+}
+
+message AgentToolsResponse {
+  bytes data = 1;
 }
 
 message WorkerFrame {
