@@ -1746,11 +1746,14 @@ CREATE INDEX thread_items_home_events ON thread_items (created_at DESC, sequence
 
 CREATE TABLE thread_goals (
     thread_id TEXT PRIMARY KEY NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
-    revision INTEGER NOT NULL CHECK (revision > 0),
+    generation INTEGER NOT NULL CHECK (generation > 0),
     objective TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('active', 'paused', 'blocked', 'complete', 'limited', 'cleared')),
     rounds INTEGER NOT NULL CHECK (rounds >= 0),
     round_limit INTEGER NOT NULL CHECK (round_limit > 0),
+    launch_agent TEXT,
+    launch_model TEXT,
+    launch_effort TEXT,
     progress TEXT,
     detail TEXT
   ) STRICT;

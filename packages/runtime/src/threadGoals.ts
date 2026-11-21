@@ -7,10 +7,17 @@ import { touchTask } from './cards'
 import type { ToolAccess } from './ToolServer'
 import { ToolRefused } from './toolErrors'
 
+export interface GoalLead {
+  readonly agentId: string
+  readonly model?: string
+  readonly effort?: string
+}
+
 type GoalRow = Omit<ThreadGoal, 'waiting' | 'status'> & {
   readonly status: ThreadGoal['status'] | 'cleared'
-  readonly taskId: string
-  readonly taskState: string
+  readonly launchAgent: string | null
+  readonly launchModel: string | null
+  readonly launchEffort: string | null
   readonly available: number
 }
 
@@ -18,7 +25,7 @@ const goalRow = (threadId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [row] = yield* sql<GoalRow>`
-      SELECT g.*, t.task_id, k.state AS task_state,
+      SELECT g.*, g.generation AS revision,
         (k.state IN ('draft', 'open') AND k.kept_at IS NULL AND p.archived_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
           AND NOT EXISTS (SELECT 1 FROM helpers h WHERE h.task_id = k.id AND h.state = 'working')
@@ -57,16 +64,27 @@ export const readGoal = (threadId: string) => Effect.map(goalRow(threadId), view
 export const runnableGoal = (threadId: string) =>
   Effect.map(goalRow(threadId), (row) => (row?.status === 'active' && row.available === 1 ? view(row) : null))
 
+/** A goal accepted just before shutdown may have no provider session yet. */
+export const goalLaunchChoice = (threadId: string) =>
+  Effect.map(goalRow(threadId), (row): GoalLead | undefined => {
+    if (row?.launchAgent == null) return undefined
+    return {
+      agentId: row.launchAgent,
+      ...(row.launchModel === null ? {} : { model: row.launchModel }),
+      ...(row.launchEffort === null ? {} : { effort: row.launchEffort }),
+    }
+  })
+
 export const goalThread = (threadId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    return (yield* sql<{ id: string; projectId: ProjectId; state: string; kept: number }>`
-      SELECT k.id, k.project_id, k.state, k.kept_at IS NOT NULL AS kept
+    return (yield* sql<{ id: string; projectId: ProjectId; state: string }>`
+      SELECT k.id, k.project_id, k.state
       FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = k.project_id
       WHERE t.id = ${threadId} AND t.kind = 'task' AND p.archived_at IS NULL`)[0]
   })
 
-export const controlGoal = (threadId: string, control: GoalControl) =>
+export const controlGoal = (threadId: string, control: GoalControl, lead?: GoalLead) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     return yield* sql.withTransaction(
@@ -89,12 +107,18 @@ export const controlGoal = (threadId: string, control: GoalControl) =>
         if (next?.status === 'active' && (task.state === 'abandoned' || task.state === 'done'))
           return yield* new ApiError({ reason: 'Invalid', message: 'Start a goal on an open task.' })
         const revision = (row?.revision ?? 0) + 1
+        const launchAgent = next === null ? null : (lead?.agentId ?? row?.launchAgent ?? null)
+        const launchModel = launchAgent === null ? null : lead === undefined ? (row?.launchModel ?? null) : (lead.model ?? null)
+        const launchEffort = launchAgent === null ? null : lead === undefined ? (row?.launchEffort ?? null) : (lead.effort ?? null)
         yield* sql`
-          INSERT INTO thread_goals (thread_id, revision, objective, status, rounds, round_limit, progress, detail)
+          INSERT INTO thread_goals (thread_id, generation, objective, status, rounds, round_limit, launch_agent, launch_model, launch_effort, progress, detail)
           VALUES (${threadId}, ${revision}, ${next?.objective ?? ''}, ${next?.status ?? 'cleared'},
-            ${next?.rounds ?? 0}, ${next?.roundLimit ?? row?.roundLimit ?? 1}, ${next?.progress ?? null}, ${next?.detail ?? null})
-          ON CONFLICT(thread_id) DO UPDATE SET revision = excluded.revision, objective = excluded.objective,
+            ${next?.rounds ?? 0}, ${next?.roundLimit ?? row?.roundLimit ?? 1},
+            ${launchAgent}, ${launchModel}, ${launchEffort},
+            ${next?.progress ?? null}, ${next?.detail ?? null})
+          ON CONFLICT(thread_id) DO UPDATE SET generation = excluded.generation, objective = excluded.objective,
             status = excluded.status, rounds = excluded.rounds, round_limit = excluded.round_limit,
+            launch_agent = excluded.launch_agent, launch_model = excluded.launch_model, launch_effort = excluded.launch_effort,
             progress = excluded.progress, detail = excluded.detail`
         yield* touchTask(task.id)
         return { goal: yield* readGoal(threadId), changed: true, taskId: task.id, stopping }
@@ -107,7 +131,7 @@ export const pauseGoal = (threadId: string, detail: string | null = null) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const [changed] = yield* sql<{ taskId: string }>`
-      UPDATE thread_goals SET status = 'paused', revision = revision + 1, detail = ${detail}
+      UPDATE thread_goals SET status = 'paused', generation = generation + 1, detail = ${detail}
       WHERE thread_id = ${threadId} AND status = 'active'
       RETURNING (SELECT task_id FROM threads WHERE id = thread_id) AS task_id`
     if (changed !== undefined) yield* touchTask(changed.taskId)
@@ -135,7 +159,7 @@ export const startGoalRound = (threadId: string, goal: ThreadGoal, automatic: bo
     const sql = yield* SqlClient.SqlClient
     const [changed] = yield* sql<{ taskId: string }>`
       UPDATE thread_goals SET rounds = rounds + 1
-      WHERE thread_id = ${threadId} AND revision = ${goal.revision} AND status = 'active' AND rounds < round_limit
+      WHERE thread_id = ${threadId} AND generation = ${goal.revision} AND status = 'active' AND rounds < round_limit
       RETURNING (SELECT task_id FROM threads WHERE id = thread_id) AS task_id`
     if (changed === undefined) return false
     yield* touchTask(changed.taskId)
@@ -148,7 +172,7 @@ export const endGoalRound = (threadId: string, revision: number, failure: string
     const [changed] = yield* sql<{ taskId: string }>`
       UPDATE thread_goals SET status = CASE WHEN ${failure} IS NULL THEN 'limited' ELSE 'blocked' END,
         detail = ${failure}
-      WHERE thread_id = ${threadId} AND revision = ${revision} AND status = 'active'
+      WHERE thread_id = ${threadId} AND generation = ${revision} AND status = 'active'
         AND (${failure} IS NOT NULL OR rounds >= round_limit)
       RETURNING (SELECT task_id FROM threads WHERE id = thread_id) AS task_id`
     if (changed !== undefined) yield* touchTask(changed.taskId)
@@ -176,7 +200,7 @@ export const reportGoal = (access: ToolAccess, input: unknown) =>
           WHERE thread_id = ${access.threadId} AND status = 'active'
             AND EXISTS (SELECT 1 FROM turn_deliveries d WHERE d.id = ${access.turnId ?? null}
               AND d.thread_id = thread_goals.thread_id AND d.provider_session_id = ${access.sessionId}
-              AND d.state = 'delivered' AND d.goal_revision = thread_goals.revision)
+              AND d.state = 'delivered' AND d.goal_revision = thread_goals.generation)
           RETURNING (SELECT task_id FROM threads WHERE id = thread_id) AS task_id`
         if (changed === undefined) return yield* new ToolRefused({ message: 'This turn no longer holds the active goal.' })
         yield* touchTask(changed.taskId)

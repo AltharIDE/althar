@@ -25,11 +25,16 @@ export const ThreadGoal = Schema.Struct({
 })
 export type ThreadGoal = typeof ThreadGoal.Type
 
+const commandArgument = (text: string, command: string): string | undefined => {
+  const separator = text[command.length]
+  if (text.slice(0, command.length).toLowerCase() !== command || (separator !== undefined && separator.trim() !== '')) return undefined
+  return text.slice(command.length).trim()
+}
+
 /** A command is the entire composer message. A slash inside ordinary text has no special meaning. */
 export const goalCommand = (body: string): GoalCommand | undefined => {
-  const match = /^\/goal(?:\s+([\s\S]*))?$/i.exec(body.trim())
-  if (match === null) return undefined
-  const argument = match[1]?.trim() ?? ''
+  const argument = commandArgument(body.trim(), '/goal')
+  if (argument === undefined) return undefined
   switch (argument.toLowerCase()) {
     case '':
       return { action: 'show' }
@@ -40,8 +45,8 @@ export const goalCommand = (body: string): GoalCommand | undefined => {
     case 'clear':
       return { action: 'clear' }
   }
-  const edit = /^edit\s+([\s\S]+)$/i.exec(argument)
-  return edit === null ? { action: 'set', objective: argument } : { action: 'edit', objective: edit[1] ?? '' }
+  const edit = commandArgument(argument, 'edit')
+  return edit === undefined || edit === '' ? { action: 'set', objective: argument } : { action: 'edit', objective: edit }
 }
 
 /** The same transition is used by the runtime and by the window's optimistic controls. */

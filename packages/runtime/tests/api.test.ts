@@ -306,7 +306,7 @@ describe('the API', () => {
         Effect.flatMap(
           SqlClient.SqlClient,
           (sql) => sql<{ status: string; rounds: number; revision: number }>`
-        SELECT status, rounds, revision FROM thread_goals WHERE thread_id = ${task.threadId}`,
+        SELECT status, rounds, generation AS revision FROM thread_goals WHERE thread_id = ${task.threadId}`,
         ),
       )
       yield* client.SetThreadGoal({

@@ -8,7 +8,7 @@
 }
 
 .line,
-.summary {
+.summary > span {
   display: flex;
   align-items: center;
   min-width: 0;
@@ -21,13 +21,16 @@
 
 .summary {
   flex: 1;
+  min-width: 0;
+  height: auto;
+  color: var(--t-1);
   padding: 7px 10px;
   text-align: start;
   font-size: 0.8125rem;
 }
 
-.summary:hover {
-  background: var(--hover-paper);
+.summary > span {
+  flex: 1;
 }
 
 .label {

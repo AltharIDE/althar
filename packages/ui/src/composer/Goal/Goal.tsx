@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
 
+import { ActionButton } from '../../primitives/ActionButton/ActionButton'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import s from './Goal.module.css'
 
@@ -47,8 +48,7 @@ export function Goal({
   return (
     <section aria-label="Goal" className={s.goal}>
       <div className={s.line}>
-        <button
-          type="button"
+        <ActionButton
           className={s.summary}
           aria-expanded={expanded}
           aria-controls={detailsId}
@@ -58,7 +58,7 @@ export function Goal({
           <span className={s.label}>Goal</span>
           <span className={s.objective}>{expanded ? null : goal.objective}</span>
           <output className={s.status}>{status}</output>
-        </button>
+        </ActionButton>
         {goal.status === 'active' ? (
           <LinkButton onClick={onPause}>Pause</LinkButton>
         ) : goal.status !== 'complete' ? (

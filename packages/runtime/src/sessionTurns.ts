@@ -862,7 +862,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
             const stopped =
               ended?.stopReason === 'refusal' || endedEarly
                 ? 'The agent stopped without working on the goal.'
-                : state === 'failed' && !held && !lost
+                : state === 'failed' && !lost && (!held || (goalRound && errorClass === 'transient'))
                   ? 'The agent could not continue. Resume the goal to try again.'
                   : null
             yield* endGoalRound(thread.threadId, activeGoal.revision, stopped)

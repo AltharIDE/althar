@@ -13,7 +13,7 @@ import { Sessions } from '../src/Sessions'
 import { controlGoal, readGoal } from '../src/threadGoals'
 import { callTool, repository, runtime, until } from './support'
 
-const taskWithGoal = Effect.gen(function* () {
+const newTask = Effect.gen(function* () {
   const projects = yield* Projects
   const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
   const task = yield* projects.createTask({
@@ -23,11 +23,12 @@ const taskWithGoal = Effect.gen(function* () {
     draft: true,
     plain: true,
   })
-  const { goal } = yield* controlGoal(task.threadId, { action: 'set', objective: 'Verify the migration [lead:slowly]' })
-  assert.isNotNull(goal)
-  yield* (yield* Sessions).kickGoal(task.threadId, goal?.revision ?? 0, { agentId: 'codex' })
   return { ...task, projectId: project.projectId }
 })
+
+const objective = 'Verify the migration [lead:slowly]'
+const lead = { agentId: 'codex' }
+const setGoal = (threadId: string) => controlGoal(threadId, { action: 'set', objective }, lead)
 
 const liveGoal = (threadId: string, except: string | null = null) =>
   Effect.gen(function* () {
@@ -43,12 +44,33 @@ const liveGoal = (threadId: string, except: string | null = null) =>
   })
 
 describe('thread goals', () => {
+  it.live('recovers a goal accepted before its first lead could start', () => {
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-cold-goal-')), 'home.sqlite')
+    const gate = holds()
+    return Effect.gen(function* () {
+      const threadId = yield* Effect.gen(function* () {
+        const task = yield* newTask
+        yield* setGoal(task.threadId)
+        return task.threadId
+      }).pipe(Effect.provide(runtime(database, { holds: gate })), Effect.scoped)
+      yield* Effect.gen(function* () {
+        const turn = yield* liveGoal(threadId)
+        assert.include(turn?.prompt ?? '', objective)
+        assert.strictEqual((yield* readGoal(threadId))?.rounds, 1)
+        yield* controlGoal(threadId, { action: 'pause' })
+        gate.open('[lead:slowly]')
+      }).pipe(Effect.provide(runtime(database, { holds: gate })), Effect.scoped)
+    })
+  })
+
   it.live('carries its objective, progress and used rounds across runtime shutdown and restart', () => {
     const database = join(mkdtempSync(join(tmpdir(), 'althar-goal-restart-')), 'home.sqlite')
     const gate = holds()
     return Effect.gen(function* () {
       const { task, sessionId } = yield* Effect.gen(function* () {
-        const task = yield* taskWithGoal
+        const task = yield* newTask
+        const { goal } = yield* setGoal(task.threadId)
+        yield* (yield* Sessions).kickGoal(task.threadId, goal?.revision ?? 0, lead)
         const before = yield* liveGoal(task.threadId)
         const sessionId = before?.sessionId ?? ''
         assert.include(

@@ -1,4 +1,4 @@
-import { endGoalRound, pauseGoal, runnableGoal } from './threadGoals'
+import { type GoalLead, endGoalRound, goalLaunchChoice, pauseGoal, runnableGoal } from './threadGoals'
 import type { MessageSender, SentCanvasComment, UndoTurnResult } from '@althar/contracts'
 import { type CommandEnvelope, Ids, type ProjectId, newId } from '@althar/domain'
 import { Commands, bumpRevision } from '@althar/persistence-sqlite'
@@ -242,11 +242,7 @@ export class Sessions extends Context.Service<
     }): Effect.Effect<'later' | 'same', NoSession | Failure>
     /** Explicitly resumes retained input after a failed turn or a usage reset; an ordinary input-batch wake does not retry failures. */
     wake(threadId: string): Effect.Effect<void>
-    kickGoal(
-      threadId: string,
-      revision: number,
-      lead?: { readonly agentId: string; readonly model?: string; readonly effort?: string },
-    ): Effect.Effect<void>
+    kickGoal(threadId: string, revision: number, lead?: GoalLead): Effect.Effect<void>
     cancelGoalRound(threadId: string, turnId: string): Effect.Effect<void>
     readonly recoverGoals: Effect.Effect<void>
     /** Starts the startup snapshot once Runtime has installed turn gates, recording hooks and tools. */
@@ -2176,11 +2172,7 @@ export class Sessions extends Context.Service<
           return true
         })
 
-      const kickGoal = (
-        threadId: string,
-        revision: number,
-        lead?: { readonly agentId: string; readonly model?: string; readonly effort?: string },
-      ) =>
+      const kickGoal = (threadId: string, revision: number, lead?: GoalLead) =>
         Effect.gen(function* () {
           const goal = yield* runnableGoal(threadId)
           if (goal?.revision !== revision) return
@@ -2188,6 +2180,11 @@ export class Sessions extends Context.Service<
           const running = threads.get(threadId)
           if (running !== undefined) {
             if (running.stopping) return
+            if (running.deliveryHeld === 'transient' && running.heldTurn !== undefined) {
+              const sql = yield* SqlClient.SqlClient
+              const [held] = yield* sql<{ goalRound: number }>`SELECT goal_round FROM turn_deliveries WHERE id = ${running.heldTurn}`
+              if (held?.goalRound === 1) running.deliveryHeld = null
+            }
             if (lead !== undefined && running.entry.definition.id !== lead.agentId)
               yield* setLeadChoice(running, lead, {
                 choice: { agentId: lead.agentId, model: lead.model ?? null, effort: lead.effort ?? null },
@@ -2196,8 +2193,11 @@ export class Sessions extends Context.Service<
             return
           }
           if (lead !== undefined) yield* start({ threadId, goalRevision: revision, ...lead })
-          else if (!(yield* startLast(threadId, undefined, revision)))
-            yield* endGoalRound(threadId, revision, 'Choose a lead, then resume the goal.')
+          else if (!(yield* startLast(threadId, undefined, revision))) {
+            const saved = yield* goalLaunchChoice(threadId)
+            if (saved === undefined) yield* endGoalRound(threadId, revision, 'Choose a lead, then resume the goal.')
+            else yield* start({ threadId, goalRevision: revision, ...saved })
+          }
         }).pipe(
           Effect.catchCause((cause) =>
             threads.has(threadId)
@@ -2214,11 +2214,14 @@ export class Sessions extends Context.Service<
       const recoverGoals = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const active = yield* sql<{ threadId: string; revision: number }>`
-          SELECT g.thread_id, g.revision FROM thread_goals g
+          SELECT g.thread_id, g.generation AS revision FROM thread_goals g
           JOIN threads t ON t.id = g.thread_id
           WHERE g.status = 'active'
             AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.state = 'running')`
-        for (const goal of active) yield* Effect.forkIn(run(kickGoal(goal.threadId, goal.revision)), sessionsScope)
+        yield* Effect.forkIn(
+          run(Effect.forEach(active, (goal) => kickGoal(goal.threadId, goal.revision), { discard: true })),
+          sessionsScope,
+        )
       }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not recover goals', cause)))
 
       let recovering = false

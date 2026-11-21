@@ -526,21 +526,18 @@ export const handlers = apiLayer(
       Effect.gen(function* () {
         if (!personSetsGoal)
           return yield* new ApiError({ reason: 'Forbidden', message: 'Set goals from Althar’s window or a paired device.' })
-        const result = yield* Effect.provideContext(controlGoal(threadId, control), store)
+        const choice =
+          lead === undefined
+            ? undefined
+            : {
+                agentId: lead.agentId,
+                ...(lead.model === undefined ? {} : { model: lead.model }),
+                ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+              }
+        const result = yield* Effect.provideContext(controlGoal(threadId, control, choice), store)
         if (!result.changed) return result.goal
         if (result.stopping !== undefined) yield* sessions.cancelGoalRound(threadId, result.stopping)
-        if (result.goal?.status === 'active')
-          yield* sessions.kickGoal(
-            threadId,
-            result.goal.revision,
-            lead === undefined
-              ? undefined
-              : {
-                  agentId: lead.agentId,
-                  ...(lead.model === undefined ? {} : { model: lead.model }),
-                  ...(lead.effort === undefined ? {} : { effort: lead.effort }),
-                },
-          )
+        if (result.goal?.status === 'active') yield* sessions.kickGoal(threadId, result.goal.revision, choice)
         return result.goal
       })
 
