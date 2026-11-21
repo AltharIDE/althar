@@ -329,7 +329,8 @@ contextBridge.exposeInMainWorld('althar', {
     viewport: (owner: string, viewport: string): Promise<void> => ipcRenderer.invoke('althar:page-viewport', owner, viewport),
     point: (owner: string): Promise<unknown> => ipcRenderer.invoke('althar:page-point', owner),
     stopPointing: (owner: string): Promise<void> => ipcRenderer.invoke('althar:page-stop-pointing', owner),
-    pins: (owner: string, pins: unknown): Promise<void> => ipcRenderer.invoke('althar:page-pins', owner, pins),
+    pins: (owner: string, pins: unknown): Promise<{ address: string; found: ReadonlyArray<number> } | null> =>
+      ipcRenderer.invoke('althar:page-pins', owner, pins),
     find: (owner: string, selector: string, address: string): Promise<unknown> =>
       ipcRenderer.invoke('althar:page-find', owner, selector, address),
     still: (owner: string): Promise<string | null> => ipcRenderer.invoke('althar:page-still', owner),

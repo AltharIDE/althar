@@ -223,6 +223,8 @@ export interface ChangeViewProps {
   comment?: string | null
   /** Takes a comment written on lines picked. Without it, lines can't be picked. */
   onComment?: (comment: NewComment) => void
+  /** Next number in the thread’s composer, which can also have page or canvas comments. */
+  nextCommentNumber?: number
   /** Changes what one waiting to go says. */
   onEditComment?: (id: string, note: string) => void
   /** Takes one waiting to go off. */
@@ -268,6 +270,7 @@ export function ChangeView({
   comments = [],
   comment = null,
   onComment,
+  nextCommentNumber,
   onEditComment,
   onRemoveComment,
   onSendComments,
@@ -290,6 +293,8 @@ export function ChangeView({
   const made = rest.filter((file) => file.generated === true)
   const files = [...named, ...written, ...made]
   const madeFrom = named.length + written.length
+  const detached = waiting.filter((one) => !files.some((file) => file.path === one.path)).map((one) => ({ ...one, line: null }))
+  const detachedNotes = <EarlierLineNotes comments={detached} current={comment} text={t.comments} onRemove={onRemoveComment} showPath />
   const current = files.find((file) => file.path === selected) ?? files[0]
   const on = findings.find((one) => one.id === finding)
   // How each markdown file is shown, where the person chose: a page, a page with its change marked, or its diff.
@@ -328,8 +333,16 @@ export function ChangeView({
     : current?.status === 'deleted'
       ? ['changes', 'source']
       : ['rendered', 'changes', 'source']
+  const commentedPath = comments.find((one) => one.id === comment)?.path
+  const [openedComment, setOpenedComment] = useState(comment)
+  if (openedComment !== comment) {
+    setOpenedComment(comment)
+    if (commentedPath !== undefined) setChosen((now) => new Map(now).set(commentedPath, 'source'))
+  }
   const wanted =
-    current === undefined ? undefined : (chosen.get(current.path) ?? (notes.some((note) => note.key === finding) ? 'source' : 'changes'))
+    current === undefined
+      ? undefined
+      : (chosen.get(current.path) ?? (current.path === commentedPath || notes.some((note) => note.key === finding) ? 'source' : 'changes'))
   const way = wanted === undefined ? undefined : ways.includes(wanted) ? wanted : ways[0]
   const page = marked === null || way === 'source' ? null : way === 'changes' ? marked : unmarked(marked)
   const show = (next: PageWay) => {
@@ -438,7 +451,11 @@ export function ChangeView({
             </Dialog.Close>
           </header>
           {current === undefined && loose.length === 0 ? (
-            <p className={s.empty}>{t.empty}</p>
+            detached.length > 0 ? (
+              detachedNotes
+            ) : (
+              <p className={s.empty}>{t.empty}</p>
+            )
           ) : (
             <div className={s.body}>
               <nav className={s.files} aria-label={t.list}>
@@ -490,6 +507,7 @@ export function ChangeView({
                   <div className={s.fileHead}>
                     <span className={s.filePath}>{t.loose}</span>
                   </div>
+                  {detachedNotes}
                   <div className={s.apart}>
                     {loose.map((one) => (
                       <FindingNote
@@ -523,6 +541,7 @@ export function ChangeView({
                       />
                     )}
                   </div>
+                  {detachedNotes}
                   {current.uncommitted && <p className={s.note}>{t.uncommittedNote}</p>}
                   <FileBody
                     key={current.path}
@@ -531,7 +550,7 @@ export function ChangeView({
                     notes={notes}
                     comments={comments.filter((one) => one.path === current.path)}
                     comment={comment}
-                    next={waiting.length + 1}
+                    next={nextCommentNumber ?? waiting.length + 1}
                     page={page}
                     {...(markdown === undefined ? {} : { markdown })}
                     onOpen={pick}
@@ -692,9 +711,17 @@ function FileBody({
         ]
   const notes = [...found, ...said, ...box]
   // Comments whose lines are gone from the file's change: above it, saying so.
-  const gone = comments.filter((one) => one.line === null)
+  const gone = (
+    <EarlierLineNotes
+      comments={comments.filter((one) => one.line === null)}
+      current={comment}
+      text={t.comments}
+      onRemove={onRemoveComment}
+      caption={t.commentsGone}
+    />
+  )
   // A generated file's diff stays folded until asked for: its lines are a tool's, not the work's.
-  const [shown, setShown] = useState(file.generated !== true || notes.length > 0)
+  const [shown, setShown] = useState(file.generated !== true || notes.length > 0 || comments.length > 0)
   // Where there are no lines to put them under, the notes go first.
   const alone = notes.length > 0 && (
     <div className={s.apart}>
@@ -706,6 +733,7 @@ function FileBody({
   if (file.binary)
     return (
       <>
+        {gone}
         {alone}
         <p className={s.quiet}>{t.binary}</p>
       </>
@@ -722,14 +750,18 @@ function FileBody({
   switch (view.state) {
     case 'loading':
       return (
-        <p className={s.quiet}>
-          <Spinner size="small" />
-          {t.loading}
-        </p>
+        <>
+          {gone}
+          <p className={s.quiet}>
+            <Spinner size="small" />
+            {t.loading}
+          </p>
+        </>
       )
     case 'failed':
       return (
         <>
+          {gone}
           {alone}
           <div className={s.failed}>
             <Problem
@@ -754,6 +786,7 @@ function FileBody({
       if (view.lines.length === 0)
         return (
           <>
+            {gone}
             {alone}
             <p className={s.quiet}>{file.from ? t.moved(file.from) : t.empty}</p>
           </>
@@ -761,6 +794,7 @@ function FileBody({
       if (page !== null)
         return (
           <>
+            {gone}
             {alone}
             <Markdown
               source={page.source}
@@ -777,20 +811,7 @@ function FileBody({
         )
       return (
         <>
-          {gone.length > 0 && (
-            <div className={s.apart}>
-              <p className={s.note}>{t.commentsGone}</p>
-              {gone.map((one) => (
-                <LineCommentNote
-                  key={one.id}
-                  comment={one}
-                  current={one.id === comment}
-                  text={t.comments}
-                  {...(one.state === 'draft' && onRemoveComment !== undefined ? { onRemove: () => onRemoveComment(one.id) } : {})}
-                />
-              ))}
-            </div>
-          )}
+          {gone}
           <Diff
             lines={view.lines}
             label={file.path}
@@ -805,4 +826,37 @@ function FileBody({
         </>
       )
   }
+}
+
+function EarlierLineNotes({
+  comments,
+  current,
+  text,
+  onRemove,
+  showPath,
+  caption,
+}: {
+  comments: readonly ViewedComment[]
+  current: string | null
+  text: Partial<LineCommentsText>
+  onRemove: ((id: string) => void) | undefined
+  showPath?: boolean
+  caption?: string
+}) {
+  if (comments.length === 0) return null
+  return (
+    <div className={s.apart}>
+      {caption !== undefined && <p className={s.note}>{caption}</p>}
+      {comments.map((one) => (
+        <LineCommentNote
+          key={one.id}
+          comment={one}
+          current={one.id === current}
+          text={text}
+          {...(showPath === true ? { showPath: true } : {})}
+          {...(one.state === 'draft' && onRemove !== undefined ? { onRemove: () => onRemove(one.id) } : {})}
+        />
+      ))}
+    </div>
+  )
 }
