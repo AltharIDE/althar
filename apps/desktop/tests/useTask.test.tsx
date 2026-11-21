@@ -153,8 +153,23 @@ describe('what a task hears', () => {
     const { client, emit, result, unmount } = reading({ session: null, accepting: 'now' })
     vi.mocked(client.startSession).mockImplementation(() => never<string>())
     await waitFor(() => expect(result.current.snapshot).not.toBeNull())
-    act(() => void result.current.send('No lead', { agentId: 'codex', model: null, effort: null }))
+    const onAccepted = vi.fn()
+    act(
+      () =>
+        void result.current.send(
+          'No lead',
+          { agentId: 'codex', model: null, effort: null },
+          {
+            sent: [],
+            pictures: [],
+            files: [],
+            attached: [],
+            onAccepted,
+          },
+        ),
+    )
     await waitFor(() => expect(client.startSession).toHaveBeenCalled())
+    expect(onAccepted).toHaveBeenCalledTimes(1)
     const stored = { ...items.you('No lead', { state: 'queued', interrupting: false }), id: 'not-started-task', sequence: 1 }
     vi.mocked(client.getThreadItem).mockResolvedValue(stored)
     act(() => emit(changed('thread_item', stored.id, 'th1', 'p1')))
