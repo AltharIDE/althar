@@ -1747,3 +1747,7 @@ CREATE INDEX thread_items_home_events ON thread_items (created_at DESC, sequence
 CREATE INDEX thread_items_by_thread_date ON thread_items (thread_id, created_at DESC);
 
 CREATE INDEX thread_items_setups_by_thread ON thread_items (thread_id, sequence DESC) WHERE kind = 'setup';
+
+CREATE INDEX tasks_settled_by_project ON tasks (project_id, settled_at DESC, id DESC) WHERE state IN ('done', 'abandoned');
+
+CREATE INDEX thread_items_search_passages ON thread_items (id DESC) WHERE kind IN ('user_message', 'agent_message', 'step_result', 'arrival');

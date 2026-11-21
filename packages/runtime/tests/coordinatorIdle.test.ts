@@ -383,6 +383,8 @@ it.effect.each(['process', 'process-temp'])('closes a %s coordinator and its unr
   const alive = (pid: number) => {
     try {
       process.kill(pid, 0)
+      // An exited Linux child can remain as a zombie until its new parent reaps it.
+      if (process.platform === 'linux' && readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(-1)?.startsWith('Z')) return false
       return true
     } catch {
       return false

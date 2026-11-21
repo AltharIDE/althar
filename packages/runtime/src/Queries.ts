@@ -2,7 +2,7 @@ import { standInOf } from './standIn'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
-import { readHomeCards } from './readHomeCards'
+import { homeTaskRows, readHomeCards } from './readHomeCards'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
@@ -3705,24 +3705,19 @@ export class Queries extends Context.Service<
        */
       const homeTasks = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
-          SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
-          WHERE p.archived_at IS NULL AND (k.state IN ('open', 'draft') OR k.id IN (
-            -- A merged task the board still shows can be ready again, with commits after its pull request in none yet.
-            SELECT id FROM (
-              SELECT id, state, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY settled_at DESC, id DESC) AS place
-              FROM tasks WHERE state IN ('done', 'abandoned'))
-            WHERE state = 'done' AND place <= ${SETTLED_SHOWN}))
-          ORDER BY k.created_at, k.id`
-        // A large cold home works out many cards. Give other calls a turn between cards instead of keeping the
-        // runtime's scheduler busy for the entire read; the order and the card's own consistency rules stay the same.
+        const sessions = yield* Sessions
+        const changes = yield* Changes
+        const projects = yield* sql<{ id: string }>`SELECT id FROM projects WHERE archived_at IS NULL`
+        const groups = yield* readHomeCards(projects, AT_ONCE, ({ id }) => homeTaskRows(id, instance.deviceId, SETTLED_SHOWN))
+        const active = new Set((yield* sessions.onTasks).map((one) => one.taskId))
+        const rows = groups.flat().sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+        // Give other calls a turn between cards. Keep the original history window for pruning worktree facts.
         const tasks = yield* readHomeCards(rows, AT_ONCE, (row) =>
-          Effect.map(onBoard(row), (read) =>
-            read.flatMap((task) =>
-              // A task kept for later waits on its board, not here.
-              onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
-            ),
-          ),
+          Effect.gen(function* () {
+            if (!row.candidate && !active.has(row.id) && !(yield* changes.openingNext(row.id))) return []
+            const read = yield* onBoard(row)
+            return read.flatMap((task) => (onHome(task) ? [{ ...task, projectId: row.projectId }] : []))
+          }),
         )
         return { open: new Set(rows.map((row) => row.id)), tasks: tasks.flat() }
       })

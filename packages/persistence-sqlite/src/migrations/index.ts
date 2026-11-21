@@ -100,6 +100,7 @@ import { statements as sessionsByAgent } from './0095_sessions_by_agent'
 import { statements as homeEvents } from './0096_home_events'
 import { statements as threadItemDates } from './0097_thread_item_dates'
 import { statements as setupsByThread } from './0098_setups_by_thread'
+import { statements as boundedHomeSearch } from './0099_bounded_home_search'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -217,6 +218,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0096_home_events', statements: homeEvents },
   { key: '0097_thread_item_dates', statements: threadItemDates },
   { key: '0098_setups_by_thread', statements: setupsByThread },
+  { key: '0099_bounded_home_search', statements: boundedHomeSearch },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

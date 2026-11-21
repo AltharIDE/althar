@@ -16,6 +16,9 @@ describe('search documents', () => {
       const plan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
         SELECT max(created_at) FROM thread_items WHERE thread_id = ${'thread'} AND created_at > ${'2026-01-01'}`
       assert.isTrue(plan.some((row) => row.detail.includes('thread_items_by_thread_date')))
+      const passages = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+        SELECT id FROM thread_items WHERE kind IN ('user_message', 'agent_message', 'step_result', 'arrival') ORDER BY id DESC LIMIT 5000`
+      assert.isTrue(passages.some((row) => row.detail.includes('thread_items_search_passages')))
     }).pipe(Effect.provide(runtime())),
   )
 

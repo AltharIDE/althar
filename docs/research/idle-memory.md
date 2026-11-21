@@ -95,3 +95,20 @@ The current store takes SQLite's exclusive locking mode for the lifetime of its 
 SQLite's shared cache is not a safe shortcut around that lock. In a temporary WAL database, Node 25.8.2 opened two `file:…?cache=shared` connections in the same process even while one held the exclusive lock. A worker then ran a 2,767 ms recursive query on one table; a simple read of a different table on the original thread waited 2,734 ms. The shared-cache mutex therefore still stalled the runtime, and the second connection could bypass the lock that distinguishes one runtime's ownership. This is a small controlled probe, not a packaged Electron or cross-platform measurement; it rules out this approach on the tested Node build, not other worker designs.
 
 The paired probe with normal locking and private caches answered the other-table read in under 1 ms while the worker's query took 3,066 ms. A separate normal-mode WAL read transaction also blocked another connection's exclusive acquisition while allowing the writer to commit. That suggests an ownership lease may be possible, but a reader held indefinitely prevents WAL checkpoints from advancing past its snapshot, and changing from today's exclusive lock to that lease without a gap or breaking older runtimes has not been established. In a handover experiment, a shared-cache anchor retained the exclusive lock and blocked the writer on its table. These probes are not an implementation or evidence of safe profile ownership.
+
+### Follow-up read results
+
+Home now seeks each active project's latest 30 settled tasks by index. It checks whether a task can return to Home before building its card. A live session, unread reply, call, review or work to ship still goes through the same card logic as the board. The lookup yields between projects and card reads. Search seeks through an index of recent public passages, opening at most 128 passage records between yields, including where the latest passages are hidden or empty. Both paths keep using the profile's exclusively held connection.
+
+Building and committing both new indexes on a copy of the populated fixture took 2.3 seconds. Together they used 14.9 MiB on disk, nearly all for the passage index.
+
+| First concurrent RPC calls, ms | Prior branch, warm | Follow-up, warm | Prior branch, concurrent writer | Follow-up, concurrent writer |
+| --- | ---: | ---: | ---: | ---: |
+| `GetHome` | 362–572 | 33–76 | 405–469 | 32–45 |
+| `GetLoad` | 51–97 | 24–32 | 60–103 | 20–39 |
+| `GetSearchDocuments` | 17–36 | 27–70 | 20–29 | 29–41 |
+| `GetSettings` | 0.5–3.0 | 0.7–4.6 | 20–28 | 4–10 |
+
+Each range comes from three fresh runtimes per variant on the same warmed 1,200-task, 336,000-item fixture, alternating versions. The calls ran through the runtime's RPC client and server over a Node message port with fake agents. Load had a 100 ms meter seed. The disk trial added one worker overwriting a 32 MiB file in 2 MiB chunks, syncing each write at 16 ms intervals. These trials cover warm caches and one competing writer. The old packaged-app stalls and cold or saturated storage were outside this comparison.
+
+The prior branch in this table already has the first search pagination and date-index changes. It was faster than the original search service timings of 105–205 ms for the first page. In two further service comparisons with both versions using the latest indexes, all 6,224 documents matched in order. One complete traversal took 122–130 ms in the prior version and 85–190 ms with the yields and smaller batches. Finder still collects those pages in the renderer. Each SQLite statement runs synchronously, so an individual slow disk read can still pause the runtime. Batching limits the amount of history that earlier reads would have processed in one statement.
