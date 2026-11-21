@@ -62,6 +62,17 @@ describe("a project's ink", () => {
 })
 
 describe('the home', () => {
+  it.live('finds a task setup by thread without scanning the transcript', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+        SELECT json_extract(i.content, '$.kept') FROM thread_items i
+        WHERE i.thread_id = ${'thread'} AND i.kind = 'setup' AND json_extract(i.content, '$.ended') IS NULL
+        ORDER BY i.sequence DESC LIMIT 1`
+      assert.isTrue(plan.some((row) => row.detail.includes('thread_items_setups_by_thread')))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('shows across projects what runs, what waits on the person, and what the loop did since they last left it', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
