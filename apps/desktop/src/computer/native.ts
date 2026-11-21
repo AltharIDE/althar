@@ -21,6 +21,9 @@ const MAX_IMAGE_DIMENSION = 1700
 const MAX_OBSERVATION_AGE = 60_000
 const BUTTONS = { left: ClickButton.Left, middle: ClickButton.Middle, right: ClickButton.Right } as const
 
+/** Only validation and guidance authored here may be returned to the task as an error. */
+export class ComputerProblem extends Error {}
+
 const windowOf = (one: WindowInfo): NativeWindow | null =>
   one.pid === undefined || one.pid <= 0 || one.pid === process.ppid || one.title.trim() === ''
     ? null
@@ -49,12 +52,12 @@ export const nativeComputer = () => {
 
   const current = async (target: NativeTarget) => {
     if (target === 'desktop') return null
-    if (target.pid === process.ppid) throw new Error('The task cannot control Althar’s own window.')
+    if (target.pid === process.ppid) throw new ComputerProblem('The task cannot control Althar’s own window.')
     const { windows } = await driver.listWindows({ pid: target.pid })
     const window = windows.find(
       (one) => String(one.windowId) === target.handle && one.pid === target.pid && one.appName.slice(0, 160) === target.app,
     )
-    if (window === undefined) throw new Error('That window closed or changed ownership. Ask the person to select it again.')
+    if (window === undefined) throw new ComputerProblem('That window closed or changed ownership. Ask the person to select it again.')
     return window
   }
 
@@ -74,7 +77,7 @@ export const nativeComputer = () => {
     if (target === 'desktop') {
       const result = await driver.getDesktopState({ maxImageDimension: MAX_IMAGE_DIMENSION })
       const picture = pictureOf(result.images[0])
-      if (result.isError || picture === undefined) throw new Error('Althar could not capture the primary display.')
+      if (result.isError || picture === undefined) throw new ComputerProblem('Althar could not capture the primary display.')
       const { width, height } = await sharp(Buffer.from(picture.data, 'base64')).metadata()
       const frame = { width, height }
       observations.set(target, {
@@ -87,7 +90,7 @@ export const nativeComputer = () => {
       return { kind: 'observed', observation: id, answer: { text: `Observation ${id} of the primary display.` }, picture, frame }
     }
     const live = await current(target)
-    if (live === null) throw new Error('That window is unavailable.')
+    if (live === null) throw new ComputerProblem('That window is unavailable.')
     const state = await driver.getWindowState({
       pid: target.pid,
       windowId: BigInt(target.handle),
@@ -112,7 +115,7 @@ export const nativeComputer = () => {
       )
     }
     for (const one of state.observations ?? []) lines.push(`${one.role} ${JSON.stringify((one.label ?? one.value ?? '').slice(0, 300))}`)
-    if (state.degradedReason === 'screen_locked') throw new Error('The screen locked. Ask the person to unlock it.')
+    if (state.degradedReason === 'screen_locked') throw new ComputerProblem('The screen locked. Ask the person to unlock it.')
     const picture =
       state.screenshotFrameValid === false || state.elements?.some((one) => one.isPassword) === true
         ? undefined
@@ -139,12 +142,12 @@ export const nativeComputer = () => {
   }
 
   const run = async (call: NativeCall): Promise<NativeResult> => {
-    if (!driver.isAvailable()) throw new Error('The native computer-use driver is unavailable in this graphical session.')
+    if (!driver.isAvailable()) throw new ComputerProblem('The native computer-use driver is unavailable in this graphical session.')
     if (call.op === 'inventory') return { kind: 'inventory', value: await inventory() }
     if (call.op === 'observe') return observe(call.target, call.screenshot)
     if (call.op === 'launch') {
       const result = await driver.callTool('launch_app', JSON.stringify({ launch_path: call.app.path }))
-      if (result.isError) throw new Error('The approved app did not open.')
+      if (result.isError) throw new ComputerProblem('The approved app did not open.')
       const info = JSON.parse(result.structuredJson ?? '{}') as { readonly pid?: unknown }
       if (typeof info.pid !== 'number' || !Number.isSafeInteger(info.pid) || info.pid < 1) return { kind: 'launched', windows: [] }
       const listed = await driver.listWindows({ pid: info.pid })
@@ -161,15 +164,15 @@ export const nativeComputer = () => {
       Date.now() - seen.at > MAX_OBSERVATION_AGE ||
       (live !== null && (seen.bounds === null || !sameBounds(live.bounds, seen.bounds)))
     )
-      throw new Error('That observation is stale. Observe the target again before sending input.')
+      throw new ComputerProblem('That observation is stale. Observe the target again before sending input.')
     const position = (point: { readonly element: string } | { readonly x: number; readonly y: number }) => {
       if ('element' in point) {
         const token = seen.elements.get(point.element)
-        if (token === undefined) throw new Error('That element is not in the latest observation.')
+        if (token === undefined) throw new ComputerProblem('That element is not in the latest observation.')
         return { element_token: token }
       }
       if (seen.pixels === null || point.x >= seen.pixels.width || point.y >= seen.pixels.height)
-        throw new Error('That point is outside the latest screenshot. Observe with a screenshot first.')
+        throw new ComputerProblem('That point is outside the latest screenshot. Observe with a screenshot first.')
       return point
     }
     const native =
@@ -177,7 +180,7 @@ export const nativeComputer = () => {
         ? ({ kind: 'desktop', display_id: 'primary' } as const)
         : ({ kind: 'window', pid: target.pid, window_id: Number(target.handle) } as const)
     if (target !== 'desktop' && !Number.isSafeInteger(native.kind === 'window' ? native.window_id : 0))
-      throw new Error('That window cannot accept this action.')
+      throw new ComputerProblem('That window cannot accept this action.')
     const delivery_mode = foreground ? 'foreground' : 'background'
     const common = { target: native, delivery_mode }
     // Every action spends its observation, including an action whose effect is uncertain.
@@ -225,10 +228,7 @@ export const nativeComputer = () => {
         }
       }
     })()
-    if (result.isError)
-      throw new Error(
-        `The driver could not confirm that action${result.errorCode === undefined ? '' : ` (${result.errorCode})`}. Observe the app before retrying.`,
-      )
+    if (result.isError) throw new ComputerProblem('The driver could not confirm that action. Observe the app before retrying.')
     return { kind: 'acted', answer: { text: 'Input was attempted. Observe and verify the intended outcome.' } }
   }
 

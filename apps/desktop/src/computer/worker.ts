@@ -1,4 +1,4 @@
-import { nativeComputer } from './native'
+import { ComputerProblem, nativeComputer } from './native'
 import type { NativeCall, NativeReply } from './protocol'
 
 const port = process.parentPort
@@ -17,8 +17,8 @@ port.on('message', ({ data }: { data: { readonly id: string; readonly call: Nati
       (error: unknown) => {
         // Native library errors can carry screen content. Only send messages from our own validation and controlled driver branches.
         const message =
-          error instanceof Error && error.name === 'Error'
-            ? error.message.slice(0, 300)
+          error instanceof ComputerProblem
+            ? error.message
             : 'The native driver could not complete that call. Check the app before retrying.'
         port.postMessage({ id, error: message } satisfies NativeReply)
       },
