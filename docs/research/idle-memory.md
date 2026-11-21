@@ -45,6 +45,8 @@ Concurrent OpenCode reads now discard an older classification or Go limits answe
 
 On the same M4, standalone OpenCode v2.3.0 commands were also run directly with a new temporary home and no sign-ins. Sampling the commands and their descendants every 50 ms found a 328.3 MiB peak for `auth list` (eight samples, 0.49 s) and 181.8 MiB for `api … experimental.usage.limits` (five samples, 0.29 s); both exited 0. These are individual command peaks, not measurements of the changed app's poll, and peaks between samples may be missed. Go's limit command therefore remains a substantial transient cost when it is polled.
 
+An isolated runtime replay advanced both versions to their first five-minute timer tick, with a signed-in fake account and the actual OpenCode v2.3.0 listing command wired to the credential read. The command used a new temporary home with no sign-ins. The prior timer launched it once and sampled a 267.2 MiB process-tree peak over 52 samples. The new timer launched it zero times. This measures the real subprocess triggered by the runtime's timer. The release bundle and the person's signed-in account were outside the probe.
+
 ### A coordinator after use
 
 A live project's coordinator tree held 216.8 MiB across three processes 38 minutes after its last logged turn and 215.8 MiB at 62 minutes. The cold profiles did no turns and never started a coordinator. This measures one warm coordinator on the live machine, where other tasks were present. Its footprint was nearly flat across the samples.
@@ -53,7 +55,11 @@ A project's coordinator is always available. Starting its provider process is de
 
 The follow-up retires a coordinator after 30 minutes without work, checked at most a minute later. It keeps active turns, open tools, background commands and queued work alive. Tests cover waking on news with the previous account and conversation, an input accepted while the old session is closing, and work that prevents retirement. In two fake process launch modes, a provider and an unreported child were both alive before retirement and both gone after it. A separate in-process native-agent test closes its session with a real fake MCP server and child; both processes exit. Registered process adapters share the owned-process connection path, and the native adapter closes its session's MCP tools. These are process-count checks on macOS, not an after-retirement measurement of the real 216 MiB coordinator above; individual signed-in adapters and other platforms have not all been measured here.
 
-If the runtime exits after an idle session has completed but before its queued input wakes it, startup recovery now resumes the input on its saved account. Restart tests snapshot both that interval and a close already in progress, after its idle stop intent and a new input were recorded; both check delivery after reopening the profile.
+If the runtime exits after an idle session has completed but before its queued input wakes it, startup recovery resumes the input. Restart tests snapshot both that interval and a close already in progress after its idle stop intent and a new input were recorded. Both check delivery after reopening the profile.
+
+The sleeping account is a preference across window starts, news and recovery. The project’s account restrictions, sign-in and rotation limits still apply. A failed background wake leaves a notice in the conversation and keeps earlier input queued for the next successful start.
+
+Physical-footprint samples of the two test provider trees before and after retirement were 123.5 → 0 MiB and 121.0 → 0 MiB. Each included the adapter and its unreported child. These are actual test subprocesses under the runtime's retirement policy with an accelerated clock. The observed 216 MiB live coordinator above was a different provider tree. Its release-bundle footprint after retirement remains unmeasured.
 
 ```mermaid
 flowchart LR
@@ -111,4 +117,15 @@ Building and committing both new indexes on a copy of the populated fixture took
 
 Each range comes from three fresh runtimes per variant on the same warmed 1,200-task, 336,000-item fixture, alternating versions. The calls ran through the runtime's RPC client and server over a Node message port with fake agents. Load had a 100 ms meter seed. The disk trial added one worker overwriting a 32 MiB file in 2 MiB chunks, syncing each write at 16 ms intervals. These trials cover warm caches and one competing writer. The old packaged-app stalls and cold or saturated storage were outside this comparison.
 
-The prior branch in this table already has the first search pagination and date-index changes. It was faster than the original search service timings of 105–205 ms for the first page. In two further service comparisons with both versions using the latest indexes, all 6,224 documents matched in order. One complete traversal took 122–130 ms in the prior version and 85–190 ms with the yields and smaller batches. Finder still collects those pages in the renderer. Each SQLite statement runs synchronously, so an individual slow disk read can still pause the runtime. Batching limits the amount of history that earlier reads would have processed in one statement.
+The prior branch in this table already has the first search pagination and date-index changes. It was faster than the original search service timings of 105–205 ms for the first page. In two service comparisons with both versions using the latest indexes, all 6,224 documents matched in order. One complete traversal took 122–130 ms in the prior version and 85–190 ms with the first implementation of the smaller batches.
+
+The final implementation seeks and formats a single passage batch in one statement. A full-catalog RPC replay compared it with the original main query at `8508a81cc` on copies of the same populated fixture. The main-query copy omitted the follow-up search indexes. Three alternating runs per version covered all 32 pages.
+
+| Full-catalog RPC replay | Main query | Final query |
+| --- | ---: | ---: |
+| Slowest page per run, warm | 253–302 ms | 33–61 ms |
+| Full traversal, warm | 3.50–3.71 s | 0.35–0.43 s |
+| Slowest page per run, concurrent writer | 578–891 ms | 83–149 ms |
+| Full traversal, concurrent writer | 4.98–8.06 s | 0.59–0.63 s |
+
+The warm traversals returned identical hashes for all 6,224 documents in order. The writer ran as above on the shared Mac. The high end reproduces the scale of the earlier slowdown on the original query path, with timing from the runtime RPC client through decoding. Finder still collects the full catalog in the renderer. Query-filtered runtime search and the renderer's end-to-end timings remain open. An individual synchronous SQLite statement can still pause the runtime.
