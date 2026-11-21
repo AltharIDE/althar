@@ -1,0 +1,537 @@
+/* An artifact as a canvas of boards: the ground, the boards on it, what is drawn over them, its head and its tool bar. */
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--n-2);
+  isolation: isolate;
+}
+.ground {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  /* the ground's dots move with it, so it reads as a surface, not a backdrop */
+  background-image: radial-gradient(circle at 1px 1px, var(--line-2) 1px, transparent 1.2px);
+}
+.world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.sheet {
+  position: absolute;
+  background: #fff;
+  /* a hairline and a soft lift, as the ground's zoom draws them: never thicker than a pixel on screen */
+  box-shadow:
+    0 0 0 calc(1px / var(--z)) var(--line-2),
+    0 calc(2px / var(--z)) calc(10px / var(--z)) -2px var(--shadow);
+}
+.sheet[hidden] {
+  display: none;
+}
+.sheet[data-fresh] {
+  box-shadow:
+    0 0 0 calc(2px / var(--z)) var(--signal-line),
+    0 calc(2px / var(--z)) calc(10px / var(--z)) -2px var(--shadow);
+}
+.sheet[data-picked] {
+  box-shadow:
+    0 0 0 calc(2px / var(--z)) var(--signal),
+    0 calc(2px / var(--z)) calc(10px / var(--z)) -2px var(--shadow);
+}
+.frame {
+  display: block;
+  height: 100%;
+  border: 0;
+  background: #fff;
+  pointer-events: none;
+}
+.drawn {
+  padding: 40px 48px 48px;
+  background: var(--paper);
+  color: var(--t-1);
+}
+
+/* the chart Althar draws */
+.chart {
+  margin: 0;
+}
+.chart figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+.chart figcaption strong {
+  font-size: 22px;
+  font-weight: 600;
+}
+.chart figcaption span {
+  font-size: 14px;
+  color: var(--t-3);
+}
+.chart svg {
+  display: block;
+  width: 100%;
+}
+.chartRule {
+  stroke: var(--line);
+}
+.chartTick {
+  fill: var(--t-3);
+  font-size: 13px;
+}
+.chartValue {
+  fill: var(--t-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+.chartBar {
+  fill: var(--n-5);
+}
+.chartBarNow {
+  fill: var(--signal);
+}
+
+/* what takes the pointer over the boards */
+.glass {
+  position: absolute;
+  inset: 0;
+  cursor: default;
+}
+.canvas[data-tool='move'] .glass {
+  cursor: grab;
+}
+.canvas[data-tool='move'] .glass:active {
+  cursor: grabbing;
+}
+.canvas[data-tool='mark'] .glass {
+  cursor: crosshair;
+}
+.canvas[data-tool='comment'] .glass {
+  cursor: cell;
+}
+
+/* drawn over the boards, in the canvas's own pixels */
+.over {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.over > * {
+  pointer-events: auto;
+}
+
+.sectionHead {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.sectionTitle {
+  overflow: hidden;
+  font: 600 15px/1.25 var(--font-display, var(--font));
+  color: var(--t-1);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.sectionTitle:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sectionFacts {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* a board's label: its name, its size, what changed; its actions at its end on hover */
+.label {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.labelName {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 550;
+  color: var(--t-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.label[data-picked] .labelName {
+  color: var(--signal-ink);
+}
+.labelName:hover {
+  color: var(--t-1);
+}
+.labelSize {
+  flex: none;
+  padding: 1px 5px;
+  margin-left: -3px;
+  border-radius: var(--r-sm);
+  color: var(--t-3);
+}
+.labelSize:hover {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+.labelVersion {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  color: var(--signal-ink);
+  font-weight: 500;
+  user-select: none;
+}
+.labelVersion:hover {
+  background: var(--signal-paper);
+}
+.labelVersion:active {
+  background: var(--signal-fill);
+  color: var(--signal-on-ink);
+}
+.labelGap {
+  flex: 1;
+}
+/* its actions sit over its end, so a name has the label's room until it is hovered */
+.labelEnd {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 8px;
+  background: linear-gradient(to right, transparent, var(--n-2) 8px);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.label[data-narrow] .labelSize {
+  display: none;
+}
+.label:hover .labelEnd,
+.label:focus-within .labelEnd,
+.labelEnd:has([data-keep]) {
+  opacity: 1;
+}
+.labelIcon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  color: var(--t-3);
+}
+.labelIcon:hover {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+.tried {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: -1px;
+  display: none;
+}
+/* a take says what it tried under its name, over the board */
+.label:has(.tried) {
+  top: auto;
+  transform: translateY(-16px);
+}
+.label:has(.tried) .tried {
+  display: block;
+  overflow: hidden;
+  padding-top: 0;
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* a part, pointed at */
+.hover,
+.pointed {
+  position: absolute;
+  border-radius: 3px;
+  pointer-events: none !important;
+}
+.hover {
+  box-shadow:
+    0 0 0 1.5px var(--signal),
+    0 0 0 4px color-mix(in srgb, var(--signal) 14%, transparent);
+}
+.hoverName {
+  position: absolute;
+  left: -1.5px;
+  bottom: calc(100% + 4px);
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  background: var(--signal-fill);
+  color: var(--signal-on-ink);
+  font-size: 11px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.pointed {
+  box-shadow:
+    0 0 0 2px var(--signal),
+    0 0 0 6px color-mix(in srgb, var(--signal) 18%, transparent);
+}
+.stroke {
+  position: absolute;
+  inset: 0;
+  pointer-events: none !important;
+}
+.stroke path {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* the lead at work on a part: it shimmers where the change will land */
+.working {
+  position: absolute;
+  border-radius: 4px;
+  pointer-events: none !important;
+  box-shadow: 0 0 0 2px var(--signal-line);
+  background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--signal) 16%, transparent) 50%, transparent 80%) 0 0 / 300% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .working {
+    animation: none;
+    background: color-mix(in srgb, var(--signal) 10%, transparent);
+  }
+}
+.workingWord {
+  position: absolute;
+  right: -2px;
+  bottom: calc(100% + 4px);
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
+  background: var(--float);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  color: var(--t-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* the box on what was pointed at */
+.boxPlace {
+  position: absolute;
+  z-index: 2;
+  width: 360px;
+}
+
+/* the canvas's head: floating over the ground, as quiet chips */
+.headStart,
+.headEnd {
+  position: absolute;
+  top: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.headStart {
+  left: 12px;
+}
+.headEnd {
+  right: 12px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  font-size: 12px;
+  color: var(--t-2);
+}
+.chip:hover,
+.chip[data-state='open'] {
+  color: var(--t-1);
+  background: var(--paper);
+}
+.chipWords {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.zoomWord {
+  min-width: 3.2ch;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.views {
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  background: var(--n-1);
+}
+.headEnd > [role='radiogroup'] {
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  background: var(--n-1);
+}
+
+/* one board at a time: which, and a step either way */
+.stepper {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 4px;
+  transform: translateX(-50%);
+  border-radius: 8px;
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+  font-size: 12px;
+}
+.step {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--t-2);
+}
+.step:hover {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+.stepName {
+  max-width: 240px;
+  overflow: hidden;
+  font-weight: 550;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stepCount {
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+
+/* the tool bar along the bottom */
+.tools {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  transform: translateX(-50%);
+  border-radius: 12px;
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-pop);
+}
+.tool {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--t-2);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.tool:hover {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+.tool[aria-pressed='true'] {
+  background: var(--signal-paper);
+  color: var(--signal-ink);
+}
+.toolsRule {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--line-2);
+}
+.ask {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+}
+
+/* an artifact's canvas, filling what holds it; focus lands here so it has Escape first */
+.host {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  outline: none;
+}
+/* Keep, on a take's label */
+.keep {
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  background: var(--signal-fill);
+  color: var(--signal-on-ink);
+  font-size: 11.5px;
+  font-weight: 550;
+}
+.keep:hover {
+  filter: brightness(1.08);
+}
+
+/* a name for assistive technology only */
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

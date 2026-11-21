@@ -1,0 +1,424 @@
+/* The box on what was pointed at, Share, and a picture of an artifact: drawn in the kit's tokens, light and dark. */
+
+/* ——— the box on a part: say what you think ——— */
+.say {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 8px;
+  border-radius: 12px;
+  background: var(--float);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-pop);
+  font-size: 13px;
+  color: var(--t-1);
+}
+.sayHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-left: 2px;
+}
+.sayOn {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
+  background: var(--signal-paper);
+  color: var(--signal-ink);
+  font-size: 12px;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sayWhere {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sayField {
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 4px 2px;
+  border: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--t-1);
+  font: inherit;
+  line-height: 1.45;
+}
+.sayField::placeholder {
+  color: var(--t-4);
+}
+.starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+}
+.starter {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 12px;
+  box-shadow: 0 0 0 1px var(--line-2);
+  font-size: 12px;
+  color: var(--t-2);
+}
+.starter:hover {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+.sayFoot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.sayTo {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 2px;
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ——— Share ——— */
+.shareChip,
+.shareHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.shareChip {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift);
+}
+.shareHead {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+}
+.shareChip:hover,
+.shareHead:hover,
+.shareChip[data-state='open'],
+.shareHead[data-state='open'] {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+.share {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+}
+.shareTitle {
+  font-weight: 600;
+  color: var(--t-1);
+}
+.shareLink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 4px 4px 10px;
+  border-radius: 8px;
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.shareUrl {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font: 12px var(--mono);
+  color: var(--t-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shareLine {
+  margin: -4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.people {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+.people li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+.face {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--mark-clay);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.face[data-ink='teal'] {
+  background: var(--mark-teal);
+}
+.face[data-ink='ochre'] {
+  background: var(--mark-ochre);
+}
+.face[data-ink='plum'] {
+  background: var(--mark-plum);
+}
+.face[data-ink='indigo'] {
+  background: var(--mark-indigo);
+}
+.face[data-ink='moss'] {
+  background: var(--mark-moss);
+}
+.personName {
+  color: var(--t-1);
+  font-weight: 500;
+}
+.personRole {
+  flex: 1;
+  color: var(--t-3);
+  font-size: 12px;
+}
+.personCan {
+  color: var(--t-3);
+  font-size: 12px;
+}
+.addPerson {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  outline: none;
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--t-1);
+  font: inherit;
+  font-size: 12.5px;
+}
+.addPerson:focus {
+  box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+.addPerson::placeholder {
+  color: var(--t-4);
+}
+.shareRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.shareRowWords {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--t-1);
+}
+.shareRowPath {
+  font: 11px var(--mono);
+  color: var(--t-3);
+}
+.downloads {
+  display: flex;
+  gap: 4px;
+}
+.downloads button {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  box-shadow: 0 0 0 1px var(--line-2);
+  font-size: 12px;
+  color: var(--t-2);
+}
+.downloads button:hover {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+
+/* ——— a picture of an artifact: its first board, live, from the top ——— */
+.thumb {
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  pointer-events: none;
+}
+.thumb[data-phone] {
+  background: var(--n-2);
+}
+.thumbWorld {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  transform-origin: 0 0;
+}
+
+/* ——— Keep: where an artifact lives ——— */
+.keepHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--t-2);
+}
+.keepHead:hover,
+.keepHead[data-state='open'] {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+.keepPath {
+  min-width: 0;
+  overflow: hidden;
+  font: 11.5px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.keepBusy {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+  animation: keepBusy 0.9s var(--ease) infinite alternate;
+}
+@keyframes keepBusy {
+  from {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .keepBusy {
+    animation: none;
+  }
+}
+.keepBehind {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--signal-paper);
+  color: var(--signal-ink);
+  font-size: 11px;
+}
+.keptNow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.keptNow code {
+  font: 11.5px var(--mono);
+  color: var(--t-1);
+}
+.keepField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.keepLabel {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.keepInput {
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font: 12px var(--mono);
+  color: var(--t-1);
+}
+.keepInput:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 1px var(--signal),
+    0 0 0 3px var(--signal-paper);
+}
+.keepFiles {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: -4px 0 0;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--line-2);
+  list-style: none;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.keepFiles li {
+  display: flex;
+  gap: 8px;
+}
+.keepFiles code {
+  flex: none;
+  width: 84px;
+  font: 11px var(--mono);
+  color: var(--t-2);
+}
+.keepAside {
+  margin: -4px 0 0;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.keepEnd {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* where an artifact is in git, in a list */
+.where {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--t-3);
+}
+.wherePath {
+  min-width: 0;
+  overflow: hidden;
+  font: 11px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.keepSub {
+  font-size: 11.5px;
+  color: var(--t-3);
+}

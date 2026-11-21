@@ -1,0 +1,128 @@
+// Shoots each direction's moments, at 1×, the page whole (the app's window over the lab's bar), into
+// lab/artifact-boards/shots, with the lab running on 6196: node lab/artifact-boards/shoot.mjs [name…]. Some shots act
+// first (a change sent and landed, a take kept). Chromium can't start in an agent's sandbox on a Mac; run it outside.
+import { mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { chromium } from '@playwright/test'
+
+const out = join(import.meta.dirname, 'shots')
+mkdirSync(out, { recursive: true })
+const LAB = 'http://localhost:6196'
+const size = { width: 1440, height: 860 }
+
+/** Every copy of Kiln drawn in the page has drawn its screen. */
+const settled = async (page) => {
+  await page.waitForLoadState('networkidle')
+  await page.waitForTimeout(1200)
+  for (const frame of page.frames()) {
+    if (frame === page.mainFrame()) continue
+    await frame.waitForSelector('#root > div', { timeout: 15_000 }).catch(() => undefined)
+  }
+  await page.waitForTimeout(900)
+}
+
+const send = async (page, words) => {
+  await page.getByRole('textbox', { name: 'What you think' }).fill(words)
+  await page.getByRole('button', { name: 'Send', exact: true }).click()
+}
+
+const shots = [
+  ['a1-every-board', 'd=a&m=0'],
+  ['a2-point', 'd=a&m=1'],
+  [
+    'a2-landed',
+    'd=a&m=1',
+    async (page) => {
+      await send(page, 'They still look like a form. Make them feel like presents.')
+      await page.waitForTimeout(3200)
+    },
+  ],
+  [
+    'a2-takes',
+    'd=a&m=1',
+    async (page) => {
+      await page.getByRole('button', { name: 'Show me a few' }).click()
+      await page.waitForTimeout(3200)
+    },
+  ],
+  [
+    'a2-kept',
+    'd=a&m=1',
+    async (page) => {
+      await page.getByRole('button', { name: 'Show me a few' }).click()
+      await page.waitForTimeout(3200)
+      await page.getByRole('button', { name: 'Keep' }).nth(1).click()
+      await page.getByRole('radio', { name: 'One board at a time' }).click()
+    },
+  ],
+  ['a3-switch', 'd=a&m=2'],
+  ['a4-share', 'd=a&m=3'],
+  ['a5-keep', 'd=a&m=4'],
+  [
+    'a5-saved',
+    'd=a&m=4',
+    async (page) => {
+      await page.getByRole('button', { name: 'Save to kiln' }).click()
+      await page.waitForTimeout(2000)
+      await page
+        .getByRole('button', { name: /^Gift a class/ })
+        .first()
+        .click()
+      await page.waitForTimeout(600)
+    },
+  ],
+  ['a-one-board', 'd=a&m=0', async (page) => page.getByRole('radio', { name: 'One board at a time' }).click()],
+  [
+    'a-sizes',
+    'd=a&m=0',
+    async (page) => {
+      await page.getByRole('button', { name: 'Directions', exact: true }).click()
+      await page.getByRole('menuitemradio', { name: /every size/ }).click()
+    },
+  ],
+  ['b1-gallery', 'd=b&m=0'],
+  ['b1-in-git', 'd=b&m=0', async (page) => page.getByRole('radio', { name: 'In git' }).click()],
+  ['b-found', 'd=b&m=0', async (page) => page.getByRole('button', { name: /A class, by hand/ }).click()],
+  ['b2-room', 'd=b&m=1'],
+  ['b3-share', 'd=b&m=2'],
+  ['c1-wall', 'd=c&m=0'],
+  ['c2-picked', 'd=c&m=1'],
+  ['c3-share', 'd=c&m=2'],
+  ['d1-pins', 'd=d&m=0'],
+  ['d2-pin', 'd=d&m=1'],
+  [
+    'd-new-pin',
+    'd=d&m=0',
+    async (page) => {
+      // Point at the heading on the board, as a person would: a press where it is drawn.
+      const box = await page.frameLocator('iframe[title="A present first"]').locator('[data-part="title"]').boundingBox()
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+      await send(page, 'Too busy next to the card. Quieter.')
+      await page.waitForTimeout(3200)
+    },
+  ],
+  ['d3-shared', 'd=d&m=2'],
+  ['note-a', 'd=a&m=0&note=1'],
+  ['dark-a2', 'd=a&m=1&theme=dark'],
+  ['dark-a5', 'd=a&m=4&theme=dark'],
+  ['dark-b2', 'd=b&m=1&theme=dark'],
+  ['dark-d2', 'd=d&m=1&theme=dark'],
+]
+
+const only = process.argv.slice(2)
+const browser = await chromium.launch()
+for (const [name, query, act] of shots) {
+  if (only.length > 0 && !only.some((one) => name.startsWith(one))) continue
+  const page = await browser.newPage({ viewport: size, deviceScaleFactor: 1 })
+  page.on('pageerror', (error) => process.stdout.write(`  ${String(name)}: ${error.message}\n`))
+  await page.goto(`${LAB}/?${String(query)}`)
+  await settled(page)
+  if (act !== undefined) {
+    await act(page)
+    await settled(page)
+  }
+  await page.screenshot({ path: join(out, `${String(name)}.png`) })
+  process.stdout.write(`${String(name)}\n`)
+  await page.close()
+}
+await browser.close()

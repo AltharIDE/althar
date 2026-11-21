@@ -1,0 +1,23 @@
+/* The panel beside the conversation, holding an artifact's canvas. */
+.panel {
+  min-height: 0;
+}
+.version {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  font: 11.5px var(--mono);
+  color: var(--t-2);
+  font-variant-numeric: tabular-nums;
+}
+.version:hover,
+.version[data-state='open'] {
+  background: var(--hover-faint);
+  color: var(--t-1);
+}
+.pins {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
