@@ -59,6 +59,7 @@ jobs:
       e2e: ${{ steps.plan.outputs.e2e }}
       windows-e2e: ${{ steps.plan.outputs.windows-e2e }}
       native-homes: ${{ steps.native.outputs.homes }}
+      native-computer: ${{ steps.computer.outputs.run }}
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -95,6 +96,20 @@ jobs:
               ".github/{actions/electron/**,workflows/desktop.yml}", "{bun.lock,.bun-version,.node-version}"
             ].map((path) => new Bun.Glob(path))
             console.log(`homes=${process.env.DRAFT !== "true" && paths.some((path) => path === "*" || globs.some((glob) => glob.match(path)))}`)
+          ' >> "$GITHUB_OUTPUT"
+      - id: computer
+        run: |
+          bun -e '
+            const paths = (await Bun.file(`${process.env.RUNNER_TEMP}/changed`).text()).split("\n").filter(Boolean)
+            const globs = [
+              "apps/desktop/src/{computer,main/computer}/**", "apps/desktop/src/main/main.ts",
+              "apps/desktop/src/{preload,runtime}/**", "apps/desktop/src/renderer/features/task/ComputerUse*",
+              "apps/desktop/e2e/{computerUse.spec,support}.ts", "apps/desktop/e2e/fixtures/computer-app/**",
+              "apps/desktop/{package.json,vite.node.config.ts}", "packages/runtime/**",
+              "packages/provider-adapters/src/testing/FakeAgent.ts",
+              ".github/{actions/electron/**,workflows/desktop.yml}", "{bun.lock,.bun-version,.node-version}"
+            ].map((path) => new Bun.Glob(path))
+            console.log(`run=${paths.some((path) => path === "*" || globs.some((glob) => glob.match(path)))}`)
           ' >> "$GITHUB_OUTPUT"
 
   verify:
@@ -157,6 +172,54 @@ jobs:
       # Tests that failed, then passed on their retry, filed as issues (packages/testing).
       - if: always()
         uses: ./.github/actions/flaky
+
+  native-computer:
+    name: native computer use (${{ matrix.os }})
+    needs: plan
+    if: needs.plan.outputs.native-computer == 'true'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+    env:
+      ALTHAR_TEST_NATIVE_COMPUTER: portable
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - uses: ./.github/actions/electron
+      - if: runner.os == 'Linux'
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xfwm4 wmctrl xvfb xauth
+          dbus-run-session -- xvfb-run --auto-servernum -s '-screen 0 1440x1000x24' bash -e -c '
+            xfwm4 --compositor=on &
+            manager=$!
+            trap "kill $manager 2>/dev/null || true" EXIT
+            timeout 15 bash -c "until wmctrl -m >/dev/null 2>&1; do sleep 0.2; done"
+            bun run test:e2e e2e/computerUse.spec.ts --reporter=list
+          '
+      - if: runner.os == 'Windows'
+        run: bun run test:e2e e2e/computerUse.spec.ts --reporter=list
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: native-computer-${{ matrix.os }}
+          path: apps/desktop/test-results
+          retention-days: 7
 
   native-homes:
     name: native pairing (${{ matrix.os }})

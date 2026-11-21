@@ -122,8 +122,9 @@ The normal desktop end-to-end spec uses a stand-in driver. To exercise
 native input on a test desktop with the required OS permissions, run the
 same spec with `ALTHAR_TEST_NATIVE_COMPUTER=portable`. It launches two
 fixture apps, exports a note from one, opens it in the other, and checks
-the saved file and the screenshot through Althar. Use the platform's
-normal syntax for setting the environment variable.
+the saved file and the screenshot through Althar. Set
+`ALTHAR_E2E_FOREGROUND=1` on macOS as well. GitHub Actions runs the native
+spec on a dedicated X11 display and a Windows runner.
 
 ### The Flatpak
 

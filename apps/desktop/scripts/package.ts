@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { chmodSync, cpSync, existsSync, globSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join, relative } from 'node:path'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { build } from 'electron-builder'
@@ -94,7 +94,7 @@ const RELEASES = { provider: 'github', owner: 'AltharIDE', repo: 'althar' } as c
 
 /** The packages the runtime starts as processes, at the versions the app depends on. */
 const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
-/** What stays in node_modules: speech and image processing and the terminals' pseudo-terminals, with their platform binaries, and the updater. */
+/** What stays in node_modules, including packages with platform binaries. */
 const NATIVE = ['sherpa-onnx-node', 'electron-updater', 'sharp', 'node-pty', '@trycua/cua-driver']
 
 /** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
@@ -176,7 +176,10 @@ const pinnedFor = (arch: string) => ({
 const folderOf = (stage: string, from: string, name: string) => {
   const found = (createRequire(from).resolve.paths(name) ?? [])
     .map((folder) => join(folder, name))
-    .find((path) => existsSync(join(path, 'package.json')))
+    .find((path) => {
+      const inside = relative(stage, path)
+      return !isAbsolute(inside) && inside !== '..' && !inside.startsWith(`..${sep}`) && existsSync(join(path, 'package.json'))
+    })
   if (found === undefined) throw new Error(`The package has no ${name}, found from ${relative(stage, from)}`)
   return found
 }
@@ -186,7 +189,15 @@ const CLAUDE_ADAPTER = join('node_modules', '@agentclientprotocol', 'claude-agen
 
 rmSync(out, { recursive: true, force: true })
 
-/** The app, staged for a processor in out/stage/<arch>: the bundles, the pictures, and the adapters, speech engine and updater with that processor's binaries. */
+const assertPlatformBinaries = (app: string, arch: string) => {
+  for (const binary of binariesFor(process.platform, arch)) {
+    const parent = folderOf(app, join(app, 'package.json'), binary.parent)
+    const program = join(folderOf(app, join(parent, 'package.json'), binary.name), binary.file)
+    if (!existsSync(program)) throw new Error(`The package is missing ${relative(app, program)}`)
+  }
+}
+
+/** The app, staged for a processor in out/stage/<arch>, with that processor's binaries. */
 const stageFor = (arch: string) => {
   const stage = join(out, 'stage', arch)
   const pinned = pinnedFor(arch)
@@ -232,12 +243,7 @@ const stageFor = (arch: string) => {
     if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)
   }
 
-  // Codex, Claude Code and the speech engine for this platform and processor, where the runtime looks for them (scripts/binaries.ts).
-  for (const binary of binariesFor(process.platform, arch)) {
-    const parent = folderOf(stage, join(stage, 'package.json'), binary.parent)
-    const program = join(folderOf(stage, join(parent, 'package.json'), binary.name), binary.file)
-    if (!existsSync(program)) throw new Error(`The package is missing ${relative(stage, program)}`)
-  }
+  assertPlatformBinaries(stage, arch)
   return stage
 }
 
@@ -375,7 +381,9 @@ for (const arch of arches) {
     const app = join(dist, made.folder, `${own.productName}.app`)
     for (const path of [app, dmg, join(dist, made.zip), feed]) if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
     // What ships, not only what was staged.
-    assertAdapterPatched(join(app, 'Contents', 'Resources', 'app', CLAUDE_ADAPTER))
+    const packaged = join(app, 'Contents', 'Resources', 'app')
+    assertAdapterPatched(join(packaged, CLAUDE_ADAPTER))
+    assertPlatformBinaries(packaged, arch)
     const { read, wrong } = wrongArchs(app, arch)
     if (wrong.length > 0)
       throw new Error(
@@ -398,7 +406,9 @@ if (mac) {
   for (const path of [installer, `${installer}.blockmap`, join(dist, 'latest.yml'), node])
     if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
   // What ships, not only what was staged.
-  assertAdapterPatched(join(dist, 'win-unpacked', 'resources', 'app', CLAUDE_ADAPTER))
+  const packaged = join(dist, 'win-unpacked', 'resources', 'app')
+  assertAdapterPatched(join(packaged, CLAUDE_ADAPTER))
+  assertPlatformBinaries(packaged, 'x64')
   process.stdout.write(`\n${installer}\n${installer}.blockmap\n${join(dist, 'latest.yml')}\n`)
 } else {
   const made = readdirSync(dist).filter((name) => /\.(AppImage|deb|rpm)$/.test(name))
@@ -408,7 +418,11 @@ if (mac) {
   // What ships, not only what was staged: the unpacked app (linux-unpacked, or linux-arm64-unpacked) the packages are made from.
   const unpacked = readdirSync(dist).filter((name) => /^linux(-\w+)?-unpacked$/.test(name))
   if (unpacked.length === 0) throw new Error(`The package is missing the unpacked app in ${dist}`)
-  for (const name of unpacked) assertAdapterPatched(join(dist, name, 'resources', 'app', CLAUDE_ADAPTER))
+  for (const name of unpacked) {
+    const packaged = join(dist, name, 'resources', 'app')
+    assertAdapterPatched(join(packaged, CLAUDE_ADAPTER))
+    assertPlatformBinaries(packaged, process.arch)
+  }
   for (const name of made) process.stdout.write(`${join(dist, name)}\n`)
   process.stdout.write(`${feed}\n`)
 }
