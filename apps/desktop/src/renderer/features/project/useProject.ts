@@ -537,6 +537,7 @@ export const useProject = (projectId: string): ProjectModel => {
     return act(async () => {
       try {
         await action()
+        images?.onAccepted?.()
       } catch (failure) {
         accepted = false
         setCoordinator((current) => ({ ...current, items: unsent(current.items, id, text) }))

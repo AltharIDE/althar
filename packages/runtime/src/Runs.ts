@@ -33,6 +33,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Queue, Schema, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { namedByFindings } from './findingPaths'
 import { thisDevice } from './device'
 import { Busy, type Order } from './Busy'
 import type { Artifacts } from './Artifacts'
@@ -2796,7 +2797,7 @@ export class Runs extends Context.Service<
               return typeof file === 'string' && file !== '' ? [file.replace(/^\.?\//, '')] : []
             },
           )
-          const namedBy = (path: string) => named.some((file) => file === path || file.endsWith(`/${path}`) || path.endsWith(`/${file}`))
+          const namedBy = (path: string) => namedByFindings(named, path)
           let lines = 0
           const files: Array<string> = []
           for (const worktree of yield* worktreesOf(run.taskId)) {
