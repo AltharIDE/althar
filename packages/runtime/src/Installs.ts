@@ -21,6 +21,7 @@ import type { Fetch } from '@althar/connectors'
 import {
   type AgentDefinition,
   type AgentDownload,
+  agentVersion,
   cleanUp,
   isMusl,
   type LaunchSpec,
@@ -32,6 +33,7 @@ import {
 } from '@althar/provider-adapters'
 import { Context, Duration, Effect, Layer, Option, Ref, Schema } from 'effect'
 import { Unzip, UnzipInflate } from 'fflate'
+import { makeKeyedLock } from './keyedLock'
 
 /*
  * Agents Althar downloads for a person who doesn't have one (docs/
@@ -223,6 +225,8 @@ export class Installs extends Context.Service<
   {
     /** Where the agent stands on this device. */
     state(definition: AgentDefinition): Effect.Effect<InstallState>
+    /** The agent's CLI version, shared by every client of this runtime. */
+    version(definition: AgentDefinition): Effect.Effect<string | null>
     /** Where its command is, looked up now: the person's, or Althar's copy. */
     locate(definition: AgentDefinition): Located | null
     /** Downloads its latest release, checks it and makes it the copy in use. */
@@ -242,6 +246,16 @@ export class Installs extends Context.Service<
         const assetOf = <A>(assets: Readonly<Record<string, A>>): A | undefined =>
           musl ? (assets[`${target}-musl`] ?? assets[target]) : assets[target]
         const installing = yield* Ref.make(new Set<string>())
+        const versions = new Map<string, string | null>()
+        const versionChecks = makeKeyedLock()
+        const version = (definition: AgentDefinition) =>
+          versionChecks.withLock(
+            definition.id,
+            Effect.suspend(() => {
+              if (versions.has(definition.id)) return Effect.succeed(versions.get(definition.id) ?? null)
+              return agentVersion(definition).pipe(Effect.tap((found) => Effect.sync(() => versions.set(definition.id, found))))
+            }),
+          )
 
         /** Where Althar's downloaded copy of the agent's command is, whether or not it is there. */
         const kept = (definition: AgentDefinition, name: string) =>
@@ -451,6 +465,7 @@ export class Installs extends Context.Service<
 
         return Installs.of({
           locate: locateOf,
+          version,
           state: (definition) =>
             Effect.map(Ref.get(installing), (now) => ({
               located: locateOf(definition),
@@ -462,7 +477,15 @@ export class Installs extends Context.Service<
               pinned: definition.cli?.download !== undefined && pinned(definition.cli.download) ? definition.cli.download.version : null,
               installing: now.has(definition.id),
             })),
-          install,
+          install: (definition) =>
+            install(definition).pipe(
+              Effect.tap(() =>
+                versionChecks.withLock(
+                  definition.id,
+                  Effect.sync(() => versions.delete(definition.id)),
+                ),
+              ),
+            ),
         })
       }),
     )

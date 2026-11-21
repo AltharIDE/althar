@@ -1,6 +1,5 @@
 import { DevicePairings } from './DevicePairings'
 import { agentCatalogHandlers } from './AgentCatalog'
-import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
@@ -137,7 +136,6 @@ import { Setups } from './Setups'
 import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
 import { afterOpen, startup } from './startup'
-import { makeKeyedLock } from './keyedLock'
 import { tallyOf } from './tally'
 import { Coordinator } from './Coordinator'
 import { SettingsTools } from './SettingsTools'
@@ -811,23 +809,6 @@ export const handlers = apiLayer(
         ),
       )
 
-    /* Each agent's version, asked of its CLI once a launch. */
-    const versions = new Map<string, string | null>()
-    const versionChecks = makeKeyedLock()
-    const versionOf = (entry: AgentEntry) =>
-      versionChecks.withLock(
-        entry.definition.id,
-        Effect.suspend(() =>
-          versions.has(entry.definition.id)
-            ? Effect.succeed(versions.get(entry.definition.id) ?? null)
-            : agentVersion(entry.definition).pipe(
-                Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))),
-                // Asked again next time: one that failed says no version, not a wrong one.
-                contained('Status.version', () => null, entry.definition.id),
-              ),
-        ),
-      )
-
     /*
      * An agent, with its accounts: each check starts the agent's own status
      * command, in the account's home. An agent that couldn't be looked at
@@ -850,7 +831,7 @@ export const handlers = apiLayer(
               : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
-          version: yield* versionOf(entry),
+          version: yield* installs.version(entry.definition).pipe(contained('Status.version', () => null, entry.definition.id)),
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
           addsAccounts: entry.definition.home.accounts !== 'one',
@@ -2539,7 +2520,6 @@ export const handlers = apiLayer(
           Effect.gen(function* () {
             const entry = yield* agents.get(agentId)
             yield* installs.install(entry.definition)
-            versions.delete(agentId)
             yield* models.forget(agentId)
           }),
         ),

@@ -568,7 +568,7 @@ describe('the API', () => {
       Effect.gen(function* () {
         let checks = 0
         let versions = 0
-        const { client } = yield* connected({
+        const { client, context } = yield* connected({
           agents: agentsWith('codex', (definition) => {
             const check = definition.signIn.status
             if (check === undefined) throw new Error('The test agent needs a status command')
@@ -588,7 +588,19 @@ describe('the API', () => {
             }
           }),
         })
-        const [first, second] = yield* Effect.all([client.Status({}), client.Status({})], { concurrency: 2 })
+        const channel = new MessageChannel()
+        yield* Effect.addFinalizer(() => Effect.sync(() => channel.port1.close()))
+        yield* Effect.forkScoped(
+          Layer.launch(
+            connection(
+              emitterPort(channel.port1, (data) => data),
+              { kind: 'window' },
+            ),
+          ).pipe(Effect.provideContext(context)),
+        )
+        const protocol = yield* Layer.build(clientProtocol(emitterPort(channel.port2, (data) => data)))
+        const otherWindow = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+        const [first, second] = yield* Effect.all([client.Status({}), otherWindow.Status({})], { concurrency: 2 })
         assert.deepStrictEqual(first, second)
         assert.strictEqual(checks, 1)
         assert.strictEqual(versions, 1)
