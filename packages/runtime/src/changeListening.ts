@@ -1,3 +1,4 @@
+import { checkFailuresIn } from '@althar/contracts'
 import {
   type Account,
   ChangeRequest,
@@ -965,13 +966,20 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
               )
         if (now.headSha !== null && ran !== null) {
           const sum = checksOf(now.headSha, ran)
-          const finished = sum.outcome === 'passed' || sum.outcome === 'failed'
+          // Where its host names the checks it requires, only those failing or cancelled are a failure to see through: an optional
+          // one's holds nothing back, so it isn't counted, run again or handed to the lead, and the checks read as passed as far as
+          // the rest go, or still running while a required one hasn't reported (#1117). As read where the host doesn't say.
+          const required = sum.outcome === 'failed' ? (yield* rulesOf(host, repository, before, now, false))?.requiredChecks : undefined
+          const counts = (check: string) => !Array.isArray(required) || required.includes(check)
+          const counted = checkFailuresIn(sum, required)
+          const own = { ...sum, outcome: counted.outcome, failed: counted.failed, failing: counted.failing }
+          const finished = own.outcome === 'passed' || own.outcome === 'failed'
           // A check run again after it failed is heard again when it ends: once the host has shown it running again, or, one too
           // quick to be seen so, after RERUN_SHOWS. Until then a failure is the old one.
           const reran = yield* ranAgain(link, sum.sha)
           // Checks still running keep the pull request worth asking about; too long, while Althar sees them through, and the change is
           // the person's. Running again after a rerun, from when they show so.
-          if (sum.outcome === 'running') {
+          if (own.outcome === 'running') {
             happened = true
             yield* heard(link, 'checks_running', `running:${sum.sha}`, { sha: sum.sha })
             if (reran !== null && !reran.started) yield* heard(link, 'checks_rerun_started', reran.startedId, { sha: sum.sha })
@@ -979,20 +987,26 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
           }
           const settled =
             reran === null || reran.started || (yield* Clock.currentTimeMillis) - Date.parse(reran.at) > Duration.toMillis(RERUN_SHOWS)
-          const transitioned = finished && settled && (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome)
+          // The same head may fail on an optional check first and on a required one later, its host's outcome failed both times:
+          // a change in what counts is heard too.
+          const was = before.checks === null ? null : checkFailuresIn(before.checks, required)
+          const transitioned =
+            finished &&
+            settled &&
+            (before.checks?.sha !== sum.sha ||
+              before.checks.outcome !== sum.outcome ||
+              was?.outcome !== counted.outcome ||
+              was.failing.join('\n') !== counted.failing.join('\n') ||
+              was.cancelled.join('\n') !== counted.cancelled.join('\n'))
           // Advance even when this observation already exists: a previous poll may have recorded it and then failed before
           // saving its snapshot. Reusing that observation repairs the snapshot without delivering the result twice.
           if (transitioned) checksRevision += 1
-          // Where its host names the checks it requires, only those failing are a failure to see through: an optional one's holds
-          // nothing back, so it isn't counted, run again or handed to the lead (#1117). Kept as read where the host doesn't say.
-          const required = sum.failed > 0 ? (yield* rulesOf(host, repository, before, now, false))?.requiredChecks : undefined
-          const counts = (check: string) => !Array.isArray(required) || required.includes(check)
-          const own = Array.isArray(required)
-            ? { ...sum, failed: sum.failing.filter(counts).length, failing: sum.failing.filter(counts) }
-            : sum
           if (
             transitioned &&
-            (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}:${checksRevision}${reran?.again ?? ''}`, { ...own }))
+            (yield* heard(link, 'checks', `checks:${sum.sha}:${own.outcome}:${checksRevision}${reran?.again ?? ''}`, {
+              ...own,
+              ...(counted.optional.length > 0 ? { optional: counted.optional } : {}),
+            }))
           ) {
             happened = true
             // The failed checks' logs, read once: the card shows their ends, or why there are none, and the lead is told the same.
@@ -1008,8 +1022,9 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
               from: null,
               where: name,
               passed: sum.passed,
-              failed: sum.failed,
-              failing: sum.failing,
+              failed: own.failed,
+              failing: own.failing,
+              ...(counted.optional.length > 0 ? { optional: counted.optional } : {}),
               logs: reads.map((read) => ({ name: read.name, url: read.url, log: read.log, missing: read.missing })),
               url: now.url,
             })

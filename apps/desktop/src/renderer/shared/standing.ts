@@ -7,7 +7,6 @@ import {
   type NextThing as Next,
   pushResolves,
   ranChecks,
-  requiredChecksOf,
   standingOf,
 } from '@althar/contracts'
 import type { IconName } from '@althar/ui'
@@ -164,13 +163,16 @@ export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(c
   return facts.length === 0 ? [requiredClearOf(change, standing), ...optional] : [...facts, ...optional]
 }
 
-/** Nothing in the way where only optional checks failed: the required ones all passed, said as such. */
+/**
+ * Nothing in the way where only optional checks failed: the required ones all passed, as its host's checks need says
+ * (`MergeNeed`, each required name once), green only where it says they're met; else how many ran passed, quietly.
+ */
 const requiredClearOf = (change: ChangeSummary, standing: Standing): Said => {
-  const checks = change.checks
-  if (standing.optional === undefined || checks === null) return clearOf(change)
-  const required = requiredChecksOf(change)
-  const counted = checks.list.filter((check) => check.state !== 'skipped' && (required === null || required.includes(check.name)))
-  return counted.length === 0 ? clearOf(change) : { words: standingText.passedRequired(counted.length), icon: 'check', tone: 'ok' }
+  if (standing.optional === undefined) return clearOf(change)
+  const need = change.needs?.find((one) => one.kind === 'checks')
+  return need?.state === 'met' && need.need !== undefined && need.need > 0
+    ? { words: standingText.passedRequired(need.need), icon: 'check', tone: 'ok' }
+    : clearOf(change)
 }
 
 /** Whether the next thing is the person's own, done from where it is shown: pushing, merging and shipping. The others are the lead's, and open the task. */

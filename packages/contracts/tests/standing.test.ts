@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ChangeSummary, ChecksSummary } from '../src/Api'
 import {
+  checkFailuresIn,
   checkFailuresOf,
   forShip,
   goingUp,
@@ -235,7 +236,20 @@ describe('the shared rule for accepting a change', () => {
         failed: 1,
         cancelled: [],
         optional: ['Workers Builds: althar-site'],
+        missing: [],
+        outcome: 'failed',
       })
+    })
+
+    it('reads the outcome as far as the required checks go: passed, failed on a cancellation, or still to come', () => {
+      expect(checkFailuresIn(site, ['check', 'test']).outcome).toBe('passed')
+      expect(checkFailuresIn(site, ['check', 'test', 'lint'])).toMatchObject({ outcome: 'running', missing: ['lint'] })
+      const cancelled = checks({ outcome: 'failed', list: [...checks().list, { name: 'lint', state: 'cancelled', summary: null }] })
+      expect(checkFailuresIn(cancelled, ['test', 'lint'])).toMatchObject({ outcome: 'failed', cancelled: ['lint'] })
+      expect(checkFailuresIn(cancelled, ['test'])).toMatchObject({ outcome: 'passed', optional: ['lint'] })
+      // No required set: a cancellation fails it, as the host's outcome says.
+      expect(checkFailuresIn(cancelled, null)).toMatchObject({ outcome: 'failed', cancelled: ['lint'] })
+      expect(checkFailuresIn(cancelled, 'all').outcome).toBe('failed')
     })
 
     it('counts every check where the host gives no required set, as before', () => {

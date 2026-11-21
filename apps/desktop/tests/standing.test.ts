@@ -184,6 +184,22 @@ describe('a change whose only failures are optional checks (#1117)', () => {
     ])
   })
 
+  it('says nothing green while a required check hasn’t reported yet, and counts each required name once', () => {
+    // `lint` is required and not yet reported: still to come, not passed.
+    const waiting = change({
+      checks: site,
+      needs: [{ kind: 'checks', state: 'waiting', have: 2, need: 3, who: ['lint'], required: ['check', 'test', 'lint'] }],
+    })
+    expect(isBlocked(standingOf(waiting))).toBe(false)
+    expect(factsOf(waiting).map((fact) => [fact.words, fact.tone])).toEqual([
+      ['Checks running, 2 of 3 passed', 'live'],
+      ['Optional Workers Builds: althar-site failed', 'quiet'],
+    ])
+    // Two runs of `test`: still two required checks.
+    const twice = checks({ ...site, passed: 3, total: 4, list: [...site.list, { name: 'test', state: 'passed', summary: null }] })
+    expect(factsOf(change({ checks: twice, needs }))[0]?.words).toBe('All 2 required checks passed')
+  })
+
   it('still says a required failure in red, the optional one quietly after it', () => {
     const both = change({ checks: checks({ ...site, failed: 2, failing: ['test', 'Workers Builds: althar-site'] }), needs })
     expect(factsOf(both).map((fact) => [fact.words, fact.tone])).toEqual([

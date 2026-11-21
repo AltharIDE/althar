@@ -53,7 +53,7 @@ export const isMergeable = (change: ChangeSummary | null): boolean => {
   if (change.diverged !== null || change.conflicts === true || (change.localHead !== null && change.unpushed > 0)) return false
   const checks = change.checks
   // Only checks its host doesn't require failed: as good as passed (#1117).
-  const passed = checks !== null && (checks.outcome === 'passed' || (checks.outcome === 'failed' && checkFailuresOf(change).failed === 0))
+  const passed = checks !== null && checkFailuresOf(change).outcome === 'passed'
   return checks !== null && passed && checks.running === 0 && !heldBack(change.needs)
 }
 
