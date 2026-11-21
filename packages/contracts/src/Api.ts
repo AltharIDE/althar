@@ -2420,6 +2420,8 @@ export const ArrivalItem = Schema.Struct({
     passed: Schema.NullOr(Schema.Number),
     failed: Schema.NullOr(Schema.Number),
     failing: Schema.Array(Schema.String),
+    /** Checks its host doesn't require that failed or were cancelled (#1117): not counted in `failed`, said quietly. Absent where none. */
+    optional: Schema.optional(Schema.Array(Schema.String)),
     /** Failed checks' logs: the end of each, or why Althar couldn't read it, with the check's page. None from before it read them here. */
     logs: Schema.Array(CheckLogShown),
     url: Schema.NullOr(Schema.String),
