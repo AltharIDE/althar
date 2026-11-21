@@ -29,6 +29,7 @@ import type { Live } from './Live'
 import { WORK, workOf } from './machine'
 import { type Permissions, type RequestContext, moveSession } from './Permissions'
 import type { Policies } from './Policies'
+import { processes, treeOf } from './ports'
 import { guardEnv, guardHolds } from './pushGuard'
 import type { Questions } from './Questions'
 import { change, fact, timestamp } from './records'
@@ -811,10 +812,15 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
         ...(asideNow.unsaid ? { waitsForWords: true } : {}),
       }
       threads.set(thread.threadId, running)
-      // Closed, it stops what it left running with all that started, before its agent ends their shells only (stopping.ts).
+      // Stop descendants before the agent exits and they are reparented, including detached commands that never reported an output file.
       yield* Scope.addFinalizer(
         scope,
         Effect.gen(function* () {
+          const pid = running.connection.process?.pid
+          if (pid !== undefined && process.platform !== 'win32') {
+            const descendants = [...treeOf(yield* processes(), [pid])].filter((child) => child !== pid)
+            return yield* stopTrees(running, [descendants])
+          }
           const open = [...running.background.values()].filter((left) => left.ended === null)
           yield* stopTrees(running, yield* Effect.forEach(open, (left) => treeOfLeft(running, left), { concurrency: 'unbounded' }))
         }).pipe(Effect.timeout(LEFT_STOPS_WITHIN), Effect.ignore),
