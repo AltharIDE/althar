@@ -38,6 +38,7 @@ import { boardOf, loadOf, NOW, placesOf, PROJECTS, type Scene, SCENES } from './
 import { A } from './directions/a'
 import { B } from './directions/b'
 import { C } from './directions/c'
+import { C2, C3, C4, C5 } from './directions/cv'
 import type { Ctx, Direction } from './directions/types'
 import { ZERO } from './directions/zero'
 import s from './lab.module.css'
@@ -46,18 +47,21 @@ import s from './lab.module.css'
  * The agent places lab (README.md): where agents at once and the places in
  * use live, on the app's own board, the kit's own window bar and its own
  * settings, with no runtime. The bar along the bottom, or its keys, swaps the
- * direction in place (0 as built, A, B, C), the scene (1–4), crowded (K), a
- * narrow window (N), the Settings tab (S) and dark (D). ?open= opens what a
+ * take in place (0 as built, 1–5 C's takes), the scene (Q W E R), crowded
+ * (K), a narrow window (N), the Settings tab (S) and dark (D); A and B, the
+ * first round's other directions, stay at ?d=a and ?d=b. ?open= opens what a
  * shot needs: mac (This Mac, from the bar), upnext (what Up next opens), quick.
  */
 
-const DIRECTIONS: readonly Direction[] = [ZERO, A, B, C]
+const DIRECTIONS: readonly Direction[] = [ZERO, C, C2, C3, C4, C5, A, B]
+const ON_BAR = DIRECTIONS.filter((one) => one.kbd !== undefined)
+const SCENE_KEYS = ['q', 'w', 'e', 'r'] as const
 
 const params = () => new URLSearchParams(location.search)
 const read = () => {
   const now = params()
   return {
-    d: (DIRECTIONS.find((one) => one.key === now.get('d'))?.key ?? 'a') as Direction['key'],
+    d: DIRECTIONS.find((one) => one.key === now.get('d'))?.key ?? C.key,
     p: (SCENES.find((one) => one.key === now.get('p'))?.key ?? 'memory') as Scene,
     k: now.get('k') === '1',
     n: now.get('n') === '1',
@@ -254,9 +258,9 @@ function Lab() {
       const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
       if (typing || event.metaKey || event.ctrlKey || event.altKey) return
       const key = event.key.toLowerCase()
-      const found = DIRECTIONS.find((one) => one.key === key)
+      const found = ON_BAR.find((one) => one.kbd === key)
       if (found !== undefined) return set({ d: found.key })
-      const scene = SCENES[Number(key) - 1]
+      const scene = SCENES[SCENE_KEYS.indexOf(key as (typeof SCENE_KEYS)[number])]
       if (scene !== undefined) return set({ p: scene.key })
       if (key === 'k') return set({ k: !state.k })
       if (key === 'n') return set({ n: !state.n })
@@ -310,16 +314,16 @@ function Lab() {
         </div>
         {slot !== null && direction.upNext !== null && createPortal(direction.upNext.draw(ctx), slot)}
         <div className={s.bar} role="toolbar" aria-label="Directions">
-          {DIRECTIONS.map((one) => (
+          {ON_BAR.map((one) => (
             <button key={one.key} type="button" aria-pressed={state.d === one.key} onClick={() => set({ d: one.key })} title={one.idea}>
-              <kbd>{one.key.toUpperCase()}</kbd>
+              <kbd>{one.kbd}</kbd>
               {one.label}
             </button>
           ))}
           <span className={s.rule} />
           {SCENES.map((one, i) => (
             <button key={one.key} type="button" aria-pressed={state.p === one.key} onClick={() => set({ p: one.key })}>
-              <kbd>{i + 1}</kbd>
+              <kbd>{SCENE_KEYS[i]!.toUpperCase()}</kbd>
               {one.label}
             </button>
           ))}

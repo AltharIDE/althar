@@ -1,0 +1,126 @@
+/* what they share: This Mac named quietly before what it says, and why in a quiet line */
+.where {
+  color: var(--t-3);
+}
+.why {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--t-3);
+  text-wrap: pretty;
+}
+
+/* C2: today's row, folding open to This Mac's places in place */
+.fold {
+  margin: 0 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--n-1);
+}
+.foldRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--t-1);
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.foldRow:hover {
+  background: var(--hover-paper);
+}
+.foldChevron {
+  flex: none;
+  color: var(--t-3);
+  transition: transform var(--fast) var(--ease);
+}
+.fold[data-open] .foldChevron {
+  transform: rotate(90deg);
+}
+.foldWords {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
+.foldBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 10px 10px 29px;
+}
+
+/* C3: a tag at the end of Up next's heading, in warm, and what it opens */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  margin: -1px 0;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--warm) 80%, var(--t-1));
+  background: color-mix(in srgb, var(--warm) 10%, transparent);
+  transition: background var(--fast) var(--ease);
+}
+.tag:hover,
+.tag[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--warm) 18%, transparent);
+}
+.peek {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+.peekHead {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.peekTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+/* C5: one line, no box, over Up next's rows */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  margin: 0 0 6px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--t-1);
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.line:hover,
+.line[aria-expanded='true'] {
+  background: var(--line);
+}
+.lineWords {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
+.lineWords [data-lowered] {
+  color: color-mix(in srgb, var(--warm) 80%, var(--t-1));
+}
+.lineChevron {
+  flex: none;
+  color: var(--t-4);
+}

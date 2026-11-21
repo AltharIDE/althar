@@ -35,6 +35,14 @@ export const words = {
   /** The rest of Up next, while the number is lowered. */
   startsAs: (places: Places) =>
     places.why === null ? null : `Up next starts as it ${places.why === 'memory' ? 'frees up' : 'calms down'}.`,
+  /** A lowered number and until when, as a sentence of its own. */
+  atATimeUntil: (places: Places) =>
+    places.why === null ? null : `${places.atOnce === 1 ? 'One agent' : `${places.atOnce} agents`} at a time ${until[places.why]}`,
+  /** Every place in use, or how many are. */
+  allAtWork: (places: Places) =>
+    places.held.length >= places.configured ? `All ${places.configured} at work` : `${places.held.length} of ${places.configured} at work`,
+  /** A lowered number, as few words as a chip or a tag has room for. */
+  forNow: (places: Places) => `${places.atOnce} at a time`,
   /** The banner's title, while the number is lowered. */
   oneAtATime: (places: Places) => `${places.atOnce === 1 ? 'One agent' : `${places.atOnce} agents`} at a time for now`,
   roles: (held: readonly Held[]) => {

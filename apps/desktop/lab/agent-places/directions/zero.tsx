@@ -7,6 +7,7 @@ import type { Direction } from './types'
 /* 0 · As built: the board's own banner over Up next (BoardView's AgentPlaces), the bar and the slider as they are. */
 export const ZERO: Direction = {
   key: '0',
+  kbd: '0',
   label: 'As built',
   idea: 'The board’s banner over Up next; the bar and the slider as they are',
   bar: (ctx) => (

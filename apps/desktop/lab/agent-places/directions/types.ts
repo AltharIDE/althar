@@ -20,7 +20,10 @@ export interface Ctx {
 }
 
 export interface Direction {
-  readonly key: '0' | 'a' | 'b' | 'c'
+  /** In the page's address: ?d=. */
+  readonly key: string
+  /** Its key on the lab's bar; without one, it's reached only by its address. */
+  readonly kbd?: string
   readonly label: string
   /** What it is, in a line, for the lab's bar. */
   readonly idea: string
