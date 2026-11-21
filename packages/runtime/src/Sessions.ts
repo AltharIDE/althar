@@ -35,7 +35,6 @@ import {
 } from './errors'
 import { Failures } from './Failures'
 import { git } from './git'
-import { dueForHandover, dueForLeadHandover, roomFor, shrinks } from './handover'
 import { makeInputBatches } from './inputBatches'
 import { Instance } from './Instance'
 import { makeKeyedLock } from './keyedLock'
@@ -1126,26 +1125,6 @@ export class Sessions extends Context.Service<
           }
         })
 
-      /**
-       * Whether a session is handed to a fresh one before its next turn: a
-       * coordinator whose context is filling up (ADR-031); a task's lead whose
-       * context is past its mark, or past a smaller one at a break in its work
-       * (a step done, the task made a change, or idle past its cache's life),
-       * unless something it left running still runs, which closing its
-       * session would stop (ADR-038).
-       */
-      const dueToHandOver = (running: Running) =>
-        Effect.gen(function* () {
-          const { thread } = running
-          if (thread.role === 'coordinator') return dueForHandover(running.context)
-          if (thread.role !== 'task' || thread.review !== null) return false
-          if ([...running.background.values()].some((left) => left.ended === null)) return false
-          // Still at work though its turn ended, or within the moment an agent takes to say what it left running (Codex says so
-          // after its turn): not yet.
-          if (yield* busyNow(thread.threadId)) return false
-          return dueForLeadHandover(running.context)
-        })
-
       /** Whether anything waits in the thread's queue. */
       const inputWaiting = (threadId: string) =>
         Effect.gen(function* () {
@@ -1318,7 +1297,9 @@ export class Sessions extends Context.Service<
         },
         betweenAgents,
         changeHeads,
-        dueToHandOver,
+        get afterCompaction(): SessionTurnsDependencies['afterCompaction'] {
+          return afterCompaction
+        },
         // Callbacks can be registered after the layer starts. Turns use the current callback.
         get gate(): SessionTurnsDependencies['gate'] {
           return gate
@@ -1781,7 +1762,11 @@ export class Sessions extends Context.Service<
             title: `Effort changed to ${(named?.name ?? input.effort).toLowerCase()}.`,
           })
         })
-      const { asideState, briefFor, handoverBrief, reviewingOf, taskBrief } = makeSessionBriefs({ instance, policies, threads })
+      const { afterCompaction, asideState, briefFor, handoverBrief, reviewingOf, taskBrief } = makeSessionBriefs({
+        instance,
+        policies,
+        threads,
+      })
 
       /**
        * Hands the thread to another agent. The new agent is started first; only
@@ -1935,23 +1920,8 @@ export class Sessions extends Context.Service<
           }),
         )
 
-      /**
-       * Hands a coordinator's conversation, or a task lead's work, to a fresh
-       * session once its context is filling up, or for a lead, at a break in
-       * its work (ADR-031, ADR-038): the same agent, account, model and
-       * effort, briefed from Althar's records. It starts between turns: the
-       * old session takes no more, and what the person says meanwhile waits
-       * for the new one. The new session is started before the old one stops,
-       * so a handover that fails leaves the old one carrying on, its agent
-       * compacting its context itself as before.
-       *
-       * `lost`, what the agent said when it no longer had the session, as
-       * Claude Code's adapter drops one whose process died: it can't carry
-       * on, so it is handed over whatever its context, and a handover that
-       * fails, or a reviewer's, which isn't handed over, stops it, so Try again
-       * starts a fresh one.
-       */
-      const handOver = (previous: Running, lost?: string, moved = false): Effect.Effect<void, never, Store> =>
+      /** Starts a replacement between turns when the agent lost its session or its work moved to another folder. */
+      const handOver = (previous: Running, reason: { readonly lost: string } | 'moved'): Effect.Effect<void, never, Store> =>
         exclusive(
           previous.thread.threadId,
           Effect.gen(function* () {
@@ -1959,21 +1929,11 @@ export class Sessions extends Context.Service<
             // Stopped or switched while it waited: nothing is left to hand over.
             if (threads.get(previous.thread.threadId) !== previous || previous.stopping) return
             if (previous.thread.role === 'reviewer') {
-              if (lost !== undefined) yield* cannotCarryOn(previous, lost)
+              if (reason !== 'moved') yield* cannotCarryOn(previous, reason.lost)
               return
             }
-            // A lead's task as it is now, not as its session found it: it may have a branch, a pull request or a new name since.
+            // Read the task as it stands now, including any move, branch or pull request.
             const thread = previous.thread.role === 'task' ? yield* loadThread(previous.thread.threadId) : previous.thread
-            // Something it left running since it was due would stop with it: it carries on as it is, and is looked at again.
-            if (
-              lost === undefined &&
-              !moved &&
-              thread.role === 'task' &&
-              [...previous.background.values()].some((left) => left.ended === null)
-            ) {
-              previous.handover = 'none'
-              return yield* Queue.offer(previous.wake, undefined)
-            }
             const [session] = yield* sql<{ model: string | null; effort: string | null }>`
               SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
             const model = session?.model ?? undefined
@@ -1982,21 +1942,7 @@ export class Sessions extends Context.Service<
             const brief =
               thread.role === 'coordinator'
                 ? yield* handoverBrief(thread)
-                : { text: yield* briefFor(thread, { kind: 'handover', ...(lost === undefined ? {} : { lost: true }) }), open: null }
-            // A brief that would fill a fresh session as far would only be due again, and a lead's that saves little isn't
-            // worth its thread of thought: the old one carries on as it is. A lost one can't.
-            // Its folder moved, it can't carry on where it is: it is handed over whatever its context.
-            if (
-              lost === undefined &&
-              !moved &&
-              (!roomFor(brief.text, previous.context) || (thread.role === 'task' && !shrinks(brief.text, previous.context)))
-            ) {
-              yield* Effect.logWarning(
-                `The ${thread.role === 'task' ? 'lead' : 'coordinator'} is left to compact by itself: its brief would fill a fresh session`,
-              )
-              previous.handover = 'left'
-              return yield* Queue.offer(previous.wake, undefined)
-            }
+                : yield* briefFor(thread, { kind: 'handover', lost: reason !== 'moved' })
             // Started afresh, a stand-in still stands in for the lead it was given.
             const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId))
             const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model, standsIn)
@@ -2007,19 +1953,15 @@ export class Sessions extends Context.Service<
                 source: 'runtime',
                 severity: 'info',
                 title:
-                  lost !== undefined
-                    ? startedAfreshWords(previous.entry.definition.name)
-                    : moved
-                      ? `Started ${previous.entry.definition.name} afresh in its new folder.`
-                      : brief.open === null
-                        ? `Started ${previous.entry.definition.name} afresh.`
-                        : 'Started a fresh session.',
+                  reason === 'moved'
+                    ? `Started ${previous.entry.definition.name} afresh in its new folder.`
+                    : startedAfreshWords(previous.entry.definition.name),
               }),
             ).pipe(beforeTakingOver(connected))
             yield* activate(
               connected,
               {
-                text: brief.text,
+                text: brief,
                 closing:
                   thread.role === 'coordinator'
                     ? 'Carry the conversation on from where it stands.'
@@ -2036,10 +1978,11 @@ export class Sessions extends Context.Service<
               Effect.suspend(() => {
                 if (threads.get(previous.thread.threadId) !== previous) return Effect.void
                 // Lost, it can't carry on: it stops, and the person is told.
-                if (lost !== undefined) return exclusive(previous.thread.threadId, cannotCarryOn(previous, lost))
-                // It carries on as it is, with what waited for it.
-                previous.handover = 'left'
-                return Queue.offer(previous.wake, undefined)
+                if (reason !== 'moved') return exclusive(previous.thread.threadId, cannotCarryOn(previous, reason.lost))
+                // Startup failed and already said why. Keep the messages queued for a later attempt in the new folder.
+                previous.moved = true
+                previous.handover = 'none'
+                return Effect.void
               }),
             ),
           ),

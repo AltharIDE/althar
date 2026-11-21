@@ -204,7 +204,7 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
       return [
         why.kind === 'start'
           ? "You are an aside of this project's coordinator, in Althar: a quick chat the person opened beside their conversation with the coordinator, off the board. Answer what they ask, in your reply, as briefly as it allows; a greeting gets a greeting back. Your reply is the answer: there is no step to finish, no report, and no finish_step or evidence to give."
-          : `You are carrying on an aside of this project's coordinator, in Althar, a quick chat the person opened beside their conversation with the coordinator: Althar started you afresh ${why.kind === 'handover' && why.lost === true ? 'because the session before was lost' : 'to keep your context small'}. Its thread so far is below. Your reply is the answer: there is no step to finish and no finish_step to call.`,
+          : `You are carrying on an aside of this project's coordinator, in Althar, a quick chat the person opened beside their conversation with the coordinator: Althar started you afresh ${why.kind === 'handover' ? (why.lost === true ? 'because the session before was lost' : 'because its folder moved') : 'to carry on the conversation'}. Its thread so far is below. Your reply is the answer: there is no step to finish and no finish_step to call.`,
         ...askedFor(thread),
         first === undefined
           ? `Read and search ${thread.cwd} to answer.`
@@ -342,7 +342,7 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
             ? `You are working on a task across several repositories, each ${local ? "in the person's own checkout of it" : 'in a git worktree of its own'}. Althar keeps its record and answers your permission requests.`
             : `You are working on a task ${local ? "in the person's own checkout of its repository" : 'in a git worktree of its own'}. Althar keeps its record and answers your permission requests.`
           : why.kind === 'handover'
-            ? `You are carrying on a task an earlier session of yours worked on, in the same ${folders}: Althar started you afresh ${why.lost === true ? 'because that session was lost' : 'to keep your context small'}. Its record so far is below.`
+            ? `You are carrying on a task an earlier session of yours worked on, in the ${why.lost === true ? 'same' : 'new'} ${folders}: Althar started you afresh ${why.lost === true ? 'because that session was lost' : 'because its folder moved'}. Its record so far is below.`
             : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${folders}. Its record so far is below.`,
         `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
         ...(why.kind === 'start' && standing?.state === 'done'
@@ -583,53 +583,56 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
   /** Names models by what each agent says of them, or by their ids where that can't be read. */
   const byId: ModelNamer = (step) => step.model ?? `${step.agentId}'s default model`
 
-  /**
-   * A coordinator session's brief (ADR-031): its role, then the record
-   * of the project and the conversation, the same for every session it
-   * starts, on opening the project or taking over from another agent or a
-   * full context. Only how much of the conversation it carries word for
-   * word differs: a session handed a full context over carries its last
-   * few messages, any other as much of the thread as a brief holds. And
-   * how many tasks are open.
-   */
-  const coordinatorRecordOf = (thread: CoordinatorThread, recent: Recent) =>
+  /** A coordinator's project records, with conversation history when opening a fresh session. */
+  const coordinatorRecordOf = (thread: CoordinatorThread, recent?: Recent) =>
     Effect.gen(function* () {
       const modelOf = yield* modelNamer.pipe(
         Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read the models to name for the coordinator', cause), byId)),
       )
-      const [role, record] = yield* Effect.all(
-        [
-          Effect.map(Effect.all([projectWorksIn(thread.projectId), projectTowards(thread.projectId)]), ([worksIn, towards]) =>
-            coordinatorRole(thread, worksIn, towards),
-          ),
-          coordinatorRecord({
-            projectId: thread.projectId,
-            threadId: thread.threadId,
-            modelOf,
-            working: (threadId) => threads.get(threadId)?.turnRunning === true,
-            copies: thread.folder.repositories,
-            recent,
-          }),
-        ],
-        { concurrency: 'unbounded' },
-      )
-      return { role, record }
+      return yield* coordinatorRecord({
+        projectId: thread.projectId,
+        threadId: thread.threadId,
+        modelOf,
+        working: (threadId) => threads.get(threadId)?.turnRunning === true,
+        copies: thread.folder.repositories,
+        ...(recent === undefined ? {} : { recent }),
+      })
     })
 
+  const coordinatorBriefOf = (thread: CoordinatorThread, recent: Recent, recovery?: string) =>
+    Effect.map(
+      Effect.all([projectWorksIn(thread.projectId), projectTowards(thread.projectId), coordinatorRecordOf(thread, recent)], {
+        concurrency: 'unbounded',
+      }),
+      ([worksIn, towards, record]) =>
+        [...coordinatorRole(thread, worksIn, towards), ...(recovery === undefined ? [] : [recovery]), ...record.sections].join('\n\n'),
+    )
+
   /** The coordinator's brief as a session starts: its role, the record, and as much of the thread as a brief holds. */
-  const coordinatorBrief = (thread: CoordinatorThread) =>
-    Effect.map(coordinatorRecordOf(thread, { budget: PROMPT_BUDGET }), ({ role, record }) => [...role, ...record.sections].join('\n\n'))
+  const coordinatorBrief = (thread: CoordinatorThread) => coordinatorBriefOf(thread, { budget: PROMPT_BUDGET })
 
-  /**
-   * A fresh coordinator session's brief, when Althar hands the
-   * conversation over (ADR-031): its role, that it took over, then the
-   * record with the last few messages. And how many tasks are open.
-   */
-  const handoverBrief = (thread: CoordinatorThread) =>
-    Effect.map(coordinatorRecordOf(thread, HANDED_OVER), ({ role, record }) => ({
-      text: [...role, TOOK_OVER, ...record.sections].join('\n\n'),
-      open: record.open,
-    }))
+  /** A fresh coordinator's brief after its agent lost the earlier session. */
+  const handoverBrief = (thread: CoordinatorThread) => coordinatorBriefOf(thread, HANDED_OVER, TOOK_OVER)
 
-  return { asideState, briefFor, handoverBrief, reviewingOf, taskBrief }
+  /** Current Althar records go alongside the agent's own summary, on its next ordinary turn. */
+  const afterCompaction = (thread: ThreadContext) =>
+    Effect.gen(function* () {
+      if (thread.role === 'reviewer' || (thread.role === 'task' && thread.review !== null)) return null
+      const authority =
+        'Use read_turn for this turn’s message IDs and read_errands for the records. Only a fresh message from the person or an open errand’s recorded next step can authorize an asked-for tool.'
+      const records =
+        thread.role === 'coordinator'
+          ? (yield* coordinatorRecordOf(thread)).sections
+          : [
+              notesSection(yield* notesOf(thread.projectId)),
+              `Open errands concerning this task:\n${(yield* errandLines(thread.projectId, thread.taskId)).join('\n') || 'None.'}`,
+            ]
+      return [
+        'Current Althar records after compaction. Earlier conversation is available through read_thread.',
+        ...records,
+        authority,
+      ].join('\n\n')
+    })
+
+  return { afterCompaction, asideState, briefFor, handoverBrief, reviewingOf, taskBrief }
 }

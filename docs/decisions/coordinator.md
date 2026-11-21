@@ -127,44 +127,30 @@ A refusal is explained in the same turn, with the command and its reason,
 never held for the next message. It may install and run tests in its
 copies; a change to code is still a task.
 
-## Handover before its context fills
+## Compaction and session recovery
 
-The coordinator's conversation is one long thread. Agents compact their own
-context at a moment of their choosing, into a summary of their own, and a
-decision the person made only in conversation may not survive that. So
-Althar hands the coordinator over itself.
+The coordinator keeps the same conversation and session as its context fills.
+If the agent compacts on its own, Althar carries on with the agent's summary.
+At 80% of the window, Althar can send the agent's own Compact command before
+its next queued turn. The command runs by itself between turns, and the
+queued messages follow in order. An idle session can wait for its next
+message, and a failed automatic request leaves the session available for
+the next turn.
 
-- **At 80% of its context** (`HANDOVER_AT`), between turns, never in one,
-  Althar starts a fresh session on the same agent, account, model and effort,
-  and stops the old one. What the person says in the meantime waits for the
-  fresh session.
-- **The fresh session is briefed from Althar's records,** not the raw
-  thread:
-  - its role and tools;
-  - a line saying it took over;
-  - the project overview and the project's notes;
-  - what the repositories tell agents;
-  - every open task, with where it stands, who leads it and what waits on
-    the person, and the newest 25 tasks with their plan and their lead's
-    last report;
-  - the ten tasks finished last, and how each ended;
-  - the earlier conversation in short: every line the person wrote, up to
-    500 characters, and the start of each reply, up to 200, with the tasks,
-    issues and questions that came of it, in up to 20,000 characters, the
-    newest kept. Althar cuts it from the record itself, with no agent, so
-    the handover waits for no model;
-  - the last twelve messages, word for word.
+After compaction the next ordinary turn gets current Althar records alongside
+the agent's summary. They include the project overview, notes, repository
+instructions, open and recently finished tasks, and open errands. The full
+thread remains available through `read_thread` and in the window.
 
-  It reads anything earlier, or whole, with `read_thread`, a part at a time.
-- **The person sees one quiet line** in the thread, and the whole
-  conversation stays theirs to scroll.
-- **Nothing Althar owns moves.** Plans counting down, held plans, drafts and
-  running tasks belong to Althar, not to the session, and carry on.
-- **A handover that fails leaves the old session going,** compacting by
-  itself, and Althar doesn't try again for that session. Neither does it hand
-  over where the brief would take 40% or more of a fresh context.
+If the agent has lost its session, Althar starts it afresh on the same account,
+model and effort. The replacement receives its role, the project records, the
+last twelve messages within a 16,000-character budget, and a bounded excerpt
+of the earlier conversation. What is queued goes with the first turn. Althar
+says in the thread when it starts a session afresh. Plans, drafts and running
+tasks are stored independently of the session.
 
-A task's lead is handed over the same way, once its context is full ([agents.md](agents.md)).
+See [Agents](agents.md#keeping-context-small) for the lead's threshold and the
+person's Compact command.
 
 ## The project's notes
 

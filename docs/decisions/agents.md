@@ -135,19 +135,27 @@ People choose who does work by model, not by the tool that runs it. The coordina
 
 ## Keeping context small
 
-Every call reads the whole context again, so long sessions cost most of the usage. A lead is started afresh only once its context is full, and the person can compact any agent at once. The coordinator's own handover is in [coordinator.md](coordinator.md).
+A task's lead keeps its session as its context fills. When a lead reaches
+200,000 tokens or 80% of its window, whichever comes first, Althar can ask it
+to compact before its next queued turn. The [coordinator](coordinator.md#compaction-and-session-recovery)
+uses 80% of its window. Althar sends `/compact` on Claude Code, Codex and
+OpenCode. Other agents can manage their own compaction, as can a reviewer.
+An automatic request is attempted once while the reported context remains
+above the threshold. The next turn proceeds if the command fails.
 
-- **A lead is handed to a fresh session between turns, never during one.** It keeps the same agent, account, model and effort, and is briefed from the task as any agent taking it over is. The thread shows a quiet line ("Started Claude Code afresh.").
-- **When:** only once its context is full: before a turn, once it's past 200,000 tokens or 80% of its window, whichever comes first (`packages/runtime/src/handover.ts`). A break hands nothing over at any size, whether its last turn finished a step or round, made its task a change, or it sat idle past its prompt cache's life. Coming back to a task after a pause carries the conversation on, with all the lead knows of the work.
-- **The cost:** after a pause longer than its prompt cache's life, the next message reads the whole context at full price. The context ring shows the size, and Compact is one press away.
-- **A lead and the coordinator know the person's local date, time and zone,** from the computer's clock ("Wednesday 18 November 2026, 09:05, Europe/Budapest"): one line in the brief, written as its first turn is sent, so it stays the same for the session and in the cache. It is said again, as a line first in a turn's own message, only after its last turn ended four hours or more before, on a new local day or zone, or after a compaction (`packages/runtime/src/localTime.ts`). A gap of hours outlives the prompt cache anyway, so the line costs nothing there, and nothing earlier in the context changes.
-- **It happens lazily,** only when the lead has a turn to take, so a finished task costs nothing.
-- **Some leads are left as they are,** and their agent compacts on its own:
-  - one whose left-running processes are still going, since closing its session would stop them;
-  - one where the brief would save little.
+The next ordinary turn after compaction gets the current project notes and
+open errands for the task, and the person's local time. The coordinator gets
+its project records too. The agent keeps its own summary and can read earlier
+messages in `read_thread`.
 
-  A reviewer is never handed over, because its session spans the review's rounds.
-- **Compact is in the context ring's detail,** for a task's agent and the coordinator alike. It sends the agent's own `/compact` as a turn of its own, never waits for a place among the agents at work, and the thread says how far it took the context ("412k → 38k tokens"). A handover that falls due waits for it.
+The person can press **Compact** in the context ring for either conversation.
+It runs the agent's own command in queue order and does not wait for an agent
+place. The thread shows what the agent reports, including how far usage fell
+where both counts are available.
+
+Althar starts the same agent afresh when it loses its session or the task
+moves to another folder. The replacement receives the task's records and
+earlier conversation before it carries on.
 
 ## Reading plan usage
 
@@ -183,7 +191,7 @@ People asked what a task cost. What they want to know is how much of each subscr
 ## Changes
 
 - 8 Nov 2026: written from the ADRs under Replaces.
-- 9 Nov 2026: a lead starts afresh only once its context is full, never at a break (a task is a conversation plus parts, [tasks](tasks.md#changing-parts)).
+- 9 Nov 2026: breaks stopped replacing a lead's session. In-place compaction now keeps that session across full contexts too.
 - 10 Nov 2026: a lead's helpers, on any model it picks with `list_models`, each handed one of its task's changes ([tasks](tasks.md#helpers)).
 - 10 Nov 2026: each agent's own helpers that would work in the background are switched off at its launch, and a task's usage says each model's tokens (ADR-087, [tasks § Helpers](tasks.md#helpers)).
 

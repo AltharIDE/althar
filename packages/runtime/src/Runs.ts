@@ -1671,6 +1671,8 @@ export class Runs extends Context.Service<
               yield* releaseExternalOn(event.threadId, 'person')
             return
           }
+          // A compaction ends no work and owes no reply or report. A limit still belongs to the account.
+          if (event._tag === 'TurnEnded' && event.compacting === true && event.errorClass !== 'usage_limit') return
           // A quick task's writes still acquire their own branch when its turn ends, even when it yielded to a wait.
           yield* firstWriteOn(event.threadId)
           // A turn can end after its task settled while it was working. It owes no further report: a reminder would race

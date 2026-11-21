@@ -180,7 +180,7 @@ describe('an agent that offers no choice of model', () => {
 })
 
 describe('an agent that offers no choice of model, further on', () => {
-  it.live('is handed to a fresh session as the coordinator, on no model or effort', () =>
+  it.live('compacts its coordinator session without choosing a model or effort', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
       const coordinator = yield* Coordinator
@@ -195,13 +195,13 @@ describe('an agent that offers no choice of model, further on', () => {
       yield* say('hello')
       yield* until(turns(threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
       yield* say('Where are we? [context:85]')
-      const handed = yield* until(sessionsOn(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'active')
+      yield* until(turns(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'completed')
+      yield* say('Go on.')
+      yield* until(turns(threadId), (rows) => rows.length === 4 && rows[3]?.state === 'completed')
+      assert.strictEqual((yield* turns(threadId))[2]?.prompt, '/compact')
       assert.deepStrictEqual(
-        handed.map((row) => [row.agentId, row.model, row.effort, row.state]),
-        [
-          ['opencode', null, null, 'superseded'],
-          ['opencode', null, null, 'active'],
-        ],
+        (yield* sessionsOn(threadId)).map((row) => [row.agentId, row.model, row.effort, row.state]),
+        [['opencode', null, null, 'active']],
       )
     }).pipe(Effect.provide(withQueries())),
   )
