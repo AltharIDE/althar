@@ -572,6 +572,8 @@ const computers = computerSessions({
     process.platform === 'win32' ||
     (process.platform === 'linux' && Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)),
   canAsk: () => !quitting && localWindows().size > 0,
+  // The Linux driver can compose all monitors into one frame. A primary-display grant cannot expose that frame.
+  canShareDisplay: () => process.platform !== 'linux' || screen.getAllDisplays().length === 1,
   desktopInputSafe: (action, frame) => {
     const focused = BrowserWindow.getFocusedWindow()
     if (focused !== null && mine(focused.webContents)) return false

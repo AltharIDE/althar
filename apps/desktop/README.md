@@ -112,6 +112,8 @@ is Command-Shift-Escape on a Mac and Ctrl-Shift-Escape elsewhere, where
 the desktop lets the app register it. Foreground input and sharing the
 primary display are separate choices. Sharing the display can expose
 other open apps to the task's model.
+On Linux, primary display sharing requires a single connected display.
+Window approval works across connected displays.
 
 Use a signed-in graphical session. On macOS the system may require
 Accessibility and Screen Recording access. On Linux, accessibility and

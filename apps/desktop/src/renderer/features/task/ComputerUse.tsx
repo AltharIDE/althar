@@ -51,10 +51,14 @@ function ComputerRequest({ request, answer }: { readonly request: Answer; readon
             <input type="checkbox" checked={foreground} onChange={(event) => setForeground(event.currentTarget.checked)} />
             <span>Allow foreground input in the selected windows</span>
           </label>
-          <label>
-            <input type="checkbox" checked={desktop} onChange={(event) => setDesktop(event.currentTarget.checked)} />
-            <span>Share and control the primary display. Other open apps may be visible to the task.</span>
-          </label>
+          {request.primaryDisplay ? (
+            <label>
+              <input type="checkbox" checked={desktop} onChange={(event) => setDesktop(event.currentTarget.checked)} />
+              <span>Share and control the primary display. Other open apps may be visible to the task.</span>
+            </label>
+          ) : (
+            <p className={s.reason}>Primary display sharing on Linux requires one connected display.</p>
+          )}
         </fieldset>
       )}
       {request.windows.length === 0 && request.apps.length === 0 && !request.desktop && (

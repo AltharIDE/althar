@@ -10,9 +10,15 @@ const TASK = `task_${'a'.repeat(32)}`
 const OWNER: ComputerOwner = { taskId: TASK, sessionId: 'lead', turnId: 'turn', threadId: 'thread', title: 'Verify computer access' }
 const signal = () => new AbortController().signal
 
-const setup = (worker: () => ComputerWorker = testComputerWorker) => {
+const setup = (worker: () => ComputerWorker = testComputerWorker, canShareDisplay = () => true) => {
   const states: Array<ComputerState> = []
-  const sessions = computerSessions({ worker, changed: (state) => states.push(state), canAsk: () => true, available: () => true })
+  const sessions = computerSessions({
+    worker,
+    changed: (state) => states.push(state),
+    canAsk: () => true,
+    canShareDisplay,
+    available: () => true,
+  })
   const ask = async (owner = OWNER, desktop = false) => {
     const approval = sessions.call(owner, { op: 'request', reason: 'Use Writer and Reader', desktop }, signal())
     await vi.waitFor(() => expect(states.at(-1)?.request).toBeDefined())
@@ -23,6 +29,17 @@ const setup = (worker: () => ComputerWorker = testComputerWorker) => {
 }
 
 describe('desktop access for a task', () => {
+  it('keeps foreground window approval available when the display itself cannot be shared', async () => {
+    const { sessions, ask } = setup(testComputerWorker, () => false)
+    const { request, approval } = await ask(OWNER, true)
+    const answer = { requestId: request.id, windows: [request.windows[0]!.id], foreground: true }
+    expect(request.primaryDisplay).toBe(false)
+    expect(sessions.allow(TASK, { ...answer, desktop: true })).toBe(false)
+    expect(sessions.allow(TASK, { ...answer, desktop: false })).toBe(true)
+    expect(await approval).toMatchObject({ value: { text: expect.stringContaining('"desktop":null,"foreground":true') } })
+    sessions.stop(TASK)
+  })
+
   it('restricts the grant to a live request and the windows the person selected', async () => {
     const { sessions, ask } = setup()
     const { approval, request } = await ask()

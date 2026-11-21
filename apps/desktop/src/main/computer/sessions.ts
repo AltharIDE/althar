@@ -54,6 +54,7 @@ export const computerSessions = (options: {
   readonly worker: () => ComputerWorker
   readonly changed: (state: ComputerState) => void
   readonly canAsk: () => boolean
+  readonly canShareDisplay: () => boolean
   readonly available: () => boolean
   readonly desktopInputSafe?: (action: NativeAction, frame: NativeFrame | undefined) => boolean
 }) => {
@@ -85,6 +86,7 @@ export const computerSessions = (options: {
           request: {
             id: session.pending.id,
             desktop: session.pending.desktop,
+            primaryDisplay: session.pending.desktop && options.canShareDisplay(),
             reason: session.pending.reason,
             windows: publicWindows(session.pending.windows),
             apps: publicApps(session.pending.apps),
@@ -193,6 +195,7 @@ export const computerSessions = (options: {
     const waiting = session?.pending
     if (session === undefined || waiting === undefined || waiting.id !== decision.requestId) return false
     if ((decision.desktop || decision.foreground) && !waiting.desktop) return false
+    if (decision.desktop && !options.canShareDisplay()) return false
     const selected = [...new Set(decision.windows)]
     if (selected.some((id) => !waiting.windows.has(id) && !waiting.apps.has(id))) return false
     if (session.windows.size + session.apps.size + selected.length > 40) return false
@@ -287,6 +290,7 @@ export const computerSessions = (options: {
       }
       const target = command.target === 'desktop' ? (active.desktop ? 'desktop' : undefined) : active.windows.get(command.target)
       if (target === undefined) return error('That window or display has not been approved.')
+      if (target === 'desktop' && !options.canShareDisplay()) return error('The display layout no longer permits primary-display control.')
       const name = target === 'desktop' ? 'the primary display' : target.app
       if (command.op === 'observe' || command.op === 'evidence') {
         const observed = await active.worker.run({

@@ -77,6 +77,7 @@ export interface ComputerState {
   readonly request?: {
     readonly id: string
     readonly desktop: boolean
+    readonly primaryDisplay: boolean
     readonly reason: string
     readonly windows: ReadonlyArray<ComputerWindow>
     readonly apps: ReadonlyArray<{ readonly id: string; readonly app: string }>
