@@ -6,9 +6,9 @@ import { tasksOf, words } from './words'
 import s from './parts.module.css'
 
 /*
- * What the takes share: a worker's places as a row of cells, the workers as
- * groups of cells or as a bar each, a worker's glyph, and the work that holds
- * the places.
+ * What the takes share: a computer's places as a row of cells, every
+ * computer's as groups of cells or as parts of one track, a computer's glyph,
+ * and the work that holds the places.
  */
 
 type Cell = 'on' | 'free' | 'shut' | 'gone'
@@ -46,15 +46,19 @@ export function WorkerPips({ workers }: { workers: readonly Worker[] }) {
   )
 }
 
-/** Every worker as a short bar, one under another: how full it is in cobalt, what it can't take for now faded. */
-export function WorkerBars({ workers }: { workers: readonly Worker[] }) {
+/**
+ * Every computer as a part of one track, as long as its places are many: at work in cobalt, free bare, closed for now
+ * faded at its end; one out of reach faded whole. Small, the bar's, as wide whatever the numbers; large, a popover's.
+ */
+export function Track({ workers, size = 'small' }: { workers: readonly Worker[]; size?: 'small' | 'large' }) {
   return (
-    <span className={s.bars} aria-hidden="true">
+    <span className={`${s.track} ${size === 'large' ? s.trackLarge : ''}`} aria-hidden="true">
       {workers.map((one) => {
         const { held, configured, atOnce } = one.places
         const style = {
+          flexGrow: configured,
           '--used': `${(Math.min(held.length, configured) / configured) * 100}%`,
-          '--open': `${(Math.min(atOnce, configured) / configured) * 100}%`,
+          '--open': `${(Math.max(Math.min(atOnce, configured), Math.min(held.length, configured)) / configured) * 100}%`,
         } as CSSProperties
         return <i key={one.id} style={style} data-away={one.away !== null || undefined} />
       })}

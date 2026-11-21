@@ -1,0 +1,22 @@
+/* the meter: the kit's own button and gauges (LoadMeter.module.css), with what the lab adds */
+.meter {
+  gap: 10px;
+}
+/* a step closed for now: a free step, faded */
+.shut {
+  opacity: 0.35;
+}
+/* the places, then what waits after them */
+.places {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* as many as wait, in the gauges' own small figures; its room kept while none do */
+.waits {
+  min-width: 2.4ch;
+  font: 500 9.5px/1 var(--font-label);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--t-2);
+}

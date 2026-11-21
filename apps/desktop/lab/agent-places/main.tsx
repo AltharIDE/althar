@@ -34,39 +34,53 @@ import { text as settingsText } from '../../src/renderer/features/settings/text'
 import { usePreferences } from '../../src/renderer/shared/usePreferences'
 import { agents, fakeClient, fakeHost } from '../../tests/fixtures'
 import { servicesFor } from '../../tests/render'
-import { boardOf, loadOf, NOW, PROJECTS, type Scene, SCENES, thisMacOf, type Worker, workersOf } from './data'
-import { workerSlider } from './directions/chip'
-import { W1, W2, W3, W4 } from './directions/popovers'
-import type { ChipKind, Ctx, Direction } from './directions/types'
+import { boardOf, loadOf, NOW, PROJECTS, type Scene, SCENES, thisMacOf, waitingOf, type Worker, workersOf } from './data'
+import { workerSlider } from './directions/meter'
+import { P1, P2, P3 } from './directions/peeks'
+import type { BarKind, Ctx, Direction, Offer } from './directions/types'
 import { ZERO } from './directions/zero'
 import { words } from './words'
 import s from './lab.module.css'
 
 /*
- * The agent places lab (README.md): This Mac's chip, this home's workers and
- * their places beside its name, and what it opens, on the app's own board,
- * the kit's own window bar and its own settings, with no runtime. The bar
- * along the bottom, or its keys, swaps the take in place (0 as built, 1–4
- * what the chip opens), what the chip draws (Z X C), the scene (Q W E R T),
- * only this Mac (M), crowded (K), a narrow window (N), the Settings tab (S),
- * dark (D), and whether the chip's popover stays open as they change (O).
- * ?open=quick opens the quick settings.
+ * The agent places lab (README.md): one meter in the window's bar for every
+ * computer this home's agents work on and this computer's load, and what it
+ * opens, on the app's own board, the kit's own window bar and its own
+ * settings, with no runtime. Homes stays as it is. The bar along the bottom,
+ * or its keys, swaps the take in place (0 as built, 1–3 what the meter
+ * opens), what the meter draws (Z X C), the scene (Q W E R T Y), only this
+ * Mac (M), crowded (K), a narrow window (N), the Settings tab (S), dark (D),
+ * and whether the meter's peek stays open as they change (O). ?open=quick
+ * opens the quick settings.
  */
 
-const DIRECTIONS: readonly Direction[] = [ZERO, W1, W2, W3, W4]
-const SCENE_KEYS = ['q', 'w', 'e', 'r', 't'] as const
-const CHIPS: readonly { key: ChipKind; kbd: string; label: string; idea: string }[] = [
-  { key: 'mac', kbd: 'z', label: 'This Mac’s', idea: 'The chip: this computer’s places alone, as its CPU and memory beside it' },
-  { key: 'groups', kbd: 'x', label: 'A group a worker', idea: 'The chip: every worker’s places, a group of cells each' },
-  { key: 'bars', kbd: 'c', label: 'A bar a worker', idea: 'The chip: every worker a short bar, one under another' },
+const DIRECTIONS: readonly Direction[] = [ZERO, P1, P2, P3]
+const SCENE_KEYS = ['q', 'w', 'e', 'r', 't', 'y'] as const
+const BARS: readonly { key: BarKind; kbd: string; label: string; idea: string }[] = [
+  {
+    key: 'gauges',
+    kbd: 'z',
+    label: 'AGENTS, CPU, MEM',
+    idea: 'The meter: an AGENTS gauge before CPU and MEM, in their manner, one button',
+  },
+  { key: 'cells', kbd: 'x', label: 'A cell a place', idea: 'The meter: a cell a place, a group a computer, then how many wait' },
+  {
+    key: 'track',
+    kbd: 'c',
+    label: 'One track',
+    idea: 'The meter: one track, a part a computer, as wide whatever the numbers, then how many wait',
+  },
 ]
+
+/** Work any computer could take that has waited this long, in minutes, with no room for it, brings up Althar Cloud. */
+const SUSTAINED = 10
 
 const params = () => new URLSearchParams(location.search)
 const read = () => {
   const now = params()
   return {
-    d: DIRECTIONS.find((one) => one.key === now.get('d'))?.key ?? W1.key,
-    c: CHIPS.find((one) => one.key === now.get('c'))?.key ?? 'groups',
+    d: DIRECTIONS.find((one) => one.key === now.get('d'))?.key ?? P1.key,
+    b: BARS.find((one) => one.key === now.get('b'))?.key ?? 'gauges',
     o: now.get('o') !== '0',
     m: now.get('m') === '1',
     p: (SCENES.find((one) => one.key === now.get('p'))?.key ?? 'mac') as Scene,
@@ -115,14 +129,14 @@ function Gear({ ctx, direction, onAll }: { ctx: Ctx; direction: Direction; onAll
   )
 }
 
-/** Each other worker's number, under this computer's: in the app, Settings' own Workers. */
-function OtherWorkers({ ctx }: { ctx: Ctx }) {
+/** Each other computer's number, and the cloud's, under this computer's. */
+function OtherComputers({ ctx }: { ctx: Ctx }) {
   const others = ctx.workers.filter((one) => one.kind !== 'this')
   if (others.length === 0) return null
   return (
     <SettingGroup
-      title={words.workersTitle}
-      action={<LinkButton onClick={() => ctx.say('Opens Add a worker')}>{words.addWorker.replace('…', '')}</LinkButton>}
+      title={words.otherComputers}
+      action={<LinkButton onClick={() => ctx.say('Opens Add a computer')}>{words.addComputer.replace('…', '')}</LinkButton>}
     >
       <SettingList>
         {others.map((one) => (
@@ -160,7 +174,13 @@ function SettingsScreen({ ctx, direction }: { ctx: Ctx; direction: Direction }) 
           text={{ title: settingsText.awakeTitle, note: settingsText.awakeNote }}
         />
         {direction.settings(ctx)}
-        <SettingSwitch title={settingsText.loadTitle} glyph={<Icon name="load" size={15} />} checked onChange={() => undefined} />
+        {/* in a take, the switch hides the one meter: the agents and this computer's load */}
+        <SettingSwitch
+          title={direction === ZERO ? settingsText.loadTitle : words.showMeter}
+          glyph={<Icon name="load" size={15} />}
+          checked
+          onChange={() => undefined}
+        />
         <SettingSwitch
           title={settingsText.atLoginTitle}
           note={settingsText.atLoginNote}
@@ -176,7 +196,7 @@ function SettingsScreen({ ctx, direction }: { ctx: Ctx; direction: Direction }) 
           onChange={() => undefined}
         />
       </SettingList>
-      {direction !== ZERO && <OtherWorkers ctx={ctx} />}
+      {direction !== ZERO && <OtherComputers ctx={ctx} />}
     </SettingsLayout>
   )
 }
@@ -185,7 +205,7 @@ function Lab() {
   const [state, setStateNow] = useState(read)
   const [own, setOwn] = useState<Readonly<Record<string, number | null>>>({})
   const first = read()
-  const [peek, setPeek] = useState<string | null>(first.o && first.d !== ZERO.key && opened !== 'quick' ? 'bar' : null)
+  const [peek, setPeek] = useState(first.o && first.d !== ZERO.key && opened !== 'quick')
   const [quick, setQuick] = useState(opened === 'quick')
   const [said, setSaid] = useState<string | null>(null)
   const services = useMemo(() => servicesFor(fakeClient().client, fakeHost()), [])
@@ -195,7 +215,7 @@ function Lab() {
     const merged = { ...state, ...next }
     const url = params()
     url.set('d', merged.d)
-    url.set('c', merged.c)
+    url.set('b', merged.b)
     url.set('p', merged.p)
     for (const [key, on] of [
       ['k', merged.k],
@@ -213,7 +233,7 @@ function Lab() {
     url.delete('open')
     history.replaceState(null, '', `?${url.toString()}`)
     if (next.p !== undefined || next.k !== undefined) setOwn({})
-    setPeek(merged.o && merged.d !== ZERO.key ? 'bar' : null)
+    setPeek(merged.o && merged.d !== ZERO.key)
     setQuick(false)
     setStateNow(merged)
   }
@@ -246,6 +266,18 @@ function Lab() {
   }, [workers, state.d, state.k])
   const lanes = board.lanes
   const load = loadOf(state.p, places, state.k)
+  const waiting = waitingOf(workers, state.k)
+  // Althar Cloud, where work any computer could take has waited a while with no room for it: to set up, or its cap to raise.
+  const offer: Offer = (() => {
+    const any = waiting.filter((one) => one.only === null)
+    if (any.length === 0 || Math.max(...any.map((one) => one.minutes)) < SUSTAINED) return null
+    const cloud = workers.find((one) => one.kind === 'cloud')
+    if (cloud === undefined) return { kind: 'setup', waiting: any }
+    if (cloud.spend === null) return null
+    if (cloud.places.why === 'cap') return { kind: 'raise', waiting: any, resets: cloud.spend.resets }
+    if (cloud.places.held.length >= cloud.places.atOnce) return { kind: 'more', waiting: any, month: words.quietOf(cloud) ?? '' }
+    return null
+  })()
 
   const say = (what: string) => {
     setSaid(what)
@@ -263,7 +295,9 @@ function Lab() {
     here,
     places,
     load,
-    chip: state.c,
+    bar: state.b,
+    waiting,
+    offer,
     count,
     most: MOST_AT_ONCE,
     setCount: (n) => setOwn((was) => ({ ...was, [here.id]: n })),
@@ -293,8 +327,8 @@ function Lab() {
       if (found !== undefined) return set({ d: found.key })
       const scene = SCENES[SCENE_KEYS.indexOf(key as (typeof SCENE_KEYS)[number])]
       if (scene !== undefined) return set({ p: scene.key })
-      const chip = CHIPS.find((one) => one.kbd === key)
-      if (chip !== undefined) return set({ c: chip.key })
+      const bar = BARS.find((one) => one.kbd === key)
+      if (bar !== undefined) return set({ b: bar.key })
       if (key === 'm') return set({ m: !state.m })
       if (key === 'k') return set({ k: !state.k })
       if (key === 'n') return set({ n: !state.n })
@@ -355,8 +389,8 @@ function Lab() {
             </button>
           ))}
           <span className={s.rule} />
-          {CHIPS.map((one) => (
-            <button key={one.key} type="button" aria-pressed={state.c === one.key} onClick={() => set({ c: one.key })} title={one.idea}>
+          {BARS.map((one) => (
+            <button key={one.key} type="button" aria-pressed={state.b === one.key} onClick={() => set({ b: one.key })} title={one.idea}>
               <kbd>{one.kbd.toUpperCase()}</kbd>
               {one.label}
             </button>
@@ -389,7 +423,7 @@ function Lab() {
             <kbd>D</kbd>Dark
           </button>
           <button type="button" aria-pressed={state.o} onClick={() => set({ o: !state.o })}>
-            <kbd>O</kbd>Popover open
+            <kbd>O</kbd>Peek open
           </button>
           <span className={s.gap} />
           <span className={s.idea} title={direction.idea}>

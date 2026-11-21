@@ -1,10 +1,11 @@
-import { AgentsAtOnce, ChromeButton, LoadMeter } from '@althar/ui'
+import { AgentsAtOnce, ChromeButton, LoadMeter, PlanGauge } from '@althar/ui'
 
+import { CLAUDE_PLENTY, CODEX_PLENTY } from '../../../../../packages/ui/src/fixtures/plan'
 import { text as settingsText } from '../../../src/renderer/features/settings/text'
 import { SLOTS } from '../data'
 import type { Direction } from './types'
 
-/* 0 · As built: the board's own banner over Up next (BoardView's AgentPlaces), the bar and the slider as they are. */
+/* 0 · As built: the board's own banner over Up next (BoardView's AgentPlaces); the bar (Homes, CPU and MEM, plan usage) and the slider as they are. */
 export const ZERO: Direction = {
   key: '0',
   kbd: '0',
@@ -14,6 +15,7 @@ export const ZERO: Direction = {
     <>
       <ChromeButton icon="plug" label="Homes" compact />
       <LoadMeter load={ctx.load} slots={SLOTS} onOpen={() => undefined} onHide={() => undefined} />
+      <PlanGauge agents={[CLAUDE_PLENTY, CODEX_PLENTY]} />
     </>
   ),
   quick: (ctx) => (

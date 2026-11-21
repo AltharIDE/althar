@@ -19,9 +19,10 @@ import { card } from '../../tests/fixtures'
 export const SCENES = [
   { key: 'mac', label: 'This Mac lowered' },
   { key: 'full', label: 'All in use' },
-  { key: 'away', label: 'A worker away' },
+  { key: 'away', label: 'A computer away' },
   { key: 'cap', label: 'Cloud cap reached' },
   { key: 'free', label: 'Room to spare' },
+  { key: 'tight', label: 'Work waits, no cloud' },
 ] as const
 export type Scene = (typeof SCENES)[number]['key']
 
@@ -83,6 +84,8 @@ export interface Worker {
   readonly spend: { readonly spent: number; readonly cap: number; readonly resets: string } | null
   /** Tasks that can start only here, waiting for it, and why only here: a local checkout, a platform. */
   readonly pinned: readonly PinnedTask[]
+  /** How hard it works, 0 to 1, as the computer says; none for the cloud, whose computers are Althar's. */
+  readonly load: { readonly cpu: number; readonly memory: number } | null
 }
 
 export interface PinnedTask {
@@ -216,10 +219,13 @@ const places = (machine: Machine, held: readonly Held[], lowered?: { atOnce: num
   own: false,
 })
 
-const worker = (one: Omit<Worker, 'away' | 'spend' | 'pinned'> & Partial<Pick<Worker, 'away' | 'spend' | 'pinned'>>): Worker => ({
+const worker = (
+  one: Omit<Worker, 'away' | 'spend' | 'pinned' | 'load'> & Partial<Pick<Worker, 'away' | 'spend' | 'pinned' | 'load'>>,
+): Worker => ({
   away: null,
   spend: null,
   pinned: [],
+  load: null,
   ...one,
 })
 
@@ -240,10 +246,27 @@ export const workersOf = (scene: Scene, crowded: boolean, onlyMac: boolean): Wor
   const test: Doing = { kind: 'background', command: crowded ? 'bun run test:e2e --project=chromium' : 'bun run test' }
 
   const thisMac = (held: Held[], lowered?: { atOnce: number; why: Why }, pinned: PinnedTask[] = []) =>
-    worker({ id: 'this', name: 'This Mac', kind: 'this', what: 'This computer', places: places(mac, held, lowered), pinned })
-  const buildBox = (held: Held[], more: Partial<Worker> = {}) =>
-    worker({ id: 'build-box', name: 'build-box', kind: 'own', what: 'Linux', places: places(box, held), ...more })
-  const macMini = (held: Held[]) => worker({ id: 'mac-mini', name: 'Mac mini', kind: 'own', what: 'macOS', places: places(mini, held) })
+    worker({
+      id: 'this',
+      name: 'This Mac',
+      kind: 'this',
+      what: 'This computer',
+      places: places(mac, held, lowered),
+      pinned,
+      load: { cpu: LOAD[scene].cpu, memory: LOAD[scene].memory },
+    })
+  const buildBox = (held: Held[], more: Partial<Worker> = {}, lowered?: { atOnce: number; why: Why }) =>
+    worker({
+      id: 'build-box',
+      name: 'build-box',
+      kind: 'own',
+      what: 'Linux',
+      places: places(box, held, lowered),
+      load: BOX_LOAD[scene],
+      ...more,
+    })
+  const macMini = (held: Held[]) =>
+    worker({ id: 'mac-mini', name: 'Mac mini', kind: 'own', what: 'macOS', places: places(mini, held), load: { cpu: 0.34, memory: 0.58 } })
   const cloudOf = (held: Held[], spent: number, closed = false) =>
     worker({
       id: 'cloud',
@@ -299,6 +322,7 @@ export const workersOf = (scene: Scene, crowded: boolean, onlyMac: boolean): Wor
           thisMac([a('login'), a('safari'), a('audit')]),
           buildBox([a('vite', { doing: test }), a('vite', { role: 'helper' }), a('flaky')], {
             away: { since: '23:02' },
+            load: null,
             pinned: [pinnedTo('Rebuild the staging database', 'Needs Linux')],
           }),
           ...(k ? [macMini([a('icons')])] : []),
@@ -329,6 +353,20 @@ export const workersOf = (scene: Scene, crowded: boolean, onlyMac: boolean): Wor
         ]
       case 'free':
         return [thisMac([a('login'), a('safari')]), buildBox([a('vite', { doing: test })]), ...(k ? [macMini([])] : []), cloudOf([], 3.1)]
+      case 'tight':
+        // No cloud linked: This Mac short of CPU, build-box of memory, both full, and the line waits.
+        return [
+          thisMac([a('login', { cpu: 0.24 }), a('safari', { cpu: 0.21 }), a('audit', { cpu: 0.18 }), ...(k ? [a('perf'), a('sso')] : [])], {
+            atOnce: k ? 5 : 3,
+            why: 'cpu',
+          }),
+          buildBox(
+            [a('vite', { doing: test }), a('vite', { role: 'helper' }), a('notes'), a('flaky'), a('cache'), a('docs')],
+            {},
+            { atOnce: 6, why: 'memory' },
+          ),
+          ...(k ? [macMini([a('icons'), a('pdf'), a('tags'), a('emails')])] : []),
+        ]
     }
   })()
   // With no other worker, what can start only on This Mac is the whole line, which waits as it does today.
@@ -341,13 +379,26 @@ export const thisMacOf = (workers: readonly Worker[]) => workers.find((one) => o
 /** A worker with no free place it can start in: full, closed for a while, or out of reach. */
 export const isFull = (one: Worker) => one.away !== null || one.places.held.length >= one.places.atOnce
 
-/** Every place across the workers that can be counted: in use, and the most there are. */
+/**
+ * Every place across the computers: at work and as many as there are on those in reach (`busy` of `of`, as the words
+ * say it); and, for what draws them, every place there is, out of reach too, and how many of them are closed for now.
+ */
 export const poolOf = (workers: readonly Worker[]) => {
   const near = workers.filter((one) => one.away === null)
   return {
     busy: near.reduce((sum, one) => sum + one.places.held.length, 0),
-    configured: near.reduce((sum, one) => sum + one.places.configured, 0),
-    atOnce: near.reduce((sum, one) => sum + one.places.atOnce, 0),
+    of: near.reduce((sum, one) => sum + one.places.configured, 0),
+    /** Where a task could start now: free and not closed for a while. */
+    free: near.reduce((sum, one) => sum + Math.max(0, one.places.atOnce - one.places.held.length), 0),
+    all: workers.reduce((sum, one) => sum + one.places.configured, 0),
+    closed: workers.reduce(
+      (sum, one) =>
+        sum +
+        (one.away !== null
+          ? one.places.configured
+          : Math.max(0, one.places.configured - Math.max(one.places.atOnce, one.places.held.length))),
+      0,
+    ),
   }
 }
 
@@ -403,28 +454,55 @@ export interface Pinned {
   readonly worker: string
 }
 
+/** A task waiting to start, in any project: for a free place anywhere, or for the one computer it can start on. */
+export interface Waiting {
+  readonly taskId: string
+  readonly title: string
+  readonly project: string
+  /** The computer it can start on alone, and why only there; null where any can take it. */
+  readonly only: { readonly worker: string; readonly why: string } | null
+  /** How long it has waited, in minutes. */
+  readonly minutes: number
+}
+
+/** Up next in the other projects, behind Meridian's, while every place is taken. */
+const ELSEWHERE = [
+  { title: 'Bump Node to 24 in CI', project: 'Halyard' },
+  { title: 'Fix the export dialog on small screens', project: 'Tessera' },
+] as const
+
 /**
- * Up next, by what the workers have free. Anything can start wherever a place is free, so with room anywhere only
+ * What waits, by what the workers have free. Anything can start wherever a place is free, so with room anywhere only
  * work that can start on one worker alone waits: a local checkout on This Mac, a Linux build on build-box. With
- * every worker full, the whole line waits, in order.
+ * every worker full, every project's line waits, in order, the first for longest.
  */
-const lineOf = (workers: readonly Worker[], crowded: boolean) => {
+export const waitingOf = (workers: readonly Worker[], crowded: boolean): Waiting[] => {
   const anyRoom = workers.some((one) => !isFull(one))
-  const titles = [
+  if (anyRoom)
+    return workers.flatMap((one) => one.pinned.map((task) => ({ ...task, only: { worker: one.name, why: task.why }, minutes: 6 })))
+  const meridian = [
     'Dark mode for Settings',
     'Show receipts in the customer portal',
     ...(crowded ? ['Retry failed payouts overnight', 'Let admins export every workspace setting as one file'] : []),
-  ]
-  if (!anyRoom) return { titles, pinned: [] as Pinned[] }
-  const pinned = workers.flatMap((one) => one.pinned.map((task) => ({ task, worker: one.name })))
-  return { titles: pinned.map(({ task }) => task.title), pinned: pinned.map(({ task, worker }) => ({ taskId: task.taskId, worker })) }
+  ].map((title, i) => ({ taskId: `line-${i}`, title, project: 'Meridian' }))
+  const others = ELSEWHERE.map((one, i) => ({ taskId: `else-${i}`, ...one }))
+  const line = [meridian[0]!, others[0]!, ...meridian.slice(1), others[1]!]
+  return line.map((one, i) => ({ ...one, only: null, minutes: Math.max(2, 25 - i * 7) }))
+}
+
+/** Up next on Meridian's board: its own waiting tasks, and which wait for one worker. */
+const lineOf = (workers: readonly Worker[], crowded: boolean) => {
+  const mine = waitingOf(workers, crowded).filter((one) => one.project === 'Meridian')
+  return {
+    titles: mine.map((one) => one.title),
+    pinned: mine.flatMap((one): Pinned[] => (one.only === null ? [] : [{ taskId: one.taskId, worker: one.only.worker }])),
+  }
 }
 
 /** Meridian's board: what runs there, what waits up next for a place, and a call. */
 export const boardOf = (workers: readonly Worker[], crowded: boolean): { lanes: Lanes; pinned: readonly Pinned[] } => {
   const here = workers.filter((one) => one.away === null)
-  const pool = poolOf(workers)
-  const queued = { busy: pool.busy, atOnce: pool.atOnce }
+  const queued = { busy: poolOf(workers).busy, atOnce: here.reduce((sum, one) => sum + one.places.atOnce, 0) }
   const mine = here.flatMap((one) => one.places.held).filter((held) => held.project === 'Meridian')
   const running = [...new Map(mine.map((held) => [held.taskId, held])).values()].map((held) =>
     task({
@@ -514,6 +592,17 @@ const LOAD: Record<Scene, { cpu: number; memory: number; pressure: MemoryPressur
   away: { cpu: 0.45, memory: 0.6, pressure: MemoryPressure.Normal },
   cap: { cpu: 0.8, memory: 0.72, pressure: MemoryPressure.Normal },
   free: { cpu: 0.3, memory: 0.48, pressure: MemoryPressure.Normal },
+  tight: { cpu: 0.93, memory: 0.68, pressure: MemoryPressure.Normal },
+}
+
+/** build-box's load, as it says it. */
+const BOX_LOAD: Record<Scene, { cpu: number; memory: number }> = {
+  mac: { cpu: 0.46, memory: 0.41 },
+  full: { cpu: 0.71, memory: 0.63 },
+  away: { cpu: 0, memory: 0 },
+  cap: { cpu: 0.74, memory: 0.66 },
+  free: { cpu: 0.18, memory: 0.22 },
+  tight: { cpu: 0.64, memory: 0.91 },
 }
 
 /** The load meter's reading, this computer's: Althar's work on it by task, most CPU first. */
