@@ -352,6 +352,9 @@ describe('the API', () => {
       assert.isNull(thread.task.goal)
       assert.isNull(thread.session)
       assert.isTrue(thread.items.some((item) => item.kind === 'notice' && item.content.title === 'Set an objective with /goal.'))
+      yield* client.AbandonTask({ commandId: commandId(), taskId: task.id })
+      const abandoned = yield* Effect.flip(client.Send({ ...command, commandId: commandId(), body: '/goal Verify the build' }))
+      assert.strictEqual(abandoned.message, 'Start a goal on an open task.')
     }).pipe(Effect.scoped),
   )
 

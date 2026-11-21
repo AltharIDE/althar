@@ -11,7 +11,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { controlGoal, readGoal } from '../src/threadGoals'
-import { callTool, repository, runtime, until } from './support'
+import { callTool, repository, runtime, turns, until } from './support'
 
 const newTask = (scratch = false) =>
   Effect.gen(function* () {
@@ -201,4 +201,96 @@ describe('thread goals', () => {
       gate.open('[lead:slowly]')
     }).pipe(Effect.provide(runtime(':memory:', { holds: gate, sessionControls: (controls) => connections.push(controls) })), Effect.scoped)
   })
+
+  it.live('resumes after a transient provider failure on an automatic turn', () => {
+    const service: { down: 'offline' | undefined } = { down: 'offline' }
+    const gate = holds()
+    return Effect.gen(function* () {
+      const task = yield* newTask()
+      const sessions = yield* Sessions
+      const { goal } = yield* setGoal(task.threadId)
+      yield* sessions.kickGoal(task.threadId, goal?.revision ?? 0, lead)
+      const blocked = yield* until(readGoal(task.threadId), (goal) => goal?.status === 'blocked')
+      assert.include(blocked, { rounds: 1, detail: 'The agent could not continue. Resume the goal to try again.' })
+      const [failed] = yield* turns(task.threadId)
+      assert.strictEqual(failed?.errorClass, 'transient')
+
+      service.down = undefined
+      const resumed = yield* controlGoal(task.threadId, { action: 'resume' })
+      yield* sessions.kickGoal(task.threadId, resumed.goal?.revision ?? 0)
+      const live = yield* liveGoal(task.threadId)
+      assert.strictEqual(live?.sessionId, failed?.providerSessionId)
+      assert.include(yield* readGoal(task.threadId), { status: 'active', rounds: 2 })
+      yield* controlGoal(task.threadId, { action: 'pause' })
+      gate.open('[lead:slowly]')
+    }).pipe(Effect.provide(runtime(':memory:', { holds: gate, connection: () => service.down })), Effect.scoped)
+  })
+
+  it.live('gives a queued message priority and rejects its goal report after an edit', () => {
+    const gate = holds()
+    return Effect.gen(function* () {
+      const task = yield* newTask()
+      const sessions = yield* Sessions
+      const body = 'Check the local result first. [lead:slowly]'
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { body }),
+        threadId: task.threadId,
+        body,
+        sender: { kind: 'window' },
+        disposition: 'after_current',
+      })
+      const { goal } = yield* setGoal(task.threadId)
+      yield* sessions.kickGoal(task.threadId, goal?.revision ?? 0, lead)
+      const [turn] = yield* until(turns(task.threadId), ([turn]) => turn?.state === 'delivered')
+      assert.include(turn?.prompt ?? '', body)
+      assert.include(turn?.prompt ?? '', 'Prioritize the person’s latest message')
+      assert.strictEqual((yield* readGoal(task.threadId))?.rounds, 0)
+
+      const updated = yield* controlGoal(task.threadId, { action: 'edit', objective: 'Verify production instead' })
+      assert.isUndefined(updated.stopping)
+      assert.include(
+        yield* callTool(
+          {
+            role: 'lead',
+            projectId: task.projectId,
+            taskId: task.taskId,
+            threadId: task.threadId,
+            sessionId: turn?.providerSessionId ?? '',
+          },
+          'report_goal',
+          { turn: turn?.id, status: 'complete', detail: 'Local verification passed.' },
+        ),
+        'no longer holds',
+      )
+      assert.include(yield* readGoal(task.threadId), { objective: 'Verify production instead', status: 'active', rounds: 0, detail: null })
+      yield* controlGoal(task.threadId, { action: 'pause' })
+      gate.open('[lead:slowly]')
+    }).pipe(Effect.provide(runtime(':memory:', { holds: gate })), Effect.scoped)
+  })
+
+  it.live('explains why an unstarted goal needs a lead and why a chosen lead failed to start', () =>
+    Effect.gen(function* () {
+      const task = yield* newTask()
+      const sessions = yield* Sessions
+      const state = readGoal(task.threadId)
+      const first = yield* controlGoal(task.threadId, { action: 'set', objective })
+      yield* sessions.kickGoal(task.threadId, first.goal?.revision ?? 0)
+      assert.include(yield* until(state, (goal) => goal?.status === 'blocked'), {
+        rounds: 0,
+        detail: 'Choose a lead, then resume the goal.',
+      })
+
+      const resumed = yield* controlGoal(task.threadId, { action: 'resume' }, lead)
+      yield* sessions.kickGoal(task.threadId, resumed.goal?.revision ?? 0, lead)
+      assert.include(yield* until(state, (goal) => goal?.status === 'blocked'), {
+        rounds: 0,
+        detail: 'The lead could not start. Check its connection and resume the goal.',
+      })
+    }).pipe(
+      Effect.provide(
+        runtime(':memory:', {}, { each: { codex: { beforeNewSession: () => Promise.reject(new Error('Startup failed.')) } } }),
+      ),
+      Effect.scoped,
+    ),
+  )
 })
