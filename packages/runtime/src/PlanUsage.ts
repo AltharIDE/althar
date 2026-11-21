@@ -242,7 +242,7 @@ export class PlanUsage extends Context.Service<
         // A listing classifies connections; it doesn't measure usage. Retain it until the sign-in is checked again or
         // explicitly refreshed, while continuing to read Go's actual limits on the usual schedule.
         const listings = new Map<string, { readonly check: SignInCheck; readonly credentials: CredentialsRead }>()
-        const listingReads = new Map<string, number>()
+        const openCodeReads = new Map<string, number>()
         /* How many times sessions have said each account's windows: an endpoint's answer to a question asked before the last of them doesn't replace it. */
         const sayings = new Map<string, number>()
         /* Each account's windows, by the saying that last said each: those said since the endpoint was asked stay over its answer. */
@@ -334,7 +334,7 @@ export class PlanUsage extends Context.Service<
             ON CONFLICT (account_id, observed_at) DO UPDATE SET used_percent = excluded.used_percent, resets_at = excluded.resets_at`
           })
 
-        const keep = (accountId: string, next: Held) =>
+        const keepUsage = (accountId: string, next: Held) =>
           Effect.gen(function* () {
             held.set(accountId, next)
             if (next.paidBy !== 'key') yield* keepWeek(accountId, next.windows)
@@ -369,9 +369,18 @@ export class PlanUsage extends Context.Service<
             const entry = agents.list.find((each) => each.definition.id === account.agentId)
             if (entry === undefined) return
             const definition = entry.definition
+            const generation = definition.id === 'opencode' ? (openCodeReads.get(account.id) ?? 0) + 1 : 0
+            if (definition.id === 'opencode') openCodeReads.set(account.id, generation)
             const listing = definition.id === 'opencode' && !refreshListing ? listings.get(account.id) : undefined
             const cached = listing === undefined ? undefined : yield* signIns.cached(account)
             const check = listing !== undefined && cached === listing.check ? cached : yield* signIns.account(account)
+            const current = Effect.gen(function* () {
+              if (definition.id !== 'opencode') return true
+              const signedIn = yield* signIns.cached(account)
+              return openCodeReads.get(account.id) === generation && signedIn === check
+            })
+            const keep = (accountId: string, next: Held) =>
+              Effect.flatMap(current, (valid) => (valid ? Effect.asVoid(keepUsage(accountId, next)) : Effect.void))
             const before = held.get(account.id)
             const env = accounts.env(account)
             /* A fault, with the reading held when it is kept: one a session said while the source was asked stays. */
@@ -529,13 +538,12 @@ export class PlanUsage extends Context.Service<
               let listed: CredentialsRead
               if (listing !== undefined && cached === listing.check) listed = listing.credentials
               else {
-                const reading = (listingReads.get(account.id) ?? 0) + 1
-                listingReads.set(account.id, reading)
+                if (!(yield* current)) return
                 listings.delete(account.id)
                 listed = yield* Effect.promise(() => readCredentials(definition, env))
                 // A newer refresh or a forgotten connection owns its own result, even if this one finishes later.
-                if (listed.kind === 'credentials' && listingReads.get(account.id) === reading && (yield* signIns.cached(account)) === check)
-                  listings.set(account.id, { check, credentials: listed })
+                if (!(yield* current)) return
+                if (listed.kind === 'credentials') listings.set(account.id, { check, credentials: listed })
               }
               if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
               // How each provider is paid, for what a task used of it (Spending): a turn is priced by the provider it ran on.
@@ -815,7 +823,7 @@ export class PlanUsage extends Context.Service<
                   // Each window said replaces its own, and the others stay as last said, each with when it was.
                   const named = new Set(said.map(keyOf))
                   const windows = [...(before?.windows ?? []).filter((each) => !named.has(keyOf(each))), ...dated(said, at)]
-                  yield* keep(accountId, {
+                  yield* keepUsage(accountId, {
                     agentId,
                     source: 'acp_extension',
                     plan: before?.plan ?? null,

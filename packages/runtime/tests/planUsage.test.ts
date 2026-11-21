@@ -772,6 +772,69 @@ describe('a window as it resets, and what a restart reads back', () => {
 describe('OpenCode’s accounts, by their own sign-ins', () => {
   const openCode = (view: PlanUsageView) => accountOf(view, 'opencode')
 
+  it.effect('does not let a superseded listing replace the newer account classification', () => {
+    let release!: () => void
+    const waiting = new Promise<void>((resolve) => (release = resolve))
+    let listings = 0
+    const layer = withUsage({
+      readCredentials: async () => {
+        if (++listings === 1) {
+          await waiting
+          return credentials(['openai', 'plan'])
+        }
+        return credentials(['openai', 'key'])
+      },
+    })
+    return onTestClock(
+      Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('opencode')
+        const first = yield* Effect.forkChild(usage.refresh([account!.id], true))
+        yield* until(
+          Effect.sync(() => listings),
+          (count) => count === 1,
+        )
+        yield* usage.refresh([account!.id], true)
+        assert.strictEqual((yield* usage.paidBy(account!.id))?.paidBy, 'key')
+        release()
+        yield* Fiber.join(first)
+        assert.strictEqual((yield* usage.paidBy(account!.id))?.paidBy, 'key')
+      }).pipe(Effect.ensuring(Effect.sync(() => release())), Effect.provide(layer)),
+    )
+  })
+
+  it.effect('does not let an older Go limit answer restore a forgotten classification', () => {
+    let release!: () => void
+    const waiting = new Promise<void>((resolve) => (release = resolve))
+    let listings = 0
+    let limits = 0
+    const layer = withUsage({
+      readCredentials: async () => (++listings === 1 ? credentials(['opencode-go', 'plan']) : credentials(['openai', 'key'])),
+      readGoUsage: async () => {
+        limits++
+        await waiting
+        return read(used(100))
+      },
+    })
+    return onTestClock(
+      Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        const [account] = yield* (yield* Accounts).of('opencode')
+        const first = yield* Effect.forkChild(usage.refresh([account!.id], true))
+        yield* until(
+          Effect.sync(() => limits),
+          (count) => count === 1,
+        )
+        yield* (yield* SignIns).forget('opencode')
+        yield* usage.refresh([account!.id], true)
+        assert.strictEqual((yield* usage.paidBy(account!.id))?.paidBy, 'key')
+        release()
+        yield* Fiber.join(first)
+        assert.strictEqual((yield* usage.paidBy(account!.id))?.paidBy, 'key')
+      }).pipe(Effect.ensuring(Effect.sync(() => release())), Effect.provide(layer)),
+    )
+  })
+
   it.effect('are keys, with no fault, when every sign-in is a key', () =>
     Effect.gen(function* () {
       const view = openCode(yield* (yield* PlanUsage).now(true))
