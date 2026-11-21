@@ -532,6 +532,25 @@ export const takesScript = (words: ReadonlyArray<string>): boolean => {
   return SCRIPT_LANGUAGES.test(program.slice(program.lastIndexOf('/') + 1))
 }
 
+/** Look for an innermost brace pair with a list or range separator. */
+const hasBraceExpansion = (word: string): boolean => {
+  let inside = false
+  let separator = false
+  for (let index = 0; index < word.length; index += 1) {
+    const char = word[index]
+    if (char === '{') {
+      inside = true
+      separator = false
+    } else if (char === '}') {
+      if (inside && separator) return true
+      inside = false
+    } else if (inside && (char === ',' || (char === '.' && word[index + 1] === '.'))) {
+      separator = true
+    }
+  }
+  return false
+}
+
 /** A command line's commands as written, with the separator that ends each ('' for the last). */
 export const splitCommandLine = (source: string) => {
   const text = withoutQuotedHeredocs(source)
@@ -563,7 +582,7 @@ export const splitCommandLine = (source: string) => {
   let substituted = false
   const endWord = () => {
     if (inWord) {
-      if (expands || (braces && /\{[^{}]*(,|\.\.)[^{}]*\}/.test(word))) expanding.add(words.length)
+      if (expands || (braces && hasBraceExpansion(word))) expanding.add(words.length)
       words.push(word)
     }
     word = ''
