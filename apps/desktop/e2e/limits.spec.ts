@@ -87,7 +87,7 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
     await expect(
       shown(
         page,
-        /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (.+ on )?Codex takes the work over( until then)?\.$/,
+        /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (No other agent has room on that model, so )?(.+ on )?Codex(, a different model,)? takes the work over( until then)?\.$/,
       ),
     ).toBeVisible()
     await expect(shown(page, /Checkout retries once when the payment call fails/).first()).toBeVisible()
@@ -123,7 +123,7 @@ test('waits for the reset where no other agent is free, and says so on its card,
     await expect(
       shown(
         page,
-        /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (.+ on )?Codex takes the work over( until then)?\.$/,
+        /^(.+ on )?Claude Code ran out of usage while working on the task, until .+\. (No other agent has room on that model, so )?(.+ on )?Codex(, a different model,)? takes the work over( until then)?\.$/,
       ),
     ).toBeVisible()
     // Passive quota notices stay out of the thread; its actionable waiting state still offers another model.
@@ -148,7 +148,10 @@ test('asks the person when the reset isn’t known and no other agent is free', 
     await expect(shown(page, 'Needs you', { exact: true }).first()).toBeVisible()
     await openTask(page)
     await expect(
-      shown(page, /^(.+ on )?Claude Code ran out of usage while working on the task\. (.+ on )?Codex takes the work over( until .+)?\.$/),
+      shown(
+        page,
+        /^(.+ on )?Claude Code ran out of usage while working on the task\. (No other agent has room on that model, so )?(.+ on )?Codex(, a different model,)? takes the work over( until .+)?\.$/,
+      ),
     ).toBeVisible()
     await expect(shown(page, 'Codex is out of usage.')).toBeVisible()
     // Telling an agent that is out anything would hit the same limit. Claude Code ran out first, and nothing else is free: it is tried again.

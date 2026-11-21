@@ -29,6 +29,7 @@ const sol = { id: 'gpt-strong', name: 'GPT Strong' }
 const third = { id: 'opencode-go/deepseek-strong', name: 'OpenCode Go/DeepSeek Strong' }
 const unscored = { id: 'unknown', name: 'New Model' }
 const sameMaker = { id: 'opencode-go/claude-strong', name: 'OpenCode Go/Claude Strong' }
+const goSol = { id: 'opencode-go/gpt-strong', name: 'OpenCode Go/GPT Strong' }
 
 // The same cached Artificial Analysis scores list_models reads. The strongest
 // route on OpenCode is deliberately the same maker as the lead.
@@ -196,15 +197,16 @@ const automationRuns = (automationId: string) =>
   )
 
 describe('automatic usage takeover by model', () => {
-  it.live('continues a turn on another maker’s strongest plan model with its brief, commits and unfinished work', () => {
+  it.live('continues a turn on the same model on another agent with room, with its brief, commits and unfinished work', () => {
     const back = Date.now() + 3_600_000
     return Effect.gen(function* () {
       const task = yield* startTask()
       yield* task.start
       yield* ready(task.projectId)
+      // OpenCode Go offers the lead's own model: it goes there, rather than to GPT Strong, which scores nearly as well.
       assert.deepStrictEqual(yield* agentsOn(task.threadId), [
         { agentId: 'claude-code', model: claude.id },
-        { agentId: 'codex', model: sol.id },
+        { agentId: 'opencode', model: sameMaker.id },
       ])
       const prompts = yield* turns(task.threadId)
       const taken = prompts.find((turn) => turn.prompt?.includes('You are taking over a task'))?.prompt ?? ''
@@ -215,7 +217,8 @@ describe('automatic usage takeover by model', () => {
       assert.include(taken, 'Carry on with the task from where it stands')
       const notices = (yield* items(task.threadId)).filter((item) => item.kind === 'notice' && item.content.about === 'limit')
       assert.lengthOf(notices, 1)
-      assert.include(notices[0]?.content.title, 'GPT Strong on Fake codex takes the work over until then.')
+      assert.include(notices[0]?.content.title, 'Claude Strong on Fake opencode takes the work over until then.')
+      assert.notInclude(notices[0]?.content.title, 'a different model')
       yield* noCall
     }).pipe(
       Effect.provide(
@@ -288,7 +291,11 @@ describe('automatic usage takeover by model', () => {
       ])
       const notices = (yield* items(task.threadId)).filter((item) => item.kind === 'notice' && item.content.about === 'limit')
       assert.lengthOf(notices, 1)
-      assert.include(notices[0]?.content.title, 'DeepSeek Strong on Fake opencode takes the review over until then.')
+      // No other agent offers GPT Strong, so the review moves to another model, and the line says so.
+      assert.include(
+        notices[0]?.content.title,
+        'No other agent has room on that model, so DeepSeek Strong on Fake opencode, a different model, takes the review over until then.',
+      )
       assert.notInclude(notices[0]?.content.title, 'opencode-go')
       assert.notInclude(notices[0]?.content.title, 'reviews its own work')
       yield* noCall
@@ -319,7 +326,10 @@ describe('automatic usage takeover by model', () => {
       ])
       yield* noCall
     }).pipe(
-      Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back }, holds: held }, codex: { holds: held } })),
+      // OpenCode doesn't offer the lead's model here, so the stand-in is Codex, on another.
+      Effect.provide(
+        withAgents({ 'claude-code': { outOfUsage: { until: back }, holds: held }, codex: { holds: held }, opencode: { models: [third] } }),
+      ),
       onTestClock,
     )
   })
@@ -427,6 +437,22 @@ describe('automatic usage takeover by model', () => {
       ),
     ),
   )
+  it.live('keeps the work on its model through another agent before a different, stronger model, and marks the other model', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask()
+      const limits = yield* Limits
+      const models = yield* Models
+      // On GPT Strong through OpenCode Go, as GPT-6.2 Sol was: Codex offers the same model, Claude Code a stronger one.
+      const input = { besides: ['opencode'], projectId: task.projectId, planned: { agentId: 'opencode', model: goSol.id } }
+      const same = yield* limits.free(input)
+      assert.deepInclude(same, { agentId: 'codex', model: sol.id })
+      assert.isUndefined(same?.otherModel)
+      // Only where none of the model's ways has room does it go to another, which the takeover says.
+      yield* models.setModelBlocked({ agentId: 'codex', model: sol.id, blocked: true })
+      assert.deepInclude(yield* limits.free(input), { agentId: 'claude-code', model: claude.id, otherModel: true })
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+
   it.live('keeps comparable strength ahead of a weak or unscored different maker', () =>
     Effect.gen(function* () {
       const task = yield* startTask()

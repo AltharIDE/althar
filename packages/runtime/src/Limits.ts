@@ -1,5 +1,12 @@
 import { isAgentDefault, modelName } from '@althar/contracts'
-import { type ConfigOption, leftOf, tightestWindow, type UsageWindow, type WindowKind } from '@althar/provider-adapters'
+import {
+  type AgentDefinition,
+  type ConfigOption,
+  leftOf,
+  tightestWindow,
+  type UsageWindow,
+  type WindowKind,
+} from '@althar/provider-adapters'
 import type { ProjectId } from '@althar/domain'
 import { Clock, Context, Duration, Effect, Layer, Option, Random, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
@@ -12,7 +19,7 @@ import { timestamp } from './records'
 import { SignIns } from './SignIns'
 import { Models } from './Models'
 import { ModelFacts } from './ModelFacts'
-import { makerOf } from './modelMaker'
+import { makerOf, modelKey } from './modelMaker'
 import { Installs, isInstalled } from './Installs'
 
 /*
@@ -60,6 +67,8 @@ export type Standing =
       readonly agentId: string
       readonly model: string | null
       readonly accountId: string
+      /** Another model than the one planned, as no other way to that one had room. */
+      readonly otherModel?: boolean
       readonly because: Unable
     }
   | { readonly kind: 'unable'; readonly unable: Unable }
@@ -97,6 +106,10 @@ export const roomWords = (room: Room, now: number, reset = true): string =>
 export const whoWords = (who: { readonly agent: string; readonly model: string | null }): string =>
   who.model === null ? who.agent : `${who.model} on ${who.agent}`
 
+/** Who takes work over in a handover, and, where it is another model, that none of the ways to the one before had room. */
+const takerWords = (to: { readonly agent: string; readonly model: string | null; readonly otherModel?: boolean }): string =>
+  to.otherModel === true ? `No other agent has room on that model, so ${whoWords(to)}, a different model,` : whoWords(to)
+
 /**
  * What a thread says when a new step steers clear of an agent that is nearly
  * out: who has how little left, until when, and what Althar does: who takes
@@ -108,12 +121,13 @@ export const lowWords = (input: {
   /** The time it is said at, which says whether the reset is today. */
   readonly now: number
   readonly step?: keyof typeof outStep
-  readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean }
+  /** Who takes the step, on which model; `otherModel` where no other way to the model before had room. */
+  readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean; readonly otherModel?: boolean }
 }): string => {
   const step = input.step === undefined ? undefined : outStep[input.step]
   const work = step?.work ?? 'the step'
   if (input.to !== undefined)
-    return `${input.from} has ${roomWords(input.room, input.now)}. ${whoWords(input.to)} takes ${work} instead${
+    return `${input.from} has ${roomWords(input.room, input.now)}. ${takerWords(input.to)} takes ${work} instead${
       input.to.ownWork === true && (input.step === 'implement' || input.step === 'review') ? ', with the review by the same maker' : ''
     }.`
   const back = input.room.resetsAt === null ? `until ${input.from} has room again` : `until ${whenWords(input.room.resetsAt, input.now)}`
@@ -161,9 +175,15 @@ export const outWords = (input: {
   readonly step?: keyof typeof outStep
   /**
    * Who takes over, on which model; `ownWork` where the review and implementation use the same maker; `standsIn` where it
-   * leads only until the one out is back, which takes it back then.
+   * leads only until the one out is back, which takes it back then; `otherModel` where no other way to the model before had room.
    */
-  readonly to?: { readonly agent: string; readonly model: string | null; readonly ownWork?: boolean; readonly standsIn?: boolean }
+  readonly to?: {
+    readonly agent: string
+    readonly model: string | null
+    readonly ownWork?: boolean
+    readonly standsIn?: boolean
+    readonly otherModel?: boolean
+  }
   readonly waits?: 'step' | 'message'
   /** The project moves work on, but no other model was free to take it. */
   readonly nothingFree?: boolean
@@ -172,7 +192,7 @@ export const outWords = (input: {
   const out = `${input.from} ran out of usage${step === undefined ? '' : ` ${step.during}`}`
   const back = input.resetsAt === null ? null : whenWords(input.resetsAt, input.now)
   if (input.to !== undefined)
-    return `${out}${back === null ? '' : `, until ${back}`}. ${whoWords(input.to)} takes ${step === undefined ? '' : `${step.work} `}over${
+    return `${out}${back === null ? '' : `, until ${back}`}. ${takerWords(input.to)} takes ${step === undefined ? '' : `${step.work} `}over${
       input.to.standsIn === true ? (back === null ? ` until ${input.from} is back` : ' until then') : ''
     }${input.to.ownWork === true && (input.step === 'implement' || input.step === 'review') ? ', with the review by the same maker' : ''}.`
   if (input.waits === undefined) return `${out}${back === null ? '' : `, until ${back}`}.`
@@ -224,6 +244,8 @@ export interface ModelChoice {
 export interface Takeover extends ModelChoice {
   readonly ownWork: boolean
   readonly accountId: string
+  /** Another model than the one the work was on, as no other way to that one had room. */
+  readonly otherModel?: boolean
 }
 
 type Failure = SqlError.SqlError | Schema.SchemaError
@@ -566,7 +588,22 @@ export class Limits extends Context.Service<
           }
           const otherMaker = makerFor(input.other)
           const fromMaker = makerFor(input.from ?? input.planned)
-          const found: Array<Takeover & { low: boolean; sameMaker: boolean; score: number; preferred: boolean }> = []
+          // Which model the work was on, whichever agent offers it: by the list's id, or by its name where the list doesn't know it.
+          const keysOf = (definition: AgentDefinition, model: { readonly id: string; readonly name: string }) => {
+            const fact = facts.of(definition, model)
+            return [modelKey(null, definition, model), ...(fact === null ? [] : [fact.slug])]
+          }
+          const fromKeys = (() => {
+            const choice = input.from ?? input.planned
+            const agent = agents.list.find((entry) => entry.definition.id === choice?.agentId)
+            const offered = catalog.find((one) => one.agentId === choice?.agentId)
+            const id = choice?.model ?? offered?.model ?? null
+            if (agent === undefined || id === null) return []
+            const model = offered?.models.find((one) => one.id === id)
+            if (model !== undefined && isAgentDefault(model)) return []
+            return keysOf(agent.definition, model ?? { id, name: id.slice(id.lastIndexOf('/') + 1) })
+          })()
+          const found: Array<Takeover & { low: boolean; sameMaker: boolean; sameModel: boolean; score: number; preferred: boolean }> = []
           for (const entry of agents.list) {
             const agentId = entry.definition.id
             if (
@@ -628,12 +665,16 @@ export class Limits extends Context.Service<
                 }
               }
               if (room === undefined || accountId === undefined || (input.withRoom === true && room)) continue
+              const sameModel =
+                model.id !== null && keysOf(entry.definition, { id: model.id, name: model.name }).some((key) => fromKeys.includes(key))
               found.push({
                 agentId,
                 model: model.id,
                 ownWork,
                 accountId,
                 sameMaker: fromMaker !== null && (maker === null || maker === fromMaker),
+                sameModel,
+                ...(fromKeys.length > 0 && !sameModel ? { otherModel: true } : {}),
                 low: room,
                 score,
                 preferred: model.id === preferred || (preferred === null && model.id === offered?.model),
@@ -646,8 +687,12 @@ export class Limits extends Context.Service<
           const comparable = (candidate: (typeof found)[number]) =>
             candidate.score >=
             Math.max(...found.filter((one) => one.ownWork === candidate.ownWork && one.low === candidate.low).map((one) => one.score)) - 5
+          // The model the work was on, on another agent with room, before any other: the step stays on the model it was
+          // given, a review's maker included, as it was planned so. Another model only where none of its ways has room.
+          const stays = (candidate: (typeof found)[number]) => candidate.sameModel && !candidate.low
           return found.toSorted(
             (a, b) =>
+              Number(stays(b)) - Number(stays(a)) ||
               Number(a.ownWork) - Number(b.ownWork) ||
               Number(a.low) - Number(b.low) ||
               Number(comparable(b)) - Number(comparable(a)) ||
@@ -762,7 +807,14 @@ export class Limits extends Context.Service<
           })
           return first === undefined
             ? ({ kind: 'unable', unable: stuck } as Standing)
-            : ({ kind: 'instead', agentId: first.agentId, model: first.model, accountId: first.accountId, because: stuck } as Standing)
+            : ({
+                kind: 'instead',
+                agentId: first.agentId,
+                model: first.model,
+                accountId: first.accountId,
+                ...(first.otherModel === true ? { otherModel: true } : {}),
+                because: stuck,
+              } as Standing)
         })
 
       return Limits.of({
@@ -826,7 +878,13 @@ export class Limits extends Context.Service<
             const first = list[0]
             return first === undefined
               ? undefined
-              : { agentId: first.agentId, model: first.model, ownWork: first.ownWork, accountId: first.accountId }
+              : {
+                  agentId: first.agentId,
+                  model: first.model,
+                  ownWork: first.ownWork,
+                  accountId: first.accountId,
+                  ...(first.otherModel === true ? { otherModel: true } : {}),
+                }
           }),
         choices: (input) => choices(input),
         canTakeOver: (list) => canTakeOver(list),

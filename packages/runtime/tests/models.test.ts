@@ -296,6 +296,56 @@ describe('the models each agent offers', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('offer a model a session offers after the agent was asked, as Codex’s own older list leaves it out', () => {
+    // Asked, and started again later, it answers with its own older list, as Codex does where OpenAI's doesn't come in time.
+    let started = 0
+    const older = { models: [{ id: SMALL.id, name: SMALL.name }] }
+    return Effect.gen(function* () {
+      const models = yield* Models
+      const sessions = yield* Sessions
+      const codex = Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex'))
+      const [asked] = yield* until(codex, (found) => found[0]?.probing === false)
+      assert.deepStrictEqual(
+        asked?.models.map((model) => model.id),
+        ['small'],
+      )
+      // A session reached OpenAI: its newer model is offered from then on, not only from the next launch.
+      yield* sessions.start({ threadId: yield* thread, agentId: 'codex', model: 'small' })
+      const [later] = yield* codex
+      assert.deepStrictEqual(
+        later?.models.map((model) => model.id),
+        ['large', 'small'],
+      )
+      // One more on the older list hides it again for nothing.
+      yield* sessions.start({ threadId: yield* thread, agentId: 'codex', model: 'small' })
+      const [after] = yield* codex
+      assert.deepStrictEqual(
+        after?.models.map((model) => model.id),
+        ['large', 'small'],
+      )
+    }).pipe(
+      Effect.provide(
+        Runtime.layer({
+          database: ':memory:',
+          worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+          appVersion: '0.0.0-test',
+          deviceName: 'Test Mac',
+          agents: Layer.succeed(
+            Agents,
+            Agents.from([
+              {
+                definition: definition('codex'),
+                transport: () => ({ _tag: 'InProcess', agent: fakeAgent(started++ === 1 ? {} : older) }),
+              },
+            ]),
+          ),
+          secrets: Secrets.memory(),
+          connectors: fakeConnectors({}),
+        }),
+      ),
+    )
+  })
+
   it.live('aren’t asked of an agent that is signed out, nor again of one that couldn’t say', () =>
     Effect.gen(function* () {
       const models = yield* Models

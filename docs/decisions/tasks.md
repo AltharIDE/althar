@@ -590,7 +590,9 @@ stored, so it cannot go stale.
 
 
 **Auto moves a lead's next step to a lighter model of the same agent** when
-the plan's tightest window is 90% used or more. A line in the thread says
+the plan's tightest window is 90% used or more, unless another agent has room on
+the same model: then it stays on its model, and goes to that agent once the plan
+is nearly out (the person's note of 21 November). A line in the thread says
 from which model to which, the share used, the window and when it resets.
 Keep turns it back, for the whole task; Undo puts the move back. How models
 are picked is in [agents.md](agents.md).

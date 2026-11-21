@@ -368,6 +368,11 @@ describe('Auto’s lighter model', () => {
         Effect.map(catalog.catalog, (all) => all.find((one) => one.agentId === 'claude-code')),
         (one) => one !== undefined && one.probing === false,
       )
+      // No other agent has room on the plan's model: only then does it move to a lighter one.
+      const read = yield* until(catalog.catalog, (all) => all.every((one) => !one.probing))
+      const others = read.filter((one) => one.agentId !== 'claude-code' && one.models.some((model) => model.id === 'large'))
+      assert.isNotEmpty(others)
+      for (const other of others) yield* catalog.setModelBlocked({ agentId: other.agentId, model: 'large', blocked: true })
       yield* (yield* PlanUsage).now(true)
       yield* plans.start(planId, instance.personId)
       const [moved] = yield* until(
@@ -403,6 +408,10 @@ describe('Auto’s lighter model', () => {
       assert.isUndefined(yield* auto.lighter({ ...where, agentId: 'nowhere', model: 'large' }))
       assert.isUndefined(yield* auto.lighter({ ...where, model: 'huge' }))
       assert.isUndefined(yield* auto.lighter({ ...where, model: 'small' }))
+      // Another agent with room on the same model again: the step stays on it, and goes there once this plan is nearly out.
+      yield* catalog.setModelBlocked({ agentId: others[0]!.agentId, model: 'large', blocked: false })
+      assert.isUndefined(yield* auto.lighter({ ...where, model: 'large' }))
+      yield* catalog.setModelBlocked({ agentId: others[0]!.agentId, model: 'large', blocked: true })
       // The person kept the model: no move, even with the plan nearly out.
       yield* sql`
         INSERT INTO task_model_keeps ${sql.insert({ taskId: created.taskId, agentId: 'claude-code', model: 'large', keptAt: when })}`

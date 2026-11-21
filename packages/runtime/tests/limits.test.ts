@@ -214,7 +214,7 @@ describe('an agent out of usage', () => {
       const [ready] = yield* until(cardOf(projectId), (cards) => cards.some((card) => card.phase === 'ready'))
       assert.strictEqual(ready?.lead, 'codex')
       assert.deepStrictEqual(yield* said(task.threadId), [
-        `Small on Fake claude-code ran out of usage while working on the task, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Large on Fake codex takes the work over until then.`,
+        `Small on Fake claude-code ran out of usage while working on the task, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. No other agent has room on that model, so Large on Fake codex, a different model, takes the work over until then.`,
         'implement: Did the task.',
         'The task ends on its branch.',
       ])
@@ -586,7 +586,7 @@ describe('an agent out of usage', () => {
       assert.include(reply, 'Fake claude-code was working on this when it reached its usage limit, and may have done some of it already.')
       assert.include(
         yield* said(threadId),
-        `Small on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake codex takes over until then.`,
+        `Small on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. No other agent has room on that model, so Small on Fake codex, a different model, takes over until then.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })

@@ -30,6 +30,8 @@ import { Accounts } from './Accounts'
  * to read its levels, and stops it, recording nothing, as a sign-in check
  * does. Until it has said, the latest session it had says, for the model it
  * was on, and what it is on is always what that session was last set to.
+ * Once it has said, a model a session offers since is offered too: Codex
+ * answers with an older list of its own where OpenAI's doesn't come in time.
  * What can't be read is left empty; a picker offers the agent's own default.
  * An agent that couldn't say, as one asked before its sign-in is done, is
  * asked again once it is found signed in, and otherwise at a read a minute
@@ -219,6 +221,12 @@ export class Models extends Context.Service<
       const scope = yield* Effect.scope
       /* What asking each agent found this launch; an agent being asked has no entry yet. */
       const probed = new Map<string, Offered | null>()
+      /*
+       * The models sessions offered since each agent was asked, and the latest session read for it. An agent that can't
+       * reach its maker as it is asked answers with an older list of its own (Codex, its request for OpenAI's timed out),
+       * which mustn't hide a model its sessions offer for the rest of the launch.
+       */
+      const since = new Map<string, { after: string; readonly models: Map<string, OfferedModel> }>()
       const lastEntries = new Map<string, AgentEntry>()
       /* When each agent that couldn't say was asked, so it is asked again a while on. */
       const failedAt = new Map<string, number>()
@@ -235,6 +243,32 @@ export class Models extends Context.Service<
         probed.delete(agentId)
         failedAt.delete(agentId)
       }
+      /** Forgets what asking an agent found, and what its sessions offered since. */
+      const forgetAsked = (agentId: string) => {
+        probed.delete(agentId)
+        since.delete(agentId)
+        failedAt.delete(agentId)
+        probing.delete(agentId)
+      }
+      /** What it offered when asked, and before those, any model a session offered since that the asking didn't. */
+      const withLater = (definition: AgentDefinition, asked: Offered) =>
+        Effect.gen(function* () {
+          const later = since.get(definition.id)
+          if (later === undefined) return asked.models
+          // Only the sessions not read yet: the reads stay as quick however long Althar runs.
+          const rows = yield* sql<{ config: string; startedAt: string }>`
+            SELECT config, started_at FROM provider_sessions WHERE agent_id = ${definition.id} AND config IS NOT NULL
+              AND started_at > ${later.after}
+            ORDER BY started_at`
+          for (const row of rows) {
+            later.after = row.startedAt
+            for (const model of modelsOf(definition, settingsIn(row.config)).models)
+              if (model.efforts.length > 0 || !later.models.has(model.id)) later.models.set(model.id, model)
+          }
+          const offered = new Set(asked.models.map((model) => model.id))
+          const extra = [...later.models.values()].filter((model) => !offered.has(model.id))
+          return extra.length === 0 ? asked.models : [...extra, ...asked.models]
+        })
       // Found signed in: one asked before its sign-in was done said nothing, and is asked again at the next read.
       yield* Effect.forkIn(
         Stream.runForEach(signIns.signedIn, ({ agentId }) => Effect.sync(() => forgetFailure(agentId))),
@@ -246,7 +280,7 @@ export class Models extends Context.Service<
        * and stops it. Its process is recorded before it is spawned, as any
        * agent's is, so one a crash leaves behind is stopped at the next launch.
        */
-      const probe = (entry: AgentEntry, reservation: symbol) =>
+      const probe = (entry: AgentEntry, reservation: symbol, askedAt: string) =>
         Effect.acquireUseRelease(
           // A folder it can't make fails the asking, as a throw would have it asked again at every read.
           Effect.try(() => {
@@ -317,7 +351,11 @@ export class Models extends Context.Service<
               if (!ownsProbe(entry.definition.id, reservation)) return
               probed.set(entry.definition.id, found)
               if (found === null) failedAt.set(entry.definition.id, yield* Clock.currentTimeMillis)
-              else failedAt.delete(entry.definition.id)
+              else {
+                failedAt.delete(entry.definition.id)
+                // Sessions started as it was asked count too: one may have reached the maker the asking couldn't.
+                since.set(entry.definition.id, { after: askedAt, models: new Map() })
+              }
             }),
           ),
           Effect.ensuring(Effect.sync(() => releaseProbe(entry.definition.id, reservation))),
@@ -327,11 +365,7 @@ export class Models extends Context.Service<
         Effect.gen(function* () {
           const { definition } = entry
           const previous = lastEntries.get(definition.id)
-          if (previous !== undefined && previous !== entry) {
-            probed.delete(definition.id)
-            failedAt.delete(definition.id)
-            probing.delete(definition.id)
-          }
+          if (previous !== undefined && previous !== entry) forgetAsked(definition.id)
           lastEntries.set(definition.id, entry)
           const defaults = yield* defaultEffortsOf(definition.id)
           const blocked = yield* blockedModelsOf(definition.id)
@@ -346,9 +380,11 @@ export class Models extends Context.Service<
           const failed = failedAt.get(definition.id)
           if (probed.get(definition.id) === null && failed !== undefined && (yield* Clock.currentTimeMillis) - failed >= askAgain)
             forgetFailure(definition.id)
-          // What it said when asked this launch is newer than any session: a model it offers since then is there.
+          // What it said when asked this launch is newer than any session before it; a model a session offered since is there too.
           const asked = probed.get(definition.id)
-          if (asked !== undefined) return { ...(asked ?? seen), ...now, defaults, blocked, probing: false }
+          if (asked === null) return { ...seen, ...now, defaults, blocked, probing: false }
+          if (asked !== undefined)
+            return { ...asked, models: yield* withLater(definition, asked), ...now, defaults, blocked, probing: false }
           // Not asked yet this launch: asked now, in the background, if it is installed and signed in; its latest session says until then.
           // Whether it is signed in is its own command's to say, which takes seconds with the computer busy, so that is asked
           // behind too: the read never waits on it (foundations.md, The UI is instant). One signed out counts as one that
@@ -360,7 +396,7 @@ export class Models extends Context.Service<
               signIns.of(definition.id).pipe(
                 Effect.flatMap((status) => {
                   if (!ownsProbe(definition.id, reservation)) return Effect.void
-                  if (status !== 'signed_out') return Effect.asVoid(probe(entry, reservation))
+                  if (status !== 'signed_out') return Effect.asVoid(Effect.flatMap(timestamp, (at) => probe(entry, reservation, at)))
                   return Effect.gen(function* () {
                     probed.set(definition.id, null)
                     failedAt.set(definition.id, yield* Clock.currentTimeMillis)
@@ -391,16 +427,7 @@ export class Models extends Context.Service<
             const entry = yield* agents.get(input.agentId)
             yield* setModelBlocked(entry.definition.id, input.model, input.blocked)
           }).pipe(Effect.provide(context)),
-        forget: (agentId) =>
-          signIns.forget(agentId).pipe(
-            Effect.andThen(
-              Effect.sync(() => {
-                probed.delete(agentId)
-                failedAt.delete(agentId)
-                probing.delete(agentId)
-              }),
-            ),
-          ),
+        forget: (agentId) => signIns.forget(agentId).pipe(Effect.andThen(Effect.sync(() => forgetAsked(agentId)))),
       })
     }),
   )
