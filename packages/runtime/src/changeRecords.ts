@@ -68,6 +68,8 @@ export const Snapshot = Schema.Struct({
    * opens another.
    */
   attached: Schema.optional(Schema.Boolean),
+  /** Attached to a contributor's fork using the pull request's maintainer edit setting. */
+  maintainerEdit: Schema.optional(Schema.Boolean),
   /**
    * In its target branch's merge queue, as Althar put it there or its host
    * says it is, however it got there: the host merges it once the queue's
@@ -447,6 +449,7 @@ export const snapshotOf = (
   source: change.source,
   ...(change.queued === true ? { queued: true } : {}),
   ...(change.headRepository !== undefined ? { head: change.headRepository } : before?.head !== undefined ? { head: before.head } : {}),
+  ...(before?.maintainerEdit === true ? { maintainerEdit: true } : {}),
   // What merging needs stays as last read until it is read again, on its own turn (DEV-204).
   ...(before?.rules === undefined || change.state !== 'open' ? {} : { rules: before.rules }),
 })

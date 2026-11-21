@@ -419,6 +419,10 @@ export const words = (
           return `${remote} has commits pushed since you looked, so nothing was replaced. Look again before replacing them.`
         if (why === 'never')
           return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
+        if (why === 'contributor_force_push')
+          return `Althar never force-pushes to a contributor’s branch. Ask the lead to bring in ${remote}’s commits, then push again.`
+        if (why === 'maintainer_edits_disabled')
+          return `Maintainer edits are disabled on ${remote}. Ask the author to allow maintainer edits, then push again.`
         if (why === 'protected') {
           const needs = fieldOf(error, 'needs')
           if (Array.isArray(needs)) {

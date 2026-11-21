@@ -634,6 +634,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
     head: text(value, 'headSha') || null,
     listening,
     localHead: null,
+    ...(field(value, 'maintainerEdit') === true ? { maintainerEdit: true } : {}),
     unpushed: 0,
     diverged: null,
   }
