@@ -20,6 +20,7 @@ import { Projects } from '../src/Projects'
 import { timestamp } from '../src/records'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { addItem } from '../src/threads'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, fakeConnectors, HOST, hosted, runtime } from './support'
 
@@ -119,12 +120,15 @@ describe('the coordinator tagging', () => {
         message,
         steps: [
           {
-            key: 'merge',
+            key: 'merge-release',
             tool: 'merge_pull_request',
             taskId: slug,
             target: `task:${slug}`,
             request: {},
-            waits: [{ kind: 'task_pull_request', target: slug }],
+            waits: [
+              { kind: 'review_settled', target: slug },
+              { kind: 'checks_passed', target: slug },
+            ],
           },
           {
             key: 'tag',
@@ -132,7 +136,10 @@ describe('the coordinator tagging', () => {
             taskId: slug,
             target: 'meridian/api tag v0.9.0',
             request: { tag: 'v0.9.0', commit: `task:${slug}` },
-            waits: [{ kind: 'task_merged', target: slug }],
+            waits: [
+              { kind: 'task_merged', target: slug },
+              { kind: 'lead_done', target: slug },
+            ],
           },
         ],
       })
@@ -155,6 +162,9 @@ describe('the coordinator tagging', () => {
       yield* line.tick(coordinator.projectId)
       assert.lengthOf(yield* heard(), 0, 'running checks do not wake a merge')
       assert.lengthOf(host.tagsPushed, 0)
+      const report = (content: Record<string, unknown>) =>
+        addItem({ projectId: coordinator.projectId as ProjectId, threadId: task.threadId }, 'step_result', content)
+      yield* report({ step: 'review', verdict: 'pass', findings: [] })
       // Deliver the actual watcher's news as the next turn, as the session host does. No fresh person message.
       const deliver = (id: string) =>
         Effect.gen(function* () {
@@ -164,11 +174,17 @@ describe('the coordinator tagging', () => {
           yield* sql`INSERT INTO turn_delivery_inputs ${sql.insert({ projectId: coordinator.projectId, deliveryId: turnId, userInputId: id, position: 1 })}`
         })
       green = true
+      yield* sql`UPDATE external_links SET snapshot = json_set(snapshot, '$.checks', json(${JSON.stringify({ sha: 'older-head', outcome: 'passed' })}))
+        WHERE task_id = ${task.taskId}`
+      yield* line.tick(coordinator.projectId)
+      assert.lengthOf(yield* heard(), 0, 'checks on an older head do not wake a merge')
+      yield* sql`UPDATE external_links SET snapshot = json_set(snapshot, '$.checks.sha', json_extract(snapshot, '$.headSha'))
+        WHERE task_id = ${task.taskId}`
       yield* line.tick(coordinator.projectId)
       const [mergeNews] = yield* heard()
-      assert.include(mergeNews!.body, `merge_pull_request with errand "${errand}" and step "merge"`)
+      assert.include(mergeNews!.body, `merge_pull_request with errand "${errand}" and step "merge-release"`)
       yield* deliver(mergeNews!.id)
-      assert.include(yield* callTool(coordinator, 'merge_pull_request', { errand, step: 'merge' }), 'Merged')
+      assert.include(yield* callTool(coordinator, 'merge_pull_request', { errand, step: 'merge-release' }), 'Merged')
       const landed = (yield* host.change(repository, pull.number)).mergeCommit
       assert.isNotNull(landed)
       // Main moves again before the tag. The release must still tag the first PR's landed commit.
@@ -177,6 +193,9 @@ describe('the coordinator tagging', () => {
       assert.notStrictEqual(yield* host.commitOf(repository, 'main'), landed)
       // Even a new PR attached to this same task cannot retarget the tag step.
       yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId: coordinator.projectId, taskId: task.taskId, product: 'github', kind: 'change', externalId: later.id, ref: String(later.number), key: String(later.number), url: later.url.replace('https://github.com', HOST), snapshot: JSON.stringify({ ...later, repository: PATH }), listening: 1, createdAt: yield* timestamp, updatedAt: yield* timestamp })}`
+      yield* line.tick(coordinator.projectId)
+      assert.strictEqual((yield* heard())[0]?.id, mergeNews!.id, 'the tag still waits on the lead')
+      yield* report({ step: 'implement', summary: 'Release prep complete.' })
       yield* line.tick(coordinator.projectId)
       const [tagNews] = yield* heard()
       assert.include(tagNews!.body, 'Take it now: push_tag with ')

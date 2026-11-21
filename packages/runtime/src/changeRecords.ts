@@ -280,24 +280,7 @@ export interface Unshipped {
   readonly del: number
 }
 
-/**
- * A task's pull requests as they stand now: in each repository the latest,
- * the open one else the newest; earlier ones, closed or merged, are history
- * (ADR-034).
- */
-export const latestOf = <A extends { readonly state: string; readonly repository: ReadonlyArray<string> }>(
-  changes: ReadonlyArray<A>,
-): ReadonlyArray<A> => {
-  const byRepository = new Map<string, Array<A>>()
-  for (const change of changes) {
-    const where = change.repository.join('/').toLowerCase()
-    byRepository.set(where, [...(byRepository.get(where) ?? []), change])
-  }
-  return [...byRepository.values()].flatMap((all) => {
-    const latest = all.find((change) => change.state === 'open') ?? all.at(-1)
-    return latest === undefined ? [] : [latest]
-  })
-}
+export { latestOf } from './pullRequestStanding'
 
 /** How long a pull request with nothing new counts as quiet, and how much less often a quiet one is asked. */
 export const QUIET_AFTER = Duration.minutes(10)
