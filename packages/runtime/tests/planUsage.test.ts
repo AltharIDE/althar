@@ -23,7 +23,7 @@ import { PlanUsage } from '../src/PlanUsage'
 import { Queries } from '../src/Queries'
 import { SignIns } from '../src/SignIns'
 import { usableModels } from '../src/usableModels'
-import { fakeAgents, fakeSignInEnds, runtime, task, until } from './support'
+import { fakeAgents, fakeSignInEnds, onTestClock, runtime, task, until } from './support'
 
 /*
  * Plan usage (docs/plans/plan-usage.md): where each account's windows come
@@ -855,6 +855,43 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
     usage: { windows, source: 'agent', observedAt: NOW, plan: 'OpenCode Go' },
   })
   const goAndZen = async () => credentials(['opencode-go', 'plan'], ['opencode', 'key'])
+
+  it.effect('reuses the listing on background reads, still reads Go, and lists again when the connection is forgotten or refreshed', () => {
+    let listings = 0
+    let limits = 0
+    const layer = withUsage({
+      readCredentials: async () => (listings++, credentials(['opencode-go', 'plan'], ['opencode', 'key'])),
+      readGoUsage: async () => (limits++, go(used(20))),
+    })
+    return onTestClock(
+      Effect.gen(function* () {
+        const usage = yield* PlanUsage
+        yield* usage.now(true)
+        assert.deepStrictEqual([listings, limits], [1, 1])
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* usage.now()
+        yield* until(
+          Effect.sync(() => limits),
+          (count) => count === 2,
+        )
+        assert.strictEqual(listings, 1)
+        const [account] = yield* (yield* Accounts).of('opencode')
+        yield* usage.refresh([account!.id], true)
+        assert.deepStrictEqual([listings, limits], [1, 3])
+        yield* (yield* SignIns).forget('opencode')
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* usage.now()
+        yield* until(
+          Effect.sync(() => limits),
+          (count) => count === 4,
+        )
+        assert.strictEqual(listings, 2)
+        yield* TestClock.adjust(Duration.minutes(5))
+        yield* usage.now(true)
+        assert.deepStrictEqual([listings, limits], [3, 5])
+      }).pipe(Effect.provide(layer)),
+    )
+  })
 
   it.effect('shows Go’s rolling five hours, week and month, read through its OpenCode Console sign-in', () =>
     Effect.gen(function* () {

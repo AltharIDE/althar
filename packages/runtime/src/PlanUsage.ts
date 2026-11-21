@@ -7,6 +7,7 @@ import {
   type AgentDefinition,
   agentVersion,
   type CredentialsRead,
+  type SignInCheck,
   type EndpointRead,
   majorOf,
   noReadingOf,
@@ -238,6 +239,9 @@ export class PlanUsage extends Context.Service<
 
         const held = new Map<string, Held>()
         const asked = new Map<string, number>()
+        // A listing classifies connections; it doesn't measure usage. Retain it until the sign-in is checked again or
+        // explicitly refreshed, while continuing to read Go's actual limits on the usual schedule.
+        const listings = new Map<string, { readonly check: SignInCheck; readonly credentials: CredentialsRead }>()
         /* How many times sessions have said each account's windows: an endpoint's answer to a question asked before the last of them doesn't replace it. */
         const sayings = new Map<string, number>()
         /* Each account's windows, by the saying that last said each: those said since the endpoint was asked stay over its answer. */
@@ -358,12 +362,14 @@ export class PlanUsage extends Context.Service<
           )
 
         /* Reads one account from its agent's source and keeps what it said; `onDemand` where steering wants it read again, whatever a session said lately. */
-        const readAccount = (account: Account, onDemand = false, afterLimit = false) =>
+        const readAccount = (account: Account, onDemand = false, afterLimit = false, refreshListing = false) =>
           Effect.gen(function* () {
             const entry = agents.list.find((each) => each.definition.id === account.agentId)
             if (entry === undefined) return
             const definition = entry.definition
-            const check = yield* signIns.account(account)
+            const listing = definition.id === 'opencode' && !refreshListing ? listings.get(account.id) : undefined
+            const cached = listing === undefined ? undefined : yield* signIns.cached(account)
+            const check = listing !== undefined && cached === listing.check ? cached : yield* signIns.account(account)
             const before = held.get(account.id)
             const env = accounts.env(account)
             /* A fault, with the reading held when it is kept: one a session said while the source was asked stays. */
@@ -518,8 +524,12 @@ export class PlanUsage extends Context.Service<
               // Its listing is OpenCode 2's: on 1.x the command fails with its help, and what it can list says no plan from a key.
               const cannotList = openCodeCannotList(definition.name, yield* agentMajorOf(definition))
               if (cannotList !== null) return yield* keep(account.id, fault('cannot_classify', cannotList))
-              const listed = yield* Effect.promise(() => readCredentials(definition, env))
+              const listed =
+                listing !== undefined && cached === listing.check
+                  ? listing.credentials
+                  : yield* Effect.promise(() => readCredentials(definition, env))
               if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
+              listings.set(account.id, { check, credentials: listed })
               // How each provider is paid, for what a task used of it (Spending): a turn is priced by the provider it ran on.
               // A provider with sign-ins paid two ways, or one Althar can't classify, is unknown: never taken for a key.
               const providers: Record<string, 'plan' | 'key' | 'unknown'> = {}
@@ -608,7 +618,7 @@ export class PlanUsage extends Context.Service<
               yield* Effect.forEach(
                 due,
                 (account) =>
-                  readAccount(account, only !== undefined, afterLimit).pipe(
+                  readAccount(account, only !== undefined, afterLimit, force && !afterLimit).pipe(
                     Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause)),
                   ),
                 { concurrency: 'unbounded', discard: true },
@@ -635,7 +645,8 @@ export class PlanUsage extends Context.Service<
           for (const entry of agents.list) {
             const all = yield* accounts.of(entry.definition.id)
             for (const account of all) {
-              const check = yield* signIns.account(account)
+              const cached = entry.definition.id === 'opencode' && listings.has(account.id) ? yield* signIns.cached(account) : undefined
+              const check = cached ?? (yield* signIns.account(account))
               // A sign-in that ends within its last days, read with its account, warns once at each stage (signInEnding.ts); one
               // whose check already says signed out has ended, so the bar never says "ends by" beside a signed-out row.
               const stage = warning(check.endsAt, warned.get(warnedKey(account.id)), now, check.status === 'signed_out')
