@@ -3,8 +3,7 @@ import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
-import { StrictMode, useEffect, useLayoutEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
@@ -38,18 +37,17 @@ import { boardOf, loadOf, NOW, placesOf, PROJECTS, type Scene, SCENES, waitingOf
 import { A, B, C } from './takes/takes'
 import type { Ctx, Take } from './takes/types'
 import { ZERO } from './takes/zero'
-import { words } from './words'
 import s from './lab.module.css'
 
 /*
  * The agent places lab (README.md): where this computer's agents live once the
- * board's banner over Up next goes, by This Mac (the CPU and MEM meter and
- * what it opens) and the Agents at once slider, on the app's own board, the
+ * board's banner over Up next goes, in This Mac (what the CPU and MEM meter
+ * opens) and beside the Agents at once slider, on the app's own board, the
  * kit's own window bar and its own settings, with no runtime. The bar along
  * the bottom, or its keys, swaps in place: the take (0 as built, A B C), the
- * scene (Q W E R), one line back in Up next (U), crowded (K), a narrow window
- * (N), the Settings tab (S), dark (D), and whether the meter's popover stays
- * open as they change (O). G opens the quick settings.
+ * scene (Q W E R), crowded (K), a narrow window (N), the Settings tab (S),
+ * dark (D), and whether This Mac stays open as they change (O). G opens the
+ * quick settings.
  */
 
 const TAKES: readonly Take[] = [ZERO, A, B, C]
@@ -62,7 +60,6 @@ const read = () => {
     d: TAKES.find((one) => one.key === now.get('d'))?.key ?? A.key,
     p: (SCENES.find((one) => one.key === now.get('p'))?.key ?? 'memory') as Scene,
     o: now.get('o') !== '0',
-    u: now.get('u') === '1',
     k: now.get('k') === '1',
     n: now.get('n') === '1',
     dark: now.get('theme') === 'dark',
@@ -135,13 +132,7 @@ function SettingsScreen({ ctx, take }: { ctx: Ctx; take: Take }) {
           text={{ title: settingsText.awakeTitle, note: settingsText.awakeNote }}
         />
         {take.slider(ctx, false)}
-        {/* in A, the switch takes the one meter out: the agents and this computer's load */}
-        <SettingSwitch
-          title={take === A ? words.showMeter : settingsText.loadTitle}
-          glyph={<Icon name="load" size={15} />}
-          checked
-          onChange={() => undefined}
-        />
+        <SettingSwitch title={settingsText.loadTitle} glyph={<Icon name="load" size={15} />} checked onChange={() => undefined} />
         <SettingSwitch
           title={settingsText.atLoginTitle}
           note={settingsText.atLoginNote}
@@ -161,33 +152,6 @@ function SettingsScreen({ ctx, take }: { ctx: Ctx; take: Take }) {
   )
 }
 
-/**
- * Lab only: the one line Up next may keep, at the end of its heading, where the board has no room for it; it opens
- * the meter's popover. Nothing while there's room.
- */
-function UpNextLine({ ctx, version }: { ctx: Ctx; version: string }) {
-  const [at, setAt] = useState<HTMLElement | null>(null)
-  useLayoutEffect(() => {
-    const title = document.querySelector('section[data-lane="next"] header h2')
-    if (title === null) return
-    const span = document.createElement('span')
-    title.after(span)
-    setAt(span)
-    return () => {
-      span.remove()
-      setAt(null)
-    }
-  }, [version])
-  const line = words.upNext(ctx.places)
-  if (at === null || line === null) return null
-  return createPortal(
-    <button type="button" className={s.upNext} onClick={() => ctx.peek.set(true)}>
-      {line}
-    </button>,
-    at,
-  )
-}
-
 function Lab() {
   const [state, setStateNow] = useState(read)
   const [own, setOwn] = useState<number | null>(null)
@@ -204,7 +168,6 @@ function Lab() {
     url.set('d', merged.d)
     url.set('p', merged.p)
     for (const [key, on] of [
-      ['u', merged.u],
       ['k', merged.k],
       ['n', merged.n],
     ] as const)
@@ -269,7 +232,6 @@ function Lab() {
       if (found !== undefined) return set({ d: found.key })
       const scene = SCENES[SCENE_KEYS.indexOf(key as (typeof SCENE_KEYS)[number])]
       if (scene !== undefined) return set({ p: scene.key })
-      if (key === 'u') return set({ u: !state.u })
       if (key === 'k') return set({ k: !state.k })
       if (key === 'n') return set({ n: !state.n })
       if (key === 'd') return set({ dark: !state.dark })
@@ -324,7 +286,6 @@ function Lab() {
                     now={NOW}
                     onOpen={(threadId) => ctx.onOpen(threadId.replace(/^th-/, ''))}
                   />
-                  {state.u && take !== ZERO && <UpNextLine ctx={ctx} version={boardKey} />}
                 </div>
               ) : (
                 <SettingsScreen ctx={ctx} take={take} />
@@ -347,14 +308,6 @@ function Lab() {
             </button>
           ))}
           <span className={s.rule} />
-          <button
-            type="button"
-            aria-pressed={state.u}
-            onClick={() => set({ u: !state.u })}
-            title="Up next keeps one line, at the end of its heading"
-          >
-            <kbd>U</kbd>Up next line
-          </button>
           <button type="button" aria-pressed={state.k} onClick={() => set({ k: !state.k })}>
             <kbd>K</kbd>Crowded
           </button>
@@ -372,7 +325,7 @@ function Lab() {
             <kbd>D</kbd>Dark
           </button>
           <button type="button" aria-pressed={state.o} onClick={() => set({ o: !state.o })}>
-            <kbd>O</kbd>Popover open
+            <kbd>O</kbd>This Mac open
           </button>
           <span className={s.gap} />
           <span className={s.idea} title={take.idea}>
