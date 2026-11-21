@@ -673,6 +673,7 @@ describe('the API', () => {
               TrustBot: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
+              SetThreadGoal: () => Effect.die('unused'),
               Send: ({ body, images }) =>
                 images === undefined
                   ? Effect.void

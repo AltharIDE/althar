@@ -1,0 +1,83 @@
+.goal {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--paper);
+  color: var(--t-1);
+}
+
+.line,
+.summary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.line {
+  padding-inline-end: 10px;
+}
+
+.summary {
+  flex: 1;
+  padding: 7px 10px;
+  text-align: start;
+  font-size: 0.8125rem;
+}
+
+.summary:hover {
+  background: var(--hover-paper);
+}
+
+.label {
+  font-weight: 600;
+}
+
+.objective {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status,
+.detail {
+  color: var(--t-2);
+}
+
+.status {
+  flex: none;
+}
+
+.details {
+  border-top: 1px solid var(--line-2);
+  padding: 10px;
+  font-size: 0.8125rem;
+}
+
+.details p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.details textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 8px;
+  padding: 6px;
+  border: 1px solid var(--line-3);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}

@@ -100,4 +100,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0094_preset_tunings': 'e415b238eb87c7ca10fe6b5fca58d13059dc9cf41e30a79e8f85669248cf2dce',
   '0095_sessions_by_agent': 'bcfdc66359f3d62b1cade2085845e5d17c680adc6f3202560f6d4a0ac77b6b05',
   '0096_home_events': '53968d0dafcd3c044785f534768bf5bbefa3ffb57ee4bfc7b226906ba52f3b62',
+  '0097_thread_goals': '0f4a9d8c9ec2741b6fc4bbee1d68e9ff78c17e1c960cea00727b566fa8f11ae8',
 }

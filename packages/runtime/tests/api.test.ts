@@ -5,7 +5,16 @@ import { tmpdir } from 'node:os'
 import { join, sep, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
-import { type MessageSender, Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
+import {
+  type MessageSender,
+  Api,
+  ApiError,
+  GOAL_ROUNDS,
+  clientProtocol,
+  emitterPort,
+  type ThreadSnapshot,
+  type WatchEvent,
+} from '@althar/contracts'
 import {
   type AgentDefinition,
   AgentExited,
@@ -232,6 +241,92 @@ describe('the API', () => {
       }),
     ),
   )
+  it.live('continues a persisted goal on a different provider and accepts evidence from its current turn', () =>
+    Effect.gen(function* () {
+      const first = holds()
+      const second = holds()
+      const { client, grant, store, context } = yield* connected({
+        agents: fakeAgents({}, [], { codex: { holds: first }, 'claude-code': { holds: second } }),
+      })
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Verify the API' })
+      const active = store(
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ id: string; sessionId: string; agent: string; prompt: string; revision: number }>`
+        SELECT d.id, d.provider_session_id AS session_id, s.agent_id AS agent, d.prompt, d.goal_revision AS revision
+        FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+        WHERE d.thread_id = ${task.threadId} AND d.goal_round = 1 AND d.state = 'delivered'`,
+        ),
+      )
+      const head = client.GetThread({ threadId: task.threadId, limit: 0 })
+      const started = yield* client.SetThreadGoal({
+        commandId: commandId(),
+        threadId: task.threadId,
+        control: { action: 'set', objective: 'Verify the API [lead:slowly]' },
+        lead: { agentId: 'codex' },
+      })
+      assert.strictEqual(started?.status, 'active')
+      const [before] = yield* until(active, (rows) => rows[0]?.agent === 'codex')
+      const handing = yield* Effect.forkChild(
+        client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'claude-code' }),
+      )
+      first.open('[lead:slowly]')
+      yield* Fiber.join(handing)
+      const [after] = yield* until(active, (rows) => rows[0]?.agent === 'claude-code')
+      assert.strictEqual(after?.revision, before?.revision)
+      assert.include(after?.prompt ?? '', 'Verify the API')
+      const report = { status: 'complete', detail: 'API test suite passed.' }
+      const access = { role: 'lead' as const, projectId: project.id, taskId: task.id, threadId: task.threadId }
+      assert.include(
+        yield* callTool({ ...access, sessionId: before?.sessionId ?? '' }, 'report_goal', { ...report, turn: before?.id }).pipe(
+          Effect.provideContext(context),
+        ),
+        'no longer holds',
+      )
+      assert.include(
+        yield* callTool({ ...access, sessionId: after?.sessionId ?? '' }, 'report_goal', { ...report, turn: after?.id }).pipe(
+          Effect.provideContext(context),
+        ),
+        'evidence recorded',
+      )
+      second.open('[lead:slowly]')
+      assert.strictEqual((yield* head).task.goal?.detail, report.detail)
+      assert.strictEqual((yield* head).task.goal?.status, 'complete')
+    }).pipe(Effect.scoped),
+  )
+
+  it.live('bounds automatic rounds, routes typed controls through Althar and preserves revision across clear', () =>
+    Effect.gen(function* () {
+      const { client, grant, store } = yield* connected()
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Bounded goal' })
+      const send = (body: string) => client.Send({ commandId: commandId(), threadId: task.threadId, body, disposition: 'after_current' })
+      const goal = store(
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ status: string; rounds: number; revision: number }>`
+        SELECT status, rounds, revision FROM thread_goals WHERE thread_id = ${task.threadId}`,
+        ),
+      )
+      yield* client.SetThreadGoal({
+        commandId: commandId(),
+        threadId: task.threadId,
+        control: { action: 'set', objective: 'Keep checking the result' },
+        lead: { agentId: 'codex' },
+      })
+      const [limited] = yield* until(goal, ([row]) => row?.status === 'limited')
+      assert.strictEqual(limited?.rounds, GOAL_ROUNDS)
+      yield* send('/goal clear')
+      assert.isNull((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).task.goal)
+      yield* send('/goal Verify the next result')
+      const [newer] = yield* goal
+      assert.isAbove(newer?.revision ?? 0, limited?.revision ?? 0)
+      yield* send('/goal pause')
+      assert.strictEqual((yield* goal)[0]?.status, 'paused')
+    }).pipe(Effect.scoped),
+  )
+
   it.live('Try again refuses visibly when there is no failed turn or ended session', () =>
     Effect.gen(function* () {
       const { client, grant } = yield* connected()

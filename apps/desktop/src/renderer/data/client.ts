@@ -122,6 +122,8 @@ import {
   type TaskSummary,
   type ThreadItem,
   type ThreadSnapshot,
+  type ThreadGoal,
+  type GoalControl,
   type UndoTurnResult,
   type TrackerContainer,
   type WatchEvent,
@@ -507,6 +509,11 @@ export interface Client {
   readonly keepTaskForLater: (taskId: string) => Promise<void>
   /** Gives the task another title, in any state; its slug, branch and folder stay. */
   readonly renameTask: (taskId: string, title: string) => Promise<void>
+  readonly setThreadGoal: (input: {
+    readonly threadId: string
+    readonly control: GoalControl
+    readonly lead?: { readonly agentId: string; readonly model?: string; readonly effort?: string }
+  }) => Promise<ThreadGoal | null>
   readonly send: (input: {
     readonly threadId: string
     readonly body: string
@@ -1222,6 +1229,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     keepTaskForLater: (taskId) => command((commandId) => api.KeepTaskForLater({ commandId, taskId })),
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
+    setThreadGoal: (input) => command((commandId) => api.SetThreadGoal({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
     undoTurn: (itemId) => command((commandId) => api.UndoTurn({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),

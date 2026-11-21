@@ -1,3 +1,4 @@
+import { controlGoal, goalThread, pauseGoal, readGoal } from './threadGoals'
 import { DevicePairings } from './DevicePairings'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { lstatSync, realpathSync } from 'node:fs'
@@ -20,6 +21,8 @@ import {
   apiLayer,
   ApiError,
   type AgentStatus,
+  type GoalControl,
+  goalCommand,
   type StorageSize,
   type Attachment,
   type PortLike,
@@ -346,7 +349,7 @@ export const handlers = apiLayer(
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
     // What writes a project's notes needs, as the services have it.
-    const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands>()
+    const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto>()
     // What bringing a task's removed folder back needs (ADR-056).
     const folderStore = yield* Effect.context<SqlClient.SqlClient | Ledger | Instance | Crypto.Crypto>()
     const cleanup = yield* FolderCleanup
@@ -513,6 +516,33 @@ export const handlers = apiLayer(
         }),
         queryContext,
       )
+
+    const personSetsGoal = sender.kind === 'window' || sender.kind === 'paired_device'
+    const setThreadGoal = (
+      threadId: string,
+      control: GoalControl,
+      lead?: { readonly agentId: string; readonly model?: string | undefined; readonly effort?: string | undefined },
+    ) =>
+      Effect.gen(function* () {
+        if (!personSetsGoal)
+          return yield* new ApiError({ reason: 'Forbidden', message: 'Set goals from Althar’s window or a paired device.' })
+        const result = yield* Effect.provideContext(controlGoal(threadId, control), store)
+        if (!result.changed) return result.goal
+        if (result.stopping !== undefined) yield* sessions.cancelGoalRound(threadId, result.stopping)
+        if (result.goal?.status === 'active')
+          yield* sessions.kickGoal(
+            threadId,
+            result.goal.revision,
+            lead === undefined
+              ? undefined
+              : {
+                  agentId: lead.agentId,
+                  ...(lead.model === undefined ? {} : { model: lead.model }),
+                  ...(lead.effort === undefined ? {} : { effort: lead.effort }),
+                },
+          )
+        return result.goal
+      })
 
     /** A terminal is the person's own shell: only their window opens, reads, types into or closes one, never a paired device or a socket. */
     const terminalRefused = new ApiError({ reason: 'Forbidden', message: 'A terminal opens only in Althar’s window on this computer.' })
@@ -1628,6 +1658,7 @@ export const handlers = apiLayer(
           commandId,
           api(
             Effect.gen(function* () {
+              yield* Effect.provideContext(pauseGoal(threadId), store)
               const live = yield* sessions.running(threadId)
               if (Option.isNone(live) || !live.value.turnRunning) {
                 const [task] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
@@ -1692,7 +1723,15 @@ export const handlers = apiLayer(
         ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
       StopSession: ({ commandId, threadId }) =>
-        once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
+        once(
+          commandId,
+          api(
+            Effect.andThen(
+              Effect.provideContext(pauseGoal(threadId), store),
+              Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })),
+            ),
+          ),
+        ),
       SetTaskResolveConflicts: ({ commandId, taskId, resolveConflicts }) =>
         once(
           commandId,
@@ -1780,11 +1819,36 @@ export const handlers = apiLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
+      SetThreadGoal: ({ threadId, control, lead }) => api(setThreadGoal(threadId, control, lead)),
       Send: ({ commandId, threadId, body, disposition, images, files, dictated, comments, canvasComments }) =>
         api(
           sessions.accepting(
             threadId,
             Effect.gen(function* () {
+              const goal = goalCommand(body)
+              if (goal !== undefined) {
+                const task = yield* goalThread(threadId)
+                if (task !== undefined) {
+                  if (!personSetsGoal)
+                    return yield* new ApiError({ reason: 'Forbidden', message: 'Set goals from Althar’s window or a paired device.' })
+                  if ([images, files, comments, canvasComments].some((parts) => (parts?.length ?? 0) > 0))
+                    return yield* new ApiError({ reason: 'Invalid', message: 'Send attachments in a message alongside the goal.' })
+                  if (goal.action !== 'show') yield* setThreadGoal(threadId, goal)
+                  else {
+                    const current = yield* readGoal(threadId)
+                    yield* Effect.provideContext(
+                      addItem({ projectId: task.projectId, threadId }, 'notice', {
+                        source: 'runtime',
+                        severity: 'info',
+                        title: current === null ? 'Set an objective with /goal.' : `Goal · ${current.waiting ? 'waiting' : current.status}`,
+                        ...(current === null ? {} : { description: current.objective }),
+                      }),
+                      store,
+                    )
+                  }
+                  return
+                }
+              }
               // Its images and files are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
               const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               const copied = yield* filesFor(threadId, files)
