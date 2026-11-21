@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 
+import { checkFailuresIn } from '@althar/contracts'
 import { type ChangeRequest, type CodeHost, ConnectorFailed, MergeMethod, type MergeWays, type Repository } from '@althar/connectors'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
@@ -539,7 +540,14 @@ export class MergeLine extends Context.Service<
           const sum = yield* checksAt(change.headSha)
           if (sum.total > 0)
             yield* note(projectId, stepOf(entry), 'checks_seen', `checks:${change.headSha}:${sum.outcome}`, { head: change.headSha })
-          const cancelled = sum.list.filter((check) => check.state === 'cancelled').map((check) => check.name)
+          // Only the checks its host requires hold it out of line: an optional one's failure or cancellation doesn't (#1117).
+          // Where the host can't say which it requires, every check counts.
+          const rules =
+            sum.outcome === 'failed' && host.mergeRules !== undefined
+              ? yield* host.mergeRules(repository, change).pipe(Effect.orElseSucceed(() => null))
+              : null
+          const counted = checkFailuresIn(sum, rules?.requiredChecks)
+          const cancelled = counted.cancelled
           const red = () =>
             said(
               {
@@ -547,9 +555,9 @@ export class MergeLine extends Context.Service<
                 ...at,
                 ...moved,
                 reason:
-                  cancelled.length > 0 && sum.failed === 0
+                  cancelled.length > 0 && counted.failed === 0
                     ? `${name}’s checks were cancelled (${cancelled.join(', ')}): it steps out of line until they run and pass.`
-                    : `${name}’s checks failed at ${short(change.headSha)} (${sum.failing.join(', ')}): it steps out of line and goes back in once they pass.`,
+                    : `${name}’s checks failed at ${short(change.headSha)} (${counted.failing.join(', ')}): it steps out of line and goes back in once they pass.`,
               },
               'red',
               `checks failed at ${short(change.headSha)}`,
@@ -595,8 +603,8 @@ export class MergeLine extends Context.Service<
                 'red',
                 'sent back by the queue',
               )
-            if (sum.outcome === 'failed') return red()
-            if (sum.outcome === 'running')
+            if (counted.outcome === 'failed') return red()
+            if (sum.outcome === 'running' || counted.outcome === 'running')
               return said({ state: 'waiting', ...at, ...moved, reason: `${name}’s checks are running.` }, 'wait', 'checks running')
             if (
               sum.outcome === 'none' &&
@@ -618,7 +626,7 @@ export class MergeLine extends Context.Service<
           }
 
           // A red head holds no slot even when main has advanced: updating it would put ungreen work ahead of the next.
-          if (sum.outcome === 'failed') return red()
+          if (counted.outcome === 'failed') return red()
 
           // Althar's line: one slot for the branch.
           const placeIn = (one: Entry) => line.findIndex((other) => other.errandId === one.errandId)
@@ -679,7 +687,7 @@ export class MergeLine extends Context.Service<
               `behind ${entry.branch} at ${short(base)}`,
               base,
             )
-          if (sum.outcome === 'running')
+          if (sum.outcome === 'running' || counted.outcome === 'running')
             return said(
               { state: 'waiting', ...at, ...moved, reason: `${name}’s checks are running at ${short(change.headSha)}.` },
               'wait',

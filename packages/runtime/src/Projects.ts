@@ -970,13 +970,16 @@ export class Projects extends Context.Service<
             ORDER BY b.created_at, b.rowid`
           const [first] = bindings
           if (first === undefined) return yield* new NotFound({ kind: 'project', id: input.projectId })
-          // The repositories it changes: the project's one, or the ones it names, by name or slug, in the project's order.
+          // An aside without a selection can read the whole project; a task names the repositories it changes.
           const named = (input.repositories ?? []).map((name) => name.trim().toLowerCase()).filter((name) => name !== '')
           const matches = (binding: (typeof bindings)[number], name: string) => binding.slug === name || binding.name.toLowerCase() === name
           const unknown = named.filter((name) => !bindings.some((binding) => matches(binding, name)))
           const choices = bindings.map((binding) => binding.name)
           if (unknown.length > 0) return yield* new RepositoriesNeeded({ unknown, choices })
-          const chosen = bindings.length === 1 ? bindings : bindings.filter((binding) => named.some((name) => matches(binding, name)))
+          const chosen =
+            bindings.length === 1 || (input.shelf === 'scratch' && named.length === 0)
+              ? bindings
+              : bindings.filter((binding) => named.some((name) => matches(binding, name)))
           if (chosen.length === 0) return yield* new RepositoriesNeeded({ unknown: [], choices })
           // The branch each works toward (ADR-093): one asked for is on the remote it starts from, else the task isn't made.
           const towards = new Map(

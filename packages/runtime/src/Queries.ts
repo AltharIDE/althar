@@ -19,6 +19,7 @@ import {
   type BoardSnapshot,
   type ChangeSummary,
   CheckLogShown,
+  checkFailuresOf,
   ChecksSummary,
   type CoordinatorSnapshot,
   type HomeEvent,
@@ -2839,7 +2840,7 @@ export class Queries extends Context.Service<
                         ? ('merged' as const)
                         : pull.state === 'closed'
                           ? ('closed' as const)
-                          : pull.checks?.outcome === 'failed'
+                          : checkFailuresOf(pull).outcome === 'failed'
                             ? ('failing' as const)
                             : pull.draft
                               ? ('draft' as const)
@@ -3971,8 +3972,10 @@ export class Queries extends Context.Service<
             deletions: change?.deletions ?? null,
             changedFiles: change?.changedFiles ?? null,
           })
-          const passed = change?.checks !== null && change?.checks !== undefined && change.checks.outcome === 'passed'
-          const failed = change?.checks !== null && change?.checks !== undefined && change.checks.outcome === 'failed'
+          // Only checks its host doesn't require failed: they pass, as far as merging goes (#1117).
+          const outcome = change === null ? 'none' : checkFailuresOf(change).outcome
+          const passed = outcome === 'passed'
+          const failed = outcome === 'failed'
           const afterMerge = change !== null && change.state === 'merged'
           const at = task.startedAt ?? plan?.proposedAt ?? task.createdAt
           // Only Make it a full task gives a small change a review task of its own (FastLane.makeFullTask).
