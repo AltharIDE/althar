@@ -208,7 +208,9 @@ export const makeSessionBriefs = (dependencies: SessionBriefsDependencies) => {
         ...askedFor(thread),
         first === undefined
           ? `Read and search ${thread.cwd} to answer.`
-          : `The repository is ${withRole(first.name, first.role)}, in ${first.worktree}: a copy of ${first.baseRef}${first.baseCommit === null ? '' : ` at ${first.baseCommit.slice(0, 12)}`}, with no branch and nothing installed. Read and search it to answer.`,
+          : thread.repositories.length === 1
+            ? `The repository is ${withRole(first.name, first.role)}, in ${first.worktree}: a copy of ${first.baseRef}${first.baseCommit === null ? '' : ` at ${first.baseCommit.slice(0, 12)}`}, with no branch and nothing installed. Read and search it to answer.`
+            : `The project's repositories are side by side in ${thread.cwd}, with no branches or setup. Read and search them to answer:\n${thread.repositories.map((repository) => `- ${withRole(repository.name, repository.role)}: ${repository.worktree}`).join('\n')}`,
         // Quick, so never set up (Setups.ts): what needs an install or a build is a task's.
         "An aside never installs or upgrades dependencies, runs the project's setup, or builds: that is how it answers fast. Where what the person asks needs one of those, tests run or the project running, say in a line that it becomes a task, which they make with Make it a task over the composer.",
         "You have the coordinator's tools and Althar's: list_tasks, find_tasks, read_task and read_thread for the project's work, read_pull_request and read_checks for its pull requests, find_issues and read_issue for its issues, start_task, or draft_task and propose_plan, for work done elsewhere. Where what the person asks is work in this repository, say so in a line and start on it: once you change it, the aside becomes a task on the board, and Althar tells you then what a task's lead does.",
