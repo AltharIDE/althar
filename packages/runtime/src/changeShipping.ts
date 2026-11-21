@@ -698,6 +698,7 @@ export const makeChangeShipping = (dependencies: ChangeShippingDependencies) => 
       if (ahead.kind === 'behind') return `Someone else pushed to ${name}`
       if (ahead.kind === 'rewritten') return `Pushing to ${name} would need forcing`
       if (ahead.kind === 'unknown') return `Althar can't tell what ${name} has`
+      if (snapshot.maintainerEdit === true) return 'Changes to a contributor’s fork wait for your push'
       const { host, repository } = yield* current(taskId, snapshot.url)
       const onto = sourceOf(snapshot, branch)
       if (onto === repository.defaultBranch || onto === snapshot.target) return `${name} is from ${onto}`

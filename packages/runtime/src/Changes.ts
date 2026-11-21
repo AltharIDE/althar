@@ -857,6 +857,9 @@ export class Changes extends Context.Service<
         get tellLead(): ChangePublishingDependencies['tellLead'] {
           return tellLead
         },
+        get tipBeforePush(): ChangePublishingDependencies['tipBeforePush'] {
+          return tipBeforePush
+        },
         get unfollowed(): ChangePublishingDependencies['unfollowed'] {
           return unfollowed
         },
@@ -906,6 +909,7 @@ export class Changes extends Context.Service<
         sentTo,
         settleAsked,
         stampMerged,
+        tipBeforePush,
         waitingOn,
         worktreeOf,
       } = makeChangeHost({

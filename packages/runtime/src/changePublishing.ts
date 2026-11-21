@@ -6,6 +6,7 @@ import { Cause, Clock, type Crypto, Effect, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import { withFolder } from './bringBack'
 import { offScratch, touchCard } from './cards'
+import { withContributorGit } from './changeHost'
 import {
   type AttachInput,
   type Attached,
@@ -174,6 +175,14 @@ export interface ChangePublishingDependencies {
     | RevisionConflict,
     SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto
   >
+  readonly tipBeforePush: (
+    taskId: string,
+    snapshot: Snapshot,
+    path: string,
+    target: { readonly url: string; readonly header: string | null },
+    onto: string,
+    destination: { readonly host: CodeHost; readonly repository: Repository; readonly own: Repository },
+  ) => Effect.Effect<string | null, ChangedSinceSeen | ConnectorFailed | PushRefused>
   readonly unfollowed: (id: string) => Effect.Effect<void, unknown, Store>
   readonly unshippedOf: (taskId: string, kept?: boolean) => Effect.Effect<Unshipped[], unknown, Store>
   readonly wakeNow: (taskId: string | null) => void
@@ -684,7 +693,7 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
         return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: `${own.path.join('/')}/${task.branch}` })
       // Attached to an open pull request it didn't open, its branch goes there, and nothing else opens (ADR-052).
       const attached = next === undefined ? yield* attachedOf(input.taskId, task.workspaceId) : undefined
-      if (attached !== undefined) return yield* publishAttached(input, task, attached, pushTarget)
+      if (attached !== undefined) return yield* publishAttached(input, task, attached, pushTarget, { host, repository, own })
       // The next pull request describes only accepted commits, before a rebranch gives them new identities.
       const described =
         next === undefined || task.acceptedHead === undefined
@@ -1017,13 +1026,14 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
     task: PublishRow,
     attached: { readonly record: string; readonly sent: string | null; readonly link: LinkRow; readonly snapshot: Snapshot },
     pushTarget: { readonly url: string; readonly header: string | null },
+    destination: { readonly host: CodeHost; readonly repository: Repository; readonly own: Repository },
   ) =>
     Effect.gen(function* () {
       const { link, snapshot } = attached
       const pictures = yield* evidencePaths(input.taskId)
       const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures(task.path, file))
       const onto = sourceOf(snapshot, task.branch)
-      const tip = yield* remoteTip(task.path, pushTarget, onto)
+      const tip = yield* dependencies.tipBeforePush(input.taskId, snapshot, task.path, pushTarget, onto, destination)
       const { head, settle } = yield* credited(task.path, task.branch, task.acceptedHead ?? (yield* commitOf(task.path, 'HEAD')), [
         task.baseCommit,
         attached.sent,
@@ -1032,9 +1042,9 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       ])
       // Already there, nothing goes up; else only as a fast-forward, in a sentence where it isn't one.
       if (tip !== head)
-        yield* pushTo(task.path, pushTarget, task.branch, head, undefined, onto).pipe(
-          Effect.catchTag('GitFailed', (failed) => dependencies.refusal(input.taskId, nameOf(snapshot), failed)),
-        )
+        yield* withContributorGit(snapshot.maintainerEdit === true, pushTarget, (target) =>
+          pushTo(task.path, target, task.branch, head, undefined, onto),
+        ).pipe(Effect.catchTag('GitFailed', (failed) => dependencies.refusal(input.taskId, nameOf(snapshot), failed)))
       yield* settle
       const { host, repository } = yield* current(input.taskId, snapshot.url)
       const read = yield* host.change(repository, snapshot.number)
@@ -1056,9 +1066,8 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
   /**
    * Attaches one of the task's repositories to an open pull request it
    * didn't open, by its link or its number (ADR-052): one opened by hand,
-   * or from a fork into the repository it came from, whose branch is on
-   * the fork this clone pushes to. Its branch must be one the task pushes
-   * to; another task following it keeps it. The task's branch, where it
+   * or from a fork into the repository it came from. A contributor's
+   * fork requires maintainer edits. Another task following it keeps it. The task's branch, where it
    * isn't based on that pull request's head, starts from it only with
    * `start`, the person's word: its own commits that aren't in the head
    * go on top, one by one, and where they conflict, or the worktree has
@@ -1164,8 +1173,8 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       // One whose branch is a change's own is that change's: recorded on it, in place of any open one it had, and the task
       // follows the rest as before (a task is a conversation plus parts).
       row = rows.find((one) => one.bindingId === row.bindingId && one.branch === pull.source && existsSync(one.path)) ?? row
-      // Its branch is on the repository this clone pushes to, or nowhere Althar can push: the fork, else the repository itself;
-      // for a fork whose branches go to the repository it came from (ADR-085), that one too, as the person can push there.
+      // Its branch is on the repository this clone pushes to, or on a contributor's fork that lets maintainers edit.
+      // Where the project sends branches upstream (ADR-085), the upstream repository can have its own branches too.
       // Where the host doesn't say which repository it is on, a branch of the same name here may be another's: none is pushed to.
       const pushes = fork?.fork.path ?? found.path
       const headOn = pull.headRepository
@@ -1174,10 +1183,20 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
       if (headOn !== null && headOn.length === 0) return yield* refuse(`${name}’s branch was on a fork that is gone.`)
       const headPath = headOn ?? path
       const upstreamBranches = fork !== null && row.changeTarget === 'upstream_branch' && same(headPath, fork.upstream.path)
-      if (!same(headPath, pushes) && !(upstreamBranches && repository.canPush))
+      const outside = !same(headPath, pushes) && !(upstreamBranches && repository.canPush)
+      const maintainerEdit = outside && !same(headPath, path)
+      if (maintainerEdit) {
+        if (pull.maintainerEdits !== true)
+          return yield* refuse(
+            `${name} is from ${headPath.join('/')} and maintainer edits are disabled. Ask the author to allow maintainer edits, then attach it.`,
+          )
+        if (!repository.canPush)
+          return yield* refuse(`Your account can’t push to ${path.join('/')}. Sign in with an account that can edit ${name}’s branch.`)
+      } else if (outside) {
         return yield* refuse(
           `${name}’s branch, ${pull.source}, is on ${headPath.join('/')}, which this task doesn’t push to: it pushes to ${pushes.join('/')}.`,
         )
+      }
       const own = same(headPath, pushes) ? pushes : headPath
       const [other] = yield* sql<{ slug: string }>`
             SELECT k.slug FROM external_links x JOIN tasks k ON k.id = x.task_id
@@ -1198,7 +1217,12 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
         return yield* refuse(`Task ${sending.slug}’s work goes to ${name}. Abandon it first, or leave ${name} to it.`)
       const pushTarget = yield* fromHost(host.pushTarget(same(own, path) ? repository : yield* fromHost(host.repository(own))))
       // Its head as its branch has it now, fetched here: what the task's branch must be on for its pushes to add to it.
-      const tip = yield* fetchInto(row.path, pushTarget, pull.source, `refs/althar/pull-request/${pull.source}`)
+      const ref = `refs/althar/pull-request/${pull.source}`
+      const tip = yield* maintainerEdit
+        ? withContributorGit(true, pushTarget, (target) => fetchedInto(row.path, target, pull.source, ref)).pipe(
+            Effect.orElseSucceed(() => null),
+          )
+        : fetchInto(row.path, pushTarget, pull.source, ref)
       if (tip === null) return yield* refuse(`Althar couldn’t fetch ${name}’s branch, ${pull.source}, from ${own.join('/')}.`)
       let base = row.baseCommit
       let started = false
@@ -1253,7 +1277,12 @@ export const makeChangePublishing = (dependencies: ChangePublishingDependencies)
         yield* git(row.path, 'checkout', '-q', '-b', row.branch)
       }
       const kept = yield* commitsAhead(row.path, tip, 'HEAD').pipe(Effect.orElseSucceed(() => 0))
-      const snapshot: Snapshot = { ...snapshotOf(pull, path, host.words, null), headSha: tip, attached: true }
+      const snapshot: Snapshot = {
+        ...snapshotOf(pull, path, host.words, null),
+        headSha: tip,
+        attached: true,
+        ...(maintainerEdit ? { maintainerEdit: true } : {}),
+      }
       const followed = yield* sql<{ id: string; projectId: ProjectId; taskId: string }>`
             SELECT DISTINCT l.id, l.project_id, l.task_id FROM external_links l JOIN repository_changes c ON c.pull_request_url = l.url
             WHERE l.task_id = ${input.taskId} AND l.kind = 'change' AND l.listening = 1 AND l.url <> ${pull.url}

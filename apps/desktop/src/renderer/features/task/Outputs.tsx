@@ -812,7 +812,7 @@ export function Outputs({
           pullRequest={text.pullRequest(one, several)}
           named={text.named(one)}
           // Only from the head the person saw it at: what anyone pushed since is never replaced.
-          {...(kind === 'rewritten' && one.head !== null
+          {...(kind === 'rewritten' && one.head !== null && one.maintainerEdit !== true
             ? { onReplace: () => onReplace(one.localHead ?? '', one.head ?? '', one.url) }
             : {})}
           onMerge={() => onBringIn(one.url)}

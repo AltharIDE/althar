@@ -7,6 +7,7 @@ import {
   Comment,
   ConnectorFailed,
   type Product,
+  type PushTarget,
   type Repository,
   parseRemote,
 } from '@althar/connectors'
@@ -91,6 +92,19 @@ import { TITLE_LENGTH, retitleTask } from './taskTitle'
 import { addItem, updateItem } from './threads'
 import { type ToolAccess, ToolRefused } from './ToolServer'
 import { words } from './words'
+
+// A connected token can be scoped to the target repository. The person's configured Git can also sign in to the fork.
+export const withContributorGit = <A>(contributor: boolean, target: PushTarget, run: (target: PushTarget) => Effect.Effect<A, GitFailed>) =>
+  run(target).pipe(
+    Effect.catchIf(
+      (failed) => {
+        if (!contributor || target.header === null) return false
+        const why = pushFailureOf(failed)?.why
+        return why === 'denied' || why === 'forbidden' || /repository not found|returned error: 404/i.test(failed.stderr)
+      },
+      () => run({ ...target, header: null }),
+    ),
+  )
 
 const TagAsked = Schema.Struct({ tag: Schema.String, repository: Schema.optional(Schema.NullOr(Schema.String)) })
 
@@ -379,6 +393,33 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
     pull: { readonly number: number; readonly source: string; readonly head?: ReadonlyArray<string> | null | undefined },
   ) => Effect.flatMap(branchRepositoryOf(taskId, host, repository, path, pull), (on) => host.pushTarget(on))
 
+  /** A contributor can revoke maintainer edits, close the pull request or delete its branch after a task attaches. */
+  const tipBeforePush = (
+    taskId: string,
+    snapshot: Snapshot,
+    path: string,
+    target: { readonly url: string; readonly header: string | null },
+    onto: string,
+    { host, repository, own }: { readonly host: CodeHost; readonly repository: Repository; readonly own: Repository },
+  ) =>
+    Effect.gen(function* () {
+      if (snapshot.maintainerEdit !== true) return yield* remoteTip(path, target, onto)
+      const remote = nameOf(snapshot)
+      const now = yield* host.change(repository, snapshot.number)
+      if (now.state !== 'open' || now.source !== onto) return yield* new ChangedSinceSeen({ taskId })
+      if (now.maintainerEdits !== true) return yield* new PushRefused({ taskId, why: 'maintainer_edits_disabled', remote })
+      if (!repository.canPush) return yield* new PushRefused({ taskId, why: 'forbidden', remote })
+      const head = now.headRepository
+      if (head?.length === 0) return yield* new PushRefused({ taskId, why: 'fork_gone', remote })
+      if (head == null || !samePath(head, own.path)) return yield* new PushRefused({ taskId, why: 'unplaced', remote })
+      if (onto === own.defaultBranch) return yield* new PushRefused({ taskId, why: 'protected', remote })
+      const tip = yield* withContributorGit(true, target, (gitTarget) => askedRemoteTip(path, gitTarget, onto)).pipe(
+        Effect.catchTag('GitFailed', (failed) => refusal(taskId, remote, failed)),
+      )
+      if (tip === null) return yield* new PushRefused({ taskId, why: 'refused', remote, said: 'the contributor’s branch is gone' })
+      return tip
+    })
+
   /** A commit, and what crediting made it from (credit.ts): the branch stays on that until it moves onto what was sent. */
   const madeFrom = (commit: string) =>
     Effect.gen(function* () {
@@ -521,11 +562,19 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
       const workspace = yield* worktreeOf(taskId, snapshot.url)
       if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
       // A pull request from a fork into the repository it was forked from takes its commits on the fork.
-      const pushTarget = yield* pushTargetOf(taskId, host, repository, workspace.path, {
+      const own = yield* branchRepositoryOf(taskId, host, repository, workspace.path, {
         ...snapshot,
         source: sourceOf(snapshot, workspace.branch),
       })
-      return { link, snapshot, workspace, pushTarget, sent: yield* sentTo(link.projectId, snapshot.url) }
+      const pushTarget = yield* host.pushTarget(own)
+      return {
+        link,
+        snapshot,
+        workspace,
+        pushTarget,
+        sent: yield* sentTo(link.projectId, snapshot.url),
+        destination: { host, repository, own },
+      }
     })
 
   /**
@@ -586,11 +635,11 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
   const push = (taskId: string, seen: string, url?: string, by: 'person' | 'althar' | 'ship' = 'person') =>
     Effect.gen(function* () {
       if (by !== 'ship') yield* dependencies.holdBeforePush(taskId)
-      const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
+      const { link, snapshot, workspace, pushTarget, sent, destination } = yield* pushingTo(taskId, url)
       if (workspace.heldAt !== null && by !== 'ship') return yield* new ShipRefused({ taskId, why: 'held' })
       // Onto the pull request's own branch, which for one attached to the task may be called otherwise (ADR-052).
       const onto = sourceOf(snapshot, workspace.branch)
-      const tip = yield* remoteTip(workspace.path, pushTarget, onto)
+      const tip = yield* tipBeforePush(taskId, snapshot, workspace.path, pushTarget, onto, destination)
       const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [snapshot.headSha, sent, tip])
       // What Althar last pushed before what it last saw: a pull request read before that push is behind it.
       yield* stillOnHead(taskId, snapshot.url, workspace.path, seen, head, tip, [sent, snapshot.headSha])
@@ -604,9 +653,9 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
         head,
       })
       // Refused, it says why in a sentence, not git's hint: the pull request has commits the branch doesn't.
-      yield* pushTo(workspace.path, pushTarget, workspace.branch, head, undefined, onto).pipe(
-        Effect.catchTag('GitFailed', (failed) => refusal(taskId, nameOf(snapshot), failed)),
-      )
+      yield* withContributorGit(snapshot.maintainerEdit === true, pushTarget, (target) =>
+        pushTo(workspace.path, target, workspace.branch, head, undefined, onto),
+      ).pipe(Effect.catchTag('GitFailed', (failed) => refusal(taskId, nameOf(snapshot), failed)))
       yield* settle
       return yield* pushedTo(taskId, link, snapshot, workspace.path, seen, head, by === 'althar' ? 'althar' : 'person')
     })
@@ -627,6 +676,7 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
       const sql = yield* SqlClient.SqlClient
       const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
       const where = nameOf(snapshot)
+      if (snapshot.maintainerEdit === true) return yield* new PushRefused({ taskId, why: 'contributor_force_push', remote: where })
       const { rules } = yield* (yield* Policies).current(link.projectId)
       if (ruleSetOf(rules).never.includes('force-push')) return yield* new PushRefused({ taskId, why: 'never', remote: where })
       const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [replaces, sent])
@@ -684,7 +734,9 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
       const onto = sourceOf(snapshot, workspace.branch)
       const ref = `refs/althar/pull-request/${onto}`
       // Where it can't be fetched, git's own words say why.
-      const head = yield* fetchedInto(workspace.path, pushTarget, onto, ref)
+      const head = yield* withContributorGit(snapshot.maintainerEdit === true, pushTarget, (target) =>
+        fetchedInto(workspace.path, target, onto, ref),
+      )
       const where = nameOf(snapshot)
       const short = head.slice(0, 12)
       const rewritten = head === sent && !(yield* onHead(workspace.path, head))
@@ -1962,6 +2014,7 @@ export const makeChangeHost = (dependencies: ChangeHostDependencies) => {
     sentTo,
     settleAsked,
     stampMerged,
+    tipBeforePush,
     waitingOn,
     worktreeOf,
   }
