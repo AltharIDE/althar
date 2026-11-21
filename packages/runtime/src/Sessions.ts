@@ -8,7 +8,7 @@ import {
   type PermissionRequest,
   type SessionEvent,
 } from '@althar/provider-adapters'
-import { Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Option, Queue, Schema, Scope } from 'effect'
+import { Cause, Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Option, Queue, Schema, Scope } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import type { Accepting } from './admission'
@@ -1483,11 +1483,22 @@ export class Sessions extends Context.Service<
                   'An interrupted chat undo needs recovery. Keep or move later file edits, then retry Undo from here before starting the agent.',
               })
             const entry = yield* (yield* Agents).get(input.agentId)
+            const [slept] =
+              thread.role === 'coordinator' && input.accountId === undefined
+                ? yield* sql<{ accountId: string | null }>`
+                  SELECT s.account_id FROM provider_sessions s
+                  WHERE s.id = (SELECT id FROM provider_sessions WHERE thread_id = ${input.threadId}
+                    ORDER BY started_at DESC, rowid DESC LIMIT 1)
+                    AND s.agent_id = ${entry.definition.id}
+                    AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
+                      AND f.type = 'provider_session.stop_requested' AND json_extract(f.payload, '$.reason') = 'idle')`
+                : []
             const account = yield* limits.pick({
               agentId: entry.definition.id,
               projectId: thread.projectId,
               threadId: input.threadId,
               ...accountOf(input),
+              ...(slept?.accountId == null ? {} : { preferAccountId: slept.accountId }),
               ...(input.model === undefined ? {} : { model: input.model }),
             })
             const blocked =
@@ -2098,10 +2109,9 @@ export class Sessions extends Context.Service<
             model: string | null
             effort: string | null
             startedAt: string
-            threadKind: string
           }>`
-            SELECT s.id, s.project_id, s.agent_id, s.account_id, s.model, s.effort, s.started_at, t.kind AS thread_kind
-            FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+            SELECT s.id, s.project_id, s.agent_id, s.account_id, s.model, s.effort, s.started_at
+            FROM provider_sessions s
             WHERE s.thread_id = ${threadId}
             ORDER BY (SELECT max(f.sequence) FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id) DESC,
               s.started_at DESC, s.rowid DESC LIMIT 1`
@@ -2161,9 +2171,6 @@ export class Sessions extends Context.Service<
             ...(recovering === undefined ? {} : { recovering }),
             ...(on.model === null ? {} : { model: on.model }),
             ...(on.effort == null ? {} : { effort: on.effort }),
-            ...(last.threadKind !== 'coordinator' || last.accountId === null || on.agentId !== last.agentId
-              ? {}
-              : { accountId: last.accountId }),
             ...(standing === undefined ? {} : { standsIn: standing }),
           })
           return true
@@ -2174,7 +2181,27 @@ export class Sessions extends Context.Service<
           Effect.forkIn(
             run(Effect.flatMap(inputWaiting(threadId), (waiting) => (waiting ? startLast(threadId) : Effect.succeed(false)))).pipe(
               Effect.catchTag('SessionRunning', () => Effect.succeed(true)),
-              Effect.catchCause((cause) => Effect.logWarning('Could not wake an idle coordinator', { threadId, cause })),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.interrupt
+                  : Effect.andThen(
+                      Effect.logWarning('Could not wake an idle coordinator', { threadId, cause }),
+                      run(
+                        Effect.gen(function* () {
+                          if (threads.has(threadId) || !(yield* inputWaiting(threadId))) return
+                          const { projectId } = yield* loadThread(threadId)
+                          const failure = Option.getOrUndefined(Cause.findErrorOption(cause))
+                          const next = failure instanceof SessionFailed ? failure.summary : 'Send another message to try again.'
+                          yield* addItem({ projectId, threadId }, 'notice', {
+                            source: 'runtime',
+                            severity: 'error',
+                            title: 'The coordinator couldn’t start.',
+                            description: `${next} Your earlier message is still queued.`,
+                          })
+                        }),
+                      ).pipe(Effect.catchCause((error) => Effect.logWarning('Could not record the coordinator’s wake failure', error))),
+                    ),
+              ),
             ),
             sessionsScope,
           ),

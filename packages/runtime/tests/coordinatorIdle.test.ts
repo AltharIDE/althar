@@ -1,20 +1,28 @@
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { MessageChannel } from 'node:worker_threads'
 
+import { Api, clientProtocol, emitterPort } from '@althar/contracts'
 import { assert, it } from '@effect/vitest'
 import { removeTreeSync } from '@althar/testing'
-import { Deferred, Duration, Effect, Fiber, Option } from 'effect'
+import { Context, Deferred, Duration, Effect, Fiber, Layer, Option } from 'effect'
+import { RpcClient } from 'effect/rpc'
 import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
+import { Accounts } from '../src/Accounts'
+import { connection, services } from '../src/Api'
 import { Coordinator } from '../src/Coordinator'
+import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
+import { applyRules } from '../src/rulesChange'
 import * as Runtime from '../src/Runtime'
+import { Secrets } from '../src/Secrets'
 import { Sessions } from '../src/Sessions'
-import { onTestClock, repository, runtime, until } from './support'
+import { fakeAgents, fakeConnectors, onTestClock, repository, ROOMY, runtime, until } from './support'
 
-it.effect('retires an idle coordinator and wakes it for news with its account and queued input', () =>
+it.effect.each(['allowed', 'excluded'] as const)('wakes on news when the previous account is %s', (access) =>
   onTestClock(
     Effect.gen(function* () {
       const projects = yield* Projects
@@ -23,6 +31,12 @@ it.effect('retires an idle coordinator and wakes it for news with its account an
       const sql = yield* SqlClient.SqlClient
       const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
       const threadId = yield* coordinator.thread(project.projectId)
+      const accounts = yield* Accounts
+      const [main] = yield* accounts.of('claude-code')
+      const work = yield* accounts.add({ agentId: 'claude-code', name: 'Work' })
+      const person = (yield* Instance).personId
+      yield* applyRules(project.projectId, { accountStrategy: 'first' }, person)
+      yield* sessions.start({ threadId, agentId: 'claude-code', accountId: work.id })
       yield* coordinator.say({
         envelope: yield* Runtime.envelope('thread.send', {}),
         threadId,
@@ -36,6 +50,7 @@ it.effect('retires an idle coordinator and wakes it for news with its account an
       assert.strictEqual(Option.getOrThrow(yield* sessions.running(threadId)).sessionId, first.sessionId)
       yield* TestClock.adjust(Duration.seconds(20))
       yield* until(sessions.running(threadId), Option.isNone)
+      if (access === 'excluded') yield* applyRules(project.projectId, { onlyAccounts: { 'claude-code': [main!.id] } }, person)
       const news = 'A task needs attention.'
       yield* coordinator.say({
         envelope: yield* Runtime.envelope('coordinator.news', {}),
@@ -48,13 +63,76 @@ it.effect('retires an idle coordinator and wakes it for news with its account an
       const next = Option.getOrThrow(
         yield* until(sessions.running(threadId), (one) => Option.isSome(one) && one.value.sessionId !== first.sessionId),
       )
-      assert.strictEqual(next.accountId, first.accountId)
+      assert.strictEqual(first.accountId, work.id)
+      assert.strictEqual(next.accountId, access === 'allowed' ? work.id : main!.id)
       const inputs = sql<{ state: string }>`SELECT state FROM user_inputs WHERE thread_id = ${threadId} AND body = ${news}`
       yield* until(inputs, (rows) => rows[0]?.state === 'delivered')
       const [turn] = yield* sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE provider_session_id = ${next.sessionId}`
       assert.include(turn!.prompt, 'Hello')
       assert.include(turn!.prompt, news)
     }).pipe(Effect.provide(runtime(':memory:', {}, { idle: { coordinator: Duration.seconds(10) } }))),
+  ),
+)
+
+it.effect('keeps the second account when the window starts the sleeping coordinator', () =>
+  onTestClock(
+    Effect.gen(function* () {
+      const { port1, port2 } = new MessageChannel()
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          port1.close()
+          port2.close()
+        }),
+      )
+      const context = yield* Layer.build(
+        services({
+          database: ':memory:',
+          worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-coordinator-window-')),
+          appVersion: '0.0.0-test',
+          deviceName: 'Test Mac',
+          agents: fakeAgents(),
+          accountsRoot: mkdtempSync(join(tmpdir(), 'althar-coordinator-window-accounts-')),
+          secrets: Secrets.memory(),
+          connectors: fakeConnectors({}),
+          busy: { machine: ROOMY },
+          idle: { coordinator: Duration.seconds(10) },
+        }),
+      )
+      yield* Effect.forkScoped(
+        Layer.launch(
+          connection(
+            emitterPort(port1, (data) => data),
+            { kind: 'window' },
+          ),
+        ).pipe(Effect.provideContext(context)),
+      )
+      const protocol = yield* Layer.build(clientProtocol(emitterPort(port2, (data) => data)))
+      const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
+      const coordinator = Context.get(context, Coordinator)
+      const sessions = Context.get(context, Sessions)
+      const accounts = Context.get(context, Accounts)
+      yield* Effect.gen(function* () {
+        const project = yield* (yield* Projects).open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+        const threadId = yield* coordinator.thread(project.projectId)
+        yield* applyRules(project.projectId, { accountStrategy: 'first' }, (yield* Instance).personId)
+        const work = yield* accounts.add({ agentId: 'claude-code', name: 'Work' })
+        yield* sessions.start({ threadId, agentId: 'claude-code', accountId: work.id })
+        yield* coordinator.say({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId,
+          body: 'Hello',
+          disposition: 'after_current',
+        })
+        const first = Option.getOrThrow(
+          yield* until(sessions.running(threadId), (one) => Option.isSome(one) && one.value.turnEndedAt !== null),
+        )
+        yield* TestClock.adjust(Duration.seconds(25))
+        yield* until(sessions.running(threadId), Option.isNone)
+        const id = yield* client.StartSession({ commandId: 'cmd_0123456789abcdef0123456789abcdef', threadId, agentId: 'claude-code' })
+        assert.notStrictEqual(id, first.sessionId)
+        assert.strictEqual(Option.getOrThrow(yield* sessions.running(threadId)).accountId, work.id)
+      }).pipe(Effect.provideContext(context))
+    }),
   ),
 )
 
@@ -124,7 +202,7 @@ it.effect('delivers an input accepted while the old coordinator is closing', () 
   )
 })
 
-it.effect('wakes queued input accepted after retirement starts but before the provider closes', () => {
+it.effect.each(['starts', 'fails'] as const)('keeps input sent during retirement when the next provider %s', (wake) => {
   const retiring = Deferred.makeUnsafe<void>()
   const release = Deferred.makeUnsafe<void>()
   return onTestClock(
@@ -151,8 +229,26 @@ it.effect('wakes queued input accepted after retirement starts but before the pr
       yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', {}), threadId, body, disposition: 'after_current' })
       const input = sql<{ state: string }>`SELECT state FROM user_inputs WHERE thread_id = ${threadId} AND body = ${body}`
       assert.strictEqual((yield* input)[0]?.state, 'queued')
+      if (wake === 'fails')
+        yield* sql`INSERT INTO turn_undo_recoveries (command_id, thread_id, plans, state)
+          VALUES ('prepared-undo', ${threadId}, '[]', 'prepared')`
       yield* Deferred.succeed(release, undefined)
       yield* Fiber.join(advance)
+      if (wake === 'fails') {
+        const notices = sql<{ description: string }>`
+          SELECT json_extract(content, '$.description') AS description FROM thread_items
+          WHERE thread_id = ${threadId} AND kind = 'notice' AND json_extract(content, '$.title') = 'The coordinator couldn’t start.'`
+        yield* until(notices, (rows) => rows.some((row) => row.description.includes('still queued')))
+        assert.strictEqual((yield* input)[0]?.state, 'queued')
+        assert.isTrue(Option.isNone(yield* sessions.running(threadId)))
+        yield* sql`UPDATE turn_undo_recoveries SET state = 'recovered' WHERE command_id = 'prepared-undo'`
+        yield* coordinator.say({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId,
+          body: 'Try again',
+          disposition: 'after_current',
+        })
+      }
       yield* until(input, (rows) => rows[0]?.state === 'delivered')
       assert.notStrictEqual(Option.getOrThrow(yield* sessions.running(threadId)).sessionId, first.sessionId)
     }).pipe(
