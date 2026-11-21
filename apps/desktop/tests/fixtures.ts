@@ -1295,7 +1295,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setPlansAndReviews: vi.fn(async () => {}),
     setNewProjectDefaults: vi.fn(async () => {}),
     getStorageSize: vi.fn(async () => ({ state: 'done' as const, bytes: 3 * 1024 ** 3, approximate: false, unreadable: 0 })),
-    getTaskFolders: vi.fn(async () => ({ disk: null, folders: [], measuring: false })),
+    getTaskFolders: vi.fn(async () => ({ disks: [], folders: [], measuring: false })),
     cleanUpFolders: vi.fn(async () => ({ freed: 0, failed: 0 })),
     removeTaskFolder: vi.fn(async () => ({ freed: 0, failed: 0 })),
     moveInLine: vi.fn(async () => {}),

@@ -351,3 +351,9 @@ export const earlierRoots = (worktrees: ReadonlyArray<string>, root: string, hom
     return at !== homeAt && !homeAt.startsWith(at + sep) && at !== rootAt && !at.startsWith(rootAt + sep)
   })
 }
+
+/** The project folders worktrees were made in under an earlier root (root/project/task/repository), as `earlierRoots` takes those roots. */
+export const earlierProjectFolders = (worktrees: ReadonlyArray<string>, root: string, home: string): ReadonlyArray<string> => {
+  const earlier = new Set(earlierRoots(worktrees, root, home))
+  return [...new Set(worktrees.map((path) => dirname(dirname(path))))].filter((folder) => earlier.has(dirname(folder)))
+}

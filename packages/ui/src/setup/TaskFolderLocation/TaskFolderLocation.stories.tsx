@@ -117,3 +117,19 @@ export const SetByEnvironment: Story = {
     </SettingList>
   ),
 }
+
+/** In the Flatpak: every pick comes through the file portal, which task folders can't use, so the row is the folder and one line saying why, with no Change. */
+export const Flatpak: Story = {
+  args: { folder: '/home/ada/.var/app/dev.althar.app/data/althar/worktrees', from: 'default', sandboxed: true },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText(/arrives through the file portal, which task folders can’t use/)).toBeVisible()
+    await expect(c.queryByText(/inside the one you choose/)).toBeNull()
+    await expect(c.queryByRole('button')).toBeNull()
+  },
+  render: (args) => (
+    <SettingList>
+      <TaskFolderLocation {...args} />
+    </SettingList>
+  ),
+}

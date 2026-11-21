@@ -1,6 +1,10 @@
+import { chosenWorktrees, usableNow, worktreesFrom } from '@althar/runtime/locations'
+
 /*
  * The command line: which folder to open, the task to start, the agent to
- * start it on, and where the profile and worktrees live.
+ * start it on, and where the profile and worktrees live. Without --worktrees,
+ * new tasks' folders go where the app's Settings says, for the profile used
+ * (taskFolders), as the app's do.
  */
 
 export interface Options {
@@ -20,10 +24,26 @@ starts its agent. Then type to talk to the agent; /help lists the commands.`
 
 export { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
 
-/** Reads the arguments, or says what is wrong with them. */
+/**
+ * Where new tasks' folders go, for a profile, as the app has it (`worktreesFrom`): ALTHAR_WORKTREES, else the folder chosen in its
+ * Settings, else the default. A chosen folder that can't be used now, such as a drive not connected, is never made: the default stands
+ * in, and `unusable` says which it was.
+ */
+export const taskFolders = (
+  env: NodeJS.ProcessEnv,
+  profile: string,
+  fallback: string,
+  chosen: (profile: string) => string | null = chosenWorktrees,
+  usable: (folder: string) => boolean = usableNow,
+): { readonly folder: string; readonly unusable?: string } => {
+  const now = worktreesFrom(env, chosen(profile), fallback)
+  return now.from === 'setting' && !usable(now.folder) ? { folder: fallback, unusable: now.folder } : { folder: now.folder }
+}
+
+/** Reads the arguments, or says what is wrong with them. Where new tasks' folders go, unless --worktrees says, is asked of the profile used. */
 export const parseOptions = (
   args: ReadonlyArray<string>,
-  defaults: { readonly profile: string; readonly worktrees: string },
+  defaults: { readonly profile: string; readonly worktrees: (profile: string) => string },
 ): { readonly options: Options } | { readonly error: string } => {
   const flags = new Map<string, string>()
   const positional: Array<string> = []
@@ -46,14 +66,15 @@ export const parseOptions = (
   const task = flags.get('task')
   if (task === undefined || task.trim() === '') return { error: 'Give the task a title with --task.' }
   const model = flags.get('model')
+  const profile = flags.get('profile') ?? defaults.profile
   return {
     options: {
       folder,
       task: task.trim(),
       agent: flags.get('agent') ?? 'claude-code',
       ...(model === undefined ? {} : { model }),
-      profile: flags.get('profile') ?? defaults.profile,
-      worktrees: flags.get('worktrees') ?? defaults.worktrees,
+      profile,
+      worktrees: flags.get('worktrees') ?? defaults.worktrees(profile),
     },
   }
 }

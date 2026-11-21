@@ -2,11 +2,11 @@ import type { LiveEvent } from '@althar/runtime'
 import { assert, describe, it } from '@effect/vitest'
 
 import { parseLine } from '../src/input'
-import { defaultProfile, defaultWorktrees, parseOptions } from '../src/options'
+import { defaultProfile, defaultWorktrees, parseOptions, taskFolders } from '../src/options'
 import { printer } from '../src/printer'
 
 describe('the command line', () => {
-  const defaults = { profile: '/profile', worktrees: '/worktrees' }
+  const defaults = { profile: '/profile', worktrees: () => '/worktrees' }
 
   it('reads the folder, the task and the agent', () => {
     assert.deepStrictEqual(
@@ -36,6 +36,37 @@ describe('the command line', () => {
     [['a', 'b', '--task', 'x'], 'One folder at a time; also got b.'],
   ])('says what is wrong with %j', (args, error) => {
     assert.deepStrictEqual(parseOptions(args, defaults), { error })
+  })
+
+  it('asks where task folders go of the profile it uses, and takes --worktrees over it', () => {
+    const asked: Array<string> = []
+    const worktrees = (profile: string) => {
+      asked.push(profile)
+      return `${profile}-chosen`
+    }
+    assert.deepInclude(parseOptions(['.', '--task', 'x', '--profile', '/p'], { profile: '/profile', worktrees }), {
+      options: { folder: '.', task: 'x', agent: 'claude-code', profile: '/p', worktrees: '/p-chosen' },
+    })
+    assert.deepStrictEqual(asked, ['/p'])
+    assert.deepInclude(parseOptions(['.', '--task', 'x', '--worktrees', '/w'], { profile: '/profile', worktrees }), {
+      options: { folder: '.', task: 'x', agent: 'claude-code', profile: '/profile', worktrees: '/w' },
+    })
+  })
+
+  it('makes task folders where the app’s Settings says, after the environment and before the default', () => {
+    const chosen = (profile: string) => (profile === '/profile' ? '/Volumes/Ext/Althar' : null)
+    const usable = () => true
+    assert.deepStrictEqual(taskFolders({}, '/profile', '/home/ada/Althar', chosen, usable), { folder: '/Volumes/Ext/Althar' })
+    assert.deepStrictEqual(taskFolders({}, '/other', '/home/ada/Althar', chosen, usable), { folder: '/home/ada/Althar' })
+    assert.deepStrictEqual(taskFolders({ ALTHAR_WORKTREES: '/env' }, '/profile', '/home/ada/Althar', chosen, usable), { folder: '/env' })
+  })
+
+  it('never makes a chosen folder that isn’t there now, such as a drive not connected: the default stands in, and it says which', () => {
+    const chosen = () => '/Volumes/Ext/Althar'
+    assert.deepStrictEqual(
+      taskFolders({}, '/profile', '/home/ada/Althar', chosen, () => false),
+      { folder: '/home/ada/Althar', unusable: '/Volumes/Ext/Althar' },
+    )
   })
 
   it('keeps the profile where the platform keeps app data, unless told otherwise', () => {
