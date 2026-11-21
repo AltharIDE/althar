@@ -7,16 +7,17 @@ import { type AppNet, appFetchOf } from '../src/runtime/appFetch'
 
 /** A stand-in for Electron's net.request: it keeps what it was asked, and answers as `answer` says once ended. */
 const fakeNet = (answer: (request: EventEmitter) => void) => {
-  const asked: Array<{ options: ClientRequestConstructorOptions; headers: Record<string, string>; body: string; aborted: boolean }> = []
+  const asked: Array<{ options: ClientRequestConstructorOptions; headers: Record<string, string>; body: Array<Buffer>; aborted: boolean }> =
+    []
   const net: AppNet = {
     fetch: async () => new Response('fetched'),
     request: (options) => {
       const request = new EventEmitter()
-      const seen = { options, headers: {} as Record<string, string>, body: '', aborted: false }
+      const seen = { options, headers: {} as Record<string, string>, body: [] as Array<Buffer>, aborted: false }
       asked.push(seen)
       Object.assign(request, {
         setHeader: (name: string, value: string) => (seen.headers[name] = value),
-        write: (chunk: string) => (seen.body += chunk),
+        write: (chunk: string | Buffer) => seen.body.push(Buffer.from(chunk)),
         end: () => queueMicrotask(() => answer(request)),
         abort: () => (seen.aborted = true),
       })
@@ -69,9 +70,22 @@ describe("the app's fetch", () => {
     expect(await answer.text()).toBe('<Error/>')
     expect(answer.headers.get('content-type')).toBe('application/xml')
     expect(answer.headers.get('vary')).toBe('a, b')
-    expect(asked[0]?.body).toBe('{"a":1}')
+    expect(Buffer.concat(asked[0]?.body ?? []).toString()).toBe('{"a":1}')
     const unchanged = fakeNet((request) => respond(request, 304, {}, []))
     expect((await appFetchOf(unchanged.net)('https://api.test/x', { redirect: 'manual' })).status).toBe(304)
+  })
+
+  it('sends the exact bytes in a manual redirect upload', async () => {
+    const { net, asked } = fakeNet((request) => respond(request, 201, {}, ['uploaded']))
+    const bytes = Uint8Array.of(0, 137, 80, 78, 71, 255, 0).subarray(1, 6)
+    const answer = await appFetchOf(net)('https://uploads.github.com/user-attachments/assets', {
+      method: 'POST',
+      redirect: 'manual',
+      body: bytes,
+      headers: { 'content-type': 'application/octet-stream' },
+    })
+    expect(answer.status).toBe(201)
+    expect(Buffer.concat(asked[0]?.body ?? [])).toEqual(Buffer.from([137, 80, 78, 71, 255]))
   })
 
   it('fails as the network does, and stops when told to', async () => {

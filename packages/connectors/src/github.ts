@@ -131,6 +131,7 @@ const PullAnswer = Schema.Struct({
   state: Schema.String,
   draft: Schema.optional(Schema.Boolean),
   merged_at: Schema.optional(Schema.NullOr(Schema.String)),
+  maintainer_can_modify: Schema.optional(Schema.Boolean),
   // The repository each side is on: a fork's, for a branch from one; null where the fork is gone.
   head: Schema.Struct({
     ref: Schema.String,
@@ -262,7 +263,7 @@ const personOf = (user: User | null | undefined): Person =>
 const headRepositoryOf = (pull: PullAnswer): ReadonlyArray<string> | null | undefined => {
   const head = pull.head.repo
   const base = pull.base.repo?.full_name.toLowerCase()
-  return head === undefined ? undefined : head?.full_name.toLowerCase() === base ? null : head === null ? [] : head.full_name.split('/')
+  return head === undefined ? undefined : head === null ? [] : head.full_name.toLowerCase() === base ? null : head.full_name.split('/')
 }
 
 const changeOf = (pull: PullAnswer): ChangeRequest => ({
@@ -283,6 +284,7 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   changedFiles: pull.changed_files ?? null,
   updatedAt: pull.updated_at,
   ...(headRepositoryOf(pull) === undefined ? {} : { headRepository: headRepositoryOf(pull) }),
+  ...(pull.maintainer_can_modify === undefined ? {} : { maintainerEdits: pull.maintainer_can_modify }),
   // Not mergeable, or `dirty`, is GitHub's way of saying the merge conflicts.
   ...(pull.mergeable === false || pull.mergeable_state === 'dirty'
     ? { conflicts: true }

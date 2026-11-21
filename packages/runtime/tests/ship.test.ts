@@ -19,6 +19,7 @@ import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
@@ -789,17 +790,31 @@ describe('a Ship', () => {
     const { working, bare, github } = onGitHub()
     return Effect.gen(function* () {
       const runs = yield* Runs
+      const queries = yield* Queries
+      const tasks = yield* Tasks
       const task = yield* opened(working, '[coordinator:plan-no-review]', 'none')
+      const keep = Effect.gen(function* () {
+        return yield* tasks.keep({ envelope: yield* Runtime.envelope('task.keep', { taskId: task.taskId }), taskId: task.taskId })
+      })
       assert.lengthOf(github.changes, 0)
       yield* say(task.threadId, 'Make it retry twice. tidy pls [lead:commit]')
       yield* answered(task.threadId, task.turns + 1)
       yield* until(heldAt(task.taskId), (at) => at !== null)
+      const board = yield* queries.board(task.projectId)
+      const held = board.tasks.find((card) => card.taskId === task.taskId)
+      assert.strictEqual(held?.phase, 'ready')
+      assert.isAbove(held?.held?.commits ?? 0, 0)
+      assert.isFalse(yield* keep)
       // Ship sends it up as the task ends: its branch, and no pull request (a task is a conversation plus parts: one that
       // ends with its branch, as a prototype does or a change that dropped its pull request, stays a branch).
       yield* runs.ship({ envelope: yield* Runtime.envelope('task.ship', { taskId: task.taskId }), taskId: task.taskId })
       yield* until(heldAt(task.taskId), (at) => at === null)
       assert.strictEqual(git(bare, 'rev-parse', BRANCH), git(task.path, 'rev-parse', 'HEAD'))
       assert.lengthOf(github.changes, 0)
+      yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready' && all[0].held === undefined)
+      assert.isTrue(yield* keep)
+      const kept = yield* queries.board(task.projectId)
+      assert.strictEqual(kept.tasks.find((card) => card.taskId === task.taskId)?.phase, 'kept')
       // The person opens its pull request on purpose, from its Change card: a draft.
       yield* runs.publish(task.taskId)
       assert.deepStrictEqual([github.changes[0]?.source, github.changes[0]?.draft], [BRANCH, true])

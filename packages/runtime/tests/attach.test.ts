@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -21,6 +21,7 @@ import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
 import * as Runtime from '../src/Runtime'
+import { words } from '../src/words'
 import { callTool, fakeConnectors, HOST, hosted, items, runtime, until } from './support'
 
 /*
@@ -40,7 +41,7 @@ const git = (cwd: string, ...args: Array<string>) =>
 /** Where a branch is on the fork, as the host reads it. */
 const tipOf = (bare: string, branch: string) => {
   try {
-    return git(bare, 'rev-parse', `refs/heads/${branch}`)
+    return git(bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`)
   } catch {
     return null
   }
@@ -63,33 +64,38 @@ const forked = (
   options: {
     readonly fork?: ReadonlyArray<string>
     readonly state?: 'open' | 'closed'
-    readonly host?: Pick<FakeServiceOptions, 'reviews' | 'saysHead'>
+    readonly host?: Pick<FakeServiceOptions, 'reviews' | 'saysHead' | 'pushHeader'>
   } = {},
 ) => {
   const { working, bare } = hosted(['you', 'api'])
+  const contributor = options.fork !== undefined ? hosted(options.fork).bare : bare
   git(working, 'remote', 'add', 'upstream', `${HOST}/meridian/api.git`)
   git(working, 'checkout', '-q', '-b', 'fix-send-back')
   const head = commit(working, 'send.ts', 'export const sendBack = () => 1\n')
-  git(working, 'push', '-q', bare, 'fix-send-back')
+  git(working, 'push', '-q', contributor, 'fix-send-back')
   git(working, 'checkout', '-q', 'main')
   git(working, 'branch', '-q', '-D', 'fix-send-back')
   const github: FakeService = makeFakeService({
-    pushUrl: () => bare,
-    headOf: (number) => (number === 1 ? tipOf(bare, 'fix-send-back') : null),
+    pushUrl: (path) => (path.join('/') === options.fork?.join('/') ? contributor : bare),
+    headOf: (number) => (number === 1 ? tipOf(contributor, 'fix-send-back') : null),
     ...options.host,
   })
   github.addRepository(['you', 'api'])
   github.addRepository(['meridian', 'api'])
+  if (options.fork !== undefined) {
+    github.addRepository(options.fork)
+    github.letPush(options.fork, false)
+  }
   const pull = github.addPullRequest({
     path: ['meridian', 'api'],
     title: 'Send back won’t restart a dead lead',
-    author: 'you',
+    author: options.fork?.[0] ?? 'you',
     source: 'fix-send-back',
     headSha: head,
     fork: options.fork ?? ['you', 'api'],
     ...(options.state === undefined ? {} : { state: options.state }),
   })
-  return { working, bare, github, pull, head }
+  return { working, bare, github, pull, head, contributor }
 }
 
 const withQueries = (github: FakeService) =>
@@ -131,6 +137,60 @@ const cardOf = (projectId: string, taskId: string) =>
   })
 
 describe('a task attached to a pull request it didn’t open', () => {
+  it.live('publishes to an editable contributor fork without replacing its history', () => {
+    const header = 'Authorization: Basic dGVzdA=='
+    const { bare, contributor, github, pull, head, working } = forked({ fork: ['dana', 'api'], host: { pushHeader: header } })
+    github.allowForkPush(pull.number)
+    // A token scoped to the upstream repository cannot push to the fork. The device's git sign-in can.
+    writeFileSync(
+      join(contributor, 'hooks', 'pre-receive'),
+      `#!/bin/sh
+cat >/dev/null
+if [ "$GIT_CONFIG_VALUE_0" = '${header}' ]; then
+  echo 'connected token' >> auth-attempts
+  echo 'Write access to repository not granted.' >&2
+  exit 1
+fi
+echo 'configured git' >> auth-attempts
+`,
+      { mode: 0o755 },
+    )
+    return Effect.gen(function* () {
+      const { projectId, task, personId } = yield* project(working)
+      const changes = yield* Changes
+      const attached = yield* changes.attach({ taskId: task.taskId, pullRequest: '#1', start: true, actorId: personId })
+      assert.strictEqual(attached.kind, 'attached')
+      assert.strictEqual(git(task.worktree, 'rev-parse', 'HEAD'), head)
+      const next = commit(task.worktree, 'why.md', 'It restarts.\n')
+      const [published] = yield* changes.publish({ projectId, taskId: task.taskId, runId: 'run_none', end: 'draft' })
+      assert.isTrue(published?.kind === 'opened' && published.attached === true)
+      assert.strictEqual(readFileSync(join(contributor, 'auth-attempts'), 'utf8'), 'connected token\nconfigured git\n')
+      assert.strictEqual(tipOf(contributor, 'fix-send-back'), next)
+      assert.isNull(tipOf(bare, 'fix-send-back'))
+      assert.isNull(tipOf(contributor, task.branch))
+      assert.lengthOf(github.changes, 1)
+
+      const pushed = commit(task.worktree, 'more.md', 'More.\n')
+      yield* changes.push(task.taskId, pushed)
+      assert.strictEqual(tipOf(contributor, 'fix-send-back'), pushed)
+
+      github.allowForkPush(pull.number, false)
+      const afterRevocation = commit(task.worktree, 'later.md', 'Later.\n')
+      const revoked = yield* Effect.flip(changes.push(task.taskId, afterRevocation))
+      assert.include(words(revoked, String).message, 'Ask the author to allow maintainer edits')
+      assert.strictEqual(tipOf(contributor, 'fix-send-back'), pushed)
+      github.allowForkPush(pull.number)
+
+      git(task.worktree, 'reset', '--hard', head)
+      const replacement = commit(task.worktree, 'instead.md', 'Instead.\n')
+      const diverged = yield* Effect.flip(changes.publish({ projectId, taskId: task.taskId, runId: 'run_none', end: 'draft' }))
+      assert.include(words(diverged, String).message, 'has commits that aren’t here yet')
+      const refused = yield* Effect.flip(changes.replace(task.taskId, replacement, pushed))
+      assert.include(words(refused, String).message, 'Althar never force-pushes to a contributor’s branch')
+      assert.strictEqual(tipOf(contributor, 'fix-send-back'), pushed)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
   it.live('follows an upstream pull request from the fork, and publishing updates its branch without opening another', () => {
     const { bare, github, pull, head, working } = forked()
     return Effect.gen(function* () {
@@ -340,7 +400,7 @@ describe('a task attached to a pull request it didn’t open', () => {
             const refused = yield* Effect.flip(
               (yield* Changes).attach({ taskId: task.taskId, pullRequest: '#1', start: true, actorId: personId }),
             )
-            assert.include((refused as { message?: string }).message, 'is on dana/api, which this task doesn’t push to')
+            assert.include((refused as { message?: string }).message, 'Ask the author to allow maintainer edits')
           }).pipe(Effect.provide(withQueries(theirs.github)))
         }),
       )
@@ -354,7 +414,7 @@ describe('a task attached to a pull request it didn’t open', () => {
       const refused = yield* Effect.flip(
         (yield* Changes).attach({ taskId: task.taskId, pullRequest: '#1', start: true, actorId: personId }),
       )
-      assert.include((refused as { message?: string }).message, 'is on dana/api, which this task doesn’t push to')
+      assert.include((refused as { message?: string }).message, 'Ask the author to allow maintainer edits')
       assert.isNull(tipOf(theirs.bare, task.branch))
     })
       .pipe(Effect.provide(withQueries(theirs.github)))
@@ -447,7 +507,8 @@ describe('a task attached to a pull request it didn’t open', () => {
   })
 
   it.live('starts a task drafted for a pull request on its head', () => {
-    const { github, head, working } = forked()
+    const { github, pull, head, working } = forked({ fork: ['dana', 'api'] })
+    github.allowForkPush(pull.number)
     return Effect.gen(function* () {
       const { projectId, coordinator } = yield* project(working)
       const drafted = yield* callTool(coordinator, 'draft_task', {

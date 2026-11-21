@@ -1747,6 +1747,8 @@ export const ChangeSummary = Schema.Struct({
   listening: Schema.Boolean,
   /** The head of the task's branch here, for an open one: what pushing it pushes, and nothing newer. */
   localHead: Schema.NullOr(Schema.String),
+  /** The task attached to a contributor’s branch with maintainer edits. */
+  maintainerEdit: Schema.optional(Schema.Boolean),
   /** Commits on the task's branch here that aren't on it yet: the person pushes them once they've looked. */
   unpushed: Schema.Number,
   /**

@@ -1,50 +1,29 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useQueries, type UseQueryResult } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { LINE_COMMENTS, type LineComment, type LineCommentNow } from '@althar/contracts'
+import { ApiError, LINE_COMMENTS, type FileDiff, type LineComment, type LineCommentNow } from '@althar/contracts'
 import type { NewComment, ViewedComment } from '@althar/ui'
 
 import { useServices } from '../../data/services'
+import { drop, gather, type GatheredComment, isDiffDraft, markEarlier, rewrite } from '../../shared/comments'
 import { ago } from '../../shared/time'
 
 /*
  * The person's comments on lines of a task's diff (DEV-175; decisions: desktop-app § Comments on the diff): those
- * they wrote and gathered, waiting to go, kept for each task while the window
- * is open; and those sent, read from the runtime each time the Changes view
+ * they wrote and gathered in the thread's draft, and those sent, read from the runtime each time the Changes view
  * opens and as the change moves, each where it is now and addressed once a
  * commit since changed its lines.
  */
 
-/** A comment waiting to go, by an id of the window's own. */
-export interface DraftComment extends NewComment {
-  readonly id: string
-}
-
 export interface LineCommentsModel {
   /** Every comment on the task's diff, as the Changes view shows them: those waiting first, numbered, then those sent, oldest first. */
   readonly comments: ReadonlyArray<ViewedComment>
-  /** How many wait to go. */
-  readonly waiting: number
   readonly add: (comment: NewComment) => void
   readonly edit: (id: string, note: string) => void
   readonly remove: (id: string) => void
-  /** Takes those waiting, as many as a message takes, as they go: given back with `giveBack` where Althar doesn't take them. */
-  readonly take: () => ReadonlyArray<LineComment>
-  /** Returns how to take exactly those off again, leaving any written or removed since, as where the lead had them already. */
-  readonly giveBack: (comments: ReadonlyArray<LineComment>) => () => void
   /** Reads the sent ones again: once a message with some is accepted. */
   readonly reread: () => void
 }
-
-/** A comment as it goes to the runtime: no id, no more than it says. */
-export const sentOf = ({ path, side, start, end, under, code, note }: NewComment): LineComment => ({
-  path,
-  side,
-  start,
-  end,
-  ...(under === undefined ? {} : { under }),
-  code,
-  note,
-})
 
 /** The line a comment goes under: the last of its lines, where its first is now. */
 const lastLine = (first: number, comment: Pick<LineComment, 'start' | 'end'>) => first + (comment.end - comment.start)
@@ -64,37 +43,61 @@ export const viewedSent = (comment: LineCommentNow, now?: Date): ViewedComment =
   sentAt: ago(comment.sentAt, now),
 })
 
-/** A comment waiting to go, as the Changes view shows it: numbered as it will be in the message. */
-export const viewedDraft = (comment: DraftComment, index: number): ViewedComment => ({
-  ...comment,
-  state: 'draft',
-  n: index + 1,
-  line: comment.end,
-})
+/** The saved quote must still be on the same side and at the same coordinates. */
+export const lineIsEarlier = (comment: Omit<LineComment, 'note'>, diff: FileDiff): boolean | undefined => {
+  const numbers = new Map<number, string>()
+  for (const line of diff.lines) {
+    if (line.kind === 'hunk') continue
+    if (comment.side === 'old' && line.kind !== 'added') numbers.set(line.old, line.text)
+    if (comment.side === 'new' && line.kind !== 'removed') numbers.set(line.new, line.text)
+  }
+  let number = comment.start
+  for (const line of comment.code) {
+    if (line.kind === (comment.side === 'old' ? 'added' : 'removed')) continue
+    const seen = numbers.get(number)
+    if (seen === undefined) return diff.truncated ? undefined : true
+    if (seen.slice(0, LINE_COMMENTS.lineText) !== line.text) return true
+    number += 1
+  }
+  return numbers.has(comment.end) ? false : diff.truncated ? undefined : true
+}
 
-// Those waiting, by task, kept while the window is open: the view can close and the task change without losing them.
-const gathered = new Map<string, ReadonlyArray<DraftComment>>()
-let made = 0
-
-export const useLineComments = (taskId: string | null, open: boolean, moved = ''): LineCommentsModel => {
+export const useLineComments = (
+  key: string,
+  drafts: ReadonlyArray<GatheredComment>,
+  taskId: string | null,
+  open: boolean,
+  moved = '',
+): LineCommentsModel => {
   const { client } = useServices()
-  const [drafts, setDraftsState] = useState<ReadonlyArray<DraftComment>>(() => (taskId === null ? [] : (gathered.get(taskId) ?? [])))
-  const [shownFor, setShownFor] = useState(taskId)
   const [sent, setSent] = useState<{ readonly taskId: string; readonly comments: ReadonlyArray<LineCommentNow> } | null>(null)
   const [attempt, setAttempt] = useState(0)
-  if (shownFor !== taskId) {
-    setShownFor(taskId)
-    setDraftsState(taskId === null ? [] : (gathered.get(taskId) ?? []))
-  }
-  const setDrafts = useCallback(
-    (next: (now: ReadonlyArray<DraftComment>) => ReadonlyArray<DraftComment>) =>
-      setDraftsState((now) => {
-        const changed = next(now)
-        if (taskId !== null) gathered.set(taskId, changed)
-        return changed
-      }),
-    [taskId],
-  )
+
+  const diffDrafts = useMemo(() => drafts.filter(isDiffDraft), [drafts])
+  const paths = useMemo(() => [...new Set(diffDrafts.map((one) => one.on.line.path))], [diffDrafts])
+  const diffs = useQueries({
+    queries: paths.map((path) => ({
+      queryKey: ['draft-diff', taskId, path, moved],
+      queryFn: () => client.behind(() => client.getFileDiff(taskId ?? '', path)),
+      enabled: taskId !== null,
+      gcTime: 0,
+    })),
+    combine: useCallback((results: ReadonlyArray<UseQueryResult<FileDiff>>) => results.map(({ data, error }) => ({ data, error })), []),
+  })
+  useEffect(() => {
+    const earlier = new Map<string, boolean>()
+    for (const one of diffDrafts) {
+      const read = diffs[paths.indexOf(one.on.line.path)]
+      const state =
+        read?.data !== undefined
+          ? lineIsEarlier(one.on.line, read.data)
+          : read?.error instanceof ApiError && read.error.reason === 'NotFound'
+            ? true
+            : undefined
+      if (state !== undefined) earlier.set(one.id, state)
+    }
+    if (earlier.size > 0) markEarlier(key, earlier)
+  }, [key, diffDrafts, paths, diffs])
 
   useEffect(() => {
     if (!open || taskId === null) return
@@ -114,35 +117,19 @@ export const useLineComments = (taskId: string | null, open: boolean, moved = ''
   }, [client, open, taskId, moved, attempt])
 
   const own = sent?.taskId === taskId ? sent.comments : []
+  const waiting = drafts.flatMap((one, index): ViewedComment[] =>
+    isDiffDraft(one)
+      ? [{ ...one.on.line, note: one.note, id: one.id, state: 'draft', n: index + 1, line: one.earlier ? null : one.on.line.end }]
+      : [],
+  )
   return {
-    comments: [...drafts.map(viewedDraft), ...own.map((comment) => viewedSent(comment))],
-    waiting: drafts.length,
+    comments: [...waiting, ...own.map((comment) => viewedSent(comment))],
     add: useCallback(
-      (comment: NewComment) => {
-        made += 1
-        setDrafts((now) => [...now, { ...comment, id: `draft-${made}` }])
-      },
-      [setDrafts],
+      ({ note, ...line }: NewComment) => gather(key, { id: crypto.randomUUID(), note, on: { kind: 'diff', line }, crop: null }),
+      [key],
     ),
-    edit: useCallback(
-      (id: string, note: string) => setDrafts((now) => now.map((one) => (one.id === id ? { ...one, note } : one))),
-      [setDrafts],
-    ),
-    remove: useCallback((id: string) => setDrafts((now) => now.filter((one) => one.id !== id)), [setDrafts]),
-    // As many as one message takes: any more wait for the next Send.
-    take: () => {
-      setDrafts((now) => now.slice(LINE_COMMENTS.count))
-      return drafts.slice(0, LINE_COMMENTS.count).map(sentOf)
-    },
-    giveBack: (comments) => {
-      const back = comments.map((comment) => {
-        made += 1
-        return { ...comment, id: `draft-${made}` }
-      })
-      setDrafts((now) => [...back, ...now])
-      const put = new Set(back.map((one) => one.id))
-      return () => setDrafts((now) => now.filter((one) => !put.has(one.id)))
-    },
+    edit: useCallback((id: string, note: string) => rewrite(key, id, note), [key]),
+    remove: useCallback((id: string) => drop(key, id), [key]),
     reread: useCallback(() => setAttempt((count) => count + 1), []),
   }
 }

@@ -151,6 +151,8 @@ const MergeAnswer = Schema.Struct({
   source_project_id: Schema.optional(Schema.NullOr(Schema.Number)),
   /** The project it goes into. */
   target_project_id: Schema.optional(Schema.Number),
+  allow_collaboration: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  allow_maintainer_to_push: Schema.optional(Schema.NullOr(Schema.Boolean)),
   sha: Schema.optional(Schema.NullOr(Schema.String)),
   author: Schema.optional(Schema.NullOr(User)),
   // A string, and "1000+" past a thousand files; said only when one merge request is read.
@@ -318,6 +320,11 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
       : { conflicts: request.has_conflicts === true }),
   // A branch of the project's own; one from a fork's, `change` reads where it is.
   ...(request.source_project_id !== undefined && request.source_project_id === request.target_project_id ? { headRepository: null } : {}),
+  ...(request.allow_collaboration != null
+    ? { maintainerEdits: request.allow_collaboration }
+    : request.allow_maintainer_to_push != null
+      ? { maintainerEdits: request.allow_maintainer_to_push }
+      : {}),
   ...(request.merge_when_pipeline_succeeds == null ? {} : { autoMerge: request.merge_when_pipeline_succeeds }),
 })
 
