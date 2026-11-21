@@ -73,33 +73,36 @@ export const searchDocuments = Effect.fn('Search.documents')(function* (
     while (from < latest && room() > 0 && remaining > 0) {
       // Seek through the narrow index first. Even when recent passages are mostly hidden or empty,
       // each statement opens and formats at most one batch of records before yielding.
-      const batch = yield* read(sql<{ id: string }>`
+      const batch = yield* read(sql<({ id: null } | SearchDocument) & { scannedThrough: string | null; scanned: number }>`
+      WITH batch AS MATERIALIZED (
         SELECT id FROM thread_items WHERE kind IN ${sql.unsafe(PASSAGE_KINDS)}
           AND id > ${from} AND id >= ${bounds?.earliest ?? ''} AND id <= ${latest}
-        ORDER BY id LIMIT ${Math.min(PASSAGE_BATCH, remaining)}`)
-      const last = batch.at(-1)
-      if (last === undefined) break
-      from = last.id
-      remaining -= batch.length
-      rows.push(
-        ...(yield* read(sql<SearchDocument>`
-      SELECT 'said:' || i.id AS id, 'said' AS kind, i.project_id, t.id AS thread_id, t.task_id, i.id AS item_id,
-        trim(coalesce(json_extract(i.content, '$.text'), json_extract(i.content, '$.summary'), '') || char(10) ||
-          coalesce((SELECT group_concat(coalesce(json_extract(f.value, '$.title') || ' ', '') || json_extract(f.value, '$.claim'), char(10))
-            FROM json_each(i.content, '$.findings') f), ''), char(10)) AS title,
-        coalesce(json_extract(i.content, '$.built'), '') AS body, coalesce(k.title, 'Conversation') AS ref, NULL AS url,
-        i.created_at AS changed_at, '' AS state
-      FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind IN ('task', 'coordinator')
-        LEFT JOIN tasks k ON k.id = t.task_id LEFT JOIN user_inputs u ON u.id = i.user_input_id
-        JOIN projects p ON p.id = i.project_id
-      WHERE i.id IN ${sql.in(batch.map((one) => one.id))} AND i.kind IN ${sql.unsafe(PASSAGE_KINDS)} AND p.archived_at IS NULL
-        AND (i.kind != 'user_message' OR u.state IN ('queued', 'delivered'))
-        AND trim(coalesce(json_extract(i.content, '$.text'), json_extract(i.content, '$.summary'), '') || char(10) ||
-          coalesce((SELECT group_concat(coalesce(json_extract(f.value, '$.title') || ' ', '') || json_extract(f.value, '$.claim'), char(10))
-            FROM json_each(i.content, '$.findings') f), ''), char(10)) != ''
-      ORDER BY i.id LIMIT ${room()}`)),
+        ORDER BY id LIMIT ${Math.min(PASSAGE_BATCH, remaining)}
+      ), passages AS MATERIALIZED (
+        SELECT 'said:' || i.id AS id, 'said' AS kind, i.project_id, t.id AS thread_id, t.task_id, i.id AS item_id,
+          trim(coalesce(json_extract(i.content, '$.text'), json_extract(i.content, '$.summary'), '') || char(10) ||
+            coalesce((SELECT group_concat(coalesce(json_extract(f.value, '$.title') || ' ', '') || json_extract(f.value, '$.claim'), char(10))
+              FROM json_each(i.content, '$.findings') f), ''), char(10)) AS title,
+          coalesce(json_extract(i.content, '$.built'), '') AS body, coalesce(k.title, 'Conversation') AS ref, NULL AS url,
+          i.created_at AS changed_at, '' AS state
+        FROM batch JOIN thread_items i ON i.id = batch.id
+          JOIN threads t ON t.id = i.thread_id AND t.kind IN ('task', 'coordinator')
+          LEFT JOIN tasks k ON k.id = t.task_id LEFT JOIN user_inputs u ON u.id = i.user_input_id
+          JOIN projects p ON p.id = i.project_id
+        WHERE p.archived_at IS NULL AND (i.kind != 'user_message' OR u.state IN ('queued', 'delivered'))
       )
-      if (batch.length < PASSAGE_BATCH) break
+      SELECT scan.*, passages.*
+      FROM (SELECT max(id) AS scanned_through, count(*) AS scanned FROM batch) scan
+        LEFT JOIN passages ON passages.title != ''
+      ORDER BY passages.id LIMIT ${room()}`)
+      const first = batch[0]
+      if (first?.scannedThrough == null) break
+      from = first.scannedThrough
+      remaining -= first.scanned
+      for (const { scannedThrough: _, scanned: _count, ...passage } of batch) {
+        if (passage.id !== null) rows.push(passage)
+      }
+      if (first.scanned < PASSAGE_BATCH) break
     }
   }
   const task = cursor('task:')

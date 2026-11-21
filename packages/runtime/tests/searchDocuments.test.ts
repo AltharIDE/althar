@@ -42,6 +42,9 @@ describe('search documents', () => {
       yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId, taskId: made.taskId, product: 'github', kind: 'change', externalId: '42', ref: 'api#42', key: '#42', url: 'https://example.test/42', snapshot: JSON.stringify({ title: 'Retry PR', body: 'PR body', state: 'open', draft: true }), createdAt: at, updatedAt: at })}`
       yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId, taskId: made.taskId, product: 'github', kind: 'issue', externalId: '43', ref: 'api#43', key: '#43', url: 'https://example.test/43', snapshot: JSON.stringify({ title: 'Retry issue', status: { name: 'Open' } }), createdAt: at, updatedAt: at })}`
       yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId, taskId: made.taskId, product: 'github', kind: 'issue', externalId: '44', ref: 'api#44', key: '#44', url: 'https://example.test/44', snapshot: JSON.stringify({ title: '' }), createdAt: at, updatedAt: at })}`
+      // The first passage batch can be entirely blank. A later batch still fills the page.
+      for (let i = 0; i < 128; i++)
+        yield* addItem({ projectId: projectId as ProjectId, threadId: thread!.id }, 'agent_message', { text: '', pictures: [], files: [] })
       for (let i = 0; i < 205; i++)
         yield* addItem({ projectId: projectId as ProjectId, threadId: thread!.id }, 'agent_message', {
           text: `Decision ${i}: use retries`,
