@@ -342,7 +342,7 @@ const historyTo = (to: LoadPoint): LoadPoint[] =>
   })
 
 /** What else of Althar's runs and holds no place: each project's coordinator, and Althar itself. */
-export const NO_PLACE: readonly LoadRow[] = [
+const NO_PLACE: readonly LoadRow[] = [
   {
     id: 'coordinator',
     title: 'Coordinator',

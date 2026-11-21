@@ -1,18 +1,18 @@
-import { BrandMark, Icon } from '@althar/ui'
+import { BrandMark } from '@althar/ui'
 
 import type { Held, Places } from './data'
 import { tasksOf, words } from './words'
 import s from './parts.module.css'
 
 /*
- * What the directions share: the places as a row of cells, the work that
- * holds them, and the line that says the number is lowered for a while.
+ * What the takes share: the places as a row of cells, and the work that
+ * holds them.
  */
 
 type Cell = 'on' | 'free' | 'shut'
 
 /** One cell a place: in use in cobalt, free as an empty step, and closed for now as an outline. */
-export const cellsOf = (places: Places): Cell[] => {
+const cellsOf = (places: Places): Cell[] => {
   const busy = places.held.length
   return Array.from({ length: Math.max(places.configured, busy) }, (_, i) => (i < busy ? 'on' : i >= places.atOnce ? 'shut' : 'free'))
 }
@@ -40,13 +40,13 @@ function Held({ n }: { n: number }) {
 }
 
 /** A task's agents, as its row says them: its project, who, and what runs where it isn't a turn. */
-function Meta({ agents, project }: { agents: readonly Held[]; project: boolean }) {
+function Meta({ agents }: { agents: readonly Held[] }) {
   const first = agents[0]!
   const background = agents.find((one) => one.doing.kind === 'background')
   const starting = agents.every((one) => one.doing.kind === 'starting')
   return (
     <span className={s.meta}>
-      {[project ? first.project : null, words.roles(agents), starting ? words.starting : null].filter((part) => part !== null).join(' · ')}
+      {[first.project, words.roles(agents), starting ? words.starting : null].filter((part) => part !== null).join(' · ')}
       {background?.doing.kind === 'background' && (
         <>
           {' · '}
@@ -59,19 +59,9 @@ function Meta({ agents, project }: { agents: readonly Held[]; project: boolean }
 
 /**
  * The work holding the places, a row a task, each opening it: as many cobalt cells as places it holds, its title, its
- * project and who; with `figures`, what it takes of the computer.
+ * project and who.
  */
-export function HeldRows({
-  places,
-  onOpen,
-  figures = false,
-  project = true,
-}: {
-  places: Places
-  onOpen: (taskId: string) => void
-  figures?: boolean
-  project?: boolean
-}) {
+export function HeldRows({ places, onOpen }: { places: Places; onOpen: (taskId: string) => void }) {
   const tasks = tasksOf(places.held)
   if (tasks.length === 0) return <p className={s.none}>{words.nothing}</p>
   const most = Math.max(...tasks.map((agents) => agents.length))
@@ -79,8 +69,6 @@ export function HeldRows({
     <ul className={s.rows} style={{ '--cells': `${most * 4 + (most - 1) * 2}px` } as React.CSSProperties}>
       {tasks.map((agents) => {
         const first = agents[0]!
-        const cpu = agents.reduce((sum, one) => sum + one.cpu, 0)
-        const memory = agents.reduce((sum, one) => sum + Number.parseFloat(one.memory), 0)
         return (
           <li key={first.taskId}>
             <button type="button" className={s.row} onClick={() => onOpen(first.taskId)} title={first.title}>
@@ -90,30 +78,12 @@ export function HeldRows({
                   <BrandMark brand={first.mark} size={11} className={s.mark} />
                   <span className={s.titleText}>{first.title}</span>
                 </span>
-                <Meta agents={agents} project={project} />
+                <Meta agents={agents} />
               </span>
-              {figures && (
-                <span className={s.figures}>
-                  <span className={s.figure}>{Math.round(cpu * 100)}%</span>
-                  <span className={s.figureQuiet}>{memory.toFixed(1)} GB</span>
-                </span>
-              )}
             </button>
           </li>
         )
       })}
     </ul>
-  )
-}
-
-/** While the number is lowered: what to, and until when. Nothing otherwise. */
-export function Lowered({ places, className }: { places: Places; className?: string }) {
-  const line = words.lowered(places)
-  if (line === null) return null
-  return (
-    <p className={`${s.lowered} ${className ?? ''}`}>
-      <Icon name="load" size={13} className={s.loweredIcon} />
-      <span>{line}</span>
-    </p>
   )
 }

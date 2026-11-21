@@ -3,8 +3,7 @@ import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
-import { StrictMode, useEffect, useLayoutEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { StrictMode, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
@@ -35,33 +34,30 @@ import { usePreferences } from '../../src/renderer/shared/usePreferences'
 import { agents, fakeClient, fakeHost } from '../../tests/fixtures'
 import { servicesFor } from '../../tests/render'
 import { boardOf, loadOf, NOW, placesOf, PROJECTS, type Scene, SCENES } from './data'
-import { A } from './directions/a'
-import { B } from './directions/b'
-import { C } from './directions/c'
-import { C2, C3, C4, C5 } from './directions/cv'
+import { P1, P2, P3, P4 } from './directions/popovers'
 import type { Ctx, Direction } from './directions/types'
 import { ZERO } from './directions/zero'
 import s from './lab.module.css'
 
 /*
- * The agent places lab (README.md): where agents at once and the places in
- * use live, on the app's own board, the kit's own window bar and its own
- * settings, with no runtime. The bar along the bottom, or its keys, swaps the
- * take in place (0 as built, 1–5 C's takes), the scene (Q W E R), crowded
- * (K), a narrow window (N), the Settings tab (S) and dark (D); A and B, the
- * first round's other directions, stay at ?d=a and ?d=b. ?open= opens what a
- * shot needs: mac (This Mac, from the bar), upnext (what Up next opens), quick.
+ * The agent places lab (README.md): This Mac's chip, its places beside its
+ * name, and what it opens, on the app's own board, the kit's own window bar
+ * and its own settings, with no runtime. The bar along the bottom, or its
+ * keys, swaps the take in place (0 as built, 1–4 what the chip opens), the
+ * scene (Q W E R), crowded (K), a narrow window (N), the Settings tab (S),
+ * dark (D), and whether the chip's popover stays open as they change (O).
+ * ?open=quick opens the quick settings.
  */
 
-const DIRECTIONS: readonly Direction[] = [ZERO, C, C2, C3, C4, C5, A, B]
-const ON_BAR = DIRECTIONS.filter((one) => one.kbd !== undefined)
+const DIRECTIONS: readonly Direction[] = [ZERO, P1, P2, P3, P4]
 const SCENE_KEYS = ['q', 'w', 'e', 'r'] as const
 
 const params = () => new URLSearchParams(location.search)
 const read = () => {
   const now = params()
   return {
-    d: DIRECTIONS.find((one) => one.key === now.get('d'))?.key ?? C.key,
+    d: DIRECTIONS.find((one) => one.key === now.get('d'))?.key ?? P1.key,
+    o: now.get('o') !== '0',
     p: (SCENES.find((one) => one.key === now.get('p'))?.key ?? 'memory') as Scene,
     k: now.get('k') === '1',
     n: now.get('n') === '1',
@@ -73,26 +69,6 @@ type State = ReturnType<typeof read>
 
 const opened = params().get('open')
 if (params().get('shot') === '1') document.documentElement.dataset.shot = ''
-
-/** Up next's own spot for a direction's take: the end of its heading, or the top of its body, before its rows. */
-const useSlot = (where: 'head' | 'body' | null, key: string) => {
-  const [slot, setSlot] = useState<HTMLElement | null>(null)
-  useLayoutEffect(() => {
-    if (where === null) return
-    const lane = document.querySelector('section[data-lane="next"]')
-    const parent = where === 'head' ? lane?.querySelector(':scope > header') : lane?.querySelector(':scope > div')
-    if (parent == null) return
-    const el = document.createElement('div')
-    el.className = where === 'head' ? s.headSlot! : s.bodySlot!
-    parent.insertBefore(el, where === 'head' ? null : parent.firstChild)
-    setSlot(el)
-    return () => {
-      el.remove()
-      setSlot(null)
-    }
-  }, [where, key])
-  return slot
-}
 
 function Gear({ ctx, direction, onAll }: { ctx: Ctx; direction: Direction; onAll: () => void }) {
   const preferences = usePreferences()
@@ -178,7 +154,8 @@ function SettingsScreen({ ctx, direction }: { ctx: Ctx; direction: Direction }) 
 function Lab() {
   const [state, setStateNow] = useState(read)
   const [own, setOwn] = useState<number | null>(null)
-  const [mac, setMac] = useState<string | null>(opened === 'mac' ? 'bar' : opened === 'upnext' ? 'upnext' : null)
+  const first = read()
+  const [mac, setMac] = useState<string | null>(first.o && first.d !== ZERO.key && opened !== 'quick' ? 'bar' : null)
   const [quick, setQuick] = useState(opened === 'quick')
   const [said, setSaid] = useState<string | null>(null)
   const services = useMemo(() => servicesFor(fakeClient().client, fakeHost()), [])
@@ -199,10 +176,12 @@ function Lab() {
     else url.delete('theme')
     if (merged.screen === 'settings') url.set('screen', 'settings')
     else url.delete('screen')
+    if (merged.o) url.delete('o')
+    else url.set('o', '0')
     url.delete('open')
     history.replaceState(null, '', `?${url.toString()}`)
     if (next.p !== undefined || next.k !== undefined) setOwn(null)
-    setMac(null)
+    setMac(merged.o && merged.d !== ZERO.key ? 'bar' : null)
     setQuick(false)
     setStateNow(merged)
   }
@@ -250,21 +229,21 @@ function Lab() {
     quick: { open: quick, set: setQuick },
   }
 
-  const slotKey = `${state.d}-${state.p}-${state.k}-${state.n}-${state.screen}-${count}`
-  const slot = useSlot(state.screen === 'board' ? (direction.upNext?.where ?? null) : null, slotKey)
+  const boardKey = `${state.d}-${state.p}-${state.k}-${state.n}-${count}`
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const typing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
       if (typing || event.metaKey || event.ctrlKey || event.altKey) return
       const key = event.key.toLowerCase()
-      const found = ON_BAR.find((one) => one.kbd === key)
+      const found = DIRECTIONS.find((one) => one.kbd === key)
       if (found !== undefined) return set({ d: found.key })
       const scene = SCENES[SCENE_KEYS.indexOf(key as (typeof SCENE_KEYS)[number])]
       if (scene !== undefined) return set({ p: scene.key })
       if (key === 'k') return set({ k: !state.k })
       if (key === 'n') return set({ n: !state.n })
       if (key === 'd') return set({ dark: !state.dark })
+      if (key === 'o') return set({ o: !state.o })
       if (key === 's') return set({ screen: state.screen === 'board' ? 'settings' : 'board' })
     }
     window.addEventListener('keydown', onKey)
@@ -304,7 +283,7 @@ function Lab() {
             <div className={s.screen}>
               {state.screen === 'board' ? (
                 <div className={s.board}>
-                  <BoardView key={slotKey} lanes={lanes} agents={agents} now={NOW} onOpen={(threadId) => ctx.onOpen(threadId)} />
+                  <BoardView key={boardKey} lanes={lanes} agents={agents} now={NOW} onOpen={(threadId) => ctx.onOpen(threadId)} />
                 </div>
               ) : (
                 <SettingsScreen ctx={ctx} direction={direction} />
@@ -312,9 +291,8 @@ function Lab() {
             </div>
           </div>
         </div>
-        {slot !== null && direction.upNext !== null && createPortal(direction.upNext.draw(ctx), slot)}
         <div className={s.bar} role="toolbar" aria-label="Directions">
-          {ON_BAR.map((one) => (
+          {DIRECTIONS.map((one) => (
             <button key={one.key} type="button" aria-pressed={state.d === one.key} onClick={() => set({ d: one.key })} title={one.idea}>
               <kbd>{one.kbd}</kbd>
               {one.label}
@@ -343,6 +321,9 @@ function Lab() {
           </button>
           <button type="button" aria-pressed={state.dark} onClick={() => set({ dark: !state.dark })}>
             <kbd>D</kbd>Dark
+          </button>
+          <button type="button" aria-pressed={state.o} onClick={() => set({ o: !state.o })}>
+            <kbd>O</kbd>Popover open
           </button>
           <span className={s.gap} />
           <span className={s.idea} title={direction.idea}>

@@ -1,0 +1,285 @@
+/* ---- what every popover shares: its frame, a home's heading, the number's line, the other homes at its foot ---- */
+.peek {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+}
+.head,
+.homeHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.head {
+  padding: 8px 12px 4px;
+}
+.homeIcon {
+  flex-shrink: 0;
+  color: var(--t-2);
+}
+.homeName {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hint {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.part {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px 10px;
+}
+.eyebrow {
+  margin: 0;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.number {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-2);
+}
+.numberValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.lowered {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.foot,
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 6px 0;
+  border-top: 1px solid var(--line);
+}
+.footRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--t-1);
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.footRow:hover {
+  background: var(--hover-paper);
+}
+.footRow > svg {
+  flex-shrink: 0;
+  color: var(--t-2);
+}
+.footName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.footHint {
+  flex-shrink: 0;
+  margin-left: 4px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+/* ---- P1: each home a section, its places under its name ---- */
+.home {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 10px;
+}
+.home + .home {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+/* under the home's name, in a line with it past its icon */
+.indent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 22px;
+}
+.indent :global(ul) {
+  margin-left: -6px;
+}
+.meter {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+}
+.countQuiet {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.other {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 -6px;
+  padding: 6px;
+  border-radius: 6px;
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.other:hover {
+  background: var(--hover-paper);
+}
+.other .homeName {
+  font-weight: 500;
+}
+
+/* ---- P2: the slider as its own row, the kit's, at the top ---- */
+.slider {
+  padding: 0 12px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.slider > * {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* ---- P3: a row a place ---- */
+.places {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 4px 0 0;
+  padding: 0 6px 6px;
+  list-style: none;
+  border-bottom: 1px solid var(--line);
+}
+.place,
+.placeQuiet {
+  display: grid;
+  grid-template-columns: 22px 4px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 10px;
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  text-align: left;
+}
+.place {
+  transition: background var(--fast) var(--ease);
+}
+.place:hover {
+  background: var(--hover-paper);
+}
+.placeQuiet {
+  align-items: center;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.placeN {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  color: var(--t-4);
+  text-align: right;
+  white-space: nowrap;
+}
+.placeQuiet .placeN {
+  line-height: inherit;
+}
+.placeCell {
+  display: block;
+  width: 4px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 1px;
+  background: var(--track);
+}
+.placeQuiet .placeCell {
+  margin-top: 0;
+}
+.placeCell[data-cell='on'] {
+  background: var(--live);
+}
+.placeCell[data-cell='shut'] {
+  opacity: 0.35;
+}
+.placeWords {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.placeTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 520;
+  line-height: 18px;
+  color: var(--t-1);
+}
+.mark {
+  flex-shrink: 0;
+  color: var(--t-3);
+}
+.placeTitleText,
+.placeMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.placeMeta {
+  font-size: 11px;
+  color: var(--t-3);
+}
+.command {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--t-2);
+}
+.placeAside {
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+
+/* ---- P4: a home's line of places, under its name in the kit's menu ---- */
+.menuLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}

@@ -13,18 +13,9 @@ export const ZERO: Direction = {
   bar: (ctx) => (
     <>
       <ChromeButton icon="plug" label="Homes" compact />
-      <LoadMeter
-        load={ctx.load}
-        slots={SLOTS}
-        onOpen={() => undefined}
-        onHide={() => undefined}
-        open={ctx.mac.open === 'bar'}
-        onOpenChange={(open) => ctx.mac.set(open ? 'bar' : null)}
-      />
+      <LoadMeter load={ctx.load} slots={SLOTS} onOpen={() => undefined} onHide={() => undefined} />
     </>
   ),
-  // The board draws its own, from the places the runtime gives it.
-  upNext: null,
   quick: (ctx) => (
     <AgentsAtOnce
       compact

@@ -1,6 +1,6 @@
 # The agent places lab
 
-Where agents at once and the places in use live: by This Mac, beside the Settings slider, and what Up next keeps of the banner it has today ("2 of 5 agent places in use · Temporarily limited to 1"). Drawn on the app's own board (`BoardView`), the kit's own window bar (`ProjectTabs`, `LoadMeter`, `LoadPeek`), quick settings (`ControlCenter`, `QuickCards`) and Settings (`SettingsLayout`, `AgentsAtOnce`), from the tests' fixtures, with no runtime and no Electron.
+Where agents at once and the places in use live. The person picked the chip: in this computer's window the bar's home chip names it, This Mac, with its places as cells beside the name and no other words; Up next keeps nothing of today's banner ("2 of 5 agent places in use · Temporarily limited to 1"), its rows saying why they wait. The lab now tries what the chip opens. Drawn on the app's own board (`BoardView`), the kit's own window bar (`ProjectTabs`, `LoadMeter`), popover and menu, quick settings (`ControlCenter`, `QuickCards`) and Settings (`SettingsLayout`, the Agents at once row), from the tests' fixtures, with no runtime and no Electron.
 
 ```bash
 cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/agent-places/vite.config.ts
@@ -8,28 +8,22 @@ cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/agent-places/vite
 
 At `http://localhost:6161`. The bar along the bottom, or its keys, swaps in place:
 
-- **0** as built; **1–5** C's takes (below). The first round's A and B stay at `?d=a` and `?d=b`
+- **0** as built; **1–4** what the chip opens (below)
 - **Q W E R** the scene: lowered for memory (the banner's own case: 2 of 5 at work, 1 at a time), lowered for CPU, all in use, room to spare
 - **K** crowded (8 places across three projects, long titles); **N** a narrow window; **S** the Settings tab, at Work on this Mac; **D** dark
+- **O** keeps the chip's popover open as the rest changes (on at first)
 
-The gear opens the quick settings, and the slider in each moves the number live. `?open=mac|upnext|quick` opens This Mac's view from the bar, what Up next opens, or the quick settings; `?shot=1` turns motion off for a headless shot.
+The gear opens the quick settings, and the slider in each moves the number live. `?open=quick` opens the quick settings; `?shot=1` turns motion off for a headless shot.
 
-## The directions
+A place closed for now is a free place's step, faded: the words say the number is lowered and why. The slider's ink stops at the lowered number, a quiet mark there, the track bare to the person's own.
 
-- **A · This Mac.** The places are part of how hard this computer works: a third meter in the window's bar after CPU and memory, a cell a place, cobalt in use, outlined warm where closed for now. Its peek, This Mac, adds Agents at once (how many work, the cells, the lowered number and why) and the work in the places with what each takes of the computer; what needs no place (coordinators, Althar) follows. Up next keeps only the small meter at the end of its heading, opening the same peek. Settings stays calm; the slider's line says only when its number is lowered.
-- **B · The slider.** Agents at once is the meter: a cell under each number on its track, filled where an agent works. Settings lists the work in the places under it. Up next keeps one row, the cells and a count, shown only while something waits or the number is lowered; it opens the same slider, so the number changes where the wait shows. The bar and This Mac's peek stay as they are.
-- **C · The computer.** Places belong to the computer the agents run on, so they live on the window's home chip, which names it: This Mac and its cells. It opens to each home with its places, this one with the work in them and its number. The slider marks a lowered number on its track. Up next keeps nothing while work waits as usual (each row says why); only a lowered number gets a banner, with the way to This Mac.
+## What the chip opens
 
-## C's takes
-
-The person picked C. Its takes keep its chip (This Mac and its cells, opening to each home's places) and its slider, and differ in what Up next keeps:
-
-- **C1 · Card.** C as it was: a card over Up next only while the number is lowered, "One agent at a time for now", why, and See This Mac.
-- **C2 · Fold.** Today's row, only while lowered, said plainly: "This Mac · One agent at a time until memory frees up" and the cells. It folds open in place to This Mac's places: how many work, the work in them, the number and Change.
-- **C3 · Heading.** Nothing in Up next's body: a warm tag at the end of its heading, "1 at a time", only while lowered. This Mac's places open from it.
-- **C4 · Chip only.** Up next keeps nothing ever; the rows' own "2 agents busy, 1 at a time" carry the wait. The chip says a lowered number itself: "This Mac ▮▮▯▯▯ 1 at a time".
-- **C5 · While waiting.** One unboxed line whenever Up next waits on places, not only while lowered: "This Mac · All 5 at work", or warm, "This Mac · One agent at a time until memory frees up". It opens the chip.
+- **P1 · Homes.** Each home with its places. This Mac open: its cells and how many work, the lowered number and why, the work in the places a row a task, the number and Change. Then each other home with its cells, Connect a home…, Manage homes….
+- **P2 · The number.** This Mac and how many work, then the Agents at once slider itself, to change the number right there, the lowered number as its line. Then the work in the places, and the other homes a line each.
+- **P3 · A row a place.** Each place a numbered row: the agent in it (a task with a lead and a helper holds two), a place past a lowered number saying it closes when done, then the free ones and the closed ones a row each run ("3–5 Closed until memory frees up"). The number and Change under them.
+- **P4 · The menu.** The chip's homes menu as it is today (the kit's `Menu`), each home with a line of places under its name; then the work as items, each opening its task; Agents at once… with its number, opening the quick settings; Connect a home…, Manage homes….
 
 ## What the lab assumes
 
-The runtime's `WorkPlaces` gives the count, the configured and current number and each holder's task, role, agent and reason. The directions also use each holder's project (A, B, C), why the number is lowered (memory or CPU, which `PressureAdmission` knows but doesn't say), and in A each holder's CPU and memory, which the load meter's rows have by task. A home's places in C would come from that home's window.
+The runtime's `WorkPlaces` gives the count, the configured and current number and each holder's task, role, agent and reason. The popovers also use each holder's project and why the number is lowered (memory or CPU, which `PressureAdmission` knows but doesn't say). Another home's places would come from that home's window.

@@ -3,19 +3,13 @@ import { device } from '@althar/ui/device'
 import type { Held, Places, Role, Why } from './data'
 
 /*
- * The words every direction shares: how many places are in use, the number
+ * The words the takes share: how many places are in use, the number
  * lowered for a while and why, and who holds a place.
  */
 
 const until: Record<Why, string> = {
   memory: 'until memory frees up',
   cpu: 'until the CPU frees up',
-}
-
-/** Why, as a sentence of its own. */
-const because: Record<Why, string> = {
-  memory: `${device.This} is short of memory.`,
-  cpu: `${device.This}’s CPU is fully in use.`,
 }
 
 const roleWords: Record<Role, [string, string]> = {
@@ -28,23 +22,7 @@ export const words = {
   title: 'Agents at once',
   machine: device.This,
   atWork: (busy: number, of: number) => `${busy} of ${of} at work`,
-  /** Short: in a heading or a bar. */
-  short: (places: Places) => (places.why === null ? `${places.held.length} of ${places.configured}` : `${places.atOnce} for now`),
   lowered: (places: Places) => (places.why === null ? null : `Lowered to ${places.atOnce} ${until[places.why]}`),
-  because: (places: Places) => (places.why === null ? null : because[places.why]),
-  /** The rest of Up next, while the number is lowered. */
-  startsAs: (places: Places) =>
-    places.why === null ? null : `Up next starts as it ${places.why === 'memory' ? 'frees up' : 'calms down'}.`,
-  /** A lowered number and until when, as a sentence of its own. */
-  atATimeUntil: (places: Places) =>
-    places.why === null ? null : `${places.atOnce === 1 ? 'One agent' : `${places.atOnce} agents`} at a time ${until[places.why]}`,
-  /** Every place in use, or how many are. */
-  allAtWork: (places: Places) =>
-    places.held.length >= places.configured ? `All ${places.configured} at work` : `${places.held.length} of ${places.configured} at work`,
-  /** A lowered number, as few words as a chip or a tag has room for. */
-  forNow: (places: Places) => `${places.atOnce} at a time`,
-  /** The banner's title, while the number is lowered. */
-  oneAtATime: (places: Places) => `${places.atOnce === 1 ? 'One agent' : `${places.atOnce} agents`} at a time for now`,
   roles: (held: readonly Held[]) => {
     const counts = new Map<Role, number>()
     for (const one of held) counts.set(one.role, (counts.get(one.role) ?? 0) + 1)
@@ -57,10 +35,12 @@ export const words = {
       .join(', ')
   },
   starting: 'Starting',
+  /** A place in use past a lowered number: it closes once its agent is done. */
+  closesAfter: 'Closes when done',
+  freePlace: 'Free',
+  closedPlace: (places: Places) => (places.why === null ? 'Closed' : `Closed ${until[places.why]}`),
   places: (n: number) => (n === 1 ? '1 place' : `${n} places`),
   change: 'Change',
-  free: (n: number) => (n === 1 ? '1 free' : `${n} free`),
-  waiting: (n: number) => (n === 1 ? '1 task waits' : `${n} tasks wait`),
   inUse: 'At work now',
   nothing: 'No agent is at work.',
 }

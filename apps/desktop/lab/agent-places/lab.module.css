@@ -49,16 +49,6 @@
   gap: 8px;
 }
 
-/* where a direction's take goes in Up next: the end of its heading, the top of its body */
-.headSlot {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-}
-.bodySlot:empty {
-  display: none;
-}
-
 .bar {
   position: relative;
   z-index: 1000;

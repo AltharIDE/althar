@@ -3,17 +3,14 @@ import { Icon, LinkButton, SettingRow } from '@althar/ui'
 
 import k from '../../../../packages/ui/src/setup/Preferences/Preferences.module.css'
 import type { Places } from './data'
-import { cellsOf } from './parts'
 import { words } from './words'
 import s from './slider.module.css'
 
 /*
  * Agents at once, as the kit draws it (`AgentsAtOnce`, with its own styles),
- * with what is in use now drawn on it. `cells`: a cell under each number up
- * to the person's, cobalt where an agent holds the place and an outline
- * where it is closed for now, so the number and what fills it read as one.
- * `limit`: only the number lowered for now, marked on the track. The rest is
- * the kit's: the default's mark, the thumb clicking into it, the warmth past it.
+ * with the number lowered for now marked on its track: the ink stops there
+ * and the track runs bare to the person's own. The rest is the kit's: the
+ * default's mark, the thumb clicking into it, the warmth past it.
  */
 
 export interface LiveAtOnceProps {
@@ -23,13 +20,12 @@ export interface LiveAtOnceProps {
   most: number
   onChange: (count: number | null) => void
   compact?: boolean
-  show: 'cells' | 'limit'
   title?: string
   /** In place of the kit's line. */
   note?: ReactNode
 }
 
-export function LiveAtOnce({ places, count, most, onChange, compact = false, show, title = words.title, note }: LiveAtOnceProps) {
+export function LiveAtOnce({ places, count, most, onChange, compact = false, title = words.title, note }: LiveAtOnceProps) {
   const { machine } = places
   const [held, setHeld] = useState<number | null>(null)
   const track = useRef<HTMLDivElement>(null)
@@ -49,8 +45,6 @@ export function LiveAtOnce({ places, count, most, onChange, compact = false, sho
     return clamp(Math.round(raw))
   }
   const heatStyle = { '--heat': heat } as CSSProperties
-  // While held, the cells follow the thumb: as many as the number, the work in them where it is.
-  const shown = { ...places, configured: n, atOnce: places.why === null ? n : Math.min(places.atOnce, n) }
   const lowered = places.why !== null && places.atOnce < n
   const line =
     note ??
@@ -128,7 +122,7 @@ export function LiveAtOnce({ places, count, most, onChange, compact = false, sho
               <div className={k.fill} style={{ width: at(n) }} />
             </div>
             {/* the number lowered for now: the track from it to the person's number closed, its end marked */}
-            {show === 'limit' && lowered && (
+            {lowered && (
               <>
                 <span className={s.closed} style={{ left: at(places.atOnce), width: `calc(${at(n)} - ${at(places.atOnce)})` }} />
                 <span className={s.forNow} style={{ left: at(places.atOnce) }} />
@@ -144,13 +138,6 @@ export function LiveAtOnce({ places, count, most, onChange, compact = false, sho
             <span className={k.atDefault} style={{ left: at(machine.count) }} />
             <span className={`${k.thumb} ${held !== null ? k.held : ''}`} style={{ left: at(n) }} />
           </div>
-          {show === 'cells' && (
-            <div className={s.cells} aria-hidden="true">
-              {cellsOf(shown).map((cell, i) => (
-                <i key={i} data-cell={cell} style={{ left: at(i + 1) }} />
-              ))}
-            </div>
-          )}
           {!compact && (
             <div className={k.scale} aria-hidden="true">
               <span>{machine.count === 1 ? '' : 1}</span>

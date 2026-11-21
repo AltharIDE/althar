@@ -1,28 +1,3 @@
-/* a cell under each number up to the person's, on the track's own scale */
-.cells {
-  position: relative;
-  height: 12px;
-  margin-top: 3px;
-}
-.cells i {
-  position: absolute;
-  top: 0;
-  width: 8px;
-  height: 12px;
-  margin-left: -4px;
-  border-radius: 2px;
-  background: var(--track);
-  transition:
-    background var(--enter) var(--ease-out),
-    left 120ms ease-out;
-}
-.cells i[data-cell='on'] {
-  background: var(--live);
-}
-.cells i[data-cell='shut'] {
-  opacity: 0.35;
-}
-
 /* the number lowered for now: the ink stops there, the track past it to the thumb bare, its end marked */
 .closed {
   position: absolute;
@@ -42,10 +17,4 @@
   border-radius: 2px;
   background: var(--t-3);
   pointer-events: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .cells i {
-    transition: none;
-  }
 }
