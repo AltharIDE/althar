@@ -5,7 +5,10 @@ import { AgentRunOutcome } from '@althar/worker-protocol'
 import { MAX_WORKER_BUNDLE_BYTES, type AgentWorkerPool } from '@althar/worker-protocol/agent-runs'
 import { Effect, Semaphore } from 'effect'
 
-const unavailable = (error: unknown): string => (error instanceof Error ? error.message : 'The worker connection was lost.')
+const unavailable = (error: unknown): string => {
+  if (error instanceof Error) return error.message
+  return typeof error === 'string' ? error : 'The worker connection was lost.'
+}
 
 export const workerExecution = (active: () => AgentWorkerPool | undefined): WorkerExecutionPlatform => ({
   list: (projectId) =>

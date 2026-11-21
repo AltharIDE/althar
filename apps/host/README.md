@@ -212,6 +212,8 @@ The preview runs one configured command per worker with a one-minute budget. The
 
 Use a Linux worker with Git, systemd 254 or later, and a working systemd user manager. Set it up under a dedicated account for your own trusted projects. The agent uses the provider account you sign into on that machine.
 
+Use a host, worker and Desktop built from the same revision for this flow. It supports the lead of a task with one Git repository and its own worktree. Enrollment uses the host console. Use an Althar client with approval authority if a task needs a protected permission decision.
+
 1. On the home, [configure the worker listener and enroll the worker certificate](#native-worker-diagnostic). For a separate machine, bind to a private address the worker can reach, and include the home’s worker-facing DNS name in the home certificate. Record the **home ID** and **project ID**. Once the host is running, assign the worker to that project with the command below. Give the worker its own client certificate and key, plus the public CA certificate. Save the **worker ID** the command prints.
 
    ~~~sh

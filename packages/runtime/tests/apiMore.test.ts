@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Readable, Writable } from 'node:stream'
@@ -287,8 +287,14 @@ describe('a normal task assigned to a worker', () => {
                   path: workerPath,
                   toolPort: request.toolPort,
                   checkpoint: Effect.sync(() => {
-                    const path = join(workerPath, 'change.txt')
-                    if (existsSync(path)) writeFileSync(join(request.worktree, 'change.txt'), readFileSync(path))
+                    const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: workerPath }).toString().trim()
+                    const home = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: request.worktree }).toString().trim()
+                    if (head === home) return
+                    execFileSync('git', ['-c', 'protocol.file.allow=always', 'fetch', '--no-tags', workerPath, head], {
+                      cwd: request.worktree,
+                      stdio: 'ignore',
+                    })
+                    execFileSync('git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: request.worktree, stdio: 'ignore' })
                   }),
                 }
               }),
@@ -308,8 +314,11 @@ describe('a normal task assigned to a worker', () => {
           end: 'ready',
           steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
         })
-        const snapshot = yield* until(client.GetThread({ threadId: task.threadId, fresh: true }), (view) =>
-          view.task.files.some((file) => file.path === 'change.txt'),
+        const snapshot = yield* until(
+          client.GetThread({ threadId: task.threadId, fresh: true }),
+          (view) =>
+            view.task.files.some((file) => file.path === 'change.txt') &&
+            view.items.some((item) => item.kind === 'step_result' && item.content.step === 'implement'),
         )
         assert.lengthOf(placed, 1)
         assert.strictEqual(snapshot.task.worktree, placed[0]?.site)
