@@ -1,0 +1,97 @@
+/* ---- A: the gauge, and what it leads with ---- */
+.gauge {
+  gap: 5px;
+}
+/* how many wait, after the cells, in the gauges' own small figures */
+.waits {
+  font: 500 9.5px/1 var(--font-label);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--t-2);
+}
+/* why the number is lowered, under the cells */
+.why {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+/* what waits, and the way to the slider */
+.under {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+/* ---- B: a list ---- */
+.count {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-2);
+}
+/* the rest of the number: free, or closed for now and why, as empty slots */
+.rest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 6px 0;
+  padding: 6px 8px;
+  border: 1px dashed var(--line-2);
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.slots {
+  display: inline-flex;
+  gap: 2px;
+}
+.slots i {
+  width: 4px;
+  height: 9px;
+  border-radius: 1px;
+  background: var(--track);
+}
+.rest[data-closed] .slots i {
+  background: repeating-linear-gradient(-45deg, var(--t-4) 0 1px, transparent 1px 3px);
+}
+.waitRow {
+  align-items: center;
+}
+/* a task that waits: an empty ring where a mark would be */
+.ring {
+  width: 9px;
+  height: 9px;
+  margin: 0 2px;
+  border: 1.5px solid var(--t-4);
+  border-radius: 99px;
+}
+.machine {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.atOnce {
+  align-items: center;
+}
+
+/* ---- C: the slider, on a sheet of its own as in the quick settings ---- */
+.sheet {
+  padding: 10px 12px 8px;
+  border-radius: 10px;
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* a long popover scrolls, short of the window's foot */
+.scroll {
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

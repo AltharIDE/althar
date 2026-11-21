@@ -1,10 +1,8 @@
 # The agent places lab
 
-One meter in the window's bar for how much work can run and how much does: every computer this home's agents work on (ADR-103: This Mac itself, the person's own machines, Althar Cloud), each with its own places, its own number and its own reason to have fewer for a while, and this computer's CPU and memory, which were a meter of their own and said much the same. Homes stays as it is: which home this window is, and the others to open. Plan usage stays after the meter, as it is: the model's quota, apart from the computers' work.
+Where this computer's agents live once the board's banner over Up next ("2 of 5 agent places in use · Temporarily limited to 1") goes: by This Mac (the CPU and MEM meter in the window's bar, and the popover it opens, which the kit titles This Mac) and beside the Agents at once slider (the quick settings and Settings › Work on this Mac). How many work and for what, the number, and the number lowered for now and why. Homes and plan usage stay as they are. On screen an agent place is an agent, as the slider already counts them.
 
-Where work any computer could take has waited a while with no room for it, what the meter opens offers Althar Cloud quietly at its foot, as ADR-103's Run in cloud has it: to set up where none is linked, to raise its cap once the month is spent, or to run more at once where it is full too. Up next keeps nothing of today's banner ("2 of 5 agent places in use · Temporarily limited to 1"); a row that can start on one computer alone says which ("Waits for This Mac").
-
-It's drawn on the app's own board (`BoardView`), the kit's own window bar (`ProjectTabs`, `ChromeButton`, the meters' `Gauge` and styles, `PlanGauge`), popover, quick settings (`ControlCenter`, `QuickCards`) and Settings (`SettingsLayout`, the Agents at once row), from the tests' fixtures, with no runtime and no Electron.
+It's drawn on the app's own board (`BoardView`), the kit's own window bar (`ProjectTabs`, `ChromeButton`, the meter's `Gauge` and styles, `PlanGauge`), popover, quick settings (`ControlCenter`, `QuickCards`) and Settings (`SettingsLayout`, the slider's own row and styles), from the tests' fixtures, with no runtime and no Electron.
 
 ```bash
 cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/agent-places/vite.config.ts
@@ -12,25 +10,19 @@ cd apps/desktop && ../../node_modules/.bin/vp dev --config lab/agent-places/vite
 
 At `http://localhost:6161`. The bar along the bottom, or its keys, swaps in place:
 
-- **0** as built; **1–3** what the meter opens (below)
-- **Z X C** what the meter draws: an AGENTS gauge before CPU and MEM, in their manner, one button (full ink while work waits, as a full CPU is); a cell a place, a group a computer, then how many wait; one track, a part a computer, as wide whatever the numbers, then how many wait
-- **Q W E R T Y** the scene: This Mac lowered for memory (only Dark mode for Settings, which needs its local checkout, waits, for This Mac); every computer full, the cloud too (every line waits; more cloud offered); build-box out of reach (a Linux-only task waits for it); the cloud's month spent (closed until 1 Dec; its cap offered); room to spare; work waits with no cloud linked, This Mac short of CPU and build-box of memory (the cloud offered)
-- **M** only this Mac: no other computer and no cloud, as for someone who never added one
-- **K** crowded (a bigger Mac, a Mac mini besides, long titles); **N** a narrow window; **S** the Settings tab, at Work on this Mac, with each other computer's number under it; **D** dark
-- **O** keeps the meter's peek open as the rest changes (on at first)
+- **0** as built; **A B C** the takes (below)
+- **Q W E R** the scene: lowered to 1 while memory is short (2 at work of 5, 3 tasks wait); all 5 at work (3 wait); lowered to 3 while the CPU is busy; room to spare (2 of 5, nothing waits)
+- **U** Up next keeps one line at the end of its heading ("1 at a time for now · memory is short", "All 5 agents at work"; nothing with room), which opens the meter's popover
+- **K** crowded (a bigger Mac, 8 agents, long titles); **N** a narrow window; **S** Settings; **D** dark; **O** keeps the meter's popover open as the rest changes; **G** the quick settings
 
-The gear opens the quick settings, and every slider moves its computer's number live. `?open=quick` opens the quick settings; `?shot=1` turns motion off for a headless shot.
+Every slider moves the number live. `?open=quick` opens the quick settings; `?shot=1` turns motion off for a headless shot.
 
-A place closed for now is a free place's step, faded. On a computer out of reach, its work as last seen is faded cobalt and the rest faded. The words say why. The count says what is at work and what is free, so places lowered for now aren't counted as room.
+## The takes
 
-## What the meter opens
-
-- **1 · How much can run.** Every place as one track and a count ("6 at work · 10 free"); what waits in a line that opens to the list; then a row a computer, with what is off with it (lowered and why, out of reach since when, the month spent) and how hard it works (its CPU and memory, or the cloud's month).
-- **2 · This Mac first.** As the load's peek is today, with this computer's places at the top: its cells and count, what is off, the trace, CPU and memory; then the other computers a line each; then what runs on This Mac, by CPU.
-- **3 · The work first.** The computers a line each; then what waits, the longest first, each that any computer could take able to go to the cloud from its row; then what runs and where.
-
-Each ends with Althar Cloud where it is offered, Agents at once… and Add a computer….
+- **A · In the bar.** An AGENTS gauge before CPU and MEM, in the same button: a cell an agent, at work in cobalt, free bare, closed for now hollow; then how many tasks wait (+3). What it opens leads with the agents (a cell each, "2 of 5 at work", why it is lowered and what happens next, how many wait, Agents at once…), then the load as today; each running task says its agents' parts and what they do. The slider marks a lowered number on its track and says why in place of its note.
+- **B · A list in This Mac.** The bar as it is. This Mac lists its agents: "2 of 5 agents" by its name; the tasks at work, each with its agents' parts; the rest of the number as empty slots, free or closed for now and why; then what waits for one, in every project; then the load, smaller; and Agents at once with its number, lowered or default, and Change. The slider as in A.
+- **C · On the slider.** The bar as it is. Wherever Agents at once is (at the top of This Mac, in the quick settings, in Settings) its track shows each agent at work as a cobalt dot on its step, the number lowered for now marked, and a line of what works and waits over the number's own. Settings is no longer calm: the kit's slider says nothing of what runs, on purpose.
 
 ## What the lab assumes
 
-The runtime's `WorkPlaces` gives this computer's count, its configured and current number and each holder's task, role, agent and reason; `GetLoad` its CPU and memory. Workers aren't built yet (ADR-103 is proposed; the native worker is decided, not built). The lab makes up each computer's places, number, state and load; the cloud's spending and cap; each holder's project; why a number is lowered (memory or CPU, which `PressureAdmission` knows but doesn't say); what waits in the other projects and for how long; and which tasks can start on one computer alone and why. ADR-103 leaves prices and plans open, so the offers name none. The Up next row that names a computer is the board's own row with its words swapped by the lab: `NextRow` has no way to say which computer a task waits for. On screen a worker is a computer, or Althar Cloud: the glossary keeps "worker" off the screen.
+The runtime's `WorkPlaces` gives this computer's count, its number and the number lowered for now, and each agent's task, role and reason; `GetLoad` its CPU and memory by task. The lab makes up why the number is lowered (memory or the CPU; the pressure check knows, but doesn't say), each task's project on the popover's rows, and what waits in the other projects. The Up next line is the lab's, put in the board's heading from outside: `BoardColumn` has no place for it.

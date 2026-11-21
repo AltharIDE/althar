@@ -1,151 +1,208 @@
-import type { CSSProperties } from 'react'
-import { BrandMark, Icon, type IconName } from '@althar/ui'
+import { type ReactNode, useState } from 'react'
+import { BrandMark, ChromeButton, Gauge, type LoadGlance, type LoadPoint, type LoadRow, PlanGauge, Popover } from '@althar/ui'
 
-import type { Held, Places, Worker } from './data'
-import { tasksOf, words } from './words'
+import { heldSteps, percent, STEPS, strained } from '../../../../packages/ui/src/chrome/LoadMeter/load'
+import m from '../../../../packages/ui/src/chrome/LoadMeter/LoadMeter.module.css'
+import lp from '../../../../packages/ui/src/chrome/LoadMeter/LoadPeek.module.css'
+import { CLAUDE_PLENTY, CODEX_PLENTY } from '../../../../packages/ui/src/fixtures/plan'
+import { closedOf, type Places } from './data'
+import type { Ctx } from './takes/types'
+import { words } from './words'
 import s from './parts.module.css'
 
 /*
- * What the takes share: a computer's places as a row of cells, every
- * computer's as groups of cells or as parts of one track, a computer's glyph,
- * and the work that holds the places.
+ * What the takes share: the bar (Homes as it is, the meter, plan usage as it
+ * is), the meter's CPU and MEM gauges as the kit draws them, this computer's
+ * agents as cells, and the kit's own peek's trace, figures and rows, which it
+ * keeps to itself.
  */
 
-type Cell = 'on' | 'free' | 'shut' | 'gone'
-
-/**
- * One cell a place: in use in cobalt, free as an empty step, closed for now faded. A worker out of reach: its work as
- * last seen, faded cobalt, and the rest faded, since nothing can start there.
- */
-const cellsOf = (places: Places, away: boolean): Cell[] => {
-  const busy = places.held.length
-  return Array.from({ length: Math.max(places.configured, busy) }, (_, i) =>
-    away ? (i < busy ? 'gone' : 'shut') : i < busy ? 'on' : i >= places.atOnce ? 'shut' : 'free',
-  )
+/** How many steps a share lights, held still near a step's edge, as the kit's meter holds its own. */
+const useSteps = (share: number) => {
+  const [held, setHeld] = useState(() => heldSteps(share, STEPS, null))
+  const steps = heldSteps(share, STEPS, held)
+  if (steps !== held) setHeld(steps)
+  return steps
 }
 
-/** A worker's places as cells: small, as the window's bar draws its meters; large, where there is room. */
-export function Pips({ places, away = false, size = 'small' }: { places: Places; away?: boolean; size?: 'small' | 'large' }) {
+/** This computer's CPU and memory, as the kit's meter draws them. */
+export function LoadGauges({ load }: { load: LoadGlance }) {
+  const cpu = useSteps(load.cpu)
+  const work = useSteps(load.work ?? 0)
+  const memory = useSteps(load.memory)
+  const workMemory = useSteps(load.workMemory ?? 0)
   return (
-    <span className={`${s.pips} ${s[size]}`} aria-hidden="true">
-      {cellsOf(places, away).map((cell, i) => (
-        <i key={i} data-cell={cell} />
-      ))}
-    </span>
-  )
-}
-
-/** Every worker's places, a group of cells each, a little apart. */
-export function WorkerPips({ workers }: { workers: readonly Worker[] }) {
-  return (
-    <span className={s.groups} aria-hidden="true">
-      {workers.map((one) => (
-        <Pips key={one.id} places={one.places} away={one.away !== null} />
-      ))}
-    </span>
+    <>
+      <Gauge name="CPU" lit={cpu} ours={work} full={cpu === STEPS} />
+      <Gauge name="MEM" lit={memory} ours={workMemory} full={strained(load.pressure)} />
+    </>
   )
 }
 
 /**
- * Every computer as a part of one track, as long as its places are many: at work in cobalt, free bare, closed for now
- * faded at its end; one out of reach faded whole. Small, the bar's, as wide whatever the numbers; large, a popover's.
+ * This computer's agents, a cell each up to its number: at work in cobalt, free bare, closed for now faded. Small, a
+ * gauge's steps; large, a popover's.
  */
-export function Track({ workers, size = 'small' }: { workers: readonly Worker[]; size?: 'small' | 'large' }) {
+export function Cells({ places, size = 'small' }: { places: Places; size?: 'small' | 'large' }) {
+  const busy = Math.min(places.agents.length, places.configured)
+  const closedFrom = places.configured - closedOf(places)
   return (
-    <span className={`${s.track} ${size === 'large' ? s.trackLarge : ''}`} aria-hidden="true">
-      {workers.map((one) => {
-        const { held, configured, atOnce } = one.places
-        const style = {
-          flexGrow: configured,
-          '--used': `${(Math.min(held.length, configured) / configured) * 100}%`,
-          '--open': `${(Math.max(Math.min(atOnce, configured), Math.min(held.length, configured)) / configured) * 100}%`,
-        } as CSSProperties
-        return <i key={one.id} style={style} data-away={one.away !== null || undefined} />
-      })}
-    </span>
-  )
-}
-
-const GLYPH: Record<Worker['kind'], IconName> = { this: 'computer', own: 'computer', cloud: 'globe' }
-
-/** A worker's glyph: a computer, or the cloud. */
-export function WorkerGlyph({ worker, className }: { worker: Worker; className?: string }) {
-  return <Icon name={GLYPH[worker.kind]} size={14} {...(className === undefined ? {} : { className })} />
-}
-
-/** As many cells as places it holds, in cobalt: the column a task's row starts with. */
-function HeldCells({ n, gone }: { n: number; gone: boolean }) {
-  return (
-    <span className={`${s.pips} ${s.small} ${s.held}`} aria-hidden="true">
-      {Array.from({ length: n }, (_, i) => (
-        <i key={i} data-cell={gone ? 'gone' : 'on'} />
+    <span className={size === 'small' ? m.steps : s.cells} aria-hidden="true">
+      {Array.from({ length: places.configured }, (_, i) => (
+        <i key={i} data-lit={i < busy ? 'ours' : undefined} className={i >= closedFrom ? s.closed : undefined} />
       ))}
     </span>
   )
 }
 
-/** A task's agents, as its row says them: its project, who, and what runs where it isn't a turn. */
-function Meta({ agents }: { agents: readonly Held[] }) {
-  const first = agents[0]!
-  const background = agents.find((one) => one.doing.kind === 'background')
-  const starting = agents.every((one) => one.doing.kind === 'starting')
+/** The meter in the bar: its button opens what the take puts in it. */
+export function Meter({
+  ctx,
+  label,
+  width,
+  trigger,
+  children,
+}: {
+  ctx: Ctx
+  label: string
+  width: number
+  trigger: ReactNode
+  children: ReactNode
+}) {
   return (
-    <span className={s.meta}>
-      {[first.project, words.roles(agents), starting ? words.starting : null].filter((part) => part !== null).join(' · ')}
-      {background?.doing.kind === 'background' && (
-        <>
-          {' · '}
-          <code className={s.command}>{background.doing.command}</code>
-        </>
+    <span className={m.meter}>
+      <Popover
+        label={label}
+        placement="below"
+        align="end"
+        width={width}
+        padded={false}
+        initialFocus="panel"
+        open={ctx.peek.open}
+        onOpenChange={ctx.peek.set}
+        trigger={
+          <button type="button" className={`${m.button} ${s.button}`} aria-label={label}>
+            {trigger}
+          </button>
+        }
+      >
+        {children}
+      </Popover>
+    </span>
+  )
+}
+
+/** The bar between Homes and the gear: Homes as it is, then the meter, then plan usage as it is. */
+export function Bar({ ctx, children }: { ctx: Ctx; children: ReactNode }) {
+  return (
+    <>
+      <ChromeButton icon="plug" label="Homes" compact onClick={() => ctx.say('Opens the homes menu, as it is')} />
+      {children}
+      <PlanGauge agents={[CLAUDE_PLENTY, CODEX_PLENTY]} />
+    </>
+  )
+}
+
+const clamp = (n: number) => Math.min(1, Math.max(0, n))
+
+/** The CPU over the last two minutes, as the kit's peek draws it. */
+export function Trace({ points, width = 276, height = 40 }: { points: readonly LoadPoint[]; width?: number; height?: number }) {
+  const pad = 1.5
+  const x = (i: number) => ((i / Math.max(1, points.length - 1)) * width).toFixed(1)
+  const y = (v: number) => (pad + (1 - clamp(v)) * (height - pad * 2)).toFixed(1)
+  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i)} ${y(p.cpu)}`).join('')
+  const area = `M${x(0)} ${y(0)}${points.map((p, i) => `L${x(i)} ${y(p.work)}`).join('')}L${x(points.length - 1)} ${y(0)}Z`
+  return (
+    <div className={lp.trace}>
+      <svg className={lp.spark} width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
+        <path d={area} className={lp.sparkOurs} />
+        <path d={line} className={lp.sparkLine} />
+      </svg>
+      <span className={lp.axis} aria-hidden="true">
+        <span>2 min ago</span>
+        <span>now</span>
+      </span>
+    </div>
+  )
+}
+
+/** CPU and memory as figures, each with Althar's part, as the kit's peek has them. */
+export function Figures({ load }: { load: LoadGlance }) {
+  const figure = (name: string, figure: string, total: number, ours: number) => (
+    <div className={lp.row}>
+      <span className={lp.name}>{name}</span>
+      <span className={lp.figure}>{figure}</span>
+      <span className={lp.bar} aria-hidden="true">
+        <i className={lp.ours} style={{ width: `${Math.min(total, ours) * 100}%` }} />
+        <i className={lp.rest} style={{ width: `${(total - Math.min(total, ours)) * 100}%` }} />
+      </span>
+      {ours > 0 && (
+        <span className={lp.work}>
+          <i className={lp.key} aria-hidden="true" />
+          Althar’s work {percent(ours)}%
+        </span>
       )}
-    </span>
+    </div>
+  )
+  return (
+    <div className={lp.machine}>
+      {figure('CPU', `${percent(load.cpu)}%`, load.cpu, load.work ?? 0)}
+      {figure('Memory', `${load.memoryUsed} of ${load.memoryTotal}`, load.memory, load.workMemory ?? 0)}
+    </div>
   )
 }
 
-export interface HeldRowsProps {
-  held: readonly Held[]
-  onOpen: (taskId: string) => void
-  /** The worker a task's agents are on, at the row's end, where the list is of several. */
-  whereOf?: (taskId: string) => string
-  /** As last seen, on a worker out of reach. */
-  gone?: boolean
+/** A piece of Althar's work as the kit's peek has it, its agents' parts in place of its processes where it has agents. */
+export function WorkRow({ row, places, onOpen }: { row: LoadRow; places: Places; onOpen: (id: string) => void }) {
+  const agents = places.agents.filter((one) => one.taskId === row.id)
+  const meta =
+    agents.length > 0
+      ? `${row.project} · ${words.roles(
+          agents.map((one) => one.role),
+          agents.some((one) => one.doing === 'starting') ? 'starting' : agents[0]!.doing,
+        )}`
+      : [row.project, row.agent].filter(Boolean).join(' · ')
+  const inner = (
+    <>
+      {row.mark === undefined ? <span /> : <BrandMark brand={row.mark} size={13} className={lp.mark} />}
+      <span className={lp.words}>
+        <span className={lp.title}>{row.title}</span>
+        <span className={lp.meta}>{meta}</span>
+      </span>
+      <span className={lp.figures}>
+        <span className={lp.figure}>{percent(row.cpu)}%</span>
+        <span className={lp.held}>{row.memory}</span>
+      </span>
+    </>
+  )
+  return row.opens === false ? (
+    <div className={lp.share}>{inner}</div>
+  ) : (
+    <button type="button" className={`${lp.share} ${lp.way}`} onClick={() => onOpen(row.id)}>
+      {inner}
+    </button>
+  )
 }
 
-/**
- * The work holding the places, a row a task, each opening it: as many cobalt cells as places it holds, its title, its
- * project and who, and where it runs where the list is of several workers.
- */
-export function HeldRows({ held, onOpen, whereOf, gone = false }: HeldRowsProps) {
-  const tasks = tasksOf(held)
-  if (tasks.length === 0) return <p className={s.none}>{words.nothing}</p>
-  const most = Math.max(...tasks.map((agents) => agents.length))
+/** Althar's work on this computer, most CPU first, then the other apps, as the kit's peek has them. */
+export function Running({ ctx, rows, head = words.running }: { ctx: Ctx; rows: readonly LoadRow[]; head?: string }) {
   return (
-    <ul className={s.rows} data-gone={gone || undefined} style={{ '--cells': `${most * 4 + (most - 1) * 2}px` } as React.CSSProperties}>
-      {tasks.map((agents) => {
-        const first = agents[0]!
-        const where = whereOf?.(first.taskId)
-        return (
-          <li key={first.taskId}>
-            <button
-              type="button"
-              className={s.row}
-              onClick={() => onOpen(first.taskId)}
-              title={first.title}
-              data-where={where !== undefined || undefined}
-            >
-              <HeldCells n={agents.length} gone={gone} />
-              <span className={s.words}>
-                <span className={s.title}>
-                  <BrandMark brand={first.mark} size={11} className={s.mark} />
-                  <span className={s.titleText}>{first.title}</span>
-                </span>
-                <Meta agents={agents} />
-              </span>
-              {where !== undefined && <span className={s.where}>{where}</span>}
-            </button>
+    <section className={lp.rows}>
+      <span className={lp.rowsHead}>
+        <h3 className={lp.eyebrow}>{head}</h3>
+        <span className={lp.eyebrow}>CPU</span>
+      </span>
+      <ul className={lp.list}>
+        {rows.map((row) => (
+          <li key={row.id}>
+            <WorkRow row={row} places={ctx.places} onOpen={ctx.onOpen} />
           </li>
-        )
-      })}
-    </ul>
+        ))}
+      </ul>
+      <span className={lp.other}>
+        <span>{words.otherApps}</span>
+        <span className={lp.figure}>{percent(ctx.load.cpu - (ctx.load.work ?? 0))}%</span>
+      </span>
+    </section>
   )
 }
