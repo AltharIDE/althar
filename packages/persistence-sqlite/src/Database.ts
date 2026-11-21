@@ -1,4 +1,4 @@
-import { realpath } from 'node:fs/promises'
+import { lstat, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -182,27 +182,27 @@ export const layer = (
       transformResultNames: snakeToCamel,
       ...(options.busyTimeout === undefined ? {} : { busyTimeout: options.busyTimeout }),
     })
-  const opened = (exclusive: boolean) =>
+  const opened = (filename: string, exclusive: boolean) =>
     Layer.fromBuildMemo((memo, scope) => timed('store-migrations', Layer.buildWithMemoMap(migrate(options), memo, scope))).pipe(
-      Layer.provideMerge(beforeMigrations(options.filename, options.maintenanceToken, exclusive)),
+      Layer.provideMerge(beforeMigrations(filename, options.maintenanceToken, exclusive)),
       Layer.provideMerge(
-        Layer.fromBuildMemo((memo, scope) => timed('store-open', Layer.buildWithMemoMap(connection(options.filename), memo, scope))),
+        Layer.fromBuildMemo((memo, scope) => timed('store-open', Layer.buildWithMemoMap(connection(filename), memo, scope))),
       ),
     )
   const readable = options.filename !== ':memory:' && (options.migrations ?? migrations).some(({ key }) => key === '0097_finder_index')
   const live = Layer.unwrap(
     Effect.gen(function* () {
       yield* checkMaintenance(options.filename, options.maintenanceToken)
-      if (options.filename === ':memory:') return opened(false).pipe(Layer.provideMerge(ReadLane.layer(null)))
+      if (options.filename === ':memory:') return opened(options.filename, false).pipe(Layer.provideMerge(ReadLane.layer(null)))
       const filename = yield* canonicalDatabase(options.filename)
       yield* ownDatabase(filename)
       yield* checkMaintenance(filename, options.maintenanceToken)
-      if (!readable) return opened(true).pipe(Layer.provideMerge(ReadLane.layer(null)))
+      if (!readable) return opened(filename, true).pipe(Layer.provideMerge(ReadLane.layer(null)))
 
       // Acquire the original SQLite lock on upgrades so an older executable cannot
       // start against the old schema. Once migrated, older executables reject the
       // new schema and this process holds the separate ownership lock until exit.
-      yield* Effect.scoped(Layer.build(opened(true)))
+      yield* Effect.scoped(Layer.build(opened(filename, true)))
       return Layer.effectDiscard(
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -228,11 +228,27 @@ const openError = (cause: unknown) =>
 
 const canonicalDatabase = (filename: string) =>
   Effect.tryPromise({
-    try: () =>
-      realpath(filename).catch((error: NodeJS.ErrnoException) => {
+    try: async () => {
+      const canonical = await realpath(filename).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== 'ENOENT') throw error
-        return realpath(dirname(filename)).then((folder) => join(folder, basename(filename)))
-      }),
+        return undefined
+      })
+      if (canonical !== undefined) {
+        const file = await stat(canonical)
+        if (!file.isFile() || file.nlink > 1) throw new Error('The database must be a regular file with one link.')
+        return canonical
+      }
+      // Reject a dangling symlink, which could create data elsewhere under this path's lock.
+      const exists = await lstat(filename).then(
+        () => true,
+        (error: NodeJS.ErrnoException) => {
+          if (error.code !== 'ENOENT') throw error
+          return false
+        },
+      )
+      if (exists) throw new Error('The database path does not lead to an existing file.')
+      return join(await realpath(dirname(filename)), basename(filename))
+    },
     catch: openError,
   })
 

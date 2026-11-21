@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { linkSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,6 +9,20 @@ import { SqlClient } from 'effect/sql'
 import * as Database from '../src/Database'
 
 describe('the separate read connections', () => {
+  it.live('rejects a second database path made by hard-linking an open profile', () => {
+    const folder = mkdtempSync(join(tmpdir(), 'althar-store-alias-'))
+    const filename = join(folder, 'profile.sqlite')
+    const alias = join(folder, 'alias.sqlite')
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(Database.layer({ filename }))
+        yield* Effect.sync(() => linkSync(filename, alias))
+        const refused = yield* Effect.flip(Effect.provide(Effect.void, Database.layer({ filename: alias })))
+        assert.strictEqual(refused._tag, 'SqlError')
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => rmSync(folder, { recursive: true, force: true }))))
+  })
+
   it.live('read committed snapshots during a write, reject writes, and release ownership on close', () => {
     const folder = mkdtempSync(join(tmpdir(), 'althar-store-read-'))
     const filename = join(folder, 'profile.sqlite')
