@@ -44,6 +44,7 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
     let outcome: (exit: AgentRunExit) => void = () => undefined
     let stopping = 0
     let reachable = true
+    let toolsAvailable = true
     const written: Uint8Array[] = []
     const worker: WorkerAgentProcess = {
       workspacePath: '/worker/project',
@@ -76,7 +77,15 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
         assert.deepStrictEqual(placement, { projectId: input.projectId, workspaceId: input.workspaceId, providerId: input.providerId })
         assert.strictEqual(options?.toolPort, input.toolPort)
         assert.strictEqual(options?.checkout?.head, head)
-        return worker
+        if (toolsAvailable) return worker
+        return {
+          workspacePath: worker.workspacePath,
+          output: worker.output,
+          exit: worker.exit,
+          write: worker.write,
+          stop: worker.stop,
+          readPatch: worker.readPatch,
+        }
       },
     }
     const service = workerExecution(() => pool)
@@ -94,6 +103,10 @@ it.live('prepares a real task checkout and keeps the worker process scoped to th
       }),
     )
     assert.strictEqual(stopping, 1)
+    toolsAvailable = false
+    const missingTools = yield* Effect.scoped(Effect.flip(service.open(input)))
+    assert.include(missingTools.reason, 'worker did not open the Althar tools connection')
+    assert.strictEqual(stopping, 2)
   }),
 )
 

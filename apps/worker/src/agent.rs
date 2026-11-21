@@ -745,8 +745,8 @@ async fn execute(
     };
     let result = match run.tools {
         true => {
-            // Only the agent on this worker can reach the local listener. The
-            // home still checks the run and MCP session token.
+            // The listener stays on worker loopback. The home checks both
+            // the current run and the MCP session token.
             let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
             let tools_port = listener.local_addr()?.port();
             let channel = slot.channel.clone();
