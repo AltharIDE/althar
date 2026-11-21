@@ -1182,6 +1182,7 @@ export class Sessions extends Context.Service<
           /** The agent accepted or refused this choice; clearing for a takeover has not resolved it yet. */
           readonly resolved?: true
           readonly onlyIfEmpty?: true
+          readonly goalRevision?: number
         },
       ) =>
         Effect.gen(function* () {
@@ -1191,6 +1192,8 @@ export class Sessions extends Context.Service<
               if (running.stopping || threads.get(running.thread.threadId) !== running) return false
               if (options?.after !== undefined && running.nextLead !== options.after) return false
               if (options?.onlyIfEmpty === true && running.nextLead !== undefined) return false
+              if (options?.goalRevision !== undefined && (yield* runnableGoal(running.thread.threadId))?.revision !== options.goalRevision)
+                return false
               if (options?.choice === undefined && options?.resolved !== true && running.nextLead === next) return true
               const [session] = yield* sql<{ revision: number }>`SELECT revision FROM provider_sessions WHERE id = ${running.sessionId}`
               if (session === undefined) return yield* new NoSession({ threadId: running.thread.threadId })
@@ -2172,26 +2175,30 @@ export class Sessions extends Context.Service<
           return true
         })
 
+      const wakeGoal = (running: Running, revision: number, lead?: GoalLead) =>
+        Effect.gen(function* () {
+          const { threadId } = running.thread
+          if (running.stopping || (yield* runnableGoal(threadId))?.revision !== revision) return
+          if (running.deliveryHeld === 'transient' && running.heldTurn !== undefined) {
+            const sql = yield* SqlClient.SqlClient
+            const [held] = yield* sql<{ goalRound: number }>`SELECT goal_round FROM turn_deliveries WHERE id = ${running.heldTurn}`
+            if (held?.goalRound === 1 && (yield* runnableGoal(threadId))?.revision === revision) running.deliveryHeld = null
+          }
+          if (lead !== undefined && (running.entry.definition.id !== lead.agentId || lead.model !== undefined || lead.effort !== undefined))
+            yield* setLeadChoice(running, lead, {
+              goalRevision: revision,
+              choice: { agentId: lead.agentId, model: lead.model ?? null, effort: lead.effort ?? null },
+            })
+          yield* Queue.offer(running.wake, undefined)
+        })
+
       const kickGoal = (threadId: string, revision: number, lead?: GoalLead) =>
         Effect.gen(function* () {
           const goal = yield* runnableGoal(threadId)
           if (goal?.revision !== revision) return
           if (goal.rounds >= goal.roundLimit) return yield* endGoalRound(threadId, revision, null)
           const running = threads.get(threadId)
-          if (running !== undefined) {
-            if (running.stopping) return
-            if (running.deliveryHeld === 'transient' && running.heldTurn !== undefined) {
-              const sql = yield* SqlClient.SqlClient
-              const [held] = yield* sql<{ goalRound: number }>`SELECT goal_round FROM turn_deliveries WHERE id = ${running.heldTurn}`
-              if (held?.goalRound === 1) running.deliveryHeld = null
-            }
-            if (lead !== undefined && running.entry.definition.id !== lead.agentId)
-              yield* setLeadChoice(running, lead, {
-                choice: { agentId: lead.agentId, model: lead.model ?? null, effort: lead.effort ?? null },
-              })
-            yield* Queue.offer(running.wake, undefined)
-            return
-          }
+          if (running !== undefined) return yield* wakeGoal(running, revision, lead)
           if (lead !== undefined) yield* start({ threadId, goalRevision: revision, ...lead })
           else if (!(yield* startLast(threadId, undefined, revision))) {
             const saved = yield* goalLaunchChoice(threadId)
@@ -2199,15 +2206,18 @@ export class Sessions extends Context.Service<
             else yield* start({ threadId, goalRevision: revision, ...saved })
           }
         }).pipe(
+          Effect.catchTag('SessionRunning', () =>
+            Effect.suspend(() => {
+              const running = threads.get(threadId)
+              return running === undefined ? Effect.void : wakeGoal(running, revision, lead)
+            }),
+          ),
           Effect.catchCause((cause) =>
-            threads.has(threadId)
-              ? Effect.void
-              : Effect.andThen(
-                  Effect.logWarning('Could not start the goal’s lead', cause),
-                  endGoalRound(threadId, revision, 'The lead could not start. Check its connection and resume the goal.').pipe(
-                    Effect.ignore,
-                  ),
-                ),
+            Effect.gen(function* () {
+              if (threads.has(threadId) || (yield* runnableGoal(threadId))?.revision !== revision) return
+              yield* Effect.logWarning('Could not start the goal’s lead', cause)
+              yield* endGoalRound(threadId, revision, 'The lead could not start. Check its connection and resume the goal.')
+            }).pipe(Effect.ignore),
           ),
         )
 

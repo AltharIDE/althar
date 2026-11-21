@@ -56,6 +56,7 @@ import {
   upFrontSaid,
 } from './sessionState'
 import { type RunSkills, refusalOf, runSkills } from './Skills'
+import { blockGoalAfterDisconnect } from './threadGoals'
 import { addItem, betweenTurns, recorder } from './threads'
 import type { ToolServer } from './ToolServer'
 import { folderGoneWords, summarize } from './words'
@@ -216,6 +217,8 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
             ...(stop === undefined ? {} : { stop }),
             ...(outcome?.state === 'completed' ? { reason: outcome.reason } : {}),
           })
+          if (state === 'lost' && running.thread.role === 'task' && running.thread.helper === undefined)
+            yield* blockGoalAfterDisconnect(running.thread.threadId, running.sessionId)
         }),
       )
       // An idle disconnect lost no work. Only an interrupted turn needs a warning and a way out.

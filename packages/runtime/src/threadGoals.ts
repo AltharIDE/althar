@@ -178,6 +178,20 @@ export const endGoalRound = (threadId: string, revision: number, failure: string
     if (changed !== undefined) yield* touchTask(changed.taskId)
   })
 
+/** Workflow steps have their own recovery. A stand-alone goal needs a visible way to restart its lead. */
+export const blockGoalAfterDisconnect = (threadId: string, sessionId: string) =>
+  Effect.gen(function* () {
+    const goal = yield* runnableGoal(threadId)
+    if (goal === null) return
+    const sql = yield* SqlClient.SqlClient
+    const [last] = yield* sql<{ id: string }>`
+      SELECT s.id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+      WHERE t.id = ${threadId}
+        AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.state = 'running')
+      ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
+    if (last?.id === sessionId) yield* endGoalRound(threadId, goal.revision, 'The lead disconnected. Resume the goal to try again.')
+  })
+
 /** Only the live turn that received the current objective may report on it. */
 export const reportGoal = (access: ToolAccess, input: unknown) =>
   Effect.gen(function* () {

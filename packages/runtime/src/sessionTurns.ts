@@ -376,8 +376,8 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       const activeGoal = compacting ? null : goal
       const goalRound = activeGoal !== null && !asking
       if (!asking && !goalRound && (running.brief === undefined || running.brief.onlyForGoal === true)) return false
-      // The coordinator speaks when spoken to: its brief waits for the person's first message. So does an aside opened with +.
-      if (!asking && (thread.role === 'coordinator' || running.waitsForWords === true)) return false
+      // An aside opened with + waits for the person's first message or goal. The coordinator only answers messages.
+      if (!asking && (thread.role === 'coordinator' || (running.waitsForWords === true && !goalRound))) return false
       // A compaction says nothing of the brief: that is read with the next turn.
       const briefOf = compacting ? undefined : running.brief
       // Its copies of the repositories are fresh for each turn: made so as its last turn ended, while the person read and wrote,

@@ -9,6 +9,7 @@ import {
   type MessageSender,
   Api,
   ApiError,
+  GOAL_LENGTH,
   GOAL_ROUNDS,
   clientProtocol,
   emitterPort,
@@ -324,6 +325,33 @@ describe('the API', () => {
       assert.isAbove(newer?.revision ?? 0, limited?.revision ?? 0)
       yield* send('/goal pause')
       assert.strictEqual((yield* goal)[0]?.status, 'paused')
+    }).pipe(Effect.scoped),
+  )
+
+  it.live('validates typed goal commands before keeping attachments or starting a lead', () =>
+    Effect.gen(function* () {
+      const { client, grant } = yield* connected()
+      const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+      const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Goal controls' })
+      const command = { threadId: task.threadId, disposition: 'after_current' as const }
+      const attached = yield* Effect.flip(
+        client.Send({
+          ...command,
+          commandId: commandId(),
+          body: '/goal Verify the build',
+          images: [{ data: 'not an image', name: 'notes.png' }],
+        }),
+      )
+      assert.strictEqual(attached.message, 'Send attachments in a message alongside the goal.')
+      const oversized = yield* Effect.flip(
+        client.Send({ ...command, commandId: commandId(), body: `/goal ${'a'.repeat(GOAL_LENGTH + 1)}` }),
+      )
+      assert.strictEqual(oversized.reason, 'Invalid')
+      yield* client.Send({ ...command, commandId: commandId(), body: '/goal' })
+      const thread = yield* client.GetThread({ threadId: task.threadId })
+      assert.isNull(thread.task.goal)
+      assert.isNull(thread.session)
+      assert.isTrue(thread.items.some((item) => item.kind === 'notice' && item.content.title === 'Set an objective with /goal.'))
     }).pipe(Effect.scoped),
   )
 
