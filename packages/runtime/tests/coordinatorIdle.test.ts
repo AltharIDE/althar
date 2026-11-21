@@ -219,6 +219,77 @@ it.effect('recovers input queued for a retired coordinator if the runtime restar
   ),
 )
 
+it.effect('recovers input after a restart during an idle coordinator’s close', () => {
+  let entered!: () => void
+  let release!: () => void
+  let armed = false
+  const closing = new Promise<void>((resolve) => (entered = resolve))
+  const closed = new Promise<void>((resolve) => (release = resolve))
+  return onTestClock(
+    Effect.gen(function* () {
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-idle-closing-')), 'profile.sqlite')
+      const saved = yield* Effect.gen(function* () {
+        const projects = yield* Projects
+        const coordinator = yield* Coordinator
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+        const threadId = yield* coordinator.thread(project.projectId)
+        yield* coordinator.say({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId,
+          body: 'Hello',
+          disposition: 'after_current',
+        })
+        const first = Option.getOrThrow(
+          yield* until(sessions.running(threadId), (one) => Option.isSome(one) && one.value.turnEndedAt !== null),
+        )
+        armed = true
+        const advance = yield* Effect.forkChild(TestClock.adjust(Duration.seconds(25)))
+        yield* Effect.promise(() => closing)
+        const input = yield* sessions.send({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId,
+          body: 'Accepted during close',
+          sender: { kind: 'window' },
+        })
+        const [intent] = yield* sql<{ reason: string }>`SELECT json_extract(payload, '$.reason') AS reason FROM record_events
+          WHERE aggregate_id = ${first.sessionId} AND type = 'provider_session.stop_requested' ORDER BY sequence DESC LIMIT 1`
+        assert.strictEqual(intent?.reason, 'idle')
+        yield* sql`VACUUM INTO ${file}`
+        release()
+        yield* Fiber.join(advance)
+        return { threadId, inputId: input.inputId, accountId: first.accountId }
+      }).pipe(
+        Effect.ensuring(Effect.sync(() => release())),
+        Effect.provide(
+          runtime(
+            ':memory:',
+            {
+              beforeClose: async () => {
+                if (armed) {
+                  entered()
+                  await closed
+                }
+              },
+            },
+            { idle: { coordinator: Duration.seconds(10) } },
+          ),
+        ),
+      )
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const sessions = yield* Sessions
+        yield* until(
+          sql<{ state: string }>`SELECT state FROM user_inputs WHERE id = ${saved.inputId}`,
+          (rows) => rows[0]?.state === 'delivered',
+        )
+        assert.strictEqual(Option.getOrThrow(yield* sessions.running(saved.threadId)).accountId, saved.accountId)
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+})
+
 it.effect('keeps a coordinator with a turn and queued input, then delivers that input', () => {
   let waiting = false
   return onTestClock(

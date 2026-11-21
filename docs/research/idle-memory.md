@@ -53,7 +53,7 @@ A project's coordinator is always available. Starting its provider process is de
 
 The follow-up retires a coordinator after 30 minutes without work, checked at most a minute later. It keeps active turns, open tools, background commands and queued work alive. Tests cover waking on news with the previous account and conversation, an input accepted while the old session is closing, and work that prevents retirement. In two fake process launch modes, a provider and an unreported child were both alive before retirement and both gone after it. A separate in-process native-agent test closes its session with a real fake MCP server and child; both processes exit. Registered process adapters share the owned-process connection path, and the native adapter closes its session's MCP tools. These are process-count checks on macOS, not an after-retirement measurement of the real 216 MiB coordinator above; individual signed-in adapters and other platforms have not all been measured here.
 
-If the runtime exits after an idle session has completed but before its queued input wakes it, startup recovery now resumes the input on its saved account. The restart test snapshots that interval and checks delivery after reopening the profile.
+If the runtime exits after an idle session has completed but before its queued input wakes it, startup recovery now resumes the input on its saved account. Restart tests snapshot both that interval and a close already in progress, after its idle stop intent and a new input were recorded; both check delivery after reopening the profile.
 
 ```mermaid
 flowchart LR
