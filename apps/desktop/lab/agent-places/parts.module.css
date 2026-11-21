@@ -31,6 +31,51 @@
 .pips i[data-cell='shut'] {
   opacity: 0.35;
 }
+/* on a worker out of reach: its work as last seen, cobalt faded */
+.pips i[data-cell='gone'] {
+  background: var(--live);
+  opacity: 0.3;
+}
+
+/* every worker's cells, a group each, a little apart */
+.groups {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+/* every worker a short bar, one under another */
+.bars {
+  display: inline-flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  justify-content: center;
+  gap: 2px;
+}
+.bars i {
+  position: relative;
+  display: block;
+  width: 28px;
+  height: 4px;
+  border-radius: 1px;
+  /* the part it can't take for now, past --open, faded */
+  background: linear-gradient(
+    to right,
+    var(--track) 0 var(--open),
+    color-mix(in srgb, var(--track) 35%, transparent) var(--open) 100%
+  );
+  overflow: hidden;
+}
+.bars i::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--used);
+  background: var(--live);
+}
+.bars i[data-away] {
+  opacity: 0.35;
+}
 .held {
   margin-top: 4px;
 }
@@ -58,6 +103,18 @@
 }
 .row:hover {
   background: var(--hover-paper);
+}
+.row[data-where] {
+  grid-template-columns: var(--cells, 4px) minmax(0, 1fr) auto;
+}
+.where {
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.rows[data-gone] .title {
+  color: var(--t-2);
 }
 .words {
   display: flex;

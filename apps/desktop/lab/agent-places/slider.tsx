@@ -23,9 +23,20 @@ export interface LiveAtOnceProps {
   title?: string
   /** In place of the kit's line. */
   note?: ReactNode
+  /** Whose default the scale marks: this Mac, build-box, your plan. */
+  where?: string
 }
 
-export function LiveAtOnce({ places, count, most, onChange, compact = false, title = words.title, note }: LiveAtOnceProps) {
+export function LiveAtOnce({
+  places,
+  count,
+  most,
+  onChange,
+  compact = false,
+  title = words.title,
+  note,
+  where = 'this Mac',
+}: LiveAtOnceProps) {
   const { machine } = places
   const [held, setHeld] = useState<number | null>(null)
   const track = useRef<HTMLDivElement>(null)
@@ -142,7 +153,7 @@ export function LiveAtOnce({ places, count, most, onChange, compact = false, tit
             <div className={k.scale} aria-hidden="true">
               <span>{machine.count === 1 ? '' : 1}</span>
               <span className={k.mark} style={{ left: at(machine.count) }}>
-                {`${machine.count} · this Mac`}
+                {`${machine.count} · ${where}`}
               </span>
               <span>{machine.count === most ? '' : most}</span>
             </div>
