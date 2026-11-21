@@ -941,6 +941,43 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
   })
   const goAndZen = async () => credentials(['opencode-go', 'plan'], ['opencode', 'key'])
 
+  it.effect('does not list an unclassified idle account on its first timer tick, but reads a reported limit', () => {
+    let listings = 0
+    let reads = 0
+    const layer = withUsage(
+      { readCredentials: async () => (listings++, goAndZen()), readGoUsage: async () => (reads++, go(used(20))) },
+      { every: Duration.minutes(5) },
+    )
+    return onTestClock(
+      Effect.gen(function* () {
+        yield* PlanUsage
+        const tick = Effect.gen(function* () {
+          const events = yield* (yield* Live).subscribe
+          const told = yield* Effect.forkChild(
+            events.pipe(
+              Stream.filter((event) => event._tag === 'PlanUsage'),
+              Stream.take(1),
+              Stream.runCollect,
+            ),
+          )
+          yield* TestClock.adjust(Duration.minutes(5))
+          yield* Fiber.join(told)
+        })
+        yield* tick
+        assert.deepStrictEqual([listings, reads], [0, 0])
+        const sql = yield* SqlClient.SqlClient
+        const [account] = yield* (yield* Accounts).of('opencode')
+        assert.isUndefined(yield* (yield* SignIns).cached(account!))
+        const principalId = yield* newId(Ids.principal)
+        const at = new Date(yield* Clock.currentTimeMillis).toISOString()
+        yield* sql`INSERT INTO principals ${sql.insert({ id: principalId, agentId: 'opencode', accountId: account!.id, deviceId: (yield* Instance).deviceId, subjectHint: 'Fake', authMode: 'vendor_cli', observedAt: at })}`
+        yield* sql`INSERT INTO account_statuses ${sql.insert({ id: yield* newId(Ids.accountStatus), principalId, state: 'limited', windows: JSON.stringify([{ kind: 'usage', resetsAt: RESET }]), source: 'error', observedAt: at })}`
+        yield* tick
+        assert.deepStrictEqual([listings, reads], [1, 1])
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
   it.effect('leaves an idle Go account alone on the timer, but polls it when a limit is waiting', () => {
     let reads = 0
     let listings = 0
@@ -991,6 +1028,8 @@ describe('OpenCode Go, a plan with limits on an OpenCode account', () => {
         yield* sql`UPDATE account_statuses SET state = 'ok' WHERE principal_id = ${principalId}`
         yield* (yield* SignIns).forget('opencode')
         yield* tick
+        assert.deepStrictEqual([listings, reads], [1, 4])
+        yield* usage.refresh([account!.id], true)
         assert.deepStrictEqual([listings, reads], [2, 5])
       }).pipe(Effect.provide(layer)),
     )

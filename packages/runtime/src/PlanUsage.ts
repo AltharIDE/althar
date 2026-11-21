@@ -243,6 +243,8 @@ export class PlanUsage extends Context.Service<
         // explicitly refreshed, while continuing to read Go's actual limits on the usual schedule.
         const listings = new Map<string, { readonly check: SignInCheck; readonly credentials: CredentialsRead }>()
         const openCodeReads = new Map<string, number>()
+        // Serialize the final check and write, including persistence, so an older write cannot finish after a newer one.
+        const openCodeWrites = Semaphore.makeUnsafe(1)
         /* How many times sessions have said each account's windows: an endpoint's answer to a question asked before the last of them doesn't replace it. */
         const sayings = new Map<string, number>()
         /* Each account's windows, by the saying that last said each: those said since the endpoint was asked stay over its answer. */
@@ -380,7 +382,11 @@ export class PlanUsage extends Context.Service<
               return openCodeReads.get(account.id) === generation && signedIn === check
             })
             const keep = (accountId: string, next: Held) =>
-              Effect.flatMap(current, (valid) => (valid ? Effect.asVoid(keepUsage(accountId, next)) : Effect.void))
+              definition.id === 'opencode'
+                ? openCodeWrites.withPermits(1)(
+                    Effect.flatMap(current, (valid) => (valid ? Effect.asVoid(keepUsage(accountId, next)) : Effect.void)),
+                  )
+                : Effect.asVoid(keepUsage(accountId, next))
             const before = held.get(account.id)
             const env = accounts.env(account)
             /* A fault, with the reading held when it is kept: one a session said while the source was asked stays. */
@@ -628,21 +634,19 @@ export class PlanUsage extends Context.Service<
                 const last = asked.get(account.id)
                 if (!afterLimit && last !== undefined && now - last < Duration.toMillis(options.kept ?? (force ? LEAST : KEPT)))
                   return false
-                asked.set(account.id, now)
                 return true
               })
               yield* Effect.forEach(
                 due,
                 (account) =>
                   Effect.gen(function* () {
-                    const listing = background && account.agentId === 'opencode' ? listings.get(account.id) : undefined
-                    if (listing !== undefined && (yield* signIns.cached(account)) === listing.check) {
+                    if (background && account.agentId === 'opencode') {
                       const windows = held.get(account.id)?.windows ?? []
                       const [working] = yield* sql<{ one: number }>`
                         SELECT 1 AS one FROM provider_sessions s JOIN turn_deliveries d ON d.provider_session_id = s.id
                         WHERE s.account_id = ${account.id} AND d.state IN ('pending', 'delivered') LIMIT 1`
-                      // An idle account cannot consume usage in Althar. A full window or a reported limit still needs
-                      // polling, so work waiting for a reset can resume without the person opening the gauge.
+                      // An idle account cannot consume usage in Althar, including before its first classification. A full
+                      // window or a reported limit still needs polling so work waiting for a reset can resume on its own.
                       if (
                         working === undefined &&
                         !windows.some((window) => window.spend !== true && leftOf(window) <= 0) &&
@@ -650,6 +654,11 @@ export class PlanUsage extends Context.Service<
                       )
                         return
                     }
+                    // A skipped timer must not throttle an explicit read or a turn that starts just after it. Recheck here
+                    // because another read may have started while the idle and limit checks were in flight.
+                    const last = asked.get(account.id)
+                    if (!afterLimit && last !== undefined && now - last < Duration.toMillis(options.kept ?? (force ? LEAST : KEPT))) return
+                    asked.set(account.id, now)
                     yield* readAccount(account, only !== undefined, afterLimit, force && !afterLimit)
                   }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause))),
                 { concurrency: 'unbounded', discard: true },
@@ -676,8 +685,12 @@ export class PlanUsage extends Context.Service<
           for (const entry of agents.list) {
             const all = yield* accounts.of(entry.definition.id)
             for (const account of all) {
-              const cached = entry.definition.id === 'opencode' && listings.has(account.id) ? yield* signIns.cached(account) : undefined
-              const check = cached ?? (yield* signIns.account(account))
+              // Rendering a timer's result must not itself start OpenCode's expensive sign-in listing. A read or an
+              // explicit sign-in check fills this cache; until then the account's sign-in is simply unknown.
+              const check: SignInCheck =
+                entry.definition.id === 'opencode'
+                  ? ((yield* signIns.cached(account)) ?? { status: 'unknown', paidBy: 'unknown' })
+                  : yield* signIns.account(account)
               // A sign-in that ends within its last days, read with its account, warns once at each stage (signInEnding.ts); one
               // whose check already says signed out has ended, so the bar never says "ends by" beside a signed-out row.
               const stage = warning(check.endsAt, warned.get(warnedKey(account.id)), now, check.status === 'signed_out')
