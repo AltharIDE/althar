@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest'
 
 import type { HomeSetup } from '../src/homes'
 import { authenticateRelease, findRelease, ReleaseProblem, type HostRelease } from '../src/main/homes/release'
-import { homeSetups, type Ran, type RunOptions, type SetupSystem } from '../src/main/homes/setup'
+import { homeSetups, loggedInWith, type Ran, type RunOptions, type SetupSystem } from '../src/main/homes/setup'
 
 /*
  * Setting a home up over SSH, as main runs ssh.sh's protocol: a fake OpenSSH answers each operation as a server would,
@@ -235,7 +235,15 @@ it('makes the home a user of its own as root, with the key that logged in, and r
     probe: [
       {
         stdout: looked({ root: true, login: 'root' }),
-        stderr: `debug1: Server accepts key: me@laptop ED25519 ${fingerprint(LOGIN_BLOB)} agent`,
+        // Another key accepted first, whose signing failed: the one that logged in came after it.
+        stderr: [
+          `debug1: Offering public key: me@old RSA ${fingerprint(KEY_BLOB)} agent`,
+          `debug1: Server accepts key: me@old RSA ${fingerprint(KEY_BLOB)} agent`,
+          'sign_and_send_pubkey: signing failed for RSA "me@old" from agent: agent refused operation',
+          `debug1: Offering public key: me@laptop ED25519 ${fingerprint(LOGIN_BLOB)} agent`,
+          `debug1: Server accepts key: me@laptop ED25519 ${fingerprint(LOGIN_BLOB)} agent`,
+          'Authenticated to vps.test ([203.0.113.4]:22) using "publickey".',
+        ].join('\n'),
       },
       { stdout: looked() },
     ],
@@ -259,7 +267,10 @@ it('gives althar only the key that logged in, and stops where it can’t tell wh
     // Logged in with a key whose .pub isn't there, while the agent holds another.
     probe: {
       stdout: looked({ root: true, login: 'root' }),
-      stderr: `debug1: Server accepts key: /home/me/.ssh/deploy ED25519 ${fingerprint(LOGIN_BLOB)} explicit`,
+      stderr: [
+        `debug1: Server accepts key: /home/me/.ssh/deploy ED25519 ${fingerprint(LOGIN_BLOB)} explicit`,
+        'debug1: Authentication succeeded (publickey).',
+      ].join('\n'),
     },
     resolve: { stdout: 'hostname vps.test\nidentityfile ~/.ssh/deploy\n' },
     'ssh-add': { stdout: `ssh-ed25519 ${KEY_BLOB} other\n` },
@@ -268,6 +279,26 @@ it('gives althar only the key that logged in, and stops where it can’t tell wh
   setups.start({ target: 'root@vps.test' })
   expect(await settled(setups, 'failed')).toMatchObject({ problem: 'NoPublicKey', at: 1, madeUser: false })
   expect(at.asked.some((one) => one.operation === 'root-login')).toBe(false)
+})
+
+it('reads the key a login finished with only where OpenSSH’s log says so for sure', () => {
+  const accepts = (blob: string) => `debug1: Server accepts key: me ED25519 ${fingerprint(blob)} agent`
+  const done = 'Authenticated to vps.test ([203.0.113.4]:22) using "publickey".'
+  expect(loggedInWith([accepts(KEY_BLOB), accepts(LOGIN_BLOB), done].join('\n'))).toBe(fingerprint(LOGIN_BLOB))
+  expect(loggedInWith([accepts(LOGIN_BLOB), 'debug1: Authentication succeeded (publickey).'].join('\n'))).toBe(fingerprint(LOGIN_BLOB))
+  // Accepted, but never logged in with it.
+  expect(loggedInWith(accepts(LOGIN_BLOB))).toBeUndefined()
+  // Its signing failed, and the login finished some other way.
+  expect(
+    loggedInWith([accepts(LOGIN_BLOB), 'sign_and_send_pubkey: signing failed for ED25519 "me" from agent', done].join('\n')),
+  ).toBeUndefined()
+  // Two keys needed: neither alone logs in.
+  expect(
+    loggedInWith([accepts(KEY_BLOB), 'Authenticated using "publickey" with partial success.', accepts(LOGIN_BLOB), done].join('\n')),
+  ).toBeUndefined()
+  expect(
+    loggedInWith([accepts(LOGIN_BLOB), 'Authenticated to vps.test ([203.0.113.4]:22) using "keyboard-interactive".'].join('\n')),
+  ).toBeUndefined()
 })
 
 it('finds the release before it makes a root login’s user, so a server it can’t finish is left as it was', async () => {
@@ -373,6 +404,30 @@ it('follows a transfer the server is still running after the connection drops, r
   await settled(setups, 'done')
   expect(at.told.some((one) => one?.progress?.bytes === 30_000_000)).toBe(true)
   expect(at.told.some((one) => one?.problem === 'LockHeld')).toBe(false)
+  expect(at.asked.filter((one) => one.operation === 'install')).toHaveLength(2)
+})
+
+it('stops on the trouble a transfer it follows ends with, rather than starting another', async () => {
+  const transferring = [
+    event('get', 'started', { bytes: 0, totalBytes: release.bytes }),
+    event('get', 'progress', { bytes: 10, totalBytes: release.bytes }),
+  ]
+  const at = server({
+    ...goesThrough,
+    install: [
+      { code: 255, stdout: [looked(), ...transferring].join('\n'), stderr: 'Connection to vps.test closed by remote host.' },
+      { code: 1, stdout: [looked(), event('get', 'failed', { code: 'LockHeld' })].join('\n') },
+    ],
+    status: [
+      { code: 1, stdout: event('setup', 'failed', { code: 'SetupNotFound' }) },
+      { stdout: transferring.join('\n') },
+      // The server couldn't fetch it after all: the way out is sending it from here.
+      { code: 1, stdout: [...transferring, event('get', 'failed', { code: 'CannotDownload' })].join('\n') },
+    ],
+  })
+  const setups = at.setups()
+  setups.start({ target: 'deploy@vps.test' })
+  expect(await settled(setups, 'failed')).toMatchObject({ problem: 'CannotDownload', at: 2 })
   expect(at.asked.filter((one) => one.operation === 'install')).toHaveLength(2)
 })
 

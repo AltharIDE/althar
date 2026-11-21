@@ -86,6 +86,26 @@ const hostOf = (target: string) => target.split('@').at(-1) ?? target
 const indexOf = (step: unknown) => Math.max(0, SETUP_STEPS.indexOf(step as SetupStep))
 const fingerprintOf = (blob: string) =>
   `SHA256:${createHash('sha256').update(Buffer.from(blob, 'base64')).digest('base64').replace(/=+$/, '')}`
+/**
+ * The fingerprint of the key a login finished with, from ssh -v's log, or undefined where it can't be told for sure.
+ * OpenSSH logs "Server accepts key" when the server would take a key, before it signs with it; where signing fails it
+ * offers the next. So it's the last key accepted before authentication succeeded over publickey, with no signing
+ * failure after it. A login that needed more than one (partial success) or ended otherwise isn't read.
+ */
+export const loggedInWith = (log: string): string | undefined => {
+  const lines = log.split(/\r?\n/)
+  const succeeded = lines.findIndex(
+    (line) => /Authentication succeeded \(publickey\)/.test(line) || /Authenticated to .* using "publickey"/.test(line),
+  )
+  if (succeeded === -1) return undefined
+  const before = lines.slice(0, succeeded)
+  if (before.some((line) => /partial success/i.test(line))) return undefined
+  let at = -1
+  for (const [index, line] of before.entries()) if (/Server accepts key:/.test(line)) at = index
+  if (at === -1) return undefined
+  if (before.slice(at + 1).some((line) => /signing failed|sign_and_send_pubkey/.test(line))) return undefined
+  return /(SHA256:[A-Za-z0-9+/]+)/.exec(before[at]!)?.[1]
+}
 const eventsIn = (text: string): Event[] =>
   text.split('\n').flatMap((line) => {
     try {
@@ -280,7 +300,7 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
 
     /** The public key the server took, from what OpenSSH said: the one to give the user Althar makes. */
     const acceptedKey = async (stderr: string) => {
-      const fingerprint = /Server accepts key:.*?(SHA256:[A-Za-z0-9+/]+)/.exec(stderr)?.[1]
+      const fingerprint = loggedInWith(stderr)
       const where = await resolve(setup!.target)
       const agent = await system.run('ssh-add', ['-L'], { signal, timeout: 10_000 }).catch(() => ({ stdout: '' }))
       const files = await Promise.all(where.identities.map((path) => system.readFile(`${path}.pub`).catch(() => null)))
@@ -450,7 +470,9 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
       for (;;) {
         const now = await status()
         if (now.kind === 'host') return 'staged' as const
-        if (now.kind === 'none' || now.events.some((one) => one.state === 'failed')) return 'ended' as const
+        if (now.kind === 'none') return 'ended' as const
+        // It failed there (couldn't download, didn't match): that's the setup's trouble, with its own way out.
+        failedIn(now.events)
         const moved = [...now.events].reverse().find((one) => one.step === 'get' && typeof one.bytes === 'number')
         if (moved !== undefined && typeof moved.totalBytes === 'number')
           set({ progress: { bytes: moved.bytes as number, total: moved.totalBytes } })
