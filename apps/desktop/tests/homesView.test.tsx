@@ -1252,7 +1252,7 @@ it('holds the host and the method while it connects, and closes once the home co
   await act(async () => connecting.resolve())
   // Connected shows for a moment, as its window opens, and then the dialog goes.
   expect(screen.getByRole('button', { name: 'Connecting…' })).not.toBeNull()
-  await waitFor(() => expect(close).toHaveBeenCalledOnce(), { timeout: 2000 })
+  await waitFor(() => expect(close).toHaveBeenCalledOnce())
 })
 
 it('lets a connection abandoned by an edit come to nothing in the form', async () => {

@@ -4,6 +4,7 @@ import { expect, it, vi } from 'vitest'
 
 import type { CheckedHome, HomeSetup, HomeState, HomesHost, HomesOverview } from '../src/homes'
 import { ConnectHome } from '../src/renderer/features/homes/ConnectHome'
+import { troubleOf } from '../src/renderer/features/homes/SetUp'
 import { Chip } from '../src/renderer/features/homes/HomeConnections'
 import { homesUi } from '../src/renderer/features/homes/useHomes'
 
@@ -101,7 +102,7 @@ it('opens a first home on what a home is, then sets it up over SSH, step by step
   expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('vps')
   await userEvent.click(screen.getByRole('button', { name: 'Connect' }))
   expect(at.homes.connect).toHaveBeenCalledExactlyOnceWith('opaque-confirmation', 'vps')
-  await waitFor(() => expect(close).toHaveBeenCalledOnce(), { timeout: 2000 })
+  await waitFor(() => expect(close).toHaveBeenCalledOnce())
   expect(at.homes.setupAct).toHaveBeenCalledWith('dismiss')
 })
 
@@ -188,4 +189,48 @@ it('shows a setup under way on the chip while its dialog is closed, and the chip
   expect(screen.getByRole('button', { name: 'Setting up vps.test: Needs you. Show it' })).not.toBeNull()
   at.tell(null)
   expect(screen.queryByRole('button', { name: /^Setting up/ })).toBeNull()
+})
+
+it('says for every trouble what happened, and what to run or press to get past it', () => {
+  const at = setup({ target: { target: 'deploy@vps.test', port: 2222 }, phase: 'failed', at: 2 })
+  const codes = [
+    'AuthFailed',
+    'Unreachable',
+    'Dropped',
+    'HostKeyChanged',
+    'KeyScanFailed',
+    'UnsupportedOS',
+    'UnsupportedArchitecture',
+    'NoSystemd',
+    'NoUserManager',
+    'NotEnoughDisk',
+    'DiskUnavailable',
+    'NoRelease',
+    'CannotDownload',
+    'UploadFailed',
+    'SignatureMismatch',
+    'KnownHostsUnwritable',
+    'IdentityMismatch',
+    'LockHeld',
+    'AccountConflict',
+    'AccountCreationFailed',
+    'NoPublicKey',
+  ]
+  const troubles = codes.map((code) => troubleOf(code, at))
+  // Each says something of its own, about this server.
+  expect(new Set(troubles.map((one) => one.title)).size).toBeGreaterThan(15)
+  for (const one of troubles) expect(one.title).not.toBe('')
+  expect(troubles[0]!.command).toBe('ssh-copy-id -p 2222 deploy@vps.test')
+  expect(troubles[1]!.title).toBe('Althar couldn’t reach vps.test over SSH.')
+  expect(troubles[2]!.title).toBe('The connection to vps.test keeps dropping.')
+  // Where trying again can't help, it doesn't offer to; where sending it from here can, it does.
+  expect(troubleOf('NoRelease', at).retry).toBe(false)
+  expect(troubleOf('AccountConflict', at).retry).toBe(false)
+  expect(troubleOf('CannotDownload', at).other).toBe('upload')
+  // One it doesn't know says where it stopped, and where to read why.
+  expect(troubleOf('Unheard', at)).toMatchObject({
+    title: 'Setting up vps.test stopped at get althar-host.',
+    command: expect.stringContaining('journalctl'),
+  })
+  expect(troubleOf('Unheard', { ...at, at: 99 }).title).toBe('Setting up vps.test stopped at a step.')
 })

@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
+import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 
 import type { HomeSetup } from '../src/homes'
@@ -12,6 +13,8 @@ import { homeSetups, loggedInWith, type Ran, type RunOptions, type SetupSystem }
  */
 
 const HOME = `home_${'2'.repeat(32)}`
+// Where the setup keeps itself in the profile, as the system's paths join it (backslashes on Windows).
+const SAVED = join('/profile', 'home-setup.json')
 const DEVICE = `dev_${'3'.repeat(32)}`
 const KEY_BLOB = Buffer.from('server host key').toString('base64')
 const LOGIN_BLOB = Buffer.from('login key').toString('base64')
@@ -143,10 +146,10 @@ it('sets a home up step by step, downloading the verified release on the server,
   expect(at.system.release).toHaveBeenCalledWith('x64', expect.any(AbortSignal))
   expect(done.log).toContain(`althar-host status: ready, ${HOME}`)
   // Kept until it's connected or dismissed, so a restart of Althar opens on it.
-  expect(JSON.parse(at.files.get('/profile/home-setup.json')!)).toMatchObject({ at: 5, target: { target: 'deploy@vps.test' } })
+  expect(JSON.parse(at.files.get(SAVED)!)).toMatchObject({ at: 5, target: { target: 'deploy@vps.test' } })
   await setups.act('dismiss')
   expect(at.told.at(-1)).toBeNull()
-  await vi.waitFor(() => expect(at.files.has('/profile/home-setup.json')).toBe(false))
+  await vi.waitFor(() => expect(at.files.has(SAVED)).toBe(false))
 })
 
 it('asks the person to trust a server’s key seen the first time, keeps it in known_hosts, and goes on', async () => {
@@ -349,7 +352,7 @@ it('sends althar-host from this computer where the server can’t download it', 
   // Fetched into a folder of its own, sent from there, and the folder gone after.
   expect(at.system.fetchArchive).toHaveBeenCalledWith(
     release,
-    '/scratch/0/althar-host.tar.gz',
+    join('/scratch/0', 'althar-host.tar.gz'),
     expect.any(Function),
     expect.any(AbortSignal),
   )
@@ -485,7 +488,7 @@ it('opens on a setup Althar quit partway through, and resumes it from what the s
       return { stdout: '' }
     },
   })
-  at.files.set('/profile/home-setup.json', JSON.stringify({ target: { target: 'deploy@vps.test' }, at: 3, madeUser: false, upload: false }))
+  at.files.set(SAVED, JSON.stringify({ target: { target: 'deploy@vps.test' }, at: 3, madeUser: false, upload: false }))
   const setups = at.setups()
   expect(await setups.state()).toMatchObject({ phase: 'stopped', at: 3 })
   await setups.act('resume')
@@ -540,14 +543,14 @@ const manifest = {
   format: 1,
   version: '0.14.2',
   sequence: 3,
-  publishedAt: '2026-11-01T00:00:00.000Z',
-  expiresAt: '2027-05-01T00:00:00.000Z',
+  publishedAt: '2025-11-01T00:00:00.000Z',
+  expiresAt: '2026-05-01T00:00:00.000Z',
   platform: 'linux',
   arch: 'x64',
   archive: { url: 'https://example.test/a.tar.gz', sha256: 'b'.repeat(64), bytes: 40_000_000 },
   unpackedBytes: 120_000_000,
 }
-const now = Date.parse('2026-11-20T00:00:00.000Z')
+const now = Date.parse('2026-01-20T00:00:00.000Z')
 
 it('authenticates a release only under a pinned key, for the server’s architecture, while it’s fresh', () => {
   const { pem, envelope } = signed(manifest)
@@ -555,7 +558,7 @@ it('authenticates a release only under a pinned key, for the server’s architec
   const other = signed(manifest)
   expect(() => authenticateRelease(envelope, [other.pem], 'x64', now)).toThrow(/failed its check/)
   expect(() => authenticateRelease(envelope, [pem], 'arm64', now)).toThrow(/failed its check/)
-  expect(() => authenticateRelease(envelope, [pem], 'x64', Date.parse('2027-06-01T00:00:00.000Z'))).toThrow(/failed its check/)
+  expect(() => authenticateRelease(envelope, [pem], 'x64', Date.parse('2026-06-01T00:00:00.000Z'))).toThrow(/failed its check/)
   const tampered = Buffer.from(
     envelope
       .toString()
@@ -569,7 +572,7 @@ it('authenticates a release only under a pinned key, for the server’s architec
 it('finds the newest host release on GitHub, and says there’s none where no key is pinned or none is published', async () => {
   const { pem, envelope } = signed(manifest)
   const fetcher = vi.fn(async (url: string) =>
-    url.includes('api.github.com')
+    new URL(url).host === 'api.github.com'
       ? Response.json([
           {
             tag_name: 'v0.9.0',
@@ -595,6 +598,6 @@ it('finds the newest host release on GitHub, and says there’s none where no ke
   const signal = new AbortController().signal
   expect(await findRelease('x64', { keys: [pem], fetch: fetcher, now: () => now }, signal)).toMatchObject({ version: '0.14.2' })
   expect(fetcher).toHaveBeenLastCalledWith('https://x.test/ok', expect.anything())
-  await expect(findRelease('x64', { keys: [], fetch: fetcher }, signal)).rejects.toMatchObject({ code: 'NoRelease' })
-  await expect(findRelease('arm64', { keys: [pem], fetch: fetcher }, signal)).rejects.toMatchObject({ code: 'NoRelease' })
+  await expect(findRelease('x64', { keys: [], fetch: fetcher, now: () => now }, signal)).rejects.toMatchObject({ code: 'NoRelease' })
+  await expect(findRelease('arm64', { keys: [pem], fetch: fetcher, now: () => now }, signal)).rejects.toMatchObject({ code: 'NoRelease' })
 })
