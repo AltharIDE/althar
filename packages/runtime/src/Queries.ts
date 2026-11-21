@@ -2289,16 +2289,22 @@ export class Queries extends Context.Service<
       /** A task's card, as its item in the coordinator's thread shows it. */
       /**
        * What waits on a task's branch for Ship (a task is a conversation plus parts, "A tweak waits for Ship"): since its first
-       * hold, and how many commits, those ahead of its open pull requests and `after`, those after its last merged or closed or
-       * in none yet. Undefined while nothing is held: read only then, so a board of tasks holding nothing asks git nothing more.
+       * hold, and how many commits, those ahead of its open pull requests and those in none yet. The latter are already known
+       * when it has a pull request history. Read them for a branch with no pull request only if it has a hold.
        */
-      const heldOf = (taskId: string, after: number) =>
+      const heldOf = (taskId: string, after: number | undefined) =>
         Effect.gen(function* () {
           const changes = yield* Changes
           const [first] = yield* changes.holds(taskId).pipe(Effect.orElseSucceed(() => []))
           if (first === undefined) return undefined
           const open = yield* changes.aheadOfOpen(taskId).pipe(Effect.orElseSucceed(() => []))
-          const commits = open.reduce((sum, one) => sum + one.count, 0) + after
+          const unpublished =
+            after ??
+            (yield* changes.unshipped(taskId, { kept: true }).pipe(Effect.orElseSucceed(() => []))).reduce(
+              (sum, one) => sum + one.commits.length,
+              0,
+            )
+          const commits = open.reduce((sum, one) => sum + one.count, unpublished)
           // Held with nothing left to send, as where the person pushed it by hand, it waits on nothing: Ship lets go of it.
           return commits === 0 ? undefined : { since: first.heldAt, commits }
         })
@@ -2737,7 +2743,7 @@ export class Queries extends Context.Service<
                 }
           // Held for Ship (a task is a conversation plus parts, "A tweak waits for Ship"): what the person's turns with its lead
           // committed after its plan waits on its branch, on its open pull requests or after the last, and only Ship sends it up.
-          const held = yield* heldOf(taskId, unshipped?.commits ?? 0)
+          const held = yield* heldOf(taskId, shipping?.changes === 0 ? undefined : (unshipped?.commits ?? 0))
           // A reply the person hasn't seen (a task is a conversation plus parts): its lead answered a turn their words began after
           // its plan, since they last had the task open. It waits in Needs you until they open it, settled or not.
           const replied = yield* repliedAt(taskId)
