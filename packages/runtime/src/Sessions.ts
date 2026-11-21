@@ -553,7 +553,7 @@ export class Sessions extends Context.Service<
           AND NOT EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id AND f.type = 'provider_session.stop_requested'
             AND (json_extract(f.payload, '$.state') <> 'completed' OR coalesce(json_extract(f.payload, '$.reason'), '') NOT IN ('shutdown', 'idle')))
           AND ((s.state = 'completed' AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
-              AND f.type = 'provider_session.completed' AND json_extract(f.payload, '$.reason') = 'shutdown'))
+              AND f.type = 'provider_session.completed' AND json_extract(f.payload, '$.reason') IN ('shutdown', 'idle')))
             OR (s.state IN ('lost', 'failed') AND EXISTS (SELECT 1 FROM record_events f WHERE f.aggregate_type = 'provider_session' AND f.aggregate_id = s.id
               AND f.type IN ('provider_session.lost', 'provider_session.failed') AND json_extract(f.payload, '$.reason') = 'runtime_restarted')))`
       const recovery = yield* recoverable.pipe(Effect.orDie)

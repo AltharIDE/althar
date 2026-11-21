@@ -173,6 +173,52 @@ it.effect('wakes queued input accepted after retirement starts but before the pr
   )
 })
 
+it.effect('recovers input queued for a retired coordinator if the runtime restarts before its wake', () =>
+  onTestClock(
+    Effect.gen(function* () {
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-idle-recovery-')), 'profile.sqlite')
+      const saved = yield* Effect.gen(function* () {
+        const projects = yield* Projects
+        const coordinator = yield* Coordinator
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+        const threadId = yield* coordinator.thread(project.projectId)
+        yield* coordinator.say({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId,
+          body: 'Hello',
+          disposition: 'after_current',
+        })
+        const first = Option.getOrThrow(
+          yield* until(sessions.running(threadId), (one) => Option.isSome(one) && one.value.turnEndedAt !== null),
+        )
+        yield* TestClock.adjust(Duration.seconds(25))
+        yield* until(sessions.running(threadId), Option.isNone)
+        const input = yield* sessions.send({
+          envelope: yield* Runtime.envelope('thread.send', {}),
+          threadId,
+          body: 'Waiting across restart',
+          sender: { kind: 'window' },
+        })
+        const [queued] = yield* sql<{ state: string }>`SELECT state FROM user_inputs WHERE id = ${input.inputId}`
+        assert.strictEqual(queued?.state, 'queued')
+        yield* sql`VACUUM INTO ${file}`
+        return { threadId, inputId: input.inputId, accountId: first.accountId }
+      }).pipe(Effect.provide(runtime(':memory:', {}, { idle: { coordinator: Duration.seconds(10) } })))
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const sessions = yield* Sessions
+        yield* until(
+          sql<{ state: string }>`SELECT state FROM user_inputs WHERE id = ${saved.inputId}`,
+          (rows) => rows[0]?.state === 'delivered',
+        )
+        assert.strictEqual(Option.getOrThrow(yield* sessions.running(saved.threadId)).accountId, saved.accountId)
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  ),
+)
+
 it.effect('keeps a coordinator with a turn and queued input, then delivers that input', () => {
   let waiting = false
   return onTestClock(
