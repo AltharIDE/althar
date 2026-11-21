@@ -304,19 +304,20 @@ characters and all of them at 20,000, with where the rest is.
 ### Compaction and recovery
 
 Althar uses ACP usage updates to decide when the coordinator reaches 80%
-of its window. Before the next queued turn, a supported agent receives its
-own Compact command as a turn without user input. The same session then
-reads the queue alongside the current project records. A compaction that
-ends between turns also refreshes those records on the next ordinary turn.
+of its window. The delivery loop can send a supported agent its own Compact
+command as soon as the ordinary turn ends, and a late usage update wakes the
+loop if the coordinator is already idle. The command carries no user input.
+The first ordinary turn after compaction includes the coordinator's role and
+current project records alongside the queued messages.
 See [ADR-031](../decisions/coordinator.md#compaction-and-session-recovery).
 
 ```mermaid
 flowchart TD
-  A[Next coordinator turn] --> B{Session available?}
+  A[Turn ends or idle usage update arrives] --> B{Session available?}
   B -->|Lost| C[Start a fresh session with Althar's recovery brief]
   B -->|Available and full| D[Ask the agent to compact between turns]
   B -->|Available| E[Read the next turn]
-  D --> F[Keep the session and refresh project records after compaction]
+  D --> F[Keep the session and restore role and project records on the next turn]
   F --> E
   C --> E
 ```

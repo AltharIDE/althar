@@ -7,7 +7,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { acceptingOf } from './admission'
 import type { Artifacts } from './Artifacts'
 import { touchCard, touchTask } from './cards'
-import { canCompact, COMPACT, contextFull } from './compact'
+import { COMPACT, contextFull } from './compact'
 import { Agents, type RuntimeConfig } from './Config'
 import { coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, modelNamer } from './coordinatorNews'
@@ -32,6 +32,7 @@ import {
   type ThreadContext,
   type Why,
   asTold,
+  automaticCompactionDue,
   compactedSpan,
   compactedWords,
   errorClassOf,
@@ -90,6 +91,7 @@ export interface SessionTurnsDependencies {
   readonly live: Live['Service']
   readonly loadThread: (
     threadId: string,
+    options?: { restoreFolders?: boolean },
   ) => Effect.Effect<
     ThreadContext,
     SqlError.SqlError | GitFailed | NotFound | Schema.SchemaError | RowNotFound | RevisionConflict | TaskRefused,
@@ -332,18 +334,11 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       const compactAt = queued.findIndex((input) => input.body === COMPACT)
       const beforeCompact = compactAt === -1 ? queued : queued.slice(0, compactAt)
       const manualCompact = compactAt >= 0 && beforeCompact.every((input) => input.state === 'noted')
-      // Ask only when real input is about to be read. A queued Compact keeps its place in the person's order.
+      // Compact a full coordinator as its turn ends. A lead waits for its next input, and a queued Compact keeps its place.
       const autoCompact =
         compactAt === -1 &&
-        running.brief === undefined &&
-        running.handover === 'none' &&
-        queued.some((input) => input.state === 'queued') &&
-        !running.compactAttempted &&
-        !running.nativeCompacting &&
-        running.callsOpen.size === 0 &&
-        canCompact(running.entry.definition.id) &&
-        (thread.role === 'coordinator' || (thread.role === 'task' && thread.review === null && thread.helper === undefined)) &&
-        contextFull(running.context, thread.role === 'task')
+        automaticCompactionDue(running) &&
+        (thread.role === 'coordinator' || queued.some((input) => input.state === 'queued'))
       const compacting = manualCompact || autoCompact
       const selected = autoCompact ? [] : manualCompact ? queued.slice(compactAt, compactAt + 1) : beforeCompact
       const before = running.context
@@ -394,13 +389,12 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
       const compacted = compacting ? undefined : running.compacted
       const records =
         compacted !== undefined && brief === undefined && becameWork === null
-          ? yield* dependencies
-              .afterCompaction(thread)
-              .pipe(
-                Effect.catchCause((cause) =>
-                  Effect.as(Effect.logWarning('Could not refresh Althar records after compaction', cause), null),
-                ),
-              )
+          ? yield* Effect.flatMap(
+              thread.role === 'task' ? loadThread(thread.threadId, { restoreFolders: false }) : Effect.succeed(thread),
+              dependencies.afterCompaction,
+            ).pipe(
+              Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not refresh Althar records after compaction', cause), null)),
+            )
           : null
       // The lead is told how its worktrees were set up, in its brief.
       const setUp = thread.role === 'task' && brief !== undefined ? yield* setups.told(thread.taskId) : null
@@ -455,6 +449,7 @@ export const makeSessionTurns = (dependencies: SessionTurnsDependencies) => {
             const still = waiting.filter((input) => !running.blockedInputs?.has(input.id))
             if (
               inputBatches.pending(thread.threadId) ||
+              (autoCompact && !automaticCompactionDue(running)) ||
               still.length !== queued.length ||
               still.some((input, index) => input.id !== queued[index]?.id)
             )

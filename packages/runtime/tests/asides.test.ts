@@ -397,6 +397,8 @@ describe('an aside opened with +', () => {
           assert.strictEqual(again, 'Look again. [context:25/1000000]')
           const afterCompact = yield* said('And now? [context:1/1000000]')
           assert.include(afterCompact, 'Current Althar records after compaction.')
+          assert.include(afterCompact, "You are an aside of this project's coordinator")
+          assert.notInclude(afterCompact, "When you have done the task, call Althar's finish_step tool")
           assert.notInclude(afterCompact, 'The thread so far')
           assert.notInclude(afterCompact, WORK)
 

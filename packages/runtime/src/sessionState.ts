@@ -7,7 +7,7 @@ import { Crypto, Deferred, Duration, Effect, Option, Queue, Schema, Scope, Semap
 import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
-import { COMPACT, contextFull } from './compact'
+import { canCompact, COMPACT, contextFull } from './compact'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import type { CoordinatorFolder } from './coordinatorFolder'
 import { Instance } from './Instance'
@@ -434,8 +434,25 @@ export const BASELINE_WITHIN = Duration.seconds(5)
 /** The longest a session that closes spends stopping what it left running, finding it included, before its agent stops. */
 export const LEFT_STOPS_WITHIN = Duration.seconds(15)
 
+export const automaticCompactionDue = (running: Running) => {
+  const { thread } = running
+  return (
+    !running.stopping &&
+    running.brief === undefined &&
+    running.handover === 'none' &&
+    running.deliveryHeld === null &&
+    !running.compactAttempted &&
+    !running.nativeCompacting &&
+    running.callsOpen.size === 0 &&
+    (thread.role === 'coordinator' || (thread.role === 'task' && thread.review === null && thread.helper === undefined)) &&
+    contextFull(running.context, thread.role === 'task') &&
+    canCompact(running.entry.definition.id)
+  )
+}
+
 export const markCompacted = (running: Running) => {
-  if (running.thread.role === 'coordinator' || (running.thread.role === 'task' && running.thread.review === null))
+  const { thread } = running
+  if (thread.role === 'coordinator' || (thread.role === 'task' && thread.review === null && thread.helper === undefined))
     running.compacted = Symbol()
   running.timeTold = undefined
 }
@@ -464,11 +481,12 @@ export type StopRequest =
   | { readonly state: 'superseded'; readonly by: string }
 
 /**
- * Why a session's brief is written: a start, another agent taking over, or
- * the same one started afresh because its folder moved or its session was lost.
+ * Why a session's brief is written: a start, another agent taking over,
+ * a fresh session after loss or a move, or a refresh after compaction.
  */
 export type Why =
   | { readonly kind: 'start' }
+  | { readonly kind: 'compaction' }
   | { readonly kind: 'takeover'; readonly from: string | undefined }
   | { readonly kind: 'handover'; readonly lost?: boolean }
 

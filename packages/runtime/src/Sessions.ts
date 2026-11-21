@@ -835,7 +835,7 @@ export class Sessions extends Context.Service<
           if (abandoned !== undefined) return yield* new TaskRefused({ taskId: abandoned.taskId, why: 'abandoned' })
         })
 
-      const loadThread = (threadId: string) =>
+      const loadThread = (threadId: string, { restoreFolders = true }: { restoreFolders?: boolean } = {}) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [kind] = yield* sql<{ kind: string; projectId: ProjectId; projectName: string }>`
@@ -847,7 +847,7 @@ export class Sessions extends Context.Service<
           const helped = kind?.kind === 'step' ? yield* helperThreadOf(threadId) : undefined
           if (helped !== undefined) return helped
           // A finished task's folder that was removed comes back before an agent starts in it, and is set up again (ADR-056).
-          if (kind !== undefined && kind.kind !== 'coordinator') {
+          if (restoreFolders && kind !== undefined && kind.kind !== 'coordinator') {
             const back = yield* bringBackFor(threadId, instance.systemId)
             if (back !== null) yield* setups.begin(back)
           }

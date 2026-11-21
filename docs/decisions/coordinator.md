@@ -131,16 +131,17 @@ copies; a change to code is still a task.
 
 The coordinator keeps the same conversation and session as its context fills.
 If the agent compacts on its own, Althar carries on with the agent's summary.
-At 80% of the window, Althar can send the agent's own Compact command before
-its next queued turn. The command runs by itself between turns, and the
-queued messages follow in order. An idle session can wait for its next
-message, and a failed automatic request leaves the session available for
-the next turn.
+At 80% of the window, Althar sends the agent's own Compact command while the
+coordinator is idle, including when a late usage update reports that it is
+full. The command runs by itself between turns, and queued messages follow
+in order. A failed automatic request leaves the session available for the
+next turn.
 
-After compaction the next ordinary turn gets current Althar records alongside
-the agent's summary. They include the project overview, notes, repository
-instructions, open and recently finished tasks, and open errands. The full
-thread remains available through `read_thread` and in the window.
+After compaction the next ordinary turn gets the coordinator's role and
+current Althar records alongside the agent's summary. The records include the
+project overview, notes, repository instructions, open and recently finished
+tasks, and open errands. The full thread remains available through
+`read_thread` and in the window.
 
 If the agent has lost its session, Althar starts it afresh on the same account,
 model and effort. The replacement receives its role, the project records, the

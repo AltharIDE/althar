@@ -180,10 +180,10 @@ describe('compacting the coordinator', () => {
         { key: 'after-checks', tool: 'test_asked', target: 'repo/#17', request: {}, waits: [{ kind: 'checks', target: 'head-a' }] },
       ])
       yield* sessions.interrupt(threadId)
-      yield* answered(threadId, 2)
+      yield* answered(threadId, 3)
       yield* callTool(access, 'keep_note', { note: 'Ship on Thursdays.' })
       yield* say(threadId, 'And now? [context:95]')
-      yield* answered(threadId, 4)
+      yield* answered(threadId, 5)
       yield* say(threadId, 'Go on.')
       yield* answered(threadId, 6)
 
@@ -199,7 +199,9 @@ describe('compacting the coordinator', () => {
         { origin: 'system', inputs: 0 },
         { origin: 'system', inputs: 0 },
       ])
+      assert.include(turns[3]?.prompt, 'Ship on Thursdays.')
       const next = turns[5]?.prompt ?? ''
+      assert.include(next, 'You are the coordinator of the project')
       assert.include(next, 'Ship on Thursdays.')
       assert.include(next, errand)
       assert.include(next, 'Open errands (only their recorded next steps may act in a news turn)')
@@ -243,17 +245,12 @@ describe('compacting the coordinator', () => {
 
   it.live('uses late usage and lets an agent’s own compaction satisfy the threshold', () =>
     Effect.gen(function* () {
-      const sessions = yield* Sessions
       const { threadId } = yield* opened
       yield* say(threadId, 'Fill up. [context-later:95]')
-      const first = yield* answered(threadId, 1)
-      yield* until(
-        Effect.map(sessions.running(threadId), (running) => Option.isSome(running) && contextFull(running.value.context, false)),
-        Boolean,
-      )
-      assert.lengthOf(yield* prompts(threadId), 1)
+      const first = yield* answered(threadId, 2)
+      assert.strictEqual((yield* prompts(threadId))[1]?.prompt, COMPACT)
       yield* say(threadId, 'To the next subject. [context:85]')
-      yield* answered(threadId, 3)
+      yield* answered(threadId, 4)
       yield* say(threadId, 'Go on.')
       yield* answered(threadId, 5)
       yield* say(threadId, 'Agent summarizes on its own. [context-compacted] [context:95]')
@@ -264,6 +261,7 @@ describe('compacting the coordinator', () => {
       assert.strictEqual(turns[1]?.prompt, COMPACT)
       assert.strictEqual(turns[3]?.prompt, COMPACT)
       assert.include(turns[6]?.prompt, 'Current Althar records after compaction.')
+      assert.include(turns[6]?.prompt, 'You are the coordinator of the project')
       assert.isTrue(turns.every((turn) => turn.providerSessionId === first))
     }).pipe(Effect.provide(withQueries())),
   )

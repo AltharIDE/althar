@@ -195,7 +195,7 @@ describe('an agent that offers no choice of model, further on', () => {
       yield* say('hello')
       yield* until(turns(threadId), (rows) => rows.length === 1 && rows[0]?.state === 'completed')
       yield* say('Where are we? [context:85]')
-      yield* until(turns(threadId), (rows) => rows.length === 2 && rows[1]?.state === 'completed')
+      yield* until(turns(threadId), (rows) => rows.length === 3 && rows[2]?.state === 'completed')
       yield* say('Go on.')
       yield* until(turns(threadId), (rows) => rows.length === 4 && rows[3]?.state === 'completed')
       assert.strictEqual((yield* turns(threadId))[2]?.prompt, '/compact')

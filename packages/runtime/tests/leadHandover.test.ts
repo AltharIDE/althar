@@ -115,7 +115,7 @@ describe('compacting a full lead', () => {
     assert.isFalse(contextFull({ used: 500_000, size: 0 }, true))
   })
 
-  it.live('compacts before the next turn, keeps the session, and sends fresh project notes', () =>
+  it.live('compacts before the next turn and restores the task brief and current project notes in the same session', () =>
     Effect.gen(function* () {
       const projectId = yield* opened
       const task = yield* started(projectId, 'Do it. [lead:finish]')
@@ -134,6 +134,8 @@ describe('compacting a full lead', () => {
         [2, 4],
       )
       assert.isTrue(turns.every((turn) => turn.providerSessionId === first?.id))
+      assert.include(turns[3]?.prompt, 'Task: Lead\n\nDo it. [lead:finish]')
+      assert.include(turns[3]?.prompt, "When you have done the task, call Althar's finish_step tool")
       assert.include(turns[3]?.prompt, 'Ship on Thursdays.')
       assert.include(turns[3]?.prompt, 'Open errands concerning this task')
       assert.match(turns[3]?.prompt ?? '', /\n\nAnd now\? \[context:80\/200000\]$/)
