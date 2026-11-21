@@ -1,4 +1,4 @@
-import { isAgentDefault, modelName } from '@althar/contracts'
+import { isAgentDefault, modelName, standsFor } from '@althar/contracts'
 import {
   type AgentDefinition,
   type ConfigOption,
@@ -588,16 +588,22 @@ export class Limits extends Context.Service<
           }
           const otherMaker = makerFor(input.other)
           const fromMaker = makerFor(input.from ?? input.planned)
-          // Which model the work was on, whichever agent offers it: by the list's id, or by its name where the list doesn't know it.
+          // Which model the work was on, whichever agent offers it: by the agent's id for it without its provider
+          // (`opencode-go/gpt-6.2-sol` is Codex's `gpt-6.2-sol`), by its name as people know it, and by the list's id.
           const keysOf = (definition: AgentDefinition, model: { readonly id: string; readonly name: string }) => {
             const fact = facts.of(definition, model)
-            return [modelKey(null, definition, model), ...(fact === null ? [] : [fact.slug])]
+            return [
+              `id:${model.id.slice(model.id.lastIndexOf('/') + 1).toLowerCase()}`,
+              modelKey(null, definition, model),
+              ...(fact === null ? [] : [fact.slug]),
+            ]
           }
           const fromKeys = (() => {
             const choice = input.from ?? input.planned
             const agent = agents.list.find((entry) => entry.definition.id === choice?.agentId)
             const offered = catalog.find((one) => one.agentId === choice?.agentId)
-            const id = choice?.model ?? offered?.model ?? null
+            // An agent's own default is the model its entry names, where it names one of the agent's.
+            const id = standsFor(offered?.models ?? [], choice?.model ?? offered?.model ?? null)
             if (agent === undefined || id === null) return []
             const model = offered?.models.find((one) => one.id === id)
             if (model !== undefined && isAgentDefault(model)) return []
@@ -687,12 +693,12 @@ export class Limits extends Context.Service<
           const comparable = (candidate: (typeof found)[number]) =>
             candidate.score >=
             Math.max(...found.filter((one) => one.ownWork === candidate.ownWork && one.low === candidate.low).map((one) => one.score)) - 5
-          // The model the work was on, on another agent with room, before any other: the step stays on the model it was
-          // given, a review's maker included, as it was planned so. Another model only where none of its ways has room.
-          const stays = (candidate: (typeof found)[number]) => candidate.sameModel && !candidate.low
+          // The model the work was on, on another agent with usage left, before any other: the step stays on the model it
+          // was given, a review's maker included, as it was planned so; of those, one not nearly out first. Another model
+          // only where none of its ways has room. Every one found has some left: one with none isn't found.
           return found.toSorted(
             (a, b) =>
-              Number(stays(b)) - Number(stays(a)) ||
+              Number(b.sameModel) - Number(a.sameModel) ||
               Number(a.ownWork) - Number(b.ownWork) ||
               Number(a.low) - Number(b.low) ||
               Number(comparable(b)) - Number(comparable(a)) ||

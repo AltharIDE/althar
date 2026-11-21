@@ -30,8 +30,9 @@ import { Accounts } from './Accounts'
  * to read its levels, and stops it, recording nothing, as a sign-in check
  * does. Until it has said, the latest session it had says, for the model it
  * was on, and what it is on is always what that session was last set to.
- * Once it has said, a model a session offers since is offered too: Codex
- * answers with an older list of its own where OpenAI's doesn't come in time.
+ * Once it has said, a model a session offered in the day before or offers
+ * since is offered too: Codex answers with an older list of its own where
+ * OpenAI's doesn't come in time, a restart's asking included.
  * What can't be read is left empty; a picker offers the agent's own default.
  * An agent that couldn't say, as one asked before its sign-in is done, is
  * asked again once it is found signed in, and otherwise at a read a minute
@@ -77,6 +78,8 @@ const WALK_TIMEOUT = Duration.seconds(40)
 
 /** How long after an agent couldn't say its models it is asked again, at the next read. */
 const ASK_AGAIN = Duration.minutes(1)
+/** How far before an agent's asking its sessions still say what it offers, where the asking got an older list. */
+const RECENT = 24 * 60 * 60 * 1000
 
 // Settings kept before names were, by their values alone.
 const choices = (option: ConfigOption | undefined) =>
@@ -222,11 +225,13 @@ export class Models extends Context.Service<
       /* What asking each agent found this launch; an agent being asked has no entry yet. */
       const probed = new Map<string, Offered | null>()
       /*
-       * The models sessions offered since each agent was asked, and the latest session read for it. An agent that can't
-       * reach its maker as it is asked answers with an older list of its own (Codex, its request for OpenAI's timed out),
-       * which mustn't hide a model its sessions offer for the rest of the launch.
+       * The models sessions offered around each agent's asking. An agent that can't reach its maker as it is asked answers
+       * with an older list of its own (Codex, where OpenAI's doesn't come in time), which mustn't hide a model its sessions
+       * offer: those of the day before it was asked (a restart's asking may get the older list where the last sessions
+       * didn't) and those since. Sessions are read by id once they have said their settings, which is as they start, not
+       * in the order they were made: `from` passes only those that can't say anything any more.
        */
-      const since = new Map<string, { after: string; readonly models: Map<string, OfferedModel> }>()
+      const since = new Map<string, { from: string; readonly read: Map<string, string>; readonly models: Map<string, OfferedModel> }>()
       const lastEntries = new Map<string, AgentEntry>()
       /* When each agent that couldn't say was asked, so it is asked again a while on. */
       const failedAt = new Map<string, number>()
@@ -250,20 +255,35 @@ export class Models extends Context.Service<
         failedAt.delete(agentId)
         probing.delete(agentId)
       }
-      /** What it offered when asked, and before those, any model a session offered since that the asking didn't. */
+      /** What it offered when asked, and before those, any model a session offered around the asking that the asking didn't. */
       const withLater = (definition: AgentDefinition, asked: Offered) =>
         Effect.gen(function* () {
           const later = since.get(definition.id)
           if (later === undefined) return asked.models
-          // Only the sessions not read yet: the reads stay as quick however long Althar runs.
-          const rows = yield* sql<{ config: string; startedAt: string }>`
-            SELECT config, started_at FROM provider_sessions WHERE agent_id = ${definition.id} AND config IS NOT NULL
-              AND started_at > ${later.after}
-            ORDER BY started_at`
-          for (const row of rows) {
-            later.after = row.startedAt
-            for (const model of modelsOf(definition, settingsIn(row.config)).models)
+          // Settings are '{}' until the session has started: only those that said them, and each once.
+          const said = yield* sql<{ id: string; startedAt: string }>`
+            SELECT id, started_at FROM provider_sessions
+            WHERE agent_id = ${definition.id} AND started_at >= ${later.from} AND config <> '{}'`
+          const unread = said.filter((row) => !later.read.has(row.id))
+          for (const row of unread) {
+            const [one] = yield* sql<{ config: string }>`SELECT config FROM provider_sessions WHERE id = ${row.id}`
+            later.read.set(row.id, row.startedAt)
+            if (one === undefined) continue
+            for (const model of modelsOf(definition, settingsIn(one.config)).models)
               if (model.efforts.length > 0 || !later.models.has(model.id)) later.models.set(model.id, model)
+          }
+          // Onwards from the first session still starting, or a minute before the latest said, so the reads stay small.
+          if (unread.length > 0) {
+            const [pending] = yield* sql<{ first: string | null }>`
+              SELECT MIN(started_at) AS first FROM provider_sessions
+              WHERE agent_id = ${definition.id} AND started_at >= ${later.from} AND config = '{}' AND ended_at IS NULL`
+            const latest = Math.max(...said.map((row) => Date.parse(row.startedAt)))
+            const margin = new Date(latest - 60_000).toISOString()
+            const next = pending?.first != null && pending.first < margin ? pending.first : margin
+            if (next > later.from) {
+              later.from = next
+              for (const [id, at] of later.read) if (at < next) later.read.delete(id)
+            }
           }
           const offered = new Set(asked.models.map((model) => model.id))
           const extra = [...later.models.values()].filter((model) => !offered.has(model.id))
@@ -353,8 +373,12 @@ export class Models extends Context.Service<
               if (found === null) failedAt.set(entry.definition.id, yield* Clock.currentTimeMillis)
               else {
                 failedAt.delete(entry.definition.id)
-                // Sessions started as it was asked count too: one may have reached the maker the asking couldn't.
-                since.set(entry.definition.id, { after: askedAt, models: new Map() })
+                // Sessions of the day before it was asked count too, and those since: one may have reached the maker the asking couldn't.
+                since.set(entry.definition.id, {
+                  from: new Date(Date.parse(askedAt) - RECENT).toISOString(),
+                  read: new Map(),
+                  models: new Map(),
+                })
               }
             }),
           ),

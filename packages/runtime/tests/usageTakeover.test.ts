@@ -453,6 +453,68 @@ describe('automatic usage takeover by model', () => {
     }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
   )
 
+  it.live('keeps the model through a route nearly out where the one before is out, before another model with more room', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask()
+      const limits = yield* Limits
+      const accounts = yield* Accounts
+      const sql = yield* SqlClient.SqlClient
+      // Codex has GPT Strong with 4% left; Claude Code has Claude Strong with plenty.
+      const [account] = yield* accounts.of('codex')
+      yield* sql`INSERT INTO plan_usage_readings ${sql.insert({
+        accountId: account!.id,
+        agentId: 'codex',
+        source: 'agent',
+        windows: JSON.stringify([{ kind: 'weekly', usedPercent: 96, resetsAt: new Date(Date.now() + 3_600_000).toISOString() }]),
+        observedAt: new Date().toISOString(),
+      })}`
+      const input = { besides: ['opencode'], projectId: task.projectId, planned: { agentId: 'opencode', model: goSol.id } }
+      // Out of usage on OpenCode Go: GPT Strong on Codex has some left, so the work stays on its model there.
+      const same = yield* limits.free(input)
+      assert.deepInclude(same, { agentId: 'codex', model: sol.id })
+      assert.isUndefined(same?.otherModel)
+      // Nearly out moves only to one with room: there, it goes to another model, and says so.
+      assert.deepInclude(yield* limits.free({ ...input, withRoom: true }), { agentId: 'claude-code', model: claude.id, otherModel: true })
+    }).pipe(Effect.provide(withAgents({ opencode: { models: [goSol, third] } }))),
+  )
+
+  it.live('knows the model by its id where agents name it differently and the model list doesn’t know it', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask()
+      const limits = yield* Limits
+      const input = { besides: ['opencode'], projectId: task.projectId, planned: { agentId: 'opencode', model: 'opencode-go/gpt-fresh' } }
+      const same = yield* limits.free(input)
+      assert.deepInclude(same, { agentId: 'codex', model: 'gpt-fresh' })
+      assert.isUndefined(same?.otherModel)
+    }).pipe(
+      Effect.provide(
+        withAgents({
+          codex: { models: [weak, { id: 'gpt-fresh', name: 'GPT Fresh Preview' }] },
+          opencode: { models: [{ id: 'opencode-go/gpt-fresh', name: 'OpenCode Go/Fresh' }, third] },
+        }),
+      ),
+    ),
+  )
+
+  it.live('reads an agent’s own default as the model it names, for the same model and for the line that it is another', () =>
+    Effect.gen(function* () {
+      const task = yield* startTask()
+      const limits = yield* Limits
+      const models = yield* Models
+      // OpenCode is on its own default, which stands for its GPT Strong.
+      const input = { besides: ['opencode'], projectId: task.projectId, planned: { agentId: 'opencode', model: 'default' } }
+      const same = yield* limits.free(input)
+      assert.deepInclude(same, { agentId: 'codex', model: sol.id })
+      assert.isUndefined(same?.otherModel)
+      yield* models.setModelBlocked({ agentId: 'codex', model: sol.id, blocked: true })
+      assert.deepInclude(yield* limits.free(input), { agentId: 'claude-code', model: claude.id, otherModel: true })
+    }).pipe(
+      Effect.provide(
+        withAgents({ opencode: { models: [{ id: 'default', name: 'Default (recommended)', description: goSol.name }, goSol, third] } }),
+      ),
+    ),
+  )
+
   it.live('keeps comparable strength ahead of a weak or unscored different maker', () =>
     Effect.gen(function* () {
       const task = yield* startTask()

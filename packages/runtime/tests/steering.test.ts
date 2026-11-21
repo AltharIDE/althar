@@ -248,7 +248,7 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
       assert.strictEqual(ready?.lead, 'opencode')
       assert.include(
         yield* said(task.threadId),
-        `Small on Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. No other agent has room on that model, so Small on Fake opencode, a different model, takes the fixes instead.`,
+        `Small on Fake claude-code has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Small on Fake opencode takes the fixes instead.`,
       )
       assert.deepStrictEqual(
         (yield* sessionsOn(task.threadId)).map((session) => session.agentId),
@@ -405,7 +405,7 @@ describe('a settle step on a lead that fell nearly out since it worked', () => {
       assert.isTrue(
         (yield* said(task.threadId)).some((title) =>
           title.endsWith(
-            `has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. No other agent has room on that model, so Small on Fake opencode, a different model, takes the fixes instead.`,
+            `has 3% of its five-hour limit left, until ${whenWords(resetsAt, Date.now())}. Small on Fake opencode takes the fixes instead.`,
           ),
         ),
       )

@@ -43,6 +43,21 @@ const SEEN_ON_LARGE = {
   ],
 }
 
+/** A runtime whose only agent is Codex, each start of it given what `options` says then. */
+const codexOnly = (database: string, options: () => FakeAgentOptions) =>
+  Runtime.layer({
+    database,
+    worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
+    appVersion: '0.0.0-test',
+    deviceName: 'Test Mac',
+    agents: Layer.succeed(
+      Agents,
+      Agents.from([{ definition: definition('codex'), transport: () => ({ _tag: 'InProcess', agent: fakeAgent(options()) }) }]),
+    ),
+    secrets: Secrets.memory(),
+    connectors: fakeConnectors({}),
+  })
+
 /** A task's thread, for a session to run on. */
 const thread = Effect.gen(function* () {
   const projects = yield* Projects
@@ -344,6 +359,73 @@ describe('the models each agent offers', () => {
         }),
       ),
     )
+  })
+
+  it.live('keep a model the sessions of the day before offered where a restart’s asking gets the older list', () => {
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-models-')), 'althar.sqlite')
+    const older = { models: [{ id: SMALL.id, name: SMALL.name }] }
+    const codex = Effect.flatMap(Models, (models) => Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')))
+    return Effect.gen(function* () {
+      // The launch before: its session reached OpenAI, and offered the newer model.
+      yield* Effect.gen(function* () {
+        yield* until(codex, (found) => found[0]?.probing === false)
+        yield* (yield* Sessions).start({ threadId: yield* thread, agentId: 'codex', model: 'large' })
+      }).pipe(Effect.provide(codexOnly(database, () => ({}))))
+      // Started again, Codex answers the asking with its older list; the session of a moment ago still says what it offers.
+      const [asked] = yield* until(codex, (found) => found[0]?.probing === false).pipe(Effect.provide(codexOnly(database, () => older)))
+      assert.deepStrictEqual(
+        asked?.models.map((model) => model.id),
+        ['large', 'small'],
+      )
+    })
+  })
+
+  it.live('read a session that says its settings after a later one did, and one started in the same millisecond', () => {
+    const older = { models: [{ id: SMALL.id, name: SMALL.name }] }
+    const offering = (ids: ReadonlyArray<string>) =>
+      JSON.stringify({
+        options: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: ids[0],
+            values: ids,
+            choices: ids.map((id) => ({ value: id, name: id.toUpperCase() })),
+          },
+        ],
+      })
+    return Effect.gen(function* () {
+      const models = yield* Models
+      const sql = yield* SqlClient.SqlClient
+      const codex = Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex'))
+      const offered = Effect.map(codex, (found) => found[0]?.models.map((model) => model.id))
+      yield* until(codex, (found) => found[0]?.probing === false)
+      const threadId = yield* thread
+      const [where] = yield* sql<{ projectId: string }>`SELECT project_id FROM threads WHERE id = ${threadId}`
+      const at = Date.now() + 1000
+      const session = (id: string, startedAt: number, config: string, state: string) =>
+        sql`INSERT INTO provider_sessions ${sql.insert({
+          id,
+          projectId: where!.projectId,
+          threadId,
+          agentId: 'codex',
+          config,
+          state,
+          startedAt: new Date(startedAt).toISOString(),
+        })}`
+      // A slow session made first says nothing yet; one made after it has said its settings, and is read.
+      yield* session(`sess_${'a'.repeat(32)}`, at, '{}', 'starting')
+      yield* session(`sess_${'b'.repeat(32)}`, at + 5, offering(['small']), 'completed')
+      assert.deepStrictEqual(yield* offered, ['small'])
+      // The first says its settings once it has started: what it offers counts, though a later one was read before it.
+      yield* sql`UPDATE provider_sessions SET config = ${offering(['small', 'large'])}, state = 'completed' WHERE id = ${`sess_${'a'.repeat(32)}`}`
+      assert.deepStrictEqual(yield* offered, ['large', 'small'])
+      // One made in the same millisecond as one read already is read too.
+      yield* session(`sess_${'c'.repeat(32)}`, at + 5, offering(['huge']), 'completed')
+      assert.sameMembers((yield* offered) ?? [], ['huge', 'large', 'small'])
+    }).pipe(Effect.provide(codexOnly(':memory:', () => older)))
   })
 
   it.live('aren’t asked of an agent that is signed out, nor again of one that couldn’t say', () =>

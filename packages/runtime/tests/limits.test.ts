@@ -210,6 +210,10 @@ describe('an agent out of usage', () => {
       const before = yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title: 'Earlier' })
       yield* sessions.start({ threadId: before.threadId, agentId: 'codex', model: 'large' })
       yield* sessions.stop(before.threadId)
+      // No other agent offers the lead's own model, which would come first.
+      const models = yield* Models
+      yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      for (const agentId of ['codex', 'opencode']) yield* models.setModelBlocked({ agentId, model: 'small', blocked: true })
       yield* start
       const [ready] = yield* until(cardOf(projectId), (cards) => cards.some((card) => card.phase === 'ready'))
       assert.strictEqual(ready?.lead, 'codex')
@@ -586,7 +590,7 @@ describe('an agent out of usage', () => {
       assert.include(reply, 'Fake claude-code was working on this when it reached its usage limit, and may have done some of it already.')
       assert.include(
         yield* said(threadId),
-        `Small on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. No other agent has room on that model, so Small on Fake codex, a different model, takes over until then.`,
+        `Small on Fake claude-code ran out of usage, until ${whenWords(new Date(Math.ceil(back / 1000) * 1000).toISOString(), Date.now())}. Small on Fake codex takes over until then.`,
       )
     }).pipe(Effect.provide(withAgents({ 'claude-code': { outOfUsage: { until: back } } })))
   })
