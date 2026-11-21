@@ -137,6 +137,7 @@ import { Setups } from './Setups'
 import * as Runtime from './Runtime'
 import { withEdits, workedOutReach } from './sandboxReach'
 import { afterOpen, startup } from './startup'
+import { makeKeyedLock } from './keyedLock'
 import { tallyOf } from './tally'
 import { Coordinator } from './Coordinator'
 import { SettingsTools } from './SettingsTools'
@@ -812,14 +813,20 @@ export const handlers = apiLayer(
 
     /* Each agent's version, asked of its CLI once a launch. */
     const versions = new Map<string, string | null>()
+    const versionChecks = makeKeyedLock()
     const versionOf = (entry: AgentEntry) =>
-      versions.has(entry.definition.id)
-        ? Effect.succeed(versions.get(entry.definition.id) ?? null)
-        : agentVersion(entry.definition).pipe(
-            Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))),
-            // Asked again next time: one that failed says no version, not a wrong one.
-            contained('Status.version', () => null, entry.definition.id),
-          )
+      versionChecks.withLock(
+        entry.definition.id,
+        Effect.suspend(() =>
+          versions.has(entry.definition.id)
+            ? Effect.succeed(versions.get(entry.definition.id) ?? null)
+            : agentVersion(entry.definition).pipe(
+                Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))),
+                // Asked again next time: one that failed says no version, not a wrong one.
+                contained('Status.version', () => null, entry.definition.id),
+              ),
+        ),
+      )
 
     /*
      * An agent, with its accounts: each check starts the agent's own status

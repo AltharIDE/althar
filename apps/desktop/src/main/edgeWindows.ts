@@ -297,8 +297,6 @@ export const startEdge = (host: EdgeHost): Edge => {
     tray.on('click', toggleSheet)
     // Off a Mac the sheet's click may never come (AppIndicator), so the menu carries what it would.
     if (process.platform !== 'darwin') tray.setContextMenu(trayMenu())
-    // Made now and kept hidden, so the first click opens it at once, already read.
-    if (sheet === undefined || sheet.isDestroyed()) makeSheet()
   }
 
   /** Takes the mark out of the menu bar; its sheet is kept, hidden, for when it comes back. */

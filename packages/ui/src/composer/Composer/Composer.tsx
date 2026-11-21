@@ -63,6 +63,8 @@ export interface Dictation {
   input?: string | null
   /** Chooses the microphone dictation hears (null: the system's default). With it, a menu beside the microphone offers them, while dictating too. */
   onChooseInput?: (id: string | null) => void
+  /** Reads available microphones when the menu is opened. */
+  onInputMenuOpenChange?: (open: boolean) => void
   onStart: () => void
   onStop: () => void
 }
@@ -765,6 +767,7 @@ function InputMenu({ dictation, onChoose, t }: { dictation: Dictation; onChoose:
   return (
     <Menu
       label={t.inputs}
+      {...(dictation.onInputMenuOpenChange === undefined ? {} : { onOpenChange: dictation.onInputMenuOpenChange })}
       placement="above"
       align="end"
       width={260}

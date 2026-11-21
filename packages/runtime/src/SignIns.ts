@@ -1,11 +1,12 @@
 import { afterOpen } from './startup'
 import { adapterNode, planPairOf, type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
-import { Clock, Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
+import { Clock, Context, Duration, Effect, Layer, PubSub, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { Agents } from './Config'
 import { Copilot } from './Copilot'
+import { makeKeyedLock } from './keyedLock'
 
 /*
  * Whether each account is signed in, and how that is paid for, from its
@@ -82,6 +83,9 @@ export class SignIns extends Context.Service<
       const accounts = yield* Accounts
       const copilot = yield* Copilot
       const known = new Map<string, { readonly check: SignInCheck; readonly at: number }>()
+      const checking = makeKeyedLock()
+      // Cold CLI checks can each start a full agent process tree. Share a budget across all callers.
+      const probes = Semaphore.makeUnsafe(2)
       /* Agents found signed in this launch, and what is said as they are. */
       const found = new Set<string>()
       const arrived = yield* PubSub.unbounded<SignedIn>()
@@ -95,7 +99,7 @@ export class SignIns extends Context.Service<
           )
           return read === undefined ? check : { ...check, paidBy: 'plan' as const }
         })
-      const account = (of: Account, recheck = false) =>
+      const checkAccount = (of: Account, recheck: boolean) =>
         Effect.gen(function* () {
           const last = known.get(of.id)
           if (!recheck && last !== undefined && (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(TTL))
@@ -105,8 +109,7 @@ export class SignIns extends Context.Service<
           yield* accounts.prepare(of)
           const checked = yield* entry.definition.native === 'copilot'
             ? copilot.status(of.id)
-            : afterOpen(signInCheck(entry.definition, adapterNode(), accounts.env(of)))
-          // As it stands now, not as it stood when this check began: another may have finished meanwhile and said it.
+            : afterOpen(probes.withPermits(1)(signInCheck(entry.definition, adapterNode(), accounts.env(of))))
           const before = known.get(of.id)?.check.status
           known.set(of.id, { check: checked, at: yield* Clock.currentTimeMillis })
           if (checked.status === 'signed_in') {
@@ -116,6 +119,7 @@ export class SignIns extends Context.Service<
           }
           return yield* paid(of, checked)
         })
+      const account = (of: Account, recheck = false) => checking.withLock(of.id, checkAccount(of, recheck))
       /** What an account's sign-in looked like when a refusal was first seen in Settings: another since means it was put right. */
       const refusals = new Map<string, { readonly at: string; readonly connections: string }>()
       /** Since when the agent itself has said a provider's sign-in must be done again (OpenCode's `needs_auth`). */
