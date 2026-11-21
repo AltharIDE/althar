@@ -206,12 +206,17 @@ describe('reviewing someone else’s pull request', () => {
       }).pipe(Effect.provide(withQueries(github)))
     })
 
-  for (const product of ['gitlab', 'bitbucket_cloud', 'bitbucket_dc'] as const)
-    it.live(`fetches ${product}'s review ref and preserves its own-author change request`, () => {
+  for (const [product, author] of [
+    ['gitlab', 'ninemate'],
+    ['gitlab', 'YOU'],
+    ['bitbucket_cloud', 'YOU'],
+    ['bitbucket_dc', 'YOU'],
+  ] as const)
+    it.live(`drafts and posts a ${product} review with inline comments on ${author}'s change`, () => {
       const at = hosted()
       const host = makeFakeService({ product, pushUrl: () => at.bare })
       host.addRepository(['meridian', 'api'])
-      const { head, pull } = pullRequest(at, host, { author: 'YOU' })
+      const { head, pull } = pullRequest(at, host, { author })
       git(
         at.bare,
         'update-ref',
@@ -232,18 +237,24 @@ describe('reviewing someone else’s pull request', () => {
         assert.deepInclude(workspace, { access: 'read', state: 'ready' })
         assert.strictEqual(git(workspace?.path ?? '', 'rev-parse', 'HEAD'), head)
         const summary = 'Keep the retry bounded.'
-        yield* callTool(lead(projectId, task?.threadId ?? '', task?.id ?? ''), 'draft_review', {
-          verdict: 'changes',
-          summary,
-          comments: [],
-        })
+        const comment = { path: 'send.ts', line: 1, body: 'Cover the retry limit.' }
+        assert.match(
+          yield* callTool(lead(projectId, task?.threadId ?? '', task?.id ?? ''), 'draft_review', {
+            verdict: 'changes',
+            summary,
+            comments: [comment],
+          }),
+          /^Drafted/,
+        )
         const [draft] = yield* cardsIn(task?.threadId ?? '')
+        assert.deepInclude(draft?.comments[0], comment)
+        assert.isEmpty(host.reviewsPosted)
         const reviews = yield* Reviews
         const person = (yield* Instance).personId
         yield* reviews.change(draft?.draftId ?? '', { verdict: 'changes' }, person)
         const posted = yield* reviews.post(draft?.draftId ?? '', person)
         assert.deepInclude(posted, { state: 'posted', verdict: 'changes', summary })
-        assert.deepInclude(host.reviewsPosted[0]?.review, { event: 'request_changes', commit: head })
+        assert.deepInclude(host.reviewsPosted[0]?.review, { event: 'request_changes', commit: head, comments: [comment] })
         assert.notInclude(host.reviewsPosted[0]?.review.body ?? '', 'posted as a comment because')
       }).pipe(Effect.provide(withQueries(host)))
     })

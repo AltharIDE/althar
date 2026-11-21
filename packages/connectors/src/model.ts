@@ -445,7 +445,7 @@ export interface HostCapabilities {
   /**
    * A change Althar didn't open can be read for review, with whether its
    * author is one of the repository's people and the fork it comes from, and
-   * a review posted on it with comments on its lines. Only GitHub's, for now.
+   * a review posted on it with comments on its lines.
    */
   readonly reviews: boolean
   /**
