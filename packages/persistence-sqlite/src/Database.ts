@@ -1,11 +1,19 @@
+import { realpath } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
+
 import { SqliteClient, SqliteMigrator } from '@effect/sql-sqlite-node'
 import { Cause, Clock, type Duration, Effect, Exit, Layer, Schema } from 'effect'
-import { SqlClient, type SqlError } from 'effect/sql'
+import { SqlClient, SqlError } from 'effect/sql'
 import { camelToSnake, snakeToCamel } from 'effect/String'
 
 import { BackupFailed, backUpBeforeMigrating, latestBackup, reasonOf } from './backups'
 import { idOf, loaderFor, type Migration, MIGRATIONS_TABLE, migrations } from './migrations'
 import { checkMaintenance, DatabaseInMaintenance } from './maintenance'
+import { ReadLane } from './readLane'
+
+export { ReadLane }
+export { ReadPriority } from './readLane'
 
 /** How many prepared statements the store keeps: more than the runtime has. */
 export const PREPARED = 2_000
@@ -87,7 +95,7 @@ export class MigrationFailed extends Schema.TaggedError<MigrationFailed>()('Migr
  * an earlier launch's and reconcile them. The lock is taken by the first
  * statement and held until the connection closes.
  */
-const beforeMigrations = (filename: string, maintenanceToken?: string) =>
+const beforeMigrations = (filename: string, maintenanceToken?: string, exclusive = true) =>
   Layer.effectDiscard(
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -97,13 +105,15 @@ const beforeMigrations = (filename: string, maintenanceToken?: string) =>
         // every commit, which on a disk agents' builds keep busy took up to a second each, with the runtime's one thread
         // waiting. The store stays whole after any crash; one of the computer itself may lose the last moment's commits.
         yield* sql`PRAGMA synchronous = NORMAL`
-        yield* sql`PRAGMA locking_mode = EXCLUSIVE`
-        yield* sql`BEGIN IMMEDIATE`.pipe(
-          Effect.andThen(sql`COMMIT`),
-          Effect.catchTag('SqlError', (error): Effect.Effect<never, SqlError.SqlError | DatabaseInUse> =>
-            /locked|busy/i.test(String(error.cause)) ? Effect.fail(new DatabaseInUse({ filename })) : Effect.fail(error),
-          ),
-        )
+        if (exclusive) {
+          yield* sql`PRAGMA locking_mode = EXCLUSIVE`
+          yield* sql`BEGIN IMMEDIATE`.pipe(
+            Effect.andThen(sql`COMMIT`),
+            Effect.catchTag('SqlError', (error): Effect.Effect<never, SqlError.SqlError | DatabaseInUse> =>
+              /locked|busy/i.test(String(error.cause)) ? Effect.fail(new DatabaseInUse({ filename })) : Effect.fail(error),
+            ),
+          )
+        }
       }
       // A caller may have waited for the previous writer after passing the first
       // check. Recheck while owning SQLite's exclusive lock, before any migration.
@@ -161,43 +171,86 @@ const migrate = (options: DatabaseOptions) =>
 export const layer = (
   options: DatabaseOptions,
 ): Layer.Layer<
-  SqlClient.SqlClient | SqliteClient.SqliteClient,
+  SqlClient.SqlClient | SqliteClient.SqliteClient | ReadLane,
   MigrationFailed | BackupFailed | SqlError.SqlError | ForeignKeyViolations | DatabaseInUse | DatabaseInMaintenance | DatabaseSchemaTooNew
 > => {
-  const opened = Layer.fromBuildMemo((memo, scope) =>
-    timed('store-migrations', Layer.buildWithMemoMap(migrate(options), memo, scope)),
-  ).pipe(
-    Layer.provideMerge(beforeMigrations(options.filename, options.maintenanceToken)),
-    Layer.provideMerge(
-      Layer.fromBuildMemo((memo, scope) =>
-        timed(
-          'store-open',
-          Layer.buildWithMemoMap(
-            SqliteClient.layer({
-              filename: options.filename,
-              // Each statement is prepared once and kept: the runtime has some 1,500, and a board's cards alone run hundreds
-              // of them on every change, so the client's 200 had each read prepare most of them again.
-              prepareCacheSize: PREPARED,
-              transformQueryNames: camelToSnake,
-              transformResultNames: snakeToCamel,
-              ...(options.busyTimeout === undefined ? {} : { busyTimeout: options.busyTimeout }),
-            }),
-            memo,
-            scope,
-          ),
-        ),
+  const connection = (filename: string) =>
+    SqliteClient.layer({
+      filename,
+      prepareCacheSize: PREPARED,
+      transformQueryNames: camelToSnake,
+      transformResultNames: snakeToCamel,
+      ...(options.busyTimeout === undefined ? {} : { busyTimeout: options.busyTimeout }),
+    })
+  const opened = (exclusive: boolean) =>
+    Layer.fromBuildMemo((memo, scope) => timed('store-migrations', Layer.buildWithMemoMap(migrate(options), memo, scope))).pipe(
+      Layer.provideMerge(beforeMigrations(options.filename, options.maintenanceToken, exclusive)),
+      Layer.provideMerge(
+        Layer.fromBuildMemo((memo, scope) => timed('store-open', Layer.buildWithMemoMap(connection(options.filename), memo, scope))),
       ),
-    ),
+    )
+  const readable = options.filename !== ':memory:' && (options.migrations ?? migrations).some(({ key }) => key === '0097_finder_index')
+  const live = Layer.unwrap(
+    Effect.gen(function* () {
+      yield* checkMaintenance(options.filename, options.maintenanceToken)
+      if (options.filename === ':memory:') return opened(false).pipe(Layer.provideMerge(ReadLane.layer(null)))
+      const filename = yield* canonicalDatabase(options.filename)
+      yield* ownDatabase(filename)
+      yield* checkMaintenance(filename, options.maintenanceToken)
+      if (!readable) return opened(true).pipe(Layer.provideMerge(ReadLane.layer(null)))
+
+      // Acquire the original SQLite lock on upgrades so an older executable cannot
+      // start against the old schema. Once migrated, older executables reject the
+      // new schema and this process holds the separate ownership lock until exit.
+      yield* Effect.scoped(Layer.build(opened(true)))
+      return Layer.effectDiscard(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`PRAGMA synchronous = NORMAL`
+          yield* sql`PRAGMA foreign_keys = ON`
+          yield* checkMaintenance(filename, options.maintenanceToken)
+        }),
+      ).pipe(Layer.provideMerge(connection(filename)), Layer.provideMerge(ReadLane.layer(filename)))
+    }),
+  )
+  return live.pipe(
     // Opening a file another runtime holds fails as the client sets it up, before any statement of ours.
     Layer.catchCause((cause) =>
       /database is locked|SQLITE_BUSY/i.test(Cause.pretty(cause))
-        ? Layer.effect(SqlClient.SqlClient, Effect.fail(new DatabaseInUse({ filename: options.filename }))).pipe(
-            Layer.provideMerge(Layer.effect(SqliteClient.SqliteClient, Effect.fail(new DatabaseInUse({ filename: options.filename })))),
-          )
-        : Layer.effect(SqlClient.SqlClient, Effect.failCause(cause)).pipe(
-            Layer.provideMerge(Layer.effect(SqliteClient.SqliteClient, Effect.failCause(cause))),
-          ),
+        ? Layer.effectContext(Effect.fail(new DatabaseInUse({ filename: options.filename })))
+        : Layer.effectContext(Effect.failCause(cause)),
     ),
   )
-  return Layer.unwrap(Effect.as(checkMaintenance(options.filename, options.maintenanceToken), opened))
 }
+
+const openError = (cause: unknown) =>
+  new SqlError.SqlError({ reason: SqlError.classifySqliteError(cause, { message: 'Could not open the store', operation: 'connect' }) })
+
+const canonicalDatabase = (filename: string) =>
+  Effect.tryPromise({
+    try: () =>
+      realpath(filename).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error
+        return realpath(dirname(filename)).then((folder) => join(folder, basename(filename)))
+      }),
+    catch: openError,
+  })
+
+/** SQLite keeps this kernel lock for the life of the connection, including across crashes. */
+const ownDatabase = (filename: string) =>
+  Effect.acquireRelease(
+    Effect.try({
+      try: () => {
+        const lock = new DatabaseSync(`${filename}.owner`)
+        try {
+          lock.exec('BEGIN EXCLUSIVE')
+          return lock
+        } catch (error) {
+          lock.close()
+          throw error
+        }
+      },
+      catch: openError,
+    }),
+    (lock) => Effect.sync(() => lock.close()),
+  )

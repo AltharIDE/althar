@@ -6,6 +6,7 @@ import {
   type ConnectionInfo,
   type Elsewhere,
   type FeedPosition,
+  type FinderQuery,
   type SearchDocuments,
 } from '@althar/contracts'
 import { checkedPosition, checkedWatch } from './checkedWatch'
@@ -220,7 +221,7 @@ export interface Client {
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   /** Tasks found by what they were about, best first: in one project, or every one; with no words, the ones changed last. */
-  readonly getSearchDocuments: (after?: string) => Promise<SearchDocuments>
+  readonly getSearchDocuments: (after?: string, search?: FinderQuery, signal?: AbortSignal) => Promise<SearchDocuments>
   readonly getSearchFiles: (threadId: string) => Promise<{ readonly files: ReadonlyArray<string> }>
   readonly searchTasks: (input: { readonly projectId?: string; readonly text: string; readonly limit?: number }) => Promise<FoundTasks>
   readonly createTask: (input: {
@@ -1061,7 +1062,14 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
-    getSearchDocuments: (after) => settle(api.GetSearchDocuments(after === undefined ? {} : { after })),
+    getSearchDocuments: (after, search, signal) =>
+      settle(
+        api.GetSearchDocuments({
+          ...(after === undefined ? {} : { after }),
+          ...(search === undefined ? {} : { search }),
+        }),
+        signal,
+      ),
     getSearchFiles: (threadId) => settle(api.GetSearchFiles({ threadId })),
     searchTasks: (input) => settle(api.SearchTasks(input)),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
@@ -1107,9 +1115,9 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
           ...(at.image === true ? { image: true } : {}),
         }),
       ),
-    getBoard: (projectId) => settle(api.GetBoard({ projectId })),
+    getBoard: (projectId) => settle(api.GetBoard({ projectId, cached: true })),
     getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
-    getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
+    getHome: (since) => settle(api.GetHome(since === undefined ? { cached: true } : { since, cached: true })),
     leftHome: () => command((commandId) => api.LeftHome({ commandId })),
     seeTask: (taskId) => command((commandId) => api.SeeTask({ commandId, taskId })),
     settledWithOnePress: (press) => command((commandId) => api.SettledWithOnePress({ commandId, ...press })),

@@ -144,6 +144,32 @@ const titleIn = (board: { readonly tasks: ReadonlyArray<{ readonly taskId: strin
   board.tasks.find((task) => task.taskId === taskId)?.title
 
 describe('a board read after one task moved', () => {
+  it.live('serves completed projections and publishes a replacement when one task changes', () => {
+    const traced = cardsWorkedOut()
+    return Effect.gen(function* () {
+      const queries = yield* Queries
+      const started = yield* queries.cursor
+      const { projectId, made } = yield* tasks('First task', 'Second task')
+      const first = made[0]!.taskId
+      yield* watched(
+        started,
+        made.map((task) => task.taskId),
+      )
+      yield* quiet(projectId, traced)
+      traced.since()
+      assert.strictEqual(titleIn(yield* queries.board(projectId, true), first), 'First task')
+      yield* queries.home(undefined, undefined, true)
+      assert.deepStrictEqual(traced.since(), [])
+
+      const before = yield* queries.cursor
+      yield* retitleTask({ envelope: yield* Runtime.envelope('task.retitle', {}), taskId: first, title: 'Renamed' })
+      yield* watched(before, [first])
+      traced.since()
+      assert.strictEqual(titleIn(yield* queries.board(projectId, true), first), 'Renamed')
+      assert.deepStrictEqual(traced.since(), [])
+    }).pipe(Effect.provide(keeping), Effect.provide(traced.layer))
+  })
+
   it.live('works out that card alone, and none as the watcher has it already', () => {
     const traced = cardsWorkedOut()
     return Effect.gen(function* () {
