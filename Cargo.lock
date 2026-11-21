@@ -20,6 +20,7 @@ dependencies = [
  "prost",
  "prost-build",
  "protoc-bin-vendored",
+ "ring",
  "rustix",
  "rustls",
  "tokio",

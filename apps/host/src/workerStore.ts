@@ -4,12 +4,14 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
 import {
+  AgentRunOutcome,
   DiagnosticOutcome,
   validWorkerProtocolId,
   type DiagnosticOffer,
   type DiagnosticLog,
   type DiagnosticResult,
 } from '@althar/worker-protocol'
+import type { AgentRunLedger } from '@althar/worker-protocol/agent-runs'
 import {
   DIAGNOSTIC_LEASE_MS,
   DIAGNOSTIC_RENEWAL_MS,
@@ -107,6 +109,21 @@ export const openWorkerStore = async (profile: string, homeId: string, now = Dat
         attempt_id TEXT PRIMARY KEY REFERENCES project_attempt(id),
         output BLOB NOT NULL CHECK(length(output) <= ${MAX_PROJECT_LOG_BYTES})
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS agent_worker_journal (
+        worker_id TEXT PRIMARY KEY REFERENCES worker_enrollment(id),
+        journal_id TEXT NOT NULL UNIQUE
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS agent_worker_run (
+        id TEXT PRIMARY KEY,
+        worker_id TEXT NOT NULL REFERENCES agent_worker_journal(worker_id),
+        project_id TEXT NOT NULL,
+        workspace_id TEXT NOT NULL,
+        provider_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('active', 'exited', 'stopped', 'start_failed')),
+        exit_code INTEGER CHECK(exit_code IS NULL OR exit_code BETWEEN 0 AND 255)
+      ) STRICT;
+      CREATE UNIQUE INDEX IF NOT EXISTS agent_worker_active ON agent_worker_run(worker_id) WHERE state = 'active';
+      CREATE UNIQUE INDEX IF NOT EXISTS agent_workspace_active ON agent_worker_run(workspace_id) WHERE state = 'active';
     `)
     const attempts = (table: 'diagnostic' | 'project_attempt', logs: 'diagnostic_log' | 'project_log') => {
       const appendLog = db.prepare(`
@@ -149,6 +166,7 @@ export const openWorkerStore = async (profile: string, homeId: string, now = Dat
       SELECT id FROM worker_enrollment WHERE id = ? AND revoked = 0
         AND NOT EXISTS (SELECT 1 FROM diagnostic WHERE worker_id = worker_enrollment.id AND state IN ('queued', 'offered', 'claimed'))
         AND NOT EXISTS (SELECT 1 FROM project_attempt WHERE worker_id = worker_enrollment.id AND state IN ('queued', 'offered', 'claimed'))
+        AND NOT EXISTS (SELECT 1 FROM agent_worker_run WHERE worker_id = worker_enrollment.id AND state = 'active')
     `
     const enqueueDiagnostic = db.prepare(`
       INSERT INTO diagnostic (worker_id, id, fence, state) SELECT id, ?, ?, 'queued' FROM (${availableWorker}) RETURNING id
@@ -157,7 +175,47 @@ export const openWorkerStore = async (profile: string, homeId: string, now = Dat
       INSERT INTO project_attempt (worker_id, id, fence, project_id, command_name, state)
       SELECT id, ?, ?, ?, ?, 'queued' FROM (${availableWorker}) RETURNING id
     `)
+    const journal = db.prepare(`
+      INSERT INTO agent_worker_journal (worker_id, journal_id)
+      SELECT id, ? FROM worker_enrollment WHERE id = ? AND revoked = 0
+      ON CONFLICT(worker_id) DO UPDATE SET journal_id = excluded.journal_id
+      WHERE agent_worker_journal.journal_id = excluded.journal_id
+      RETURNING worker_id
+    `)
+    const runningAgent = db.prepare(`
+      SELECT id AS runId, project_id AS projectId, provider_id AS providerId, workspace_id AS workspaceId
+      FROM agent_worker_run WHERE worker_id = ? AND state = 'active'
+    `)
+    const beginAgent = db.prepare(`
+      INSERT INTO agent_worker_run (id, worker_id, project_id, provider_id, workspace_id, state)
+      SELECT ?, candidate.id, ?, ?, ?, 'active' FROM (${availableWorker}) candidate
+      WHERE EXISTS (SELECT 1 FROM agent_worker_journal WHERE worker_id = candidate.id)
+        AND NOT EXISTS (SELECT 1 FROM agent_worker_run WHERE workspace_id = ? AND state = 'active')
+      RETURNING id
+    `)
+    const finishAgent = db.prepare(`
+      UPDATE agent_worker_run SET state = ?, exit_code = ?
+      WHERE id = ? AND worker_id = ? AND state = 'active'
+    `)
+    const agents: AgentRunLedger = {
+      bind: (workerId, journalId) => journal.get(journalId, workerId) !== undefined,
+      outstanding: (workerId) => runningAgent.get(workerId) as ReturnType<AgentRunLedger['outstanding']>,
+      begin: (workerId, run) =>
+        beginAgent.get(run.runId, run.projectId, run.providerId, run.workspaceId, workerId, run.workspaceId) !== undefined,
+      finish: (workerId, result) => {
+        const state =
+          result.outcome === AgentRunOutcome.EXITED
+            ? 'exited'
+            : result.outcome === AgentRunOutcome.STOPPED
+              ? 'stopped'
+              : result.outcome === AgentRunOutcome.START_FAILED
+                ? 'start_failed'
+                : undefined
+        return state !== undefined && finishAgent.run(state, result.exitCode ?? null, result.runId, workerId).changes === 1
+      },
+    }
     return {
+      agents,
       close: () => db.close(),
       workerForCertificate: (fingerprint: string) => enrolled.get(fingerprint)?.id as string | undefined,
       enroll(fingerprint: string) {

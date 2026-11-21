@@ -1096,6 +1096,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
   const watching: Array<number | import('@althar/contracts').FeedPosition | undefined> = []
   const starts = new Set<() => void>()
   const client: Client = {
+    listProjectWorkers: vi.fn(async () => []),
     status: vi.fn(async () => status),
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
     openProject: vi.fn(async () => project),

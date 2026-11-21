@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { AgentStatus, ChangeSummary, PlanStep, Product, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
+import type { AgentStatus, ChangeSummary, PlanStep, Product, ProjectWorker, TaskEnd as End, WorksIn as Where } from '@althar/contracts'
 import {
   AsideCard,
   AsideState,
@@ -8,6 +8,7 @@ import {
   type LaunchStep,
   LinkButton,
   PresetOffer,
+  Select,
   TaskCard,
   TaskEnd,
   TaskLaunch,
@@ -77,7 +78,8 @@ export interface CardActions {
   readonly projectId?: string
   readonly agents: ReadonlyArray<AgentStatus>
   readonly agentName: (id: string | null) => string
-  readonly onStart: (planId: string) => void
+  readonly workers?: ReadonlyArray<ProjectWorker>
+  readonly onStart: (planId: string, workerId?: string) => void
   readonly onHold: (planId: string) => void
   /** Stops a task waiting for another (tasks wait for their blockers); done once it has gone through or failed. */
   readonly onStopWaiting?: (taskId: string, on: string) => Promise<void>
@@ -247,7 +249,34 @@ function PlanCard({
     if (nextToward === undefined) actions.onChange(plan.id, next, nextEnd, nextWhere)
     else actions.onChange(plan.id, next, nextEnd, nextWhere, nextToward)
   }
+  const lead = steps.find((step) => step.key === 'implement' && !step.skipped)
+  const workers =
+    card.phase === 'held' && card.reviewing == null && worksIn !== 'checkout' && lead !== undefined
+      ? (actions.workers ?? []).filter((worker) => worker.providers.includes(lead.agentId))
+      : []
+  const [place, setPlace] = useState<{ planId: string; workerId: string }>({ planId: plan.id, workerId: 'home' })
+  const selected = place.planId === plan.id ? place.workerId : 'home'
   const from = fromOf(card)
+  const placement =
+    workers.length === 0 && selected === 'home' ? undefined : (
+      <Select
+        label="Run on"
+        variant="filled"
+        value={selected}
+        options={[
+          { value: 'home', label: 'This home' },
+          ...workers.map((worker) => ({
+            value: worker.workerId,
+            label: 'Linux worker ' + worker.workerId.slice(-6),
+            disabled: worker.busy,
+          })),
+          ...(selected !== 'home' && !workers.some((worker) => worker.workerId === selected)
+            ? [{ value: selected, label: 'Worker unavailable', disabled: true }]
+            : []),
+        ]}
+        onChange={(workerId) => setPlace({ planId: plan.id, workerId })}
+      />
+    )
   return (
     <TaskLaunch
       task={card.slug}
@@ -324,8 +353,17 @@ function PlanCard({
                   },
                 }),
           })}
-      {...(card.presetOffer === undefined ? {} : { footNote: <Offer card={card} /> })}
-      onStart={() => actions.onStart(plan.id)}
+      {...(card.presetOffer === undefined && placement === undefined
+        ? {}
+        : {
+            footNote: (
+              <>
+                {' '}
+                {placement} {card.presetOffer === undefined ? undefined : <Offer card={card} />}{' '}
+              </>
+            ),
+          })}
+      onStart={() => actions.onStart(plan.id, selected === 'home' ? undefined : selected)}
     />
   )
 }

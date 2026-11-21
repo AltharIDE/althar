@@ -513,6 +513,7 @@ export class Projects extends Context.Service<
       readonly taskId?: string
       /** Made on Scratch, an aside, in the transaction that makes it: never on the board, even for a moment. */
       readonly shelf?: 'scratch'
+      readonly workerId?: string
     }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | BranchNotFound | GitFailed | Failure>
     /**
      * Starts another change in a task (a task is a conversation plus parts,
@@ -942,6 +943,7 @@ export class Projects extends Context.Service<
         readonly taskId?: string
         /** Made on Scratch, an aside, in the transaction that makes it: never on the board, even for a moment. */
         readonly shelf?: 'scratch'
+        readonly workerId?: string
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1027,6 +1029,7 @@ export class Projects extends Context.Service<
                 slug,
                 state: input.draft === true ? 'draft' : 'open',
                 ...(input.shelf === undefined ? {} : { shelf: input.shelf }),
+                ...(input.workerId === undefined ? {} : { executionWorkerId: input.workerId }),
                 createdByActorId: envelope.actorId,
                 createdAt,
               })}`
