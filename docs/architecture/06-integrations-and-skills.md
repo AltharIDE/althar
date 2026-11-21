@@ -680,6 +680,22 @@ now. Nothing reaches the tracker on its word:
   or a GraphQL error of its own internals), leaves it uncertain too; only
   what it refuses is not filed. A draft discarded after it was uncertain is
   told to the coordinator as perhaps on the tracker, not as never filed.
+- **Filings are paced by account** (`issuePace.ts`), since trackers count
+  calls per account and some ask for writes to be spaced (GitHub a second
+  apart). A filed draft first waits (`waiting`): one filing at a time on an
+  account, the next a second after the last, while other accounts file
+  apart. It is marked as being filed only as the tracker is asked, so a
+  draft left waiting was never sent: Althar closed then leaves it not
+  filed, to file again, and it can be discarded while it waits, which sends
+  nothing. A refusal for too many calls is a refusal, nothing filed (each
+  adapter files with its last call, and what it reads after can't fail
+  it), so Althar waits for the reset the tracker said, or 5 then 10 seconds
+  where it said none, and asks again, three times at most; the card says
+  until when. A reset more than a minute off is said instead, on the card,
+  and the account isn't asked again until it. Any other end, an answer lost
+  among them, is never asked again. Linear's usage limit (`usage limit
+  exceeded`, its plan's cap on issues) is a refusal of its own, not too many
+  calls: the card says it, and waiting wouldn't help.
 - **The same title for the same place** in the same thread is the same
   draft, for a coordinator unsure its first call worked; for another place,
   it is another draft.

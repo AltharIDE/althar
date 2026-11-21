@@ -231,15 +231,25 @@ export const messageOf = (body: string, fallback: string): string => plainError(
 
 /** When a rate-limited call may be tried again, from whichever header the service sends. */
 const retryAtOf = (headers: Headers, now: number): string | undefined => {
-  const after = Number(headers.get('retry-after'))
-  if (headers.has('retry-after') && Number.isFinite(after)) return new Date(now + after * 1000).toISOString()
+  const afterHeader = headers.get('retry-after')
+  if (afterHeader !== null && afterHeader.trim() !== '') {
+    const after = Number(afterHeader)
+    const at = Number.isFinite(after) ? now + Math.max(0, after) * 1000 : Date.parse(afterHeader)
+    if (Number.isFinite(at) && Math.abs(at) <= 8.64e15) return new Date(at).toISOString()
+  }
   // GitHub's and GitLab's reset is a time, in seconds since the epoch; Bitbucket's is the seconds left until it.
   const resetHeader = headers.has('x-ratelimit-reset') ? 'x-ratelimit-reset' : 'ratelimit-reset'
   const reset = Number(headers.get(resetHeader))
-  if (headers.has(resetHeader) && Number.isFinite(reset))
-    return new Date(reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000).toISOString()
-  const resetMs = Number(headers.get('x-ratelimit-requests-reset'))
-  if (headers.has('x-ratelimit-requests-reset') && Number.isFinite(resetMs)) return new Date(resetMs).toISOString()
+  if (headers.has(resetHeader) && Number.isFinite(reset)) {
+    const at = reset < 1_000_000_000 ? now + reset * 1000 : reset * 1000
+    if (Math.abs(at) <= 8.64e15) return new Date(at).toISOString()
+  }
+  for (const name of ['x-ratelimit-endpoint-requests-reset', 'x-ratelimit-requests-reset', 'x-ratelimit-complexity-reset']) {
+    const value = headers.get(name)
+    const resetMs = Number(value)
+    if (value !== null && value.trim() !== '' && Number.isFinite(resetMs) && Math.abs(resetMs) <= 8.64e15)
+      return new Date(resetMs).toISOString()
+  }
   return undefined
 }
 
@@ -578,7 +588,25 @@ export const makeHttp = (options: HttpOptions): Http => {
           answer.body,
         ).pipe(Effect.catch(() => Effect.flatMap(success(answer), () => Effect.fail(invalid('The answer was not GraphQL')))))
         const first = envelope.errors?.[0]
-        if (first !== undefined) return yield* Effect.fail(graphqlFailure(product, first, answer.status))
+        if (first !== undefined) {
+          // A partial mutation may already have performed its write. Never describe it as a refusal.
+          if (envelope.data != null && /\bmutation\b/.test(query))
+            return yield* Effect.fail(invalid('The mutation returned partial data with errors'))
+          const failed = graphqlFailure(product, first, answer.status)
+          if (failed.reason === 'rate_limited') {
+            const retryAt = retryAtOf(answer.headers, yield* Clock.currentTimeMillis)
+            return yield* Effect.fail(
+              new ConnectorFailed({
+                product,
+                reason: failed.reason,
+                message: failed.message,
+                status: answer.status,
+                ...(retryAt === undefined ? {} : { retryAt }),
+              }),
+            )
+          }
+          return yield* Effect.fail(failed)
+        }
         yield* success(answer)
         return yield* Schema.decodeUnknownEffect(schema)(envelope.data ?? null).pipe(Effect.mapError((error) => invalid(error.message)))
       }),

@@ -348,6 +348,8 @@ export enum IssuePriority {
 /** Where an issue the coordinator drafted stands. */
 export enum IssueDraftState {
   Pending = 'pending',
+  /** Filed by the person, waiting before its tracker is asked: its turn on the account, or the time the tracker said. */
+  Waiting = 'waiting',
   Filing = 'filing',
   Filed = 'filed',
   Failed = 'failed',

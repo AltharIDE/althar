@@ -3097,8 +3097,11 @@ export const PushRequestItem = Schema.Struct({
 export const IssuePriority = Schema.Literals(['urgent', 'high', 'medium', 'low', 'none'])
 export type IssuePriority = typeof IssuePriority.Type
 
-/** Where an issue the coordinator drafted stands: waiting on you, being filed, filed, not filed and why, perhaps filed (its answer was lost), or discarded. */
-export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
+/**
+ * Where an issue the coordinator drafted stands: waiting on you, filed by you and waiting for its tracker (nothing sent yet), being
+ * filed, filed, not filed and why, perhaps filed (its answer was lost), or discarded.
+ */
+export const IssueDraftState = Schema.Literals(['pending', 'waiting', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
 
 /**
@@ -3165,6 +3168,8 @@ export const IssueDraftCard = Schema.Struct({
   direct: Schema.optional(Schema.Boolean),
   /** What its tracker left off once filed, in a line each: a label it hasn't, a field it refused. */
   leftOff: Schema.optional(Schema.Array(Schema.String)),
+  /** While it waits, when Althar asks its tracker again, as the tracker said; null or absent while it waits its turn. */
+  waitingUntil: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type IssueDraftCard = typeof IssueDraftCard.Type
 

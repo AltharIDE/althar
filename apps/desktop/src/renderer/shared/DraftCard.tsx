@@ -5,6 +5,7 @@ import { IssueDraft, IssueDraftState, Markdown } from '@althar/ui'
 
 import { productBrand } from './products'
 import type { IssueDraftContent } from './thread'
+import { clock } from './time'
 
 /*
  * An issue the coordinator or a task's lead drafted, in their thread: the tracker and where
@@ -13,6 +14,7 @@ import type { IssueDraftContent } from './thread'
  * it first, or discard it; or file it and every later one at once, which
  * the coordinator keeps as a note. Once filed, its key and its link, and
  * what its tracker left off; filed at once, a way to be asked first again.
+ * Filed and waiting for its tracker, its turn or the time the tracker said.
  * Not filed, why, and filing it again; perhaps filed, its answer lost, a
  * word to look on the tracker before filing again.
  */
@@ -58,6 +60,7 @@ const PRIORITIES: Readonly<Record<IssuePriority, string | null>> = {
 /** The kit's state, from the runtime's. */
 const STATES: Readonly<Record<State, IssueDraftState>> = {
   pending: IssueDraftState.Pending,
+  waiting: IssueDraftState.Waiting,
   filing: IssueDraftState.Filing,
   filed: IssueDraftState.Filed,
   failed: IssueDraftState.Failed,
@@ -83,6 +86,7 @@ export function DraftCard({ draft, actions }: { draft: IssueDraftContent; action
       direct={draft.direct === true}
       state={STATES[draft.state]}
       {...(draft.error === null ? {} : { error: draft.error })}
+      {...(draft.waitingUntil == null ? {} : { waitingUntil: clock(draft.waitingUntil) })}
       {...(draft.issue === null ? {} : { issue: { key: draft.issue.key, href: draft.issue.url } })}
       onFile={() => actions.onFile(draft.draftId)}
       onChange={(edit) => {

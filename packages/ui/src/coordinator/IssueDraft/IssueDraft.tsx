@@ -21,8 +21,10 @@ import s from './IssueDraft.module.css'
  * thread, with what else it is filed with (its project, milestone, assignee)
  * beside its priority and labels. Nothing reaches the tracker until you file
  * it: you can change it first, or throw it away; or file this one and every
- * later one at once. If filing fails the card says why and can be filed
- * again. Filed or discarded, it folds to a line: the issue's key and link,
+ * later one at once. Filed, it may wait before its tracker is asked: its
+ * turn behind another on the same account, or the time the tracker said to
+ * wait until; you can still throw it away meanwhile, and nothing is sent. If
+ * filing fails the card says why and can be filed again. Filed or discarded, it folds to a line: the issue's key and link,
  * and what its tracker left off; or that it was thrown away. One filed at
  * once, without asking, says so, and you can ask to be asked first.
  */
@@ -44,6 +46,10 @@ export interface IssueDraftText {
   showLess: string
   /** Beside the buttons, while it is being filed. */
   filing: (source: string) => string
+  /** Beside the buttons, while it waits its turn on the tracker. */
+  waiting: (source: string) => string
+  /** Beside the buttons, while it waits for the time the tracker said, as a clock says it: 14:05. */
+  waitingUntil: (source: string, time: string) => string
   /** Before why it wasn't filed. */
   failed: (source: string) => string
   /** Before why it may be on the tracker already, its answer lost. */
@@ -80,6 +86,8 @@ export const issueDraftText: IssueDraftText = {
   showAll: 'Show all',
   showLess: 'Show less',
   filing: (source) => `Filing on ${source}…`,
+  waiting: (source) => `Waiting its turn on ${source}…`,
+  waitingUntil: (source, time) => `${source} asked Althar to wait. Filing at ${time}…`,
   failed: (source) => `Couldn’t file it on ${source}.`,
   uncertain: (source) => `This may be on ${source} already.`,
   discard: 'Discard',
@@ -130,6 +138,8 @@ export type IssueDraftProps = RootProps<
     state: IssueDraftState
     /** Why it wasn't filed, while it stands failed; or why it may have been, while uncertain. */
     error?: string
+    /** While it waits, the time its tracker said to wait until, as a clock says it: 14:05. */
+    waitingUntil?: string
     /** The issue, once filed: its key, and its link. */
     issue?: { key: string; href: string }
     /** File it, or file it again after it failed or may have. */
@@ -173,6 +183,7 @@ export function IssueDraft({
   direct = false,
   state,
   error,
+  waitingUntil,
   issue,
   onFile,
   onChange,
@@ -241,13 +252,14 @@ export function IssueDraft({
         </article>
       )
     case IssueDraftState.Pending:
+    case IssueDraftState.Waiting:
     case IssueDraftState.Filing:
     case IssueDraftState.Failed:
     case IssueDraftState.Uncertain:
       return (
         <DraftCard
           root={{ ...rest, ref, className }}
-          draft={{ mark, source, container, title, body, bodyView, labels, priority, details, error }}
+          draft={{ mark, source, container, title, body, bodyView, labels, priority, details, error, waitingUntil }}
           state={state}
           onFile={onFile}
           onChange={onChange}
@@ -269,6 +281,7 @@ function folds(state: IssueDraftState) {
     case IssueDraftState.Discarded:
       return true
     case IssueDraftState.Pending:
+    case IssueDraftState.Waiting:
     case IssueDraftState.Filing:
     case IssueDraftState.Failed:
     case IssueDraftState.Uncertain:
@@ -282,7 +295,7 @@ interface CardProps {
   root: ComponentPropsWithRef<'article'>
   draft: Pick<
     IssueDraftProps,
-    'mark' | 'source' | 'container' | 'title' | 'body' | 'bodyView' | 'labels' | 'priority' | 'details' | 'error'
+    'mark' | 'source' | 'container' | 'title' | 'body' | 'bodyView' | 'labels' | 'priority' | 'details' | 'error' | 'waitingUntil'
   >
   state: IssueDraftState
   onFile?: () => void
@@ -296,7 +309,7 @@ interface CardProps {
 
 /** The draft before it is filed: what it says, and the buttons that file it, change it, or throw it away. */
 function DraftCard({ root, draft, state, onFile, onChange, onDiscard, onAlwaysAtOnce, saving, headingLevel, t }: CardProps) {
-  const { mark, source, container, title, body, bodyView, labels, priority, details = [], error } = draft
+  const { mark, source, container, title, body, bodyView, labels, priority, details = [], error, waitingUntil } = draft
   const quiet = [...(priority ? [t.prioritised(priority)] : []), ...details, ...(labels.length > 0 ? [t.labelled(labels)] : [])]
   const { className, ...rest } = root
   const kickerId = useId()
@@ -305,10 +318,13 @@ function DraftCard({ root, draft, state, onFile, onChange, onDiscard, onAlwaysAt
   const [editing, setEditing] = useState(false)
   const [sent, setSent] = useState(false)
   const [all, setAll] = useState(false)
+  /* waiting, it can still be thrown away, which sends nothing; being filed, it can't */
+  const waiting = state === IssueDraftState.Waiting
   const filing = state === IssueDraftState.Filing
+  const busy = waiting || filing
   const failed = state === IssueDraftState.Failed
   const unsure = state === IssueDraftState.Uncertain
-  const open = editing && !filing
+  const open = editing && !busy
   /* saved: the form stays while the save is under way, and closes once it isn't */
   if (sent && !saving) {
     setSent(false)
@@ -378,26 +394,30 @@ function DraftCard({ root, draft, state, onFile, onChange, onDiscard, onAlwaysAt
             )}
           </div>
           {/* no foot where there is nothing to say or press */}
-          {(filing || onAlwaysAtOnce !== undefined || onDiscard !== undefined || onChange !== undefined || onFile !== undefined) && (
+          {(busy || onAlwaysAtOnce !== undefined || onDiscard !== undefined || onChange !== undefined || onFile !== undefined) && (
             <div className={s.foot}>
-              <span className={s.note}>
+              <span className={s.note} aria-live="polite">
                 {filing
                   ? t.filing(source)
-                  : onAlwaysAtOnce &&
-                    state === IssueDraftState.Pending && <LinkButton onClick={onAlwaysAtOnce}>{t.alwaysAtOnce}</LinkButton>}
+                  : waiting
+                    ? waitingUntil
+                      ? t.waitingUntil(source, waitingUntil)
+                      : t.waiting(source)
+                    : onAlwaysAtOnce &&
+                      state === IssueDraftState.Pending && <LinkButton onClick={onAlwaysAtOnce}>{t.alwaysAtOnce}</LinkButton>}
               </span>
               {onDiscard && !filing && (
                 <Button variant="quiet" onClick={onDiscard}>
                   {t.discard}
                 </Button>
               )}
-              {onChange && !filing && (
+              {onChange && !busy && (
                 <Button ref={edit} onClick={() => setEditing(true)}>
                   {t.edit}
                 </Button>
               )}
               {onFile && (
-                <Button variant="signal" busy={filing} onClick={onFile}>
+                <Button variant="signal" busy={busy} onClick={onFile}>
                   {failed || unsure ? t.fileAgain : t.file}
                 </Button>
               )}

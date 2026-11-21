@@ -2318,10 +2318,15 @@ export class Coordinator extends Context.Service<
             ...card.left.map((why) => `${why}.`),
           ]
           const leftWords = left.length === 0 ? '' : ` Left off: ${left.join(' ')}`
+          // Filed at once, it is said as its card ended: filed, discarded while it waited its turn, perhaps filed, or not.
           if (fileNow === true)
-            return card.issue === null
-              ? `Drafted the issue “${card.title}”, but it wasn't filed: ${card.error ?? 'the tracker did not take it'}.${leftWords} The person can file it again from its card.`
-              : `Filed the issue “${card.title}” on ${card.tracker}, in ${card.container}, as ${card.issue.key}: ${card.issue.url}. Its card in this thread is the record of it.${leftWords}${card.leftOff.length === 0 ? '' : ` ${card.tracker} left off: ${card.leftOff.join(' ')}`}`
+            return card.state === 'discarded'
+              ? `Drafted the issue “${card.title}”, but the person discarded it while it waited its turn on ${card.tracker}, so nothing was sent. Don't draft it again unless they ask.`
+              : card.state === 'uncertain'
+                ? `Drafted the issue “${card.title}” and asked ${card.tracker} to file it, but Althar can't tell whether it did: ${card.error ?? 'its answer was lost.'} Its card says so. Don't draft or file it again: the person looks on ${card.tracker} first.`
+                : card.issue === null
+                  ? `Drafted the issue “${card.title}”, but it wasn't filed: ${card.error ?? 'the tracker did not take it'}.${leftWords} The person can file it again from its card.`
+                  : `Filed the issue “${card.title}” on ${card.tracker}, in ${card.container}, as ${card.issue.key}: ${card.issue.url}. Its card in this thread is the record of it.${leftWords}${card.leftOff.length === 0 ? '' : ` ${card.tracker} left off: ${card.leftOff.join(' ')}`}`
           return `Drafted the issue “${card.title}” on ${card.tracker}, in ${card.container}.${leftWords} Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
         })
 
