@@ -359,7 +359,8 @@ export class PlanUsage extends Context.Service<
           sql<{ state: string }>`SELECT s.state FROM account_statuses s JOIN principals p ON p.id = s.principal_id
             WHERE p.account_id = ${accountId} ORDER BY s.observed_at DESC LIMIT 1`.pipe(
             Effect.map(([latest]) => latest?.state === 'limited'),
-            Effect.orElseSucceed(() => false),
+            // If the store cannot say, keep polling rather than strand work waiting for a reset.
+            Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read an account limit', cause), true)),
           )
 
         /* Reads one account from its agent's source and keeps what it said; `onDemand` where steering wants it read again, whatever a session said lately. */
@@ -607,7 +608,7 @@ export class PlanUsage extends Context.Service<
             })
           })
 
-        const readAll = (force: boolean, only?: ReadonlyArray<string>, afterLimit = false) =>
+        const readAll = (force: boolean, only?: ReadonlyArray<string>, afterLimit = false, background = false) =>
           Effect.gen(function* () {
             yield* hydrate
             const now = yield* Clock.currentTimeMillis
@@ -625,9 +626,24 @@ export class PlanUsage extends Context.Service<
               yield* Effect.forEach(
                 due,
                 (account) =>
-                  readAccount(account, only !== undefined, afterLimit, force && !afterLimit).pipe(
-                    Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause)),
-                  ),
+                  Effect.gen(function* () {
+                    const listing = background && account.agentId === 'opencode' ? listings.get(account.id) : undefined
+                    if (listing !== undefined && (yield* signIns.cached(account)) === listing.check) {
+                      const windows = held.get(account.id)?.windows ?? []
+                      const [working] = yield* sql<{ one: number }>`
+                        SELECT 1 AS one FROM provider_sessions s JOIN turn_deliveries d ON d.provider_session_id = s.id
+                        WHERE s.account_id = ${account.id} AND d.state IN ('pending', 'delivered') LIMIT 1`
+                      // An idle account cannot consume usage in Althar. A full window or a reported limit still needs
+                      // polling, so work waiting for a reset can resume without the person opening the gauge.
+                      if (
+                        working === undefined &&
+                        !windows.some((window) => window.spend !== true && leftOf(window) <= 0) &&
+                        !(yield* limited(account.id))
+                      )
+                        return
+                    }
+                    yield* readAccount(account, only !== undefined, afterLimit, force && !afterLimit)
+                  }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause))),
                 { concurrency: 'unbounded', discard: true },
               )
               read += due.length
@@ -722,7 +738,7 @@ export class PlanUsage extends Context.Service<
         if (Duration.toMillis(every) > 0)
           yield* Effect.forkScoped(
             Effect.forever(
-              Effect.andThen(Effect.sleep(every), Effect.andThen(readAll(false), told)).pipe(
+              Effect.andThen(Effect.sleep(every), Effect.andThen(readAll(false, undefined, false, true), told)).pipe(
                 Effect.catchCause((cause) => Effect.logWarning('Could not read plan usage', cause)),
               ),
             ),
