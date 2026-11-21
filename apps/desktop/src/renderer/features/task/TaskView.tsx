@@ -830,21 +830,25 @@ export function TaskView({
   // A pick holds only while the task stands as it was made for: one made with no lead on it is spent once a lead is, and one
   // of another agent to take over from the lead once that lead stops. The picker then reads the task as the runtime has it.
   const leadOn = session?.held === true
+  // Another session takes it over after the one going out let it go: the picker and header say who leads as that one will.
+  const taking = session !== null && !session.held && session.handover === true ? upcomingOn(session) : null
   if (pick !== null && leadOn) setPick(null)
   if (handover !== null && !leadOn) setHandover(null)
   const agentName = (id: string | null) =>
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Running or not, the task has its lead: the one on it now, else the last, else the one its plan names.
   // Its model as just picked, or chosen for its next turn, where it is the same agent's: the header says what the picker says.
-  const next = session !== null && session.held ? (moving ?? upcomingOn(session)) : null
+  const next = session !== null && session.held ? (moving ?? upcomingOn(session)) : taking === null ? null : (moving ?? taking)
   const leadModel =
     session !== null && next !== null && next.agentId === session.agentId ? (next.model ?? session.model) : (session?.model ?? null)
   const lead =
     session !== null && session.held
       ? named(session.agentId, leadModel, session.account)
-      : snapshot.task.lead === null
-        ? noLead
-        : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
+      : taking !== null
+        ? named(taking.agentId, next?.model ?? taking.model, null)
+        : snapshot.task.lead === null
+          ? noLead
+          : named(snapshot.task.lead.agentId, snapshot.task.lead.model, snapshot.task.lead.account)
   const { status, state, why } = statusOf(snapshot, agentName)
   // Its steps as a graph, where the runtime keeps rounds of work for it; without, its face isn't offered.
   const shown: Face = face === null || (face === 'graph' && !hasGraph) ? 'talk' : face
@@ -890,7 +894,9 @@ export function TaskView({
   const standIn = session?.held === true && waiting === null && moving === null && pending === null ? (session.standsIn ?? null) : null
   const choice =
     session === null || !session.held
-      ? chosen
+      ? taking === null
+        ? chosen
+        : ((moving !== null ? { ...moving, agentId: taking.agentId } : null) ?? taking)
       : (waiting ?? (moving !== null ? { ...moving, agentId: session.agentId } : null) ?? pending ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.

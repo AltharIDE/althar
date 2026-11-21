@@ -779,6 +779,72 @@ describe('the API', () => {
     ),
   )
 
+  it.live(
+    'takes a model and effort picked after the lead going out let the thread go, for the first turn of the one taking it over',
+    () => {
+      // The old session's close is held once the switch begins: it has let the thread go, and the new one has not taken it.
+      let open: () => void = () => {}
+      let closing: Promise<void> | undefined
+      const beforeClose = () => closing ?? Promise.resolve()
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const { client, grant, store } = yield* connected({ agents: fakeAgents({}, [], { codex: { beforeClose } }) })
+          const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+          const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry' })
+          const first = yield* client.StartSession({
+            commandId: commandId(),
+            threadId: task.threadId,
+            agentId: 'codex',
+            model: 'large',
+            effort: 'high',
+          })
+          yield* until(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+          closing = new Promise<void>((resolve) => {
+            open = resolve
+          })
+          const switching = yield* Effect.forkChild(
+            client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large', effort: 'high' }),
+          )
+          // As the window reads the thread in the gap: not held, but taken over, leading as the incoming session will.
+          const gap = yield* until(
+            client.GetThread({ threadId: task.threadId }),
+            (thread) => thread.session?.held === false && thread.session.handover === true,
+          )
+          assert.strictEqual(gap.session?.nextLead?.agentId, 'codex')
+          // What the window sends then, as the picker names the agent; never a start, which would wait and then refuse.
+          yield* client.SetModel({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'small' })
+          yield* client.SetEffort({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', effort: 'low' })
+          const picked = yield* client.GetThread({ threadId: task.threadId })
+          assert.deepStrictEqual(picked.session?.nextLead, { agentId: 'codex', model: 'small', effort: 'low' })
+          open()
+          yield* Fiber.join(switching)
+          const after = yield* until(
+            client.GetThread({ threadId: task.threadId }),
+            (thread) => idle(thread) && thread.session?.held === true && thread.session.id !== first && thread.session.model === 'small',
+          )
+          assert.strictEqual(after.session?.effort, 'low')
+          assert.isUndefined(after.session?.handover)
+          // Set on the new session before its first turn was asked of it: the last setting comes before its first delivery.
+          const sessionId = after.session?.id ?? ''
+          const [order] = yield* store(
+            Effect.flatMap(
+              SqlClient.SqlClient,
+              (sql) => sql<{ settled: number | null; firstTurn: number | null }>`
+              SELECT
+                (SELECT max(sequence) FROM record_events WHERE aggregate_type = 'provider_session' AND aggregate_id = ${sessionId}
+                  AND type = 'provider_session.lead_choice_changed') AS settled,
+                (SELECT min(e.sequence) FROM record_events e JOIN turn_deliveries t ON t.id = e.aggregate_id
+                  WHERE e.aggregate_type = 'turn_delivery' AND t.provider_session_id = ${sessionId}) AS first_turn`,
+            ),
+          )
+          assert.isNotNull(order?.settled)
+          assert.isNotNull(order?.firstTurn)
+          assert.isBelow(order?.settled ?? Infinity, order?.firstTurn ?? -Infinity)
+        }).pipe(Effect.ensuring(Effect.sync(() => open()))),
+      )
+    },
+  )
+
   it.live('says when the turn running started, which the wait for its first word is counted from, and when it ended', () => {
     // Its answer is held until the test has read the turn running.
     const coordinator = holds()

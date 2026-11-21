@@ -1076,7 +1076,7 @@ describe('the Talk room', () => {
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Stop', disposition: 'interrupt_and_continue' }))
     await userEvent.click(await screen.findByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: 'High' }))
-    await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'thc', effort: 'high' }))
+    await waitFor(() => expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code', effort: 'high' }))
     // At work, another agent takes over only with what the person says next.
     await userEvent.click(screen.getByRole('radio', { name: /gpt-5\.2-codex, via Codex/ }))
     await userEvent.keyboard('{Escape}')

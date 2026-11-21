@@ -132,8 +132,10 @@ export {
 interface Handing {
   /** The session on its way out, where there was one: what is picked shows on it while it still holds the thread. */
   readonly from: Running | undefined
-  /** The agent taking the thread. */
+  /** The agent taking the thread, and the model and effort it was asked to start on, where they were named. */
   readonly agentId: string
+  readonly model: string | undefined
+  readonly effort: string | undefined
   /** The lead the incoming session takes up before its first turn: its own agent's model or effort, or another agent back. */
   pick: Running['nextLead']
   /** What the incoming session took up as it took the thread. */
@@ -345,6 +347,14 @@ export class Sessions extends Context.Service<
         readonly usageOut?: { readonly agentId: string; readonly accountId: string; readonly until: string }
       }>
     >
+    /**
+     * A switch or a fresh session taking the thread over, from its start until the new session holds the thread, even where
+     * the one going out has already let it go: who leads its first turn, as the switch asked and as picked meanwhile. A
+     * model or effort chosen now (`chooseLead`) is that session's.
+     */
+    handingOver(
+      threadId: string,
+    ): Effect.Effect<Option.Option<{ readonly agentId: string; readonly model?: string; readonly effort?: string }>>
     /**
      * Decides something Althar does for the thread's session as one of its
      * own requests would be (ADR-013): by the rules, the coordinator or the
@@ -1259,8 +1269,13 @@ export class Sessions extends Context.Service<
       const handovers = new Map<string, Handing>()
 
       /** A switch or a fresh session begins: from here what is picked is the incoming one's, starting from `seed`. */
-      const handing = (threadId: string, from: Running | undefined, agentId: string, seed: Running['nextLead']): Handing => {
-        const holder: Handing = { from, agentId, pick: seed, adopted: undefined }
+      const handing = (
+        threadId: string,
+        from: Running | undefined,
+        to: { readonly agentId: string; readonly model: string | undefined; readonly effort: string | undefined },
+        seed: Running['nextLead'],
+      ): Handing => {
+        const holder: Handing = { from, ...to, pick: seed, adopted: undefined }
         handovers.set(threadId, holder)
         return holder
       }
@@ -1996,7 +2011,7 @@ export class Sessions extends Context.Service<
             const holder = handing(
               input.threadId,
               previous,
-              entry.definition.id,
+              { agentId: entry.definition.id, model: input.model, effort: input.effort },
               previousHandover === 'under_way' ? previous?.nextLead : undefined,
             )
             if (previous !== undefined) previous.handover = 'under_way'
@@ -2129,7 +2144,12 @@ export class Sessions extends Context.Service<
             // Started afresh, a stand-in still stands in for the lead it was given.
             const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId))
             // A model or effort the person picks while it starts is the fresh session's, as is one picked as this began.
-            const to = handing(previous.thread.threadId, previous, previous.entry.definition.id, previous.nextLead)
+            const to = handing(
+              previous.thread.threadId,
+              previous,
+              { agentId: previous.entry.definition.id, model, effort },
+              previous.nextLead,
+            )
             holder = to
             const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model, standsIn)
             const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
@@ -2676,6 +2696,21 @@ export class Sessions extends Context.Service<
                   ...(running.nextLead === undefined ? {} : { nextLead: running.nextLead }),
                   ...(running.deliveryHeld === 'usage_limit' && running.usageOut !== undefined ? { usageOut: running.usageOut } : {}),
                 })
+          }),
+        handingOver: (threadId) =>
+          Effect.sync(() => {
+            const holder = handovers.get(threadId)
+            if (holder === undefined) return Option.none()
+            const { pick } = holder
+            // Another agent picked back takes the thread as picked; the incoming one starts as it was asked to, but for what is picked.
+            if (pick !== undefined && pick.agentId !== holder.agentId) return Option.some(pick)
+            const model = pick?.model ?? holder.model
+            const effort = pick?.effort ?? holder.effort
+            return Option.some({
+              agentId: holder.agentId,
+              ...(model === undefined ? {} : { model }),
+              ...(effort === undefined ? {} : { effort }),
+            })
           }),
         askPermission: (threadId, request) =>
           Effect.suspend(() => {

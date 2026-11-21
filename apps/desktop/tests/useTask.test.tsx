@@ -307,6 +307,19 @@ describe('what the person does on a task', () => {
     expect(client.setModel).not.toHaveBeenCalled()
   })
 
+  it('moves the session taking the thread over, not a start, where the lead going out has let the thread go', async () => {
+    const base = snapshot().session!
+    // The runtime's read in the gap of a switch: the old session gone, the new one not yet holding the thread.
+    const { result, client } = reading({
+      session: { ...base, held: false, handover: true, nextLead: { agentId: base.agentId, model: base.model, effort: base.effort } },
+    })
+    await waitFor(() => expect(result.current.snapshot).not.toBeNull())
+    await act(() => result.current.choose({ agentId: base.agentId, model: 'gpt-6.1-sol', effort: 'low' }))
+    expect(client.startSession).not.toHaveBeenCalled()
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: base.agentId, model: 'gpt-6.1-sol' })
+    expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: base.agentId, effort: 'low' })
+  })
+
   it('sends a pick back to the model the lead is on while another is held for its next turn', async () => {
     const base = snapshot().session!
     const { result, client } = reading({

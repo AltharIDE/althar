@@ -1434,6 +1434,7 @@ export const handlers = apiLayer(
         once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, ...(agentId === undefined ? {} : { agentId }), model })))),
       SetEffort: ({ commandId, threadId, agentId, effort }) =>
         once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, ...(agentId === undefined ? {} : { agentId }), effort })))),
+      SetAgent: ({ commandId, threadId, agentId }) => once(commandId, api(Effect.asVoid(sessions.chooseLead({ threadId, agentId })))),
       GetModels: () => api(models.catalog),
       SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),

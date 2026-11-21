@@ -545,6 +545,7 @@ describe('the API', () => {
               InstallAgent: () => Effect.die('unused'),
               OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
+              SetAgent: () => Effect.die('unused'),
               GetModels: () => Effect.die('unused'),
               SetDefaultEffort: () => Effect.die('unused'),
               SetModelBlocked: () => Effect.die('unused'),

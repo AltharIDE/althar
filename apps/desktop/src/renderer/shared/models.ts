@@ -527,6 +527,8 @@ export const moveTo = async (client: Client, threadId: string, current: Choice, 
   const back = agentId !== current.agentId
   const model = next.model ?? (back ? holding.model : null)
   const effort = next.effort ?? (back ? holding.effort : null)
+  // An agent that tells neither is picked back as itself.
+  if (back && model === null && effort === null) await client.setAgent({ threadId, agentId })
   if (model !== null && (back || model !== current.model)) await client.setModel({ threadId, agentId, model })
   if (effort !== null && (back || effort !== current.effort)) await client.setEffort({ threadId, agentId, effort })
 }

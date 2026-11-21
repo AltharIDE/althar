@@ -367,6 +367,23 @@ describe('moving a running thread to a choice', () => {
     expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'sonnet' })
   })
 
+  it('tells the runtime the agent is back where it tells neither its model nor its effort', async () => {
+    const { client } = fakeClient()
+    // An agent with no model or effort to pick, picked back over OpenCode waiting to take over: picked as itself.
+    const plain = { agentId: 'acp-rpc', model: null, effort: null }
+    await moveTo(
+      client,
+      'th1',
+      { agentId: 'opencode', model: 'small', effort: null },
+      { agentId: 'acp-rpc', model: null, effort: null },
+      plain,
+    )
+    expect(client.setAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'acp-rpc' })
+    expect(client.setModel).not.toHaveBeenCalled()
+    expect(client.setEffort).not.toHaveBeenCalled()
+    expect(client.switchAgent).not.toHaveBeenCalled()
+  })
+
   it('tells the runtime the agent is back when picked back as it is, with nothing of its own chosen', async () => {
     const { client } = fakeClient()
     // OpenCode waits to take over; the person picks Codex again, leaving its model and effort as Codex holds them.
@@ -381,6 +398,7 @@ describe('moving a running thread to a choice', () => {
     expect(client.switchAgent).not.toHaveBeenCalled()
     expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-6.1-terra' })
     expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', effort: 'xhigh' })
+    expect(client.setAgent).not.toHaveBeenCalled()
   })
 })
 

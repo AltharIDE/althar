@@ -220,26 +220,30 @@ describe('pending lead choices on the client feed', () => {
     )
   })
 
-  it.live('keeps the lead where the agent on the thread is picked back as it is over another waiting to take over', () =>
-    Effect.gen(function* () {
-      const sessions = yield* Sessions
-      const sql = yield* SqlClient.SqlClient
-      const lead = yield* started
-      assert.strictEqual(yield* sessions.changeLead({ threadId: lead.threadId, agentId: 'opencode', model: 'small' }), 'later')
-      // What the window sends for Codex picked again with nothing of its own chosen: Codex as it is.
-      assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, agentId: 'codex', model: 'large' }), 'same')
-      assert.isUndefined(Option.getOrThrow(yield* sessions.running(lead.threadId)).nextLead)
-      yield* sessions.send({
-        envelope: yield* Runtime.envelope('thread.send', {}),
-        threadId: lead.threadId,
-        body: 'Carry on.',
-        sender: { kind: 'window' },
-      })
-      yield* until(turns(lead.threadId), (rows) => rows.length === 2 && rows.every((row) => row.state === 'completed'))
-      const agents = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE thread_id = ${lead.threadId}`
-      assert.deepStrictEqual(agents, [{ agentId: 'codex' }])
-    }).pipe(Effect.provide(runtime(':memory:', {}, {}))),
-  )
+  for (const as of [{ model: 'large' }, {}] as const)
+    it.live(
+      `keeps the lead where the agent on the thread is picked back as it is over another waiting to take over${'model' in as ? ', with its model' : ', with nothing of its own'}`,
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const sql = yield* SqlClient.SqlClient
+          const lead = yield* started
+          assert.strictEqual(yield* sessions.changeLead({ threadId: lead.threadId, agentId: 'opencode', model: 'small' }), 'later')
+          // What the window sends for Codex picked again with nothing of its own chosen: Codex as it is, by its model, or by
+          // itself alone where it tells neither model nor effort (`SetAgent`).
+          assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, agentId: 'codex', ...as }), 'same')
+          assert.isUndefined(Option.getOrThrow(yield* sessions.running(lead.threadId)).nextLead)
+          yield* sessions.send({
+            envelope: yield* Runtime.envelope('thread.send', {}),
+            threadId: lead.threadId,
+            body: 'Carry on.',
+            sender: { kind: 'window' },
+          })
+          yield* until(turns(lead.threadId), (rows) => rows.length === 2 && rows.every((row) => row.state === 'completed'))
+          const agents = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE thread_id = ${lead.threadId}`
+          assert.deepStrictEqual(agents, [{ agentId: 'codex' }])
+        }).pipe(Effect.provide(runtime(':memory:', {}, {}))),
+    )
 
   it.live('notifies another client while a turn runs, and notifies cancellation without changing actual settings', () => {
     const going = holds()

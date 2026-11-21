@@ -3757,6 +3757,12 @@ export const SessionSummary = Schema.Struct({
    * is held, a note waits its turn there, running or between turns.
    */
   held: Schema.Boolean,
+  /**
+   * A switch or a fresh session is taking the thread over, until it holds it, even after the one going out has let it go
+   * (`held` false then): a model or effort picked now is the incoming session's, sent as on a held thread, never as a start.
+   * `nextLead` is what that session leads as then.
+   */
+  handover: Schema.optional(Schema.Boolean),
   /** Who leads the thread from its next turn, where that was changed while it worked or waited; absent or null otherwise. */
   nextLead: Schema.optional(
     Schema.NullOr(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String), effort: Schema.NullOr(Schema.String) })),
@@ -5023,6 +5029,7 @@ const socketCalls = new Set<string>([
   'SwitchAgent',
   'SetModel',
   'SetEffort',
+  'SetAgent',
   'GetRepositoryScripts',
 ])
 
@@ -5549,6 +5556,11 @@ const ProjectApi = RpcGroup.make(
   command('SetModel', { threadId: Schema.String, agentId: Schema.optional(Schema.String), model: Schema.String }, Schema.Void),
   /** How hard the thread's agent thinks, picked as `SetModel` is: taken at once, set on the agent in the background. */
   command('SetEffort', { threadId: Schema.String, agentId: Schema.optional(Schema.String), effort: Schema.String }, Schema.Void),
+  /**
+   * The thread's agent picked with nothing of its model or effort chosen, as `SetModel` is: the one on the thread picked back
+   * over another waiting to take over keeps the thread, as it is; the one going out, picked while another takes over, takes it back.
+   */
+  command('SetAgent', { threadId: Schema.String, agentId: Schema.String }, Schema.Void),
   /** Every agent's models and efforts, as far as Althar knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),
   /** The person's default effort for one of an agent's models, kept for the profile. */

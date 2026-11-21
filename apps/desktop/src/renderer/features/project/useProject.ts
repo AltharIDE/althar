@@ -658,8 +658,8 @@ export const useProject = (projectId: string): ProjectModel => {
       try {
         // As the cache has it now, not as this render had it: a head read may have landed since.
         const session = (cache.getQueryData<CoordinatorSnapshot>(keys.coordinator(projectId)) ?? coordinator)?.session
-        // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something.
-        if (threadId !== null && session != null && session.held) {
+        // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something. One taking it over is.
+        if (threadId !== null && session != null && (session.held || session.handover === true)) {
           // From what it was last picked to, else what the runtime holds for its next turn, else what it is on.
           const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
           // With it, or going to it with a switch asked for a moment ago: the same agent again keeps its session.
