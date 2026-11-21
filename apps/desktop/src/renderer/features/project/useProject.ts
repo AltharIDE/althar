@@ -663,7 +663,7 @@ export const useProject = (projectId: string): ProjectModel => {
           // From what it was last picked to, else what the runtime holds for its next turn, else what it is on.
           const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
           // With it, or going to it with a switch asked for a moment ago: the same agent again keeps its session.
-          const holding = lastPick.current?.agentId ?? session.agentId
+          const holding = lastPick.current ?? runningOn(session)
           lastPick.current = choice
           await moveTo(client, threadId, from, choice, holding)
         }

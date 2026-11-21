@@ -5543,11 +5543,12 @@ const ProjectApi = RpcGroup.make(
   /**
    * The person's pick of the thread's model, taken at once: the thread's session shows it as who leads from its next turn
    * (`nextLead`), and the runtime sets it on the agent in the background, once no turn runs. What the agent wouldn't take is
-   * said in the thread, and the lead stays as it was.
+   * said in the thread, and the lead stays as it was. `agentId` is the agent whose model it is, as the picker showed it: the
+   * one on the thread where left out; while another takes the thread over, the one going out takes it back.
    */
-  command('SetModel', { threadId: Schema.String, model: Schema.String }, Schema.Void),
+  command('SetModel', { threadId: Schema.String, agentId: Schema.optional(Schema.String), model: Schema.String }, Schema.Void),
   /** How hard the thread's agent thinks, picked as `SetModel` is: taken at once, set on the agent in the background. */
-  command('SetEffort', { threadId: Schema.String, effort: Schema.String }, Schema.Void),
+  command('SetEffort', { threadId: Schema.String, agentId: Schema.optional(Schema.String), effort: Schema.String }, Schema.Void),
   /** Every agent's models and efforts, as far as Althar knows them. */
   call('GetModels', {}, Schema.Array(AgentModels)),
   /** The person's default effort for one of an agent's models, kept for the profile. */

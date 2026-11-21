@@ -986,7 +986,7 @@ export const useTask = (threadId: string): TaskModel => {
         else {
           const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
           // With it, or going to it with a switch asked for a moment ago: the same agent again keeps its session.
-          const holding = lastPick.current?.agentId ?? session.agentId
+          const holding = lastPick.current ?? runningOn(session)
           lastPick.current = choice
           await moveTo(client, threadId, from, choice, holding)
         }

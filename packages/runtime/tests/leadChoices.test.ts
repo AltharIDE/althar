@@ -1,12 +1,12 @@
 import { Ledger } from '@althar/persistence-sqlite'
-import { holds, scenarios } from '@althar/provider-adapters/testing'
+import { holds } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Fiber, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { items, notices, runtime, task, turns, until } from './support'
+import { notices, runtime, task, turns, until } from './support'
 
 const choices = (sessionId: string) =>
   Effect.flatMap(
@@ -97,54 +97,149 @@ describe('pending lead choices on the client feed', () => {
     })
   }
 
-  it.live('sets a model picked while a fresh session takes the lead on that session, before its first turn', () => {
-    // The fresh session's start is held, so the person picks while it starts, as they did on a real task.
-    let holding = false
-    let release: () => void = () => {}
-    const startup = () =>
-      holding
-        ? new Promise<void>((resolve) => {
-            release = resolve
-          })
-        : Promise.resolve()
+  /**
+   * The model and effort a session was on as its first turn was asked of it: its last setting of either before that turn's
+   * delivery was recorded (`provider_session.*` facts carry no option values, so its row as the turn ended, with no setting
+   * after the turn began).
+   */
+  const firstTurnOn = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const [first] = yield* sql<{ sequence: number }>`
+        SELECT min(e.sequence) AS sequence FROM record_events e JOIN turn_deliveries t ON t.id = e.aggregate_id
+        WHERE e.aggregate_type = 'turn_delivery' AND t.provider_session_id = ${sessionId}`
+      const [settled] = yield* sql<{ sequence: number }>`
+        SELECT max(sequence) AS sequence FROM record_events WHERE aggregate_type = 'provider_session' AND aggregate_id = ${sessionId}
+          AND type = 'provider_session.lead_choice_changed'`
+      return { firstTurn: first?.sequence ?? null, settled: settled?.sequence ?? null, on: (yield* actual(sessionId))[0] }
+    })
+
+  /** What the agent waits on once a test holds it, until the test opens it again: opened first, it doesn't wait. */
+  const gate = () => {
+    let held: Promise<void> | undefined
+    let open: () => void = () => {}
+    return {
+      hold: () => {
+        held = new Promise<void>((resolve) => {
+          open = resolve
+        })
+      },
+      wait: () => held ?? Promise.resolve(),
+      open: () => {
+        held = undefined
+        open()
+      },
+    }
+  }
+
+  for (const at of ['connects', 'stops'] as const) {
+    it.live(
+      `sets a model and effort picked while a fresh session ${at === 'connects' ? 'connects' : 'replaces the one going out'} on it, before its first turn`,
+      () => {
+        // The switch is held where the person picks: the new session's start, or the old one's close, after it has let the thread go.
+        const held = gate()
+        return Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const sql = yield* SqlClient.SqlClient
+          const lead = yield* started
+          held.hold()
+          const switching = yield* Effect.forkChild(
+            sessions.switchAgent({ threadId: lead.threadId, agentId: 'codex', model: 'large', effort: 'high' }),
+          )
+          if (at === 'connects')
+            yield* until(
+              sql`SELECT id FROM provider_sessions WHERE thread_id = ${lead.threadId} AND state = 'starting'`,
+              (rows) => rows.length === 1,
+            )
+          else yield* until(sessions.running(lead.threadId), Option.isNone)
+          // Two picks, as the picker sends a model and an effort: both kept for the session starting, never refused.
+          assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, model: 'small' }), 'later')
+          assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, effort: 'low' }), 'later')
+          if (at === 'connects')
+            assert.deepStrictEqual(Option.getOrThrow(yield* sessions.running(lead.threadId)).nextLead, {
+              agentId: 'codex',
+              model: 'small',
+              effort: 'low',
+            })
+          held.open()
+          const sessionId = yield* Fiber.join(switching)
+          yield* until(turns(lead.threadId), (rows) => rows.some((row) => row.providerSessionId === sessionId && row.state === 'completed'))
+          // The one going out stayed as it was; the new one was put on the pick before its first turn was asked of it.
+          assert.strictEqual((yield* actual(lead.sessionId))[0]?.model, 'large')
+          const first = yield* firstTurnOn(sessionId)
+          assert.include(first.on, { model: 'small', effort: 'low' })
+          assert.isNotNull(first.settled)
+          assert.isBelow(first.settled ?? Infinity, first.firstTurn ?? -Infinity)
+          // Said by the models' names, on the session that changed, with no switch from an agent to itself.
+          const said = (yield* notices(lead.threadId)).map((notice) => notice['title'])
+          assert.include(said, 'Model changed to Small.')
+          assert.isFalse(said.some((title) => title?.startsWith('Switched from Fake codex') === true))
+        }).pipe(
+          Effect.ensuring(Effect.sync(() => held.open())),
+          Effect.provide(
+            runtime(':memory:', {}, { each: { codex: at === 'connects' ? { beforeNewSession: held.wait } : { beforeClose: held.wait } } }),
+          ),
+        )
+      },
+    )
+  }
+
+  it.live('takes the thread back to the agent going out where it is picked back while another takes it over', () => {
+    const held = gate()
     return Effect.gen(function* () {
       const sessions = yield* Sessions
       const sql = yield* SqlClient.SqlClient
       const lead = yield* started
-      holding = true
-      const switching = yield* Effect.forkChild(
-        sessions.switchAgent({ threadId: lead.threadId, agentId: 'codex', model: 'large', effort: 'high' }),
-      )
+      held.hold()
+      const switching = yield* Effect.forkChild(sessions.switchAgent({ threadId: lead.threadId, agentId: 'opencode', model: 'large' }))
       yield* until(
         sql`SELECT id FROM provider_sessions WHERE thread_id = ${lead.threadId} AND state = 'starting'`,
         (rows) => rows.length === 1,
       )
-      // The lead from its next turn, shown at once, and kept for the session starting, not set on the one on its way out.
-      assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, model: 'small' }), 'later')
-      assert.deepStrictEqual(Option.getOrThrow(yield* sessions.running(lead.threadId)).nextLead, { agentId: 'codex', model: 'small' })
-      holding = false
-      release()
-      const sessionId = yield* Fiber.join(switching)
-      assert.strictEqual((yield* actual(lead.sessionId))[0]?.model, 'large')
-      assert.strictEqual((yield* actual(sessionId))[0]?.model, 'small')
-      // Its first turn, the brief, runs on that session, and the agent says it is on the model picked.
-      yield* until(turns(lead.threadId), (rows) => rows.some((row) => row.providerSessionId === sessionId && row.state === 'completed'))
+      // A Codex model, as the picker shows it while OpenCode starts: Codex's, never set on OpenCode.
+      assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, agentId: 'codex', model: 'small' }), 'later')
+      held.open()
+      yield* Fiber.join(switching)
+      // OpenCode took the thread, and Codex took it back on the model picked, before OpenCode's first turn.
+      const back = yield* until(
+        sql<{ id: string; agentId: string; model: string | null }>`
+          SELECT id, agent_id, model FROM provider_sessions WHERE thread_id = ${lead.threadId} AND state = 'active'`,
+        (rows) => rows.length === 1 && rows[0]?.agentId === 'codex' && rows[0].id !== lead.sessionId,
+      )
+      assert.strictEqual(back[0]?.model, 'small')
+      const opencode = yield* sql<{
+        id: string
+      }>`SELECT id FROM provider_sessions WHERE thread_id = ${lead.threadId} AND agent_id = 'opencode'`
+      assert.lengthOf(opencode, 1)
+      assert.lengthOf(yield* sql`SELECT id FROM turn_deliveries WHERE provider_session_id = ${opencode[0]?.id ?? ''}`, 0)
+      const said = (yield* notices(lead.threadId)).map((notice) => String(notice['title']))
+      assert.isFalse(said.some((title) => title.includes('stays on its model')))
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => held.open())),
+      Effect.provide(runtime(':memory:', {}, { each: { opencode: { beforeNewSession: held.wait } } })),
+    )
+  })
+
+  it.live('keeps the lead where the agent on the thread is picked back as it is over another waiting to take over', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const lead = yield* started
+      assert.strictEqual(yield* sessions.changeLead({ threadId: lead.threadId, agentId: 'opencode', model: 'small' }), 'later')
+      // What the window sends for Codex picked again with nothing of its own chosen: Codex as it is.
+      assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, agentId: 'codex', model: 'large' }), 'same')
+      assert.isUndefined(Option.getOrThrow(yield* sessions.running(lead.threadId)).nextLead)
       yield* sessions.send({
         envelope: yield* Runtime.envelope('thread.send', {}),
         threadId: lead.threadId,
-        body: scenarios.settings,
+        body: 'Carry on.',
         sender: { kind: 'window' },
       })
-      yield* until(items(lead.threadId), (rows) => rows.some((row) => String(row.content['text']).includes('model=small')))
-      // Said by the models' names, with no switch from an agent to itself.
-      const said = (yield* notices(lead.threadId)).map((notice) => notice['title'])
-      assert.include(said, 'Switched from Large to Small.')
-      assert.isFalse(said.some((title) => title?.startsWith('Switched from Fake codex') === true))
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => release())),
-      Effect.provide(runtime(':memory:', {}, { each: { codex: { beforeNewSession: startup } } })),
-    )
-  })
+      yield* until(turns(lead.threadId), (rows) => rows.length === 2 && rows.every((row) => row.state === 'completed'))
+      const agents = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE thread_id = ${lead.threadId}`
+      assert.deepStrictEqual(agents, [{ agentId: 'codex' }])
+    }).pipe(Effect.provide(runtime(':memory:', {}, {}))),
+  )
 
   it.live('notifies another client while a turn runs, and notifies cancellation without changing actual settings', () => {
     const going = holds()

@@ -332,8 +332,8 @@ describe('moving a running thread to a choice', () => {
     await moveTo(client, 'th1', on, { ...on, effort: null })
     expect([client.setModel, client.setEffort, client.switchAgent].map((call) => vi.mocked(call).mock.calls.length)).toEqual([0, 0, 0])
     await moveTo(client, 'th1', on, { ...on, model: 'sonnet', effort: 'low' })
-    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', model: 'sonnet' })
-    expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', effort: 'low' })
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'sonnet' })
+    expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', effort: 'low' })
     await moveTo(client, 'th1', on, { agentId: 'codex', model: null, effort: 'low' })
     expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', effort: 'low' })
   })
@@ -341,36 +341,46 @@ describe('moving a running thread to a choice', () => {
   it('keeps the session of the agent it is with, picked back from another waiting to take its next turn', async () => {
     const { client } = fakeClient()
     // On Codex, with OpenCode waiting to take over: back to Codex, then to another of its models.
+    const codex = { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' }
     const waiting = { agentId: 'opencode', model: 'opencode/gpt-6.2-sol', effort: 'xhigh' }
-    await moveTo(client, 'th1', waiting, { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' }, 'codex')
-    await moveTo(
-      client,
-      'th1',
-      { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' },
-      { agentId: 'codex', model: 'gpt-6.1-sol', effort: 'high' },
-      'codex',
-    )
+    await moveTo(client, 'th1', waiting, { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' }, codex)
+    await moveTo(client, 'th1', codex, { agentId: 'codex', model: 'gpt-6.1-sol', effort: 'high' }, codex)
     expect(client.switchAgent).not.toHaveBeenCalled()
-    expect(vi.mocked(client.setModel).mock.calls.map(([input]) => input.model)).toEqual(['gpt-6.1-terra', 'gpt-6.1-sol'])
+    // Each pick names its agent, so one made while another takes the thread over is never set on that one.
+    expect(vi.mocked(client.setModel).mock.calls.map(([input]) => input)).toEqual([
+      { threadId: 'th1', agentId: 'codex', model: 'gpt-6.1-terra' },
+      { threadId: 'th1', agentId: 'codex', model: 'gpt-6.1-sol' },
+    ])
     expect(vi.mocked(client.setEffort).mock.calls.map(([input]) => input.effort)).toEqual(['xhigh', 'high'])
     // Another agent still takes over, and one picked while a switch to it is under way moves that switch's session.
-    await moveTo(
-      client,
-      'th1',
-      { agentId: 'claude-code', model: 'opus', effort: 'high' },
-      { agentId: 'claude-code', model: 'sonnet', effort: 'high' },
-      'claude-code',
-    )
+    const claude = { agentId: 'claude-code', model: 'opus', effort: 'high' }
+    await moveTo(client, 'th1', claude, { agentId: 'claude-code', model: 'sonnet', effort: 'high' }, claude)
     await moveTo(
       client,
       'th1',
       { agentId: 'codex', model: 'gpt-6.1-sol', effort: 'high' },
       { agentId: 'claude-code', model: 'opus', effort: null },
-      'codex',
+      codex,
     )
     expect(client.switchAgent).toHaveBeenCalledOnce()
     expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'opus' })
-    expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', model: 'sonnet' })
+    expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'sonnet' })
+  })
+
+  it('tells the runtime the agent is back when picked back as it is, with nothing of its own chosen', async () => {
+    const { client } = fakeClient()
+    // OpenCode waits to take over; the person picks Codex again, leaving its model and effort as Codex holds them.
+    const codex = { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' }
+    await moveTo(
+      client,
+      'th1',
+      { agentId: 'opencode', model: 'small', effort: null },
+      { agentId: 'codex', model: null, effort: null },
+      codex,
+    )
+    expect(client.switchAgent).not.toHaveBeenCalled()
+    expect(client.setModel).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-6.1-terra' })
+    expect(client.setEffort).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', effort: 'xhigh' })
   })
 })
 
