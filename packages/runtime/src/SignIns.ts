@@ -4,7 +4,7 @@ import { Clock, Context, Duration, Effect, Layer, PubSub, Semaphore, Stream } fr
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
-import { Agents } from './Config'
+import { type AgentEntry, Agents } from './Config'
 import { Copilot } from './Copilot'
 import { makeKeyedLock } from './keyedLock'
 
@@ -26,6 +26,12 @@ import { makeKeyedLock } from './keyedLock'
 const TTL = Duration.minutes(1)
 
 const UNKNOWN: SignInCheck = { status: 'unknown', paidBy: 'unknown' }
+
+interface AgentChecks {
+  readonly entry: AgentEntry
+  readonly lock: ReturnType<typeof makeKeyedLock>
+  readonly known: Map<string, { readonly check: SignInCheck; readonly at: number }>
+}
 
 /** An agent signed in: found so the first time this launch, or an account of its that was signed out signed in. */
 export interface SignedIn {
@@ -60,6 +66,8 @@ export class SignIns extends Context.Service<
     of(agentId: string, recheck?: boolean): Effect.Effect<SignInStatus>
     /** An account's sign-in, and how it is paid for. */
     account(account: Account, recheck?: boolean): Effect.Effect<SignInCheck>
+    /** Drop the cached readings and let new checks proceed independently of the old connection. */
+    forget(agentId: string): Effect.Effect<void>
     /**
      * For an agent whose providers each have a sign-in (OpenCode): the ones its listing has as signed in, and any whose last turn
      * was refused, when. A refusal is let go when a later turn on the provider went through, or its sign-in changed since.
@@ -82,8 +90,7 @@ export class SignIns extends Context.Service<
       const agents = yield* Agents
       const accounts = yield* Accounts
       const copilot = yield* Copilot
-      const known = new Map<string, { readonly check: SignInCheck; readonly at: number }>()
-      const checking = makeKeyedLock()
+      const checking = new Map<string, AgentChecks>()
       // Cold CLI checks can each start a full agent process tree. Share a budget across all callers.
       const probes = Semaphore.makeUnsafe(2)
       /* Agents found signed in this launch, and what is said as they are. */
@@ -99,19 +106,22 @@ export class SignIns extends Context.Service<
           )
           return read === undefined ? check : { ...check, paidBy: 'plan' as const }
         })
-      const checkAccount = (of: Account, recheck: boolean) =>
+      const checkAccount = (of: Account, recheck: boolean, state: AgentChecks) =>
         Effect.gen(function* () {
+          if (checking.get(of.agentId) !== state) return UNKNOWN
+          const { known, entry } = state
           const last = known.get(of.id)
           if (!recheck && last !== undefined && (yield* Clock.currentTimeMillis) - last.at < Duration.toMillis(TTL))
             return yield* paid(of, last.check)
-          const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
-          if (entry === undefined) return UNKNOWN
           yield* accounts.prepare(of)
           const checked = yield* entry.definition.native === 'copilot'
             ? copilot.status(of.id)
             : afterOpen(probes.withPermits(1)(signInCheck(entry.definition, adapterNode(), accounts.env(of))))
+          const at = yield* Clock.currentTimeMillis
+          // A replaced connection cannot update the current reading or announce a sign-in.
+          if (checking.get(of.agentId) !== state || !agents.list.includes(entry)) return UNKNOWN
           const before = known.get(of.id)?.check.status
-          known.set(of.id, { check: checked, at: yield* Clock.currentTimeMillis })
+          known.set(of.id, { check: checked, at })
           if (checked.status === 'signed_in') {
             const how: SignedIn['how'] | null = before === 'signed_out' ? 'signed_in' : found.has(of.agentId) ? null : 'found'
             found.add(of.agentId)
@@ -119,7 +129,15 @@ export class SignIns extends Context.Service<
           }
           return yield* paid(of, checked)
         })
-      const account = (of: Account, recheck = false) => checking.withLock(of.id, checkAccount(of, recheck))
+      const account = (of: Account, recheck = false) =>
+        Effect.suspend(() => {
+          const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
+          if (entry === undefined) return Effect.succeed(UNKNOWN)
+          const existing = checking.get(of.agentId)
+          const state: AgentChecks = existing?.entry === entry ? existing : { entry, lock: makeKeyedLock(), known: new Map() }
+          checking.set(of.agentId, state)
+          return state.lock.withLock(of.id, checkAccount(of, recheck, state))
+        })
       /** What an account's sign-in looked like when a refusal was first seen in Settings: another since means it was put right. */
       const refusals = new Map<string, { readonly at: string; readonly connections: string }>()
       /** Since when the agent itself has said a provider's sign-in must be done again (OpenCode's `needs_auth`). */
@@ -196,6 +214,7 @@ export class SignIns extends Context.Service<
               : anyOf(all.map((check) => check.status)),
           ),
         account,
+        forget: (agentId) => Effect.sync(() => void checking.delete(agentId)),
         providers,
         signedIn: Stream.fromPubSub(arrived),
       })
