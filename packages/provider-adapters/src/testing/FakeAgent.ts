@@ -1215,12 +1215,11 @@ const playRole = async (
         await told('canvas_publish', { name: 'sign-in-page', title: 'Sign-in page', note: 'Direction A, as a page' })
         return said.join('\n\n')
       }
-      // Asked to work on the page beside its task, `[lead:page]` with `page: <address>` and `shot: <file>`, it opens it there,
-      // reads it, types in its Note field, presses Approve, reads it again and writes its screenshot to the file, and says
-      // what each of Althar's tools answered.
+      // The two native test apps pass a file using their own UI.
       if (text.includes('[lead:computer]') && available.has('computer')) {
         const ask = (args: Record<string, unknown>) => call('computer', args)
-        const approved = await ask({ op: 'request', reason: 'Transfer a note from Writer to Reader.' })
+        const visual = text.includes('[computer:visual-fixture]')
+        const approved = await ask({ op: 'request', reason: 'Transfer a note from Writer to Reader.', desktop: visual })
         let windows: ReadonlyArray<{ readonly id: string; readonly title: string }>
         try {
           windows = (JSON.parse(approved) as { readonly windows: typeof windows }).windows
@@ -1230,23 +1229,39 @@ const playRole = async (
         const writer = windows.find((one) => one.title === 'Computer Writer fixture')
         const reader = windows.find((one) => one.title === 'Computer Reader fixture')
         if (writer === undefined || reader === undefined) return 'Writer and Reader need approval.'
-        const fill = async (target: string, text: string) => {
-          const snapshot = await ask({ op: 'observe', target })
+        const input = async (target: string, label: string, args: Record<string, unknown>) => {
+          const snapshot = await ask({ op: 'observe', target, screenshot: visual })
           const observation = /Observation ([0-9a-f-]{36})/.exec(snapshot)?.[1]
-          const element = /^(e\d+) \S+ "Note"/m.exec(snapshot)?.[1]
-          if (observation === undefined || element === undefined) return snapshot
-          return ask({ op: 'type', target, observation, at: { element }, text })
+          const element = snapshot
+            .split('\n')
+            .find((line) => line.includes(` "${label}"`))
+            ?.match(/^(e[0-9]+) /)?.[1]
+          const dimensions = /Screenshot ([0-9]+)x([0-9]+)/.exec(snapshot)
+          const at =
+            element !== undefined
+              ? { element }
+              : visual && dimensions !== null
+                ? { x: Math.floor(Number(dimensions[1]) * 0.5), y: Math.floor(Number(dimensions[2]) * (label === 'Note' ? 0.3 : 0.64)) }
+                : null
+          if (observation === undefined || at === null) return snapshot
+          return ask({ ...args, target, observation, at, foreground: visual && element === undefined })
         }
-        const written = await fill(writer.id, 'Reviewed report')
+        const written = await input(writer.id, 'Note', { op: 'type', text: 'Reviewed report' })
         const observed = await ask({ op: 'observe', target: writer.id })
-        if (!observed.includes('Reviewed report')) return `Writer did not confirm the note. ${written} ${observed}`
-        const transfer = await fill(reader.id, 'Reviewed report')
+        if (!visual && !observed.includes('Reviewed report')) return `Writer did not confirm the note. ${written} ${observed}`
+        const exported = await input(writer.id, 'Export note', { op: 'click' })
+        const transfer = await input(reader.id, 'Import note', { op: 'click' })
         const verified = await ask({ op: 'observe', target: reader.id })
-        if (!verified.includes('Reviewed report')) return `Reader did not confirm the note. ${transfer} ${verified}`
+        if (!visual && !verified.includes('Reviewed report')) return `Reader did not confirm the note. ${exported} ${transfer} ${verified}`
         const evidence = await ask({ op: 'evidence', target: reader.id, caption: 'Reader shows the transferred note.' })
         await ask({ op: 'release' })
-        return `Writer and Reader both show Reviewed report. ${evidence}`
+        return visual
+          ? `Opened the handoff in Reader. ${written} ${exported} ${transfer} ${evidence}`
+          : `Writer and Reader both show Reviewed report. ${evidence}`
       }
+      // Asked to work on the page beside its task, `[lead:page]` with `page: <address>` and `shot: <file>`, it opens it there,
+      // reads it, types in its Note field, presses Approve, reads it again and writes its screenshot to the file, and says
+      // what each of Althar's tools answered.
       if (text.includes('[lead:page]') && available.has('page_open')) {
         const address = /page: (\S+)/.exec(text)?.[1] ?? ''
         const shot = /shot: (\S+)/.exec(text)?.[1]

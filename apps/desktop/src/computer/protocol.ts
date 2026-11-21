@@ -17,6 +17,10 @@ export interface NativeInventory {
 
 export type NativeTarget = NativeWindow | 'desktop'
 export type NativeAction = Extract<ComputerCall, { op: 'click' | 'type' | 'key' | 'scroll' | 'drag' }>
+export interface NativeFrame {
+  readonly width: number
+  readonly height: number
+}
 
 export type NativeCall =
   | { readonly op: 'inventory' }
@@ -27,7 +31,13 @@ export type NativeCall =
 export type NativeResult =
   | { readonly kind: 'inventory'; readonly value: NativeInventory }
   | { readonly kind: 'launched'; readonly windows: ReadonlyArray<NativeWindow> }
-  | { readonly kind: 'observed'; readonly observation: string; readonly answer: ComputerAnswer; readonly picture?: ComputerPicture }
+  | {
+      readonly kind: 'observed'
+      readonly observation: string
+      readonly answer: ComputerAnswer
+      readonly picture?: ComputerPicture
+      readonly frame?: NativeFrame
+    }
   | { readonly kind: 'acted'; readonly answer: ComputerAnswer }
 
 export type NativeReply = { readonly id: string; readonly value: NativeResult } | { readonly id: string; readonly error: string }

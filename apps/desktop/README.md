@@ -118,6 +118,13 @@ Accessibility and Screen Recording access. On Linux, accessibility and
 capture depend on the desktop session and, on Wayland, the compositor.
 Native input and capture are supplied by the bundled Cua Driver SDK.
 
+The normal desktop end-to-end spec uses a stand-in driver. To exercise
+native input on a test desktop with the required OS permissions, run the
+same spec with `ALTHAR_TEST_NATIVE_COMPUTER=portable`. It launches two
+fixture apps, exports a note from one, opens it in the other, and checks
+the saved file and the screenshot through Althar. Use the platform's
+normal syntax for setting the environment variable.
+
 ### The Flatpak
 
 **The Flatpak is experimental**: a task running under GNOME and KDE is still

@@ -7,7 +7,7 @@ import type { NativeCall, NativeReply, NativeResult } from '../../computer/proto
 
 const CALL_LIMIT = 20_000
 const DESKTOP_ENV =
-  /^(DISPLAY|WAYLAND_DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|XDG_CURRENT_DESKTOP|XDG_SESSION_TYPE|XDG_DATA_DIRS|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|PATH|LANG|LANGUAGE|LC_.*|LD_LIBRARY_PATH|SYSTEMROOT|WINDIR|TMPDIR|TEMP|TMP)$/i
+  /^(DISPLAY|WAYLAND_DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|XDG_CURRENT_DESKTOP|XDG_SESSION_TYPE|XDG_DATA_HOME|XDG_DATA_DIRS|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|PATH|LANG|LANGUAGE|LC_.*|LD_LIBRARY_PATH|SYSTEMROOT|WINDIR|TMPDIR|TEMP|TMP)$/i
 
 export interface ComputerWorker {
   readonly run: (call: NativeCall) => Promise<NativeResult>
@@ -49,6 +49,7 @@ export const computerWorker = (here: string): ComputerWorker => {
       env: {
         ...Object.fromEntries(Object.entries(process.env).filter(([name]) => DESKTOP_ENV.test(name))),
         CUA_DRIVER_RS_ENABLE_WAYLAND: '1',
+        DO_NOT_TRACK: '1',
       },
     })
     // The driver can log UI data. Drain its streams without copying them into Althar's logs.

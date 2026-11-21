@@ -9,7 +9,7 @@ import type {
   ComputerState,
 } from '@althar/runtime/computerBridge'
 
-import type { NativeApp, NativeWindow } from '../../computer/protocol'
+import type { NativeAction, NativeApp, NativeFrame, NativeWindow } from '../../computer/protocol'
 import type { ComputerWorker } from './worker'
 
 const ASK_FOR = 150_000
@@ -35,6 +35,7 @@ interface Session {
   pending?: Pending | undefined
   timer?: ReturnType<typeof setTimeout> | undefined
   preview?: ComputerState['preview']
+  frame?: NativeFrame | undefined
   desktop: boolean
   foreground: boolean
   paused: boolean
@@ -54,7 +55,7 @@ export const computerSessions = (options: {
   readonly changed: (state: ComputerState) => void
   readonly canAsk: () => boolean
   readonly available: () => boolean
-  readonly desktopInputSafe?: () => boolean
+  readonly desktopInputSafe?: (action: NativeAction, frame: NativeFrame | undefined) => boolean
 }) => {
   const sessions = new Map<string, Session>()
   let foreground: Session | undefined
@@ -108,6 +109,7 @@ export const computerSessions = (options: {
     settle(session, error(reason))
     stopWorker(session)
     session.preview = undefined
+    session.frame = undefined
     session.windows.clear()
     session.apps.clear()
     session.desktop = false
@@ -136,6 +138,7 @@ export const computerSessions = (options: {
     settle(session, error('The person took over. Wait for them to resume computer use.'))
     stopWorker(session)
     session.preview = undefined
+    session.frame = undefined
     session.action = 'You have control.'
     renew(session)
     changed(session)
@@ -293,6 +296,7 @@ export const computerSessions = (options: {
         })
         if (!still() || observed.kind !== 'observed') return error('Computer use stopped before the observation could be returned.')
         active.action = `Observed ${name}.`
+        if (target === 'desktop') active.frame = observed.frame
         active.preview = observed.picture === undefined ? undefined : { target: command.target, picture: observed.picture }
         changed(active)
         if (command.op === 'evidence' && observed.picture === undefined) return error('That window did not return a usable picture.')
@@ -304,8 +308,8 @@ export const computerSessions = (options: {
         return { value }
       }
       const inForeground = target === 'desktop' || command.foreground === true
-      if (target === 'desktop' && options.desktopInputSafe?.() === false)
-        return error('Move away from the Althar window before sending input to the display.')
+      if (target === 'desktop' && options.desktopInputSafe?.(command, active.frame) === false)
+        return error('Move away from the Althar window and take a fresh observation before sending input to the display.')
       if (inForeground && !active.foreground) return error('Foreground input needs the person’s approval. Request desktop access.')
       if (
         inForeground &&

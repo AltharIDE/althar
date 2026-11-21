@@ -11,6 +11,7 @@ const PICTURE = {
 /** A deterministic desktop for the application test. The native driver has its own graphical smoke. */
 export const testComputerWorker = (): ComputerWorker => {
   const written = new Map<string, string>()
+  let exported = ''
   const run: ComputerWorker['run'] = (call: NativeCall) => {
     const target = 'target' in call ? call.target : 'desktop'
     const key = target === 'desktop' ? target : target.handle
@@ -24,12 +25,18 @@ export const testComputerWorker = (): ComputerWorker => {
         return Promise.resolve({
           kind: 'observed',
           observation: id,
-          answer: { text: `Observation ${id}\ne1 textbox "Note" "${written.get(key) ?? ''}"` },
+          answer: {
+            text: `Observation ${id}\ne1 textbox "Note" "${written.get(key) ?? ''}"\ne2 button "${key === FIRST.handle ? 'Export' : 'Import'} note"`,
+          },
           ...(call.screenshot ? { picture: PICTURE } : {}),
         })
       }
       case 'act':
         if (call.action.op === 'type') written.set(key, call.action.text)
+        if (call.action.op === 'click' && 'element' in call.action.at && call.action.at.element === 'e2') {
+          if (key === FIRST.handle) exported = written.get(key) ?? ''
+          if (key === SECOND.handle) written.set(key, exported)
+        }
         return Promise.resolve({ kind: 'acted', answer: { text: 'Input sent.' } })
     }
   }

@@ -76,14 +76,15 @@ export const nativeComputer = () => {
       const picture = pictureOf(result.images[0])
       if (result.isError || picture === undefined) throw new Error('Althar could not capture the primary display.')
       const { width, height } = await sharp(Buffer.from(picture.data, 'base64')).metadata()
+      const frame = { width, height }
       observations.set(target, {
         id,
         at: Date.now(),
         bounds: null,
-        pixels: width && height ? { width, height } : null,
+        pixels: width && height ? frame : null,
         elements: new Map(),
       })
-      return { kind: 'observed', observation: id, answer: { text: `Observation ${id} of the primary display.` }, picture }
+      return { kind: 'observed', observation: id, answer: { text: `Observation ${id} of the primary display.` }, picture, frame }
     }
     const live = await current(target)
     if (live === null) throw new Error('That window is unavailable.')
@@ -111,7 +112,11 @@ export const nativeComputer = () => {
       )
     }
     for (const one of state.observations ?? []) lines.push(`${one.role} ${JSON.stringify((one.label ?? one.value ?? '').slice(0, 300))}`)
-    const picture = state.elements?.some((one) => one.isPassword) === true ? undefined : pictureOf(state.images[0])
+    if (state.degradedReason === 'screen_locked') throw new Error('The screen locked. Ask the person to unlock it.')
+    const picture =
+      state.screenshotFrameValid === false || state.elements?.some((one) => one.isPassword) === true
+        ? undefined
+        : pictureOf(state.images[0])
     const pixels =
       picture !== undefined && state.screenshotWidth !== undefined && state.screenshotHeight !== undefined
         ? { width: state.screenshotWidth, height: state.screenshotHeight }
@@ -120,7 +125,15 @@ export const nativeComputer = () => {
     return {
       kind: 'observed',
       observation: id,
-      answer: { text: [`Observation ${id} of ${target.app}.`, ...lines].join('\n').slice(0, 22_000) },
+      answer: {
+        text: [
+          `Observation ${id} of ${target.app}.`,
+          ...(pixels === null ? [] : [`Screenshot ${pixels.width}x${pixels.height}.`]),
+          ...lines,
+        ]
+          .join('\n')
+          .slice(0, 22_000),
+      },
       ...(picture === undefined ? {} : { picture }),
     }
   }

@@ -41,6 +41,7 @@ import { watchRuntimeAttention } from './runtimeAttention'
 import { handleCanvases } from './canvases/ipc'
 import { canvasTokens } from './canvases/tokens'
 import { computerChannel, handleComputerWindow } from './computer/ipc'
+import { displayInputSafe } from './computer/display'
 import { computerSessions } from './computer/sessions'
 import { computerWorker } from './computer/worker'
 import { testComputerWorker } from './computer/testNative'
@@ -87,6 +88,7 @@ import {
   powerSaveBlocker,
   protocol,
   safeStorage,
+  screen,
   shell,
   systemPreferences,
   type UtilityProcess,
@@ -570,9 +572,13 @@ const computers = computerSessions({
     process.platform === 'win32' ||
     (process.platform === 'linux' && Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)),
   canAsk: () => !quitting && localWindows().size > 0,
-  desktopInputSafe: () => {
+  desktopInputSafe: (action, frame) => {
     const focused = BrowserWindow.getFocusedWindow()
-    return focused === null || !mine(focused.webContents)
+    if (focused !== null && mine(focused.webContents)) return false
+    const protectedWindows = BrowserWindow.getAllWindows()
+      .filter((window) => !window.isDestroyed() && window.isVisible() && !window.isMinimized())
+      .map((window) => window.getBounds())
+    return displayInputSafe(action, frame, screen.getPrimaryDisplay().bounds, protectedWindows)
   },
   changed: (state) => {
     for (const window of localWindows()) window.webContents.send('althar:computer-state', state)
@@ -1297,6 +1303,9 @@ void ready.then(() => {
   powerMonitor.on('lock-screen', () => computerConnection.stop('The screen locked.'))
   powerMonitor.on('suspend', () => computerConnection.stop('The computer went to sleep.'))
   powerMonitor.on('user-did-resign-active', () => computerConnection.stop('The graphical session changed.'))
+  screen.on('display-added', () => computerConnection.stop('The screen layout changed.'))
+  screen.on('display-removed', () => computerConnection.stop('The screen layout changed.'))
+  screen.on('display-metrics-changed', () => computerConnection.stop('The screen layout changed.'))
   globalShortcut.register('CommandOrControl+Shift+Escape', () => computerConnection.stop('Computer access stopped by you.'))
   // The canvases beside the conversations, each in its project's canvas partition (ADR-104).
   canvases = startCanvases({
