@@ -279,6 +279,8 @@ const knownClause = (wait: SaidStep['waits'][number]): string | null => {
   if (said !== '') return lower(said.replace(/^(?:once|when|after|until)\s+/i, ''))
   const kind = wait.kind.toLowerCase().replace(/[-\s]+/g, '_')
   if (kind === 'task_pull_request') return 'its pull request is ready'
+  if (kind === 'review_settled') return 'its review is settled'
+  if (kind === 'lead_done') return 'its lead finishes'
   if (kind === 'post_merge') return 'the checks after the merge pass'
   if (kind === 'run') return 'its run asks for approval'
   if (kind === 'draft') return 'its draft is ready'

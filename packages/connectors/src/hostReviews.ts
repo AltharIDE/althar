@@ -7,6 +7,90 @@ import type { Account, NewReview, PostedReview } from './model'
 type Product = 'gitlab' | 'bitbucket_cloud' | 'bitbucket_dc'
 const TextId = Schema.Union([Schema.String, Schema.Number])
 const Comment = Schema.Struct({ id: TextId })
+const DraftNote = Schema.Struct({ id: Schema.Number })
+
+interface GitLabDraftNote {
+  readonly note: string
+  readonly position?: {
+    readonly position_type: 'text'
+    readonly base_sha: string
+    readonly start_sha: string
+    readonly head_sha: string
+    readonly old_path: string
+    readonly new_path: string
+    readonly new_line: number
+    readonly old_line?: number
+  }
+}
+
+const stagingGitLabReviews = new Set<string>()
+
+/** GitLab publishes every draft by this account on the merge request in one call. */
+const publishGitLabReview = (
+  http: Pick<Http, 'json'>,
+  base: string,
+  notes: ReadonlyArray<GitLabDraftNote>,
+  confirmDiff: Effect.Effect<void, ConnectorFailed>,
+) => {
+  const drafts = `${base}/draft_notes`
+  const rejected = (message: string) => new ConnectorFailed({ product: 'gitlab', reason: 'rejected', message })
+  const uncertain = (message: string) => new ConnectorFailed({ product: 'gitlab', reason: 'invalid_response', message })
+  const list = http.json(Schema.Array(DraftNote), 'GET', drafts)
+  return Effect.acquireUseRelease(
+    Effect.suspend(() => {
+      if (stagingGitLabReviews.has(base)) return Effect.fail(rejected('Another review of this merge request is being posted.'))
+      stagingGitLabReviews.add(base)
+      return Effect.void
+    }),
+    () => {
+      const staged = new Set<number>()
+      let publishing = false
+      const cleanup = Effect.suspend(() =>
+        Effect.forEach(
+          staged,
+          (id) =>
+            http.json(Schema.Unknown, 'DELETE', `${drafts}/${id}`).pipe(
+              Effect.as(true),
+              Effect.orElseSucceed(() => false),
+            ),
+          { concurrency: 4 },
+        ),
+      )
+      return Effect.gen(function* () {
+        if ((yield* list).length > 0)
+          return yield* rejected('You have unpublished notes on this merge request. Publish or discard them in GitLab, then try again.')
+        for (const note of notes) {
+          const draft = yield* http.json(DraftNote, 'POST', drafts, note)
+          staged.add(draft.id)
+        }
+        yield* confirmDiff
+        const pending = new Set((yield* list).map(({ id }) => id))
+        if ([...staged].some((id) => !pending.has(id)))
+          return yield* uncertain('Some draft notes disappeared in GitLab while the review was being prepared. They may already be public.')
+        if (pending.size > staged.size)
+          return yield* rejected('Your unpublished notes changed in GitLab while the review was being prepared. Check them and try again.')
+        publishing = true
+        yield* http.json(Schema.Unknown, 'POST', `${drafts}/bulk_publish`)
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            // GitLab may still be publishing. Deleting drafts here could interrupt that review.
+            if (publishing && (error.reason === 'unreachable' || error.reason === 'invalid_response' || error.sizeLimit !== undefined))
+              return yield* error
+            const removed = yield* cleanup
+            if (removed.some((one) => !one))
+              return yield* uncertain(
+                'Althar could not remove all of its draft notes. Check the merge request in GitLab before trying again.',
+              )
+            return yield* error
+          }),
+        ),
+        Effect.onInterrupt(() => (publishing ? Effect.void : Effect.asVoid(cleanup))),
+      )
+    },
+    () => Effect.sync(() => stagingGitLabReviews.delete(base)),
+  )
+}
 
 /** Bitbucket Cloud can abbreviate a hash in a PR response; only a full reviewed SHA may match that prefix. */
 export const reviewCommitMatches = (reviewed: string, current: string | null): boolean =>
@@ -41,7 +125,13 @@ export const postHostReview = (
           'GET',
           base,
         )
-        return { head: one.sha, base: one.diff_refs.base_sha, start: one.diff_refs.start_sha, author: String(one.author.id) }
+        return {
+          head: one.sha,
+          diffHead: one.diff_refs.head_sha,
+          base: one.diff_refs.base_sha,
+          start: one.diff_refs.start_sha,
+          author: String(one.author.id),
+        }
       }
       if (product === 'bitbucket_cloud') {
         const one = yield* http.json(
@@ -85,6 +175,7 @@ export const postHostReview = (
         return yield* rejected('The head moved. Review the current commit before posting.')
       if (review.event === 'approve' && now.author === me.id) return yield* rejected('An account cannot approve its own change.')
       const planned: Array<{ path: string; body: unknown }> = []
+      const gitlabDrafts: Array<GitLabDraftNote> = []
       if (
         review.comments.some(
           (one) =>
@@ -98,6 +189,7 @@ export const postHostReview = (
       if (review.comments.some((one) => !Number.isSafeInteger(one.line) || one.line < 1))
         return yield* rejected('Review lines must be positive integers.')
       if (product === 'gitlab' && review.comments.length > 0) {
+        if (now.diffHead !== now.head) return yield* rejected('GitLab is still preparing the diff for the current head. Try again shortly.')
         const files = yield* paged(1, (page) =>
           http
             .json(
@@ -112,20 +204,17 @@ export const postHostReview = (
           const line = file === undefined ? null : rightLine(file.diff, comment.line)
           if (file === undefined || line === null)
             return yield* rejected(`The review line is outside the current diff: ${comment.path}:${comment.line}.`)
-          planned.push({
-            path: `${base}/discussions`,
-            body: {
-              body: comment.body,
-              position: {
-                position_type: 'text',
-                base_sha: now.base,
-                start_sha: now.start,
-                head_sha: now.head,
-                old_path: file.old_path,
-                new_path: file.new_path,
-                new_line: comment.line,
-                ...(line.old === null ? {} : { old_line: line.old }),
-              },
+          gitlabDrafts.push({
+            note: comment.body,
+            position: {
+              position_type: 'text',
+              base_sha: now.base,
+              start_sha: now.start,
+              head_sha: now.head,
+              old_path: file.old_path,
+              new_path: file.new_path,
+              new_line: comment.line,
+              ...(line.old === null ? {} : { old_line: line.old }),
             },
           })
         }
@@ -188,23 +277,36 @@ export const postHostReview = (
           })
         }
       }
-      if (review.body !== '')
-        planned.push({
-          path: `${base}/${product === 'gitlab' ? 'notes' : 'comments'}`,
-          body:
-            product === 'gitlab'
-              ? { body: review.body }
-              : product === 'bitbucket_cloud'
-                ? { content: { raw: review.body } }
-                : { text: review.body },
-        })
+      if (review.body !== '') {
+        if (product === 'gitlab') gitlabDrafts.push({ note: review.body })
+        else
+          planned.push({
+            path: `${base}/comments`,
+            body: product === 'bitbucket_cloud' ? { content: { raw: review.body } } : { text: review.body },
+          })
+      }
       let id = `${now.head}:${review.event}`
-      if ((yield* snapshot).head !== now.head)
-        return yield* rejected('The head moved while preparing the review. Read the current change before posting.')
-      for (const one of planned) {
-        const posted = yield* http.json(Comment, 'POST', one.path, one.body)
-        id = String(posted.id)
+      const confirmDiff = Effect.gen(function* () {
+        const fresh = yield* snapshot
+        if (fresh.head !== now.head)
+          return yield* rejected('The head moved while preparing the review. Read the current change before posting.')
+        if (
+          gitlabDrafts.length > 0 &&
+          review.comments.length > 0 &&
+          (fresh.diffHead !== now.diffHead || fresh.base !== now.base || fresh.start !== now.start)
+        )
+          return yield* rejected('The diff changed while preparing the review. Read the current change before posting.')
+      })
+      if (gitlabDrafts.length > 0) {
+        yield* publishGitLabReview(http, base, gitlabDrafts, confirmDiff)
         completed++
+      } else {
+        yield* confirmDiff
+        for (const one of planned) {
+          const posted = yield* http.json(Comment, 'POST', one.path, one.body)
+          id = String(posted.id)
+          completed++
+        }
       }
       if (review.event !== 'comment') {
         const fresh = yield* snapshot

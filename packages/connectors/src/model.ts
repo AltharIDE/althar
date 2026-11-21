@@ -166,6 +166,8 @@ export const ChangeRequest = Schema.Struct({
    * repository's own; absent where the host doesn't say, as a list may not.
    */
   headRepository: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+  /** Whether the author lets maintainers of the target repository push to the source branch. */
+  maintainerEdits: Schema.optional(Schema.Boolean),
   /**
    * Whether it is in its target branch's merge queue, which merges it once
    * the queue's own checks pass on that branch as it will be: true as a
@@ -445,7 +447,7 @@ export interface HostCapabilities {
   /**
    * A change Althar didn't open can be read for review, with whether its
    * author is one of the repository's people and the fork it comes from, and
-   * a review posted on it with comments on its lines. Only GitHub's, for now.
+   * a review posted on it with comments on its lines.
    */
   readonly reviews: boolean
   /**

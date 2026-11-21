@@ -68,6 +68,8 @@ export const Snapshot = Schema.Struct({
    * opens another.
    */
   attached: Schema.optional(Schema.Boolean),
+  /** Attached to a contributor's fork using the pull request's maintainer edit setting. */
+  maintainerEdit: Schema.optional(Schema.Boolean),
   /**
    * In its target branch's merge queue, as Althar put it there or its host
    * says it is, however it got there: the host merges it once the queue's
@@ -278,24 +280,7 @@ export interface Unshipped {
   readonly del: number
 }
 
-/**
- * A task's pull requests as they stand now: in each repository the latest,
- * the open one else the newest; earlier ones, closed or merged, are history
- * (ADR-034).
- */
-export const latestOf = <A extends { readonly state: string; readonly repository: ReadonlyArray<string> }>(
-  changes: ReadonlyArray<A>,
-): ReadonlyArray<A> => {
-  const byRepository = new Map<string, Array<A>>()
-  for (const change of changes) {
-    const where = change.repository.join('/').toLowerCase()
-    byRepository.set(where, [...(byRepository.get(where) ?? []), change])
-  }
-  return [...byRepository.values()].flatMap((all) => {
-    const latest = all.find((change) => change.state === 'open') ?? all.at(-1)
-    return latest === undefined ? [] : [latest]
-  })
-}
+export { latestOf } from './pullRequestStanding'
 
 /** How long a pull request with nothing new counts as quiet, and how much less often a quiet one is asked. */
 export const QUIET_AFTER = Duration.minutes(10)
@@ -447,6 +432,7 @@ export const snapshotOf = (
   source: change.source,
   ...(change.queued === true ? { queued: true } : {}),
   ...(change.headRepository !== undefined ? { head: change.headRepository } : before?.head !== undefined ? { head: before.head } : {}),
+  ...(before?.maintainerEdit === true ? { maintainerEdit: true } : {}),
   // What merging needs stays as last read until it is read again, on its own turn (DEV-204).
   ...(before?.rules === undefined || change.state !== 'open' ? {} : { rules: before.rules }),
 })
