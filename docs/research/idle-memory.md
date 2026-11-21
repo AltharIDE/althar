@@ -37,6 +37,8 @@ Althar now discovers microphones when dictation or its microphone menu needs the
 
 OpenCode also caused a transient spike after launch. In the final empty run, its two processes added 325 MiB at the five-minute sample and had exited by the ten-minute sample. At the next refresh the process arguments identified OpenCode's sign-in listing, consistent with the plan-usage poll that runs every five minutes. To cut these spikes, measure how much the listing costs per account and share its result with sign-in status where possible. Accounts with a known limit and work waiting for a reset still need background refresh.
 
+The follow-up keeps a successful OpenCode credential listing for background plan-usage reads until its sign-in is checked again or its connection is forgotten. An explicit refresh lists again. A fake-account test shows one listing for the initial read and zero additional listings on the next background read and on an after-limit refresh; Go's limit reader is called on each. This removes the repeated listing for an unchanged account, but it is not a measurement of the new process footprint: Go's separate limit reader can still start OpenCode, and the initial and explicit listings remain. The 325 MiB spike has not yet been remeasured.
+
 ### A coordinator after use
 
 A live project's coordinator tree held 216.8 MiB across three processes 38 minutes after its last logged turn and 215.8 MiB at 62 minutes. The cold profiles did no turns and never started a coordinator. This measures one warm coordinator on the live machine, where other tasks were present. Its footprint was nearly flat across the samples.
