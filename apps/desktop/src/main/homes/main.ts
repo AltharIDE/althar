@@ -13,14 +13,16 @@ import { homeGlances } from './glances'
 import { connectHomeProcess, inspectHomeProcess, pairHomeProcess } from './process'
 import { homePartition } from './policy'
 import { findRelease, HOST_RELEASE_KEYS } from './release'
-import { homeSetups, nativeSetupSystem } from './setup'
+import { canSetUp, homeSetups, nativeSetupSystem } from './setup'
 import { homeStore, homeTarget, savedHome } from './store'
 
 /**
  * Where a new home's release comes from: the pinned keys, and in a build from source, a release of your own to try
  * (ALTHAR_HOST_RELEASE_KEY, a public key's PEM file, and ALTHAR_HOST_RELEASE_MANIFEST, its manifest's address), and
- * another folder's OpenSSH programs, as the end-to-end specs give a server of their own (ALTHAR_SETUP_SSH_TOOLS).
+ * another folder's OpenSSH programs, for setting homes up and reaching them, as the end-to-end specs give a server of their
+ * own (ALTHAR_SSH_TOOLS).
  */
+const sshTools = () => (app.isPackaged ? undefined : process.env.ALTHAR_SSH_TOOLS)
 const releaseSource = () => {
   const own = app.isPackaged ? undefined : process.env.ALTHAR_HOST_RELEASE_KEY
   let keys = HOST_RELEASE_KEYS
@@ -31,7 +33,7 @@ const releaseSource = () => {
     // Without it, the pinned keys alone.
   }
   const manifest = app.isPackaged ? undefined : process.env.ALTHAR_HOST_RELEASE_MANIFEST
-  const tools = app.isPackaged ? undefined : process.env.ALTHAR_SETUP_SSH_TOOLS
+  const tools = sshTools()
   return { keys, ...(manifest === undefined ? {} : { manifest }), ...(tools === undefined ? {} : { tools }) }
 }
 
@@ -58,7 +60,11 @@ export const startHomeConnections = ({
     const child = utilityProcess.fork(entry, [], {
       serviceName: 'Althar home connection',
       stdio: 'pipe',
-      env: { ...sshEnvironment(process.env), ...(process.env.FLATPAK_ID === undefined ? {} : { FLATPAK_ID: process.env.FLATPAK_ID }) },
+      env: {
+        ...sshEnvironment(process.env),
+        ...(process.env.FLATPAK_ID === undefined ? {} : { FLATPAK_ID: process.env.FLATPAK_ID }),
+        ...(sshTools() === undefined ? {} : { ALTHAR_SSH_TOOLS: sshTools() }),
+      },
     })
     processes++
     children.set(
@@ -224,6 +230,7 @@ export const startHomeConnections = ({
   })
   ipcMain.handle('althar:homes-set-up', (event, target: unknown) => {
     owner(event)
+    if (!canSetUp()) throw new Error('Set the home up by hand, then connect to it over SSH or with a pairing code.')
     setups.start(homeTarget(target))
   })
   ipcMain.handle('althar:homes-setup-act', (event, action: unknown) => {

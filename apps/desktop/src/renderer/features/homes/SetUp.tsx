@@ -137,6 +137,20 @@ export const troubleOf = (code: string, setup: HomeSetup): Trouble => {
         body: 'Nothing of it ran. Try again in a while; a release being published may be half there.',
         retry: true,
       }
+    case 'KnownHostsUnwritable':
+      return {
+        title: `Althar couldn’t keep ${host}’s key with your known hosts.`,
+        body: 'What it ran says why. Log in once from a terminal here, which asks you to trust it, then try again.',
+        command: `ssh${port} ${target}`,
+        retry: true,
+      }
+    case 'IdentityMismatch':
+      return {
+        title: `${host} didn’t say which home it set up.`,
+        body: 'The server’s log says why. Try again picks up where it stopped.',
+        command: JOURNAL,
+        retry: true,
+      }
     case 'LockHeld':
       return {
         title: `Another setup is running on ${host}.`,
@@ -216,7 +230,11 @@ export const useSetup = (host: HomesHost, flow: Flow) => {
     predict(next)
     void host.setupAct?.(action).catch(() => setHeld(null))
   }
-  const typed = () => targetOf(flow.ssh.target, flow.ssh.options)
+  // Setup installs althar-host where it always goes, with its own profile: a launcher or profile of the form's isn't used.
+  const typed = () => {
+    const { launcher: _launcher, profile: _profile, ...target } = targetOf(flow.ssh.target, flow.ssh.options)
+    return target
+  }
   /** Another server typed since it stopped: what was done was done there, so it starts over, here. */
   const movedOn = () => setup !== null && JSON.stringify(typed()) !== JSON.stringify(setup.target)
   const start = () => {
@@ -231,12 +249,19 @@ export const useSetup = (host: HomesHost, flow: Flow) => {
   }
   const going = (next: Partial<HomeSetup>) => (setup === null ? null : { ...setup, phase: 'running' as const, problem: undefined, ...next })
 
+  // Set up, and found: the home there must be the one it made. Another (an ssh alias or config reaching elsewhere) isn't it.
+  const found = flow.found !== null && 'hostDeviceId' in flow.found ? flow.found : null
+  const stranger =
+    phase === 'done' &&
+    found !== null &&
+    (setup?.identity === undefined || found.homeId !== setup.identity.homeId || found.hostDeviceId !== setup.identity.hostDeviceId)
   const problem = setup?.phase === 'failed' && setup.problem !== undefined ? troubleOf(setup.problem, setup) : null
   const target = setup?.target.target ?? flow.ssh.target.trim()
   const stepState = (step: number): StepState => {
     if (setup === null) return 'later'
     if (step === 5) {
       if (phase !== 'done') return setup.at === 5 && phase === 'failed' ? 'failed' : setup.at === 5 ? 'now' : 'later'
+      if (stranger) return 'failed'
       if (flow.stage === 'found' || flow.stage === 'connecting' || flow.stage === 'connected') return 'done'
       if (flow.stage === 'refused') return 'failed'
       return 'now'
@@ -263,6 +288,8 @@ export const useSetup = (host: HomesHost, flow: Flow) => {
     own: setup?.madeUser === true,
     version: setup?.version,
     hostKey: setup?.hostKey,
+    /** Set up, but the home its login reaches isn't the one it made. */
+    stranger,
     stepState,
     /** Under way, where the form holds still. */
     busy: phase === 'running' || phase === 'reconnecting' || (phase === 'done' && flow.stage === 'checking'),
@@ -342,7 +369,17 @@ export function InstallSteps({ install }: { install: Install }) {
                   </AskCard>
                 )}
                 {state === 'failed' && install.problem !== null && <Failed problem={install.problem} />}
-                {index === 5 && state === 'failed' && install.problem === null && install.phase === 'done' && (
+                {index === 5 && state === 'failed' && install.problem === null && install.phase === 'done' && install.stranger && (
+                  <Failed
+                    problem={{
+                      title: `${install.target} reaches another home than the one Althar set up.`,
+                      body: 'Its SSH config may send it elsewhere. Check where it logs in, then read its identity again.',
+                      command: `ssh -G ${install.target} | grep -E '^(user|hostname|port) '`,
+                      retry: true,
+                    }}
+                  />
+                )}
+                {index === 5 && state === 'failed' && install.problem === null && install.phase === 'done' && !install.stranger && (
                   <Problem as="span" size="small">
                     Set up, but its identity couldn’t be read yet.
                   </Problem>

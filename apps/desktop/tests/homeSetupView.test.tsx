@@ -68,6 +68,7 @@ const fixture = (first: HomeSetup | null = null) => {
       }),
   }
 }
+const made = { homeId, hostDeviceId: checked.hostDeviceId }
 const steps = () => within(screen.getByRole('list', { name: /^Setting up / }))
 const stateOf = (label: string) => steps().getByText(label).closest('li')?.getAttribute('data-state')
 
@@ -92,7 +93,7 @@ it('opens a first home on what a home is, then sets it up over SSH, step by step
   expect(stateOf('Look it over')).toBe('done')
   expect(screen.getByText('Linux · x64 · systemd · 21 GB free')).not.toBeNull()
   expect(screen.getByText('Downloading · 20 of 40 MB')).not.toBeNull()
-  at.tell(setup({ phase: 'done', at: 5, version: '0.14.2', linger: 'sudo loginctl enable-linger -- deploy' }))
+  at.tell(setup({ phase: 'done', at: 5, version: '0.14.2', linger: 'sudo loginctl enable-linger -- deploy', identity: made }))
   // Set up: its identity is read by the form's own check, and it's named and connected.
   await waitFor(() => expect(at.homes.inspect).toHaveBeenCalledExactlyOnceWith({ target: 'deploy@vps.test' }))
   expect(await screen.findByText(/althar-host 0\.14\.2 is running on vps\.test/)).not.toBeNull()
@@ -149,6 +150,32 @@ it('starts over on another host typed after a failure, and Cancel calls the setu
   await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
   expect(at.homes.setupAct).toHaveBeenCalledExactlyOnceWith('dismiss')
   expect(close).toHaveBeenCalledOnce()
+})
+
+it('won’t connect a home its login reaches that isn’t the one it set up', async () => {
+  const at = fixture(setup({ phase: 'done', at: 5, version: '0.14.2', identity: made }))
+  at.homes.inspect.mockResolvedValueOnce({ ...checked, homeId: `home_${'9'.repeat(32)}` })
+  render(<ConnectHome homes={at.homes} onClose={() => {}} />)
+  expect(await screen.findByText('deploy@vps.test reaches another home than the one Althar set up.')).not.toBeNull()
+  expect(stateOf('Read its identity')).toBe('failed')
+  expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull()
+  expect(screen.queryByLabelText('Name')).toBeNull()
+  // Read again, and it's the one: named and connected.
+  await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(await screen.findByRole('button', { name: 'Connect' })).not.toBeNull()
+  expect(screen.getByText(/althar-host 0\.14\.2 is running on vps\.test/)).not.toBeNull()
+})
+
+it('sets up where althar-host always goes, leaving a launcher or profile typed for connecting out of it', async () => {
+  const at = fixture()
+  render(<ConnectHome homes={at.homes} first onClose={() => {}} />)
+  await userEvent.click(screen.getByRole('button', { name: 'Set one up' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Continue' }))
+  await userEvent.type(screen.getByLabelText('SSH host'), 'deploy@vps.test')
+  await userEvent.click(screen.getByRole('button', { name: 'Connection options' }))
+  await userEvent.type(screen.getByLabelText('althar-host on the host'), '/opt/other/launcher')
+  await userEvent.click(screen.getByRole('button', { name: 'Set it up' }))
+  expect(at.homes.setUp).toHaveBeenCalledExactlyOnceWith({ target: 'deploy@vps.test' })
 })
 
 it('shows a setup under way on the chip while its dialog is closed, and the chip brings it back', async () => {

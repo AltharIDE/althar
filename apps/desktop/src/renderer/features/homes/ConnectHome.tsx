@@ -251,13 +251,14 @@ export function ConnectHome({
     if (flow.method !== 'ssh') flow.setMethod('ssh')
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- once a setup is known, not on every change of the form
   }, [under])
-  const running = view === 'form' && installs && flow.method === 'ssh' && flow.found === null
+  // Running, or set up and found to be another home than the one it made: the setup's own buttons, not Connect.
+  const running = view === 'form' && installs && flow.method === 'ssh' && (flow.found === null || install.stranger)
   const installing = running && install.phase !== 'idle'
   const stage = !installing
     ? view === 'form'
       ? flow.stage
       : view
-    : install.phase === 'failed' || (install.phase === 'done' && flow.stage === 'refused')
+    : install.phase === 'failed' || (install.phase === 'done' && (flow.stage === 'refused' || install.stranger))
       ? 'refused'
       : install.phase === 'running' || install.phase === 'reconnecting' || install.phase === 'done'
         ? 'checking'
@@ -275,7 +276,7 @@ export function ConnectHome({
       if (install.phase === 'failed' && install.problem?.retry === true) return install.retry()
       if (install.phase === 'trust') return install.trust()
       if (install.phase === 'stopped') return install.resume()
-      if (install.phase === 'done' && flow.stage === 'refused') return install.reread()
+      if (install.phase === 'done' && (flow.stage === 'refused' || install.stranger)) return install.reread()
       return
     }
     flow.submit()
@@ -314,13 +315,13 @@ export function ConnectHome({
               <Button
                 type="submit"
                 variant="signal"
-                busy={run?.busy === true || (install.phase === 'done' && flow.stage === 'checking')}
+                busy={run?.busy === true || (install.phase === 'done' && flow.stage === 'checking' && !install.stranger)}
                 disabled={run?.busy === true || (run === null && flow.ssh.target.trim() === '')}
               >
                 {run === null
                   ? install.phase !== 'done'
                     ? 'Set it up'
-                    : flow.stage === 'refused'
+                    : flow.stage === 'refused' || install.stranger
                       ? 'Try again'
                       : 'Reading its identity…'
                   : run.primary}
@@ -353,7 +354,7 @@ export function ConnectHome({
             </p>
           </div>
         )}
-        {view === 'setup' && <Routes route={route} onRoute={(next) => morph(() => setRoute(next))} />}
+        {view === 'setup' && <Routes route={route} installs={homes.setUp !== undefined} onRoute={(next) => morph(() => setRoute(next))} />}
         {view === 'form' && (
           <div className={c.form} key="form">
             {!installing && install.phase !== 'done' && homes.pair !== undefined && (
@@ -395,7 +396,7 @@ export function ConnectHome({
             {flow.method === 'ssh' && flow.found === null && flow.stage !== 'checking' && install.phase === 'idle' && (
               <Options flow={flow} />
             )}
-            {flow.found !== null && (
+            {flow.found !== null && !(installs && install.stranger) && (
               <>
                 {installs && flow.method === 'ssh' && install.phase === 'done' ? (
                   // Althar made this home itself, over a key the person trusted: there's no identity to compare.

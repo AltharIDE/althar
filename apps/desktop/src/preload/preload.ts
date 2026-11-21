@@ -2,6 +2,7 @@ import { isStartupStage, type StartupStage } from '../startup'
 import {
   isHomeSetup,
   isHomesOverview,
+  NO_SETUP_ARG,
   isHomeState,
   type HomeProject,
   type HomeSetup,
@@ -180,7 +181,8 @@ contextBridge.exposeInMainWorld('althar', {
     report: (projects: ReadonlyArray<HomeProject>): void => ipcRenderer.send('althar:homes-report', projects),
     cancelCheck: () => ipcRenderer.invoke('althar:homes-cancel'),
     setup: () => ipcRenderer.invoke('althar:homes-setup'),
-    setUp: (target: unknown) => ipcRenderer.invoke('althar:homes-set-up', target),
+    // Not where this build can't set a home up (the Flatpak): the dialog offers setting it up by hand instead.
+    ...(process.argv.includes(NO_SETUP_ARG) ? {} : { setUp: (target: unknown) => ipcRenderer.invoke('althar:homes-set-up', target) }),
     setupAct: (action: SetupAction) => ipcRenderer.invoke('althar:homes-setup-act', action),
     onSetup: (listener: (setup: HomeSetup | null) => void) => {
       setups.add(listener)

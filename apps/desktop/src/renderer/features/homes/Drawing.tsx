@@ -134,7 +134,16 @@ function HomeCard({ flow, view }: { flow: Flow; view: View }) {
 }
 
 /** The two ways a server becomes a home: Althar sets it up over SSH, or it's set up there and pairs with a code. */
-export function Routes({ route, onRoute }: { route: Route; onRoute: (next: Route) => void }) {
+export function Routes({
+  route,
+  onRoute,
+  installs = true,
+}: {
+  route: Route
+  onRoute: (next: Route) => void
+  /** Althar can install it over SSH here; where it can't (the Flatpak), the server is set up by hand and reached over SSH. */
+  installs?: boolean
+}) {
   return (
     <div className={s.setup}>
       <div className={s.routes} role="radiogroup" aria-label="How to set it up">
@@ -143,8 +152,8 @@ export function Routes({ route, onRoute }: { route: Route; onRoute: (next: Route
           onPick={() => onRoute('ssh')}
           icon="terminal"
           title="Over SSH"
-          line="Althar installs it for you."
-          tag="Easiest"
+          line={installs ? 'Althar installs it for you.' : 'Set up there, reached with ssh.'}
+          {...(installs ? { tag: 'Easiest' } : {})}
         />
         <RouteCard
           on={route === 'pair'}
@@ -154,11 +163,25 @@ export function Routes({ route, onRoute }: { route: Route; onRoute: (next: Route
           line="Set up there, it prints one."
         />
       </div>
-      {route === 'ssh' ? (
+      {route === 'ssh' && installs ? (
         <div className={s.detail} key="ssh">
           <p className={s.copy}>
             Any Linux server you can reach with <Code>ssh</Code> from {device.this}: a VPS, a machine at home, a spare box. Althar installs{' '}
             <Code>althar-host</Code>, starts it so it survives restarts, and connects. Nothing to copy.
+          </p>
+        </div>
+      ) : route === 'ssh' ? (
+        <div className={s.detail} key="ssh">
+          <p className={s.copy}>
+            Any Linux server where althar-host runs that you can reach with <Code>ssh</Code> from {device.this}. Althar from Flathub can’t
+            install it there, as it doesn’t see your SSH keys.
+          </p>
+          <p className={s.aside}>
+            Not running there yet?{' '}
+            <a className={s.link} href={HOST_README} target="_blank" rel="noreferrer">
+              Set it up by hand
+              <Icon name="external" size={10} />
+            </a>
           </p>
         </div>
       ) : (

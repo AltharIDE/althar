@@ -1,24 +1,28 @@
+import { execFileSync } from 'node:child_process'
 import { createHash, generateKeyPairSync, sign } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import { launch, openFirstProject, still } from './support'
 
 /*
  * Connect a home, a first one, set up over SSH, in the real window with main's own setup: a fake OpenSSH plays the
- * server (ALTHAR_SETUP_SSH_TOOLS), seen for the first time, downloading althar-host, starting it, and a release
- * signed here with a key the app is given (ALTHAR_HOST_RELEASE_KEY). The pictures are this change's evidence
- * (test-results/home-setup-*.png), light and dark.
+ * server (ALTHAR_SSH_TOOLS), seen for the first time, downloading althar-host and starting it, from a release signed
+ * here with a key the app is given (ALTHAR_HOST_RELEASE_KEY). What it "installs" is homes.spec.ts's fixture host,
+ * which serves the app's own profile with the production stdio bridge: so the identity the setup reports, the check
+ * that reads it, Connect and the home's window are all the app's real ones, over that ssh, with no SSH daemon.
+ * The pictures are this change's evidence (test-results/home-setup-*.png), light and dark.
  */
 
-const HOME_ID = `home_01a1c4f39e2b7d5a80c6e1f42b9d3a77`
 const MB = 1_048_576
+const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 const fakeSsh = `#!/bin/sh
 state="$HOME/fake-server"
+program="$HOME/.local/share/althar-host-program"
 mkdir -p "$state"
 case "$(basename "$0")" in
   ssh-keyscan) echo "vps.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"; exit 0 ;;
@@ -27,12 +31,17 @@ case "$(basename "$0")" in
 esac
 if [ "$1" = -G ]; then printf 'hostname vps.example.com\\nport 22\\nuserknownhostsfile %s\\n' "$state/known_hosts"; exit 0; fi
 for last; do :; done
+# The home's own commands, as the app runs them to check and connect: on "the server", here.
+case "$last" in
+  *althar-host-program/launcher*) exec env -u XDG_DATA_HOME sh -c "$last" ;;
+esac
 cat > /dev/null
 ev() { printf '{"protocol":1,"step":"%s","state":"%s"%s}\\n' "$1" "$2" "\${3:-}"; }
 looked() {
   ev reach started; ev reach done; ev look started
   ev look done ',"os":"linux","arch":"x64","systemdUserManager":true,"freeKiB":22020096,"git":true,"login":"deploy","root":false,"linger":false,"action":{"code":"LingerOff","command":"loginctl enable-linger -- deploy"}'
 }
+field() { grep -o "\\"$1\\":\\"[^\\"]*\\"" | head -n 1 | cut -d '"' -f 4; }
 case "$last" in
   *"'probe'"*)
     if [ ! -f "$state/known_hosts" ]; then
@@ -43,15 +52,19 @@ case "$last" in
     looked ;;
   *"'status'"*)
     if [ ! -f "$state/started" ]; then ev setup failed ',"code":"SetupNotFound"'; exit 1; fi
-    early='{"protocol":1,"step":"setup","state":"started"},{"protocol":1,"step":"setup","state":"done","homeId":"${HOME_ID}"},{"protocol":1,"step":"start","state":"started"}'
+    info=$("$program/launcher" status --json) || exit 1
+    home=$(printf '%s' "$info" | field homeId)
+    device=$(printf '%s' "$info" | field hostDeviceId)
+    early="{\\"protocol\\":1,\\"step\\":\\"setup\\",\\"state\\":\\"started\\"},{\\"protocol\\":1,\\"step\\":\\"setup\\",\\"state\\":\\"done\\",\\"homeId\\":\\"$home\\"},{\\"protocol\\":1,\\"step\\":\\"start\\",\\"state\\":\\"started\\"}"
     if [ -f "$state/hold-start" ]; then
       printf '{"protocol":1,"state":"running","events":[%s],"rawOutput":""}\\n' "$early"
     else
-      printf '{"protocol":1,"state":"done","events":[%s,{"protocol":1,"step":"start","state":"done"},{"protocol":1,"step":"identity","state":"done","homeId":"${HOME_ID}","version":"0.14.2","apiVersion":1}],"rawOutput":""}\\n' "$early"
+      printf '{"protocol":1,"state":"done","events":[%s,{"protocol":1,"step":"start","state":"done"},{"protocol":1,"step":"identity","state":"done","homeId":"%s","hostDeviceId":"%s","version":"0.14.2","apiVersion":1}],"rawOutput":""}\\n' "$early" "$home" "$device"
     fi ;;
   *"'install'"*)
     looked
     ev get started ',"bytes":0,"totalBytes":${40 * MB}'
+    if [ -f "$state/no-download" ]; then ev get failed ',"code":"CannotDownload"'; exit 1; fi
     bytes=0
     while [ "$bytes" -lt ${40 * MB} ]; do
       if [ -f "$state/hold-get" ] && [ "$bytes" -ge ${17 * MB} ]; then sleep 0.2; continue; fi
@@ -60,6 +73,8 @@ case "$last" in
       sleep 0.05
     done
     ev get done ',"bytes":${40 * MB},"totalBytes":${40 * MB}'
+    mkdir -p "$program"
+    cp "$state/launcher" "$program/launcher"
     touch "$state/started"
     ev setup started ',"detached":true' ;;
 esac
@@ -109,7 +124,13 @@ const shoot = async (page: Page, name: string, schemes: ReadonlyArray<'light' | 
   await page.emulateMedia({ colorScheme: 'light' })
 }
 
-test('sets a first home up over SSH, as steps, from what a home is to naming it, light and dark', async () => {
+const fixture = resolve('test-results/home-host.mjs')
+test.beforeAll(() => {
+  execFileSync('bun', ['build', 'e2e/homeHost.ts', '--target=node', `--outfile=${fixture}`], { stdio: 'pipe' })
+})
+
+/** The app, with the fake OpenSSH and the signed release, its window big enough for the dialog, and the fake server's folder. */
+const start = async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
@@ -120,22 +141,46 @@ test('sets a first home up over SSH, as steps, from what a home is to naming it,
   const signed = release()
   writeFileSync(join(home, 'release.pub'), signed.key)
   const { electronApp, page } = await launch(home, {
-    ALTHAR_SETUP_SSH_TOOLS: tools,
+    ALTHAR_API_SOCKET: '1',
+    ALTHAR_SSH_TOOLS: tools,
     ALTHAR_HOST_RELEASE_KEY: join(home, 'release.pub'),
     ALTHAR_HOST_RELEASE_MANIFEST: signed.manifest,
   })
+  await openFirstProject(electronApp, page, repository(projects))
+  // Room for the whole dialog as its steps come, as a window of the person's has.
+  await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 960))
+  const state = join(await electronApp.evaluate(() => process.env.HOME ?? ''), 'fake-server')
+  mkdirSync(state, { recursive: true })
+  // What setup installs there: the fixture host, serving this app's own profile as the home.
+  const profile = join(home, 'profile')
+  writeFileSync(
+    join(state, 'launcher'),
+    `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} "$@" --profile ${quote(profile)}\n`,
+    {
+      mode: 0o700,
+    },
+  )
+  await expect.poll(() => existsSync(join(profile, 'api/endpoint.json'))).toBe(true)
+  const endpoint: { homeId: string } = JSON.parse(readFileSync(join(profile, 'api/endpoint.json'), 'utf8'))
+  return { home, electronApp, page, state, homeId: endpoint.homeId }
+}
+
+const openSetup = async (page: Page) => {
+  await page.getByRole('button', { name: 'Homes', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
+}
+
+const closing = async (electronApp: ElectronApplication, home: string) => {
+  await electronApp.close()
+  rmSync(home, { recursive: true, force: true })
+}
+
+test('sets a first home up over SSH, as steps, from what a home is to its own window, light and dark', async () => {
+  const { home, electronApp, page, state, homeId } = await start()
   try {
-    await openFirstProject(electronApp, page, repository(projects))
-    // Room for the whole dialog as its steps come, as a window of the person's has.
-    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1280, 960))
-    const fakeHome = await electronApp.evaluate(() => process.env.HOME ?? '')
-    const state = join(fakeHome, 'fake-server')
-    mkdirSync(state, { recursive: true })
     writeFileSync(join(state, 'hold-get'), '')
     writeFileSync(join(state, 'hold-start'), '')
-
-    await page.getByRole('button', { name: 'Homes', exact: true }).click()
-    await page.getByRole('menuitem', { name: 'Connect a home…', exact: true }).click()
+    await openSetup(page)
     // A first home: what a home is.
     await expect(page.getByRole('dialog', { name: 'Your first home' })).toBeVisible()
     await shoot(page, '1-intro')
@@ -171,27 +216,67 @@ test('sets a first home up over SSH, as steps, from what a home is to naming it,
     await chip.click()
     await expect(dialog.getByText('Make it a home', { exact: true }).locator('xpath=ancestor::li')).toHaveAttribute('data-state', 'done')
 
-    // Set up: its identity is read by the form's own check, here a stand-in for main's (it reaches homes through the system's ssh).
-    await electronApp.evaluate(({ ipcMain }, homeId) => {
-      ipcMain.removeHandler('althar:homes-inspect')
-      ipcMain.handle('althar:homes-inspect', () => ({
-        checkId: 'fixture',
-        homeId,
-        hostDeviceId: `dev_${'3'.repeat(32)}`,
-        apiVersion: 1,
-        version: '0.14.2',
-        target: 'deploy@vps.example.com',
-      }))
-    }, HOME_ID)
+    // Set up: the home it made is read by the app's own check, over the same ssh, and is the one the setup reported.
     rmSync(join(state, 'hold-start'))
     await expect(dialog.getByText(/althar-host 0\.14\.2 is running on vps\.example\.com/)).toBeVisible()
+    await expect(dialog.getByLabel(homeId, { exact: true })).toBeVisible()
     await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue('vps')
-    await expect(dialog.getByLabel(HOME_ID, { exact: true })).toBeVisible()
+    await dialog.getByLabel('Name', { exact: true }).fill('My VPS')
     await shoot(page, '8-done')
     expect(existsSync(join(home, 'profile', 'home-setup.json'))).toBe(true)
+
+    // Connect saves it and opens its window, over the connection the app makes to it; the setup is done with.
+    const opened = electronApp.waitForEvent('window', { predicate: (candidate) => candidate !== page })
+    await dialog.getByRole('button', { name: 'Connect', exact: true }).click()
+    const remote = await opened
+    await expect(remote.getByRole('button', { name: 'My VPS, over SSH. Homes', exact: true })).toBeVisible()
+    expect(await remote.evaluate(async () => (await window.althar.homes!.state()).connection)).toBe('connected')
+    await expect.poll(() => existsSync(join(home, 'profile', 'home-setup.json'))).toBe(false)
+    for (const scheme of ['light', 'dark'] as const) {
+      await remote.emulateMedia({ colorScheme: scheme })
+      await still(remote)
+      await remote.screenshot({ path: `test-results/home-setup-9-home-${scheme}.png`, scale: 'css' })
+    }
+  } finally {
+    await closing(electronApp, home)
+  }
+})
+
+test('stops on a trouble with what to do, stops when asked, and picks up again, light and dark', async () => {
+  const { home, electronApp, page, state, homeId } = await start()
+  try {
+    // Trusted already, and the server can't download althar-host at first.
+    writeFileSync(join(state, 'known_hosts'), '')
+    writeFileSync(join(state, 'no-download'), '')
+    writeFileSync(join(state, 'hold-get'), '')
+    await openSetup(page)
+    await page.getByRole('button', { name: 'Set one up', exact: true }).click()
+    await page.getByRole('button', { name: 'Continue', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Connect a home' })
+    await dialog.getByLabel('SSH host', { exact: true }).fill('deploy@vps.example.com')
+    await dialog.getByRole('button', { name: 'Set it up', exact: true }).click()
+
+    // A trouble says what happened and what to do, with its ways out.
+    await expect(dialog.getByText('vps.example.com can’t download althar-host.', { exact: true })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: 'Send it from here', exact: true })).toBeVisible()
+    await expect(dialog.getByText('Get althar-host', { exact: true }).locator('xpath=ancestor::li')).toHaveAttribute('data-state', 'failed')
+    await shoot(page, '10-trouble')
+    rmSync(join(state, 'no-download'))
+    await dialog.getByRole('button', { name: 'Try again', exact: true }).click()
+    await expect(dialog.getByText(/^Downloading · 17 of 40 MB$/)).toBeVisible()
+
+    // Stopped when asked: what it did stays, and it picks up from there.
+    await dialog.getByRole('button', { name: 'Stop', exact: true }).click()
+    await expect(dialog.getByText('Setting up vps.example.com stopped partway', { exact: false })).toBeVisible()
+    await expect(dialog.getByRole('button', { name: 'Resume', exact: true })).toBeVisible()
+    await shoot(page, '11-stopped')
+    rmSync(join(state, 'hold-get'))
+    await dialog.getByRole('button', { name: 'Resume', exact: true }).click()
+    await expect(dialog.getByText(/althar-host 0\.14\.2 is running on vps\.example\.com/)).toBeVisible()
+    await expect(dialog.getByLabel(homeId, { exact: true })).toBeVisible()
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect.poll(() => existsSync(join(home, 'profile', 'home-setup.json'))).toBe(false)
   } finally {
-    await electronApp.close()
+    await closing(electronApp, home)
   }
 })

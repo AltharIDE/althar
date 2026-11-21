@@ -47,7 +47,8 @@ export interface SetupSystem {
   readonly appendFile: (path: string, text: string) => Promise<void>
   readonly wait: (ms: number, signal: AbortSignal) => Promise<void>
   readonly home: string
-  readonly scratch: string
+  /** A new folder only this user can open, for one attempt's archive; `remove` takes it and all in it away. */
+  readonly scratch: () => Promise<{ readonly path: string; readonly remove: () => Promise<void> }>
 }
 
 /** What a setup keeps across a restart of Althar: where, how far, and what it learnt on the way. */
@@ -58,6 +59,7 @@ interface Saved {
   readonly upload: boolean
   readonly linger?: string
   readonly version?: string
+  readonly identity?: HomeSetup['identity']
 }
 
 /** A step that stopped, with the code the window words. */
@@ -108,7 +110,8 @@ export const FINAL = new Set(['UnsupportedOS', 'UnsupportedArchitecture', 'NoSys
 export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | null) => void) => {
   let setup: HomeSetup | null = null
   let running: AbortController | null = null
-  let pendingKey: { file: string; line: string } | null = null
+  // The key a run stopped on, for the person to trust: theirs to answer for that run only.
+  let pendingKey: { file: string; line: string; run: AbortController } | null = null
   let saved = ''
   const savedAt = join(system.home, 'home-setup.json')
   let ready: Promise<void> = system
@@ -138,6 +141,7 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
             upload: setup.upload,
             ...(setup.linger === undefined ? {} : { linger: setup.linger }),
             ...(setup.version === undefined ? {} : { version: setup.version }),
+            ...(setup.identity === undefined ? {} : { identity: setup.identity }),
           } satisfies Saved)
     if (next === saved) return
     saved = next
@@ -284,7 +288,8 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
         .flatMap((text) => (text ?? '').split('\n'))
         .map((line) => line.trim().split(/\s+/))
         .filter((parts) => parts.length >= 2 && /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521))$/.test(parts[0]!))
-      const key = keys.find((parts) => fingerprint !== undefined && fingerprintOf(parts[1]!) === fingerprint) ?? keys[0]
+      // Only the key that logged in: any other may be one this computer can't log in with as althar.
+      const key = fingerprint === undefined ? undefined : keys.find((parts) => fingerprintOf(parts[1]!) === fingerprint)
       if (key === undefined) throw new Stopped('NoPublicKey', 1)
       return `${key[0]} ${key[1]}`
     }
@@ -345,17 +350,25 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
       return { kind: 'transfer' as const, events: ran.events }
     }
 
-    /** Get althar-host onto the server: downloaded there, or sent from here; it ends with the setup going on its own. */
-    const get = async (arch: string) => {
-      advance(2)
-      let release: HostRelease
+    /** The release to install, found and checked once a run: before anything changes on the server. */
+    let found: HostRelease | undefined
+    const releaseFor = async (arch: string) => {
+      if (found !== undefined) return found
       try {
-        release = await system.release(arch, signal)
+        found = await system.release(arch, signal)
       } catch (error) {
         if (signal.aborted) throw signal.reason
         throw new Stopped(error instanceof ReleaseProblem ? error.code : 'ReleaseRejected', 2)
       }
-      set({ version: release.version, progress: { bytes: 0, total: release.bytes } })
+      set({ version: found.version })
+      return found
+    }
+
+    /** Get althar-host onto the server: downloaded there, or sent from here; it ends with the setup going on its own. */
+    const get = async (arch: string) => {
+      advance(2)
+      const release = await releaseFor(arch)
+      set({ progress: { bytes: 0, total: release.bytes } })
       const signed = [release.sha256, String(release.bytes), String(release.unpackedBytes)]
       const trust = [Buffer.from(release.envelope).toString('base64'), Buffer.from(release.key).toString('base64')]
       const install = async (method: 'download' | 'upload', source: string) => {
@@ -386,38 +399,81 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
       const started = prepared.events.find((one) => one.step === 'get' && one.state === 'started')
       if (typeof started?.uploadId !== 'string' || typeof started.uploadPath !== 'string' || /["\n]/.test(started.uploadPath))
         throw new Stopped('CannotDownload', 2)
-      const file = join(system.scratch, `althar-host-${release.sha256}.tar.gz`)
-      try {
-        await system.fetchArchive(
-          release,
-          file,
-          (bytes) => set({ progress: { bytes: Math.round(bytes / 2), total: release.bytes } }),
-          signal,
-        )
-      } catch {
-        if (signal.aborted) throw signal.reason
+      // A folder of this attempt's own: nothing else's file is written through, and it goes however this ends.
+      const scratch = await system.scratch().catch(() => {
         throw new Stopped('UploadFailed', 2)
+      })
+      try {
+        const file = join(scratch.path, 'althar-host.tar.gz')
+        try {
+          await system.fetchArchive(
+            release,
+            file,
+            (bytes) => set({ progress: { bytes: Math.round(bytes / 2), total: release.bytes } }),
+            signal,
+          )
+        } catch {
+          if (signal.aborted) throw signal.reason
+          throw new Stopped('UploadFailed', 2)
+        }
+        const target = setup!.target
+        const sent = await system.run(
+          'sftp',
+          [
+            '-b',
+            '-',
+            '-oBatchMode=yes',
+            '-oStrictHostKeyChecking=yes',
+            '-oConnectTimeout=20',
+            ...(target.configFile === undefined ? [] : ['-F', target.configFile]),
+            ...(target.port === undefined ? [] : ['-P', String(target.port)]),
+            target.target,
+          ],
+          { input: `put "${file}" "${started.uploadPath}"\n`, signal, timeout: 15 * 60_000 },
+        )
+        if (signal.aborted) throw signal.reason
+        if (sent.code !== 0) throw new Dropped()
+      } finally {
+        await scratch.remove().catch(() => undefined)
       }
-      const target = setup!.target
-      const sent = await system.run(
-        'sftp',
-        [
-          '-b',
-          '-',
-          '-oBatchMode=yes',
-          '-oStrictHostKeyChecking=yes',
-          '-oConnectTimeout=20',
-          ...(target.configFile === undefined ? [] : ['-F', target.configFile]),
-          ...(target.port === undefined ? [] : ['-P', String(target.port)]),
-          target.target,
-        ],
-        { input: `put "${file}" "${started.uploadPath}"\n`, signal, timeout: 15 * 60_000 },
-      )
-      await fs.rm(file, { force: true }).catch(() => undefined)
-      if (signal.aborted) throw signal.reason
-      if (sent.code !== 0) throw new Dropped()
       set({ progress: { bytes: release.bytes, total: release.bytes } })
       return install('upload', started.uploadId)
+    }
+
+    /**
+     * A transfer the server is running already, from a run the connection dropped under or another window's: followed
+     * by its journal until it's staged, it ends, or it stops moving (its process gone, so the lock is free again).
+     */
+    const watch = async () => {
+      let last = ''
+      let still = 0
+      for (;;) {
+        const now = await status()
+        if (now.kind === 'host') return 'staged' as const
+        if (now.kind === 'none' || now.events.some((one) => one.state === 'failed')) return 'ended' as const
+        const moved = [...now.events].reverse().find((one) => one.step === 'get' && typeof one.bytes === 'number')
+        if (moved !== undefined && typeof moved.totalBytes === 'number')
+          set({ progress: { bytes: moved.bytes as number, total: moved.totalBytes } })
+        const seen = JSON.stringify(now.events.at(-1) ?? null)
+        if (seen !== last) {
+          last = seen
+          still = 0
+        } else if (++still > 40) return 'ended' as const
+        await system.wait(1500, signal)
+      }
+    }
+
+    /** Get it there, or follow the transfer that holds the server's lock, until it's staged. */
+    const transfer = async (arch: string) => {
+      for (let held = 0; ; held++) {
+        try {
+          return await get(arch)
+        } catch (error) {
+          if (!(error instanceof Stopped) || error.code !== 'LockHeld' || held >= 3) throw error
+        }
+        say('(a transfer is under way on the server: following it)')
+        if ((await watch()) === 'staged') return
+      }
     }
 
     /** Follow the setup the server runs on its own, step by step, until the home answers. */
@@ -429,6 +485,11 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
       for (;;) {
         const now = await status()
         if (now.kind === 'none') throw new Stopped('SetupNotFound', setup!.at)
+        if (now.kind === 'transfer') {
+          // Staged and then not: the transfer's own end, where it has one, else it never got going.
+          failedIn(now.events)
+          if (++absent > 20) throw new Stopped('SetupLaunchFailed', 3)
+        }
         if (now.kind === 'host') {
           for (const one of now.events) {
             const key = `${one.step}:${one.state}`
@@ -444,9 +505,16 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
             }
           }
           if (now.state === 'done') {
+            // The home it made, as it says: the one the window connects to must be it.
             const identity = now.events.find((one) => one.step === 'identity' && one.state === 'done')
-            say('althar-host status: ready')
-            set({ phase: 'done', at: 5, ...(typeof identity?.version === 'string' ? { version: identity.version } : {}) })
+            if (typeof identity?.homeId !== 'string' || typeof identity.hostDeviceId !== 'string') throw new Stopped('IdentityMismatch', 5)
+            say(`althar-host status: ready, ${identity.homeId}`)
+            set({
+              phase: 'done',
+              at: 5,
+              identity: { homeId: identity.homeId, hostDeviceId: identity.hostDeviceId },
+              ...(typeof identity.version === 'string' ? { version: identity.version } : {}),
+            })
             return
           }
           if (now.state === 'failed') failedIn([...now.events].reverse())
@@ -462,10 +530,14 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
       }
     }
 
-    /** Once through: reach and look, make the user where it's root, then get it there unless it is, and follow it. */
+    /**
+     * Once through: reach and look, make the user where it's root (once there's a release to install, so nothing changes
+     * on a server Althar can't finish), then follow what the server has, or get it there, and follow it.
+     */
     const once = async () => {
       const looked = await look()
       if (looked.root) {
+        await releaseFor(looked.arch)
         await makeUser(looked.stderr)
         const again = await look()
         if (again.root) throw new Stopped('DedicatedUserRequired', 1)
@@ -479,7 +551,8 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
         }
         return follow()
       }
-      await get(looked.arch)
+      // Not staged yet: a transfer still going there holds its lock, and is followed rather than started over.
+      await transfer(looked.arch)
       return follow()
     }
 
@@ -503,7 +576,7 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
             continue
           }
           if (error instanceof Unknown) {
-            pendingKey = { file: error.key.file, line: error.key.line }
+            pendingKey = { file: error.key.file, line: error.key.line, run: stop }
             say(
               `The authenticity of host '${error.key.host}' can't be established. ${error.key.type} key fingerprint is ${error.key.fingerprint}.`,
             )
@@ -533,7 +606,9 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
       return setup
     },
     /** Sets a home up on this target, from the start: another under way is called off. */
-    start: (target: SshHomeTarget) => {
+    start: (given: SshHomeTarget) => {
+      // It installs althar-host where it always goes, with its own profile: a launcher or profile given would read another.
+      const { launcher: _launcher, profile: _profile, ...target } = given
       sshArguments(target)
       running?.abort()
       pendingKey = null
@@ -550,8 +625,30 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
           if (setup.phase !== 'trust' || pendingKey === null) return
           const key = pendingKey
           pendingKey = null
-          const existing = (await system.readFile(key.file)) ?? ''
-          await system.appendFile(key.file, `${existing === '' || existing.endsWith('\n') ? '' : '\n'}${key.line}\n`)
+          // Kept where OpenSSH looks, then the same run goes on: unless it was stopped, called off or replaced meanwhile.
+          const current = () => running === key.run && !key.run.signal.aborted && setup?.phase === 'trust'
+          let kept: unknown = null
+          try {
+            const existing = (await system.readFile(key.file)) ?? ''
+            await system.appendFile(key.file, `${existing === '' || existing.endsWith('\n') ? '' : '\n'}${key.line}\n`)
+          } catch (error) {
+            kept = error
+          }
+          if (!current() || setup === null) return
+          if (kept !== null) {
+            setup = {
+              ...setup,
+              phase: 'failed',
+              problem: 'KnownHostsUnwritable',
+              hostKey: undefined,
+              log: [
+                ...setup.log,
+                `Couldn’t keep the key in ${key.file}: ${kept instanceof Error ? kept.message : 'it couldn’t be written'}`,
+              ],
+            }
+            changed(setup)
+            return
+          }
           setup = {
             ...setup,
             log: [...setup.log, `Trusted ${setup.hostKey?.host ?? ''} (${setup.hostKey?.fingerprint ?? ''}), kept in ${key.file}`],
@@ -593,22 +690,24 @@ export const homeSetups = (system: SetupSystem, changed: (setup: HomeSetup | nul
 }
 export type HomeSetups = ReturnType<typeof homeSetups>
 
+/**
+ * Whether this build can set a home up: not inside the Flatpak, which keeps the person's SSH keys, agent and known
+ * hosts out of its sandbox (docs/decisions/061), so it can't read the key that logs in, scan a host or send a file.
+ * There a home is set up by hand and connected over SSH or with a pairing code.
+ */
+export const canSetUp = (env: NodeJS.ProcessEnv = process.env) => env.FLATPAK_ID === undefined
+
 /** The system as it is: OpenSSH beside the ssh the app reaches homes with, the network, and the profile's files. */
 export const nativeSetupSystem = (profile: string, release: SetupSystem['release'], own?: string): SetupSystem => {
-  const tools =
-    own ??
-    (process.env.FLATPAK_ID !== undefined
-      ? '/app/bin'
-      : process.platform === 'win32'
-        ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/OpenSSH')
-        : '/usr/bin')
-  const executable = (name: string) =>
-    own === undefined && process.env.FLATPAK_ID !== undefined && name === 'ssh'
-      ? '/app/bin/althar-host-ssh'
-      : join(tools, process.platform === 'win32' ? `${name}.exe` : name)
+  const tools = own ?? (process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/OpenSSH') : '/usr/bin')
+  const executable = (name: string) => join(tools, process.platform === 'win32' ? `${name}.exe` : name)
   return {
     home: profile,
-    scratch: tmpdir(),
+    scratch: async () => {
+      // mkdtemp makes it new, and only this user's (0700): no file of another's is there to follow or truncate.
+      const path = await fs.mkdtemp(join(tmpdir(), 'althar-host-'))
+      return { path, remove: () => fs.rm(path, { recursive: true, force: true }) }
+    },
     run: (program, args, { input, line, signal, timeout }) =>
       new Promise((resolve) => {
         const child = spawn(executable(program), [...args], {
@@ -669,7 +768,7 @@ export const nativeSetupSystem = (profile: string, release: SetupSystem['release
         progress(bytes)
         return chunk
       })
-      await pipeline(counted, createWriteStream(to, { mode: 0o600 }), { signal })
+      await pipeline(counted, createWriteStream(to, { flags: 'wx', mode: 0o600 }), { signal })
       if (bytes !== found.bytes || hash.digest('hex') !== found.sha256) {
         await fs.rm(to, { force: true })
         throw new Error('The release did not match its signed digest.')

@@ -3,7 +3,7 @@ import { createHash, generateKeyPairSync, sign } from 'node:crypto'
 import { expect, it, vi } from 'vitest'
 
 import type { HomeSetup } from '../src/homes'
-import { authenticateRelease, findRelease, type HostRelease } from '../src/main/homes/release'
+import { authenticateRelease, findRelease, ReleaseProblem, type HostRelease } from '../src/main/homes/release'
 import { homeSetups, type Ran, type RunOptions, type SetupSystem } from '../src/main/homes/setup'
 
 /*
@@ -12,6 +12,7 @@ import { homeSetups, type Ran, type RunOptions, type SetupSystem } from '../src/
  */
 
 const HOME = `home_${'2'.repeat(32)}`
+const DEVICE = `dev_${'3'.repeat(32)}`
 const KEY_BLOB = Buffer.from('server host key').toString('base64')
 const LOGIN_BLOB = Buffer.from('login key').toString('base64')
 const fingerprint = (blob: string) =>
@@ -50,7 +51,7 @@ const finished = [
   event('start', 'started'),
   event('start', 'done'),
   event('identity', 'started'),
-  event('identity', 'done', { homeId: HOME, version: '0.14.2', apiVersion: 1 }),
+  event('identity', 'done', { homeId: HOME, hostDeviceId: DEVICE, version: '0.14.2', apiVersion: 1 }),
 ]
 
 type Answer = Partial<Ran> | ((args: ReadonlyArray<string>, options: RunOptions) => Partial<Ran> | Promise<Partial<Ran>>)
@@ -60,6 +61,7 @@ const server = (given: Record<string, Answer | Answer[]>) => {
   const answers = Object.fromEntries(Object.entries(given).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value]))
   const asked: Array<{ program: string; args: ReadonlyArray<string>; operation: string }> = []
   const files = new Map<string, string>()
+  const scratches: Array<{ path: string; removed: boolean }> = []
   const system: SetupSystem = {
     run: async (program, args, options) => {
       const remote = args.at(-1) ?? ''
@@ -85,10 +87,19 @@ const server = (given: Record<string, Answer | Answer[]>) => {
     },
     wait: async () => {},
     home: '/profile',
-    scratch: '/scratch',
+    scratch: async () => {
+      const made = { path: `/scratch/${scratches.length}`, removed: false }
+      scratches.push(made)
+      return {
+        path: made.path,
+        remove: async () => {
+          made.removed = true
+        },
+      }
+    },
   }
   const told: Array<HomeSetup | null> = []
-  return { system, asked, files, told, setups: () => homeSetups(system, (setup) => told.push(setup)) }
+  return { system, asked, files, told, scratches, setups: () => homeSetups(system, (setup) => told.push(setup)) }
 }
 const settled = async (setups: ReturnType<ReturnType<typeof server>['setups']>, phase: HomeSetup['phase']) => {
   await vi.waitFor(async () => expect((await setups.state())?.phase).toBe(phase))
@@ -115,7 +126,13 @@ it('sets a home up step by step, downloading the verified release on the server,
   // At once, before the server says anything.
   expect(at.told[0]).toMatchObject({ phase: 'running', at: 0, target: { target: 'deploy@vps.test' } })
   const done = await settled(setups, 'done')
-  expect(done).toMatchObject({ at: 5, version: '0.14.2', facts: { arch: 'x64', git: true } })
+  // The home it made, as the server says: what the window's own check must find there.
+  expect(done).toMatchObject({
+    at: 5,
+    version: '0.14.2',
+    facts: { arch: 'x64', git: true },
+    identity: { homeId: HOME, hostDeviceId: DEVICE },
+  })
   expect(at.told.some((one) => one?.progress?.bytes === 20_000_000)).toBe(true)
   const install = at.asked.find((one) => one.operation === 'install')!
   // Strict host keys, the person's own port, and the release's digest, sizes and signed envelope, each quoted.
@@ -124,7 +141,7 @@ it('sets a home up step by step, downloading the verified release on the server,
     `sh -s -- 'install' 'download' '${release.sha256}' '${release.bytes}' '${release.unpackedBytes}' '${release.url}' '${Buffer.from(release.envelope).toString('base64')}' '${Buffer.from(release.key).toString('base64')}'`,
   )
   expect(at.system.release).toHaveBeenCalledWith('x64', expect.any(AbortSignal))
-  expect(done.log).toContain('althar-host status: ready')
+  expect(done.log).toContain(`althar-host status: ready, ${HOME}`)
   // Kept until it's connected or dismissed, so a restart of Althar opens on it.
   expect(JSON.parse(at.files.get('/profile/home-setup.json')!)).toMatchObject({ at: 5, target: { target: 'deploy@vps.test' } })
   await setups.act('dismiss')
@@ -153,6 +170,49 @@ it('asks the person to trust a server’s key seen the first time, keeps it in k
   await setups.act('trust')
   expect(at.files.get('/home/me/.ssh/known_hosts')).toBe(`vps.test ssh-ed25519 ${KEY_BLOB}\n`)
   await settled(setups, 'done')
+})
+
+const firstTime = {
+  ...goesThrough,
+  probe: [
+    {
+      code: 255,
+      stderr: 'No ED25519 host key is known for vps.test and you have requested strict checking.\nHost key verification failed.',
+    },
+    { stdout: looked() },
+  ],
+  resolve: { stdout: 'hostname vps.test\nport 22\nuserknownhostsfile /home/me/.ssh/known_hosts\n' },
+  'ssh-keyscan': { stdout: `vps.test ssh-ed25519 ${KEY_BLOB}\n` },
+}
+
+it('stops on a trouble it can be tried again from where the key can’t be kept', async () => {
+  const at = server(firstTime)
+  const setups = homeSetups({ ...at.system, appendFile: () => Promise.reject(new Error('EACCES: permission denied')) }, (one) =>
+    at.told.push(one),
+  )
+  setups.start({ target: 'deploy@vps.test' })
+  await settled(setups, 'trust')
+  await setups.act('trust')
+  const failed = (await setups.state())!
+  expect(failed).toMatchObject({ phase: 'failed', problem: 'KnownHostsUnwritable' })
+  expect(failed.log.at(-1)).toContain('EACCES')
+})
+
+it('leaves a setup stopped while its key was being kept stopped, rather than going on with it', async () => {
+  const at = server(firstTime)
+  let kept: (() => void) | undefined
+  const setups = homeSetups({ ...at.system, appendFile: () => new Promise<void>((resolve) => (kept = resolve)) }, (one) =>
+    at.told.push(one),
+  )
+  setups.start({ target: 'deploy@vps.test' })
+  await settled(setups, 'trust')
+  const trusting = setups.act('trust')
+  await vi.waitFor(() => expect(kept).toBeDefined())
+  await setups.act('stop')
+  kept!()
+  await trusting
+  expect((await setups.state())?.phase).toBe('stopped')
+  expect(at.asked.filter((one) => one.operation === 'probe')).toHaveLength(1)
 })
 
 it('stops on keys the server turns down, and Try again picks up from there', async () => {
@@ -193,6 +253,32 @@ it('makes the home a user of its own as root, with the key that logged in, and r
   expect(at.asked.find((one) => one.operation === 'install')!.args).toContain('althar@vps.test')
 })
 
+it('gives althar only the key that logged in, and stops where it can’t tell which that was', async () => {
+  const at = server({
+    ...goesThrough,
+    // Logged in with a key whose .pub isn't there, while the agent holds another.
+    probe: {
+      stdout: looked({ root: true, login: 'root' }),
+      stderr: `debug1: Server accepts key: /home/me/.ssh/deploy ED25519 ${fingerprint(LOGIN_BLOB)} explicit`,
+    },
+    resolve: { stdout: 'hostname vps.test\nidentityfile ~/.ssh/deploy\n' },
+    'ssh-add': { stdout: `ssh-ed25519 ${KEY_BLOB} other\n` },
+  })
+  const setups = at.setups()
+  setups.start({ target: 'root@vps.test' })
+  expect(await settled(setups, 'failed')).toMatchObject({ problem: 'NoPublicKey', at: 1, madeUser: false })
+  expect(at.asked.some((one) => one.operation === 'root-login')).toBe(false)
+})
+
+it('finds the release before it makes a root login’s user, so a server it can’t finish is left as it was', async () => {
+  const at = server({ ...goesThrough, probe: { stdout: looked({ root: true, login: 'root' }) } })
+  vi.mocked(at.system.release).mockRejectedValue(new ReleaseProblem('NoRelease'))
+  const setups = at.setups()
+  setups.start({ target: 'root@vps.test' })
+  expect(await settled(setups, 'failed')).toMatchObject({ problem: 'NoRelease', at: 2, madeUser: false })
+  expect(at.asked.map((one) => one.operation)).toEqual(['probe'])
+})
+
 it('sends althar-host from this computer where the server can’t download it', async () => {
   const at = server({
     ...goesThrough,
@@ -229,6 +315,78 @@ it('sends althar-host from this computer where the server can’t download it', 
       .at(-1)!
       .args.at(-1),
   ).toContain(`'install' 'upload' '${release.sha256}'`)
+  // Fetched into a folder of its own, sent from there, and the folder gone after.
+  expect(at.system.fetchArchive).toHaveBeenCalledWith(
+    release,
+    '/scratch/0/althar-host.tar.gz',
+    expect.any(Function),
+    expect.any(AbortSignal),
+  )
+  expect(at.scratches).toEqual([{ path: '/scratch/0', removed: true }])
+})
+
+it('takes the folder away when sending stops partway', async () => {
+  const at = server({
+    ...goesThrough,
+    status: { code: 1, stdout: event('setup', 'failed', { code: 'SetupNotFound' }) },
+    install: {
+      code: 1,
+      stdout: [looked(), event('get', 'started', { bytes: 0, totalBytes: 1 }), event('get', 'failed', { code: 'CannotDownload' })].join(
+        '\n',
+      ),
+    },
+    'prepare-upload': {
+      stdout: [looked(), event('get', 'started', { uploadId: 'Ab12Cd34', uploadPath: '/home/deploy/up/archive.partial' })].join('\n'),
+    },
+  })
+  vi.mocked(at.system.fetchArchive).mockRejectedValue(new Error('The release did not match its signed digest.'))
+  const setups = at.setups()
+  setups.start({ target: 'deploy@vps.test' })
+  await settled(setups, 'failed')
+  await setups.act('upload')
+  await vi.waitFor(async () => expect((await setups.state())?.problem).toBe('UploadFailed'))
+  expect(at.scratches).toEqual([{ path: '/scratch/0', removed: true }])
+})
+
+it('follows a transfer the server is still running after the connection drops, rather than starting it again', async () => {
+  const transferring = (bytes: number) =>
+    [event('get', 'started', { bytes: 0, totalBytes: release.bytes }), event('get', 'progress', { bytes, totalBytes: release.bytes })].join(
+      '\n',
+    )
+  const at = server({
+    ...goesThrough,
+    install: [
+      // Dropped partway through the download, which goes on there and holds the server's lock.
+      { code: 255, stdout: [looked(), transferring(10_000_000)].join('\n'), stderr: 'Connection to vps.test closed by remote host.' },
+      { code: 1, stdout: [looked(), event('get', 'failed', { code: 'LockHeld' })].join('\n') },
+    ],
+    status: [
+      { code: 1, stdout: event('setup', 'failed', { code: 'SetupNotFound' }) },
+      { stdout: transferring(10_000_000) },
+      { stdout: transferring(30_000_000) },
+      { stdout: hostStatus('running', finished.slice(0, 2)) },
+      { stdout: hostStatus('done', finished) },
+    ],
+  })
+  const setups = at.setups()
+  setups.start({ target: 'deploy@vps.test' })
+  await settled(setups, 'done')
+  expect(at.told.some((one) => one?.progress?.bytes === 30_000_000)).toBe(true)
+  expect(at.told.some((one) => one?.problem === 'LockHeld')).toBe(false)
+  expect(at.asked.filter((one) => one.operation === 'install')).toHaveLength(2)
+})
+
+it('stops where a finished setup doesn’t say which home it made', async () => {
+  const at = server({
+    ...goesThrough,
+    status: [
+      { code: 1, stdout: event('setup', 'failed', { code: 'SetupNotFound' }) },
+      { stdout: hostStatus('done', [...finished.slice(0, -1), event('identity', 'done', { homeId: HOME })]) },
+    ],
+  })
+  const setups = at.setups()
+  setups.start({ target: 'deploy@vps.test' })
+  expect(await settled(setups, 'failed')).toMatchObject({ problem: 'IdentityMismatch', at: 5 })
 })
 
 it('reconnects when the connection drops while it follows the setup, which goes on there', async () => {
@@ -292,6 +450,13 @@ it('stops at once, keeping what it did, and a stopped setup resumes', async () =
   expect(at.told.at(-1)?.phase).toBe('stopped')
   await setups.act('resume')
   await settled(setups, 'done')
+})
+
+it('sets up where althar-host always goes, not at a launcher or profile given for connecting', async () => {
+  const at = server(goesThrough)
+  const setups = at.setups()
+  setups.start({ target: 'deploy@vps.test', launcher: '/opt/other/launcher', profile: '/srv/other', port: 2222 })
+  expect((await settled(setups, 'done')).target).toEqual({ target: 'deploy@vps.test', port: 2222 })
 })
 
 it('refuses a target that isn’t an SSH host', () => {

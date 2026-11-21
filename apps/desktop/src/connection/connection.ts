@@ -12,7 +12,7 @@ import {
 } from '@althar/transport-node'
 import { Cause, Effect, Exit, Logger } from 'effect'
 
-import { bridgeHome, type ConnectionPort } from './bridge'
+import { bridgeHome, sshRuntime, type ConnectionPort } from './bridge'
 import { homeTarget, savedHome } from '../main/homes/store'
 
 interface ParentEvent {
@@ -66,9 +66,12 @@ parent.on('message', ({ data, ports }) => {
         process.exit(0)
       }
       if (data.type === 'inspect' && 'target' in data) {
-        const result = await Effect.runPromiseExit(inspectSshHost(homeTarget(data.target)).pipe(Effect.provide(Logger.layer([]))), {
-          signal: stop.signal,
-        })
+        const result = await Effect.runPromiseExit(
+          inspectSshHost(homeTarget(data.target), sshRuntime()).pipe(Effect.provide(Logger.layer([]))),
+          {
+            signal: stop.signal,
+          },
+        )
         if (Exit.isSuccess(result)) {
           parent.postMessage({ type: 'inspected', status: result.value })
           process.exit(0)

@@ -88,10 +88,14 @@ export interface HomeSetup {
   readonly linger?: string
   /** The release it installs, once found. */
   readonly version?: string
+  /** The home it made, as the server said once it was done: what the window's own check must find there. */
+  readonly identity?: { readonly homeId: string; readonly hostDeviceId: string }
   /** What it ran and what the server said, to show. */
   readonly log: ReadonlyArray<string>
 }
 export type SetupAction = 'trust' | 'stop' | 'resume' | 'upload' | 'dismiss'
+/** Handed to a window that can't set a home up (the Flatpak: main/homes/setup.ts's canSetUp), so it doesn't offer it. */
+export const NO_SETUP_ARG = '--althar-no-home-setup'
 
 export const isHomeSetup = (value: unknown): value is HomeSetup | null => {
   if (value === null) return true
