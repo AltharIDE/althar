@@ -212,8 +212,12 @@ jobs:
             timeout 15 bash -c "until wmctrl -m >/dev/null 2>&1; do sleep 0.2; done"
             bun run test:e2e e2e/computerUse.spec.ts --reporter=list
           '
+      # Let the app inherit the native Windows search path, as it does from Explorer.
       - if: runner.os == 'Windows'
-        run: bun run test:e2e e2e/computerUse.spec.ts --reporter=list
+        shell: pwsh
+        run: |
+          Get-Command git | Select-Object -ExpandProperty Source
+          bun run test:e2e e2e/computerUse.spec.ts --reporter=list --retries=0
       - uses: actions/upload-artifact@v6
         if: always()
         with:
