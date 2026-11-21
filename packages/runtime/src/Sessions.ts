@@ -141,7 +141,7 @@ import {
   WAKE_FOR,
 } from './leftRunning'
 import { WORK, workOf } from './machine'
-import { holding, portFor, portsBelow } from './ports'
+import { holding, portFor, portsBelow, processes, treeOf } from './ports'
 import { LEAD_PLANS_FROM_PRESETS, PARTS_CHANGE, PLAN_FROM_PRESETS } from './presetBrief'
 import { stopProcesses, treeOfCommand } from './stopping'
 import { outputText } from './reading'
@@ -3762,10 +3762,15 @@ export class Sessions extends Context.Service<
             ...(asideNow.unsaid ? { waitsForWords: true } : {}),
           }
           threads.set(thread.threadId, running)
-          // Closed, it stops what it left running with all that started, before its agent ends their shells only (stopping.ts).
+          // Stop descendants before the agent exits and they are reparented, including detached commands that never reported an output file.
           yield* Scope.addFinalizer(
             scope,
             Effect.gen(function* () {
+              const pid = running.connection.process?.pid
+              if (pid !== undefined && process.platform !== 'win32') {
+                const descendants = [...treeOf(yield* processes(), [pid])].filter((child) => child !== pid)
+                return yield* stopTrees(running, [descendants])
+              }
               const open = [...running.background.values()].filter((left) => left.ended === null)
               yield* stopTrees(running, yield* Effect.forEach(open, (left) => treeOfLeft(running, left), { concurrency: 'unbounded' }))
             }).pipe(Effect.timeout(LEFT_STOPS_WITHIN), Effect.ignore),

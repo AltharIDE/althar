@@ -21,6 +21,7 @@ import { Launches } from '../src/Launches'
 import { doomedOf, forebearsOf, LeftBehind } from '../src/LeftBehind'
 import { type Listed, listProcesses, marksOf, RUN, WORK, WORKER } from '../src/machine'
 import { Plans } from '../src/Plans'
+import { processes, treeOf } from '../src/ports'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -215,13 +216,19 @@ describe.skipIf(windows)('a command an agent left running', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
-  it.live('goes with everything it started when its agent stops', () =>
+  it.live('goes with everything it started when its agent stops, even without a reported output file', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
-      const { task, marked } = yield* started('Serve it [lead:serve-apart] [lead:finish]', { quick: true, run: false })
+      const { task } = yield* started('Serve it [lead:serve-apart-without-output] [lead:finish]', { quick: true, run: false })
+      const lead = Option.getOrUndefined(yield* sessions.running(task.threadId))?.pid
+      if (lead == null) return assert.fail('Expected a live lead process')
+      const tree = yield* until(
+        Effect.map(processes(), (parents) => [...treeOf(parents, [lead])]),
+        (pids) => pids.length >= 3,
+      )
       yield* sessions.stop(task.threadId)
       yield* nothingLeft(task.taskId)
-      yield* stopped(marked)
+      yield* stopped(tree)
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 })
