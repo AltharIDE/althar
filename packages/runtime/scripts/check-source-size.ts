@@ -8,7 +8,6 @@ const limit = 4_000
 // Remove each entry when its file fits the shared limit.
 const legacyLimits: Readonly<Record<string, number>> = {
   'Queries.ts': 5_050,
-  'Runs.ts': 9_350,
   'Sessions.ts': 5_700,
   'rules.ts': 5_400,
 }
