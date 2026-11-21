@@ -2,6 +2,7 @@ import { standInOf } from './standIn'
 import { errandRecords } from './Errands'
 import { errandCardLines } from './errandWords'
 import { externalWaitOf } from './externalWaits'
+import { readHomeCards } from './readHomeCards'
 import { HOSTED, MergeRules, newPullRequestLink } from '@althar/connectors'
 import { existsSync, realpathSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
@@ -3713,16 +3714,15 @@ export class Queries extends Context.Service<
               FROM tasks WHERE state IN ('done', 'abandoned'))
             WHERE state = 'done' AND place <= ${SETTLED_SHOWN}))
           ORDER BY k.created_at, k.id`
-        const tasks = yield* Effect.forEach(
-          rows,
-          (row) =>
-            Effect.map(onBoard(row), (read) =>
-              read.flatMap((task) =>
-                // A task kept for later waits on its board, not here.
-                onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
-              ),
+        // A large cold home works out many cards. Give other calls a turn between cards instead of keeping the
+        // runtime's scheduler busy for the entire read; the order and the card's own consistency rules stay the same.
+        const tasks = yield* readHomeCards(rows, AT_ONCE, (row) =>
+          Effect.map(onBoard(row), (read) =>
+            read.flatMap((task) =>
+              // A task kept for later waits on its board, not here.
+              onHome(task) ? [{ ...task, projectId: row.projectId }] : [],
             ),
-          { concurrency: AT_ONCE },
+          ),
         )
         return { open: new Set(rows.map((row) => row.id)), tasks: tasks.flat() }
       })
