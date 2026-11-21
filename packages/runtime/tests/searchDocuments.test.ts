@@ -1,7 +1,8 @@
 import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
-import type { ProjectId } from '@althar/domain'
+import { Ids, newId, type ProjectId } from '@althar/domain'
+import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { searchDocuments } from '../src/searchDocuments'
@@ -31,6 +32,13 @@ describe('search documents', () => {
       })
       const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${made.taskId} AND kind = 'task'`
       assert.isDefined(thread)
+      const at = '2026-01-01T00:00:00.000Z'
+      const actor = (yield* Instance).personId
+      yield* sql`INSERT INTO project_notes ${sql.insert({ id: yield* newId(Ids.projectNote), projectId, body: 'Keep the retries small', createdByActorId: actor, createdAt: at })}`
+      yield* sql`INSERT INTO project_notes ${sql.insert({ id: yield* newId(Ids.projectNote), projectId, body: 'Dropped note', createdByActorId: actor, createdAt: at, droppedAt: at, droppedByActorId: actor })}`
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId, taskId: made.taskId, product: 'github', kind: 'change', externalId: '42', ref: 'api#42', key: '#42', url: 'https://example.test/42', snapshot: JSON.stringify({ title: 'Retry PR', body: 'PR body', state: 'open', draft: true }), createdAt: at, updatedAt: at })}`
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId, taskId: made.taskId, product: 'github', kind: 'issue', externalId: '43', ref: 'api#43', key: '#43', url: 'https://example.test/43', snapshot: JSON.stringify({ title: 'Retry issue', status: { name: 'Open' } }), createdAt: at, updatedAt: at })}`
+      yield* sql`INSERT INTO external_links ${sql.insert({ id: yield* newId(Ids.externalLink), projectId, taskId: made.taskId, product: 'github', kind: 'issue', externalId: '44', ref: 'api#44', key: '#44', url: 'https://example.test/44', snapshot: JSON.stringify({ title: '' }), createdAt: at, updatedAt: at })}`
       for (let i = 0; i < 205; i++)
         yield* addItem({ projectId: projectId as ProjectId, threadId: thread!.id }, 'agent_message', {
           text: `Decision ${i}: use retries`,
@@ -42,6 +50,7 @@ describe('search documents', () => {
         pictures: [],
         files: [],
       })
+      yield* addItem({ projectId: projectId as ProjectId, threadId: thread!.id }, 'agent_message', { text: '', pictures: [], files: [] })
       const first = yield* searchDocuments()
       assert.strictEqual(first.documents.length, 200)
       assert.isNotNull(first.next)
@@ -50,7 +59,16 @@ describe('search documents', () => {
       assert.strictEqual(new Set(all.map((one) => one.id)).size, all.length)
       assert.strictEqual(all.filter((one) => one.kind === 'said').length, 205)
       assert.isFalse(all.some((one) => one.title.includes('Private chain')))
+      assert.isFalse(all.some((one) => one.title === 'Dropped note'))
+      assert.isTrue(all.some((one) => one.kind === 'note' && one.title === 'Keep the retries small'))
+      assert.isTrue(all.some((one) => one.kind === 'pull' && one.title === 'Retry PR' && one.state === 'draft'))
+      assert.isTrue(all.some((one) => one.kind === 'issue' && one.title === 'Retry issue' && one.state === 'Open'))
+      assert.isFalse(all.some((one) => one.ref === '#44' || one.title === ''))
       assert.isTrue(all.some((one) => one.kind === 'task' && one.title === 'Retry payments'))
+      assert.deepStrictEqual(
+        all.map((one) => one.id),
+        all.map((one) => one.id).toSorted((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+      )
       assert.isNull(next.next)
       yield* sql`UPDATE projects SET archived_at = '2026-11-13T00:00:00.000Z' WHERE id = ${projectId}`
       assert.deepStrictEqual((yield* searchDocuments()).documents, [])

@@ -16,48 +16,81 @@ export const searchDocuments = Effect.fn('Search.documents')(function* (
   kept = SAID_KEPT,
 ) {
   const sql = yield* SqlClient.SqlClient
-  const rows = yield* sql<SearchDocument>`
-    WITH documents AS (
-      SELECT 'task:' || k.id AS id, 'task' AS kind, k.project_id, t.id AS thread_id, k.id AS task_id,
-        NULL AS item_id, k.title, coalesce(k.request, k.description, '') AS body,
-        k.slug AS ref, NULL AS url,
-        coalesce((SELECT max(h.created_at) FROM thread_items h WHERE h.thread_id = t.id AND h.created_at > k.created_at), k.created_at) AS changed_at,
-        k.state
-      FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-      UNION ALL
-      SELECT 'link:' || l.id, CASE l.kind WHEN 'change' THEN 'pull' ELSE 'issue' END,
-        l.project_id, t.id, l.task_id, NULL, coalesce(json_extract(l.snapshot, '$.title'), k.title),
-        coalesce(json_extract(l.snapshot, '$.body'), ''), l.key, l.url, l.updated_at,
+  // IDs sort by kind, then by their original id. Read only the kinds that can still fit this page, and bound each
+  // before constructing the next: the old UNION materialized and sorted the whole catalog on every page.
+  const rows: SearchDocument[] = []
+  const cursor = (prefix: string) => (after < prefix ? '' : after.startsWith(prefix) ? after.slice(prefix.length) : null)
+  const room = () => 201 - rows.length
+  const conversation = cursor('conversation:')
+  if (conversation !== null && room() > 0)
+    rows.push(
+      ...(yield* sql<SearchDocument>`
+      SELECT 'conversation:' || t.id AS id, 'conversation' AS kind, t.project_id, t.id AS thread_id, NULL AS task_id, NULL AS item_id,
+        p.name || '’s conversation' AS title, '' AS body, '' AS ref, NULL AS url, t.created_at AS changed_at, '' AS state
+      FROM threads t JOIN projects p ON p.id = t.project_id
+      WHERE t.kind = 'coordinator' AND p.archived_at IS NULL AND t.id > ${conversation}
+      ORDER BY t.id LIMIT ${room()}`),
+    )
+  const link = cursor('link:')
+  if (link !== null && room() > 0)
+    rows.push(
+      ...(yield* sql<SearchDocument>`
+      SELECT 'link:' || l.id AS id, CASE l.kind WHEN 'change' THEN 'pull' ELSE 'issue' END AS kind,
+        l.project_id, t.id AS thread_id, l.task_id, NULL AS item_id, coalesce(json_extract(l.snapshot, '$.title'), k.title) AS title,
+        coalesce(json_extract(l.snapshot, '$.body'), '') AS body, l.key AS ref, l.url, l.updated_at AS changed_at,
         CASE WHEN l.kind = 'issue' THEN coalesce(json_extract(l.snapshot, '$.status.name'), '')
           WHEN json_extract(l.snapshot, '$.state') = 'open' AND json_extract(l.snapshot, '$.draft') THEN 'draft'
-          ELSE coalesce(json_extract(l.snapshot, '$.state'), '') END
-      FROM external_links l JOIN tasks k ON k.id = l.task_id
-        JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-      WHERE l.kind IN ('change', 'issue')
-      UNION ALL
-      SELECT 'note:' || n.id, 'note', n.project_id, t.id, NULL, NULL, n.body, n.body, '', NULL, n.created_at, ''
+          ELSE coalesce(json_extract(l.snapshot, '$.state'), '') END AS state
+      FROM external_links l JOIN tasks k ON k.id = l.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+        JOIN projects p ON p.id = l.project_id
+      WHERE l.kind IN ('change', 'issue') AND p.archived_at IS NULL AND l.id > ${link}
+        AND coalesce(json_extract(l.snapshot, '$.title'), k.title) != ''
+      ORDER BY l.id LIMIT ${room()}`),
+    )
+  const note = cursor('note:')
+  if (note !== null && room() > 0)
+    rows.push(
+      ...(yield* sql<SearchDocument>`
+      SELECT 'note:' || n.id AS id, 'note' AS kind, n.project_id, t.id AS thread_id, NULL AS task_id, NULL AS item_id,
+        n.body AS title, n.body, '' AS ref, NULL AS url, n.created_at AS changed_at, '' AS state
       FROM project_notes n LEFT JOIN threads t ON t.project_id = n.project_id AND t.kind = 'coordinator'
-      WHERE n.dropped_at IS NULL
-      UNION ALL
-      SELECT 'conversation:' || t.id, 'conversation', t.project_id, t.id, NULL, NULL,
-        p.name || '’s conversation', '', '', NULL, t.created_at, ''
-      FROM threads t JOIN projects p ON p.id = t.project_id WHERE t.kind = 'coordinator'
-      UNION ALL
-      SELECT 'said:' || i.id, 'said', i.project_id, t.id, t.task_id, i.id,
+        JOIN projects p ON p.id = n.project_id
+      WHERE n.dropped_at IS NULL AND p.archived_at IS NULL AND n.body != '' AND n.id > ${note}
+      ORDER BY n.id LIMIT ${room()}`),
+    )
+  const said = cursor('said:')
+  if (said !== null && room() > 0)
+    rows.push(
+      ...(yield* sql<SearchDocument>`
+      SELECT 'said:' || i.id AS id, 'said' AS kind, i.project_id, t.id AS thread_id, t.task_id, i.id AS item_id,
         trim(coalesce(json_extract(i.content, '$.text'), json_extract(i.content, '$.summary'), '') || char(10) ||
           coalesce((SELECT group_concat(coalesce(json_extract(f.value, '$.title') || ' ', '') || json_extract(f.value, '$.claim'), char(10))
-            FROM json_each(i.content, '$.findings') f), ''), char(10)),
-        coalesce(json_extract(i.content, '$.built'), ''), coalesce(k.title, 'Conversation'), NULL, i.created_at, ''
+            FROM json_each(i.content, '$.findings') f), ''), char(10)) AS title,
+        coalesce(json_extract(i.content, '$.built'), '') AS body, coalesce(k.title, 'Conversation') AS ref, NULL AS url,
+        i.created_at AS changed_at, '' AS state
       FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind IN ('task', 'coordinator')
-        LEFT JOIN tasks k ON k.id = t.task_id
-        LEFT JOIN user_inputs u ON u.id = i.user_input_id
-      WHERE i.kind IN ('user_message', 'agent_message', 'step_result', 'arrival')
+        LEFT JOIN tasks k ON k.id = t.task_id LEFT JOIN user_inputs u ON u.id = i.user_input_id
+        JOIN projects p ON p.id = i.project_id
+      WHERE i.kind IN ('user_message', 'agent_message', 'step_result', 'arrival') AND p.archived_at IS NULL AND i.id > ${said}
         AND i.id IN (SELECT n.id FROM thread_items n WHERE n.kind IN ('user_message', 'agent_message', 'step_result', 'arrival') ORDER BY n.id DESC LIMIT ${kept})
         AND (i.kind != 'user_message' OR u.state IN ('queued', 'delivered'))
+        AND trim(coalesce(json_extract(i.content, '$.text'), json_extract(i.content, '$.summary'), '') || char(10) ||
+          coalesce((SELECT group_concat(coalesce(json_extract(f.value, '$.title') || ' ', '') || json_extract(f.value, '$.claim'), char(10))
+            FROM json_each(i.content, '$.findings') f), ''), char(10)) != ''
+      ORDER BY i.id LIMIT ${room()}`),
     )
-    SELECT d.* FROM documents d JOIN projects p ON p.id = d.project_id
-    WHERE p.archived_at IS NULL AND d.id > ${after} AND d.title != ''
-    ORDER BY d.id LIMIT 201`
+  const task = cursor('task:')
+  if (task !== null && room() > 0)
+    rows.push(
+      ...(yield* sql<SearchDocument>`
+      SELECT 'task:' || k.id AS id, 'task' AS kind, k.project_id, t.id AS thread_id, k.id AS task_id,
+        NULL AS item_id, k.title, coalesce(k.request, k.description, '') AS body, k.slug AS ref, NULL AS url,
+        coalesce((SELECT max(h.created_at) FROM thread_items h WHERE h.thread_id = t.id AND h.created_at > k.created_at), k.created_at) AS changed_at,
+        k.state
+      FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' JOIN projects p ON p.id = k.project_id
+      WHERE p.archived_at IS NULL AND k.title != '' AND k.id > ${task}
+      ORDER BY k.id LIMIT ${room()}`),
+    )
   const documents = rows.slice(0, 200)
   const ids = documents.filter((one) => one.kind === 'task').map((one) => one.taskId!)
   if (ids.length > 0) {
