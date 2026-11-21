@@ -11,7 +11,7 @@ import { SqlClient } from 'effect/sql'
 
 import { type AgentEntry, Agents } from '../src/Config'
 import { EffortUnchanged, UnknownAgent } from '../src/errors'
-import { Models, modelsOf } from '../src/Models'
+import { Models, modelsOf, readsOf } from '../src/Models'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
@@ -380,6 +380,26 @@ describe('the models each agent offers', () => {
     })
   })
 
+  it('never pass a session still starting, whenever it says its settings, as the next read’s start', () => {
+    const at = Date.parse('2026-11-21T20:00:00.000Z')
+    const iso = (ms: number) => new Date(ms).toISOString()
+    const later = { from: iso(at - 86_400_000), read: new Map<string, string>() }
+    const slow = { id: 'a', startedAt: iso(at) }
+    const said = { id: 'b', startedAt: iso(at + 120_000), said: 1, starting: 0 }
+    // Whatever the slow one is as the read is made, starting or said or given up, it is read, or the next read starts at it.
+    for (const [state, row] of [
+      ['starting', { ...slow, said: 0, starting: 1 }],
+      ['said', { ...slow, said: 1, starting: 0 }],
+    ] as const) {
+      const { unread, from } = readsOf([row, said], later)
+      assert.isTrue(unread.some((one) => one.id === 'a') || from <= slow.startedAt, state)
+    }
+    // Given up before it said anything, it says nothing more, and the read moves on to a minute before the latest.
+    assert.strictEqual(readsOf([{ ...slow, said: 0, starting: 0 }, said], later).from, iso(at + 60_000))
+    // Nothing new said: it starts where it did.
+    assert.strictEqual(readsOf([{ ...slow, said: 0, starting: 1 }], later).from, later.from)
+  })
+
   it.live('read a session that says its settings after a later one did, and one started in the same millisecond', () => {
     const older = { models: [{ id: SMALL.id, name: SMALL.name }] }
     const offering = (ids: ReadonlyArray<string>) =>
@@ -415,15 +435,16 @@ describe('the models each agent offers', () => {
           state,
           startedAt: new Date(startedAt).toISOString(),
         })}`
-      // A slow session made first says nothing yet; one made after it has said its settings, and is read.
+      // A slow session made first says nothing yet; one made two minutes after it, past the read's margin, has said its
+      // settings, and is read.
       yield* session(`sess_${'a'.repeat(32)}`, at, '{}', 'starting')
-      yield* session(`sess_${'b'.repeat(32)}`, at + 5, offering(['small']), 'completed')
+      yield* session(`sess_${'b'.repeat(32)}`, at + 120_000, offering(['small']), 'completed')
       assert.deepStrictEqual(yield* offered, ['small'])
       // The first says its settings once it has started: what it offers counts, though a later one was read before it.
       yield* sql`UPDATE provider_sessions SET config = ${offering(['small', 'large'])}, state = 'completed' WHERE id = ${`sess_${'a'.repeat(32)}`}`
       assert.deepStrictEqual(yield* offered, ['large', 'small'])
       // One made in the same millisecond as one read already is read too.
-      yield* session(`sess_${'c'.repeat(32)}`, at + 5, offering(['huge']), 'completed')
+      yield* session(`sess_${'c'.repeat(32)}`, at + 120_000, offering(['huge']), 'completed')
       assert.sameMembers((yield* offered) ?? [], ['huge', 'large', 'small'])
     }).pipe(Effect.provide(codexOnly(':memory:', () => older)))
   })

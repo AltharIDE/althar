@@ -77,6 +77,32 @@ const PROBE_TIMEOUT = Duration.seconds(30)
 const WALK_TIMEOUT = Duration.seconds(40)
 
 /** How long after an agent couldn't say its models it is asked again, at the next read. */
+/**
+ * Of one read of an agent's sessions since `from`, those that have said their settings and aren't read yet, and where the
+ * next read starts: from the first still starting, or a minute before the latest that said, so the reads stay small. One
+ * still starting in this read is never passed, whenever it says its settings after.
+ */
+export const readsOf = (
+  seen: ReadonlyArray<{
+    readonly id: string
+    readonly startedAt: string
+    readonly said: number | boolean
+    readonly starting: number | boolean
+  }>,
+  later: { readonly from: string; readonly read: ReadonlyMap<string, string> },
+): { readonly unread: ReadonlyArray<{ readonly id: string; readonly startedAt: string }>; readonly from: string } => {
+  const said = seen.filter((row) => Boolean(row.said))
+  const unread = said.filter((row) => !later.read.has(row.id))
+  if (unread.length === 0) return { unread, from: later.from }
+  const margin = new Date(Math.max(...said.map((row) => Date.parse(row.startedAt))) - 60_000).toISOString()
+  const pending = seen
+    .filter((row) => Boolean(row.starting))
+    .map((row) => row.startedAt)
+    .reduce<string | undefined>((first, at) => (first === undefined || at < first ? at : first), undefined)
+  const next = pending !== undefined && pending < margin ? pending : margin
+  return { unread, from: next > later.from ? next : later.from }
+}
+
 const ASK_AGAIN = Duration.minutes(1)
 /** How far before an agent's asking its sessions still say what it offers, where the asking got an older list. */
 const RECENT = 24 * 60 * 60 * 1000
@@ -260,11 +286,12 @@ export class Models extends Context.Service<
         Effect.gen(function* () {
           const later = since.get(definition.id)
           if (later === undefined) return asked.models
-          // Settings are '{}' until the session has started: only those that said them, and each once.
-          const said = yield* sql<{ id: string; startedAt: string }>`
-            SELECT id, started_at FROM provider_sessions
-            WHERE agent_id = ${definition.id} AND started_at >= ${later.from} AND config <> '{}'`
-          const unread = said.filter((row) => !later.read.has(row.id))
+          // Settings are '{}' until the session has started: those that said them, each read once, and those still starting,
+          // all in one statement, so one that says them as this reads is in it one way or the other, never passed between two.
+          const seen = yield* sql<{ id: string; startedAt: string; said: number; starting: number }>`
+            SELECT id, started_at, config <> '{}' AS said, (config = '{}' AND ended_at IS NULL) AS starting
+            FROM provider_sessions WHERE agent_id = ${definition.id} AND started_at >= ${later.from}`
+          const { unread, from } = readsOf(seen, later)
           for (const row of unread) {
             const [one] = yield* sql<{ config: string }>`SELECT config FROM provider_sessions WHERE id = ${row.id}`
             later.read.set(row.id, row.startedAt)
@@ -272,18 +299,9 @@ export class Models extends Context.Service<
             for (const model of modelsOf(definition, settingsIn(one.config)).models)
               if (model.efforts.length > 0 || !later.models.has(model.id)) later.models.set(model.id, model)
           }
-          // Onwards from the first session still starting, or a minute before the latest said, so the reads stay small.
-          if (unread.length > 0) {
-            const [pending] = yield* sql<{ first: string | null }>`
-              SELECT MIN(started_at) AS first FROM provider_sessions
-              WHERE agent_id = ${definition.id} AND started_at >= ${later.from} AND config = '{}' AND ended_at IS NULL`
-            const latest = Math.max(...said.map((row) => Date.parse(row.startedAt)))
-            const margin = new Date(latest - 60_000).toISOString()
-            const next = pending?.first != null && pending.first < margin ? pending.first : margin
-            if (next > later.from) {
-              later.from = next
-              for (const [id, at] of later.read) if (at < next) later.read.delete(id)
-            }
+          if (from > later.from) {
+            later.from = from
+            for (const [id, at] of later.read) if (at < from) later.read.delete(id)
           }
           const offered = new Set(asked.models.map((model) => model.id))
           const extra = [...later.models.values()].filter((model) => !offered.has(model.id))
