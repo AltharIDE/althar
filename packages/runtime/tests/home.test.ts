@@ -1,4 +1,6 @@
 import { assert, describe, it } from '@effect/vitest'
+import { blockerAbandoned } from '@althar/contracts'
+import { Ids, newId } from '@althar/domain'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -62,6 +64,98 @@ describe("a project's ink", () => {
 })
 
 describe('the home', () => {
+  it.live('keeps Home and the board in agreement when settled tasks need attention again', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const queries = yield* Queries
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const instance = yield* Instance
+      const { projectId } = yield* open
+      const at = new Date().toISOString()
+      const create = (title: string, draft = false) =>
+        Effect.gen(function* () {
+          return yield* projects.createTask({ envelope: yield* Runtime.envelope('task.create', {}), projectId, title, draft })
+        })
+      const settle = (taskId: string, state: 'done' | 'abandoned' = 'done') =>
+        sql`UPDATE tasks SET state = ${state}, settled_at = ${at} WHERE id = ${taskId}`
+
+      const quiet = yield* create('Settled')
+      const call = yield* create('Open call')
+      const issue = yield* create('Issue change')
+      const review = yield* create('Review found something')
+      const conflict = yield* create('Conflict round')
+      const queued = yield* create('Waiting for a place')
+      const starting = yield* create('Session starting')
+      const blocked = yield* create('Plan with an abandoned blocker', true)
+      const blocker = yield* create('Abandoned')
+      yield* plans.propose({
+        projectId: projectId as Parameters<typeof plans.propose>[0]['projectId'],
+        taskId: blocked.taskId,
+        steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.personId,
+      })
+      for (const one of [quiet, call, issue, review, conflict, queued, starting, blocked]) yield* settle(one.taskId)
+      yield* settle(blocker.taskId, 'abandoned')
+      yield* sql`INSERT INTO task_waits (task_id, on_task_id, created_at) VALUES (${blocked.taskId}, ${blocker.taskId}, ${at})`
+      yield* sql`INSERT INTO attention_requests ${sql.insert({
+        id: yield* newId(Ids.attentionRequest),
+        projectId,
+        taskId: call.taskId,
+        kind: 'question',
+        state: 'open',
+        createdAt: at,
+      })}`
+      yield* sql`INSERT INTO issue_changes ${sql.insert({
+        id: yield* newId(Ids.issueChange),
+        projectId,
+        threadId: issue.threadId,
+        changes: '[]',
+        state: 'pending',
+        proposedBy: 'lead',
+        proposedByActorId: instance.personId,
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      yield* sql`INSERT INTO merge_reviews (url, task_id, project_id, state, created_at, updated_at)
+        VALUES ('https://example.test/pull/1', ${review.taskId}, ${projectId}, 'found', ${at}, ${at})`
+      yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+        id: yield* newId(Ids.conflictResolution),
+        projectId,
+        taskId: conflict.taskId,
+        conflicts: '[]',
+        state: 'resolving',
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      yield* sql`UPDATE threads SET waits_for_place = ${at} WHERE id = ${queued.threadId}`
+      yield* sql`INSERT INTO provider_sessions ${sql.insert({
+        id: yield* newId(Ids.providerSession),
+        projectId,
+        threadId: starting.threadId,
+        agentId: 'codex',
+        state: 'starting',
+        startedAt: at,
+      })}`
+
+      const { tasks } = yield* queries.home()
+      const board = (yield* queries.board(projectId)).tasks.filter(
+        (one) => ['ready', 'waiting', 'running', 'stopped'].includes(one.phase) || blockerAbandoned(one),
+      )
+      assert.sameDeepMembers(
+        tasks.map(({ taskId, phase }) => [taskId, phase]),
+        board.map(({ taskId, phase }) => [taskId, phase]),
+      )
+      assert.sameMembers(
+        tasks.map((one) => one.taskId),
+        [call, issue, review, conflict, queued, starting].map((one) => one.taskId),
+      )
+      // A settled task's proposed plan no longer brings it back through a blocker.
+      assert.isFalse(tasks.some((one) => one.taskId === blocked.taskId))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('finds a task setup by thread without scanning the transcript', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient

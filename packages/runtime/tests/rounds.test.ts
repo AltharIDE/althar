@@ -972,6 +972,7 @@ describe('a merged task with commits after its pull request', () => {
         yield* say(task.threadId, 'Tidy it up, and push pls.')
         yield* until(cards(task.projectId), (all) => all[0]?.held !== undefined)
         const queries = yield* Queries
+        assert.isDefined((yield* queries.home()).tasks.find((one) => one.taskId === task.taskId)?.held)
         yield* until(
           Effect.map(queries.thread(task.threadId), (header) => header.task.actions),
           (actions) => actions.includes('leaveOut'),
