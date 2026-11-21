@@ -94,7 +94,7 @@ export const handlePages = (pages: Pages, mine: (contents: WebContents) => boole
     from(event)
     const list = pinsOf(pins)
     if (list === null) throw new Error('Those aren’t pins.')
-    pages.pins(ownerIn(owner), list)
+    return pages.pins(ownerIn(owner), list)
   })
   ipcMain.handle('althar:page-find', (event, owner: unknown, selector: unknown, address: unknown) => {
     from(event)

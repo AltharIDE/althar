@@ -126,7 +126,7 @@ describe('a task’s screenshots on its pull request', () => {
         new Response(
           JSON.stringify({
             message: 'Validation Failed',
-            errors: [{ message: `Yowza that's a big file. <span>Try again with a file size less than 10MB.</span>` }],
+            errors: [{ message: `Yowza that's a big file. <span>Try again with a file size less than 1KB.</span>` }],
           }),
           { status: 422 },
         ),
@@ -195,6 +195,43 @@ describe('a task’s screenshots on its pull request', () => {
       assert.include(comments(github)[0]?.body ?? '', github.uploads[2]?.url ?? 'missing')
       assert.strictEqual((yield* standing(threadId))?.changed, 1)
       assert.notInclude((yield* standing(threadId))?.failed ?? '', 'refused.png')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('reports GitHub’s refusal when the picture is already below the limit in its answer', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    const sent: Array<number> = []
+    const real = makeGitHub({
+      apiUrl: 'https://api.github.com',
+      webUrl: 'https://github.com',
+      credential: Effect.succeed({ kind: 'bearer', token: 'fixture' }),
+      fetch: async (_url, init) => {
+        sent.push((init?.body as Uint8Array).byteLength)
+        return Response.json(
+          {
+            message: 'Validation Failed',
+            errors: [{ message: `size Yowza that's a big file. <span>Try again with a file size less than 10MB.</span>` }],
+          },
+          { status: 422 },
+        )
+      },
+    })
+    github.uploadPicture = (repository, picture) => real.uploadPicture!(repository, picture)
+    return Effect.gen(function* () {
+      const { taskId, threadId, url } = yield* opened(github, working)
+      const picture = yield* firstPicture(threadId)
+      const bytes = Number(picture.bytes)
+      assert.isAbove(bytes, 0)
+      assert.isBelow(bytes, 10_000_000)
+      yield* (yield* PullRequestScreenshots).post({ taskId, url, leftOut: [] })
+      assert.deepStrictEqual(sent, [bytes])
+      const body = comments(github)[0]?.body ?? ''
+      assert.include(body, 'GitHub said: Validation Failed')
+      assert.include(body, 'Try again with a file size less than 10MB.')
+      assert.notInclude(body, "could not fit the host's upload limit")
+      assert.include((yield* standing(threadId))?.failed ?? '', 'GitHub said: Validation Failed')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

@@ -36,7 +36,9 @@ function PageTab() {
   const navigate = useNavigate()
   const { where } = usePage(owner, useServices().host.pages)
   const origin = pages.originOf(owner)
-  const comments = useComments(origin?.draft ?? '')
+  const comments = useComments(origin?.draft ?? '').flatMap((comment, index) =>
+    comment.on.kind === 'page' ? [composerComment(comment, index + 1)] : [],
+  )
   const away = where !== 'tab' && !pages.waking(owner)
   useEffect(() => {
     if (away && origin !== null) void toOrigin(navigate, origin)
@@ -49,10 +51,10 @@ function PageTab() {
       </div>
       {comments.length > 0 && (
         <ul className={s.comments} aria-label={text.comments}>
-          {comments.map((comment, index) => (
+          {comments.map((comment) => (
             <li key={comment.id}>
               <CommentChip
-                comment={composerComment(comment, index + 1)}
+                comment={comment}
                 onOpen={() => pages.reopen(owner, comment.id)}
                 onRemove={() => drop(origin.draft, comment.id)}
               />
