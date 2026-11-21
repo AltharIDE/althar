@@ -65,7 +65,7 @@ was decided. These are what they leave open.
   commit actually read and refusing self-approval.
 - [ ] **A lead's tags.** Should a lead's `push_tag` go ahead on the person's
   word in its thread, rather than asking every time?
-- [ ] **A contributor's fork.** Attaching a fork's pull request, and pushing
+- [x] **A contributor's fork.** Attaching a fork's pull request, and pushing
   to it where its author lets maintainers edit (DEV-170).
 - [ ] **The coordinator on the web.** Should it read the web under the
   project's switch, as leads do?

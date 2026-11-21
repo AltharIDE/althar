@@ -1,5 +1,20 @@
 import type { ChangeSummary } from '@althar/contracts'
 
+/** A task's pull requests by repository: the open one if there is one, otherwise the newest (ADR-034). */
+export const latestOf = <A extends { readonly state: string; readonly repository: ReadonlyArray<string> }>(
+  changes: ReadonlyArray<A>,
+): ReadonlyArray<A> => {
+  const byRepository = new Map<string, Array<A>>()
+  for (const change of changes) {
+    const where = change.repository.join('/').toLowerCase()
+    byRepository.set(where, [...(byRepository.get(where) ?? []), change])
+  }
+  return [...byRepository.values()].flatMap((all) => {
+    const latest = all.find((change) => change.state === 'open') ?? all.at(-1)
+    return latest === undefined ? [] : [latest]
+  })
+}
+
 /*
  * What the coordinator is told of a task's pull requests: the facts the
  * task's card is built from (Queries.pullRequestsOf), in a few words for the

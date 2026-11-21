@@ -896,7 +896,7 @@ export const makeChangeLeadTools = (dependencies: ChangeLeadToolsDependencies) =
               // has looked: its fix goes up at once (ADR-040, ADR-070), unless the person said something on the task since those
               // checks came, when what it committed may be for that, or the branch had commits not pushed yet when the lead was told,
               // which the fix would take up with it. Anything else waits for the person, as ever.
-              const fixing = pushes ? null : yield* fixingOn(link)
+              const fixing = pushes || snapshot.maintainerEdit === true ? null : yield* fixingOn(link)
               const earlier =
                 fixing !== null && fixing.open && fixing.failing && !fixing.spoken
                   ? yield* pendingAtFailure(link, snapshot.headSha, path, ahead.from)

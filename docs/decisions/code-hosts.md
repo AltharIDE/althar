@@ -313,10 +313,11 @@ It's how a task takes over a pull request opened from another branch, or
 on the repository a fork sends its pull requests to.
 
 - **Which:** an open one, on the task's repository or on the one its fork
-  came from. Its branch must be on a repository the task pushes to, as the
-  host says. Where the host doesn't say, attaching is refused: a branch of
-  the same name may not be the one it merges from. A link is taken only on
-  the host the task's repository is on. One that another open task
+  came from. The host must identify its source repository. A contributor's
+  fork can be attached on GitHub or GitLab when the author allows maintainer
+  edits and the signed-in account can push to the target repository. If edits
+  are disabled, Althar asks the person to have the author enable them. A link
+  is taken only on the host the task's repository is on. One that another open task
   follows stays that task's. Pull requests are attached one at a time
   across every task, so two can't both take one.
 - **Its branch:** where the task's branch already has the pull request's
@@ -336,9 +337,11 @@ on the repository a fork sends its pull requests to.
   drafted to answer a review starts on its head. `find_pull_requests` lists
   a fork's upstream pull requests first, and says which task follows each.
 
-Not built yet: attaching a pull request whose branch is on someone else's
-fork, where its author lets maintainers edit it, and pushing to it on the
-person's word, never forced. Today that is refused.
+Pushes to a contributor's fork wait for the person's approval. They use the
+person's connected sign-in, and try the device's git sign-in if that token
+can't reach the fork. Each push checks that the pull request is still open,
+its branch still exists and the author still allows maintainer edits. Althar
+never force-pushes to that branch or pushes to the fork's default branch.
 
 ## Checks: Althar sees them through
 
@@ -786,12 +789,12 @@ The decisions above are current. These parts of them aren't built on main:
   reads it, but plans the fix like any other task.
 - **The coordinator reading the web** under the project's switch: it is
   kept off it today.
-- **A contributor's fork:** attaching its pull request, and pushing to it
-  where its author lets maintainers edit.
 - **A host Althar adds later** gets reads only until its lists are written.
 
 ## Changes
 
+- 20 Nov 2026: tasks can attach to and publish to a contributor's fork on
+  GitHub and GitLab when the author allows maintainer edits (DEV-170).
 - 12 Nov 2026: the lead and coordinator gain complete discussion pages,
   Linear resources, relationships and attachments, review controls and
   broader PR search. `code_host_api` and `tracker_api` provide authenticated
