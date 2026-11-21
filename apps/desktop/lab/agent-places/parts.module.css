@@ -27,17 +27,9 @@
 .pips i[data-cell='on'] {
   background: var(--live);
 }
-/* closed for now: only its outline, in warm, where a free place is a filled step */
+/* closed for now: a free place's step, faded; the words say why */
 .pips i[data-cell='shut'] {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warm) 70%, transparent);
-}
-.large i[data-cell='shut'] {
-  background: repeating-linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--warm) 30%, transparent) 0 1.5px,
-    transparent 1.5px 4px
-  );
+  opacity: 0.35;
 }
 .held {
   margin-top: 4px;
