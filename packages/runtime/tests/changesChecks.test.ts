@@ -208,6 +208,28 @@ describe('a change whose checks Althar sees through', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('leaves a failure of a check its host doesn’t require alone: no fix asked, and ready to accept (#1117)', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: () => [passing, { name: 'Workers Builds: althar-site', state: 'failed' }],
+      rulesOf: () => ({ requiredChecks: ['test'], needs: [] }),
+    })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.checks?.outcome === 'failed')
+      assert.isNull(ready?.step)
+      assert.lengthOf(fixesOn(bare), 0)
+      assert.notInclude((yield* notices(ready?.threadId ?? '')).join('\n'), 'again')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('starts its lead again for a failure when its session has ended', () => {
     const { working, bare } = hosted()
     let first: 'running' | 'failed' = 'running'

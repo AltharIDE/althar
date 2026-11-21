@@ -983,16 +983,24 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
           // Advance even when this observation already exists: a previous poll may have recorded it and then failed before
           // saving its snapshot. Reusing that observation repairs the snapshot without delivering the result twice.
           if (transitioned) checksRevision += 1
+          // Where its host names the checks it requires, only those failing are a failure to see through: an optional one's holds
+          // nothing back, so it isn't counted, run again or handed to the lead (#1117). Kept as read where the host doesn't say.
+          const required = sum.failed > 0 ? (yield* rulesOf(host, repository, before, now, false))?.requiredChecks : undefined
+          const counts = (check: string) => !Array.isArray(required) || required.includes(check)
+          const own = Array.isArray(required)
+            ? { ...sum, failed: sum.failing.filter(counts).length, failing: sum.failing.filter(counts) }
+            : sum
           if (
             transitioned &&
-            (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}:${checksRevision}${reran?.again ?? ''}`, { ...sum }))
+            (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}:${checksRevision}${reran?.again ?? ''}`, { ...own }))
           ) {
             happened = true
             // The failed checks' logs, read once: the card shows their ends, or why there are none, and the lead is told the same.
             const reads =
               sum.outcome === 'failed'
-                ? yield* Effect.forEach(ran.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD), (check) =>
-                    readLog(host, repository, check),
+                ? yield* Effect.forEach(
+                    ran.filter((candidate) => candidate.state === 'failed' && counts(candidate.name)).slice(0, LOGS_TO_LEAD),
+                    (check) => readLog(host, repository, check),
                   )
                 : []
             yield* arrive(link, {
@@ -1009,8 +1017,8 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
             // lead is told: it may have failed by chance. Not the checks on a merge a conflict round pushed: the round sees those
             // through itself. Nor where the pull request conflicts: the lead is asked for both at once, and the merge's checks run
             // anew.
-            const fixing = sum.failed > 0 ? yield* fixingOn(link) : null
-            const failedChecks = ran.filter((candidate) => candidate.state === 'failed')
+            const fixing = own.failed > 0 ? yield* fixingOn(link) : null
+            const failedChecks = ran.filter((candidate) => candidate.state === 'failed' && counts(candidate.name))
             const again =
               fixing?.open === true && !reran && now.conflicts !== true && !(yield* roundUnderWay(link.taskId, now.url))
                 ? (yield* Effect.forEach(failedChecks, (check) =>
@@ -1021,10 +1029,10 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
               yield* heard(link, 'checks_rerun', `rerun:${sum.sha}`, { sha: sum.sha })
               yield* sayOn(
                 link,
-                `Running ${sum.failing.length === 1 ? 'a failed check' : `${sum.failing.length} failed checks`} on ${name} again.`,
+                `Running ${own.failing.length === 1 ? 'a failed check' : `${own.failing.length} failed checks`} on ${name} again.`,
               )
               rerunning = true
-            } else if (sum.failed > 0) {
+            } else if (own.failed > 0) {
               const logs = reads.map(logForLead)
               // Its lead sees them through alone, whether or not the person has looked, started again if it must be, and its fix
               // goes up as it pushes (ADR-040, ADR-070). After FIX_ROUNDS fixes the change is the person's: its lead says once what
@@ -1036,8 +1044,8 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
                 const branch =
                   workspace === undefined ? null : yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
                 yield* heard(link, 'checks_told', `told:${sum.sha}${reran?.again ?? ''}`, { sha: sum.sha, branch })
-                forLead.push(checksForLeadAlone(sum, name, logs, FIX_ROUNDS - fixing.failed + 1, now.target || repository.defaultBranch))
-                failedNow = { failing: sum.failing, logs }
+                forLead.push(checksForLeadAlone(own, name, logs, FIX_ROUNDS - fixing.failed + 1, now.target || repository.defaultBranch))
+                failedNow = { failing: own.failing, logs }
               } else if (
                 fixing !== null &&
                 fixing.given &&
@@ -1047,12 +1055,12 @@ export const makeChangeListening = (dependencies: ChangeListeningDependencies) =
               ) {
                 yield* gaveUp(link, name)
                 alone = true
-                forLead.push(checksSpentForLead(sum, name, logs, FIX_ROUNDS))
-              } else if (fixing?.stopped !== true) forLead.push(checksForLead(sum, name, logs))
+                forLead.push(checksSpentForLead(own, name, logs, FIX_ROUNDS))
+              } else if (fixing?.stopped !== true) forLead.push(checksForLead(own, name, logs))
             } else if (reran === null && !(yield* roundUnderWay(link.taskId, now.url))) {
               // None failed but some were cancelled, which a host holds a merge on as on a failure: run again once by Althar,
               // whoever has looked, as the person would on the host (DEV-173). Cancelled again, they are the person's.
-              const cancelledChecks = ran.filter((candidate) => candidate.state === 'cancelled')
+              const cancelledChecks = ran.filter((candidate) => candidate.state === 'cancelled' && counts(candidate.name))
               const ranThem =
                 cancelledChecks.length > 0 &&
                 (yield* Effect.forEach(cancelledChecks, (check) =>
