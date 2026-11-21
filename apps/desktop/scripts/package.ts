@@ -95,7 +95,7 @@ const RELEASES = { provider: 'github', owner: 'AltharIDE', repo: 'althar' } as c
 /** The packages the runtime starts as processes, at the versions the app depends on. */
 const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
 /** What stays in node_modules: speech and image processing and the terminals' pseudo-terminals, with their platform binaries, and the updater. */
-const NATIVE = ['sherpa-onnx-node', 'electron-updater', 'sharp', 'node-pty']
+const NATIVE = ['sherpa-onnx-node', 'electron-updater', 'sharp', 'node-pty', '@trycua/cua-driver']
 
 /** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */
 const BINARIES: Record<string, string> = {

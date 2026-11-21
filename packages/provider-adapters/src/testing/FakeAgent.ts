@@ -1218,6 +1218,35 @@ const playRole = async (
       // Asked to work on the page beside its task, `[lead:page]` with `page: <address>` and `shot: <file>`, it opens it there,
       // reads it, types in its Note field, presses Approve, reads it again and writes its screenshot to the file, and says
       // what each of Althar's tools answered.
+      if (text.includes('[lead:computer]') && available.has('computer')) {
+        const ask = (args: Record<string, unknown>) => call('computer', args)
+        const approved = await ask({ op: 'request', reason: 'Transfer a note from Writer to Reader.' })
+        let windows: ReadonlyArray<{ readonly id: string; readonly title: string }>
+        try {
+          windows = (JSON.parse(approved) as { readonly windows: typeof windows }).windows
+        } catch {
+          return approved
+        }
+        const writer = windows.find((one) => one.title === 'Computer Writer fixture')
+        const reader = windows.find((one) => one.title === 'Computer Reader fixture')
+        if (writer === undefined || reader === undefined) return 'Writer and Reader need approval.'
+        const fill = async (target: string, text: string) => {
+          const snapshot = await ask({ op: 'observe', target })
+          const observation = /Observation ([0-9a-f-]{36})/.exec(snapshot)?.[1]
+          const element = /^(e\d+) \S+ "Note"/m.exec(snapshot)?.[1]
+          if (observation === undefined || element === undefined) return snapshot
+          return ask({ op: 'type', target, observation, at: { element }, text })
+        }
+        const written = await fill(writer.id, 'Reviewed report')
+        const observed = await ask({ op: 'observe', target: writer.id })
+        if (!observed.includes('Reviewed report')) return `Writer did not confirm the note. ${written} ${observed}`
+        const transfer = await fill(reader.id, 'Reviewed report')
+        const verified = await ask({ op: 'observe', target: reader.id })
+        if (!verified.includes('Reviewed report')) return `Reader did not confirm the note. ${transfer} ${verified}`
+        const evidence = await ask({ op: 'evidence', target: reader.id, caption: 'Reader shows the transferred note.' })
+        await ask({ op: 'release' })
+        return `Writer and Reader both show Reviewed report. ${evidence}`
+      }
       if (text.includes('[lead:page]') && available.has('page_open')) {
         const address = /page: (\S+)/.exec(text)?.[1] ?? ''
         const shot = /shot: (\S+)/.exec(text)?.[1]

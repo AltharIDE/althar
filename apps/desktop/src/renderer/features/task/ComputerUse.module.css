@@ -1,0 +1,53 @@
+.card {
+  display: grid;
+  gap: 10px;
+  margin-block: 8px;
+  padding: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--paper);
+  font-size: 12px;
+}
+
+.header,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.header output,
+.reason {
+  color: var(--t-3);
+}
+
+.reason {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.choices {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  max-block-size: 190px;
+  overflow: auto;
+}
+
+.choices label {
+  display: flex;
+  align-items: start;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.preview {
+  display: block;
+  max-inline-size: 100%;
+  max-block-size: 400px;
+  object-fit: contain;
+}

@@ -100,6 +100,7 @@ import { coordinatorSigned } from '../../shared/signed'
 import { countsDown, StartedOf, type StartedReading, startedBy, startedIn, useStartedBoard } from './Started'
 import { outcomeOf } from '../../shared/outcome'
 import { TaskThread, workStepText } from './TaskThread'
+import { ComputerUse } from './ComputerUse'
 import { SmallChangeOf } from './SmallChangeOf'
 import { ModelMoveOf } from './ModelMoveOf'
 import { latestReport, reviewsIn, useReviewOutcomes } from './reviewOutcomes'
@@ -1817,6 +1818,7 @@ export function TaskView({
                   >
                     <Thread label={text.thread} busy={busy}>
                       {opening}
+                      <ComputerUse taskId={snapshot.task.id} />
                       <ThreadShellProvider value={host.shell}>
                         <ThreadWaysContext.Provider value={ways}>
                           <TaskThread

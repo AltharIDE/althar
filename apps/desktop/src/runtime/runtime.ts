@@ -39,6 +39,8 @@ import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
 import { profileInUse } from './profileInUse'
 import { pagesWith } from './pages'
+import { computerWith } from './computer'
+import type { ComputerDone, ComputerOwner } from '@althar/runtime/computerBridge'
 import { screenshotsWith, type Taken } from './screenshots'
 import { sealingWith } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
@@ -135,6 +137,7 @@ const screenshots = screenshotsWith((message) => parent.postMessage(message))
 
 /* What the lead and the coordinator ask of the page beside their conversation, which the main process answers (pages.ts). */
 const pages = pagesWith((message) => parent.postMessage(message))
+const computer = computerWith((message) => parent.postMessage(message))
 
 /** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
 const firstScreen = Deferred.makeUnsafe<void>()
@@ -194,6 +197,8 @@ const options = {
   openUrl: openInBrowser,
   screenshot: screenshots.ask,
   page: pages.ask,
+  computer: computer.ask,
+  computerEnded: (owner: ComputerOwner) => parent.postMessage({ type: 'computer-turn-ended', owner }),
   editors: {
     list: () =>
       device === undefined
@@ -474,6 +479,7 @@ parent.on('message', (message) => {
   }
   if (data?.type === 'screenshot-taken' && data.requestId !== undefined) screenshots.answer(data.requestId, data as Taken)
   if (data?.type === 'page-done' && data.requestId !== undefined) pages.answer(data.requestId, data as PageDone)
+  if (data?.type === 'computer-done' && data.requestId !== undefined) computer.answer(data.requestId, data as unknown as ComputerDone)
   if (data?.type === 'first-screen') Effect.runSync(Deferred.succeed(firstScreen, undefined))
   if (data?.type === 'connect' && port !== undefined) accept(port, data.role === 'internal' ? 'internal' : 'window')
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)

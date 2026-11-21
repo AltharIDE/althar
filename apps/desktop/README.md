@@ -98,6 +98,26 @@ anyway**. Where the browser holds the download back too, keep it (Edge: …
 → Keep, then Keep anyway). Signing has its slot: `WINDOWS_SIGNING` in
 `scripts/package.ts`, and the skipped Sign step in `release.yml`.
 
+### Computer use
+
+A task can ask to use native apps on the computer running this desktop app.
+When the approval opens in the task's conversation, select the apps or
+windows it should use. Add another window when a task requests it. The
+approval lasts for the current task turn. The task can show the window it
+observed, and keep screenshots in its conversation and step evidence.
+
+Use **Take over** to pause computer input and **Resume** to return it to
+the task. **Stop** ends that turn's computer session. The desktop shortcut
+is Command-Shift-Escape on a Mac and Ctrl-Shift-Escape elsewhere, where
+the desktop lets the app register it. Foreground input and sharing the
+primary display are separate choices. Sharing the display can expose
+other open apps to the task's model.
+
+Use a signed-in graphical session. On macOS the system may require
+Accessibility and Screen Recording access. On Linux, accessibility and
+capture depend on the desktop session and, on Wayland, the compositor.
+Native input and capture are supplied by the bundled Cua Driver SDK.
+
 ### The Flatpak
 
 **The Flatpak is experimental**: a task running under GNOME and KDE is still

@@ -4,6 +4,7 @@ import { type QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } from 'react'
 
 import type { WatchEvent } from '@althar/contracts'
+import type { ComputerDecision, ComputerState } from '@althar/runtime/computerBridge'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
 import type { Viewport } from '../../main/browser/devices'
@@ -184,6 +185,12 @@ export interface StorageHost {
 }
 
 export interface Host {
+  readonly computer?: {
+    readonly states: () => Promise<ReadonlyArray<ComputerState>>
+    readonly allow: (task: string, decision: ComputerDecision) => Promise<boolean>
+    readonly control: (task: string, action: 'pause' | 'resume' | 'stop') => Promise<boolean>
+    readonly subscribe: (listener: (state: ComputerState) => void) => () => void
+  }
   readonly homes?: HomesHost
   readonly onStartupStage?: (listener: (stage: StartupStage) => void) => () => void
   readonly startup?: (stage: string, duration?: number) => void

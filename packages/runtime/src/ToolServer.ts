@@ -63,6 +63,10 @@ interface ToolBase {
    * (Reviews.ts guards the lead's), whatever is added later.
    */
   readonly inReview?: boolean
+  /** Leave potentially sensitive arguments out of Althar's tool-call observations. */
+  readonly privateInput?: boolean
+  /** Interrupt the call if the agent drops the connection. */
+  readonly cancelWithRequest?: boolean
 }
 
 /** Asked-for tools must supply a fresh read; the server owns authorization and receipts. */
@@ -160,11 +164,15 @@ export class ToolServer extends Context.Service<
           const guarded = await refusal(tool)
           if (guarded !== null) return { isError: true, content: [{ type: 'text' as const, text: guarded }] }
           const input = request.params.arguments ?? {}
+          const controller = tool.cancelWithRequest ? new AbortController() : undefined
+          if (controller !== undefined) res.once('close', () => controller.abort())
           // The call as the thread keeps it: some agents (OpenCode's `execute`) run it inside a tool of their own, which names none of this.
           const told = (error?: string) =>
             Effect.runPromise(
               Effect.forEach(observers, (hook) =>
-                hook({ access, tool: tool.name, input, ...(error === undefined ? {} : { error }) }).pipe(Effect.ignore),
+                hook({ access, tool: tool.name, input: tool.privateInput ? {} : input, ...(error === undefined ? {} : { error }) }).pipe(
+                  Effect.ignore,
+                ),
               ),
             ).catch(() => undefined)
           const exit = await Effect.runPromiseExit(
@@ -174,6 +182,7 @@ export class ToolServer extends Context.Service<
                 ? yield* errands.execute(tool.name, current, yield* tool.action(input, current))
                 : yield* tool.call(input, current)
             }),
+            controller === undefined ? undefined : { signal: controller.signal },
           )
           if (Exit.isSuccess(exit)) await told()
           if (Exit.isSuccess(exit))

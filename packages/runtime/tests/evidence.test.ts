@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
+import { Ids, newId, type ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -13,14 +14,16 @@ import {
   EVIDENCE_TEXT_KEPT,
   evidenceForReview,
   evidenceOf,
+  findComputerCapture,
   saysNothing,
   taskShown,
   textKept,
   unverifiedIn,
 } from '../src/evidence'
-import { PICTURE_KEPT } from '../src/handed'
+import { keepPicture, PICTURE_KEPT } from '../src/handed'
 import { Queries } from '../src/Queries'
 import type { ToolAccess } from '../src/ToolServer'
+import { addItem } from '../src/threads'
 import { callTool, runtime, task } from './support'
 
 /*
@@ -51,6 +54,29 @@ const kept = (threadId: string) =>
   })
 
 describe('the evidence a lead hands', () => {
+  it.live('uses a computer capture from this conversation as Outputs evidence', () =>
+    Effect.gen(function* () {
+      const { lead, threadId } = yield* started
+      const id = yield* newId(Ids.threadItem)
+      const projectId = lead.projectId as ProjectId
+      const picture = yield* keepPicture(
+        { projectId, itemId: id, folders: [] },
+        Buffer.from(SCREENSHOT_PNG, 'base64'),
+        'image/png',
+        'Desktop',
+      )
+      yield* addItem({ projectId, threadId }, 'pictures', { pictures: [{ caption: 'Desktop', picture }], source: 'computer' }, { id })
+      const evidence = [{ kind: 'screenshot' as const, caption: 'The desktop result', computer_capture: id, view: 'Desktop' }]
+      const other = yield* Effect.flip(findComputerCapture('other-thread', id))
+      assert.include(other.message, 'computer screenshot is unavailable')
+      yield* callTool(lead, 'finish_step', { built: 'A retry.', summary: 'Checked the desktop.', evidence })
+      const [shot] = (yield* kept(threadId)).evidence ?? []
+      assert.match((shot?.picture as { sha256?: string } | undefined)?.sha256 ?? '', /^[0-9a-f]{64}$/)
+      assert.isNull(shot?.path)
+      assert.strictEqual(shot?.view, 'Desktop')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('keeps a screenshot from the worktree, a command, a note and what it couldn’t show', () =>
     Effect.gen(function* () {
       const { lead, threadId, worktree } = yield* started
