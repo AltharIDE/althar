@@ -201,3 +201,53 @@ export const Narrow: Story = { decorators: [width(708)] }
 export const Dark: Story = { globals: { theme: 'dark' } }
 
 export const DarkEmpty: Story = { args: { skills: [] }, globals: { theme: 'dark' } }
+
+/** One of the person's own that Codex leaves out: Didn't load in red, first; opened, Codex's words for why. */
+const NOT_LOADED: readonly SkillTileModel[] = SKILLS.map((one) =>
+  one.name === 'release-notes'
+    ? { ...one, about: '', failed: { agent: 'codex', why: 'Codex leaves it out: missing field `description`' } }
+    : one,
+)
+
+export const DidntLoad: Story = {
+  args: { skills: NOT_LOADED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByRole('switch')[0]).toHaveAccessibleName('release-notes')
+    await expect(canvas.getByText('Didn’t load')).toBeVisible()
+  },
+}
+
+export const DidntLoadOpened: Story = {
+  args: { skills: NOT_LOADED, defaultOpen: 'release-notes' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Codex leaves it out: missing field `description`')).toBeVisible()
+  },
+}
+
+export const DarkDidntLoad: Story = { args: { skills: NOT_LOADED }, globals: { theme: 'dark' } }
+
+/** One Claude Code loads, but without what its frontmatter sets, which it can't read: said so, not that it didn't load. */
+const FRONT_IGNORED: readonly SkillTileModel[] = SKILLS.map((one) =>
+  one.name === 'release-notes'
+    ? { ...one, failed: { agent: null, why: 'Its frontmatter can’t be read, so Claude Code ignores what it sets.', loads: true } }
+    : one,
+)
+
+export const FrontmatterIgnored: Story = {
+  args: { skills: FRONT_IGNORED },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Frontmatter ignored')).toBeVisible()
+    await expect(canvas.queryByText('Didn’t load')).toBeNull()
+  },
+}
+
+export const FrontmatterIgnoredOpened: Story = {
+  args: { skills: FRONT_IGNORED, defaultOpen: 'release-notes' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Its frontmatter can’t be read, so Claude Code ignores what it sets.')).toBeVisible()
+  },
+}

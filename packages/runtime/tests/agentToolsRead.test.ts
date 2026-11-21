@@ -8,6 +8,7 @@ import { SqlClient } from 'effect/sql'
 
 import { agentTools, commandEnv, runIn, serversFor, setToolRoles } from '../src/agentTools'
 import { turnOn } from '../src/mcpSync'
+import { checkSetup } from '../src/setupHealth'
 import { fakeAgents, homeWith } from './agentHome'
 import { runtime } from './support'
 
@@ -120,7 +121,15 @@ describe('what Settings reads', () => {
     skills(join('.claude', 'skills'), 'bare', 'no frontmatter at all\n')
     skills(join('.claude', 'skills'), 'notes', 'one version\n')
     skills(join('.agents', 'skills'), 'notes', 'another version\n')
+    // Only in Codex's folder, its tile shows that file.
+    skills(join('.agents', 'skills'), 'solo', 'no frontmatter either\n')
+    // Codex's home's own folder, which no tile is of: one broken alone, and one beside a healthy one of the same name.
+    skills(join('.codex', 'skills'), 'lonely', '---\nname: lonely\n---\n')
+    skills(join('.agents', 'skills'), 'twin', '---\nname: twin\ndescription: Fine.\n---\n')
+    skills(join('.codex', 'skills'), 'twin', '---\nname: twin\n---\n')
     return Effect.gen(function* () {
+      // What Settings shows is what the last check found: no agent is on this test's PATH, so Althar reads the files alone.
+      yield* Effect.promise(() => checkSetup({ homeDir: home, env, folder, now: () => new Date().toISOString() }, async () => undefined))
       const tools = yield* agentTools('project-a')
       assert.strictEqual(tools.enabled, true)
       const settle = tools.serverSync.settle
@@ -148,6 +157,30 @@ describe('what Settings reads', () => {
           ['bare', ''],
           ['design-review', 'Reviews a design against DESIGN.md'],
           ['notes', ''],
+          ['solo', ''],
+          ['twin', 'Fine.'],
+        ],
+      )
+      // Codex leaves out a skill with no frontmatter, which Claude Code loads: the tile of that file says why. A tile
+      // is of the one file it shows: `notes` shows Claude Code's copy, which loads, so Codex's broken copy isn't put
+      // on it; nor is the healthy twin's tile marked for the broken one of its name elsewhere.
+      assert.deepStrictEqual(
+        tools.skills.map((one) => [one.name, one.home, one.failed === null ? null : { agent: one.failed.agent, why: one.failed.why }]),
+        [
+          ['bare', '~/.claude/skills/bare', null],
+          ['design-review', '~/.claude/skills/design-review', null],
+          ['notes', '~/.claude/skills/notes', null],
+          ['solo', '~/.agents/skills/solo', { agent: null, why: 'It has no frontmatter, so Codex leaves it out.' }],
+          ['twin', '~/.agents/skills/twin', null],
+        ],
+      )
+      // A skill's is on the tile of its file; one of a file no tile shows is listed with the rest of the setup, by its file.
+      assert.deepStrictEqual(
+        tools.setup.map((one) => [one.kind, one.name, one.where]),
+        [
+          ['skill', 'notes', '~/.agents/skills/notes/SKILL.md'],
+          ['skill', 'lonely', '~/.codex/skills/lonely/SKILL.md'],
+          ['skill', 'twin', '~/.codex/skills/twin/SKILL.md'],
         ],
       )
       assert.deepStrictEqual(tools.skillSync.settle, [

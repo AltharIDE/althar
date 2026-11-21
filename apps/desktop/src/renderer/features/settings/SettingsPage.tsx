@@ -84,7 +84,7 @@ import { usePostTeamReviews } from './usePostTeamReviews'
 import { PLACES, useStorage } from './useStorage'
 import { type RunOutside, useRunOutside } from './useRunOutside'
 import { useTaskFolders } from './useTaskFolders'
-import { ServersSection, SkillsSection } from './ToolSections'
+import { OwnSetupSection, ServersSection, SkillsSection } from './ToolSections'
 import { AgentCatalogSection } from './AgentCatalogSection'
 
 /*
@@ -331,7 +331,10 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
         {chosen.problem !== null ? (
           <AgentProblem why={chosen.problem} model={start} />
         ) : chosen.id === 'copilot-direct' || (chosen.installed && chosen.download?.installing !== true) ? (
-          <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+          <>
+            <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+            <OwnSetupSection agentId={chosen.id} />
+          </>
         ) : (
           <AgentInstall
             name={chosen.name}

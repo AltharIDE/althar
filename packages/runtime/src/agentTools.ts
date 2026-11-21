@@ -1,10 +1,25 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
+import { mkdir, mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 
-import type { AgentTools, SyncSettle, SyncView, ToolFailure, ToolHere, ToolRole, ToolRow, ToolSignIn, ToolSource } from '@althar/contracts'
+import type {
+  AgentTools,
+  SetupPart,
+  SyncSettle,
+  SyncView,
+  ToolFailure,
+  ToolHere,
+  ToolRole,
+  ToolRow,
+  ToolSignIn,
+  ToolSource,
+} from '@althar/contracts'
 import {
   agentServers,
+  cleanUp,
   type HeldSkill,
   type McpServer,
   referenceOf,
@@ -20,6 +35,7 @@ import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig, type RuntimeOptions } from './Config'
 import { type HealthRecord, readHealth } from './mcpHealth'
+import { type Converse, type Part, readSetup } from './setupHealth'
 import * as mcp from './mcpSync'
 import * as skills from './skillSync'
 import { describe as describeInstall } from './Skills'
@@ -184,6 +200,47 @@ const failedOf = (health: HealthRecord, name: string, agents: ReadonlyArray<Sync
     })
     .reduce<ToolFailure | null>((latest, each) => (latest === null || each.at > latest.at ? each : latest), null)
 
+/** A skill's failure as its tile shows it: one that leaves it out first, then one that loads it without what its frontmatter sets. */
+const skillFailureOf = (parts: ReadonlyArray<Part>): Part | undefined => parts.find((part) => !part.loads) ?? parts[0]
+
+/** The same file whichever way it is named. */
+const realOf = (path: string) => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
+/**
+ * Each of the person's own skill tiles with why an agent doesn't load it, and the skills' failures no tile shows. A
+ * tile is of the one file it shows (its `home`, in an agent's own folder): a failure of another file of the same name,
+ * a copy in Codex's home or one under a tile of Althar's store, keeps its own row in the rest of the setup, as does a
+ * second failure of the file beside the one its tile shows.
+ */
+const withSkillFailures = (
+  io: mcp.SyncIo & skills.SkillIo,
+  rows: ReadonlyArray<ToolRow>,
+  parts: ReadonlyArray<Part>,
+): { readonly rows: Array<ToolRow>; readonly unmatched: ReadonlyArray<Part> } => {
+  const folders = skills.skillFolders(io)
+  const failing = parts.filter((part) => part.kind === 'skill')
+  if (failing.length === 0) return { rows: [...rows], unmatched: [] }
+  const realFile = new Map(failing.map((part) => [part, realOf(part.file)]))
+  const placed = new Set<Part>()
+  const marked = rows.map((row) => {
+    if (row.repository !== null) return row
+    const agent = SYNCED_AGENTS.find((one) => row.home === `${FOLDERS[one]}/${row.name}`)
+    if (agent === undefined) return row
+    const file = realOf(join(folders[agent], row.name, 'SKILL.md'))
+    const shown = skillFailureOf(failing.filter((part) => realFile.get(part) === file))
+    if (shown === undefined) return row
+    placed.add(shown)
+    return { ...row, failed: { agent: shown.by, why: shown.why, at: shown.at, ...(shown.loads ? { loads: true } : {}) } }
+  })
+  return { rows: marked, unmatched: failing.filter((part) => !placed.has(part)) }
+}
+
 const NO_SIGN_IN: ToolRow['signIn'] = { claude: 'unknown', codex: 'unknown', opencode: 'unknown' }
 
 export const FILES: Readonly<Record<SyncedAgent, string>> = {
@@ -255,6 +312,58 @@ export const runIn =
         resolve({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 1, output: `${stdout}${stderr}` })
       })
     })
+
+/** The most a command a setup check talks to may print, and how long it is given to answer. */
+const PRINTED_AT_MOST = 4 * 1024 * 1024
+const CONVERSE_FOR = 30_000
+
+/**
+ * Talks to one of the person's agents' own commands, as a setup check asks it what it loads (`setupHealth.ts`): in
+ * an empty folder of its own under `under` (Althar's own folder, which a Codex on the device outside a Flatpak sees at
+ * the same path), in the same environment sync runs them in, stopped once it has said enough or its time is up. What
+ * it prints is read as text across its pieces, a character split between two never broken. One that isn't on this
+ * computer gives undefined.
+ */
+export const converseIn =
+  (homeDir: string, env: Readonly<Record<string, string | undefined>> = process.env, under: string = tmpdir()): Converse =>
+  async (command, args, lines, done, extra = {}) => {
+    let cwd: string
+    try {
+      await mkdir(under, { recursive: true })
+      cwd = await mkdtemp(join(under, 'setup-check-'))
+    } catch {
+      return undefined
+    }
+    return new Promise((resolve) => {
+      const decoder = new StringDecoder('utf8')
+      let printed = ''
+      let settled = false
+      const child = spawn(command, [...args], { cwd, env: { ...commandEnv(homeDir, env), ...extra }, stdio: ['pipe', 'pipe', 'ignore'] })
+      const finish = (value: string | undefined) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        child.kill()
+        Effect.runFork(cleanUp(cwd, 'the empty folder a setup check ran in'))
+        resolve(value === undefined ? undefined : value + decoder.end())
+      }
+      // oxlint-disable-next-line althar/one-clock -- a child's time to answer is kept by Node, outside any effect.
+      const timer = setTimeout(() => finish(printed), CONVERSE_FOR)
+      child.on('error', (error: NodeJS.ErrnoException) => finish(error.code === 'ENOENT' ? undefined : printed))
+      child.on('close', () => finish(printed))
+      child.stdin.on('error', () => undefined)
+      child.stdout.on('data', (chunk: Buffer) => {
+        printed += decoder.write(chunk)
+        if (printed.length > PRINTED_AT_MOST || done(printed)) finish(printed)
+      })
+      // Its input stays open: Claude Code in print mode stops reading at its end, before it has answered.
+      child.stdin.write(
+        lines(cwd)
+          .map((line) => `${line}\n`)
+          .join(''),
+      )
+    })
+  }
 
 const ioOf = (configs: NonNullable<RuntimeOptions['agentConfigs']>, now: string): mcp.SyncIo & skills.SkillIo => ({
   home: { homeDir: configs.homeDir, env: configs.env ?? process.env },
@@ -585,6 +694,8 @@ export const agentTools = (projectId: string | null) =>
         skillSync: empty,
         places: [],
         checkedAt: null,
+        setup: [],
+        setupCheckedAt: null,
       } satisfies AgentTools
     // While a switch is on, what the person changed in their agents since is brought in step as Settings reads them.
     yield* refresh(io)
@@ -665,7 +776,14 @@ export const agentTools = (projectId: string | null) =>
     }
     const skillRecord = skills.readSkillRecord(io)
     const skillPlan = skills.planSkills(io, skillRecord)
-    const skillRows: Array<ToolRow> = (yield* skillsFound(io, roles, projectId, (yield* RuntimeConfig).skills?.root)).map((one) => one.row)
+    // What the last setup check found, as it kept it: nothing is walked or parsed here (`setupHealth.ts`).
+    const setup = readSetup(io)
+    const parts = setup.parts ?? []
+    const { rows: skillRows, unmatched } = withSkillFailures(
+      io,
+      (yield* skillsFound(io, roles, projectId, (yield* RuntimeConfig).skills?.root)).map((one) => one.row),
+      parts,
+    )
     const skillSync: SyncView = {
       on: skillRecord.on,
       settle: skillPlan.settle.map((each) => ({
@@ -697,6 +815,11 @@ export const agentTools = (projectId: string | null) =>
       skillSync,
       places,
       checkedAt: health.checkedAt,
+      // A skill's is on its own tile, where the person looks for it; one of a file no tile is of is listed with the rest.
+      setup: parts
+        .filter((part) => part.kind !== 'skill' || unmatched.includes(part))
+        .map(({ at: _at, file: _file, ...part }): SetupPart => part),
+      setupCheckedAt: setup.checkedAt,
     } satisfies AgentTools
   })
 

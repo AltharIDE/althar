@@ -14,7 +14,8 @@ import { useServices } from '../../data/services'
  * person's own files and only it knows what went through; what didn't is said
  * in its words. As the servers open, each agent is asked through its own
  * command how its servers stand (signed in, failed to start); that reads, and
- * what it says shows on the tiles when it is back.
+ * what it says shows on the tiles when it is back. As the skills or the agents
+ * open, what of the person's own setup Claude Code and Codex load is read again.
  */
 
 export interface AgentToolsModel {
@@ -42,7 +43,7 @@ const said = (error: unknown) => (error instanceof Error ? error.message : Strin
 /** The agents are asked how their servers stand at most this often as the person opens the servers. */
 const CHECK_EVERY = 5 * 60_000
 
-export const useAgentTools = (options: { readonly check?: boolean } = {}): AgentToolsModel => {
+export const useAgentTools = (options: { readonly check?: boolean; readonly setup?: boolean } = {}): AgentToolsModel => {
   const { client, cache } = useServices()
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -60,6 +61,16 @@ export const useAgentTools = (options: { readonly check?: boolean } = {}): Agent
     if (age < CHECK_EVERY) return
     client.checkServers().then(reload, () => undefined)
   }, [client, enabled, last, options.check, reload])
+
+  // What of the person's own setup their agents load: read again each time the skills or the agents open, so a file
+  // they fixed shows fixed. The runtime asks the agents themselves at most every few minutes, off the thread that
+  // answers; what was there shows meanwhile, and the marks change once it is back.
+  const setupChecked = useRef(false)
+  useEffect(() => {
+    if (options.setup !== true || !enabled || setupChecked.current) return
+    setupChecked.current = true
+    client.checkSetup().then(reload, () => undefined)
+  }, [client, enabled, options.setup, reload])
 
   const after = useCallback(
     (change: Promise<unknown>) => {

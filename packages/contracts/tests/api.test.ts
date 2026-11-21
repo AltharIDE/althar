@@ -554,6 +554,7 @@ describe('the API', () => {
               SetToolInProject: () => Effect.die('unused'),
               GetServerDetail: () => Effect.die('unused'),
               CheckServers: () => Effect.die('unused'),
+              CheckSetup: () => Effect.die('unused'),
               AddServer: () => Effect.die('unused'),
               RemoveServer: () => Effect.die('unused'),
               SetToolSync: () => Effect.die('unused'),

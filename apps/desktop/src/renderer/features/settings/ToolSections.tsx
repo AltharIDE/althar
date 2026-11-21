@@ -6,6 +6,7 @@ import {
   AddServerDialog,
   AddSkillDialog,
   type NewServerView,
+  OwnSetup,
   ServerSheet,
   type ServerStarter,
   ServerTiles,
@@ -21,7 +22,7 @@ import { messageOf } from '../../data/client'
 import type { StartModel } from '../start/useStart'
 import s from './Settings.module.css'
 import { text } from './text'
-import { agentsOf, filesOf, projectsOf, serverTileOf, skillTileOf, syncOf, toolId } from './tools'
+import { agentsOf, filesOf, ownSetupOf, projectsOf, serverTileOf, skillTileOf, syncOf, toolId } from './tools'
 import { useAgentTools } from './useAgentTools'
 import { useSkills } from './useSkills'
 
@@ -167,9 +168,15 @@ export function ServersSection({ start }: { start: StartModel }) {
   )
 }
 
+/** What of the person's own setup an agent doesn't load, under its accounts in Settings › Agents; nothing while all of it does. */
+export function OwnSetupSection({ agentId }: { agentId: string }) {
+  const model = useAgentTools({ setup: true })
+  return <OwnSetup parts={ownSetupOf(model.tools, agentId)} />
+}
+
 /** The person's skills: a tile each, a repository's own beside them, and adding one from GitHub. */
 export function SkillsSection({ start }: { start: StartModel }) {
-  const model = useAgentTools()
+  const model = useAgentTools({ setup: true })
   const skills = useSkills({ check: true })
   const { tools } = model
   const people = useToolPeople(start, tools)
