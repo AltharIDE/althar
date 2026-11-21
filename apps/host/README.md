@@ -69,7 +69,9 @@ If you already sign in to your server over SSH, you can use the same connection 
 
 The desktop and CLI use the host's `connect-stdio` command for the session. This command checks the expected home ID and API version. When you disconnect, the home and its running sessions carry on. SSH lets you work with the home under a restricted role. Permission answers and device pairing require a client with the person's authority. [CLI attachment](../cli/README.md#attach-to-a-running-home) · [Transport reference](../../packages/transport-node/ARCHITECTURE.md)
 
-Desktop-driven setup uses SSH to install a signed host on a new server. It needs a published release and a trusted release key. [SSH setup reference](bootstrap/README.md)
+Desktop-driven setup uses SSH to install a signed host on a new server: in the desktop, **Connect a home… → Set one up → Over SSH**, or **SSH** with **Set it up** once you've chosen that way. Each step shows as it goes, and setup carries on with the dialog closed or after Althar restarts. It needs a published release and the desktop's pinned release key; until the first host release is out, setup says there's nothing to install yet. Althar from Flathub can't set a home up, as its sandbox keeps your SSH keys out of reach: set it up by hand there, then connect over SSH or with a pairing code. [SSH setup reference](bootstrap/README.md)
+
+Your first home opens on what a home is. Choose **Set one up**, then **With a pairing code** to connect a host that's already running.
 
 ## Direct HTTPS/WSS and device pairing
 
