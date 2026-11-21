@@ -32,7 +32,8 @@ import {
   ProjectRefused,
   RepositoriesNeeded,
 } from './errors'
-import { type Fork, forkOf } from './forks'
+import { type Fork, forkOf, onRemote, parentRemote } from './forks'
+import { makeKeyedLock } from './keyedLock'
 import { makeScratch } from './firstWrite'
 import {
   addDetachedWorktree,
@@ -42,6 +43,7 @@ import {
   currentBranch,
   defaultBranch,
   fetchBranch,
+  fetchRemote,
   git,
   gitOutcome,
   namedRemotes,
@@ -102,7 +104,9 @@ export interface Reading {
 /** A repository's recorded setup as its settings show it: its files and commands; null for none. */
 const setupShown = (json: string | null) => {
   const recorded = recordedOf(json)
-  return recorded === null ? null : { copy: recorded.copy, commands: recorded.commands }
+  return recorded === null
+    ? null
+    : { copy: recorded.copy, commands: recorded.commands, by: recorded.taskId === null ? ('person' as const) : ('agent' as const) }
 }
 
 const real = (path: string) => {
@@ -229,13 +233,22 @@ export interface ProjectRepository {
     readonly fork: string
     readonly upstream: string
     readonly upstreamUrl: string
+    /** The clone's remote the repository it was forked from is on, by whatever name; null where none is, which can be added. */
+    readonly upstreamRemote: string | null
+    /** Who said it is a fork: its host, or its remotes' names alone. */
+    readonly by: 'host' | 'names'
     readonly target: ChangeTarget
     readonly offered: boolean
   } | null
   /** Tasks under way that change it, which keep it if it is left out. */
   readonly tasks: number
   /** How each new task's folder of it gets ready (ADR-080); null until a lead records it. */
-  readonly setup: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | null
+  readonly setup: {
+    readonly copy: ReadonlyArray<string>
+    readonly commands: ReadonlyArray<string>
+    /** Who has it as it is: the lead that recorded it, or the person who edited it. */
+    readonly by: 'agent' | 'person'
+  } | null
   /** Its default branch, as its remote said when it was added. */
   readonly defaultBranch: string
   /** The branch new tasks work toward there, where it isn't the default (ADR-093); null for the default. */
@@ -272,12 +285,11 @@ export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
   for (let n = 2; ; n += 1) if (!taken.includes(`${slug}-${n}`)) return `${slug}-${n}`
 }
 
-/** A branch as it is named, without `refs/heads/` or the remote it was spelled with. */
-export const branchName = (named: string) =>
-  named
-    .trim()
-    .replace(/^refs\/(heads|remotes\/[^/]+)\//, '')
-    .replace(/^(origin|upstream)\//, '')
+/** A branch as it is named, without `refs/heads/` or the remote it was spelled with: `origin`, `upstream`, or one of `remotes`. */
+export const branchName = (named: string, remotes: ReadonlyArray<string> = []) => {
+  const plain = named.trim().replace(/^refs\/(heads|remotes\/[^/]+)\//, '')
+  return onRemote(plain, remotes)?.branch ?? plain
+}
 
 /**
  * Where a task starts in a repository: the branch it works toward, else its
@@ -292,11 +304,14 @@ export const startOf = (binding: {
   readonly toward?: string | null
 }) =>
   Effect.gen(function* () {
+    // From the repository it was forked from, by whatever name the clone has it; one the clone hasn't as a remote, from origin.
     const upstream =
-      (binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch') && (yield* forkAt(binding.repository)) !== null
+      binding.changeTarget === 'upstream' || binding.changeTarget === 'upstream_branch'
+        ? parentRemote(yield* forkAt(binding.repository))
+        : null
     const toward = binding.toward ?? null
-    return upstream
-      ? { remote: 'upstream', base: toward ?? (yield* defaultBranch(binding.repository, 'upstream')) }
+    return upstream !== null
+      ? { remote: upstream, base: toward ?? (yield* defaultBranch(binding.repository, upstream)) }
       : { remote: 'origin', base: toward ?? binding.base ?? 'main' }
   })
 
@@ -567,10 +582,20 @@ export class Projects extends Context.Service<
       readonly role?: string
       readonly changeTarget?: string
       readonly notNow?: boolean
-      readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> }
+      readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | null
       readonly workToward?: string | null
       readonly commandId?: CommandId
     }): Effect.Effect<void, NotFound | ProjectRefused | BranchNotFound | GitFailed | Failure>
+    /**
+     * Adds the repository a fork was forked from as a remote of its clone, where its host says it is one and none of its remotes
+     * has it: as `upstream`, or `parent` where that name is taken, then fetched. Answers the remote's name. No remote of the
+     * person's is renamed or removed; one already there is left as it is.
+     */
+    addParentRemote(
+      projectId: string,
+      repositoryId: string,
+      commandId?: CommandId,
+    ): Effect.Effect<string, NotFound | ProjectRefused | GitFailed | Failure>
     /**
      * Removes a project from Althar: it leaves the window, its plans stop
      * counting down, its runs end and its calls are withdrawn. Its folders,
@@ -1240,6 +1265,8 @@ export class Projects extends Context.Service<
                         fork: fork.fork.path.join('/'),
                         upstream: fork.upstream.path.join('/'),
                         upstreamUrl: fork.upstream.url,
+                        upstreamRemote: fork.upstream.remote,
+                        by: fork.by,
                         target: row.changeTarget ?? 'fork',
                         offered: row.upstreamOfferAt !== null,
                       },
@@ -1430,7 +1457,7 @@ export class Projects extends Context.Service<
         readonly changeTarget?: string
         readonly notNow?: boolean
         /** Its setup as the person changed it in the project's settings (ADR-080). */
-        readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> }
+        readonly setup?: { readonly copy: ReadonlyArray<string>; readonly commands: ReadonlyArray<string> } | null
         readonly workToward?: string | null
         readonly commandId?: CommandId
       }) =>
@@ -1464,9 +1491,18 @@ export class Projects extends Context.Service<
               )
             }
           }
-          if (input.setup !== undefined) {
+          if (input.setup === null) {
+            // Cleared: nothing is kept, so the next task's lead works it out and records it again.
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                yield* sql`UPDATE repository_bindings SET recorded_setup = NULL WHERE id = ${binding.id}`
+                yield* changed(input.projectId, 'project.setup_cleared', { repository: binding.name }, input.commandId)
+              }),
+            )
+          } else if (input.setup !== undefined) {
             const tidy = setupOf(input.setup)
             if ('refused' in tidy) return yield* new ProjectRefused({ reason: 'bad_setup' })
+            // The person's: no task's lead recorded it (taskId null), so a lead asks before replacing it.
             const recorded = JSON.stringify({ ...tidy, at: yield* timestamp, taskId: null })
             yield* sql.withTransaction(
               Effect.gen(function* () {
@@ -1492,6 +1528,42 @@ export class Projects extends Context.Service<
             Effect.gen(function* () {
               yield* sql`UPDATE repository_bindings SET ${sql.update(set)} WHERE id = ${binding.id}`
               yield* changed(input.projectId, 'project.repository_changed', { repository: binding.name, ...set }, input.commandId)
+            }),
+          )
+        })
+
+      /** One add of a parent remote at a time in a clone, so two asked at once add it once: the second finds it there. */
+      const parentAdds = makeKeyedLock()
+
+      const addParentRemote = (projectId: string, repositoryId: string, commandId?: CommandId) =>
+        Effect.gen(function* () {
+          const binding = yield* bindingOf(projectId, repositoryId)
+          if (binding.path === null) return yield* new ProjectRefused({ reason: 'not_a_fork' })
+          const path = binding.path
+          return yield* parentAdds.withLock(
+            path,
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const remotes = yield* namedRemotes(path).pipe(Effect.orElseSucceed(() => []))
+              const fork = forkOf(remotes)
+              if (fork === null) return yield* new ProjectRefused({ reason: 'not_a_fork' })
+              if (fork.upstream.remote !== null) return fork.upstream.remote
+              const taken = new Set(remotes.map((remote) => remote.name))
+              const name = taken.has('upstream') ? freeSlug('parent', [...taken]) : 'upstream'
+              yield* git(path, 'remote', 'add', name, fork.upstream.url)
+              // Its branches, to start tasks from; where it can't be reached now, the next fetch brings them. Its default branch
+              // too, as refs/remotes/<name>/HEAD, so starting a task from it needn't ask the remote each time.
+              if (yield* fetchRemote(path, name))
+                yield* git(path, 'remote', 'set-head', name, '--auto').pipe(Effect.orElseSucceed(() => ''))
+              yield* sql.withTransaction(
+                changed(
+                  projectId,
+                  'project.repository_changed',
+                  { repository: binding.name, parentRemote: name, url: fork.upstream.url },
+                  commandId,
+                ),
+              )
+              return name
             }),
           )
         })
@@ -1585,6 +1657,7 @@ export class Projects extends Context.Service<
         addRepositories: (projectId, path, commandId) => run(addRepositories(projectId, real(path), commandId)),
         leaveOut: (projectId, repositoryId, commandId) => run(leaveOut(projectId, repositoryId, commandId)),
         setRepository: (input) => run(setRepository(input)),
+        addParentRemote: (projectId, repositoryId, commandId) => run(addParentRemote(projectId, repositoryId, commandId)),
         remove: (projectId, commandId) => run(remove(projectId, commandId)),
       })
     }),

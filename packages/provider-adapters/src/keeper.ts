@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, renameSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { Effect } from 'effect'
+import { Cause, Deferred, Effect } from 'effect'
 
 import { cleanUp } from './removal'
 
@@ -48,6 +48,28 @@ static class Keeper
     const int UseStdHandles = 0x100;
     const short Hide = 0;
     const uint Infinite = 0xFFFFFFFF;
+    const uint BelowNormal = 0x4000;
+    const int CpuRateInformation = 15;
+    [StructLayout(LayoutKind.Sequential)]
+    struct CpuLimits { public uint ControlFlags; public uint Weight; }
+    [DllImport("kernel32.dll", EntryPoint = "SetInformationJobObject", SetLastError = true)]
+    static extern bool SetCpuLimits(IntPtr job, int infoClass, ref CpuLimits info, int length);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool SetPriorityClass(IntPtr process, uint priority);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern IntPtr OpenJobObject(uint access, bool inherit, string name);
+    [DllImport("kernel32.dll", EntryPoint = "QueryInformationJobObject", SetLastError = true)]
+    static extern bool QueryCpu(IntPtr job, int infoClass, out CpuLimits info, int length, out uint returned);
+    [StructLayout(LayoutKind.Sequential)]
+    struct Accounting
+    {
+        public long User, Kernel, PeriodUser, PeriodKernel;
+        public uint PageFaults, Total, Active, Terminated;
+    }
+    [DllImport("kernel32.dll", EntryPoint = "QueryInformationJobObject", SetLastError = true)]
+    static extern bool QueryAccounting(IntPtr job, int infoClass, out Accounting info, int length, out uint returned);
 
     [StructLayout(LayoutKind.Sequential)]
     struct BasicLimits
@@ -150,7 +172,10 @@ static class Keeper
         try
         {
             if (args.Length == 2 && args[0] == "started") return Started(int.Parse(args[1], CultureInfo.InvariantCulture));
-            if (args.Length >= 2 && args[0] == "run") return Run(After(Environment.CommandLine, "run"));
+            if (args.Length == 2 && args[0] == "resources") return InspectResources(args[1]);
+            if (args.Length >= 2 && args[0] == "run") return Run(After(Environment.CommandLine, "run"), null);
+            if (args.Length >= 2 && args[0].StartsWith("background-", StringComparison.Ordinal))
+                return Run(After(Environment.CommandLine, args[0]), args[0].Substring(11));
             Console.Error.WriteLine("althar-keeper: run <command> [arguments] | started <pid>");
             return 2;
         }
@@ -181,7 +206,40 @@ static class Keeper
         return line.Substring(at);
     }
 
-    static int Run(string commandLine)
+    // A shared parent job accounts for all the commands of one worker. CPU weight is work-conserving,
+    // and failure to apply it leaves the command's mandatory lifetime job and lower priority intact.
+    static IntPtr Resources(string owner)
+    {
+        if (owner == null) return IntPtr.Zero;
+        IntPtr resource = CreateJobObject(IntPtr.Zero, "Local\\Althar.Worker." + owner);
+        if (resource == IntPtr.Zero) return IntPtr.Zero;
+        CpuLimits cpu = new CpuLimits();
+        cpu.ControlFlags = 3; // ENABLE | WEIGHT_BASED, rather than a fixed hard cap.
+        cpu.Weight = 1;
+        if (SetCpuLimits(resource, CpuRateInformation, ref cpu, Marshal.SizeOf(typeof(CpuLimits)))) return resource;
+        CloseHandle(resource);
+        return IntPtr.Zero;
+    }
+
+    // Diagnostics for native verification and the app's log; absence means the optional controller was unavailable.
+    static int InspectResources(string owner)
+    {
+        IntPtr job = OpenJobObject(4, false, "Local\\Althar.Worker." + owner);
+        if (job == IntPtr.Zero) return 3;
+        try
+        {
+            CpuLimits cpu;
+            Accounting accounting;
+            uint returned;
+            if (!QueryCpu(job, CpuRateInformation, out cpu, Marshal.SizeOf(typeof(CpuLimits)), out returned) ||
+                !QueryAccounting(job, 1, out accounting, Marshal.SizeOf(typeof(Accounting)), out returned)) return 3;
+            Console.Out.Write("{\"weight\":" + cpu.Weight + ",\"processes\":" + accounting.Active + "}");
+            return 0;
+        }
+        finally { CloseHandle(job); }
+    }
+
+    static int Run(string commandLine, string owner)
     {
         IntPtr job = CreateJobObject(IntPtr.Zero, null);
         if (job == IntPtr.Zero) throw new Win32Exception();
@@ -198,16 +256,30 @@ static class Keeper
         startup.hStdInput = GetStdHandle(-10);
         startup.hStdOutput = GetStdHandle(-11);
         startup.hStdError = GetStdHandle(-12);
+        IntPtr resource = Resources(owner);
         ProcessInformation started;
         if (!CreateProcess(null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, true, CreateSuspended | CreateNewConsole,
                 IntPtr.Zero, null, ref startup, out started))
             throw new Win32Exception();
+        bool grouped = resource != IntPtr.Zero && AssignProcessToJobObject(resource, started.hProcess);
         if (!AssignProcessToJobObject(job, started.hProcess))
         {
             Win32Exception refused = new Win32Exception();
             TerminateProcess(started.hProcess, 1);
-            throw refused;
+            if (!grouped) throw refused;
+            // The optional nesting was denied. The first child never ran: retry once with only the lifetime job.
+            CloseHandle(started.hThread);
+            CloseHandle(started.hProcess);
+            if (!CreateProcess(null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, true, CreateSuspended | CreateNewConsole,
+                    IntPtr.Zero, null, ref startup, out started)) throw new Win32Exception();
+            if (!AssignProcessToJobObject(job, started.hProcess))
+            {
+                refused = new Win32Exception();
+                TerminateProcess(started.hProcess, 1);
+                throw refused;
+            }
         }
+        if (owner != null) SetPriorityClass(started.hProcess, BelowNormal);
         if (ResumeThread(started.hThread) == Infinite)
         {
             Win32Exception refused = new Win32Exception();
@@ -217,6 +289,7 @@ static class Keeper
         WaitForSingleObject(started.hProcess, Infinite);
         uint code;
         if (!GetExitCodeProcess(started.hProcess, out code)) throw new Win32Exception();
+        if (resource != IntPtr.Zero) CloseHandle(resource);
         return unchecked((int)code);
     }
 
@@ -255,8 +328,17 @@ export const compilerOf = (
 let built: string | undefined
 
 /**
+ * The builds under way here, by where each puts its keeper: what asks for it
+ * meanwhile, as several agents starting at once on Althar's first launch do,
+ * waits for that build rather than run the compiler beside it, each slower
+ * for the other.
+ */
+const building = new Map<string, Deferred.Deferred<string, string>>()
+
+/**
  * The keeper's path, built where it isn't yet; why it can't be, where it
- * can't. Two built at once each build their own and the first in place stays.
+ * can't. Asked for again while it is built here, it is that build's. Two
+ * Althars building at once each build their own and the first in place stays.
  */
 export const keeper = (folder: string = join(tmpdir(), 'althar')): Effect.Effect<string, string> =>
   Effect.suspend(() => {
@@ -265,6 +347,29 @@ export const keeper = (folder: string = join(tmpdir(), 'althar')): Effect.Effect
       built = path
       return Effect.succeed(path)
     }
+    const under = building.get(path)
+    // That build stopped before it ended, as its asker was, this one builds it.
+    if (under !== undefined)
+      return Deferred.await(under).pipe(
+        Effect.catchCause((cause) => (Cause.hasInterruptsOnly(cause) ? keeper(folder) : Effect.failCause(cause))),
+      )
+    const done = Deferred.makeUnsafe<string, string>()
+    building.set(path, done)
+    return build(folder, path).pipe(
+      Effect.onExit((exit) =>
+        Effect.andThen(
+          Effect.sync(() => {
+            if (building.get(path) === done) building.delete(path)
+          }),
+          Deferred.done(done, exit),
+        ),
+      ),
+    )
+  })
+
+/** Builds the keeper at `path`, in a folder of its own beside it. */
+const build = (folder: string, path: string): Effect.Effect<string, string> =>
+  Effect.suspend(() => {
     const compiler = compilerOf()
     if (compiler === undefined)
       return Effect.fail("Windows has no .NET Framework 4 compiler, which Althar builds the keeper of its agents' processes with")

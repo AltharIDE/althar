@@ -94,6 +94,12 @@ export const launches: Array<{
   readonly launched?: Readonly<Record<string, string>> | undefined
 }> = []
 
+/**
+ * The latest session's launch. Not the latest launch: a models probe the catalogue begins in the background launches its
+ * agent too, with no session of its own, and may land after a session's, on a slow computer (Models.ts).
+ */
+export const lastSession = () => launches.findLast((one) => one.env.ALTHAR_WORKER !== undefined)
+
 /** What each fake agent in this process was asked as a session started, as it received it: its added directories and `_meta`. */
 export const sessionsAsked: Array<{
   readonly agentId: string
@@ -132,6 +138,12 @@ const launchedEnv = (agentId: string, cwd: string, env: Readonly<Record<string, 
 
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
+
+/**
+ * Each models probe of that agent, kept out of `sessionMetas`: a probe is no session, and gives none of a session's options.
+ * The catalogue begins one in the background, behind a sign-in check, so it may land after a session's (Models.ts).
+ */
+export const probeMetas: Array<{ readonly role: 'lead' | 'reader' | undefined }> = []
 
 /**
  * Whether the fake `claude-code` holds the coordinator in a sandbox it never leaves, as Claude Code's does where it starts;
@@ -191,7 +203,9 @@ export const definition = (
   ...(id === 'claude-code'
     ? {
         sessionMeta: (role?: 'lead' | 'reader', options?: SessionOptions) => {
-          sessionMetas.push({ role, options })
+          // A session always says its options, if only whether it reaches the web; a models probe says none.
+          if (options === undefined) probeMetas.push({ role })
+          else sessionMetas.push({ role, options })
           // Given skills, with Claude Code's own session options beside its own, so the plugin they name reaches the session.
           return { ...(options?.skills === undefined ? {} : registry['claude-code'].sessionMeta?.(role, options)), fake: { asks: true } }
         },
@@ -344,6 +358,7 @@ export const runtime = (
     readonly checksAppear?: Duration.Duration
     /** How long a change's checks may run before it is the person's; 45 minutes unless a test says. */
     readonly checksStuck?: Duration.Duration
+    readonly checksTold?: Duration.Duration
     /** How long a publish step that may pass waits before it is tried again; none at all unless a test says. */
     readonly publishAgain?: Duration.Duration
     /** How long a task is under way after its agent went or its lead's turn ended; none at all unless a test says. */
@@ -390,6 +405,8 @@ export const runtime = (
     readonly page?: RuntimeOptions['page']
     /** The clock and zone automations are read by, and how often they are looked at. */
     readonly automations?: AutomationOptions
+    /** The zone leads and the coordinator are told the person's local time in; the computer's unless a test says. */
+    readonly zone?: RuntimeOptions['zone']
     /** The disk finished tasks' folders are on; a roomy one unless a test says, so no test removes them for the Mac it runs on being full. */
     readonly disk?: RuntimeOptions['disk']
     /** Which device a path is on; the system's own unless a test says. */
@@ -422,6 +439,7 @@ export const runtime = (
     ...(more.mergeLineEvery === undefined ? {} : { mergeLineEvery: more.mergeLineEvery }),
     checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
+    ...(more.checksTold === undefined ? {} : { checksTold: more.checksTold }),
     publishAgain: more.publishAgain ?? Duration.zero,
     ...(more.agentConfigs === undefined ? {} : { agentConfigs: more.agentConfigs }),
     betweenAgents: more.betweenAgents ?? Duration.zero,
@@ -444,8 +462,9 @@ export const runtime = (
     ...(more.screenshot === undefined ? {} : { screenshot: more.screenshot }),
     ...(more.page === undefined ? {} : { page: more.page }),
     ...(more.skills === undefined ? {} : { skills: more.skills }),
-    busy: { machine: ROOMY, ...more.busy },
+    busy: { machine: ROOMY, pressure: false, ...more.busy },
     ...(more.automations === undefined ? {} : { automations: more.automations }),
+    ...(more.zone === undefined ? {} : { zone: more.zone }),
     disk: more.disk ?? (() => Effect.succeed(ROOMY_DISK)),
     ...(more.device === undefined ? {} : { device: more.device }),
     // No test reaches a real service: one asked about answers, as it would online, unless the test says.

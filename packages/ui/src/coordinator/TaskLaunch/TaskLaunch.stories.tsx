@@ -259,10 +259,10 @@ export const HeldByTheRuntime: Story = {
 
 /** Started, it waits for a free agent: it says so where the clock was, its steps can still change, and Hold takes it out of the line until you start it. */
 export const WaitingForAFreeAgent: Story = {
-  render: () => <Launch queued="Waiting: 4 of 4 agents busy on this Mac" />,
+  render: () => <Launch queued="Waiting · 4 agents busy" />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('status')).toHaveTextContent('Waiting: 4 of 4 agents busy on this Mac')
+    await expect(c.getByRole('status')).toHaveTextContent('Waiting · 4 agents busy')
     await expect(c.queryByRole('button', { name: /Start/ })).toBeNull()
     await expect(c.getByRole('button', { name: 'Hold' })).toBeInTheDocument()
   },
@@ -275,7 +275,7 @@ function HeldWhileQueued() {
   const [held, setHeld] = useState(false)
   return (
     <Launch
-      {...(held ? {} : { queued: 'Waiting: 4 of 4 agents busy on this Mac' })}
+      {...(held ? {} : { queued: 'Waiting · 4 agents busy' })}
       held={held}
       onHeldChange={(next) => {
         heldQueued(next)
@@ -498,6 +498,42 @@ export const InTheConversation: Story = {
         estimate="About 25 min · about $1 on your subscriptions"
       />
     </Thread>
+  ),
+}
+
+/** Drafted, and its plan didn't come: it says so, still, and offers to plan or discard it. */
+export const NoPlanYet: Story = {
+  render: () => (
+    <TaskLaunch
+      task="901"
+      title="Explore: what the team looks like before multiplayer"
+      project={PROJECT}
+      steps={[
+        { id: 'implement', label: 'Implement', agents: [] },
+        { id: 'review', label: 'Review', agents: [] },
+      ]}
+      picker={() => null}
+      onStart={() => {}}
+      drafting={{ phase: 'sizing', ended: 'unplanned' }}
+      onPlan={fn()}
+      onDiscard={fn()}
+    />
+  ),
+}
+
+/** Discarded while it was drafted: it says so where it was, with nothing left to do. */
+export const DiscardedWhileDrafted: Story = {
+  render: () => (
+    <TaskLaunch
+      task="900"
+      title="Explore: roles and guardrails for non-engineers"
+      preset="Prototype"
+      project={PROJECT}
+      steps={[{ id: 'implement', label: 'Implement', agents: [OPUS], effort: 'Extra high' }]}
+      picker={() => null}
+      onStart={() => {}}
+      drafting={{ phase: 'end', ended: 'discarded' }}
+    />
   ),
 }
 

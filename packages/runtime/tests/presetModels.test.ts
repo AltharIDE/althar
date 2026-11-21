@@ -51,8 +51,7 @@ describe('the built-in Prototype preset', () => {
     assert.strictEqual(prototype.end, 'none')
     assert.strictEqual(prototype.reviewer, null)
     assert.include(describePreset(prototype), 'no review')
-    // Its lead is named as people know the model, not by the id the preset was written with.
-    assert.strictEqual(describePreset(prototype, presetModels([OPUS])), 'a worktree, no review, ends here, led by Claude Opus 5.5')
+    assert.strictEqual(describePreset(prototype, presetModels([OPUS])), 'a worktree, no review, ends here, the coordinator picks its lead')
     const plan = planFromPreset(proposed({ steps: [LEAD], end: 'draft' }), prototype, presetModels([OPUS, SOL]))
     assert.deepStrictEqual(plan.steps, [LEAD])
     assert.strictEqual(plan.end, 'none')
@@ -70,16 +69,51 @@ describe('the built-in Prototype preset', () => {
     assert.isUndefined(plan.reviewAfterMerge)
   })
 
-  it('names its lead as the agent lists the model: claude-opus-5-5 is the claude-opus-5 Claude Code offers', () => {
+  it('names no model or agent: the lead the plan was given stays, whoever it is', () => {
+    for (const preset of BUILT_IN) {
+      assert.isNull(preset.parts.lead, `${preset.name} names a lead`)
+      assert.isNull(preset.parts.reviewer, `${preset.name} names a reviewer`)
+      assert.isUndefined(preset.parts.effort, `${preset.name} names an effort`)
+    }
+    const sol = { ...LEAD, agentId: 'codex', model: 'gpt-6-1-sol' }
+    assert.deepStrictEqual(planFromPreset(proposed({ steps: [sol] }), prototype, presetModels([OPUS, SOL])).steps, [sol])
+  })
+
+  it('tuned by the person, takes their lead and effort, named as the agent lists the model', () => {
+    const tuned = { ...prototype, lead: 'claude-code/claude-opus-5-5', effort: 'xhigh' }
     const [step] = planFromPreset(
-      proposed({ steps: [{ ...LEAD, agentId: 'codex', model: 'gpt-6-1-sol' }] }),
-      prototype,
+      proposed({ steps: [{ ...LEAD, agentId: 'codex', model: 'gpt-6-1-sol', effort: 'low' }] }),
+      tuned,
       presetModels([OPUS, SOL]),
     ).steps
-    assert.deepInclude(step, { agentId: 'claude-code', model: 'claude-opus-5' })
+    assert.deepInclude(step, { agentId: 'claude-code', model: 'claude-opus-5', effort: 'xhigh' })
+    assert.strictEqual(
+      describePreset(tuned, presetModels([OPUS])),
+      'a worktree, no review, ends here, led by Claude Opus 5.5 at xhigh effort',
+    )
+    // Tuned to another model with no effort: the old model's effort goes, so it runs at its default; the same model keeps it.
+    const [fresh] = planFromPreset(
+      proposed({ steps: [{ ...LEAD, agentId: 'codex', model: 'large', effort: 'high' }] }),
+      { ...prototype, lead: 'claude-code/default' },
+      presetModels([OPUS, SOL]),
+    ).steps
+    assert.deepInclude(fresh, { agentId: 'claude-code', model: null, effort: null })
+    const [same] = planFromPreset(
+      proposed({ steps: [{ ...LEAD, agentId: 'codex', model: 'large', effort: 'high' }] }),
+      { ...prototype, lead: 'codex/large' },
+      presetModels([OPUS, SOL]),
+    ).steps
+    assert.deepInclude(same, { agentId: 'codex', model: 'large', effort: 'high' })
     // One the agent doesn't list stays as the preset names it.
-    const [kept] = planFromPreset(proposed({ steps: [LEAD] }), prototype, presetModels([SOL])).steps
+    const [kept] = planFromPreset(proposed({ steps: [LEAD] }), tuned, presetModels([SOL])).steps
     assert.deepInclude(kept, { agentId: 'claude-code', model: 'claude-opus-5-5' })
+    // A tuned reviewer and its effort, on a preset that's reviewed.
+    const review = planFromPreset(
+      proposed({ steps: [LEAD] }),
+      { ...change, reviewer: 'codex/gpt-6-1-terra', reviewerEffort: 'medium' },
+      presetModels([OPUS, SOL, TERRA]),
+    ).steps.find((one) => one.key === 'review')
+    assert.deepInclude(review, { agentId: 'codex', model: 'gpt-6-1-terra', effort: 'medium', skipped: false })
   })
 })
 

@@ -393,6 +393,15 @@ const indexCopy = (cwd: string, args: ReadonlyArray<string>) =>
   })
 
 /**
+ * Runs an effect's git commands, where they only look, with git's optional
+ * locks off: `git status` then neither takes the index's lock nor writes a
+ * refreshed index back, so a folder another tool has open reads as it is,
+ * with no copy of its index to make, as reading many does (`elsewhere/look.ts`).
+ */
+export const looking = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.provideService(effect, Untouched, { GIT_OPTIONAL_LOCKS: '0' })
+
+/**
  * Runs an effect's git commands in a folder someone else is working in,
  * another task's worktree or the person's checkout, without touching it:
  * on a copy of its index, which `git diff` would otherwise refresh and write
@@ -832,6 +841,13 @@ export const fetchBranch = (cwd: string, branch: string, remote = 'origin') =>
     Effect.orElseSucceed(() => false),
   )
 
+/** Fetches every branch of a remote, quietly: false where it couldn't be reached. */
+export const fetchRemote = (cwd: string, remote: string) =>
+  gitWithin(60_000, cwd, 'fetch', '--quiet', '--no-tags', remote).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  )
+
 /**
  * A remote URL without the credentials it may carry: `https://user:token@host/…`
  * becomes `https://host/…`. The record never holds a secret (docs/architecture/07).
@@ -860,15 +876,19 @@ export const remoteUrls = (cwd: string) =>
 
 /**
  * The remote a task's branch goes to with the person's own git. A fork's go to
- * the fork, or upstream where the person chose that, whichever its default
- * branch follows: a fork's usually follows upstream, as that is where it comes
- * from. Any other's goes where its work goes.
+ * the fork, or the repository it was forked from, by whatever name the clone
+ * has it, where the person chose that, whichever its default branch follows:
+ * a fork's usually follows its parent, as that is where it comes from; none
+ * where that repository is among none of the clone's remotes, rather than the
+ * fork the person chose against, until they add it. Any other's goes where its
+ * work goes.
  */
 export const branchRemoteIn = (cwd: string, base: string, target: ChangeTarget | null) =>
   Effect.gen(function* () {
     const remotes = yield* namedRemotes(cwd).pipe(Effect.orElseSucceed(() => []))
-    if (forkOf(remotes) === null) return yield* remoteOf(cwd, base)
-    return target === 'upstream_branch' ? 'upstream' : 'origin'
+    const fork = forkOf(remotes)
+    if (fork === null) return yield* remoteOf(cwd, base)
+    return target === 'upstream_branch' ? fork.upstream.remote : fork.fork.remote
   })
 
 /** Each remote by name, with its fetch URL (or the URLs it pushes to) without credentials, in the order git lists them. */

@@ -21,6 +21,8 @@ export interface QuitWorkCounts {
   runs?: number
   /** What agents left running in the background, such as a dev server. */
   left?: number
+  /** Terminals running something in front of their shell. */
+  terminals?: number
 }
 
 export interface QuitWorkText {
@@ -33,6 +35,7 @@ export interface QuitWorkText {
   reviews: (count: number) => string
   runs: (count: number) => string
   left: (count: number) => string
+  terminals: (count: number) => string
   /** An update waits; the version, as words: 0.7.0. */
   update: (version: string) => string
   cancel: string
@@ -51,6 +54,7 @@ export const quitWorkText: QuitWorkText = {
   reviews: (count) => many(count, 'review', 'reviews'),
   runs: (count) => many(count, 'run', 'runs'),
   left: (count) => many(count, 'thing left running', 'things left running'),
+  terminals: (count) => `what’s running in ${count === 1 ? 'a terminal' : `${count} terminals`}`,
   update: (version) => `Althar ${version} waits for the work to finish. Quitting installs it now.`,
   cancel: 'Cancel',
   background: 'Keep working in the background',
@@ -77,6 +81,7 @@ export const stoppingParts = (work: QuitWorkCounts, t: QuitWorkText = quitWorkTe
     work.reviews ? t.reviews(work.reviews) : null,
     work.runs ? t.runs(work.runs) : null,
     work.left ? t.left(work.left) : null,
+    work.terminals ? t.terminals(work.terminals) : null,
   ].filter((part) => part !== null)
 
 export function QuitWork({ work, background = false, update, onQuit, onBackground, onCancel, text }: QuitWorkProps) {

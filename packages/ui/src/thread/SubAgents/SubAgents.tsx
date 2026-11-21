@@ -20,7 +20,8 @@ import s from './SubAgents.module.css'
 export interface SubAgent {
   id: string
   label: string
-  model: ModelInfo
+  /** The model it runs on, where it is known. */
+  model?: ModelInfo
   state: ToolState
   /** How far along, or how long it took. */
   meta: string
@@ -101,7 +102,7 @@ export function SubAgents({ list, open, defaultOpen = null, onOpenChange, classN
                         {a.label}
                         <VisuallyHidden>, {t.state[a.state]}</VisuallyHidden>
                       </span>
-                      <Model model={a.model} short />
+                      {a.model !== undefined && <Model model={a.model} short />}
                       <span className={s.meta}>{a.meta}</span>
                       <Caret open={isOpen} />
                     </A.Trigger>

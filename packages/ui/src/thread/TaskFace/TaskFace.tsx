@@ -21,6 +21,8 @@ export type TaskFaceProps = RootProps<
     panelWidth?: number
     /** How many things arrived since the reader scrolled away, for the pill that takes them down. The host counts them. */
     unseen?: number
+    /** A bar sits over the thread (the conversation bar): a soft shadow shows under it once the thread is scrolled beneath. */
+    under?: boolean
     text?: { jump?: Partial<JumpToLatestText>; navigator?: Partial<ThreadNavigatorText> }
   }
 >
@@ -32,7 +34,7 @@ export type TaskFaceProps = RootProps<
  * offers the way back down. What opens where, and what sending does, belong
  * to the host (see ThreadShellProvider).
  */
-export function TaskFace({ children, composer, panel, panelWidth, unseen, text, className, style, ...rest }: TaskFaceProps) {
+export function TaskFace({ children, composer, panel, panelWidth, unseen, under, text, className, style, ...rest }: TaskFaceProps) {
   const scroll = useRef<HTMLDivElement>(null)
   const { atBottom, toBottom } = useStickToBottom(scroll)
   const sized = panel != null && panelWidth !== undefined ? ({ ...style, '--panel-width': `${panelWidth}px` } as CSSProperties) : style
@@ -40,7 +42,22 @@ export function TaskFace({ children, composer, panel, panelWidth, unseen, text, 
     <div className={cx(s.face, panel != null && s.hasPanel, className)} style={sized} {...rest}>
       <div className={s.main} data-floats-host="">
         <div className={s.scrollArea}>
-          <div ref={scroll} className={s.scroll}>
+          {under && <div className={s.edge} aria-hidden="true" />}
+          <div
+            ref={scroll}
+            className={cx(s.scroll, under && s.fades)}
+            onScroll={
+              under
+                ? (event) => {
+                    // Straight on the element, not state: scrolling never renders.
+                    const area = event.currentTarget.parentElement
+                    if (area === null) return
+                    if (event.currentTarget.scrollTop > 0) area.setAttribute('data-scrolled', '')
+                    else area.removeAttribute('data-scrolled')
+                  }
+                : undefined
+            }
+          >
             <ThreadMeasure>{children}</ThreadMeasure>
             {/* room for what floats on the composer's edge; a child of the scroller, so growing it is followed like the thread growing */}
             <div className={s.clear} aria-hidden="true" />

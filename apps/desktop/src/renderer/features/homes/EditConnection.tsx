@@ -1,7 +1,7 @@
 import { useId, useState } from 'react'
 import { Button, Caret, Disclosure, DisclosureTrigger, Field, Fold, Icon, Problem } from '@althar/ui'
 
-import type { CheckedHome, HomesHost, RemoteHome, SshHomeTarget } from '../../../homes'
+import type { CheckedHome, HomesHost, SshRemoteHome, SshHomeTarget } from '../../../homes'
 import { Identity, type Options, OptionFields, optionsOf, Refusal, targetOf, useConnect, Working } from './ConnectHome'
 import { homeProblem, hostOf, nameFrom } from './useHomes'
 import s from './Homes.module.css'
@@ -15,7 +15,7 @@ import s from './Homes.module.css'
 const sameTarget = (a: SshHomeTarget, b: SshHomeTarget) =>
   a.target === b.target && a.profile === b.profile && a.launcher === b.launcher && a.configFile === b.configFile && a.port === b.port
 
-export const useEdit = (homes: HomesHost, home: RemoteHome) => {
+export const useEdit = (homes: HomesHost, home: SshRemoteHome) => {
   // What is kept: the saved connection, or the one just kept, ahead of main saying so.
   const [kept, setKept] = useState<SshHomeTarget>(home.ssh)
   const [was, setWas] = useState(home.ssh)
@@ -39,7 +39,7 @@ export const useEdit = (homes: HomesHost, home: RemoteHome) => {
     setKept(next)
     setSame(true)
     void homes.change(home.id, checked.checkId).catch((error: unknown) => {
-      setKept(previous)
+      setKept((current) => (current === next ? previous : current))
       setSame(false)
       setProblem(homeProblem(error))
     })
@@ -91,7 +91,7 @@ export const useEdit = (homes: HomesHost, home: RemoteHome) => {
 export type Editing = ReturnType<typeof useEdit>
 
 /** The host and its options as the home has them, with what checking them found, and its identity beneath. */
-export function ConnectionFields({ edit, home }: { edit: Editing; home: RemoteHome }) {
+export function ConnectionFields({ edit, home }: { edit: Editing; home: SshRemoteHome }) {
   const id = useId()
   const { form } = edit
   const host = form.target.trim()

@@ -6,25 +6,24 @@ import { type StoragePlaceRow, Storage, storageSize } from './Storage'
 const MB = 1024 ** 2
 const GB = 1024 ** 3
 
+const freeUp = { id: 'worktrees', onFreeUp: fn() }
+
 const places = (figures: Partial<Record<string, StoragePlaceRow['figure']>> = {}): ReadonlyArray<StoragePlaceRow> => [
   {
     id: 'profile',
     title: 'Profile',
-    note: 'Projects, tasks and settings. ',
     path: '/home/me/.local/share/althar',
     figure: figures.profile ?? { state: 'done', bytes: 184 * MB },
   },
   {
     id: 'logs',
     title: 'Logs',
-    note: 'What Althar writes as it runs. ',
     path: '/home/me/.local/share/althar/logs',
     figure: figures.logs ?? { state: 'done', bytes: 12.4 * MB },
   },
   {
     id: 'worktrees',
     title: 'Task folders',
-    note: 'A copy of each project for each task. ',
     path: '/home/me/Althar',
     figure: figures.worktrees ?? { state: 'done', bytes: 23.6 * GB },
   },
@@ -33,7 +32,7 @@ const places = (figures: Partial<Record<string, StoragePlaceRow['figure']>> = {}
 const meta = {
   title: 'Setup/Storage',
   component: Storage,
-  args: { places: places(), onShow: fn(), onMeasureAgain: fn() },
+  args: { places: places(), onShow: fn(), onMeasureAgain: fn(), freeUp },
   render: (args) => (
     <div style={{ width: 640 }}>
       <Storage {...args} />
@@ -43,11 +42,19 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Three places, each with its path, its size and a button to show it in the file manager. */
+/** A tile a place, with its size and share, the task folders leading with Free up space; Show's tooltip says the path. */
 export const WithSizes: Story = {
   play: async ({ canvasElement, args }) => {
     const view = within(canvasElement)
     await expect(view.getByText('24 GB')).toBeInTheDocument()
+    await expect(view.getByText('99%')).toBeInTheDocument()
+    await expect(view.getAllByText('<1%')).toHaveLength(2)
+    await expect(view.getByRole('button', { name: 'Show in Files, Task folders' })).toHaveAttribute(
+      'title',
+      'Show in Files: /home/me/Althar',
+    )
+    await userEvent.click(view.getByRole('button', { name: 'Free up space' }))
+    await expect(freeUp.onFreeUp).toHaveBeenCalledOnce()
     await userEvent.click(
       view.getByRole('button', {
         name: 'Show in Files, Task folders',
@@ -69,11 +76,13 @@ export const Measuring: Story = {
   play: async ({ canvasElement }) => {
     const view = within(canvasElement)
     await expect(view.getAllByText('measuring…')).toHaveLength(2)
+    // No share until every size is in: a part never shows as the whole.
+    await expect(view.queryByText(/%$/)).toBeNull()
     await expect(view.getByRole('button', { name: 'Measure again' })).toBeDisabled()
   },
 }
 
-/** The walk ran out of time: what it counted so far, said to be a lower bound. */
+/** The walk ran out of time: what it counted so far, said to be a lower bound, and no shares, as the whole isn't known. */
 export const Approximate: Story = {
   args: {
     places: places({
@@ -81,7 +90,8 @@ export const Approximate: Story = {
     }),
   },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByText('at least 41 GB')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText(/41 GB/)).toHaveTextContent('at least 41 GB')
+    await expect(within(canvasElement).queryByText(/%$/)).toBeNull()
   },
 }
 
@@ -94,12 +104,13 @@ export const Unreadable: Story = {
   },
   play: async ({ canvasElement }) => {
     const view = within(canvasElement)
-    await expect(view.getByText('at least 12 GB')).toBeInTheDocument()
+    await expect(view.getByText(/12 GB/)).toHaveTextContent('at least 12 GB')
     await expect(view.getByText('3 items couldn’t be read')).toBeInTheDocument()
+    await expect(view.queryByText(/%$/)).toBeNull()
   },
 }
 
-/** A folder that isn't there yet, such as task folders before the first task: no size, and nothing to show. */
+/** A folder that isn't there yet, such as task folders before the first task: no size, nothing to show, and nothing to free. */
 export const MissingFolder: Story = {
   args: {
     places: places({
@@ -116,6 +127,7 @@ export const MissingFolder: Story = {
         name: 'Show in Files, Task folders',
       }),
     ).toBeDisabled()
+    await expect(view.queryByRole('button', { name: 'Free up space' })).toBeNull()
   },
 }
 
@@ -134,7 +146,7 @@ export const Sizes: Story = {
   },
 }
 
-/** Show failed, as where no file manager opens: the row says why, and the path stays there to copy. */
+/** Show failed, as where no file manager opens: the tile says why, and gives the path to copy. */
 export const ShowFailed: Story = {
   args: {
     places: places().map((place) => (place.id === 'logs' ? { ...place, problem: 'No application is registered to open folders' } : place)),
@@ -143,5 +155,33 @@ export const ShowFailed: Story = {
     await expect(within(canvasElement).getByRole('alert')).toHaveTextContent(
       'Couldn’t open it: No application is registered to open folders',
     )
+    await expect(within(canvasElement).getByText('/home/me/.local/share/althar/logs')).toBeVisible()
+  },
+}
+
+/** Copy path, from the keyboard: the whole path goes on the clipboard, and the button says it copied. */
+export const CopyPath: Story = {
+  args: { copy: fn(async () => undefined) },
+  play: async ({ canvasElement, args }) => {
+    const view = within(canvasElement)
+    const button = view.getByRole('button', { name: 'Copy path, Profile' })
+    button.focus()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.copy).toHaveBeenCalledWith('/home/me/.local/share/althar')
+    await expect(await view.findByRole('button', { name: 'Copied' })).toHaveFocus()
+  },
+}
+
+/** Copy path where the clipboard refuses, as in a window not allowed to write it: the path, focused and selected, to copy by hand. */
+export const CopyRefused: Story = {
+  args: { copy: fn(async () => Promise.reject(new Error('Write permission denied.'))) },
+  play: async ({ canvasElement }) => {
+    const view = within(canvasElement)
+    view.getByRole('button', { name: 'Copy path, Profile' }).focus()
+    await userEvent.keyboard('{Enter}')
+    const field = await view.findByRole('textbox', { name: 'Path, Profile' })
+    await expect(field).toHaveValue('/home/me/.local/share/althar')
+    await expect(field).toHaveFocus()
+    await expect((field as HTMLInputElement).selectionEnd).toBe('/home/me/.local/share/althar'.length)
   },
 }

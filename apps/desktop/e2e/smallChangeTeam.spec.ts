@@ -86,7 +86,7 @@ test('holds a small change that waits for a free agent while its team is changed
       .click()
     await startTask(page, 'Occupy the agent', '[lead:wait]')
     await say(page, 'Fix a typo in the run menu. [coordinator:plan] [coordinator:plan-small] [lead:finish]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toBeVisible()
+    await expect(page.getByText(/^Waiting · 1 agent busy$/)).toBeVisible()
 
     // Its row in Up next: its team menu opens the same dialog, which holds it while the team is changed.
     const row = page.locator('article').filter({ hasText: 'Next in line' })

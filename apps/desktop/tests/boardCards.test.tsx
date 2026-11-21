@@ -128,7 +128,7 @@ describe('a running change’s card', () => {
     })
     const shown = runningCardOf(waiting, NOW, () => '')
     expect(shown.status).toBe(TaskStatus.Queued)
-    expect(shown.why).toBe('4 of 4 agents busy on this Mac')
+    expect(shown.why).toBe('4 agents busy')
     expect(shown.at).toBeUndefined()
     expect(shown.track).toBeUndefined()
     expect(shown.object).toBeUndefined()
@@ -307,6 +307,18 @@ describe('a ready card’s own ways', () => {
     const shown = cardOf('Prototype the tabs')
     expect(shown.getByRole('button', { name: 'Done' }).getAttribute('aria-busy')).toBe('true')
     expect(shown.getByRole('button', { name: 'Keep for later' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('offers Keep for later on a prototype that ended on its branch, and not on a change with its pull request open', async () => {
+    const actions = ways()
+    const sketch = task({ taskId: 'p1', threadId: 'thp1', title: 'Prototype the tabs', phase: 'ready', kind: 'change', change: null })
+    const opened = task({ taskId: 'p2', threadId: 'thp2', title: 'Retry twice', phase: 'ready', kind: 'change', change: change() })
+    show(lanesOf(board([sketch, opened])), { actions })
+    const shown = cardOf('Prototype the tabs')
+    expect(shown.queryByRole('button', { name: 'Done' })).toBeNull()
+    await userEvent.click(shown.getByRole('button', { name: 'Keep for later' }))
+    expect(actions.keep).toHaveBeenCalledWith('p1')
+    expect(cardOf('Retry twice').queryByRole('button', { name: 'Keep for later' })).toBeNull()
   })
 
   it('says what waits for Ship and ships it from the card, whatever its pull request’s checks say (a task is a conversation plus parts)', async () => {
@@ -574,7 +586,7 @@ describe('the dock, for each', () => {
     const { docked } = dock(board([queued]), { kind: 'task', id: 'q' })
     const shown = await docked()
     expect(shown.getByText('Up next')).toBeTruthy()
-    expect(shown.getByText(/4 of 4 agents busy/)).toBeTruthy()
+    expect(shown.getByText(/4 agents busy/)).toBeTruthy()
   })
 
   it('accepts a pull request with no checks and no head its host said, as the dock showed it', async () => {

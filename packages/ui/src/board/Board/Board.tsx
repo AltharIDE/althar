@@ -277,6 +277,7 @@ export function Board({ children, label, folds, defaultFolds = NO_FOLDS, onFolds
             whole inside another would be new on every draw, and the page read each time. */}
         <ListMotion
           within={ref}
+          steady
           {...(version === undefined ? {} : { version: [...(Array.isArray(version) ? version : [version]), railsKey(rails)] })}
         >
           {children}

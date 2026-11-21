@@ -11,6 +11,7 @@ export {
 } from './Config'
 export { type AtOnce, Busy } from './Busy'
 export { Launches } from './Launches'
+export { PtySpawner, Terminals, type Pty, type ShownTerminal } from './Terminals'
 export { type AtOnceDefault, atOnceFor, type Machine } from './atOnce'
 export { SignIns } from './SignIns'
 export * from './errors'
@@ -60,3 +61,7 @@ export { InstallFailed, Installs, type OnDevice } from './Installs'
 
 export { AfterOpen, startup } from './startup'
 export { lagLogged, watchLag } from './lag'
+
+export { DevicePairings } from './DevicePairings'
+
+export { listenNetworkApi, type NetworkApiOptions } from './networkApi'

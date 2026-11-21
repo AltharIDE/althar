@@ -1,3 +1,4 @@
+import { DevicePairings } from './DevicePairings'
 import { agentCatalogHandlers } from './AgentCatalog'
 import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
@@ -79,8 +80,11 @@ import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Fetches } from './Fetches'
 import { Launches } from './Launches'
+import { Terminals } from './Terminals'
 import { LeftBehind } from './LeftBehind'
 import { localTasksIn } from './local'
+import { PARENT_KEPT, tellOf, toldOf } from './forks'
+import { namedRemotes } from './git'
 import { MachineLoad } from './MachineLoad'
 import { modelRooms } from './modelRooms'
 import { PlanUsage } from './PlanUsage'
@@ -95,6 +99,7 @@ import {
   allowsEverything,
   modeOf,
   movesIssues,
+  linksIssues,
   Policies,
   type ProjectRules,
   repositoryFilesOf,
@@ -103,9 +108,11 @@ import {
   pushesCommits,
   postsScreenshots,
   ruleSetOf,
+  trustedBotsOf,
   usageLimitOf,
   afterMergeReviewOf,
 } from './Policies'
+import { botLogin, botName } from './reviewerBots'
 import { Models } from './Models'
 import { ModelFacts } from './ModelFacts'
 import { Installs } from './Installs'
@@ -140,7 +147,18 @@ import { postTeamReviews, Reviews, runOutside, sendMidTurn, setPostTeamReviews, 
 import { setShipRoute, shipRouteSetting } from './shipRoute'
 import { shelve } from './scratch'
 import { Helpers } from './Helpers'
-import { declinePresetOffer, describe as describePreset, editPreset, partsOfTask, presetsIn, removePreset, savePreset } from './presets'
+import {
+  declinePresetOffer,
+  BUILT_IN,
+  describe as describePreset,
+  editPreset,
+  partsOfTask,
+  presetsIn,
+  removePreset,
+  resetPreset,
+  savePreset,
+  tunePreset,
+} from './presets'
 import { FastLane } from './fastLane'
 import { MergeReviews } from './MergeReviews'
 import { Plans } from './Plans'
@@ -164,6 +182,7 @@ import { agentTools, forgetSkillRoles, setSkillRoles, setToolInProject, setToolR
 import { addServer, removeServer, serverDetail } from './mcpAdd'
 import { checkHealth } from './mcpHealth'
 import { Canvases } from './Canvases'
+import { Elsewhere } from './Elsewhere'
 import * as mcpSync from './mcpSync'
 import * as skillSync from './skillSync'
 import { cancelWaitingTurn, upNextMove } from './upNextMoves'
@@ -193,6 +212,9 @@ const PUSHABLE_KEPT = 5 * 60_000
 
 /** How long a repository's page waits for a host to say who can push: it reads on without. */
 const PUSHABLE_WAIT = Duration.seconds(5)
+
+/** How long a host that didn't say whether a repository is a fork (it failed, took too long, or doesn't say) isn't asked again. */
+const PARENT_RETRY = 5 * 60_000
 
 /** A path as the file system has it, without symbolic links; as given, where it can't be read. */
 /** What an issue card's Always file at once and Always ask first say: to the coordinator, as the person, and to a task's lead. */
@@ -276,6 +298,7 @@ export const handlers = apiLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const terminals = yield* Terminals
     const leftBehind = yield* LeftBehind
     const fetches = yield* Fetches
     const machine = yield* MachineLoad
@@ -303,6 +326,7 @@ export const handlers = apiLayer(
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const canvases = yield* Canvases
+    const elsewhere = yield* Elsewhere
     const instance = yield* Instance
     const identity = (yield* CurrentClient) ?? {
       homeId: instance.homeId,
@@ -311,6 +335,13 @@ export const handlers = apiLayer(
       role: sender.kind,
     }
     const identities = yield* ClientIdentities
+    const pairings = yield* DevicePairings
+    const connectionAdmin = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      identity.actorId === instance.personId && (identity.role !== 'socket' || identity.deviceId === instance.deviceId)
+        ? effect
+        : Effect.fail(
+            new ApiError({ reason: 'Forbidden', message: 'Manage connection devices from a trusted client or the host console.' }),
+          )
     const nudges = yield* Nudges
     const actorId = yield* Effect.orDie(Schema.decodeUnknownEffect(ActorId)(identity.actorId))
     const sql = yield* SqlClient.SqlClient
@@ -389,6 +420,7 @@ export const handlers = apiLayer(
       config.storage === undefined
         ? undefined
         : storageSizes({ profile: config.storage.profile, logs: config.storage.logs, worktrees: config.worktreeRoot })
+    const sizesChanged = Effect.sync(() => sizes?.forget('worktrees'))
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
@@ -483,6 +515,9 @@ export const handlers = apiLayer(
         queryContext,
       )
 
+    /** A terminal is the person's own shell: only their window opens, reads, types into or closes one, never a paired device or a socket. */
+    const terminalRefused = new ApiError({ reason: 'Forbidden', message: 'A terminal opens only in Althar’s window on this computer.' })
+    const windowOnly = <A, E, R>(effect: Effect.Effect<A, E, R>) => (sender.kind === 'window' ? api(effect) : Effect.fail(terminalRefused))
     /* GitHub as the skills page reaches it: over the app's own network, unauthenticated, for public repositories. */
     const github: GitHubAccess = config.fetch === undefined ? {} : { fetch: config.fetch }
     /**
@@ -571,6 +606,52 @@ export const handlers = apiLayer(
         return can
       })
 
+    /** When each `origin` last had no answer from its host, by its address: asked again only after PARENT_RETRY. */
+    const unanswered = new Map<string, number>()
+
+    /**
+     * Asks the host of a repository's `origin` whether it is a fork, and of
+     * which repository, through the connection that reaches it, and keeps the
+     * answer (forks.ts) for PARENT_KEPT, so reading the project again doesn't
+     * ask again. A host that can't be reached, or doesn't say, leaves what was
+     * known: the remotes' names, or what a host said before; and isn't asked
+     * again for PARENT_RETRY, so one that hangs holds up reading a project's
+     * repositories once, not every time. True where the answer is new.
+     */
+    const askParent = (path: string | null) =>
+      Effect.gen(function* () {
+        if (path === null) return false
+        const origin = (yield* namedRemotes(path).pipe(Effect.orElseSucceed(() => []))).find((remote) => remote.name === 'origin')
+        if (origin === undefined) return false
+        const now = yield* Clock.currentTimeMillis
+        const kept = toldOf(origin.url)
+        if (kept !== undefined && now - kept.at < PARENT_KEPT) return false
+        const missed = unanswered.get(origin.url)
+        if (missed !== undefined && now - missed < PARENT_RETRY) return false
+        const found = yield* Effect.orElseSucceed(connections.hostOf([origin.url]), () => null)
+        if (found === null) return false
+        const read = yield* found.host.repository(found.path).pipe(
+          Effect.timeout(PUSHABLE_WAIT),
+          Effect.orElseSucceed(() => null),
+        )
+        const changed = read !== null && tellOf(origin.url, read, now, found.host.product)
+        if (toldOf(origin.url)?.at === now) unanswered.delete(origin.url)
+        else unanswered.set(origin.url, now)
+        return changed
+      })
+
+    /**
+     * A project's repositories as its page shows them, each fork as its host says, asked first, all at once: where a host's answer
+     * is new, they are read again with it.
+     */
+    const repositoriesShown = (projectId: string) =>
+      Effect.gen(function* () {
+        const first = yield* projects.repositories(projectId)
+        const asked = yield* Effect.forEach(first, (repository) => askParent(repository.path), { concurrency: 'unbounded' })
+        const list = asked.some(Boolean) ? yield* projects.repositories(projectId) : first
+        return yield* Effect.forEach(list, repositoryOf, { concurrency: 'unbounded' })
+      })
+
     /**
      * A repository as its page shows it: where its work goes, from its
      * remote, with the code host Althar knows there and who it is signed in
@@ -586,6 +667,8 @@ export const handlers = apiLayer(
             : yield* Effect.map(canPushTo(forked.upstreamUrl), (canPush) => ({
                 fork: forked.fork,
                 upstream: forked.upstream,
+                remote: forked.upstreamRemote,
+                by: forked.by,
                 target: forked.target,
                 canPush,
                 offer: canPush === true && forked.target !== 'upstream_branch' && !forked.offered,
@@ -644,13 +727,23 @@ export const handlers = apiLayer(
         }
         // How each kind of ask and refusal went lately, so the person can drop one that mostly gets worked around (ADR-071).
         const tally = yield* tallyOf(projectId).pipe(Effect.provideService(SqlClient.SqlClient, sql))
-        return { ...rulesFields(projectId, rules), revision, conventions, sandbox, tally }
+        // The review and triage bots that spoke on its tasks' pull requests, the latest first, but those it trusts (code-hosts § Review and triage bots).
+        const spoke = yield* sql<{ login: string | null; name: string | null }>`
+          SELECT json_extract(payload, '$.login') AS login, json_extract(payload, '$.name') AS name FROM observations
+          WHERE project_id = ${projectId} AND kind = 'bot_spoke' ORDER BY observed_at DESC, rowid DESC`
+        const trusted = new Set(trustedBotsOf(rules).map(botLogin))
+        const suggested = new Map<string, { readonly login: string; readonly name: string }>()
+        for (const one of spoke)
+          if (one.login !== null && !trusted.has(one.login) && !suggested.has(one.login))
+            suggested.set(one.login, { login: one.login, name: one.name ?? botName(one.login) })
+        const suggestedBots = [...suggested.values()]
+        return { ...rulesFields(projectId, rules), suggestedBots, revision, conventions, sandbox, tally }
       })
 
     const rulesFields = (
       projectId: string,
       rules: ProjectRules,
-    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally'> => {
+    ): Omit<ProjectRulesView, 'conventions' | 'revision' | 'sandbox' | 'tally' | 'suggestedBots'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
@@ -666,6 +759,7 @@ export const handlers = apiLayer(
         resolveConflicts: resolvesConflicts(rules),
         pushCommits: pushesCommits(rules),
         postScreenshots: postsScreenshots(rules),
+        trustedBots: trustedBotsOf(rules).map((login) => ({ login, name: botName(login) })),
         leadsReachWeb: rules.leadsReachWeb ?? true,
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
@@ -674,6 +768,7 @@ export const handlers = apiLayer(
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
         moveIssues: movesIssues(rules),
+        linkIssues: linksIssues(rules),
         afterMergeReview: afterMergeReviewOf(rules),
         repositoryFiles: repositoryFilesOf(rules),
       }
@@ -822,7 +917,10 @@ export const handlers = apiLayer(
     const streaming = (deltas: boolean): Stream.Stream<WatchEvent> =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const events = Stream.flatMap(yield* live.subscribe, (event) => {
+          // Listening first, then what is being drafted now: nothing between is missed, and a newer draft takes its place.
+          const subscribed = yield* live.subscribe
+          const now = yield* live.drafting
+          const events = Stream.flatMap(Stream.concat(Stream.fromIterable(now), subscribed), (event) => {
             const shown = watchedOf(event)
             return shown === undefined ? Stream.empty : Stream.make(shown)
           })
@@ -852,7 +950,9 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      ListClientDevices: (options) => identities.list(options),
+      IssueDevicePairing: ({ tokenHash }) => connectionAdmin(pairings.issue(tokenHash)),
+      RevokeConnectionDevice: ({ deviceId }) => connectionAdmin(pairings.revokeConnection(deviceId)),
+      ListClientDevices: (options) => connectionAdmin(identities.list(options)),
       RegisterClientDevice: ({ name, publicKey, role }) => identities.register({ name, publicKey, role }),
       RevokeClientDevice: ({ deviceId }) => identities.revoke(deviceId),
       WatchFrom: ({ position }) =>
@@ -901,6 +1001,28 @@ export const handlers = apiLayer(
           }),
         ),
       ListProjects: () => api(queries.projects),
+      LookElsewhere: ({ projectId, grant }) =>
+        api(
+          Effect.map(
+            grant !== undefined ? Effect.flatMap(folders.path(grant), (path) => elsewhere.lookIn(path)) : elsewhere.look(projectId ?? ''),
+            (found) => ({
+              worktrees: [...found.worktrees],
+              setups: [...found.setups],
+              conversations: [...found.conversations],
+            }),
+          ),
+        ),
+      BringIn: ({ commandId, projectId, worktrees, setups, conversations, steps }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.bring_in', { projectId, worktrees, setups, conversations }, commandId)
+              const brought = yield* elsewhere.bringIn({ envelope: said, projectId, worktrees, setups, conversations, steps })
+              return { ...brought, tasks: [...brought.tasks], asides: [...brought.asides], failed: [...brought.failed] }
+            }),
+          ),
+        ),
       ReadFolder: ({ grant }) =>
         api(
           Effect.gen(function* () {
@@ -1092,6 +1214,7 @@ export const handlers = apiLayer(
                 yield* Effect.forEach(threads, (threadId) => Effect.ignore(sessions.stop(threadId)), { discard: true })
                 // And what it runs stops, with no project left to stop it from.
                 yield* launches.stopAll(projectId)
+                yield* terminals.closeAll(projectId)
                 // What its Local tasks' agents left running in their checkouts, as a server outside their group, stops as a settled task's does.
                 yield* Effect.forEach(local, (taskId) => leftBehind.settled(taskId), { discard: true })
               })
@@ -1100,8 +1223,7 @@ export const handlers = apiLayer(
             }),
           ),
         ),
-      GetRepositories: ({ projectId }) =>
-        api(Effect.flatMap(projects.repositories(projectId), (list) => Effect.forEach(list, repositoryOf))),
+      GetRepositories: ({ projectId }) => api(repositoriesShown(projectId)),
       AddRepositories: ({ commandId, projectId, grant }) =>
         once(
           commandId,
@@ -1148,6 +1270,16 @@ export const handlers = apiLayer(
                 ...(workToward === undefined ? {} : { workToward }),
                 commandId: said.commandId,
               })
+            }),
+          ),
+        ),
+      AddParentRemote: ({ commandId, projectId, repositoryId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.add_parent_remote', { projectId, repositoryId }, commandId)
+              yield* projects.addParentRemote(projectId, repositoryId, said.commandId)
             }),
           ),
         ),
@@ -1445,8 +1577,10 @@ export const handlers = apiLayer(
             ? Effect.succeed<StorageSize>({ state: 'failed' })
             : Effect.promise((signal) => sizes.size(place, refresh, signal).catch(() => ({ state: 'failed' }) as const)),
         ),
-      CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId))),
-      RemoveTaskFolder: ({ commandId, taskId, seen }) => once(commandId, api(cleanup.remove(taskId, seen, actorId))),
+      // Folders removed (or some, before a failure): the task folders' kept size no longer holds.
+      CleanUpFolders: ({ commandId }) => once(commandId, api(cleanup.cleanUp(actorId).pipe(Effect.ensuring(sizesChanged)))),
+      RemoveTaskFolder: ({ commandId, taskId, seen }) =>
+        once(commandId, api(cleanup.remove(taskId, seen, actorId).pipe(Effect.ensuring(sizesChanged)))),
       // One that no longer waits up next, started or held meanwhile, moves nowhere: the board shows the line as it is.
       MoveInLine: ({ commandId, taskId, to }) => once(commandId, api(Effect.asVoid(upNextMove(busy, plans, sql)(taskId, to, actorId)))),
       LineOldestFirst: ({ commandId, projectId }) => once(commandId, api(busy.oldestFirst(projectId))),
@@ -1512,7 +1646,7 @@ export const handlers = apiLayer(
                 if (task?.taskId != null && (yield* cancelWaitingTurn(busy, sessions, sql)(task.taskId)) > 0) return
               }
               yield* pullRequests.leadStopped({ threadId }, 'interrupted')
-              yield* sessions.interrupt(threadId)
+              yield* sessions.interrupt(threadId, 'person')
             }),
           ),
         ),
@@ -1937,9 +2071,11 @@ export const handlers = apiLayer(
             return all.map(({ fromProjectId, ...one }) => {
               const keptTo = one.projectId === null ? undefined : named.get(one.projectId)
               const from = fromProjectId == null ? undefined : named.get(fromProjectId)
+              const built = one.tuned === true ? BUILT_IN.find((preset) => preset.id === one.id) : undefined
               return {
                 ...one,
                 about: describePreset(one.parts, models),
+                ...(built === undefined ? {} : { asBuilt: { parts: built.parts, about: describePreset(built.parts, models) } }),
                 ...(keptTo === undefined ? {} : { keptTo }),
                 ...(from === undefined ? {} : { from }),
               }
@@ -1978,6 +2114,10 @@ export const handlers = apiLayer(
             ),
           ),
         ),
+      TunePreset: ({ commandId, id, tuning }) =>
+        once(commandId, api(tunePreset(id, tuning).pipe(Effect.asVoid, Effect.provideService(SqlClient.SqlClient, sql)))),
+      ResetPreset: ({ commandId, id }) =>
+        once(commandId, api(resetPreset(id).pipe(Effect.asVoid, Effect.provideService(SqlClient.SqlClient, sql)))),
       RemovePreset: ({ commandId, id }) => once(commandId, api(Effect.provideContext(removePreset(id), folderStore))),
       DeclinePresetOffer: ({ commandId, taskId }) =>
         once(commandId, api(Effect.provideContext(declinePresetOffer(taskId, actorId), folderStore))),
@@ -2275,6 +2415,25 @@ export const handlers = apiLayer(
             }),
           ),
         ),
+      TrustBot: ({ commandId, taskId, login }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+              if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+              const { rules } = yield* policies.current(task.projectId as ProjectId)
+              const trusted = trustedBotsOf(rules)
+              if (trusted.map(botLogin).includes(botLogin(login))) return
+              yield* applyRules(task.projectId, { trustedBots: [...trusted, login] }, instance.personId).pipe(
+                Effect.provideService(Policies, policies),
+                Effect.provideService(Permissions, permissions),
+                Effect.provideService(Changes, pullRequests),
+                Effect.provideService(PullRequestScreenshots, screenshots),
+              )
+            }),
+          ),
+        ),
       SetProjectAccounts: ({ commandId, projectId, rotate, only }) =>
         once(commandId, api(policies.setAccounts(projectId, only === null ? { rotate } : { rotate, only }, actorId))),
       SetUsageLimit: ({ commandId, projectId, policy }) => once(commandId, api(policies.setUsageLimit(projectId, policy, actorId))),
@@ -2557,6 +2716,30 @@ export const handlers = apiLayer(
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       ReadLaunchOutput: ({ id }) => api(launches.output(id)),
+      OpenTerminal: ({ commandId, ...input }) =>
+        once(
+          commandId,
+          windowOnly(
+            terminals.open({
+              id: input.id,
+              projectId: input.projectId,
+              taskId: input.taskId,
+              cols: input.cols,
+              rows: input.rows,
+              ...(input.launchId === undefined ? {} : { launchId: input.launchId }),
+            }),
+          ),
+        ),
+      ListTerminals: ({ projectId }) => windowOnly(terminals.ofProject(projectId)),
+      ListLaunches: ({ projectId }) => api(launches.ofProject(projectId)),
+      AttachTerminal: ({ id }) =>
+        sender.kind === 'window'
+          ? Stream.mapError(terminals.attach(id), (error) => new ApiError({ reason: 'NotFound', message: `No terminal ${error.id}.` }))
+          : Stream.fail(terminalRefused),
+      // Each key as it is pressed: straight to the shell, not through the call log a command keeps.
+      WriteTerminal: ({ id, data }) => windowOnly(terminals.write(id, data)),
+      ResizeTerminal: ({ id, cols, rows }) => windowOnly(terminals.resize(id, cols, rows)),
+      CloseTerminal: ({ commandId, id }) => once(commandId, windowOnly(terminals.close(id))),
       Watch: ({ since, deltas }) => Stream.merge(changes(since), streaming(deltas === true)),
     }
     return implemented

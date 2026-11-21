@@ -16,7 +16,6 @@ const map = (more: Partial<RepositoryMapProps> = {}) => {
   const props: RepositoryMapProps = {
     repositories: MAP_MERIDIAN,
     hosts: MAP_HOSTS,
-    onRoleChange: () => {},
     onTargetChange: () => {},
     ...more,
   }
@@ -107,6 +106,42 @@ describe('a fork’s branches', () => {
   })
 })
 
+describe('the repository a fork forks, among its clone’s remotes', () => {
+  const forkWith = (remote: string | null | undefined) =>
+    MAP_HALYARD.map((one) =>
+      one.fork === undefined ? one : { ...one, fork: { ...one.fork, ...(remote === undefined ? {} : { remote }) } },
+    )
+  const NO_REMOTE = 'Your clone has no remote for it.'
+
+  it('names the remote its clone has it as, where that isn’t upstream', () => {
+    map({ repositories: forkWith('base') })
+    expect(screen.getByText('The repository it forks, as base')).toBeTruthy()
+    expect(screen.queryByText(NO_REMOTE)).toBeNull()
+  })
+
+  it('says only what it is, as upstream or unsaid', () => {
+    for (const remote of ['upstream', undefined]) {
+      const { unmount } = map({ repositories: forkWith(remote) })
+      expect(screen.getByText('The repository it forks')).toBeTruthy()
+      unmount()
+    }
+  })
+
+  it('offers to add it where none of the remotes is it, with the button beside what it says', () => {
+    const onAddRemote = vi.fn()
+    map({ repositories: forkWith(null), onAddRemote })
+    expect(screen.getByText(NO_REMOTE)).toBeTruthy()
+    act(() => screen.getByRole('button', { name: 'Add remote' }).click())
+    expect(onAddRemote).toHaveBeenCalledWith('halyard')
+  })
+
+  it('says so without a button where there is no way to add it here', () => {
+    map({ repositories: forkWith(null) })
+    expect(screen.getByText(NO_REMOTE)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Add remote' })).toBeNull()
+  })
+})
+
 describe('a long folder', () => {
   /** Draws each folder and the end as monospace text, 7px a character, in a room 190px wide. */
   const draw = () => {
@@ -178,5 +213,34 @@ describe('its wires', () => {
     } finally {
       delete (document as unknown as Record<string, unknown>).fonts
     }
+  })
+})
+
+describe('a repository that joins', () => {
+  const card = (name: string) => screen.getByText(name, { selector: 'h4, h3, h5, span, strong' }).closest('li')
+
+  it('arrives once it is on the map, the cards already there staying still', () => {
+    const { again } = map({ repositories: MAP_MERIDIAN.slice(0, 2) })
+    // Nothing arrives as the map first draws.
+    expect(document.querySelectorAll('.arrives')).toHaveLength(0)
+    again({ repositories: MAP_MERIDIAN.slice(0, 3) })
+    const joined = MAP_MERIDIAN[2]!
+    expect(card(joined.name)?.classList.contains('arrives')).toBe(true)
+    expect(document.querySelectorAll('.arrives')).toHaveLength(1)
+  })
+
+  it('draws its wire again where the card settles once it has arrived, as its slide moves it unseen by a resize', () => {
+    resizes()
+    const { again } = map({ repositories: MAP_MERIDIAN.slice(0, 2) })
+    again({ repositories: MAP_MERIDIAN.slice(0, 3) })
+    const before = paths()
+    // Settled: lower than it started, with nothing resized.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { top: 48, bottom: 88, height: 40, left: 20, right: 320, width: 300, x: 20, y: 48, toJSON: () => ({}) } as DOMRect
+    })
+    act(() => {
+      card(MAP_MERIDIAN[2]!.name)?.dispatchEvent(new Event('animationend', { bubbles: true }))
+    })
+    expect(paths()).not.toEqual(before)
   })
 })

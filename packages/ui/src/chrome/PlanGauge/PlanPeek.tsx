@@ -36,6 +36,8 @@ export interface PlanPeekText {
   share: (percent: number) => string
   shareOut: string
   until: (at: string) => string
+  /** Hover on the bar's tick: how far through its window now is. */
+  through: (percent: number) => string
   /** The button beside an agent a sign-in stops. */
   signIn: string
   /** The agents with no reading, by name. */
@@ -59,6 +61,7 @@ export const planPeekText: PlanPeekText = {
   share: (n) => `${n}%`,
   shareOut: 'out',
   until: (at) => `until ${at}`,
+  through: (n) => `${n}% of the way through`,
   signIn: 'Sign in again',
   list: (names) => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`),
 }
@@ -85,11 +88,12 @@ const capital = (words: string) => words.charAt(0).toUpperCase() + words.slice(1
 const ofWords = (agent: PlanAgent, t: PlanPeekText) =>
   [agent.account, capital(agent.limit), agent.until === null ? null : t.until(agent.until)].filter((part) => part !== null).join(' · ')
 
-/** A share as a bar's width: a sliver while any is left, so a little reads as some. Decoration: the figure beside it says it. */
-function Bar({ left, className }: { left: number; className?: string }) {
+/** A share as a bar's width, with a tick at the time left (100 less `elapsed`): where the fill ends if use keeps to the clock.  a sliver while any is left, so a little reads as some. Decoration: the figure beside it says it. */
+function Bar({ left, elapsed, t, className }: { left: number; elapsed?: number; t: PlanPeekText; className?: string }) {
   return (
-    <span className={cx(s.bar, className)} aria-hidden="true">
+    <span className={cx(s.bar, className)} aria-hidden="true" title={elapsed === undefined ? undefined : t.through(Math.round(elapsed))}>
       <i style={{ width: `${left > 0 ? Math.max(left, 3) : 0}%` }} />
+      {elapsed !== undefined && <b className={s.now} style={{ left: `${Math.min(100, Math.max(0, 100 - elapsed))}%` }} />}
     </span>
   )
 }
@@ -106,7 +110,7 @@ function Window({ window, t }: { window: PlanWindow; t: PlanPeekText }) {
         <span className={s.windowUnknown}>{window.note}</span>
       ) : (
         <>
-          <Bar left={window.left} className={s.windowBar} />
+          <Bar left={window.left} t={t} className={s.windowBar} {...(window.elapsed === undefined ? {} : { elapsed: window.elapsed })} />
           <span className={s.windowLeft}>{window.left === 0 ? t.shareOut : t.share(window.left)}</span>
         </>
       )}
@@ -162,7 +166,7 @@ function AgentRow({ agent, t, onSignIn }: { agent: PlanAgent; t: PlanPeekText; o
         {instead === undefined ? (
           <>
             <span className={s.agentLeft}>{agent.left === 0 ? t.out : t.left(agent.left)}</span>
-            <Bar left={agent.left} className={s.agentBar} />
+            <Bar left={agent.left} t={t} className={s.agentBar} {...(agent.elapsed === undefined ? {} : { elapsed: agent.elapsed })} />
             <span className={s.agentOf}>{ofWords(agent, t)}</span>
           </>
         ) : signIn ? null : (
@@ -198,12 +202,9 @@ export function PlanPeek({ agents, headingLevel = 2, onSignIn, text, className, 
   const t = { ...planPeekText, ...text }
   return (
     <div className={cx(s.peek, className)} {...rest}>
-      <span className={s.head}>
-        <Heading level={headingLevel} className={s.heading}>
-          {t.heading}
-        </Heading>
-        <span className={s.level}>{levelOf(agents, t)}</span>
-      </span>
+      <Heading level={headingLevel} className={s.heading}>
+        {t.heading}
+      </Heading>
       {agents.length > 0 && (
         <ul className={s.agents}>
           {agents.map((agent) => (

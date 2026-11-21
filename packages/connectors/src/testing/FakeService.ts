@@ -148,9 +148,11 @@ const CHANGES_OF = (product: Product): ReadonlyArray<IssueField> =>
       ? ['status', 'close', 'priority', 'assignee', 'labels', 'milestone', 'parent', 'type', 'components', 'due', 'title', 'description']
       : product === 'trello'
         ? ['status', 'close', 'assignee', 'labels', 'due', 'title', 'description']
-        : product === 'gitlab'
-          ? ['status', 'close', 'assignee', 'labels', 'milestone', 'estimate', 'type', 'due', 'title', 'description']
-          : ['status', 'close', 'assignee', 'labels', 'project', 'milestone', 'parent', 'type', 'title', 'description']
+        : product === 'clickup'
+          ? ['status', 'close', 'priority', 'assignee', 'labels', 'parent', 'estimate', 'type', 'due', 'title', 'description']
+          : product === 'gitlab'
+            ? ['status', 'close', 'assignee', 'labels', 'milestone', 'estimate', 'type', 'due', 'title', 'description']
+            : ['status', 'close', 'assignee', 'labels', 'project', 'milestone', 'parent', 'type', 'title', 'description']
 
 /** What of those each product's adapter sets as it files an issue. */
 const CREATES_OF = (product: Product): ReadonlyArray<IssueField> =>
@@ -160,9 +162,11 @@ const CREATES_OF = (product: Product): ReadonlyArray<IssueField> =>
       ? ['assignee', 'milestone', 'parent', 'type', 'components', 'due']
       : product === 'trello'
         ? ['assignee', 'due']
-        : product === 'gitlab'
-          ? ['assignee', 'milestone', 'estimate', 'type', 'due']
-          : ['assignee', 'milestone', 'type']
+        : product === 'clickup'
+          ? ['assignee', 'due', 'status', 'parent']
+          : product === 'gitlab'
+            ? ['assignee', 'milestone', 'estimate', 'type', 'due']
+            : ['assignee', 'milestone', 'type']
 
 /** A team's statuses, on the fake, as Linear's are: each with its category, in their order on the board. */
 const STATUSES: ReadonlyArray<Issue['status']> = [
@@ -210,6 +214,15 @@ export interface FakeControls {
   readonly repositoriesMade: ReadonlyArray<NewHostRepository>
   /** Lets the account push to a repository, or no longer, as its owners would: it can until it is told otherwise. */
   letPush(path: ReadonlyArray<string>, can: boolean): void
+  /**
+   * Says a repository was forked from another, by its path, with the addresses to clone it by and the root of its forks where
+   * given; or, with null, that it is no fork. Until then the fake doesn't say.
+   */
+  forkFrom(
+    path: ReadonlyArray<string>,
+    parent: ReadonlyArray<string> | null,
+    more?: { readonly addresses?: ReadonlyArray<string>; readonly source?: ReadonlyArray<string> },
+  ): void
   addIssue(issue: {
     readonly ref: string
     readonly key?: string
@@ -239,7 +252,13 @@ export interface FakeControls {
     body: string,
     options?: { readonly path?: string; readonly line?: number; readonly bot?: boolean; readonly member?: boolean },
   ): Comment
-  reviewAs(number: number, author: string, verdict: Verdict, body?: string, options?: { readonly member?: boolean }): Review
+  reviewAs(
+    number: number,
+    author: string,
+    verdict: Verdict,
+    body?: string,
+    options?: { readonly member?: boolean; readonly bot?: boolean },
+  ): Review
   setChecks(number: number, checks: ReadonlyArray<FakeCheck>): void
   /** Someone merges a change on the host itself. */
   mergeByHand(number: number): void
@@ -349,7 +368,7 @@ export interface FakeControls {
   /** Someone changes a change's title or description on the host itself. */
   editByHand(number: number, set: { readonly title?: string; readonly body?: string }): void
   /** The account may push to the branch of a change from a fork (an outside author's, which allows it): by default it may not. */
-  allowForkPush(number: number): void
+  allowForkPush(number: number, allow?: boolean): void
   /** Every branch brought up to date, in order, by the number of the change and the commit it is at after. */
   readonly branchesUpdated: ReadonlyArray<{ readonly number: number; readonly head: string }>
   /** Every picture uploaded, in order, with the address the host gave it. */
@@ -719,6 +738,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           ...(head === null ? {} : { headSha: head }),
           ...(conflicts === undefined ? {} : { conflicts }),
           ...(options.saysHead === false ? {} : { headRepository: fork === undefined ? null : fork === '' ? [] : fork.split('/') }),
+          ...(fork === undefined ? {} : { maintainerEdits: pushable.has(number) }),
           ...(ask?.queue === true && queues && found.state === 'open'
             ? { queued: inQueue.has(number), leftQueue: leftQueue.get(number) ?? null, queueSha: queueShas.get(number) ?? null }
             : {}),
@@ -1254,7 +1274,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       called('access').pipe(
         Effect.map(() => {
           const unseen = input.repositories.filter((path) => !repositories.has(path.join('/').toLowerCase())).map((path) => path.join('/'))
-          const host = product !== 'linear' && product !== 'jira_cloud' && product !== 'jira_dc' && product !== 'trello'
+          const host =
+            product !== 'linear' && product !== 'jira_cloud' && product !== 'jira_dc' && product !== 'trello' && product !== 'clickup'
           const lines: ReadonlyArray<AccessLine> = [
             line('account', 'ok', { fact: account.login }),
             ...(input.repositories.length === 0
@@ -1311,6 +1332,20 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       const found = repositories.get(key)
       if (found !== undefined) repositories.set(key, { ...found, canPush: can })
     },
+    forkFrom: (path, parent, more = {}) => {
+      const key = path.join('/').toLowerCase()
+      const found = repositories.get(key)
+      if (found === undefined) return
+      const said =
+        parent === null
+          ? null
+          : {
+              path: [...parent],
+              ...(more.addresses === undefined ? {} : { addresses: [...more.addresses] }),
+              ...(more.source === undefined ? {} : { source: { path: [...more.source] } }),
+            }
+      repositories.set(key, { ...found, parent: said })
+    },
     addIssue: (input) => {
       const container = input.ref.includes('#') ? (input.ref.split('#')[0] ?? null) : (input.ref.split('-')[0] ?? null)
       const issue: Issue = {
@@ -1358,7 +1393,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     reviewAs: (number, author, verdict, body = '', reviewOptions = {}) => {
       const review: Review = {
         id: nextId(),
-        author: person(author),
+        author: person(author, reviewOptions.bot === true),
         member: reviewOptions.member ?? true,
         verdict,
         body,
@@ -1488,8 +1523,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     },
     pushByHand: (number) => update(number, { headSha: `${changeNumbered(number).headSha ?? 'head'}-pushed` }),
     editByHand: (number, set) => update(number, set),
-    allowForkPush: (number) => {
-      pushable.add(number)
+    allowForkPush: (number, allow = true) => {
+      if (allow) pushable.add(number)
+      else pushable.delete(number)
     },
     get branchesUpdated() {
       return [...updated]

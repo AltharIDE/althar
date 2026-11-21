@@ -9,8 +9,9 @@ import { join, resolve } from 'node:path'
 
 import { locations as locationsOf, taskFolder as taskFolderOf } from './locations'
 import { refusalOf, refusals, ROOT_MARKER, statusOf, taskFolderRefusal, taskRootIn } from './taskFolderCheck'
-import type { WindowHome } from '../homes'
+import { NO_SETUP_ARG, type WindowHome } from '../homes'
 import { startHomeConnections } from './homes/main'
+import { canSetUp } from './homes/setup'
 import { homePartition, localServicesUnavailable, remoteExternalUrl } from './homes/policy'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
@@ -92,6 +93,7 @@ import {
 import { appMenu, PAGE, windowOptions } from './windowOptions'
 import {
   keyringIsSafe,
+  protectConnectionCredential,
   keyringUnavailable,
   passwordStore,
   sealFailure,
@@ -206,6 +208,12 @@ app.setName('Althar')
 // Off a Mac Electron draws the application menu's bar at the top of every window, frameless or not; the menu is kept for its accelerators (appMenu), and its bar is hidden here (windowOptions.ts, ADR-019).
 if (process.platform !== 'darwin') app.on('browser-window-created', (_event, window) => window.setMenuBarVisibility(false))
 
+// Playwright supplies a basic password store and a mock macOS keychain before main loads. Native credential tests must
+// use the actual OS service; packaged builds contain neither this switch nor the test environment override.
+if (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_NATIVE_KEYRING === '1') {
+  app.commandLine.removeSwitch('password-store')
+  app.commandLine.removeSwitch('use-mock-keychain')
+}
 // Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
 const store = passwordStore(process.argv, process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
 if (store !== null) app.commandLine.appendSwitch('password-store', store)
@@ -503,6 +511,7 @@ let bridge: Bridge | undefined
 const mine = (contents: WebContents) => [...windows].some((window) => !window.isDestroyed() && window.webContents === contents)
 
 const homes = startHomeConnections({
+  protect: (sealing, value) => protectConnectionCredential(sealing, value, safeStorage, process.platform, portal),
   profile: locations().profile,
   entry: join(here, '../connection/connection.js'),
   mine,
@@ -510,7 +519,7 @@ const homes = startHomeConnections({
     const existing = [...windows].find((window) => {
       if (window.isDestroyed()) return false
       const current = homes.state(window.webContents.id).current
-      return home.kind === 'local' ? current.kind === 'local' : current.kind === 'ssh' && current.home.homeId === home.home.homeId
+      return home.kind === 'local' ? current.kind === 'local' : current.kind !== 'local' && current.home.id === home.home.id
     })
     if (existing !== undefined) {
       existing.show()
@@ -530,7 +539,7 @@ const localWindows = () =>
   new Set([...windows].filter((window) => !window.isDestroyed() && homes.state(window.webContents.id).current.kind === 'local'))
 const handleLocal: typeof ipcMain.handle = (channel, listener) =>
   ipcMain.handle(channel, (event, ...args) => {
-    if (homes.state(event.sender.id).current.kind === 'ssh') throw new Error(localServicesUnavailable)
+    if (homes.state(event.sender.id).current.kind !== 'local') throw new Error(localServicesUnavailable)
     return listener(event, ...args)
   })
 const showHomes = () => {
@@ -903,7 +912,7 @@ const framedNow = () => {
 
 const chromeArgs = () => {
   const chrome = chromeNow()
-  return chrome === undefined ? [] : [CHROME_ARG + JSON.stringify(chrome)]
+  return [...(chrome === undefined ? [] : [CHROME_ARG + JSON.stringify(chrome)]), ...(canSetUp() ? [] : [NO_SETUP_ARG])]
 }
 
 const openWindow = (home: WindowHome = { kind: 'local' }) => {
@@ -954,14 +963,14 @@ const openWindow = (home: WindowHome = { kind: 'local' }) => {
   window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    const remote = homes.state(window.webContents.id).current.kind === 'ssh'
+    const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
     if (allowed !== null) openOutside(allowed)
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event, url) => {
     event.preventDefault()
-    const remote = homes.state(window.webContents.id).current.kind === 'ssh'
+    const remote = homes.state(window.webContents.id).current.kind !== 'local'
     const allowed = remote ? remoteExternalUrl(url) : url
     if (allowed !== null) openOutside(allowed)
   })
@@ -987,6 +996,10 @@ handleLocal('althar:pick-folder', async (event, purpose: unknown) => {
 
 // Whether the window is maximized, as its own buttons ask.
 ipcMain.handle('althar:maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false)
+// A terminal's paste key (Ctrl+V on Windows, Ctrl+Shift+V on Linux): the clipboard pasted where the window's focus is, as the Edit menu's Paste does.
+ipcMain.on('althar:paste', (event) => {
+  if (mine(event.sender)) event.sender.paste()
+})
 
 // The window's own buttons, from its strip: close, minimize, or maximize and back (windowOptions.ts names the chrome).
 ipcMain.on('althar:window', (event, action: unknown) => {
@@ -1259,6 +1272,10 @@ handleLocal('althar:clipboard-token', async () => tokenIn(await clipboard.readTe
 // An update ready to install, as a window shows it (null where the app doesn't update, as in development); and restarting into it, at the person's word, only while no work runs.
 ipcMain.handle('althar:update', () => updates?.glance() ?? null)
 ipcMain.handle('althar:update-restart', () => updates?.restart() ?? false)
+// About's Check for updates: the app menu's check, whose dialog says what it found.
+ipcMain.handle('althar:update-check', async () => {
+  if (updates !== undefined) await checkNow(updates)
+})
 
 // Where Althar shows while the person is in another app, and what this computer has room for: a notch to choose the island by, a tray.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)
@@ -1471,13 +1488,13 @@ app.on('window-all-closed', () => {
 
 /*
  * Quitting with work under way says what it will stop and asks (DEV-118): the
- * runtime counts the leads and reviews in a turn, the runs going and what
- * agents left running, and the window asks the person to quit, to keep it all
+ * runtime counts the leads and reviews in a turn, the runs going, what
+ * agents left running and the terminals running something, and the window asks the person to quit, to keep it all
  * working in the background (where the edge keeps Althar in reach), or to
  * carry on. A Quit asked again while the question is open is their yes. With
  * nothing at work it quits as it always did.
  */
-const NOT_COUNTED: Work = { leads: 0, reviews: 0, runs: 0, left: 0 }
+const NOT_COUNTED: Work = { leads: 0, reviews: 0, runs: 0, left: 0, terminals: 0 }
 const QUIT_ASK_WAIT = 4_000
 /** A spec of Quit's own makes the runtime give no answer (ALTHAR_QUIT_UNANSWERED=1), which waiting out the time would only make slow. */
 const quitUnanswered = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_QUIT_UNANSWERED === '1'

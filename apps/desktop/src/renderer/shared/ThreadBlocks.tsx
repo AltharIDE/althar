@@ -31,9 +31,15 @@ import {
   You,
   McpAct,
   McpServer,
+  Compacted,
+  Interrupted,
+  SubAgents,
+  WebFetch,
+  WebSearch,
   VirtualBlocks,
 } from '@althar/ui'
 
+import { messageOf } from '../data/client'
 import { CommandOutput } from './CommandOutput'
 import { holdsItem, stopOf } from './virtual'
 import { SettingChangeOf } from './SettingChangeOf'
@@ -70,6 +76,7 @@ import type {
   TaskCardContent,
 } from './thread'
 import { setupStanding } from './thread'
+import { NotBroughtInOf } from '../features/elsewhere/NotBroughtInOf'
 import { ReviewOfferOf } from '../features/team/ReviewOfferOf'
 import s from './ThreadBlocks.module.css'
 import { duration, lineOf, spentWords } from './turnTime'
@@ -102,6 +109,22 @@ export const text = {
     signIn: 'Sign in',
   },
   readSkill: (names: ReadonlyArray<string>) => `read skill ${names.join(', ')}`,
+  /** A sub-agent's row, after what it was asked: its kind, where the agent says, and how many calls it has made. */
+  subAgent: (type: string | undefined, calls: number) =>
+    [type, calls === 0 ? null : calls === 1 ? '1 call' : `${calls} calls`].filter((one) => one != null).join(' · '),
+  compaction: {
+    /** A compaction's line, as it stands, with how far it took the context where Althar knows. */
+    line: (status: Extract<Block, { kind: 'compacted' }>['status'], span: string | null, error: string | null) => {
+      const words = {
+        in_progress: 'Compacting context…',
+        completed: 'Context compacted',
+        failed: 'Couldn’t compact the context',
+        cancelled: 'Compacting the context stopped',
+      }[status]
+      const after = status === 'completed' ? span : status === 'failed' ? error : null
+      return after === null || after === '' ? words : `${words} · ${after}`
+    },
+  },
   shell: 'Shell',
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<
     StepResult['step'],
@@ -129,6 +152,14 @@ export const text = {
   failing: (names: ReadonlyArray<string>) => (names.length > 2 ? `${names.length} failed` : `Failed: ${names.join(', ')}`),
   outsider: (from: string) => `Not passed to the lead: ${from} can’t write to the repository.`,
   passOn: 'Pass it on',
+  /** A review or triage bot's words (code-hosts § Review and triage bots): passed to the lead as findings where the project trusts it, else not, with a way to. */
+  bot: {
+    heard: (name: string) => `Passed to the lead as findings from ${name}, to weigh.`,
+    quiet: (name: string) => `The lead doesn’t hear ${name}: this project doesn’t trust it yet.`,
+    trust: (name: string) => `Trust ${name}`,
+    trusting: 'Trusting…',
+    trusted: (name: string) => `Trusted. The lead hears what ${name} says from now on.`,
+  },
   /** Althar setting up a repository's worktree: installing the dependencies its lockfile names, or the setup kept for it. */
   setup: {
     running: (setup: SetupContent) => (setup.kept ? `Setting up ${setup.repository}…` : `Installing dependencies in ${setup.repository}…`),
@@ -230,7 +261,67 @@ const serverName = (name: string) => {
   return word.charAt(0).toUpperCase() + word.slice(1)
 }
 
+/**
+ * A web call that went through, as from outside the repository: a search by
+ * what it searched for, a page by where it is. While it runs, or where it
+ * didn't go through, it is a call like any other, saying how it stands.
+ */
+function WebView({ web }: { web: NonNullable<Extract<Part, { kind: 'tool' }>['web']> }) {
+  return web.action === 'search' ? <WebSearch query={web.query} /> : <WebFetch url={web.url} />
+}
+
+/**
+ * A sub-agent the agent started, by what it was asked: how it stands, its
+ * kind and how many calls it has made, opening to those calls and the start
+ * of what it reported back.
+ */
+function SubAgentView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
+  const agent = part.subAgent
+  if (agent === undefined) return null
+  return (
+    <SubAgents
+      list={[
+        {
+          id: part.id,
+          label: agent.label,
+          state: part.state,
+          meta: text.subAgent(agent.type, agent.calls.length),
+          calls: (
+            <>
+              {agent.calls.map((call) => (
+                <PartView key={call.id} part={call} threadId={threadId} />
+              ))}
+              {agent.said !== undefined && (
+                <div className={s.reported}>
+                  <Markdown source={agent.said} />
+                </div>
+              )}
+            </>
+          ),
+        },
+      ]}
+    />
+  )
+}
+
+/** The agent compacting its context: a line across the thread, with the summary it kept behind Show summary. */
+function CompactedView({ block }: { block: Extract<Block, { kind: 'compacted' }> }) {
+  return (
+    <Compacted data-item={block.id} {...(block.summary === null ? {} : { summary: <Markdown source={block.summary} /> })}>
+      {text.compaction.line(block.status, block.span, block.error)}
+    </Compacted>
+  )
+}
+
 function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
+  // One Althar has something to say under, refused or to a server that was down, stays the call it is, saying it.
+  const plain = part.refused === undefined && part.server === undefined && part.why === undefined
+  if (plain && part.subAgent !== undefined) return <SubAgentView part={part} threadId={threadId} />
+  if (plain && part.web !== undefined && part.state === ToolState.Done) return <WebView web={part.web} />
+  return <CallView part={part} threadId={threadId} />
+}
+
+function CallView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
   const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
   /* once opened, what it printed stays, so it doesn't vanish as the call folds */
   const [seen, setSeen] = useState(open)
@@ -322,6 +413,8 @@ export function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'notice':
       // A review a lead offered: its line asks, with its buttons, and says what came of it once answered.
       if (part.offer?.kind === 'review') return <ReviewOfferOf offer={part.offer} ask={part.text} />
+      // What didn't come in from other tools: each by name and why, with Try again.
+      if (part.offer?.kind === 'bring_in') return <NotBroughtInOf offer={part.offer} title={part.text} />
       // A turn that failed reads as a problem; the thread's last one has its ways out beside it (ThreadBlocks, TaskThread).
       if (part.tone === 'error') return <FailedTurn text={part.text} detail={part.detail} failure={part.failure} />
       return (
@@ -435,6 +528,7 @@ function ArrivalView({
   at,
   count,
   onPassOn,
+  onTrustBot,
   'data-item': item,
 }: {
   'data-item': string
@@ -442,19 +536,24 @@ function ArrivalView({
   at: string
   count: number
   onPassOn?: (words: string) => void
+  onTrustBot?: (login: string) => Promise<void>
 }) {
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
   const verb = heardVerb(arrival)
   const body = arrival.kind === 'checks' ? (arrival.failing.length > 0 ? text.failing(arrival.failing) : null) : arrival.text
   const from = arrival.from ?? ''
-  const foot = arrival.outsider && (
+  const foot = arrival.outsider ? (
     <>
       <span>{text.outsider(from)}</span>
       {onPassOn !== undefined && body !== null && body !== '' && (
         <LinkButton onClick={() => onPassOn(text.passed(`${from} ${verb} ${where}`, body))}>{text.passOn}</LinkButton>
       )}
     </>
+  ) : arrival.bot === undefined ? (
+    false
+  ) : (
+    <BotFoot bot={arrival.bot} {...(onTrustBot === undefined ? {} : { onTrustBot })} />
   )
   return (
     <Arrived
@@ -479,6 +578,36 @@ function ArrivalView({
         />
       )}
     </Arrived>
+  )
+}
+
+/**
+ * Under a review or triage bot's words (code-hosts § Review and triage bots): that its lead heard them as
+ * findings, where the project trusts it; else that it doesn't, once, with a
+ * way to trust it from here, which says how it went in place.
+ */
+function BotFoot({ bot, onTrustBot }: { bot: NonNullable<ArrivalContent['bot']>; onTrustBot?: (login: string) => Promise<void> }) {
+  const [trust, setTrust] = useState<'idle' | 'trusting' | 'trusted' | { readonly failed: string }>('idle')
+  if (bot.trusted) return <span>{text.bot.heard(bot.name)}</span>
+  if (trust === 'trusted') return <span>{text.bot.trusted(bot.name)}</span>
+  return (
+    <>
+      <span>{typeof trust === 'object' ? trust.failed : text.bot.quiet(bot.name)}</span>
+      {onTrustBot !== undefined && (
+        <LinkButton
+          disabled={trust === 'trusting'}
+          onClick={() => {
+            setTrust('trusting')
+            onTrustBot(bot.login).then(
+              () => setTrust('trusted'),
+              (failure: unknown) => setTrust({ failed: messageOf(failure) }),
+            )
+          }}
+        >
+          {trust === 'trusting' ? text.bot.trusting : text.bot.trust(bot.name)}
+        </LinkButton>
+      )}
+    </>
   )
 }
 
@@ -552,6 +681,7 @@ export function ThreadBlocks({
   onSignIn,
   onCompact,
   onPassOn,
+  onTrustBot,
   onAnswerQuestion,
   focusQuestion,
   project,
@@ -579,6 +709,8 @@ export function ThreadBlocks({
   signed?: { readonly voice: string; readonly mark: ReactNode }
   /** Sends what someone outside said to the lead, in the person's name. */
   onPassOn?: (words: string) => void
+  /** Trusts a review or triage bot in the task's project, from where it spoke (code-hosts § Review and triage bots). */
+  onTrustBot?: (login: string) => Promise<void>
   /** Answers an agent's question; what went wrong, in words, or null. Without it, a question can't be answered here. */
   onAnswerQuestion?: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   /** The question waiting as the thread opened, by its call: the person was brought here to answer it, so it takes focus. */
@@ -673,6 +805,7 @@ export function ThreadBlocks({
             at={block.at}
             count={block.count}
             {...(onPassOn === undefined ? {} : { onPassOn })}
+            {...(onTrustBot === undefined ? {} : { onTrustBot })}
           />
         )
       case 'divider':
@@ -681,10 +814,18 @@ export function ThreadBlocks({
             {linkedWords(block.text, block.links)}
           </ThreadDivider>
         )
+      case 'compacted':
+        return <CompactedView key={block.id} block={block} />
+      case 'interrupted':
+        return <Interrupted key={block.id} />
       case 'offer':
         return (
           <div key={block.id} className={s.offer}>
-            <ReviewOfferOf offer={block.offer} ask={block.text} />
+            {block.offer.kind === 'review' ? (
+              <ReviewOfferOf offer={block.offer} ask={block.text} />
+            ) : (
+              <NotBroughtInOf offer={block.offer} title={block.text} />
+            )}
           </div>
         )
       case 'step':

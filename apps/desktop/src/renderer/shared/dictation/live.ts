@@ -174,16 +174,16 @@ export function live(
       else if (end - wrote >= EVERY * rate) void pass(recording, null, end)
     },
     /** All of it, written down once they stop. */
-    finish: async (all: Recorded): Promise<string> => {
+    finish: async (all: Recorded, transcribeFinal = transcribe): Promise<string> => {
       closed = true
       const seconds = Math.round(all.samples.length / all.sampleRate)
       const shown = wordsOf(joined(settled, last.join(' '))).length
-      const rest = async () => joined(settled, await transcribe({ samples: all.samples.subarray(until), sampleRate: all.sampleRate }))
+      const rest = async () => joined(settled, await transcribeFinal({ samples: all.samples.subarray(until), sampleRate: all.sampleRate }))
       if (all.samples.length > WHOLE * all.sampleRate) {
         report({ seconds, shown, whole: null, wrote: 'stretches' })
         return rest()
       }
-      const whole = await transcribe(all)
+      const whole = await transcribeFinal(all)
       // Much shorter than what showed: the whole pass lost words, and what settled stands.
       const kept = wordsOf(whole).length >= shown * KEPT
       report({ seconds, shown, whole: wordsOf(whole).length, wrote: kept ? 'whole' : 'stretches' })

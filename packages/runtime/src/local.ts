@@ -15,6 +15,7 @@ import { makeKeyedLock } from './keyedLock'
 import { branchExists, commitOf, git, gitOutcome, uncommittedFiles } from './git'
 import { Instance } from './Instance'
 import { branchName, prepareWorktree, startCommitOf, startOf, towardHere } from './Projects'
+import { onRemote } from './forks'
 import { change, fact, timestamp } from './records'
 import { addItem } from './threads'
 import { blockersOf } from './waits'
@@ -59,7 +60,8 @@ export interface Spot {
   /** Whether its project was removed: its task is over here, as a settled one is. */
   readonly removed: number
   /** The checkout, Local; null for a worktree. */
-  readonly kind: 'checkout' | null
+  /** Local, the person's checkout; `adopted`, a folder another tool made, which Althar never moves, rewinds or removes; else null. */
+  readonly kind: 'checkout' | 'adopted' | null
   readonly state: string
   readonly path: string
   readonly branch: string
@@ -84,7 +86,9 @@ export interface Spot {
 
 const SPOT = `
   SELECT w.id, w.project_id, w.task_id, h.id AS thread_id, w.binding_id, b.display_name AS name, b.slug AS binding_slug,
-    p.slug AS project_slug, k.slug AS task_slug, k.title, k.state AS task_state, p.archived_at IS NOT NULL AS removed, w.kind, w.state, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
+    p.slug AS project_slug, k.slug AS task_slug, k.title, k.state AS task_state, p.archived_at IS NOT NULL AS removed,
+    -- A folder another tool made (Elsewhere.ts) is never moved, rewound or removed: none of what follows takes it for a worktree of Althar's.
+    CASE WHEN w.made_by IS NULL THEN w.kind ELSE 'adopted' END AS kind, w.state, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
     w.base_commit, w.returns_to, w.returned_at, l.path AS repository, b.default_base_ref AS base, b.change_target, w.base_ref, w.toward,
     w.moving_to, w.name AS change
   FROM workspaces w
@@ -302,7 +306,7 @@ export const toCheckout = (spot: Spot) =>
 export const retarget = (spot: Spot) =>
   Effect.gen(function* () {
     const { remote, base } = yield* startOf(spot)
-    const moved = branchName(spot.baseRef) !== base
+    const moved = branchName(spot.baseRef, [remote]) !== base
     if (!moved && (yield* blockersOf(spot.taskId)).length === 0) return
     const { baseRef, baseCommit } = yield* startCommitOf(spot.repository, base, remote)
     if (!moved && baseCommit === spot.baseCommit) return
@@ -447,7 +451,13 @@ const placing = (
       if (spot.kind === null && spot.state === 'ready' && spot.returnedAt === null && !(yield* begun(spot))) yield* toCheckout(spot)
     const waiting = (yield* spotsOf(taskId)).filter((spot) => spot.kind === 'checkout' && spot.state === 'preparing')
     // First, whether each can be taken, changing nothing.
-    const taking: Array<{ readonly spot: Spot; readonly start: string; readonly baseRef: string; readonly was: Checkout }> = []
+    const taking: Array<{
+      readonly spot: Spot
+      readonly start: string
+      readonly baseRef: string
+      readonly remote: string
+      readonly was: Checkout
+    }> = []
     for (const spot of waiting) {
       const holder = yield* holderOf(spot.repository, taskId)
       // One settled, or of a removed project, all of it stopped: given back now where it can be, or let go as it is.
@@ -481,12 +491,12 @@ const placing = (
       const onBranch = holdup?.kind === 'branch' ? agreed('branch') : undefined
       if (holdup?.kind === 'branch' && onBranch !== 'switch' && onBranch !== 'from_branch')
         return { kind: 'asks', ask: { repository: spot.name, holdup: 'branch', files: [], branch: holdup.branch, base }, seen } as Placed
-      taking.push({ spot, start: onBranch === 'from_branch' ? was.head : baseCommit, baseRef, was })
+      taking.push({ spot, start: onBranch === 'from_branch' ? was.head : baseCommit, baseRef, remote, was })
     }
     // Then each is taken: its branch made where the task starts, and checked out.
-    for (const { spot, start, baseRef, was } of taking) {
+    for (const { spot, start, baseRef, remote, was } of taking) {
       const taken = yield* takeCheckout(spot.repository, spot.branch, start)
-      if (spot.toward !== null) yield* towardHere(spot.repository, spot.toward, baseRef.startsWith('upstream/') ? 'upstream' : 'origin')
+      if (spot.toward !== null) yield* towardHere(spot.repository, spot.toward, onRemote(baseRef, [remote])?.remote ?? 'origin')
       yield* record(
         spot,
         { state: 'ready', branch: taken.branch, baseRef, baseCommit: start, returnsTo: taken.returnsTo, branchedAt: yield* timestamp },

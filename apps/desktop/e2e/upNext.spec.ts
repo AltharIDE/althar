@@ -41,11 +41,11 @@ test('lists the tasks that wait for a free agent in Up next, in the order they s
     // Each waits before the next is asked for, so a plan left counting down is caught where it happens rather than as a
     // row in the wrong place later.
     await startTask(page, 'Add a retry', '[lead:wait]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(1)
+    await expect(page.getByText(/^Waiting · 1 agent busy$/)).toHaveCount(1)
     await startTask(page, 'Tidy the docs', '[lead:finish]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(2)
+    await expect(page.getByText(/^Waiting · 1 agent busy$/)).toHaveCount(2)
     await startTask(page, 'Rename the helper', '[lead:finish]')
-    await expect(page.getByText(/^Waiting: 1 of 1 agents busy/)).toHaveCount(3)
+    await expect(page.getByText(/^Waiting · 1 agent busy$/)).toHaveCount(3)
     // A plan the person holds, and one counting down, are not started either.
     await planTask(page, 'Hold this plan', '[lead:wait]')
     // Its card is the last in the conversation, once it is there: the waiting tasks' cards have a Hold of their own. Exactly: the

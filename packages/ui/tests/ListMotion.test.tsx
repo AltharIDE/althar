@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { Activity, useRef, useState } from 'react'
+import { Activity, useInsertionEffect, useRef, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest'
 
 import { ListMotion } from '../src/lib/ListMotion'
@@ -63,8 +63,13 @@ function stubAnimations() {
   }
 }
 
-/** Where layout puts an item: its list across, its place down (the first narrower, where `narrowFirst`); a copy where it is laid; anything else, nowhere. */
+/**
+ * Where layout puts an item: its list across, its place down (the first narrower, where `narrowFirst`), from where the
+ * lists' room stands where it is in one (`data-room`), from the page's start elsewhere; the room itself where `room` has
+ * it; a copy where it is laid; anything else, nowhere.
+ */
 const placed = (el: Element) => {
+  if (el.hasAttribute('data-room')) return new DOMRect(room.left, 0, room.width, room.height)
   if (el.parentElement !== null && el.parentElement === layer()) {
     const { left, top, width, height } = (el as HTMLElement).style
     return new DOMRect(Number.parseFloat(left), Number.parseFloat(top), Number.parseFloat(width), Number.parseFloat(height))
@@ -73,9 +78,12 @@ const placed = (el: Element) => {
   if (list === null || !el.hasAttribute('data-move')) return new DOMRect(0, 0, 0, 0)
   const lists = [...(list.parentElement?.querySelectorAll('ol') ?? [])]
   const place = [...list.querySelectorAll('[data-move]')].indexOf(el)
-  return new DOMRect(lists.indexOf(list) * 300, place * 50, narrowFirst && place === 0 ? 200 : 280, 40)
+  const left = list.closest('[data-room]') === null ? 0 : room.left
+  return new DOMRect(left + lists.indexOf(list) * 300, place * 50, narrowFirst && place === 0 ? 200 : 280, 40)
 }
 
+/** Where the lists' room stands across the page, and how wide and high it is. */
+let room = { left: 0, width: 900, height: 600 }
 let narrowFirst = false
 let reduced = false
 let visible = true
@@ -85,6 +93,7 @@ let rects: MockInstance<() => DOMRect>
 beforeEach(() => {
   played = []
   live.clear()
+  room = { left: 0, width: 900, height: 600 }
   narrowFirst = false
   reduced = false
   visible = true
@@ -109,20 +118,35 @@ function Lists({
   lists,
   enter,
   still = false,
+  steady = false,
+  at,
   seen = [],
   version,
 }: {
   lists: ReadonlyArray<ReadonlyArray<string>>
   enter?: 'rise' | 'grow'
   still?: boolean
+  steady?: boolean
+  /** Where the lists' room stands once this is drawn: it moves in the same commit, as a divider dragged beside them has it. */
+  at?: typeof room
   /** Keys marked as having come to where they are drawn before. */
   seen?: ReadonlyArray<string>
   version?: unknown
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  // As the document changes, after the lists' places were taken.
+  useInsertionEffect(() => {
+    if (at !== undefined) room = at
+  })
   return (
-    <div ref={ref}>
-      <ListMotion within={ref} still={still} {...(enter === undefined ? {} : { enter })} {...(version === undefined ? {} : { version })}>
+    <div ref={ref} data-room>
+      <ListMotion
+        within={ref}
+        still={still}
+        steady={steady}
+        {...(enter === undefined ? {} : { enter })}
+        {...(version === undefined ? {} : { version })}
+      >
         {lists.map((keys, i) => (
           <ol key={i}>
             {keys.map((key) => (
@@ -132,6 +156,25 @@ function Lists({
             ))}
           </ol>
         ))}
+      </ListMotion>
+    </div>
+  )
+}
+
+/** Steady lists within a window's own ListMotion, beside a list of the window's: a board beside the conversation. */
+function Window({ lists, outside, at }: { lists: ReadonlyArray<ReadonlyArray<string>>; outside: ReadonlyArray<string>; at?: typeof room }) {
+  const ref = useRef<HTMLDivElement>(null)
+  return (
+    <div ref={ref}>
+      <ListMotion within={ref}>
+        <ol>
+          {outside.map((key) => (
+            <li key={key} data-move={key}>
+              {key}
+            </li>
+          ))}
+        </ol>
+        <Lists lists={lists} steady {...(at === undefined ? {} : { at })} />
       </ListMotion>
     </div>
   )
@@ -209,6 +252,55 @@ describe('ListMotion', () => {
     c.finish()
     expect(item('c').style.zIndex).toBe('')
     expect(item('c').style.position).toBe('')
+  })
+
+  it('where its room is the page’s, moves nothing in an update that moved the list itself or changed its size', () => {
+    // A divider dragged beside a board, drawn in the same commit as the board: every card stands elsewhere on the page.
+    const { rerender } = render(<Lists lists={[['a', 'b'], ['c']]} steady />)
+    rerender(<Lists lists={[['a', 'b'], ['c']]} steady at={{ left: 120, width: 780, height: 600 }} />)
+    expect(played).toEqual([])
+    // Nor where the board changed only its width, nor where its items changed places in that same commit.
+    rerender(<Lists lists={[['b', 'a'], ['c']]} steady at={{ left: 120, width: 700, height: 600 }} />)
+    expect(played).toEqual([])
+    // Nor where only its height changed, nor where an item came in that same commit: it shows at once.
+    rerender(<Lists lists={[['b', 'a', 'd'], ['c']]} steady at={{ left: 120, width: 700, height: 520 }} />)
+    expect(played).toEqual([])
+    // Its room as it was, its items' own moves move them.
+    rerender(<Lists lists={[['a', 'b', 'd'], ['c']]} steady />)
+    expect(of(item('a'))[0]!.keyframes[0]).toEqual({ translate: '0px 50px' })
+  })
+
+  it('where its room is the page’s, stops what moves its items once the list itself moves, a copy on its way included', () => {
+    const { rerender } = render(<Lists lists={[['a', 'b'], ['c']]} steady />)
+    // b changes lists: a copy of it travels above the page, to where b is laid out now.
+    rerender(<Lists lists={[['a'], ['b', 'c']]} steady />)
+    const trip = of(layer()!.firstElementChild!)[0]!
+    expect(item('b').style.visibility).toBe('hidden')
+    // The board moves on the way, and b with it: the copy would land where b no longer is. It goes, and b shows in its place.
+    rerender(<Lists lists={[['a'], ['b', 'c']]} steady at={{ left: 120, width: 780, height: 600 }} />)
+    expect(trip.cancel).toHaveBeenCalled()
+    expect(item('b').style.visibility).toBe('')
+    expect(layer()!.childElementCount).toBe(0)
+  })
+
+  it('keeps a room of its own within a list that moves the whole window', () => {
+    // As the board is within the project's window, whose ListMotion lets a message travel to the composer (DEV-222).
+    const { rerender } = render(<Window lists={[['a', 'b'], ['c']]} outside={['m', 'n']} />)
+    // The board moves, and in that same commit the window's own list changes order.
+    rerender(<Window lists={[['a', 'b'], ['c']]} outside={['n', 'm']} at={{ left: 120, width: 780, height: 600 }} />)
+    // None of the board's cards moves: they went with it. The window's own items move as ever.
+    for (const key of ['a', 'b', 'c']) expect(of(item(key))).toEqual([])
+    expect(of(item('m'))[0]!.keyframes[0]).toEqual({ translate: '0px -50px' })
+    // The board where it was, its cards' own moves move them.
+    rerender(<Window lists={[['b', 'a'], ['c']]} outside={['n', 'm']} at={{ left: 120, width: 780, height: 600 }} />)
+    expect(of(item('a'))[0]!.keyframes[0]).toEqual({ translate: '0px -50px' })
+  })
+
+  it('where its room is its items’, slides them by as far as it moved', () => {
+    // As a row of tabs that grows and shrinks with them: what moves it is theirs. The board's cards slid off their lanes so.
+    const { rerender } = render(<Lists lists={[['a', 'b']]} />)
+    rerender(<Lists lists={[['a', 'b']]} at={{ left: 120, width: 780, height: 600 }} />)
+    expect(of(item('a'))[0]!.keyframes[0]).toEqual({ translate: '-120px 0px' })
   })
 
   it('lets a move on its way to the same place carry on, and turns one sent elsewhere from where it is', () => {

@@ -2,7 +2,7 @@ import type { MessageSender, SentCanvasComment } from '@althar/contracts'
 import { createHash } from 'node:crypto'
 
 import { type ActorId, type CommandEnvelope, type ProjectId, type WorksIn } from '@althar/domain'
-import type { Commands, Ledger } from '@althar/persistence-sqlite'
+import { type Commands, Ledger } from '@althar/persistence-sqlite'
 import { AUTOMATION_DEFAULTS, type AutomationDefinition, Schedule, scheduleInLine } from '@althar/contracts'
 import { Priority, StatusCategory } from '@althar/connectors'
 import { Clock, Context, type Crypto, Duration, Effect, Layer, Option, Schema, Semaphore, Stream } from 'effect'
@@ -12,12 +12,12 @@ import { thisDevice } from './device'
 import { Busy } from './Busy'
 import { Connections } from './Connections'
 import { Errands } from './Errands'
-import { touchCard } from './cards'
+import { postCard, touchCard } from './cards'
 import { Changes } from './Changes'
 import { endWords, modelNamer, teamOf, withEffort } from './coordinatorNews'
 import { words } from './words'
 import { teamChanges, teamLine } from './teamWords'
-import { armDraftDeadlines, stillDraft, surfaceDraftAt } from './draftDeadlines'
+import { armDraftDeadlines, planMade, stillDraft, surfaceDraftAt } from './draftDeadlines'
 import { Live, type LiveEvent } from './Live'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
@@ -84,12 +84,14 @@ import { setToward } from './towards'
 import { addItem, transcript } from './threads'
 import { hearsOf, personsWords, quoted, threadsSaying } from './TaskActions'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { describe as describePreset, presetsIn } from './presets'
+import { describe as describePreset, presetsIn, resetPreset, tunePreset } from './presets'
 import {
   callBegan,
   callEnded,
+  discardedDrafts,
   drafted as draftMade,
   heldDraft,
+  plannedAnyway,
   type Drafts,
   inputWritten,
   noDrafts,
@@ -108,7 +110,7 @@ import { waitFor } from './waits'
 export const LEAD_STARTS = { turn: 3, all: 10 } as const
 
 /** What a task's lead is told of starting tasks, in each tool that starts one. */
-const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers (a prototype the person wants built goes on as a change in its own task: change_part). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
+const LEAD_STARTING = ` From a task's lead: for work the person asked for that your task shouldn't do itself, such as a review's findings into a fix, never for work your brief covers, and never to change your own task's shape or approach: prototyping or exploring designs for its work, or building what it prototyped, happens on your task itself, on its branch and pull request, with change_part (preset Prototype, or Change). It records your task as where it came from: its card says it was started by your task, and your thread has a line linking to it. You may start ${LEAD_STARTS.turn} in a turn and ${LEAD_STARTS.all} from your task in all.`
 
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
@@ -368,6 +370,13 @@ const Relead = Schema.Struct({
 const OnTask = Schema.Struct({ task: Schema.String })
 /* A review offered: on the lead's own task where it leaves task out; by the rules' reviewer where it leaves review out. */
 const ReviewOffered = Schema.Struct({ task: Schema.optional(Schema.String), review: Schema.optional(StepPick) })
+const TunePresetInput = Schema.Struct({
+  preset: Schema.String,
+  lead: Schema.optional(Schema.NullOr(StepPick)),
+  review: Schema.optional(Schema.NullOr(StepPick)),
+  brief: Schema.optional(Schema.NullOr(Schema.String)),
+  reset: Schema.optional(Schema.Boolean),
+})
 const PartOf = Schema.Struct({ task: Schema.String, part_of: Schema.Boolean, issue: Schema.optional(Schema.String) })
 const IssueAdded = Schema.Struct({ task: Schema.optional(Schema.String), issue: Schema.String, part_of: Schema.optional(Schema.Boolean) })
 
@@ -1080,6 +1089,11 @@ export class Coordinator extends Context.Service<
             if (one.partOf) yield* issues.setPart(created.taskId, true, attached.ref)
           }
           yield* adopt(access, { taskId: created.taskId, slug: created.slug, title: title.trim() })
+          // Drafted in the coordinator's own thread, its card takes its place there now, where it was drafted, and keeps it: the
+          // live draft fills it in, then its plan, or its saying it has none. Posted only with its plan, or at the turn's end, it
+          // came after whatever the person said meanwhile. An aside's comes with its plan, as ever.
+          if (!aside && (yield* coordinatorProject(access.threadId)) !== null)
+            yield* postCard(access.projectId as ProjectId, created.taskId)
           // The leads already at work on tasks from this message hear of this one: their opening briefs were written before it was made.
           if (again === undefined && request !== undefined) {
             const task = yield* taskOf(access, created.taskId)
@@ -1116,7 +1130,7 @@ export class Coordinator extends Context.Service<
           const bare: Array<string> = []
           for (const [taskId, slug] of made) if (yield* stillDraft(taskId)) bare.push(slug)
           if (bare.length === 0) return
-          const body = `Althar's news (not the person's word): ${bare.join(', ')} ${bare.length === 1 ? 'is a draft that has' : 'are drafts that have'} no plan, so ${bare.length === 1 ? 'it hasn’t' : 'they haven’t'} started and ${bare.length === 1 ? 'it shows' : 'they show'} to the person as stopped. Your propose_plan did not go through. Call propose_plan for ${bare.length === 1 ? 'it' : 'each'} now, or tell the person that planning failed. Don't say ${bare.length === 1 ? 'it is' : 'they are'} planned.`
+          const body = `Althar's news (not the person's word): ${bare.join(', ')} ${bare.length === 1 ? 'is a draft that has' : 'are drafts that have'} no plan, so ${bare.length === 1 ? 'it hasn’t' : 'they haven’t'} started and ${bare.length === 1 ? 'its card says' : 'their cards say'} so to the person, offering to plan or discard ${bare.length === 1 ? 'it' : 'them'}. Your propose_plan did not go through. Call propose_plan for ${bare.length === 1 ? 'it' : 'each'} now, or tell the person that planning failed. Don't say ${bare.length === 1 ? 'it is' : 'they are'} planned.`
           yield* say({
             envelope: yield* envelope('coordinator.news', {}, undefined, instance.systemId),
             threadId: event.threadId,
@@ -1157,7 +1171,15 @@ export class Coordinator extends Context.Service<
       const followDrafts = (event: LiveEvent) =>
         Effect.gen(function* () {
           if (event._tag === 'TurnEnded') {
-            if (draftsBy.has(event.threadId)) yield* redraft(event.threadId, turnEnded)
+            const drafts = draftsBy.get(event.threadId)
+            if (drafts === undefined) return
+            // A draft whose plan never came keeps a card in the thread once its live one goes: it says it has no plan, or
+            // that it was discarded, and offers to plan or discard it. Posted first, so the thread is never without it.
+            const projectId = yield* coordinatorProject(event.threadId)
+            if (projectId !== null)
+              for (const draft of drafts.drafts)
+                if (draft.taskId !== null && !draft.planned) yield* postCard(projectId as ProjectId, draft.taskId)
+            yield* redraft(event.threadId, turnEnded)
             return
           }
           if (event._tag !== 'Agent') return
@@ -1196,10 +1218,42 @@ export class Coordinator extends Context.Service<
                 )
             }
           }
-          if (call.status === 'completed' || call.status === 'failed')
+          if (call.status === 'completed' || call.status === 'failed') {
+            const ending = draftsBy.get(threadId)?.calls.get(call.toolCallId)
             yield* redraft(threadId, (drafts) => callEnded(drafts, call.toolCallId, call.status === 'completed'))
+            // A plan's call can fail after its plan was proposed (a preset that didn't apply): the plan is in, and its card.
+            // Only a plan made says so: a task discarded before its call failed is no longer a draft, yet has none.
+            const taskId =
+              call.status === 'failed' && ending?.tool === 'propose_plan'
+                ? (draftsBy.get(threadId)?.drafts.find((draft) => draft.key === ending.draft)?.taskId ?? null)
+                : null
+            if (taskId !== null && (yield* planMade(taskId))) yield* redraft(threadId, (drafts) => plannedAnyway(drafts, taskId))
+          }
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not follow a task as it was drafted', cause)))
       yield* Effect.forkScoped(Stream.runForEach(yield* live.subscribe, (event) => provide(followDrafts(event))))
+
+      /*
+       * A task discarded while it is drafted, by the person or by an agent, from anywhere: its draft says so at once, rather
+       * than going on as if it would be planned. Looked at whenever the record grows while anything is being drafted.
+       */
+      const discardedNow = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        for (const [threadId, drafts] of [...draftsBy]) {
+          const ids = drafts.drafts.flatMap((draft) => (draft.taskId === null || draft.discarded ? [] : [draft.taskId]))
+          if (ids.length === 0) continue
+          const gone = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE state = 'abandoned' AND id IN ${sql.in(ids)}`
+          if (gone.length > 0) yield* redraft(threadId, (now) => discardedDrafts(now, new Set(gone.map((one) => one.id))))
+        }
+      }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not tell a discarded draft', cause)))
+      const grown = yield* (yield* Ledger).listen
+      yield* Effect.forkScoped(
+        Effect.forever(
+          Effect.andThen(
+            grown,
+            Effect.suspend(() => (draftsBy.size === 0 ? Effect.void : provide(discardedNow))),
+          ),
+        ),
+      )
 
       /*
        * Tasks the person held while they were drafted, by task: propose_plan makes their plan held from the start, so
@@ -1544,10 +1598,12 @@ export class Coordinator extends Context.Service<
               title,
               follow: 'none',
             })
+          // Its review reads what its lead builds now, at Ship, not a pull request's head as it stood while it was a prototype.
           yield* runs.changeTeam({
             taskId: task.id,
             steps: review === null ? (own === undefined ? [] : [{ ...own, skipped: true }]) : [review],
             actorId: instance.systemId,
+            atShip: true,
           })
           yield* runs.reshape({ taskId: task.id, end, ...(review === null ? {} : { afterMerge: null }), actorId: instance.systemId })
           const named = yield* modelNamer
@@ -2513,10 +2569,14 @@ export class Coordinator extends Context.Service<
             type: 'object',
             properties: {
               text: { type: 'string', description: 'Words in its title or description: all of them.' },
-              tracker: { type: 'string', description: 'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab, or a workspace.' },
+              tracker: {
+                type: 'string',
+                description: 'The tracker, by name: Linear, Jira, Trello, ClickUp, GitHub, GitLab, or a workspace.',
+              },
               container: {
                 type: 'string',
-                description: "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list.",
+                description:
+                  "Where on it: a Linear team's key, a Jira project's key, a repository as owner/name, a Trello list, a ClickUp list.",
               },
               state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Open unless said; with keys, all unless said.' },
               mine: {
@@ -2573,12 +2633,12 @@ export class Coordinator extends Context.Service<
             tracker: {
               type: 'string',
               description:
-                'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab; where two connections share a name, as Althar names them, or by site.',
+                'The tracker, by name: Linear, Jira, Trello, ClickUp, GitHub, GitLab; where two connections share a name, as Althar names them, or by site.',
             },
             container: {
               type: 'string',
               description:
-                "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a repository as owner/name.",
+                "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a ClickUp list as Space / Folder / List, a repository as owner/name.",
             },
             labels: { type: 'array', items: { type: 'string' }, description: 'Labels the tracker has; Althar says which it left off.' },
             ...fieldSchema,
@@ -2733,7 +2793,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'attach_pull_request',
-          "Attaches a task to an open pull request it didn't open, by its link or number: one opened by hand, or upstream from the fork the project pushes to. From then on the task follows it as one Althar opened: its reviews, comments, checks and conflicts are heard, its lead's pull request tools act on it, and publishing pushes to its branch, never opening another. For a task that follows the wrong pull request, or none. Where the task's branch isn't based on that pull request's head, in a turn the person's message started it starts from the head at once, its own commits kept on top; otherwise nothing changes: it says what starting from the head keeps, and you call it again with start_from_head once the person agrees.",
+          "Attaches a task to an open pull request it didn't open, by its link or number. A pull request from a contributor's fork can be attached when its author allows maintainer edits. From then on the task follows it as one Althar opened: its reviews, comments, checks and conflicts are heard, its lead's pull request tools act on it, and publishing pushes to its branch, never opening another. For a task that follows the wrong pull request, or none. Where the task's branch isn't based on that pull request's head, in a turn the person's message started it starts from the head at once, its own commits kept on top; otherwise nothing changes: it says what starting from the head keeps, and you call it again with start_from_head once the person agrees.",
           {
             type: 'object',
             properties: {
@@ -2917,7 +2977,76 @@ export class Coordinator extends Context.Service<
               const all = yield* presetsIn(access.projectId)
               // Its lead as list_models names it, not by the id a preset was written with.
               const models = presetModels(yield* usableModels(access.projectId).pipe(Effect.orElseSucceed(() => [])))
-              return all.map((one) => `- ${one.name}${one.builtin ? '' : ' (theirs)'}: ${describePreset(one.parts, models)}.`).join('\n')
+              return all
+                .map(
+                  (one) =>
+                    `- ${one.name}${one.builtin ? (one.tuned === true ? ' (built in, tuned by them)' : '') : ' (theirs)'}: ${describePreset(one.parts, models)}.`,
+                )
+                .join('\n')
+            }),
+        ),
+        tool(
+          'tune_preset',
+          'Tunes one of the built-in presets (Chat, Change, Small change, Review a PR, Prototype) as the person’s own, on their word, as Settings does: who leads it and at what effort, who reviews it and at what effort, and its brief. A built-in names no model: its lead and reviewer are picked as for any step until the person sets one here. What you leave out stays as they had it; null puts that part back to the built-in’s; reset takes all of it back. Their own presets they change in Settings. It acts at once: say what you set in a line.',
+          {
+            type: 'object',
+            properties: {
+              preset: { type: 'string', description: 'The built-in preset, by name as list_presets names it.' },
+              lead: {
+                type: ['object', 'null'],
+                description: 'Its lead’s model, as list_models writes it, with an effort where it matters; null, picked as for any step.',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+              },
+              review: {
+                type: ['object', 'null'],
+                description: 'Its reviewer’s model, with an effort where it matters; null, picked as for any step.',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort },
+              },
+              brief: { type: ['string', 'null'], description: 'A few lines its lead reads first; null, the built-in’s own.' },
+              reset: { type: 'boolean', description: 'Takes the preset back to the built-in, everything the person set gone.' },
+            },
+            required: ['preset'],
+          },
+          (access, input) =>
+            Effect.gen(function* () {
+              const asked = yield* read(TunePresetInput, input)
+              const now = (yield* presetsIn(access.projectId)).find(
+                (one) => one.builtin && (one.id === asked.preset || one.name.toLowerCase() === asked.preset.trim().toLowerCase()),
+              )
+              if (now === undefined)
+                return yield* new ToolRefused({
+                  message: `“${asked.preset}” isn’t a built-in preset: Chat, Change, Small change, Review a PR or Prototype. The person changes their own in Settings.`,
+                })
+              const models = presetModels(yield* usableModels(access.projectId).pipe(Effect.orElseSucceed(() => [])))
+              if (asked.reset === true) {
+                const back = yield* resetPreset(now.id)
+                return `${back.name} is back to the built-in: ${describePreset(back.parts, models)}.`
+              }
+              // Each part as the person had it, unless named here.
+              const pick = (
+                step: typeof StepPick.Type | null | undefined,
+                name: string,
+                was: string | null,
+                wasEffort: string | null | undefined,
+              ) =>
+                step === undefined
+                  ? Effect.succeed({ named: was, effort: wasEffort ?? null })
+                  : step === null
+                    ? Effect.succeed({ named: null, effort: null })
+                    : Effect.map(stepOf(access.projectId, step, name), (one) => ({
+                        named: `${one.agentId}/${one.model ?? 'default'}`,
+                        effort: 'effort' in one && typeof one.effort === 'string' ? one.effort : null,
+                      }))
+              const lead = yield* pick(asked.lead, 'its lead', now.parts.lead, now.parts.effort)
+              const review = yield* pick(asked.review, 'its review', now.parts.reviewer, now.parts.reviewerEffort)
+              const tuned = yield* tunePreset(now.id, {
+                lead: lead.named,
+                effort: lead.effort,
+                reviewer: review.named,
+                reviewerEffort: review.effort,
+                ...(asked.brief === undefined ? { brief: now.parts.brief } : asked.brief === null ? {} : { brief: asked.brief }),
+              })
+              return `${tuned.name}${tuned.tuned === true ? ' is tuned as theirs' : ' is as built in'}: ${describePreset(tuned.parts, models)}.`
             }),
         ),
         tool(
@@ -2928,7 +3057,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'propose_plan',
-          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines can be planned small: pass small_change and keep its configured review before Ship. Size never schedules a review after merge, and you must not propose an extra one there. Only an explicit requested review timing or a custom preset can do that. Put its lead on a light, quick model (Sonnet, at low effort where that is the lowest it lists). It then has no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
+          `Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. A change of a few lines can be planned small: pass small_change and keep its configured review before Ship. Size never schedules a review after merge, and you must not propose an extra one there. Only an explicit requested review timing or a custom preset can do that. Put its lead on a light, quick model of those list_models gives, at a low effort, unless the person's defaults or notes say otherwise. It then has no countdown: it starts at once in a place kept for small tasks, however many long ones are at work, and its card in the thread says what it skipped. Without small_change it starts on its own after 25 seconds unless the person holds or changes it. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. Proposing again for a task the person holds replaces the plan but keeps it held: it starts only when the person starts it. A task's lead plans only the tasks it drafted. ${PICK_A_PRESET}`,
           {
             type: 'object',
             properties: {

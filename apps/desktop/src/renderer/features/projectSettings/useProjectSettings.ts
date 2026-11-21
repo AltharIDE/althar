@@ -22,9 +22,9 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'repositoryFiles'
-/** A rule set from General: one of its switches, where new tasks start (ADR-091), or what an explicitly requested review after merge brings back. */
-export type GeneralRule = RuleSwitch | 'worksIn' | 'afterMergeReview'
+export type RuleSwitch = 'resolveConflicts' | 'pushCommits' | 'postScreenshots' | 'moveIssues' | 'linkIssues' | 'repositoryFiles'
+/** A rule set from General: one of its switches, where new tasks start (ADR-091), what an explicitly requested review after merge brings back, or the review bots its leads hear. */
+export type GeneralRule = RuleSwitch | 'worksIn' | 'afterMergeReview' | 'trustedBots'
 
 /** One of the three permissions for skill and OpenSpec files in its repositories. */
 export type RepositoryFile = keyof ProjectRulesView['repositoryFiles']
@@ -54,12 +54,16 @@ export interface ProjectSettingsModel {
   readonly setPushCommits: (on: boolean) => void
   /** Turns on or off a task's screenshots going up to its pull request on their own, kept as Outputs shows them (ADR-077). */
   readonly setPostScreenshots: (on: boolean) => void
+  /** Whether its leads hear a bot, by its account (code-hosts § Review and triage bots): trusted, or not. */
+  readonly setTrustsBot: (login: string, on: boolean) => void
   /** Looks at each open task now for a conflict with its default branch, under the project's rules (ADR-030). */
   readonly lookForConflicts: () => void
   /** Since it was last asked: looking (`asked`), or why it couldn't. */
   readonly looked: 'asked' | { readonly failed: string } | null
   /** Moves a task's issue along with it: to In Progress as it starts, In Review and Done with its pull request. */
   readonly setMoveIssues: (on: boolean) => void
+  /** Links a task's pull request on its issue as it opens: on ClickUp, by a comment on the task. */
+  readonly setLinkIssues: (on: boolean) => void
   /** Allows or holds back skill or OpenSpec files in a task's commits, or pushing them: each a new revision of its rules. */
   readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
   /** Where new tasks start: Local, in the person's checkout, or a worktree of their own (ADR-091). */
@@ -215,7 +219,32 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   }, [client, projectId])
   const setPushCommits = useCallback((on: boolean) => setRule('pushCommits', on), [setRule])
   const setPostScreenshots = useCallback((on: boolean) => setRule('postScreenshots', on), [setRule])
+  // The list goes whole, as last shown with this bot switched; a bot untrusted stays suggested, to trust again.
+  const setTrustsBot = useCallback(
+    (login: string, on: boolean) => {
+      const key = keys.rules(projectId)
+      const now = cache.getQueryData<ProjectRulesView>(key)
+      if (now === undefined) return
+      const bot = [...now.trustedBots, ...now.suggestedBots].find((one) => one.login === login) ?? { login, name: login }
+      const trustedBots = on
+        ? [...now.trustedBots.filter((one) => one.login !== login), bot]
+        : now.trustedBots.filter((one) => one.login !== login)
+      const suggestedBots = on ? now.suggestedBots.filter((one) => one.login !== login) : [bot, ...now.suggestedBots]
+      setRuleFailed(null)
+      cache.setQueryData<ProjectRulesView>(key, { ...now, trustedBots, suggestedBots })
+      queue.current = queue.current.then(async () => {
+        try {
+          cache.setQueryData(key, await client.setProjectRules({ projectId, trustedBots: trustedBots.map((one) => one.login) }))
+        } catch (failure) {
+          setRuleFailed({ rule: 'trustedBots', message: messageOf(failure) })
+          await cache.invalidateQueries({ queryKey: key, exact: true })
+        }
+      })
+    },
+    [cache, client, projectId],
+  )
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
+  const setLinkIssues = useCallback((on: boolean) => setRule('linkIssues', on), [setRule])
   // The three are one rule: each switch sends all three, the one switched as now chosen, the others as last shown.
   const setRepositoryFile = useCallback(
     (file: RepositoryFile, on: boolean) => {
@@ -305,9 +334,11 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     setResolveConflicts,
     setPushCommits,
     setPostScreenshots,
+    setTrustsBot,
     lookForConflicts,
     looked,
     setMoveIssues,
+    setLinkIssues,
     setRepositoryFile,
     setWorksIn,
     setAfterMergeReview,

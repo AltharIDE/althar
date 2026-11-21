@@ -277,6 +277,20 @@
 .footRight {
   margin-left: auto;
 }
+/* a change that didn't go through, taken back */
+.failed {
+  color: var(--danger);
+}
+.retry {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--t-1);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
 
 /* its actions at the row's end: switching it off, and pinning it */
 .actions {

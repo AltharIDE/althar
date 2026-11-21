@@ -89,7 +89,7 @@ const fakePages = () => {
     viewport: vi.fn(async () => {}),
     point: vi.fn(async () => pointed),
     stopPointing: vi.fn(async () => {}),
-    pins: vi.fn(async () => {}),
+    pins: vi.fn(async () => null),
     find: vi.fn(async () => pointed),
     still: vi.fn(async () => 'data:image/jpeg;base64,BBBB'),
     cover: vi.fn(async () => {}),
@@ -418,7 +418,7 @@ describe('a comment on the page', () => {
     const box = await screen.findByRole('textbox', { name: 'Comment on div.banner' })
     await userEvent.clear(box)
     await userEvent.type(box, 'Changed{Enter}')
-    await waitFor(() => expect(commentsOf(DRAFT)[0]?.note).toBe('Changed'))
+    await waitFor(() => expect(commentsOf(DRAFT)[0]).toMatchObject({ note: 'Changed', earlier: true }))
   })
 
   it('starts dictation from anywhere at the page’s own key, where no composer shows', async () => {

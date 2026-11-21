@@ -37,6 +37,8 @@ export interface RunCardText {
   stopLabel: (called: string) => string
   again: string
   againLabel: (called: string) => string
+  help: string
+  helpLabel: (called: string) => string
   openLabel: (url: string) => string
   output: string
   outputOf: (called: string) => string
@@ -53,6 +55,8 @@ export const runCardText: RunCardText = {
   stopLabel: (called) => `Stop ${called}`,
   again: 'Run again',
   againLabel: (called) => `Run ${called} again`,
+  help: 'Help me fix it',
+  helpLabel: (called) => `Help me fix ${called}`,
   openLabel: (url) => `Open ${url}`,
   output: 'Output',
   outputOf: (called) => `Output of ${called}`,
@@ -86,6 +90,8 @@ export interface RunCardProps {
   onStop?: () => void
   /** Run it again, once it ended. Without it, no Run again. */
   onRunAgain?: () => void
+  /** Put a prompt about its failure in the composer, unsent, once it failed. Without it, no Help me fix it. */
+  onHelp?: () => void
   /** What it printed. Without it, no console. */
   output?: RunOutput
   /** Its console is open: to read what it printed only while it is. */
@@ -111,6 +117,7 @@ export function RunCard({
   onOpen,
   onStop,
   onRunAgain,
+  onHelp,
   output,
   outputOpen,
   defaultOutputOpen = false,
@@ -171,6 +178,11 @@ export function RunCard({
           {t.stop}
         </Button>
       )}
+      {phase === 'failed' && onHelp && (
+        <Button size="small" variant="quiet" icon="agents" className={s.act} aria-label={t.helpLabel(called)} onClick={onHelp}>
+          {t.help}
+        </Button>
+      )}
       {ended !== undefined && onRunAgain && (
         <Button size="small" className={s.act} aria-label={t.againLabel(called)} onClick={onRunAgain}>
           {t.again}
@@ -188,16 +200,50 @@ export function RunCard({
           open={open}
           onOpenChange={setOpen}
         >
-          <div className={s.console}>
-            <div className={s.head}>
-              <ReadCommand command={command} />
-              <CopyButton value={command} ghost text={{ copy: t.copy }} className={s.copy} />
-            </div>
-            <Printed output={output} running={ended === undefined} exit={phase === 'failed' ? (ended?.code ?? undefined) : undefined} />
-          </div>
+          <RunConsole
+            command={command}
+            output={output}
+            running={ended === undefined}
+            exit={phase === 'failed' ? (ended?.code ?? undefined) : undefined}
+            text={{ copy: t.copy }}
+          />
         </Popover>
       )}
     </article>
+  )
+}
+
+/**
+ * A run's console: the command at its head, read for a person, and what it
+ * printed under it, following the end. Over its card, as tall as the room
+ * there; with `fill`, as tall as what holds it, as the window's drawer does.
+ */
+export function RunConsole({
+  command,
+  output,
+  running,
+  exit,
+  fill = false,
+  className,
+  text,
+}: {
+  command: string
+  output: RunOutput
+  running: boolean
+  /** How it ended, where it failed. */
+  exit?: number | undefined
+  fill?: boolean
+  className?: string
+  text?: Partial<Pick<RunCardText, 'copy'>>
+}) {
+  return (
+    <div className={cx(s.console, fill && s.fill, className)}>
+      <div className={s.head}>
+        <ReadCommand command={command} />
+        <CopyButton value={command} ghost text={{ copy: text?.copy ?? runCardText.copy }} className={s.copy} />
+      </div>
+      <Printed output={output} running={running} exit={exit} />
+    </div>
   )
 }
 

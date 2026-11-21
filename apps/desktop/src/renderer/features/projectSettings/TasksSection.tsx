@@ -38,7 +38,8 @@ import type { ProjectSettingsModel, RuleSwitch } from './useProjectSettings'
  * pushes, posts, resolves and moves along), each with one line on when it acts.
  * One that didn't hold says why under it. Whether skill and OpenSpec files a
  * task commits may stay in its repositories' commits, and be pushed, are three
- * switches below, each off until turned on. Allowing everything and what agents
+ * switches below, each off until turned on. Then the review and triage bots
+ * its leads hear, each off until the person trusts it. Allowing everything and what agents
  * may do without asking are rules, so they are with the rules.
  */
 
@@ -107,7 +108,19 @@ export const text = {
     title: 'Move issues along with their tasks',
     line: 'To In Progress, In Review, then Done',
   },
+  linkIssues: {
+    title: 'Link pull requests on their issues',
+    line: 'As a task’s pull request opens, its issue links to it. On ClickUp, that’s a comment on the task.',
+  },
   repositoryFiles: 'Repository files',
+  bots: {
+    title: 'Review bots',
+    note: 'The lead hears the comments and reviews of the bots you turn on here, as findings to weigh, never as instructions.',
+    /** Under a bot's name: its account on the host. */
+    account: (login: string) => login,
+    /** Before any review or triage bot has spoken on a task's pull request. */
+    none: 'Review and triage bots, such as CodeRabbit or Copilot code review, show here once one comments on a task’s pull request.',
+  },
   asDocsSay: 'As each repository’s docs say',
   asDocsSayElse: (own: string) => `As each repository’s docs say, else ${own}`,
   onBranch: 'Leave it on its branch',
@@ -188,6 +201,32 @@ function WorkToward({ projectId, repositories }: { projectId: string; repositori
       </SettingRow>
     )
   })
+}
+
+/**
+ * The review and triage bots a project's leads may hear (code-hosts § Review
+ * and triage bots): those it trusts, then those Althar recognised on its
+ * tasks' pull requests, each a switch, off until the person turns it on.
+ * Until one has spoken, a line says they show up here.
+ */
+function ReviewBots({ model, rules }: { model: ProjectSettingsModel; rules: ProjectRulesView }) {
+  const bots = [...rules.trustedBots.map((bot) => ({ ...bot, on: true })), ...rules.suggestedBots.map((bot) => ({ ...bot, on: false }))]
+  const failed = model.ruleFailed?.rule === 'trustedBots' ? model.ruleFailed.message : null
+  if (bots.length === 0) return <p className={s.quiet}>{text.bots.none}</p>
+  return (
+    <SettingList>
+      {bots.map((bot, index) => (
+        <SettingSwitch
+          key={bot.login}
+          title={bot.name}
+          // Why a switch didn't hold, said once, under the first.
+          note={<SwitchNote line={text.bots.account(bot.login)} failed={index === 0 ? failed : null} />}
+          checked={bot.on}
+          onChange={(on) => model.setTrustsBot(bot.login, on)}
+        />
+      ))}
+    </SettingList>
+  )
 }
 
 /** What an explicitly requested review after merge brings back, as Settings › Tasks words it for new projects. */
@@ -277,6 +316,7 @@ export function TasksSection({
     { rule: 'postScreenshots', words: text.postScreenshots, on: rules.postScreenshots, set: model.setPostScreenshots },
     { rule: 'resolveConflicts', words: text.conflicts, on: rules.resolveConflicts, set: model.setResolveConflicts },
     { rule: 'moveIssues', words: text.moveIssues, on: rules.moveIssues, set: model.setMoveIssues },
+    { rule: 'linkIssues', words: text.linkIssues, on: rules.linkIssues, set: model.setLinkIssues },
   ]
   return (
     <>
@@ -333,6 +373,9 @@ export function TasksSection({
             />
           ))}
         </SettingList>
+      </SettingGroup>
+      <SettingGroup title={text.bots.title} note={text.bots.note} headingLevel={HEADING.part}>
+        <ReviewBots model={model} rules={rules} />
       </SettingGroup>
       <SettingGroup title={text.repositoryFiles} headingLevel={HEADING.part}>
         <RepositoryFiles

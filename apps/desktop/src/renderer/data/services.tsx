@@ -83,6 +83,8 @@ export interface UpdateHost {
   readonly glance: () => Promise<UpdateGlance | null>
   /** Restarts into the update, at the person's word; false where it won't, as while work runs. */
   readonly restart: () => Promise<boolean>
+  /** Checks for a newer version now, as the app menu's Check for Updates… does: a dialog says what it found. */
+  readonly check?: () => Promise<void>
   /** Calls `listener` with the update as it changes, until the returned function is called. */
   readonly onChange: (listener: (glance: unknown) => void) => () => void
 }
@@ -207,6 +209,10 @@ export interface Host {
   readonly pickPlace: (name: string) => Promise<string | null>
   /** A grant for a folder dropped on the window; null when it isn't a folder on disk. */
   readonly grantDropped: (file: File) => Promise<string | null>
+  /** A dropped file's path on disk; '' for one the page made. */
+  readonly pathOfFile?: (file: File) => string
+  /** Pastes the clipboard where the window's focus is, as the Edit menu does. */
+  readonly paste?: () => void
   /** A file or folder added to a message, measured and granted: its grant, name and size, or why it can't go; null for one with no file behind it, as a pasted picture. */
   readonly attach: (file: File) => Promise<Attached | null>
   /** The files copied in the file manager, as the clipboard names them, each as `attach` says it; none where what was copied isn't files. */
@@ -317,6 +323,10 @@ export interface CanvasesHost {
   readonly close: (threadId: string) => void
   /** Loads the version shown again, as it was published. */
   readonly reload: (threadId: string) => void
+  /** A picture of the canvas as it shows, for the window to draw in its place while something of its own is over it; null where there is none. */
+  readonly still: (threadId: string) => Promise<string | null>
+  /** Hides the view while something of the window's is over it (ADR-100), and shows it again after. */
+  readonly cover: (threadId: string, covered: boolean) => Promise<void>
 }
 
 /**
@@ -340,7 +350,7 @@ export interface PagesHost {
   readonly point: (owner: string) => Promise<Pointed | null>
   readonly stopPointing: (owner: string) => Promise<void>
   /** The comments' pins, each drawn on the page it was made on. */
-  readonly pins: (owner: string, pins: ReadonlyArray<PagePin>) => Promise<void>
+  readonly pins: (owner: string, pins: ReadonlyArray<PagePin>) => Promise<{ address: string; found: ReadonlyArray<number> } | null>
   /** An element found again on its page and brought into view, to write its comment again over; null where it is gone. */
   readonly find: (owner: string, selector: string, address: string) => Promise<Pointed | null>
   /** A picture of the page as it shows, for the window to show in its place while something of its own is over it. */

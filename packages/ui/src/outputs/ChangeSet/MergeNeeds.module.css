@@ -10,21 +10,28 @@
   list-style: none;
 }
 
-/* a line wraps rather than cutting off what to do; its mark stays on its first line */
+/*
+ * A line wraps rather than cutting off what to do. Every line is 18px of text in a 30px row, so each gap between rows is the
+ * same whatever a row holds; its mark and its chevron sit in the first 18px, centred on the first line of text.
+ */
 .line {
   align-items: flex-start;
 }
-.line > :first-child {
-  margin-top: 3px;
+.line > :first-child,
+.line > svg:last-child {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-top: 0;
 }
 .words {
   display: flex;
   flex: 1;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 5px;
+  gap: 0 4px;
   min-width: 0;
-  line-height: 1.5;
+  line-height: 18px;
 }
 .said {
   min-width: 0;
@@ -34,12 +41,13 @@
 /* what to do about it, quieter, after what it says */
 .todo {
   font-size: 12px;
+  line-height: 18px;
   color: var(--t-3);
 }
 /* the dot as far from what it follows as from what it leads */
 .todo::before {
   content: '·';
-  margin-right: 5px;
+  margin-right: 4px;
 }
 
 /* waited on: a ring, quiet; not known: a question, quiet */
@@ -53,7 +61,6 @@
 span.ring {
   width: 7px;
   height: 7px;
-  margin-top: 2px;
   border-radius: 99px;
   box-shadow: inset 0 0 0 1.5px currentColor;
 }
@@ -68,7 +75,7 @@ span.unknown {
   padding: 0 0 4px 20px;
 }
 .heading {
-  margin: 8px 0 2px;
+  margin: 8px 0 4px;
   font-size: 12px;
   font-weight: 500;
   color: var(--t-3);

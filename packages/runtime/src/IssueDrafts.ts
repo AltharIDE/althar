@@ -587,7 +587,8 @@ export class IssueDrafts extends Context.Service<
           }
           const read = input.fields === undefined ? { change: {}, left: [], already: [] } : yield* readFields(at, input.fields)
           const labels = labelsOf(input.labels)
-          if (labels.length === 0 || !(where.product === 'linear' || where.product === 'trello')) return { ...read, labels }
+          if (labels.length === 0 || !(where.product === 'linear' || where.product === 'trello' || where.product === 'clickup'))
+            return { ...read, labels }
           const known = yield* Effect.orElseSucceed(at.choices('labels'), () => undefined)
           if (known === undefined) return { ...read, labels }
           const has = (label: string) => known.some((choice) => same(choice.name, label))

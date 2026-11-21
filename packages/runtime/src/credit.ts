@@ -100,7 +100,7 @@ const GITHUB_PRIVATE = '@users.noreply.github.com'
 const AGENT_LOGINS = new Set(['copilot', 'claude', 'codex', 'cursoragent', 'devin-ai-integration'])
 
 /** A bot named for the agent it is: google-labs-jules[bot], copilot-swe-agent[bot]; not campaign-roomba[bot]. */
-const agentBot = (name: string, agents: ReadonlyArray<string>) => {
+export const agentBot = (name: string, agents: ReadonlyArray<string>) => {
   const said = name.trim().toLowerCase()
   if (!said.endsWith('[bot]')) return false
   const words = said.slice(0, -'[bot]'.length).split(/[-_\s]+/)

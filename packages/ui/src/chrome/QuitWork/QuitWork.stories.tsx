@@ -87,3 +87,12 @@ export const Cancelling: Story = {
     await expect(args.onQuit).not.toHaveBeenCalled()
   },
 }
+
+/** A terminal running something counts as what it runs; an idle shell doesn't. */
+export const TerminalsRunning: Story = {
+  args: { work: { runs: 1, terminals: 2 } },
+  play: async () => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Quit Althar?' })
+    await expect(dialog).toHaveTextContent('Quitting stops 1 run and what’s running in 2 terminals.')
+  },
+}

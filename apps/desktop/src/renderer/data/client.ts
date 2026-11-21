@@ -1,8 +1,10 @@
 import {
   API_VERSION,
   socketCanCall,
+  type BroughtIn,
   type ClientIdentity,
   type ConnectionInfo,
+  type Elsewhere,
   type FeedPosition,
   type SearchDocuments,
 } from '@althar/contracts'
@@ -10,6 +12,8 @@ import { checkedPosition, checkedWatch } from './checkedWatch'
 import type { AcpCatalog, AcpConnection, ShipRoute } from '@althar/contracts'
 
 import {
+  type ShownTerminal,
+  type TerminalChunk,
   type PlaceId,
   type StorageSize,
   type CanvasDetail,
@@ -20,6 +24,7 @@ import {
   type MoveOutcome,
   type Preset,
   type PresetParts,
+  type PresetTuning,
   type WorksIn,
   type AccountSignInState,
   type SignInEnding,
@@ -141,7 +146,11 @@ import { RpcClient } from 'effect/rpc'
  */
 
 /** What may change of a project's rules at once: any of it. */
-export type ProjectRulesChange = { readonly projectId: string } & Partial<Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox'>> & {
+export type ProjectRulesChange = { readonly projectId: string } & Partial<
+  Omit<ProjectRulesView, 'projectId' | 'revision' | 'sandbox' | 'trustedBots' | 'suggestedBots'>
+> & {
+    /** The bots its leads hear, by their accounts, the list whole (code-hosts § Review and triage bots). */
+    readonly trustedBots?: ReadonlyArray<string>
     /** What the person changed of what leads' sandboxes let through: each list's edits, whole. */
     readonly sandbox?: { readonly commands?: SandboxEdits; readonly hosts?: SandboxEdits }
     /** The revision a change that replaces a list was made against: refused where the rules have moved on since. */
@@ -160,6 +169,16 @@ export interface Client {
   readonly listProjects: () => Promise<ProjectList>
   /** What opening the folder a grant names would make, read without changing anything. */
   readonly readFolder: (grant: string) => Promise<FolderReading>
+  /** What other tools left for a project's repositories, or a folder's before it is one: read only. */
+  readonly lookElsewhere: (at: { readonly projectId: string } | { readonly grant: string }) => Promise<Elsewhere>
+  /** Brings in what was picked of it, by its keys: worktrees as tasks held Up next on `steps`, setups, conversations. */
+  readonly bringIn: (input: {
+    readonly projectId: string
+    readonly worktrees: ReadonlyArray<string>
+    readonly setups: ReadonlyArray<string>
+    readonly conversations: ReadonlyArray<string>
+    readonly steps: ReadonlyArray<PlanStep>
+  }) => Promise<BroughtIn>
   /** Where a new repository named after `name` would go in the folder a grant names, read without making it; refused where it can't. */
   readonly placeRepository: (grant: string, name: string) => Promise<PlacedRepository>
   /** Makes it there, a git repository with a first commit; the grant a project opens it by. */
@@ -378,6 +397,10 @@ export interface Client {
   }) => Promise<{ readonly name: string }>
   /** Removes one of the person's presets. */
   readonly removePreset: (id: string) => Promise<void>
+  /** Tunes a built-in preset as the person's own: its lead and reviewer, their efforts, and its brief. */
+  readonly tunePreset: (id: string, tuning: PresetTuning) => Promise<void>
+  /** Takes a built-in preset back to its default. */
+  readonly resetPreset: (id: string) => Promise<void>
   /** Says not to offer a task's parts as a preset again. */
   readonly declinePresetOffer: (taskId: string) => Promise<void>
   /** "Run it" on the pull request a review task reviews, as far as `how` trusts it; `asks` where nothing says how far. */
@@ -624,6 +647,8 @@ export interface Client {
   /** Adds the repositories at the folder a grant names. */
   readonly addRepositories: (projectId: string, grant: string) => Promise<void>
   readonly leaveOutRepository: (projectId: string, repositoryId: string) => Promise<void>
+  /** Adds the repository a fork was forked from as a remote of its clone, where none of its remotes is that repository. */
+  readonly addParentRemote: (projectId: string, repositoryId: string) => Promise<void>
   readonly setRepository: (input: {
     readonly projectId: string
     readonly repositoryId: string
@@ -631,7 +656,8 @@ export interface Client {
     readonly changeTarget?: ChangeTarget
     /** Answers the offer to push a fork's branches upstream with no. */
     readonly notNow?: boolean
-    readonly setup?: RepositorySetup
+    /** The setup the person edited; null clears it, for a lead to record again. */
+    readonly setup?: RepositorySetup | null
     /** The branch new tasks work toward there (ADR-093); null for its default branch. */
     readonly workToward?: string | null
   }) => Promise<void>
@@ -648,6 +674,8 @@ export interface Client {
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
   readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
+  /** Trusts a bot in a task's project, from the thread where it spoke: its leads hear it from then on (code-hosts § Review and triage bots). */
+  readonly trustBot: (taskId: string, login: string) => Promise<void>
   /** Adds an account to an agent: in the folder a grant names, or one Althar makes. */
   readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
@@ -771,6 +799,23 @@ export interface Client {
   ) => Promise<Launch>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
+  /** What Althar runs of the project itself, its tasks' too. */
+  readonly listLaunches: (projectId: string) => Promise<ReadonlyArray<Launch>>
+  /** Opens a terminal by the id the window gave it: in the run's folder, else the task's worktree, else the project's repository. */
+  readonly openTerminal: (input: {
+    readonly id: string
+    readonly projectId: string
+    readonly taskId: string | null
+    readonly launchId?: string
+    readonly cols: number
+    readonly rows: number
+  }) => Promise<ShownTerminal>
+  readonly listTerminals: (projectId: string) => Promise<ReadonlyArray<ShownTerminal>>
+  /** What a terminal prints, from what it printed so far, until it ends or `stop` is called; `onEnd` once the stream ends either way but `stop`. */
+  readonly attachTerminal: (id: string, onChunk: (chunk: TerminalChunk) => void, onEnd: (failure?: unknown) => void) => () => void
+  readonly writeTerminal: (id: string, data: string) => Promise<void>
+  readonly resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
+  readonly closeTerminal: (id: string) => Promise<void>
   /** Keeps something for the project to run: a new one, or, by id, a change to one; a null command is its repository's own way. */
   readonly keepRunnable: (input: {
     readonly projectId: string
@@ -994,6 +1039,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     status: (options = {}) => settle(api.Status(options.recheck === undefined ? {} : { recheck: options.recheck })),
     listProjects: () => settle(api.ListProjects()),
     readFolder: (grant) => settle(api.ReadFolder({ grant })),
+    lookElsewhere: (at) => settle(api.LookElsewhere(at)),
+    bringIn: (input) => command((commandId) => api.BringIn({ commandId, ...input })),
     placeRepository: (grant, name) => settle(api.PlaceRepository({ grant, name })),
     makeRepository: (grant, name) => settle(api.MakeRepository({ grant, name })),
     prepareFolder: (grant, path) =>
@@ -1104,6 +1151,8 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     editPreset: (input) => command((commandId) => api.EditPreset({ commandId, ...input })),
     savePreset: (input) => command((commandId) => api.SavePreset({ commandId, ...input })),
     removePreset: (id) => command((commandId) => api.RemovePreset({ commandId, id })),
+    tunePreset: (id, tuning) => command((commandId) => api.TunePreset({ commandId, id, tuning })),
+    resetPreset: (id) => command((commandId) => api.ResetPreset({ commandId, id })),
     declinePresetOffer: (taskId) => command((commandId) => api.DeclinePresetOffer({ commandId, taskId })),
     runIt: (taskId, how) => command((commandId) => api.RunIt({ commandId, taskId, ...(how === undefined ? {} : { how }) })),
     stopRunning: (taskId) => command((commandId) => api.StopRunning({ commandId, taskId })),
@@ -1235,6 +1284,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
     leaveOutRepository: (projectId, repositoryId) => command((commandId) => api.LeaveOutRepository({ commandId, projectId, repositoryId })),
+    addParentRemote: (projectId, repositoryId) => command((commandId) => api.AddParentRemote({ commandId, projectId, repositoryId })),
     setRepository: (input) => command((commandId) => api.SetRepository({ commandId, ...input })),
     createBranch: (input) => command((commandId) => api.CreateBranch({ commandId, ...input })),
     getProjectRules: (projectId) => settle(api.GetProjectRules({ projectId })),
@@ -1243,6 +1293,7 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     editProjectNote: (projectId, noteId, body) => command((commandId) => api.EditProjectNote({ commandId, projectId, noteId, body })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
+    trustBot: (taskId, login) => command((commandId) => api.TrustBot({ commandId, taskId, login })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
     removeAccount: (accountId, anyway) =>
@@ -1322,6 +1373,26 @@ export const connect = async (port: DomMessagePort, expected?: ClientIdentity): 
     getRunnableRefs: (projectId, text) => settle(api.GetRunnableRefs({ projectId, ...(text === undefined ? {} : { text }) })),
     stopLaunch: (id) => command((commandId) => api.StopLaunch({ commandId, id })),
     clearLaunch: (id) => command((commandId) => api.ClearLaunch({ commandId, id })),
+    listLaunches: (projectId) => settle(api.ListLaunches({ projectId })),
+    openTerminal: (input) => command((commandId) => api.OpenTerminal({ commandId, ...input })),
+    listTerminals: (projectId) => settle(api.ListTerminals({ projectId })),
+    attachTerminal: (id, onChunk, onEnd) => {
+      const fiber = Effect.runFork(
+        Stream.runForEach(api.AttachTerminal({ id }), (chunk) => Effect.sync(() => onChunk(chunk))).pipe(
+          Effect.matchCause({
+            onSuccess: () => onEnd(),
+            onFailure: (cause) => {
+              if (!Cause.hasInterruptsOnly(cause)) onEnd(Cause.squash(cause))
+            },
+          }),
+        ),
+      )
+      return () => void Effect.runFork(Fiber.interrupt(fiber))
+    },
+    // Each key as it is pressed: never tried twice, which would type it twice.
+    writeTerminal: (id, data) => settle(api.WriteTerminal({ id, data })),
+    resizeTerminal: (id, cols, rows) => settle(api.ResizeTerminal({ id, cols, rows })),
+    closeTerminal: (id) => command((commandId) => api.CloseTerminal({ commandId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     answerCheckout: (input) => command((commandId) => api.AnswerCheckout({ commandId, ...input })),
     moveTask: (input) => command((commandId) => api.MoveTask({ commandId, ...input })),

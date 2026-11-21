@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 
 import { assert, describe, it } from '@effect/vitest'
@@ -8,12 +9,12 @@ import { Changes, FIX_ROUNDS, OFF_FOR_PROJECT, OFF_FOR_TASK } from '../src/Chang
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { Policies } from '../src/Policies'
-import { gaveUpLine } from '../src/pullRequestWords'
+import { gaveUpLine, unreachedLine } from '../src/pullRequestWords'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, hosted, until } from './support'
+import { callTool, hosted, notices, until } from './support'
 import {
   asked,
   cards,
@@ -33,6 +34,7 @@ import {
   runtimeWith,
   taskSays,
   titled,
+  worktreeOf,
 } from './conflictsSupport'
 
 /*
@@ -66,6 +68,47 @@ const linkOf = (taskId: string) =>
       ([one]) => one,
     ),
   )
+
+/**
+ * The task's pull request as PR #1007 was left: its checks heard failing on its head, by a look that ended before it told the
+ * lead. The host's next read of it is held (`hold`), so no look tells the lead until the test lets it go.
+ */
+const untoldFailure = (github: { readonly calls: ReadonlyArray<string> }, taskId: string, hold: () => void) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const reads = () => github.calls.filter((method) => method === 'change').length
+    const before = reads()
+    hold()
+    yield* until(
+      Effect.sync(() => [reads()]),
+      ([now]) => (now ?? 0) > before,
+    )
+    const link = yield* linkOf(taskId)
+    const [row] = yield* sql<{
+      head: string
+    }>`SELECT json_extract(snapshot, '$.headSha') AS head FROM external_links WHERE id = ${link?.id ?? ''}`
+    const sum = {
+      sha: row?.head ?? '',
+      outcome: 'failed',
+      passed: 0,
+      failed: 1,
+      running: 0,
+      total: 1,
+      failing: ['test'],
+      list: [{ name: 'test', state: 'failed', summary: null }],
+    }
+    yield* sql`UPDATE external_links SET snapshot = json_set(snapshot, '$.checks', json(${JSON.stringify(sum)})) WHERE id = ${link?.id ?? ''}`
+    yield* sql`INSERT INTO observations ${sql.insert({
+      id: `obs_${randomBytes(16).toString('hex')}`,
+      projectId: link?.projectId ?? '',
+      subjectType: 'external_link',
+      subjectId: link?.id ?? '',
+      kind: 'checks',
+      payload: JSON.stringify({ ...sum, id: `checks:${sum.sha}:failed:1` }),
+      source: 'github',
+      observedAt: new Date().toISOString(),
+    })}`
+  })
 
 describe('a conflict alone', () => {
   it.live('is the lead’s by default, and the card is under way while the checks on its merge run', () => {
@@ -223,6 +266,182 @@ describe('failed checks alone', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('reach the lead though the look that heard them failed before it told the lead', () => {
+    const { working, bare } = hosted()
+    let broken = false
+    let tripped = false
+    const github = hostOf(bare, (sha) => {
+      if (!broken || holdsFix(bare, sha)) return PASSED
+      // The look that first reads them failing can't run them again, and its host goes away before it reads the rest of the
+      // pull request, as PR #1007's did: it kept that they failed, and that it told the lead, and ended before it did.
+      if (!tripped) {
+        tripped = true
+        github.failNext('rerun', 'unreachable')
+        github.failNext('activity', 'unreachable')
+      }
+      return FAILED
+    })
+    return Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened(working, '[lead:fix]')
+      const sql = yield* SqlClient.SqlClient
+      broken = true
+      // The next look hears nothing new of the checks, but finds the lead never told: told now, it fixes them, and the fix goes up.
+      yield* until(given(threadId), (all) => all.some((body) => body.startsWith('Checks failed on PR #1: test.')))
+      const [failedAt] = yield* sql<{ at: string }>`
+        SELECT observed_at AS at FROM observations WHERE kind = 'checks' AND json_extract(payload, '$.outcome') = 'failed' LIMIT 1`
+      const [toldAt] = yield* sql<{ at: string }>`
+        SELECT min(accepted_at) AS at FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE 'Checks failed on PR #1%'`
+      // Told on a later look than the one that heard them failing: the one that heard them ended before it told the lead.
+      assert.isTrue(github.calls.filter((method) => method === 'activity').length > 0)
+      assert.isTrue((toldAt?.at ?? '') > (failedAt?.at ?? ''))
+      yield* until(
+        Effect.sync(() => [holdsFix(bare, 'althar/add-a-retry')]),
+        ([fixed]) => fixed === true,
+      )
+      yield* until(cardOf(projectId).pipe(Effect.map((one) => [one])), ([one]) => one?.change?.checks?.outcome === 'passed')
+      assert.strictEqual((yield* given(threadId)).filter((body) => body.startsWith('Checks failed')).length, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('aren’t being fixed on the card while its lead hasn’t been told them, and are once it is', () => {
+    const { working, bare } = hosted()
+    let broken = false
+    let held = false
+    const gate = Effect.runSync(Deferred.make<void>())
+    const github = hostOf(bare, (sha) => (broken && !holdsFix(bare, sha) ? FAILED : PASSED), undefined, {
+      waitsFor: (method) => (held && method === 'change' ? Deferred.await(gate) : Effect.void),
+    })
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:fix]')
+      yield* untoldFailure(github, taskId, () => {
+        held = true
+        broken = true
+      })
+      yield* Effect.sleep('600 millis')
+      // Past the moment a look had to tell the lead, nobody is on them: not Fixing the checks, nor under way.
+      const untold = yield* cardOf(projectId)
+      assert.strictEqual(untold?.change?.checks?.outcome, 'failed')
+      assert.notStrictEqual(untold?.step, 'checks')
+      assert.strictEqual(untold?.phase, 'ready')
+      assert.lengthOf(
+        (yield* given(threadId)).filter((body) => body.startsWith('Checks failed')),
+        0,
+      )
+      // Something else reaching its lead meanwhile, such as a comment on the pull request, doesn't tell it the checks failed.
+      const body = 'meridian commented on PR #1: Looks fine.'
+      yield* (yield* Sessions).send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body, quiet: true })
+      yield* until(
+        Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ state: string }>`SELECT state FROM user_inputs WHERE body = ${body}`),
+        ([one]) => one?.state === 'delivered',
+      )
+      // Nor does the same words for another of its repositories' PR #1, which its lead has: as a note marked taken, so the
+      // fake lead doesn't fix anything for it.
+      const other = 'Checks failed on PR #1: test. Their checks are yours to see through, in meridian/web.'
+      yield* (yield* Sessions).send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId, body: other }),
+        threadId,
+        body: other,
+        quiet: true,
+        note: true,
+      })
+      yield* Effect.flatMap(SqlClient.SqlClient, (sql) => sql`UPDATE user_inputs SET state = 'delivered' WHERE body = ${other}`)
+      yield* Effect.sleep('400 millis')
+      assert.notStrictEqual((yield* cardOf(projectId))?.step, 'checks')
+      assert.notStrictEqual((yield* cardOf(projectId))?.step, 'checks')
+      // The next look tells the lead: Fixing the checks, under way, while it is at them.
+      const seen: Array<{ readonly step: string | null; readonly phase: string }> = []
+      held = false
+      yield* Deferred.succeed(gate, undefined)
+      yield* until(
+        cardOf(projectId).pipe(
+          Effect.tap((one) => Effect.sync(() => seen.push({ step: one?.step ?? null, phase: one?.phase ?? '' }))),
+          Effect.map((one) => [one]),
+        ),
+        ([one]) => one?.change?.checks?.outcome === 'passed',
+      )
+      assert.isTrue(seen.some((one) => one.step === 'checks' && one.phase === 'running'))
+      assert.strictEqual(
+        (yield* given(threadId)).filter((body) => body.startsWith('Checks failed') && !body.includes('meridian/web')).length,
+        1,
+      )
+    }).pipe(Effect.provide(runtimeWith({ github }, {}, undefined, {}, Duration.millis(300))))
+  })
+
+  it.live('go to the person with a line where the lead can’t be started to be told them', () => {
+    const { working, bare } = hosted()
+    let held = false
+    // Only the head the failure is staged on fails: none before it, nor what the lead commits after, so no fix of its own,
+    // nor its turns ending with them failing, race the hand-off.
+    let failing: string | undefined
+    const gate = Effect.runSync(Deferred.make<void>())
+    const github = hostOf(
+      bare,
+      (sha) => {
+        if (held && failing === undefined) failing = sha
+        return sha === failing ? FAILED : PASSED
+      },
+      undefined,
+      { waitsFor: (method) => (held && method === 'change' ? Deferred.await(gate) : Effect.void) },
+    )
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:fix]')
+      yield* untoldFailure(github, taskId, () => {
+        held = true
+      })
+      const [mark] = yield* sql<{
+        sequence: number
+      }>`SELECT coalesce(max(sequence), 0) AS sequence FROM user_inputs WHERE thread_id = ${threadId}`
+      // Its lead has nothing to start again from.
+      const [lead] = yield* sql<{ agentId: string }>`SELECT agent_id FROM provider_sessions WHERE thread_id = ${threadId} LIMIT 1`
+      yield* (yield* Sessions).stop(threadId)
+      yield* sql`PRAGMA foreign_keys = OFF`
+      yield* sql`DELETE FROM provider_sessions WHERE thread_id = ${threadId}`
+      yield* sql`PRAGMA foreign_keys = ON`
+      yield* Deferred.succeed(gate, undefined)
+      const [card] = yield* until(
+        Effect.map(cardOf(projectId), (one) => [one]),
+        ([one]) => one?.checksBack != null,
+      )
+      assert.strictEqual(card?.checksBack, unreachedLine(['test']))
+      assert.strictEqual(card?.phase, 'ready')
+      assert.include(
+        (yield* notices(threadId)).map((one) => one.title),
+        unreachedLine(['test']),
+      )
+      // The message that would have told it to fix them is withdrawn: a lead started later for something else never takes it up.
+      const told = yield* sql<{
+        state: string
+      }>`SELECT state FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE 'Checks failed%' AND sequence > ${mark?.sequence ?? 0}`
+      assert.deepStrictEqual(
+        told.map((one) => one.state),
+        ['withdrawn'],
+      )
+      const { path } = yield* worktreeOf(taskId)
+      const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path, encoding: 'utf8' }).trim()
+      const body = 'Anything else to look at?'
+      const sessions = yield* Sessions
+      yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', { threadId, body }), threadId, body })
+      yield* sessions.start({ threadId, agentId: lead?.agentId ?? '' })
+      yield* until(sql<{ state: string }>`SELECT state FROM user_inputs WHERE body = ${body}`, ([one]) => one?.state === 'delivered')
+      // Taken up, it would have gone with the person's message, and the fake lead would commit a fix for it.
+      yield* Effect.sleep('1 second')
+      assert.deepStrictEqual(
+        (yield* sql<{
+          state: string
+        }>`SELECT state FROM user_inputs WHERE thread_id = ${threadId} AND body LIKE 'Checks failed%' AND sequence > ${mark?.sequence ?? 0}`).map(
+          (one) => one.state,
+        ),
+        ['withdrawn'],
+      )
+      // It answers the person (`[lead:edit]` commits what it was asked), and commits no fix for the checks of its own.
+      assert.notInclude(
+        execFileSync('git', ['log', '--format=%s', `${head}..HEAD`], { cwd: path, encoding: 'utf8' }),
+        'Fix the failing check',
+      )
+    }).pipe(Effect.provide(runtimeWith({ github }, {}, undefined, {}, Duration.millis(300))))
+  })
+
   it.live('keep the card under way while the rest still run, some failed already', () => {
     const { working, bare } = hosted()
     let checks: Checks = PASSED
@@ -359,13 +578,26 @@ describe('a task the person stopped', () => {
   it.live('stays stopped through a conflict and failed checks, and its card says why', () => {
     const { working, bare } = hosted()
     let broken = false
-    const github = hostOf(bare, () => (broken ? FAILED : PASSED))
+    let held = false
+    const gate = Effect.runSync(Deferred.make<void>())
+    const github = hostOf(bare, () => (broken ? FAILED : PASSED), undefined, {
+      waitsFor: (method) => (held && method === 'change' ? Deferred.await(gate) : Effect.void),
+    })
+    const reads = () => github.calls.filter((method) => method === 'change').length
     return Effect.gen(function* () {
       const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix]')
+      // A look at its pull request under way as the person stops it, holding the task's lock as every look does: what it
+      // hears once they have, the conflict and the checks failing, is theirs all the same.
+      held = true
+      const read = reads()
+      yield* (yield* Changes).refresh(taskId)
+      yield* until(Effect.sync(reads), (now) => now > read)
       yield* stopped(taskId, threadId)
       const before = (yield* given(threadId)).length
       broken = true
       moveHostMainOn(working, bare)
+      held = false
+      yield* Deferred.succeed(gate, undefined)
       const [why] = yield* until(
         Effect.map(cardOf(projectId), (one) => [one?.conflictUnsent ?? null]),
         ([one]) => one !== null,
@@ -375,7 +607,7 @@ describe('a task the person stopped', () => {
       yield* Effect.sleep('600 millis')
       // Nothing asked of its lead, nor a round begun.
       assert.deepStrictEqual(yield* rounds(taskId), [])
-      assert.strictEqual((yield* given(threadId)).length, before)
+      assert.deepStrictEqual((yield* given(threadId)).slice(before), [])
       assert.strictEqual((yield* cardOf(projectId))?.phase, 'stopped')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

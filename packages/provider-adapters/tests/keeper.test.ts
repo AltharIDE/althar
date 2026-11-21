@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -56,6 +56,16 @@ describe('the keeper', () => {
     const folder = mkdtempSync(join(tmpdir(), 'althar-keeper-'))
     writeFileSync(join(folder, keeperName), 'MZ')
     assert.strictEqual(await Effect.runPromise(keeper(folder)), join(folder, keeperName))
+  })
+
+  scripted('is built once for all that ask for it while it is being built', async () => {
+    // A compiler that notes each time it runs, and takes a moment, so the asks overlap.
+    const runs = join(mkdtempSync(join(tmpdir(), 'althar-keeper-runs-')), 'runs')
+    await withCompiler(`echo ran >> '${runs}'; sleep 0.3; ${BUILDS}`, async (folder) => {
+      const paths = await Effect.runPromise(Effect.all([keeper(folder), keeper(folder), keeper(folder)], { concurrency: 'unbounded' }))
+      assert.deepStrictEqual(paths, [join(folder, keeperName), join(folder, keeperName), join(folder, keeperName)])
+      assert.deepStrictEqual(readFileSync(runs, 'utf8').trim().split('\n'), ['ran'])
+    })
   })
 
   scripted('says why it couldn’t be built: the compiler’s own words, or what went wrong, and keeps nothing', async () => {

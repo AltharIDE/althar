@@ -161,7 +161,7 @@ coordinator's disposable folder, apart.
 | `propose_automation`, `change_automation` | An automation as the person asked for it, or a change to one: a name, the prompt each run is asked, days and a time or every hour, the lead, and what each run ends in (nothing, a draft or ready pull request, or reviews of each new pull request). Each on a card in its thread; nothing runs until the person turns it on, and a change that reaches further needs them to turn it on again, with Undo | Command |
 | `pause_automation` | Pauses one when the person says, since it only stops | Command |
 | `resume_automation`, `run_automation_now` | At once in a turn the person's message started, with a line in the thread; otherwise a small card the person presses, since both spend their plan and the coordinator reads text from outside ([ADR-086](../decisions/coordinator.md#moving-a-task)) | Command |
-| `stop_task`, `hold_task`, `restart_task`, `settle_task` | The person's own buttons on a task, by its slug: Stop (or with `turn`, only its lead's turn), Hold a plan counting down, Start, Resume or Reopen, and done, keep for later or discard (done and keep only for a task that isn't a change). In a turn the person's message started, at once, with a line quoting their words in the coordinator's thread and the task's; in any other, a `task_ask` card with one button that does it as their press, and Not now (ADR-097's second phase: at once in any turn, with the lines, since each can be undone). Discarding keeps the worktree and branch (ADR-056). `TaskActions.ts` ([ADR-086](../decisions/coordinator.md#moving-a-task)) | Command |
+| `stop_task`, `hold_task`, `restart_task`, `settle_task` | The person's own buttons on a task, by its slug: Stop (or with `turn`, only its lead's turn), Hold a plan counting down, Start, Resume or Reopen, and done, keep for later or discard (done only for a task that isn't a change; keep for any with no pull request open). In a turn the person's message started, at once, with a line quoting their words in the coordinator's thread and the task's; in any other, a `task_ask` card with one button that does it as their press, and Not now (ADR-097's second phase: at once in any turn, with the lines, since each can be undone). Discarding keeps the worktree and branch (ADR-056). `TaskActions.ts` ([ADR-086](../decisions/coordinator.md#moving-a-task)) | Command |
 | `rename_task` | Gives a task another title, as the person can, where its title no longer says what it does; its slug and branch stay, and what the person asked stays in its thread | Command |
 | `make_it_a_change` | A lead's, not the coordinator's: offered only on a quick task not made a change yet, and refused, with why, on any other. Called when the person asks to turn what the lead made into a real thing: a title for what it does now, a reviewer named as `propose_plan` names one (none only where the person said so), and a pull request, a draft or ready for review. Makes its branch where it has none; renames the task and gives its plan, and the run under way, the review and the ending, or opens a round with them where its last run had ended; its thread and the coordinator's news say so. The lead's next `finish_step` goes through the review, then the pull request opens ([ADR-035](../decisions/tasks.md#kinds-read-from-what-a-task-has)) | Command |
 | `run_project` | Runs the project with no agent, its default or one of what it runs by name: the default branch in a copy of its own, or a task's worktree (ADR-023, ADR-044) | Command |
@@ -273,9 +273,33 @@ The session is rebuilt from a brief ([03](03-agent-runtime-and-auth.md)) when:
 - you switch the coordinator's agent;
 - its context is filling up (below).
 
-The coordinator's brief holds its instructions for the role and the
-project's notes, then the thread as far as it fits. Older turns are read
-through its tools.
+Every one of these starts from the same brief, written from Althar's
+records (`coordinatorRecord`, `handover.ts`): its instructions for the role,
+the project as `project_overview` gives it, the project's notes, what its
+repositories tell agents (below), every open task, the ten finished last
+(done, merged or discarded, with what each lead last said), its errands,
+then the conversation. Of the conversation it carries the last part word for
+word, as much as fits in 60,000 characters, and before that the earlier part
+in short: every line the person wrote, up to 500 characters, and the start of
+everything else, up to 200, with the tasks, issues and questions that came of
+it, but no tool calls, in up to 20,000 characters, the newest kept. Althar
+writes that short part itself, with no agent, so no session waits for one.
+Anything older, or cut, is read through its tools.
+
+The brief is written while the agent starts, not after: it reads only the
+records and the copies, so the person's first words wait for whichever takes
+longer, which is the agent. On a store a tenth the person's size it takes
+about 20 ms (`responsiveness.bench.ts`).
+
+**What its repositories tell agents.** The coordinator's agent loads no
+settings file from a repository, so no hook or permission of the repository's
+reaches it, and it would load no `AGENTS.md` or `CLAUDE.md` either. So Althar
+reads them from the coordinator's copies and puts them in its brief: the
+repository root's, and the project's folder's where the project is one folder
+of its repository. Only a regular file inside the copy is read, never a link.
+An import on a line of its own (`@AGENTS.md`) is put in place once, and a
+file read already is named instead of said again. Each file is cut at 10,000
+characters and all of them at 20,000, with where the rest is.
 
 ### Handed to a fresh session before it fills
 
@@ -300,10 +324,12 @@ conversation may not survive it. So Althar hands the coordinator over first
   `project_overview` gives it, the notes, every open task (where it stands,
   who leads it and what waits on the person; for the newest 25, its plan and
   what its lead last reported too; asides apart and uncounted, with what of
-  each waits on the person and its last report), and
-  the conversation's last twelve messages, word for word, but for what waits
-  for its first turn, which that turn says. Each part is bounded; a message
-  longer than a part comes in parts, so `read_thread` reaches all of it.
+  each waits on the person and its last report), the tasks finished last,
+  what the repositories tell agents, and the conversation's last twelve
+  messages, word for word, but for what waits for its first turn, which that
+  turn says, with the earlier conversation in short before them. Each part is
+  bounded; a message longer than a part comes in parts, so `read_thread`
+  reaches all of it.
 - **What the person sees:** a quiet line in the thread, "Started a fresh
   session; picked up 3 open tasks." The thread is Althar's record, so the
   whole conversation stays there to scroll.
@@ -324,8 +350,9 @@ with its record; a removed one keeps its row.
 ### The compaction seam
 
 Althar hands the coordinator over before its agent compacts, and a brief
-uses the records, the notes, the last messages and the tools. Althar writes
-no summaries yet.
+uses the records, the notes, the last messages, the earlier ones in short and
+the tools. The short part is cut from the record, not written by a model:
+Althar writes no summaries yet.
 
 Continuous compaction will write summaries as records:
 

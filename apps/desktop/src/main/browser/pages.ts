@@ -624,9 +624,10 @@ export const startPages = (options: PagesOptions) => {
   const pin = async (page: Page) => {
     const here = page.contents.getURL()
     const shown = page.pins.filter((one) => one.address === here).map(({ n, selector }) => ({ n, selector }))
-    if (shown.length === 0 && !page.pinned) return
+    if (shown.length === 0 && !page.pinned) return null
     page.pinned = shown.length > 0
-    await call(page, `pins(${JSON.stringify(shown)})`)
+    const found = await call<ReadonlyArray<number>>(page, `pins(${JSON.stringify(shown)})`)
+    return page.contents.isDestroyed() || page.contents.getURL() !== here ? null : { address: here, found }
   }
 
   /** Takes the view off its window, where that window is still there to take it from. */
@@ -1807,16 +1808,22 @@ export const startPages = (options: PagesOptions) => {
     /** The comments' pins, drawn on the page each was made on whenever it shows. */
     pins: (ownerId: string, pins: ReadonlyArray<PagePin>) => {
       const page = live(ownerId)
-      if (page === null) return
+      if (page === null) return Promise.resolve(null)
       page.pins = pins
-      void pin(page).catch(() => undefined)
+      return pin(page).catch(() => null)
     },
     /** An element found again, brought into view, with a picture of the page to write over: going back to its page first where it is elsewhere. */
     find: async (ownerId: string, selector: string, address: string): Promise<Pointed | null> => {
       const page = live(ownerId)
       if (page === null || page.panel === null) return null
-      if (page.contents.getURL() !== address && navigation(address).kind === 'go')
-        await page.contents.loadURL(address).catch(() => undefined)
+      if (page.contents.getURL() !== address) {
+        if (navigation(address).kind !== 'go') return null
+        const loaded = await page.contents.loadURL(address).then(
+          () => true,
+          () => false,
+        )
+        if (!loaded || page.contents.getURL() !== address) return null
+      }
       const found = pickedOf(await call<unknown>(page, `find(${JSON.stringify(selector)})`).catch(() => null))
       return found === null ? null : pictureOf(page, found)
     },

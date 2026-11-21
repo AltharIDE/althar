@@ -6,7 +6,8 @@ import type { Host } from '../../data/services'
 import { useServices } from '../../data/services'
 import { ConnectHome } from './ConnectHome'
 import { ManageHomes } from './ManageHomes'
-import { homesUi, livenessOf, openedAgo, useHomesOverview, useHomeState, useHomesUi } from './useHomes'
+import { SetupChip } from './SetUp'
+import { homesUi, livenessOf, openedAgo, useHomeSetup, useHomesOverview, useHomeState, useHomesUi } from './useHomes'
 import s from './Homes.module.css'
 
 /*
@@ -34,7 +35,7 @@ function HomesMenu({
 }) {
   const { menu } = useHomesUi()
   const saved = overview?.homes ?? []
-  const remote = here.current.kind === 'ssh' ? here.current.home : null
+  const remote = here.current.kind !== 'local' ? here.current.home : null
   // A window on a home since forgotten stays on it: the menu still names it, as this window's.
   const listed: ReadonlyArray<RemoteHome> = remote !== null && !saved.some((home) => home.id === remote.id) ? [remote, ...saved] : saved
   const hint = (home: RemoteHome | 'local') => {
@@ -58,7 +59,7 @@ function HomesMenu({
           <MenuItem
             icon="reload"
             {...(here.problem === undefined ? {} : { description: here.problem })}
-            onSelect={() => void homes.reconnect()}
+            onSelect={() => void homes.reconnect().catch(() => undefined)}
           >
             Reconnect
           </MenuItem>
@@ -66,7 +67,7 @@ function HomesMenu({
         </>
       )}
       <MenuGroup label="Homes">
-        <MenuItem lead={<Icon name="computer" />} hint={hint('local')} onSelect={() => void homes.open('local')}>
+        <MenuItem lead={<Icon name="computer" />} hint={hint('local')} onSelect={() => void homes.open('local').catch(() => undefined)}>
           This computer
         </MenuItem>
         {listed.map((home) => (
@@ -74,8 +75,8 @@ function HomesMenu({
             key={home.id}
             lead={<Icon name="home" />}
             hint={hint(home)}
-            description={<span className={s.target}>{home.ssh.target}</span>}
-            onSelect={() => void homes.open(home.id)}
+            description={<span className={s.target}>{home.ssh?.target ?? home.https?.origin ?? ''}</span>}
+            onSelect={() => void homes.open(home.id).catch(() => undefined)}
           >
             {home.name}
           </MenuItem>
@@ -103,6 +104,8 @@ export function HomeButton() {
 export function Chip({ homes }: { homes: HomesHost }) {
   const here = useHomeState(homes)
   const overview = useHomesOverview(homes)
+  const setup = useHomeSetup(homes)
+  const { dialog } = useHomesUi()
   const drawn = here !== null
   useEffect(() => {
     if (!drawn) return
@@ -110,20 +113,29 @@ export function Chip({ homes }: { homes: HomesHost }) {
     return () => homesUi.set({ chips: homesUi.get().chips - 1, menu: false })
   }, [drawn])
   if (here === null || !drawn) return null
+  // A home being set up with its dialog closed: where it's got to, beside the chip, and a press brings it back.
+  const setting =
+    setup !== null && dialog !== 'connect' ? (
+      <SetupChip setup={setup} onShow={() => homesUi.set({ dialog: 'connect', menu: false })} />
+    ) : null
   if (here.current.kind === 'local')
     return (
-      <HomesMenu
-        homes={homes}
-        here={here}
-        overview={overview}
-        trigger={<ChromeButton icon="plug" label="Homes" kbd={SHORTCUT} compact />}
-      />
+      <span className={s.chipRow}>
+        {setting}
+        <HomesMenu
+          homes={homes}
+          here={here}
+          overview={overview}
+          trigger={<ChromeButton icon="plug" label="Homes" kbd={SHORTCUT} compact />}
+        />
+      </span>
     )
   const { home } = here.current
   const down = here.connection === 'disconnected'
   const connecting = here.connection === 'connecting'
   return (
     <span className={s.chipRow}>
+      {setting}
       <HomesMenu
         homes={homes}
         here={here}
@@ -133,8 +145,8 @@ export function Chip({ homes }: { homes: HomesHost }) {
             type="button"
             className={s.chip}
             data-down={down || undefined}
-            title={home.ssh.target}
-            aria-label={`${home.name}, ${down ? 'disconnected' : connecting ? 'reconnecting' : 'over SSH'}. Homes`}
+            title={home.ssh?.target ?? home.https?.origin ?? ''}
+            aria-label={`${home.name}, ${down ? 'disconnected' : connecting ? 'reconnecting' : home.https === undefined ? 'over SSH' : 'connected'}. Homes`}
           >
             {connecting ? <Spinner size="small" /> : <Icon name={down ? 'unlinked' : 'home'} size={13} />}
             <span className={s.chipName}>{home.name}</span>
@@ -176,7 +188,8 @@ export function HomeConnections({ host }: { host: Host; ready?: boolean }) {
   }, [host.homes, overview])
   if (host.homes === undefined) return null
   const close = () => homesUi.set({ dialog: null })
-  if (dialog === 'connect') return <ConnectHome homes={host.homes} onClose={close} />
+  if (dialog === 'connect')
+    return <ConnectHome homes={host.homes} first={overview !== null && overview.homes.length === 0} onClose={close} />
   if (dialog === 'manage')
     return (
       <ManageHomes

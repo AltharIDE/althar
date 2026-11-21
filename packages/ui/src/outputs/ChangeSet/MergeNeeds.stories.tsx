@@ -5,6 +5,7 @@ import { PR_416, GITHUB } from '../../fixtures/outputs'
 import { OPUS } from '../../fixtures/models'
 import { ChangeState, CheckState } from '../../foundations/vocabulary'
 import { Button } from '../../primitives/Button/Button'
+import { MergeButton } from '../../primitives/MergeButton/MergeButton'
 import type { ChangeCheck } from '../../primitives/Checks/Checks'
 import { ChangeSet } from './ChangeSet'
 import { type MergeNeed, MergeNeeds } from './MergeNeeds'
@@ -187,6 +188,62 @@ export const OnTheCardAlone: StoryObj<typeof ChangeSet> = {
         </Button>
       }
       onReviewDiff={fn()}
+    />
+  ),
+}
+
+/** In the merge queue: the card's header, its rows (the first with an optional check failed, folded, opening) and Merge options, one rhythm down. */
+export const InTheQueue: StoryObj<typeof ChangeSet> = {
+  decorators: [(Story) => <div style={{ width: 380 }}>{Story()}</div>],
+  render: () => (
+    <ChangeSet
+      state={ChangeState.Queued}
+      host={GITHUB}
+      prs={[PR_416[0]!]}
+      checks={[
+        { id: 'test', name: 'test', state: CheckState.Passed },
+        { id: 'a', name: 'e2e (linux)', state: CheckState.Failed },
+        { id: 'b', name: 'e2e (windows)', state: CheckState.Failed },
+        { id: 'c', name: 'coverage', state: CheckState.Failed },
+        { id: 'd', name: 'package', state: CheckState.Failed },
+      ]}
+      needs={[
+        {
+          kind: 'checks',
+          state: 'met',
+          have: 1,
+          need: 1,
+          required: ['test'],
+          apart: { passed: 0, failed: ['e2e (linux)', 'e2e (windows)', 'coverage', 'package'], running: 0 },
+        },
+        { kind: 'approvals', state: 'met', who: ['kimi'] },
+        { kind: 'conflicts', state: 'met' },
+      ]}
+      target="main"
+      review={{ state: CheckState.Passed, by: [OPUS] }}
+      actions={<MergeButton standing="queued" onBypassQueue={fn()} />}
+    />
+  ),
+}
+
+/** A long requirement that wraps, with no chevron, over another row: its extra lines push the next row down, as a row holds what it says. */
+export const WrappedLine: StoryObj<typeof ChangeSet> = {
+  decorators: [(Story) => <div style={{ width: 300 }}>{Story()}</div>],
+  render: () => (
+    <ChangeSet
+      state={ChangeState.Ready}
+      host={GITHUB}
+      prs={[PR_416[0]!]}
+      needs={[
+        {
+          kind: 'other',
+          state: 'unmet',
+          said: 'GitHub holds it back until the release-train/2026-11-long-lived-branch protection rule passes',
+        },
+        { kind: 'approvals', state: 'unmet', have: 0, need: 1 },
+      ]}
+      target="main"
+      actions={<Button variant="signal">Accept and merge</Button>}
     />
   ),
 }

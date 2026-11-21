@@ -15,11 +15,21 @@ import type { HostReleases } from './releases'
  */
 
 /** Every product Althar has, or will have, an adapter for. Cloud and Data Center are separate products. */
-export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export const Product = Schema.Literals([
+  'github',
+  'gitlab',
+  'bitbucket_cloud',
+  'bitbucket_dc',
+  'linear',
+  'jira_cloud',
+  'jira_dc',
+  'trello',
+  'clickup',
+])
 export type Product = typeof Product.Type
 
 /** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
-export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello', 'clickup'])
 export type Service = typeof Service.Type
 
 /** Someone on the service: a person, or a bot such as CI. */
@@ -63,6 +73,22 @@ export const Repository = Schema.Struct({
   canPush: Schema.Boolean,
   /** How the repository lets changes be merged, as its settings say, in the order Althar prefers them. */
   merges: Schema.Array(MergeMethod),
+  /**
+   * The repository it was forked from, by its path on the same host, and the addresses the host gives to clone it by, where it
+   * gives them; with the repository at the root of its forks, where the host says it (GitHub's `source`, the parent itself where
+   * that is no fork). Null where the host says it is no fork; absent where the host doesn't say, or the read didn't ask.
+   */
+  parent: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        path: Schema.Array(Schema.String),
+        addresses: Schema.optional(Schema.Array(Schema.String)),
+        source: Schema.optional(
+          Schema.Struct({ path: Schema.Array(Schema.String), addresses: Schema.optional(Schema.Array(Schema.String)) }),
+        ),
+      }),
+    ),
+  ),
 })
 export type Repository = typeof Repository.Type
 
@@ -140,6 +166,8 @@ export const ChangeRequest = Schema.Struct({
    * repository's own; absent where the host doesn't say, as a list may not.
    */
   headRepository: Schema.optional(Schema.NullOr(Schema.Array(Schema.String))),
+  /** Whether the author lets maintainers of the target repository push to the source branch. */
+  maintainerEdits: Schema.optional(Schema.Boolean),
   /**
    * Whether it is in its target branch's merge queue, which merges it once
    * the queue's own checks pass on that branch as it will be: true as a
@@ -419,7 +447,7 @@ export interface HostCapabilities {
   /**
    * A change Althar didn't open can be read for review, with whether its
    * author is one of the repository's people and the fork it comes from, and
-   * a review posted on it with comments on its lines. Only GitHub's, for now.
+   * a review posted on it with comments on its lines.
    */
   readonly reviews: boolean
   /**

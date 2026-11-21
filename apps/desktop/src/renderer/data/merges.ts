@@ -29,6 +29,19 @@ const KEY = ['merge'] as const
 /** How long a merge that went through shows as merging while its pull request still reads open: the runtime asks its host for that long. */
 export const LANDS_WITHIN = 60_000
 
+/**
+ * How long Merge answers its press on its own before a merge bound for its
+ * branch's queue shows in it: its check drawn in, it goes up into the queue.
+ * The press plays through at once, as the UI is instant: not when the host
+ * has answered, nor when the window next reads the pull request. Refused, it
+ * is the person's again, saying why.
+ */
+export const QUEUES_AFTER = 600
+
+/** Whether merging a pull request puts it in its branch's merge queue, as its host last said: there, the queue is how it merges. */
+export const mergesThroughQueue = (change: Pick<ChangeSummary, 'needs'> | null | undefined): boolean =>
+  change?.needs?.some((need) => need.kind === 'merge_queue') === true
+
 /** A merge as the person asked it: a task's pull request at `url`, at the head they saw. */
 export interface Merge {
   readonly taskId: string
@@ -60,6 +73,8 @@ export interface Merging {
   readonly failed: Readonly<Record<string, string>>
   /** Of those merging, the tasks whose merge was pressed without its pull request's address: by its head, so its shown one's. */
   readonly unaddressed: ReadonlySet<string>
+  /** Of those merging, the tasks going into their branch's merge queue, shown there from just after the press (`QUEUES_AFTER`). */
+  readonly queuing: ReadonlySet<string>
 }
 
 interface Pressed {
@@ -102,11 +117,16 @@ const usePressed = (keyOf: (one: Pressed) => string | undefined): { last: Readon
       ),
     [pressed, keyOf],
   )
-  const landing = [...last.values()].filter((one) => one.status === 'success' && one.at + LANDS_WITHIN > now)
-  const next = landing.length === 0 ? null : Math.min(...landing.map((one) => one.at + LANDS_WITHIN))
+  // And as each press under way has answered for itself long enough to go up into its merge queue, where it goes into one.
+  const ends = [...last.values()].flatMap((one) => [
+    ...(one.status === 'success' && one.at + LANDS_WITHIN > now ? [one.at + LANDS_WITHIN] : []),
+    ...((one.status === 'pending' || one.status === 'success') && one.at + QUEUES_AFTER > now ? [one.at + QUEUES_AFTER] : []),
+  ])
+  const next = ends.length === 0 ? null : Math.min(...ends)
   useEffect(() => {
     if (next === null) return
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, next - Date.now()))
+    // At least the time it waited for: a timer may fire a moment early by the clock, and the same end would set none again.
+    const timer = setTimeout(() => setNow(Math.max(Date.now(), next)), Math.max(0, next - Date.now()))
     return () => clearTimeout(timer)
   }, [next])
   return { last, now }
@@ -115,8 +135,38 @@ const usePressed = (keyOf: (one: Pressed) => string | undefined): { last: Readon
 const byTask = (one: Pressed) => one.taskId
 const byUrl = (one: Pressed) => one.url
 
-/** A pull request's merge under way, wherever in the window it was pressed: a bypass of its queue, or a merge. */
-export type Pressing = 'merge' | 'bypass'
+/** A pull request's merge under way, wherever in the window it was pressed: a bypass of its queue, a merge, or one going into its queue. */
+export type Pressing = 'merge' | 'bypass' | 'queue'
+
+/** A press, the same wherever in the window it is read: its task and when it was pressed. */
+const pressOf = (one: Pressed) => `${one.taskId} ${one.at}`
+
+/**
+ * The presses whose pull request a read has said is in its merge queue,
+ * window-wide: from then on the reads say where it stands, so one the queue
+ * takes out again is out, not shown in it or merging still.
+ */
+const confirmed = new Set<string>()
+
+/** Whether a read has said `one`'s pull request is in its queue, noting it where `change`, its read now, says so. */
+const confirmedQueued = (one: Pressed, change: Pick<ChangeSummary, 'state' | 'queued'> | undefined): boolean => {
+  if (one.bypass) return false
+  if (change?.state === 'open' && change.queued === true) confirmed.add(pressOf(one))
+  return confirmed.has(pressOf(one))
+}
+
+/**
+ * Whether a merge under way shows in its branch's merge queue already: one
+ * that goes through the queue, as its host last said, once Merge has
+ * answered its press, until a read says it is queued itself, or merged.
+ */
+const queuing = (one: Pressed, change: Pick<ChangeSummary, 'state' | 'queued' | 'needs'> | undefined, now: number) =>
+  !one.bypass &&
+  one.lands &&
+  change?.state === 'open' &&
+  mergesThroughQueue(change) &&
+  one.at + QUEUES_AFTER <= now &&
+  !confirmedQueued(one, change)
 
 /**
  * The pull requests, by address, whose merge is under way wherever in the
@@ -126,7 +176,7 @@ export type Pressing = 'merge' | 'bypass'
  * twice, whichever screen is open.
  */
 export const usePressedMerges = (
-  changes: ReadonlyArray<Pick<ChangeSummary, 'url' | 'state' | 'queued'>> | null,
+  changes: ReadonlyArray<Pick<ChangeSummary, 'url' | 'state' | 'queued' | 'needs'>> | null,
 ): ReadonlyMap<string, Pressing> => {
   const { last, now } = usePressed(byUrl)
   return useMemo(() => {
@@ -134,17 +184,33 @@ export const usePressedMerges = (
     const under = new Map<string, Pressing>()
     for (const [url, one] of last) {
       const change = read.get(url)
-      // Gone through, it lands while it still reads open: in its queue already, only a bypass is still landing.
-      const landing =
-        one.status === 'success' &&
-        one.lands &&
-        one.at + LANDS_WITHIN > now &&
-        change?.state === 'open' &&
-        (change.queued !== true || one.bypass)
-      if (one.status === 'pending' || landing) under.set(url, one.bypass ? 'bypass' : 'merge')
+      // Once read in its queue, the reads say where it stands, though Merge hasn't answered yet: taken out again, it is out.
+      if (confirmedQueued(one, change)) continue
+      // Gone through, it lands while it still reads open.
+      const landing = one.status === 'success' && one.lands && one.at + LANDS_WITHIN > now && change?.state === 'open'
+      if (one.status === 'pending' || landing) under.set(url, one.bypass ? 'bypass' : queuing(one, change, now) ? 'queue' : 'merge')
     }
     return under
   }, [last, changes, now])
+}
+
+/**
+ * The pull requests, by address, a read has said were in their merge queue
+ * since their merge was pressed, and says now are open and out of it: the
+ * queue took them out, so they are the person's to merge again, though the
+ * press may not have answered yet.
+ */
+export const useTakenOut = (changes: ReadonlyArray<Pick<ChangeSummary, 'url' | 'state' | 'queued'>> | null): ReadonlySet<string> => {
+  const { last } = usePressed(byUrl)
+  return useMemo(() => {
+    const read = new Map((changes ?? []).map((change) => [change.url, change]))
+    return new Set(
+      [...last].flatMap(([url, one]) => {
+        const change = read.get(url)
+        return change?.state === 'open' && change.queued !== true && confirmedQueued(one, change) ? [url] : []
+      }),
+    )
+  }, [last, changes])
 }
 
 const WAITS = ['merge-waits'] as const
@@ -197,14 +263,18 @@ export const useMerging = (tasks: ReadonlyArray<Pick<BoardTask, 'taskId' | 'chan
     }
     const merging = new Set<string>()
     const unaddressed = new Set<string>()
+    const queued = new Set<string>()
     const failed: Record<string, string> = {}
     for (const one of last.values()) {
+      // Read in its queue, the queue has it: the reads say where it stands from then on, Merge answered or not.
+      if (landing(one) && confirmedQueued(one, open.get(one.taskId))) continue
       if (one.status === 'pending') merging.add(one.taskId)
       else if (one.status === 'success' && one.lands && landing(one) && one.at + LANDS_WITHIN > now) merging.add(one.taskId)
       else if (one.status === 'error') failed[one.taskId] = messageOf(one.error)
+      if (merging.has(one.taskId) && landing(one) && queuing(one, open.get(one.taskId), now)) queued.add(one.taskId)
     }
     for (const one of last.values()) if (one.url === undefined && merging.has(one.taskId)) unaddressed.add(one.taskId)
-    return { merging, failed, unaddressed }
+    return { merging, failed, unaddressed, queuing: queued }
   }, [last, tasks, now])
 }
 
@@ -222,11 +292,13 @@ export const mergeStandingOf = (
   merging: boolean,
   /** The merge under way bypasses its queue: Merging, though it still reads queued, so nothing offers the bypass again. */
   bypassing = false,
+  /** The merge under way goes into its queue, its press answered: in the queue already, before the runtime reads it so. */
+  queuing = false,
 ): MergeStanding | null => {
   if (change == null) return merging ? 'merging' : null
   if (change.state === 'merged') return 'merged'
   if (change.state !== 'open') return null
-  if (change.queued === true && !(merging && bypassing)) return 'queued'
+  if ((change.queued === true || (merging && queuing)) && !(merging && bypassing)) return 'queued'
   return merging ? 'merging' : null
 }
 
@@ -239,9 +311,14 @@ export const MERGE_QUEUE_STEP = 'merge_queue'
 /**
  * Tasks as the board and the home place them: one ready whose merge is under
  * way, or whose pull request is in its merge queue, is at work, out of Needs
- * you, until it is settled or the queue takes it out.
+ * you, until it is settled or the queue takes it out. One of `queuing`, going
+ * into its queue, is in it from just after the press.
  */
-export const asMerging = <T extends BoardTask>(tasks: ReadonlyArray<T>, merging: ReadonlySet<string>): ReadonlyArray<T> =>
+export const asMerging = <T extends BoardTask>(
+  tasks: ReadonlyArray<T>,
+  merging: ReadonlySet<string>,
+  queuing: ReadonlySet<string> = new Set(),
+): ReadonlyArray<T> =>
   merging.size === 0 && !tasks.some(queuedToMerge)
     ? tasks
     : tasks.map((task) =>
@@ -250,7 +327,7 @@ export const asMerging = <T extends BoardTask>(tasks: ReadonlyArray<T>, merging:
             {
               ...task,
               phase: 'running',
-              step: queuedToMerge(task) ? MERGE_QUEUE_STEP : MERGING_STEP,
+              step: queuedToMerge(task) || (merging.has(task.taskId) && queuing.has(task.taskId)) ? MERGE_QUEUE_STEP : MERGING_STEP,
               queued: null,
               waits: null,
               reconnects: null,

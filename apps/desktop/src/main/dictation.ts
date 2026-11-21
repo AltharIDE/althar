@@ -80,7 +80,12 @@ export function startDictation(options: DictationOptions) {
   let got = 0
   const waiting = new Map<
     string,
-    { readonly type: string; readonly resolve: (value: unknown) => void; readonly reject: (error: Error) => void }
+    {
+      readonly type: string
+      readonly child: UtilityProcess
+      readonly resolve: (value: unknown) => void
+      readonly reject: (error: Error) => void
+    }
   >()
   /* Set while the model is being removed: nothing starts a speech process or reads the model until it's done. */
   let removing: Promise<void> | undefined
@@ -94,7 +99,8 @@ export function startDictation(options: DictationOptions) {
   const rest = () => {
     clearTimeout(idle)
     idle = setTimeout(() => {
-      if (!downloading && waiting.size === 0) child?.kill()
+      // Stop handing work to this process as soon as it is told to go.
+      if (!downloading && waiting.size === 0 && child?.kill()) child = undefined
     }, IDLE)
   }
 
@@ -108,11 +114,14 @@ export function startDictation(options: DictationOptions) {
     started.on('message', (message: SpeechMessage) => {
       if (message.type === 'answer' && message.id !== undefined) {
         const settle = waiting.get(message.id)
+        if (settle?.child !== started) return
         waiting.delete(message.id)
-        if (message.error === undefined) settle?.resolve(message.value)
-        else settle?.reject(new Error(message.error))
-        return rest()
+        if (message.error === undefined) settle.resolve(message.value)
+        else settle.reject(new Error(message.error))
+        if (child === started) rest()
+        return
       }
+      if (child !== started) return
       if (message.type === 'progress' && typeof message.got === 'number') got = message.got
       if (message.type === 'downloaded' || message.type === 'stopped') {
         downloading = false
@@ -122,10 +131,13 @@ export function startDictation(options: DictationOptions) {
       broadcast(message)
     })
     started.once('exit', () => {
-      if (child === started) child = undefined
-      if (downloading) broadcast({ type: 'stopped', stop: { reason: 'network' }, got, size: sizeOf(PARAKEET) })
-      downloading = false
+      if (child === started) {
+        child = undefined
+        if (downloading) broadcast({ type: 'stopped', stop: { reason: 'network' }, got, size: sizeOf(PARAKEET) })
+        downloading = false
+      }
       for (const [id, settle] of waiting) {
+        if (settle.child !== started) continue
         waiting.delete(id)
         settle.reject(new Error('The speech process stopped.'))
       }
@@ -138,8 +150,14 @@ export function startDictation(options: DictationOptions) {
     await removing
     return new Promise<unknown>((resolve, reject) => {
       const id = randomUUID()
-      waiting.set(id, { type, resolve, reject })
-      speech().postMessage({ id, type, ...extra })
+      const running = speech()
+      waiting.set(id, { type, child: running, resolve, reject })
+      try {
+        running.postMessage({ id, type, ...extra })
+      } catch (error) {
+        waiting.delete(id)
+        throw error
+      }
       rest()
     })
   }

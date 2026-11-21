@@ -2,10 +2,12 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import {
+  CLAUDE_AHEAD,
   CLAUDE_PLENTY,
   CLAUDE_RESETS,
   CLAUDE_TWO,
   CLAUDE_UNREAD,
+  CODEX_BEHIND,
   CODEX_NEARLY,
   CODEX_PLENTY,
   CODEX_SIGNED_OUT,
@@ -51,12 +53,13 @@ export const NearlyOut: Story = {
   },
 }
 
-/** Opened: the level and a row per agent, least room first. */
+/** Opened: a row per agent, least room first. */
 export const Open: Story = {
   args: { agents: [CODEX_NEARLY, CLAUDE_TWO], defaultOpen: true },
   play: async () => {
     const page = within(document.body)
-    await expect(page.getByText('Codex is nearly out')).toBeInTheDocument()
+    await expect(page.getByText('Plan usage', { selector: 'h2' })).toBeInTheDocument()
+    await expect(page.queryByText('Codex is nearly out')).toBeNull()
     await expect(page.getByText('Personal · Weekly limit · until Fri 09:00')).toBeInTheDocument()
     // An agent opens in place to every account and window, an old one saying so.
     await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
@@ -76,7 +79,6 @@ export const SignedOut: Story = {
     await expect(
       within(canvasElement).getByRole('button', { name: 'Plan usage: Claude Code has 62% left, until 17:00' }),
     ).toBeInTheDocument()
-    await expect(page.getByText('Plenty left')).toBeInTheDocument()
     await userEvent.click(page.getByRole('button', { name: 'Sign in again' }))
     await expect(args.onSignIn).toHaveBeenCalledWith(CODEX_SIGNED_OUT.id)
     // Its saved numbers stay in its detail, with why it runs nothing.
@@ -91,7 +93,6 @@ export const AllSignedOut: Story = {
   args: { agents: [CODEX_OUT], defaultOpen: true, onSignIn: fn() },
   play: async ({ canvasElement }) => {
     await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Codex can’t start work' })).toBeInTheDocument()
-    await expect(within(document.body).getByText('Codex can’t start work')).toBeInTheDocument()
     await expect(within(document.body).queryByText('Plenty left')).toBeNull()
   },
 }
@@ -139,11 +140,13 @@ export const AllUnread: Story = {
   },
 }
 
-/** Nothing read yet: the gauge unlit, and the peek says so. */
+/** Nothing read yet: the gauge unlit and named so, and the peek is its heading alone. */
 export const NothingRead: Story = {
   args: { agents: [], defaultOpen: true },
-  play: async () => {
-    await expect(within(document.body).getByText('Nothing read yet')).toBeInTheDocument()
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Plan usage: Nothing read yet' })).toBeInTheDocument()
+    await expect(within(document.body).getByText('Plan usage', { selector: 'h2' })).toBeInTheDocument()
+    await expect(within(document.body).queryByText('Nothing read yet')).toBeNull()
   },
 }
 
@@ -163,7 +166,6 @@ export const OpenCodeGoConnected: Story = {
   args: { agents: [CLAUDE_PLENTY, OPENCODE_GO_CONNECTED], defaultOpen: true },
   play: async () => {
     const page = within(document.body)
-    await expect(page.getByText('Plenty left')).toBeInTheDocument()
     await expect(page.getByText('Connected')).toBeInTheDocument()
     await userEvent.click(page.getByRole('button', { name: /^OpenCode Go/ }))
     await expect(page.getByText(/only through an OpenCode Console sign-in/)).toBeInTheDocument()
@@ -176,5 +178,25 @@ export const OpenCodeGoSignIn: Story = {
   play: async ({ args }) => {
     await userEvent.click(within(document.body).getByRole('button', { name: 'Sign in again' }))
     await expect(args.onSignIn).toHaveBeenCalledWith('opencode')
+  },
+}
+
+/** A tick on each bar at the share of the window still to come: the fill ends on it at an even pace, runs past it ahead of pace (Claude's week, 65% left of a week 40% gone) and stops short of it behind (Codex's week, 20% left of a week 70% gone; Claude's Opus week, 50% left at 40%). */
+export const Pace: Story = {
+  args: { agents: [CODEX_BEHIND, CLAUDE_AHEAD], defaultOpen: true },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getAllByTitle('40% of the way through').length).toBeGreaterThan(0)
+    await expect(page.getAllByTitle('70% of the way through').length).toBeGreaterThan(0)
+    await userEvent.click(page.getByRole('button', { name: /^Claude Code/ }))
+    await expect(page.getAllByTitle('30% of the way through').length).toBe(1)
+  },
+}
+
+/** No window known (no start or reset): no tick, and the bars are as they were. */
+export const NoWindowKnown: Story = {
+  args: { agents: [CLAUDE_RESETS, CODEX_PLENTY], defaultOpen: true },
+  play: async () => {
+    await expect(within(document.body).queryByTitle(/of the way through/)).toBeNull()
   },
 }

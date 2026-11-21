@@ -16,6 +16,7 @@ import { newProjectId } from '../src/renderer/data/client'
 import { makeQueryClient } from '../src/renderer/data/reads'
 import type { FoundRepositories } from '../src/renderer/data/services'
 import { draftActions, draftsOf } from '../src/renderer/features/newProject/draft'
+import { unsent } from '../src/renderer/features/elsewhere/unsent'
 import { NewProjectView } from '../src/renderer/features/newProject/NewProjectView'
 import { useNewProject } from '../src/renderer/features/newProject/useNewProject'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -145,6 +146,25 @@ const way = (name: RegExp) => within(screen.getByRole('radiogroup', { name: 'Whe
 const named = async (name: string) => userEvent.type(screen.getByRole('textbox', { name: 'Name' }), name)
 const create = (name: string) => userEvent.click(screen.getByRole('button', { name: new RegExp(`^Create ${name}`) }))
 
+/** A worktree Conductor left in a folder chosen for a new project. */
+const LIMA = {
+  key: 'worktree:/Users/me/conductor/workspaces/tidepool/lima',
+  tool: 'conductor' as const,
+  repositoryId: '/Users/me/code/tidepool',
+  repository: 'tidepool',
+  path: '/Users/me/conductor/workspaces/tidepool/lima',
+  branch: 'feature/lima',
+  name: 'lima',
+  uncommitted: 1,
+  unpushed: 0,
+  ahead: 1,
+  pullRequest: null,
+  archived: false,
+  lastAt: null,
+  conversations: [],
+  taskId: null,
+}
+
 describe('a new project’s three ways in', () => {
   it('starts on Clone, with each code host to connect where none is, and a folder or a new repository one press away', async () => {
     opened()
@@ -224,6 +244,63 @@ describe('a new project from a folder', () => {
     await waitFor(() => expect(client.openProject).toHaveBeenCalled())
     expect(client.prepareFolder).toHaveBeenCalledWith('grant_empty', '/Users/me/code/empty')
     expect(client.prepareFolder).toHaveBeenCalledWith('grant_unborn', UNBORN.path)
+  })
+
+  it('shows what other tools left in its folders, nothing taken, and brings in what was taken once it is made', async () => {
+    const lima = LIMA
+    const { client, onCreated } = opened(
+      { lookElsewhere: vi.fn(async () => ({ worktrees: [lima], setups: [], conversations: [] })) },
+      { pickFolders: vi.fn(async () => ['grant_local']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    const found = await screen.findByRole('region', { name: 'Already under way' })
+    expect(client.lookElsewhere).toHaveBeenCalledWith({ grant: 'grant_local' })
+    await userEvent.click(within(found).getByRole('button', { name: /^Conductor/ }))
+    expect(await screen.findByText('Then bring in 1 worktree.')).toBeTruthy()
+    await create('Tidepool')
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    expect(client.bringIn).toHaveBeenCalledWith({
+      projectId: onCreated.mock.calls[0]?.[0],
+      worktrees: [lima.key],
+      setups: [],
+      conversations: [],
+      steps: [],
+    })
+  })
+
+  it('opens the project at once though bringing in is refused, leaving the project’s conversation to say so', async () => {
+    const unhandled: Array<unknown> = []
+    const note = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', note)
+    const asked: Array<string> = []
+    const { onCreated } = opened(
+      {
+        lookElsewhere: vi.fn(async () => ({ worktrees: [LIMA], setups: [], conversations: [] })),
+        // Not a mock, which would handle what it returns itself: refused, as the runtime gone would.
+        bringIn: (input: { readonly projectId: string }) => {
+          asked.push(input.projectId)
+          return Promise.reject(new Error('The runtime went away.'))
+        },
+      },
+      { pickFolders: vi.fn(async () => ['grant_local']) },
+    )
+    await named('Tidepool')
+    await userEvent.click(way(/^A folder/))
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a folder…' }))
+    const found = await screen.findByRole('region', { name: 'Already under way' })
+    await userEvent.click(within(found).getByRole('button', { name: /^Conductor/ }))
+    await create('Tidepool')
+    await waitFor(() => expect(onCreated).toHaveBeenCalled())
+    // Refused, and caught: nothing is left unhandled, and the tab has gone on to the project.
+    await waitFor(() => expect(asked).toHaveLength(1))
+    await new Promise((settled) => setTimeout(settled, 50))
+    process.off('unhandledRejection', note)
+    expect(unhandled).toEqual([])
+    // The runtime never got it, so the window keeps what was picked, for the project's conversation to say with Try again.
+    expect(unsent.of(asked[0] ?? '')).toMatchObject({ names: expect.arrayContaining(['lima']), worktrees: [expect.any(String)] })
+    unsent.reset()
   })
 
   it('says a folder that is a project already, opens that project from there, and makes no second one', async () => {

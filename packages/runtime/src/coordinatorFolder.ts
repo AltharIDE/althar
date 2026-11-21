@@ -226,6 +226,9 @@ export const freshCopy = (repository: string, path: string, base: string, from =
 /** A turn ending and a replacement session starting can refresh the same copy; neither may remove the other's git folder. */
 const copies = makeKeyedLock()
 
+/** Reads a copy while no refresh of it is under way, so what is read is the copy as checked out, never half of one. */
+export const whileCopyHolds = <A, E, R>(root: string, read: Effect.Effect<A, E, R>) => copies.withLock(resolve(root), read)
+
 /**
  * A copy of `repository` at `path`, detached at `commit`, as `freshCopy`
  * makes one: its git folder made again, borrowing the repository's objects,

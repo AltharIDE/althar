@@ -14,7 +14,7 @@ const unavailable = () =>
     message: 'This home is not ready or its private API is unavailable. Check the host service and its journal.',
   })
 
-export const hostStatus = (profile: string, wait = false) => {
+export const hostStatus = (profile: string, wait = false, projectId?: string) => {
   const attempt = Effect.scoped(
     Effect.gen(function* () {
       const endpoint = yield* Effect.tryPromise({
@@ -37,6 +37,11 @@ export const hostStatus = (profile: string, wait = false) => {
       const api = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
       const info = yield* api.GetConnectionInfo({}).pipe(Effect.mapError(unavailable))
       if (info.identity.homeId !== identity.homeId || info.identity.role !== 'socket') return yield* unavailable()
+      if (projectId !== undefined) {
+        const { projects } = yield* api.ListProjects().pipe(Effect.mapError(unavailable))
+        if (!projects.some(({ id }) => id === projectId))
+          return yield* new HostError({ code: 'InvalidConfig', message: 'Choose a project registered on this home' })
+      }
       return {
         state: 'ready' as const,
         homeId: info.identity.homeId,

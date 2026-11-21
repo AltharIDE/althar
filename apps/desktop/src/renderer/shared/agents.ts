@@ -62,7 +62,7 @@ export const reconnectsWords = (held: HeldForConnection, at: (iso: string) => st
  * that, by what the person started or after they lowered the number, says
  * how many are busy and how many run at a time.
  */
-export const queuedWords = (queued: Queued, where: string = device.this) => `Waiting: ${busyWords(queued, where)}`
+export const queuedWords = (queued: Queued, where: string = device.this) => `Waiting · ${busyWords(queued, where)}`
 
 /** 1 → Next, 2 → 2nd, 3 → 3rd, 11 → 11th. */
 const ordinal = (n: number) => {
@@ -78,9 +78,12 @@ export const inLineWords = (place: number) => `${ordinal(place)} in line`
 /** Where a task waiting for a free agent stands in its project's line, as the chip over its composer says it: First in Up next, 2nd in Up next. */
 export const upNextWords = (place: number) => `${place === 1 ? 'First' : ordinal(place)} in Up next`
 
-/** How busy this computer's agents are, as work that waits for one says it. */
-export const busyWords = ({ busy, atOnce, holders }: Queued, where: string = device.this) => {
-  const count = busy > atOnce ? `${busy} agents busy on ${where}, ${atOnce} at a time` : `${busy} of ${atOnce} agents busy on ${where}`
+/** How busy this computer's agents are, as work that waits for one says it: a count, never the tasks. */
+export const busyWords = ({ busy, atOnce }: Queued, _where: string = device.this) =>
+  busy > atOnce ? `${busy} agents busy, ${atOnce} at a time` : `${busy} ${busy === 1 ? 'agent' : 'agents'} busy`
+
+/** Which tasks hold the agents, for a hover or a click on the wait line; none where Althar doesn't know. */
+export const holdersWords = ({ holders }: Queued): string | undefined => {
   const tasks = new Map<string, { title: string; count: number }>()
   for (const holder of holders ?? []) {
     const task = tasks.get(holder.taskId)
@@ -88,7 +91,7 @@ export const busyWords = ({ busy, atOnce, holders }: Queued, where: string = dev
     else task.count += 1
   }
   const names = [...tasks.values()].map((task) => (task.count > 1 ? `${task.title} (${task.count})` : task.title))
-  return names.length ? `${count}: ${names.join('; ')}` : count
+  return names.length ? names.join('\n') : undefined
 }
 
 /**
@@ -97,7 +100,7 @@ export const busyWords = ({ busy, atOnce, holders }: Queued, where: string = dev
  * project's name.
  */
 export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
-  `${n === 1 ? 'Waiting' : `${n} waiting`}: ${busy > atOnce ? `${busy} agents busy, ${atOnce} at a time` : `${busy} of ${atOnce} agents busy`}`
+  `${n === 1 ? 'Waiting' : `${n} waiting`} · ${busy > atOnce ? `${busy} agents busy, ${atOnce} at a time` : `${busy} ${busy === 1 ? 'agent' : 'agents'} busy`}`
 
 /** What an agent signs in to in the browser, as the window names it: the plan, and the site that asks. */
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {

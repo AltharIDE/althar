@@ -63,6 +63,15 @@ export const answeredIn = (task: string) =>
 export const asideIn = (task: string) => `coalesce(${task}.shelf, '') = 'scratch'`
 
 /**
+ * Whether the task `task` (a table alias) waits on the person in a way a kept row doesn't show, as SQL: a pull request of its
+ * own open, to accept, or commits of a worktree of its held for Ship. Such a task isn't kept for later, nor read as kept.
+ */
+export const keepWaitsIn = (task: string) =>
+  `(EXISTS (SELECT 1 FROM external_links kl WHERE kl.task_id = ${task}.id AND kl.kind = 'change'
+      AND coalesce(json_extract(kl.snapshot, '$.state'), 'open') = 'open')
+    OR EXISTS (SELECT 1 FROM workspaces kw WHERE kw.task_id = ${task}.id AND kw.held_at IS NOT NULL))`
+
+/**
  * Whether the task `task` (a table alias) is a quick task still, as SQL:
  * its latest plan says it stays on this Mac and ends in nothing, and it has
  * no pull request of its own. What makes it plain, as `kindOf` reads it.

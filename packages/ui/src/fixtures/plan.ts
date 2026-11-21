@@ -234,3 +234,48 @@ export const OPENCODE_GO_SIGN_IN: PlanAgent = {
   signIn: true,
   accounts: [{ id: 'opencode-usual', name: null, age: null, fault: 'OpenCode Go needs signing in again.', windows: [] }],
 }
+
+/** 40% through the week with 65% left: use is a little under the clock's pace, so the fill runs past the tick (at the 60% of the week left). */
+export const CLAUDE_AHEAD: PlanAgent = {
+  ...CLAUDE_PLENTY,
+  left: 65,
+  limit: 'weekly limit',
+  until: 'Fri 09:00',
+  elapsed: 40,
+  accounts: [
+    {
+      id: 'claude-work',
+      name: null,
+      age: null,
+      fault: null,
+      windows: [
+        // Even pace: 30% through, 70% left, the fill ends on the tick.
+        { id: 'five_hour', label: '5 hours', left: 70, until: '17:00', elapsed: 30 },
+        { id: 'weekly', label: 'Week', left: 65, until: 'Fri 09:00', elapsed: 40 },
+        // Behind, though much is left: 40% through with 50% left ends the fill before the tick.
+        { id: 'weekly:Opus', label: 'Opus week', left: 50, until: 'Fri 09:00', elapsed: 40 },
+      ],
+    },
+  ],
+}
+
+/** Used faster than the clock: 70% through the week with 20% left, the fill ending well before the tick at 30%. */
+export const CODEX_BEHIND: PlanAgent = {
+  ...CODEX_PLENTY,
+  left: 20,
+  limit: 'weekly limit',
+  until: 'Sun 18:12',
+  elapsed: 70,
+  accounts: [
+    {
+      id: 'codex-work',
+      name: null,
+      age: null,
+      fault: null,
+      windows: [
+        { id: 'five_hour', label: '5 hours', left: 20, until: '18:40', elapsed: 90 },
+        { id: 'weekly', label: 'Week', left: 20, until: 'Sun 18:12', elapsed: 70 },
+      ],
+    },
+  ],
+}

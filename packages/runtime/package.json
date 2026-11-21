@@ -17,7 +17,7 @@
     "./windowActions": "./src/windowActions.ts"
   },
   "scripts": {
-    "check": "vp check",
+    "check": "vp check && bun scripts/check-source-size.ts",
     "fix": "vp check --fix",
     "test": "vp test run",
     "probe:tools": "bun scripts/probe-tools.ts",
@@ -39,6 +39,7 @@
     "effect": "4.0.7",
     "fflate": "0.8.3",
     "jsonc-parser": "3.3.1",
+    "node-pty": "1.1.0",
     "sharp": "^0.35.5"
   },
   "devDependencies": {

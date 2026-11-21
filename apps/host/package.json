@@ -19,14 +19,16 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.107.1",
-    "@agentclientprotocol/codex-acp": "2.6.0",
+    "@agentclientprotocol/claude-agent-acp": "0.108.0",
+    "@agentclientprotocol/codex-acp": "2.7.0",
     "@althar/contracts": "workspace:*",
     "@althar/persistence-sqlite": "workspace:*",
     "@althar/provider-adapters": "workspace:*",
     "@althar/runtime": "workspace:*",
     "@althar/transport-node": "workspace:*",
+    "@althar/worker-protocol": "workspace:*",
     "effect": "4.0.7",
+    "node-pty": "1.1.0",
     "sharp": "^0.35.5",
     "tar": "7.5.22"
   },

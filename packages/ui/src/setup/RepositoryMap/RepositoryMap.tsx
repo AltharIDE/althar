@@ -4,12 +4,12 @@ import { device } from '../../foundations/device'
 import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
-import { ChangeTarget, HostReach, RepositoryRole, unreachable } from '../../foundations/vocabulary'
-import { repositoryRoleText } from '../../foundations/vocabularyText'
+import { ChangeTarget, HostReach, type RepositoryRole, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
 import { Path } from '../../primitives/Path/Path'
+import { BranchSelect } from '../../primitives/BranchSelect/BranchSelect'
 import { Button } from '../../primitives/Button/Button'
 import { below, Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { IconButton } from '../../primitives/IconButton/IconButton'
@@ -36,18 +36,25 @@ export interface MapRepository {
   name: string
   /** Where it is on this device, as the person reads it: ~/code/meridian-app. Without it, it isn't on this device. */
   where?: string
-  /** The branch checked out there. */
+  /** The branch checked out there, said where `toward` isn't given. */
   branch?: string
-  role: RepositoryRole
+  /**
+   * The branch its new tasks start from and open their pull requests into: its
+   * default unless the person chose another, and the branches it could be.
+   */
+  toward?: { branch: string; defaultBranch: string; branches: readonly string[] }
+  /** What it is to the project, kept for agents' briefs; the map doesn't ask it. */
+  role?: RepositoryRole
   /** Tasks under way that change it: they keep it if it is left out. */
   tasks: number
   /** Where its work goes: the host, by its id among the hosts, its path there, and its page. Without it, the work stays here. */
   remote?: { host: string; path: string; href?: string }
   /**
    * The fork it is: the repository it forks, on the same host, by its path there, where its work goes, and whether its host
-   * says the person can push to the repository it forks. Without that, it hasn't said.
+   * says the person can push to the repository it forks. Without that, it hasn't said. `remote` is what its clone calls the
+   * repository it forks, null where none of its remotes is that repository; without it, unsaid.
    */
-  fork?: { upstream: string; target: ChangeTarget; canPush?: boolean }
+  fork?: { upstream: string; target: ChangeTarget; canPush?: boolean; remote?: string | null }
 }
 
 /** A code host the repositories' work goes to. */
@@ -73,10 +80,12 @@ export interface ReadingFolder {
 export interface RepositoryMapText {
   here: string
   there: string
-  roles: Record<RepositoryRole, string>
-  role: (name: string) => string
   /** Before the branch, for a screen reader. */
   branch: string
+  /** The branch picker's name: what the branch is for. */
+  toward: (name: string) => string
+  /** Under its list: what changing it does, and what it leaves. */
+  towardNote: string
   /** Where one is, when it isn't on this device. */
   elsewhere: string
   more: (name: string) => string
@@ -103,7 +112,8 @@ export interface RepositoryMapText {
     signInAgain: string
     unknown: string
   }
-  what: Record<HostReach, string>
+  /** Who opens the pull requests, where it isn't Althar. */
+  what: Record<Exclude<HostReach, HostReach.Connected>, string>
   connect: (host: string) => string
   signInAgain: (host: string) => string
   /** The group for repositories with no remote. */
@@ -121,14 +131,19 @@ export interface RepositoryMapText {
   upstreamBranches: (upstream: string) => string
   /** Where the host says the person can't push to the repository it forks. */
   noPush: (upstream: string) => string
+  /** The repository it forks, where its clone calls it something other than `upstream`. */
+  upstreamAs: (remote: string) => string
+  /** Where none of its clone's remotes is the repository it forks. */
+  noRemote: string
+  addRemote: string
 }
 
 export const repositoryMapText: RepositoryMapText = {
   here: `On ${device.this}`,
   there: 'Where the work goes',
-  roles: repositoryRoleText,
-  role: (name) => `Role of ${name}`,
   branch: 'Checked out:',
+  toward: (name) => `Branch new tasks in ${name} work toward`,
+  towardNote: 'New tasks start from this branch and open their pull requests into it. Tasks already made keep theirs.',
   elsewhere: `Not on ${device.this}`,
   more: (name) => `More for ${name}`,
   open: (host) => `Open on ${host}`,
@@ -151,7 +166,6 @@ export const repositoryMapText: RepositoryMapText = {
     unknown: 'Not a host Althar connects to',
   },
   what: {
-    [HostReach.Connected]: 'Althar opens the pull requests',
     [HostReach.NotConnected]: 'You open the pull requests until it’s connected',
     [HostReach.SignInAgain]: 'You open the pull requests until you sign in again',
     [HostReach.Unknown]: 'You open the pull requests',
@@ -169,6 +183,9 @@ export const repositoryMapText: RepositoryMapText = {
   staysHere: `Its work stays on ${device.this}.`,
   upstreamBranches: (upstream) => `${upstream}, branches too`,
   noPush: (upstream) => `You can’t push to ${upstream} yet. Its owners can give you access.`,
+  upstreamAs: (remote) => `The repository it forks, as ${remote}`,
+  noRemote: 'Your clone has no remote for it.',
+  addRemote: 'Add remote',
 }
 
 export type RepositoryMapProps = RootProps<
@@ -180,8 +197,13 @@ export type RepositoryMapProps = RootProps<
     reading?: readonly ReadingFolder[]
     /** Where tasks' worktrees are, as the person reads it; without it, the folder isn't made yet. */
     worktrees?: string
-    onRoleChange: (id: string, role: RepositoryRole) => void
+    /** Changes the branch a repository's new tasks work toward: null for its default. Without it, the branch is only said. */
+    onTowardChange?: (id: string, branch: string | null) => void
+    /** Makes a branch the repository doesn't have, from its default, and works toward it. */
+    onTowardCreate?: (id: string, branch: string) => void
     onTargetChange: (id: string, target: ChangeTarget) => void
+    /** Adds the repository a fork forks as a remote of its clone, where it has none. Without it, there is no way to here. */
+    onAddRemote?: (id: string) => void
     /** Leaves one out: offered in its menu, never for the last. */
     onLeaveOut?: (id: string) => void
     /** Opens a repository's page on its host. Without it, there is no way to. */
@@ -209,15 +231,6 @@ export type RepositoryMapProps = RootProps<
     text?: Partial<RepositoryMapText>
   }
 >
-
-const ROLES = [
-  RepositoryRole.Service,
-  RepositoryRole.Frontend,
-  RepositoryRole.Infrastructure,
-  RepositoryRole.Library,
-  RepositoryRole.Docs,
-  RepositoryRole.Other,
-] as const
 
 /** A hairline from a folder to where its work goes, by the folder and the remote it ends at. */
 interface Edge {
@@ -338,8 +351,10 @@ export function RepositoryMap({
   hosts,
   reading = [],
   worktrees,
-  onRoleChange,
+  onTowardChange,
+  onTowardCreate,
   onTargetChange,
+  onAddRemote,
   onLeaveOut,
   onOpen,
   onConnect,
@@ -359,6 +374,12 @@ export function RepositoryMap({
   // The wires drawn once the map was first measured: any after it draws itself in.
   const known = useRef<Set<string> | null>(null)
   const [wires, setWires] = useState<Wire[]>([])
+  // The cards on the map, and those that weren't on it before they last changed: they arrive, as a clone or a folder added does.
+  const ids = [...repositories.map((one) => one.id), ...reading.map((one) => one.id)]
+  const drawnKey = ids.join('\n')
+  const [onMap, setOnMap] = useState(() => ({ key: drawnKey, ids: new Set(ids), arrived: new Set<string>() }))
+  if (onMap.key !== drawnKey) setOnMap({ key: drawnKey, ids: new Set(ids), arrived: new Set(ids.filter((id) => !onMap.ids.has(id))) })
+  const arrives = (id: string) => onMap.arrived.has(id)
 
   const hostOf = (id: string) => hosts.find((host) => host.id === id)
   const connected = (id: string) => hostOf(id)?.reach === HostReach.Connected
@@ -403,9 +424,13 @@ export function RepositoryMap({
     // And once the type has loaded, which moves everything a little.
     let on = true
     void document.fonts?.ready.then(() => on && measure())
+    // And as a card that arrives settles: its slide moves it without changing its size, so nothing above sees it.
+    const settled = () => measure()
+    root.addEventListener('animationend', settled)
     return () => {
       on = false
       watch.disconnect()
+      root.removeEventListener('animationend', settled)
     }
   }, [layout])
 
@@ -467,7 +492,7 @@ export function RepositoryMap({
         </Heading>
         <ul className={s.repositories} aria-labelledby={hereId}>
           {repositories.map((repository) => (
-            <li key={repository.id} ref={keep('card', repository.id)} className={s.repository}>
+            <li key={repository.id} ref={keep('card', repository.id)} className={cx(s.repository, arrives(repository.id) && s.arrives)}>
               <div className={s.top}>
                 <Icon name="folder" size={14} className={s.folder} />
                 <span className={s.name}>{repository.name}</span>
@@ -485,27 +510,34 @@ export function RepositoryMap({
               </span>
               {/* What the wires draw, said: where its work goes. */}
               <VisuallyHidden>{goesWords(repository, hostOf, t)}</VisuallyHidden>
-              <div className={s.foot}>
-                {repository.branch !== undefined && (
-                  <span className={s.branch}>
-                    <Icon name="branch" size={11} />
-                    <VisuallyHidden>{t.branch} </VisuallyHidden>
-                    <code>{repository.branch}</code>
-                  </span>
-                )}
-                <Select
-                  label={t.role(repository.name)}
-                  variant="quiet"
-                  className={s.role}
-                  options={ROLES.map((role) => ({ value: role, label: t.roles[role] }))}
-                  value={repository.role}
-                  onChange={(role) => onRoleChange(repository.id, role)}
-                />
-              </div>
+              {repository.toward !== undefined && onTowardChange !== undefined ? (
+                <div className={s.foot}>
+                  <BranchSelect
+                    label={t.toward(repository.name)}
+                    value={repository.toward.branch}
+                    branches={repository.toward.branches}
+                    defaultBranch={repository.toward.defaultBranch}
+                    onChange={(branch) => onTowardChange(repository.id, branch === repository.toward?.defaultBranch ? null : branch)}
+                    {...(onTowardCreate === undefined ? {} : { onCreate: (branch: string) => onTowardCreate(repository.id, branch) })}
+                    note={t.towardNote}
+                    className={s.toward}
+                  />
+                </div>
+              ) : (
+                repository.branch !== undefined && (
+                  <div className={s.foot}>
+                    <span className={s.branch}>
+                      <Icon name="branch" size={11} />
+                      <VisuallyHidden>{t.branch} </VisuallyHidden>
+                      <code>{repository.branch}</code>
+                    </span>
+                  </div>
+                )
+              )}
             </li>
           ))}
           {reading.map((folder) => (
-            <li key={folder.id} className={cx(s.repository, s.reading)} aria-busy="true">
+            <li key={folder.id} className={cx(s.repository, s.reading, arrives(folder.id) && s.arrives)} aria-busy="true">
               <div className={s.top}>
                 <Spinner size="small" />
                 <span className={s.name}>{folder.name}</span>
@@ -529,11 +561,16 @@ export function RepositoryMap({
           return (
             <HostGroup key={host.id} host={host} level={below(headingLevel)} t={t}>
               {theirs.map((repository) => (
-                <Remotes key={repository.id} repository={repository} keep={keep} t={t} onTargetChange={onTargetChange} />
+                <Remotes
+                  key={repository.id}
+                  repository={repository}
+                  keep={keep}
+                  t={t}
+                  onTargetChange={onTargetChange}
+                  {...(onAddRemote === undefined ? {} : { onAddRemote })}
+                />
               ))}
-              {host.reach === HostReach.Connected ? (
-                <p className={s.what}>{t.what[host.reach]}</p>
-              ) : (
+              {host.reach !== HostReach.Connected && (
                 <div className={s.off}>
                   <p className={s.what}>{t.what[host.reach]}</p>
                   {button !== null && (
@@ -626,11 +663,13 @@ function Remotes({
   keep,
   t,
   onTargetChange,
+  onAddRemote,
 }: {
   repository: MapRepository
   keep: Keep
   t: RepositoryMapText
   onTargetChange: (id: string, target: ChangeTarget) => void
+  onAddRemote?: (id: string) => void
 }) {
   const { remote, fork } = repository
   if (remote === undefined) return null
@@ -648,8 +687,20 @@ function Remotes({
       </div>
       <div ref={keep('node', `${repository.id}:upstream`)} className={s.node}>
         <code>{fork.upstream}</code>
-        <span className={s.nodeNote}>{t.upstream}</span>
+        <span className={s.nodeNote}>
+          {typeof fork.remote === 'string' && fork.remote !== 'upstream' ? t.upstreamAs(fork.remote) : t.upstream}
+        </span>
       </div>
+      {fork.remote === null && (
+        <div className={s.noRemote}>
+          <p>{t.noRemote}</p>
+          {onAddRemote !== undefined && (
+            <Button size="small" onClick={() => onAddRemote(repository.id)}>
+              {t.addRemote}
+            </Button>
+          )}
+        </div>
+      )}
       <div className={s.target}>
         <span aria-hidden="true">{t.target}</span>
         <Select

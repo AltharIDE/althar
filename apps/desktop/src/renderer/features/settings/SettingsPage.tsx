@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
 import {
+  AboutHeader,
   AgentInstall,
   AgentsAtOnce,
   BrowserPreferences,
@@ -9,11 +10,9 @@ import {
   AgentTabList,
   AgentTabPanel,
   AgentTabs,
-  AppVersion,
   Choices,
   CoAuthor,
   CoAuthorFace,
-  CrashReports,
   DictationSettings,
   DockPreview,
   EdgeHere,
@@ -36,20 +35,19 @@ import {
   SettingsLayout,
   SettingsNav,
   SettingSwitch,
+  HelpImprove,
   Storage,
   TaskFolderLocation,
   TaskFolders,
   UpdateReady,
-  UsageData,
   Problem,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
 import type { AccentSource, Appearance } from '../../../main/appPreferences'
 import { SYSTEM_SOUND } from '../../../main/notify'
-import { notesOf } from '../../../main/updates'
 import { type StoragePlace, useServices } from '../../data/services'
-import { agentLineOf, brandOf, pinnedOf } from '../../shared/agents'
+import { agentLineOf, brandOf, canPick, pinnedOf } from '../../shared/agents'
 import { systemAccentState } from '../../shared/accent'
 import { appIcons } from '../../shared/appIcons'
 import { device, platform } from '../../shared/device'
@@ -57,6 +55,7 @@ import { choosing, edgePlaces, edgeWords } from '../../shared/edge'
 import { useEditorPictures, useEditorsRead } from '../../shared/OpenIn'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { useSounds } from '../../shared/useSounds'
+import { CHANGELOG, COMMUNITY, WEBSITE } from '../../shared/links'
 import { useUpdate } from '../../shared/useUpdate'
 import { useDesktopChrome } from '../../shared/useWindowChrome'
 import { AgentAccounts } from '../accounts/AgentAccounts'
@@ -69,7 +68,7 @@ import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
 import { QuickCards } from './QuickCards'
 import { ChangedBy } from './ChangedBy'
-import { GROUPS, type Section, sectionText } from './sections'
+import { GROUPS, type Section, type SettingsFocus, sectionText } from './sections'
 import s from './Settings.module.css'
 import { text } from './text'
 import { useDictationSettings } from './useDictationSettings'
@@ -106,7 +105,10 @@ export interface SettingsPageProps {
   start: StartModel
   /** The section open, as the tab's address says it. */
   section: Section
-  onSection: (section: Section) => void
+  /** Opens a section; with a focus, that setting comes into view and lights for a moment. */
+  onSection: (section: Section, focus?: SettingsFocus) => void
+  /** The setting the person was sent to, as the tab's address says it. */
+  focus?: SettingsFocus
   /** Opens a task, by its thread: one whose folder shows under Work on this computer. */
   onTask?: (threadId: string) => void
   /**
@@ -120,7 +122,7 @@ export interface SettingsPageProps {
   agent?: string
 }
 
-export function SettingsPage({ start, section, onSection, onTask, signIn, account: meant, agent: shown }: SettingsPageProps) {
+export function SettingsPage({ start, section, onSection, focus, onTask, signIn, account: meant, agent: shown }: SettingsPageProps) {
   const preferences = usePreferences()
   const sounds = useSounds()
   const connections = useConnections()
@@ -174,7 +176,7 @@ export function SettingsPage({ start, section, onSection, onTask, signIn, accoun
               })),
             )}
             value={section}
-            onChange={onSection}
+            onChange={(next) => onSection(next)}
           />
         </>
       }
@@ -188,6 +190,8 @@ export function SettingsPage({ start, section, onSection, onTask, signIn, accoun
         looks={looks}
         {...(asked === undefined ? {} : { asked })}
         {...(onTask === undefined ? {} : { onTask })}
+        lit={focus === 'task-folders'}
+        onFreeUp={() => onSection('this-mac', 'task-folders')}
       />
       <div hidden={section !== 'agents'}>
         <AgentCatalogSection start={start} active={section === 'agents'} />
@@ -210,6 +214,8 @@ function SectionBody({
   looks,
   asked,
   onTask,
+  lit,
+  onFreeUp,
 }: {
   section: Section
   start: StartModel
@@ -219,6 +225,10 @@ function SectionBody({
   /** The agent the person was sent here to sign in again. */
   asked?: string
   onTask?: (threadId: string) => void
+  /** The task folders' row comes into view and lights for a moment: the person was sent there to free space. */
+  lit: boolean
+  /** Sends the person to the task folders' row, from About's storage. */
+  onFreeUp: () => void
 }) {
   switch (section) {
     case 'agents':
@@ -230,13 +240,13 @@ function SectionBody({
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
-      return <ThisMacSection {...(onTask === undefined ? {} : { onTask })} />
+      return <ThisMacSection lit={lit} {...(onTask === undefined ? {} : { onTask })} />
     case 'tasks':
       return (
         <>
           <TasksSection />
           <SettingGroup title={presetsText.title} headingLevel={2}>
-            <PresetsSection />
+            <PresetsSection agents={(start.status?.agents ?? []).filter(canPick)} />
           </SettingGroup>
         </>
       )
@@ -256,7 +266,7 @@ function SectionBody({
         </>
       )
     case 'about':
-      return <AboutSection start={start} />
+      return <AboutSection start={start} onFreeUp={onFreeUp} />
   }
 }
 
@@ -354,7 +364,7 @@ function AgentsSection({ start, accounts, asked }: { start: StartModel; accounts
 /** The system lets Althar open at login: a Mac, and Windows. */
 const opensAtLogin = platform === 'darwin' || platform === 'win32'
 
-function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
+function ThisMacSection({ lit, onTask }: { lit: boolean; onTask?: (threadId: string) => void }) {
   const { preferences, set, failed } = usePreferences()
   const atOnce = useAgentsAtOnce()
   const paused = useAutomationsPaused()
@@ -432,6 +442,7 @@ function ThisMacSection({ onTask }: { onTask?: (threadId: string) => void }) {
             freed={folders.freed}
             busy={folders.busy}
             {...(folders.error === null ? {} : { error: folders.error })}
+            lit={lit}
           />
         )}
       </SettingList>
@@ -775,37 +786,45 @@ function BrowserSection() {
  * each with a switch of its own, both off, and staying off here, while
  * DO_NOT_TRACK is set where it started.
  */
-function AboutSection({ start }: { start: StartModel }) {
+function AboutSection({ start, onFreeUp }: { start: StartModel; onFreeUp: () => void }) {
   const update = useUpdate()
   const { preferences, set, failed } = usePreferences()
   const { host } = useServices()
   const storage = useStorage()
   const version = start.status?.appVersion
+  const report = host.reportProblem
   return (
     <>
-      <div className={s.about}>
-        {version !== undefined && <AppVersion version={version} notes={notesOf(version)} text={{ name: text.version }} />}
-        {update.ready !== null && <UpdateReady {...update.ready} />}
-        {host.reportProblem !== undefined && (
-          <LinkButton onClick={() => host.reportProblem?.({ kind: 'asked', from: 'settings' })}>{text.report}</LinkButton>
-        )}
-      </div>
+      <AboutHeader
+        {...(version === undefined ? {} : { version })}
+        {...(update.ready === null ? {} : { update: <UpdateReady {...update.ready} /> })}
+        {...(update.check === undefined ? {} : { onCheck: update.check })}
+        checking={update.checking}
+        website={WEBSITE}
+        notes={CHANGELOG}
+        community={COMMUNITY}
+        {...(report === undefined ? {} : { onReport: () => report({ kind: 'asked', from: 'settings' }) })}
+      />
       <Storage
         places={PLACES.map((place) => ({
           id: place,
-          ...text.storage[place],
+          title: text.storage[place],
           path: storage.paths[place] ?? '',
           figure: storage.figures[place],
           ...(storage.problems[place] === undefined ? {} : { problem: storage.problems[place] }),
         }))}
         onShow={(id) => storage.show(id as StoragePlace)}
         onMeasureAgain={storage.measureAgain}
-        text={{ note: text.storage.note, show: text.storage.show }}
+        freeUp={{ id: 'worktrees', onFreeUp }}
+        text={{ show: text.storage.show }}
       />
-      <SettingList>
-        <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />
-        <CrashReports on={preferences.crashReports} onChange={(on) => set('crashReports', on)} doNotTrack={host.doNotTrack === true} />
-      </SettingList>
+      <HelpImprove
+        usage={preferences.usageData}
+        onUsage={(on) => set('usageData', on)}
+        crashes={preferences.crashReports}
+        onCrashes={(on) => set('crashReports', on)}
+        doNotTrack={host.doNotTrack === true}
+      />
       <Failed when={failed} />
     </>
   )

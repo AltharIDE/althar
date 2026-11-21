@@ -1,5 +1,6 @@
-import { availableParallelism } from 'node:os'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
+import { availableParallelism, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { DownloadStopped, download, markReady, PARAKEET, remove, sizeOf } from './model'
@@ -55,18 +56,27 @@ const load = (): Promise<Recognizer> => {
     // A native addon, loaded as Node finds it: it stays out of the bundle (vite.node.config.ts).
     const sherpa = createRequire(import.meta.url)('sherpa-onnx-node') as Sherpa
     const at = (name: string) => join(dir, name)
-    return sherpa.OfflineRecognizer.createAsync({
-      featConfig: { sampleRate: 16_000, featureDim: 80 },
-      modelConfig: {
-        transducer: { encoder: at('encoder.int8.onnx'), decoder: at('decoder.int8.onnx'), joiner: at('joiner.int8.onnx') },
-        tokens: at('tokens.txt'),
-        modelType: 'nemo_transducer',
-        numThreads: Math.max(1, Math.min(4, availableParallelism() - 1)),
-        provider: 'cpu',
-        debug: 0,
-      },
-      decodingMethod: 'greedy_search',
-    })
+    const folder = await mkdtemp(join(tmpdir(), 'althar-speech-'))
+    const config = join(folder, 'cpu.conf')
+    try {
+      // ONNX's arena can grow by a 2 GiB block, above Chromium's single-allocation limit.
+      // Sherpa reads its CPU options from a file when it creates the recognizer.
+      await writeFile(config, 'EnableCpuMemArena=0\n')
+      return await sherpa.OfflineRecognizer.createAsync({
+        featConfig: { sampleRate: 16_000, featureDim: 80 },
+        modelConfig: {
+          transducer: { encoder: at('encoder.int8.onnx'), decoder: at('decoder.int8.onnx'), joiner: at('joiner.int8.onnx') },
+          tokens: at('tokens.txt'),
+          modelType: 'nemo_transducer',
+          numThreads: Math.max(1, Math.min(4, availableParallelism() - 1)),
+          provider: `cpu:${config}`,
+          debug: 0,
+        },
+        decodingMethod: 'greedy_search',
+      })
+    } finally {
+      await rm(folder, { recursive: true, force: true }).catch(() => {})
+    }
   })()
   // A model that wouldn't load is tried again next time, rather than kept as a failure.
   recognizer.catch(() => (recognizer = undefined))

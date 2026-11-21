@@ -87,6 +87,8 @@ export function sourceBrand(kind: SourceKind): Brand | null {
       return Brand.Confluence
     case SourceKind.Trello:
       return Brand.Trello
+    case SourceKind.ClickUp:
+      return Brand.ClickUp
     case SourceKind.Opsgenie:
       return Brand.Opsgenie
     case SourceKind.Statuspage:

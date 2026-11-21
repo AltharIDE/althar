@@ -141,6 +141,8 @@ const walk = async (
   const panel = await screen.findByRole('complementary', {
     name: more.again === undefined ? `Connect ${name}` : `Sign in to ${name} again`,
   })
+  // The panel shows at once and reads its ways in after: a test starts once they're in.
+  await waitFor(() => expect(within(panel).queryByRole('status', { name: 'Finding the ways in' })).toBeNull())
   const press = (name: string | RegExp) => userEvent.click(within(panel).getByRole('button', { name }))
   const heading = (name: string) => within(panel).findByRole('heading', { name })
   return { client, panel, closed, press, heading }

@@ -21,9 +21,9 @@ import type { Lanes } from '../board/lanes'
  */
 
 export const text = {
-  /** The tracker its tasks name, by the key their issues share, else by its name: MER issues, Trello cards. */
+  /** The tracker its tasks name, by the key their issues share, else by its name: MER issues, Trello cards, ClickUp tasks. */
   issues: (tracker: Pick<Tracker, 'product' | 'key'>) =>
-    `${tracker.key ?? productName(tracker.product)} ${tracker.product === 'trello' ? 'cards' : 'issues'}`,
+    `${tracker.key ?? productName(tracker.product)} ${tracker.product === 'trello' ? 'cards' : tracker.product === 'clickup' ? 'tasks' : 'issues'}`,
   /** What opening a repository or tracker part says it does: Open on GitHub, Open on Linear. */
   openOn: (where: string) => `Open on ${where}`,
   moreTrackers: (n: number) => `+${n} more`,

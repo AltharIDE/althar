@@ -742,6 +742,34 @@ describe('the thread, reaching outside', () => {
     )
   })
 
+  it('says a review bot was heard as findings where trusted, else once that it wasn’t, and trusts it from there (code-hosts § Review and triage bots)', async () => {
+    const trustBot = vi.fn(async () => {})
+    const { client } = fakeClient({
+      trustBot,
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          items: [
+            items.arrival({
+              from: 'coderabbitai[bot]',
+              text: 'Retry-After may be a date.',
+              bot: { login: 'coderabbitai[bot]', name: 'CodeRabbit', trusted: true },
+            }),
+            items.arrival({ from: 'claude[bot]', text: 'Cap the retries.', bot: { login: 'claude[bot]', name: 'Claude', trusted: false } }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Passed to the lead as findings from CodeRabbit, to weigh.')).toBeTruthy()
+    expect(screen.getByText('The lead doesn’t hear Claude: this project doesn’t trust it yet.')).toBeTruthy()
+    // Only the untrusted one offers to trust it.
+    expect(screen.getAllByRole('button', { name: /^Trust / })).toHaveLength(1)
+    await userEvent.click(screen.getByRole('button', { name: 'Trust Claude' }))
+    expect(trustBot).toHaveBeenCalledWith('t1', 'claude[bot]')
+    expect(await screen.findByText('Trusted. The lead hears what Claude says from now on.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Trust Claude' })).toBeNull()
+  })
+
   it('builds blocks for arrivals in their place', () => {
     const blocks = blocksOf({ items: [items.you('Hi'), items.arrival()], turnRunning: false, worktree: null }, new Map(), () => '1m')
     expect(blocks.map((block) => block.kind)).toEqual(['you', 'arrival'])
@@ -1183,6 +1211,24 @@ describe('a task’s pull request', () => {
         expect.objectContaining({ body: 'Your branch was rewritten after it was pushed. Merge, never rebase.' }),
       ),
     )
+  })
+
+  it('offers to merge a rewritten branch from a contributor’s fork', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: {
+            ...snapshot().task,
+            phase: 'ready',
+            changes: [change({ localHead: 'def456', maintainerEdit: true, diverged: { kind: 'rewritten', local: 5, onPullRequest: 4 } })],
+            commits: 5,
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByRole('button', { name: 'Ask the lead to merge instead' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Replace the pull request’s commits' })).toBeNull()
   })
 
   it('says a push refused for commits pushed from elsewhere in a sentence, and offers to bring them in', async () => {
