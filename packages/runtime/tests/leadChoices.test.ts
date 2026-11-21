@@ -1,12 +1,12 @@
 import { Ledger } from '@althar/persistence-sqlite'
-import { holds } from '@althar/provider-adapters/testing'
+import { holds, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Fiber, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { runtime, task, turns, until } from './support'
+import { items, notices, runtime, task, turns, until } from './support'
 
 const choices = (sessionId: string) =>
   Effect.flatMap(
@@ -96,6 +96,55 @@ describe('pending lead choices on the client feed', () => {
       )
     })
   }
+
+  it.live('sets a model picked while a fresh session takes the lead on that session, before its first turn', () => {
+    // The fresh session's start is held, so the person picks while it starts, as they did on a real task.
+    let holding = false
+    let release: () => void = () => {}
+    const startup = () =>
+      holding
+        ? new Promise<void>((resolve) => {
+            release = resolve
+          })
+        : Promise.resolve()
+    return Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const lead = yield* started
+      holding = true
+      const switching = yield* Effect.forkChild(
+        sessions.switchAgent({ threadId: lead.threadId, agentId: 'codex', model: 'large', effort: 'high' }),
+      )
+      yield* until(
+        sql`SELECT id FROM provider_sessions WHERE thread_id = ${lead.threadId} AND state = 'starting'`,
+        (rows) => rows.length === 1,
+      )
+      // The lead from its next turn, shown at once, and kept for the session starting, not set on the one on its way out.
+      assert.strictEqual(yield* sessions.chooseLead({ threadId: lead.threadId, model: 'small' }), 'later')
+      assert.deepStrictEqual(Option.getOrThrow(yield* sessions.running(lead.threadId)).nextLead, { agentId: 'codex', model: 'small' })
+      holding = false
+      release()
+      const sessionId = yield* Fiber.join(switching)
+      assert.strictEqual((yield* actual(lead.sessionId))[0]?.model, 'large')
+      assert.strictEqual((yield* actual(sessionId))[0]?.model, 'small')
+      // Its first turn, the brief, runs on that session, and the agent says it is on the model picked.
+      yield* until(turns(lead.threadId), (rows) => rows.some((row) => row.providerSessionId === sessionId && row.state === 'completed'))
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId: lead.threadId,
+        body: scenarios.settings,
+        sender: { kind: 'window' },
+      })
+      yield* until(items(lead.threadId), (rows) => rows.some((row) => String(row.content['text']).includes('model=small')))
+      // Said by the models' names, with no switch from an agent to itself.
+      const said = (yield* notices(lead.threadId)).map((notice) => notice['title'])
+      assert.include(said, 'Switched from Large to Small.')
+      assert.isFalse(said.some((title) => title?.startsWith('Switched from Fake codex') === true))
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => release())),
+      Effect.provide(runtime(':memory:', {}, { each: { codex: { beforeNewSession: startup } } })),
+    )
+  })
 
   it.live('notifies another client while a turn runs, and notifies cancellation without changing actual settings', () => {
     const going = holds()

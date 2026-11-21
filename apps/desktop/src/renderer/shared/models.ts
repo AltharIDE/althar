@@ -510,12 +510,24 @@ export const upcomingOn = (session: {
   }
 }
 
-/** Puts a running thread on what the person chose: its model and effort, or another agent taking over with them. */
-export const moveTo = async (client: Client, threadId: string, current: Choice, next: Choice): Promise<void> => {
-  if (next.agentId !== current.agentId) {
+/**
+ * Puts a running thread on what the person chose: its model and effort, or another agent taking over with them. `holding`
+ * is the agent the thread is with, or going to with a switch already asked for: the same agent again keeps its session and
+ * moves it to the model and effort picked, never starting it afresh, even where another agent waits to take its next turn.
+ */
+export const moveTo = async (
+  client: Client,
+  threadId: string,
+  current: Choice,
+  next: Choice,
+  holding: string = current.agentId,
+): Promise<void> => {
+  if (next.agentId !== current.agentId && next.agentId !== holding) {
     await client.switchAgent(startOf(threadId, next))
     return
   }
-  if (next.model !== null && next.model !== current.model) await client.setModel({ threadId, model: next.model })
-  if (next.effort !== null && next.effort !== current.effort) await client.setEffort({ threadId, effort: next.effort })
+  // Back from another agent picked for its next turn: what is picked now takes that one's place, all of it.
+  const all = next.agentId !== current.agentId
+  if (next.model !== null && (all || next.model !== current.model)) await client.setModel({ threadId, model: next.model })
+  if (next.effort !== null && (all || next.effort !== current.effort)) await client.setEffort({ threadId, effort: next.effort })
 }

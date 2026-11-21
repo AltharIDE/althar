@@ -392,6 +392,11 @@ export interface Running {
    * between turns, as what is said to it next is delivered, never in one.
    */
   nextLead: { readonly agentId: string; readonly model?: string; readonly effort?: string } | undefined
+  /**
+   * The agent a switch or a fresh session takes the thread to, while it starts (`handover` under way): a model or effort the
+   * person picks meanwhile is for that session, so it is kept as `nextLead` for it and never set on this one.
+   */
+  handingTo?: string | undefined
   /** Held while its agent is set to a model or effort, so two settings never cross: the chosen one and the one before (`chooseLead`). */
   leadLock: Semaphore.Semaphore
   /** Its agent is being set to a model or effort now. */
@@ -555,6 +560,12 @@ export const offSwitchedOff = (definition: AgentDefinition, agent: AgentSession,
     }
     yield* agent.setOption(definition.options.model, instead.id)
   })
+
+/** A model as people know it, by what its agent calls it ("GPT-6.1 Sol"); its id where the agent doesn't name it. */
+export const modelNamed = (definition: AgentDefinition, options: ReadonlyArray<ConfigOption>, model: string) => {
+  const named = modelsOf(definition, options).models.find((one) => one.id === model)
+  return named === undefined ? model : knownModelName(definition, named)
+}
 
 /** What an agent is told of a message the person dictated, after its words (the standing instructions of a coordinator and a lead explain it). */
 export const DICTATED = "(Dictated by voice: words may be misheard. Read names generously; 'Alpha'/'Alter' likely means Althar.)"

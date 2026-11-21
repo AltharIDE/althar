@@ -337,6 +337,41 @@ describe('moving a running thread to a choice', () => {
     await moveTo(client, 'th1', on, { agentId: 'codex', model: null, effort: 'low' })
     expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', effort: 'low' })
   })
+
+  it('keeps the session of the agent it is with, picked back from another waiting to take its next turn', async () => {
+    const { client } = fakeClient()
+    // On Codex, with OpenCode waiting to take over: back to Codex, then to another of its models.
+    const waiting = { agentId: 'opencode', model: 'opencode/gpt-6.2-sol', effort: 'xhigh' }
+    await moveTo(client, 'th1', waiting, { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' }, 'codex')
+    await moveTo(
+      client,
+      'th1',
+      { agentId: 'codex', model: 'gpt-6.1-terra', effort: 'xhigh' },
+      { agentId: 'codex', model: 'gpt-6.1-sol', effort: 'high' },
+      'codex',
+    )
+    expect(client.switchAgent).not.toHaveBeenCalled()
+    expect(vi.mocked(client.setModel).mock.calls.map(([input]) => input.model)).toEqual(['gpt-6.1-terra', 'gpt-6.1-sol'])
+    expect(vi.mocked(client.setEffort).mock.calls.map(([input]) => input.effort)).toEqual(['xhigh', 'high'])
+    // Another agent still takes over, and one picked while a switch to it is under way moves that switch's session.
+    await moveTo(
+      client,
+      'th1',
+      { agentId: 'claude-code', model: 'opus', effort: 'high' },
+      { agentId: 'claude-code', model: 'sonnet', effort: 'high' },
+      'claude-code',
+    )
+    await moveTo(
+      client,
+      'th1',
+      { agentId: 'codex', model: 'gpt-6.1-sol', effort: 'high' },
+      { agentId: 'claude-code', model: 'opus', effort: null },
+      'codex',
+    )
+    expect(client.switchAgent).toHaveBeenCalledOnce()
+    expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'opus' })
+    expect(client.setModel).toHaveBeenLastCalledWith({ threadId: 'th1', model: 'sonnet' })
+  })
 })
 
 function Prefs() {

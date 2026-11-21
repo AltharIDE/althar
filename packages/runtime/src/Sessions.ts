@@ -86,6 +86,7 @@ import {
   type TaskThread,
   type ThreadContext,
   accountOf,
+  modelNamed,
   optionValue,
   passedOnOf,
   settleEffort,
@@ -1237,6 +1238,43 @@ export class Sessions extends Context.Service<
         )
 
       /**
+       * A model or effort chosen for the session taking the thread over while it started (`handingTo`): set on it before its first
+       * turn, so that turn runs on what the person picked, not on what the switch began with. What was chosen before the switch
+       * began (`since`) gives way to it. One the agent won't take is said, and it starts as it was.
+       */
+      const carryLead = (
+        previous: Running | undefined,
+        incoming: Pick<Running, 'sessionId' | 'entry' | 'agent' | 'thread'>,
+        since: Running['nextLead'],
+      ) =>
+        Effect.gen(function* () {
+          const next = previous?.nextLead
+          const { definition } = incoming.entry
+          if (next === undefined || next === since || next.agentId !== definition.id) return
+          const { agent, thread } = incoming
+          const refused = (what: string, error: { readonly message: string }) =>
+            addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId: incoming.sessionId }, 'notice', {
+              source: 'runtime',
+              severity: 'warning',
+              title: `${definition.name} stays on ${what} as it is: ${agentSaid(error) ?? error.message}`,
+            })
+          if (next.model !== undefined) {
+            const was = optionValue(yield* agent.options, definition.options.effort)
+            const moved = yield* agent.setOption(definition.options.model, next.model).pipe(
+              Effect.as(true),
+              Effect.catch((error) => Effect.as(refused('its model', error), false)),
+            )
+            // On its new model, it keeps the effort chosen with it where the model offers it, as `setModel` does.
+            if (moved) return yield* settleEffort(definition, agent, next.effort ?? was)
+          }
+          if (next.effort !== undefined && definition.options.effort !== undefined)
+            yield* agent.setOption(definition.options.effort, next.effort).pipe(
+              Effect.asVoid,
+              Effect.catch((error) => refused('its effort', error)),
+            )
+        })
+
+      /**
        * What the person chose of the same agent's model or effort is set on the agent, where nothing runs: the lead taken up as
        * chosen, whatever was chosen since while it was being set. A turn at work waits: it is set when the turn ends, or
        * between turns as what is said next is delivered (`deliver`).
@@ -1247,7 +1285,15 @@ export class Sessions extends Context.Service<
             Effect.gen(function* () {
               // Read under the lock, as what was chosen last: a turn that began, or was being delivered, while this waited has it.
               for (;;) {
-                if (running.turnRunning || running.leadHeld || running.stopping || threads.get(running.thread.threadId) !== running) return
+                // Being handed to another session, what was chosen is that one's (`carryLead`), never set on this one on its way out.
+                if (
+                  running.turnRunning ||
+                  running.leadHeld ||
+                  running.stopping ||
+                  running.handover === 'under_way' ||
+                  threads.get(running.thread.threadId) !== running
+                )
+                  return
                 const next = running.nextLead
                 if (next === undefined || next.agentId !== running.entry.definition.id) return
                 yield* settleLead(running, next)
@@ -1749,7 +1795,7 @@ export class Sessions extends Context.Service<
           yield* addItem({ projectId: running.thread.projectId, threadId: input.threadId, sessionId: running.sessionId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Model changed to ${model}.`,
+            title: `Model changed to ${modelNamed(definition, options, model)}.`,
           })
         })
 
@@ -1886,18 +1932,34 @@ export class Sessions extends Context.Service<
               input.about !== undefined && previous !== undefined
                 ? yield* standInFor(previous, thread.projectId, entry.definition.id, input.model, input.about, input.attemptId)
                 : undefined
-            // Starting a replacement can take arbitrarily long. Future input belongs to it from here, while the old turn may finish.
-            if (previous !== undefined) previous.handover = 'under_way'
+            // Starting a replacement can take arbitrarily long. Future input belongs to it from here, while the old turn may finish,
+            // and so does a model or effort the person picks meanwhile.
+            const since = previous?.nextLead
+            if (previous !== undefined) {
+              previous.handover = 'under_way'
+              previous.handingTo = entry.definition.id
+            }
             return yield* Effect.gen(function* () {
               const sessionId = yield* createSession(thread, entry.definition.id, account, input.model, standsIn)
               const connected = yield* connectSession(thread, sessionId, entry, account, input.model, input.effort)
               const brief = yield* Effect.gen(function* () {
                 if (previous !== undefined) yield* stopRunning(previous, { state: 'superseded', by: sessionId })
+                yield* carryLead(previous, connected, since)
+                const options = yield* connected.agent.options
+                const to = optionValue(options, entry.definition.options.model)
+                // The same agent again says what changed: its model, or nothing but a fresh session.
+                const same =
+                  previous === undefined || previous.entry.definition.id !== entry.definition.id
+                    ? undefined
+                    : was?.model != null && to !== null && was.model !== to
+                      ? `Switched from ${modelNamed(entry.definition, options, was.model)} to ${modelNamed(entry.definition, options, to)}.`
+                      : `Started ${entry.definition.name} afresh.`
                 yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
                   source: 'runtime',
                   severity: 'info',
                   title:
                     input.said ??
+                    same ??
                     (from === undefined ? `${entry.definition.name} takes over.` : `Switched from ${from} to ${entry.definition.name}.`),
                   // Another model takes the thread: always shown, whatever made the switch (never a silent one).
                   ...(input.about === undefined ? {} : { about: input.about, ...(moved ? { handover: true } : {}) }),
@@ -1928,7 +1990,14 @@ export class Sessions extends Context.Service<
                 Effect.suspend(() => {
                   if (previous === undefined || threads.get(input.threadId) !== previous || previous.stopping) return Effect.void
                   previous.handover = previousHandover ?? 'none'
-                  return Effect.asVoid(Queue.offer(previous.wake, undefined))
+                  previous.handingTo = undefined
+                  // What was picked for the agent that couldn't start goes with it: the lead carries on as it was.
+                  const picked = previous.nextLead
+                  const dropped =
+                    picked !== undefined && picked !== since && picked.agentId !== previous.entry.definition.id
+                      ? Effect.ignore(setLeadChoice(previous, undefined, { after: picked, resolved: true }))
+                      : Effect.void
+                  return Effect.andThen(dropped, Effect.asVoid(Queue.offer(previous.wake, undefined)))
                 }),
               ),
             )
@@ -1999,10 +2068,12 @@ export class Sessions extends Context.Service<
             }
             // Started afresh, a stand-in still stands in for the lead it was given.
             const standsIn = Option.getOrUndefined(yield* standInOf(previous.sessionId))
+            // A model or effort the person picks while it starts is the fresh session's (`carryLead`).
+            previous.handingTo = previous.entry.definition.id
             const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model, standsIn)
             const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
             yield* Effect.andThen(
-              stopRunning(previous, { state: 'superseded', by: sessionId }),
+              Effect.andThen(stopRunning(previous, { state: 'superseded', by: sessionId }), carryLead(previous, connected, undefined)),
               addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
@@ -2035,6 +2106,7 @@ export class Sessions extends Context.Service<
               Effect.logWarning('Could not hand a session to a fresh one', cause),
               Effect.suspend(() => {
                 if (threads.get(previous.thread.threadId) !== previous) return Effect.void
+                previous.handingTo = undefined
                 // Lost, it can't carry on: it stops, and the person is told.
                 if (lost !== undefined) return exclusive(previous.thread.threadId, cannotCarryOn(previous, lost))
                 // It carries on as it is, with what waited for it.
@@ -2357,12 +2429,16 @@ export class Sessions extends Context.Service<
                 Effect.gen(function* () {
                   const [now] = yield* sql<{ model: string | null; effort: string | null }>`
                 SELECT model, effort FROM provider_sessions WHERE id = ${running.sessionId}`
-                  const agentId = running.entry.definition.id
+                  // While a switch or a fresh session takes the thread over, the pick is for that session: it is set on it before its
+                  // first turn (`carryLead`), and nothing is the same as this one's, which is on its way out.
+                  const handing = running.handover === 'under_way' && running.handingTo !== undefined
+                  const agentId = handing ? (running.handingTo ?? running.entry.definition.id) : running.entry.definition.id
+                  const on = agentId === running.entry.definition.id ? now : undefined
                   // What was chosen before and isn't set yet stands, but for what is chosen now.
                   const before = running.nextLead?.agentId === agentId ? running.nextLead : undefined
                   const model = input.model ?? before?.model
                   const effort = input.effort ?? before?.effort
-                  const same = (model === undefined || model === now?.model) && (effort === undefined || effort === now?.effort)
+                  const same = !handing && (model === undefined || model === now?.model) && (effort === undefined || effort === now?.effort)
                   // Back on what it is on, with nothing being set: nothing is left to take up. While one is being set it is kept, so it
                   // is set back after.
                   const next =
@@ -2377,8 +2453,8 @@ export class Sessions extends Context.Service<
                     !(yield* setLeadChoice(running, next, {
                       choice: {
                         agentId,
-                        model: model ?? now?.model ?? null,
-                        effort: effort ?? now?.effort ?? null,
+                        model: model ?? on?.model ?? null,
+                        effort: effort ?? on?.effort ?? null,
                       },
                     }))
                   )

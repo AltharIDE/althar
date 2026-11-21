@@ -985,8 +985,10 @@ export const useTask = (threadId: string): TaskModel => {
         if (session == null || !session.held) await client.startSession(startOf(threadId, choice))
         else {
           const from = lastPick.current ?? upcomingOn(session) ?? runningOn(session)
+          // With it, or going to it with a switch asked for a moment ago: the same agent again keeps its session.
+          const holding = lastPick.current?.agentId ?? session.agentId
           lastPick.current = choice
-          await moveTo(client, threadId, from, choice)
+          await moveTo(client, threadId, from, choice, holding)
         }
       } catch (failure) {
         // Said where the thread says what went wrong; the picker goes back to what it was.
