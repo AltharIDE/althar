@@ -611,6 +611,28 @@ describe('the API', () => {
     ),
   )
 
+  it.live('retries a failed agent version probe and reuses the version once found', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let probes = 0
+        const { client } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({
+            ...definition,
+            version: (node) => ({
+              command: node,
+              args: ['-e', ++probes === 1 ? 'process.exit(1)' : 'console.log("1.2.3")'],
+            }),
+          })),
+        })
+        const version = client.Status({}).pipe(Effect.map(({ agents }) => agents.find(({ id }) => id === 'codex')?.version))
+        assert.strictEqual(yield* version, null)
+        assert.strictEqual(yield* version, '1.2.3')
+        assert.strictEqual(yield* version, '1.2.3')
+        assert.strictEqual(probes, 2)
+      }),
+    ),
+  )
+
   it.live('keeps a failed account check to that account, shows the rest as they are, and reports it', () =>
     Effect.scoped(
       Effect.gen(function* () {

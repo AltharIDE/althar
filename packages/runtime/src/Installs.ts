@@ -246,14 +246,18 @@ export class Installs extends Context.Service<
         const assetOf = <A>(assets: Readonly<Record<string, A>>): A | undefined =>
           musl ? (assets[`${target}-musl`] ?? assets[target]) : assets[target]
         const installing = yield* Ref.make(new Set<string>())
-        const versions = new Map<string, string | null>()
+        const versions = new Map<string, string>()
         const versionChecks = makeKeyedLock()
         const version = (definition: AgentDefinition) =>
           versionChecks.withLock(
             definition.id,
             Effect.suspend(() => {
-              if (versions.has(definition.id)) return Effect.succeed(versions.get(definition.id) ?? null)
-              return agentVersion(definition).pipe(Effect.tap((found) => Effect.sync(() => versions.set(definition.id, found))))
+              const cached = versions.get(definition.id)
+              if (cached !== undefined) return Effect.succeed(cached)
+              return Effect.map(agentVersion(definition), (found) => {
+                if (found !== null) versions.set(definition.id, found)
+                return found
+              })
             }),
           )
 
