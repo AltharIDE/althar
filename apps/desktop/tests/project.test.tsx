@@ -608,8 +608,9 @@ describe('the Talk room', () => {
 
   it('starts a held plan on the chosen worker', async () => {
     const workerId = 'wrk_' + 'a'.repeat(32)
-    const planned = card()
-    const held = { ...planned, phase: 'held' as const, plan: planned.plan === undefined ? undefined : { ...planned.plan, startsAt: null } }
+    const plan = card().plan
+    if (plan == null) throw new Error('The task card fixture needs a plan.')
+    const held = card({ phase: 'held', plan: { ...plan, startsAt: null } })
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
       listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
