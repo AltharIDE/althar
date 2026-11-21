@@ -536,37 +536,55 @@ async fn send_snapshot(
     request: AgentSnapshotRequest,
 ) -> io::Result<()> {
     let run_id = request.run_id;
-    let (tree, patch) = match workspace_patch(&cwd, &run_id, &request.base_tree).await {
-        Ok(checkpoint) => checkpoint,
-        Err(error) => {
-            eprintln!("Could not checkpoint agent files: {error}");
-            return send(
-                &outgoing,
-                WorkerMessage::Snapshot(AgentSnapshotResult {
-                    run_id,
-                    unavailable: true,
-                    ..Default::default()
-                }),
-            )
-            .await;
-        }
+    let checkpoint =
+        match workspace_patch(&cwd, &run_id, &request.base_tree, &request.base_head).await {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                eprintln!("Could not checkpoint agent files: {error}");
+                return send(
+                    &outgoing,
+                    WorkerMessage::Snapshot(AgentSnapshotResult {
+                        run_id,
+                        unavailable: true,
+                        ..Default::default()
+                    }),
+                )
+                .await;
+            }
+        };
+    let sha256 = |bytes: &[u8]| {
+        ring::digest::digest(&ring::digest::SHA256, bytes)
+            .as_ref()
+            .to_vec()
     };
-    let sha256 = ring::digest::digest(&ring::digest::SHA256, &patch);
     send(
         &outgoing,
         WorkerMessage::Snapshot(AgentSnapshotResult {
             run_id: run_id.clone(),
-            tree,
-            size: patch.len() as u32,
-            sha256: sha256.as_ref().to_vec(),
+            tree: checkpoint.tree,
+            size: checkpoint.patch.len() as u32,
+            sha256: sha256(&checkpoint.patch),
+            head: checkpoint.head,
+            commits_size: checkpoint.commits.len() as u32,
+            commits_sha256: sha256(&checkpoint.commits),
             unavailable: false,
         }),
     )
     .await?;
-    for chunk in patch.chunks(CHUNK_BYTES) {
+    for chunk in checkpoint.patch.chunks(CHUNK_BYTES) {
         send(
             &outgoing,
             WorkerMessage::Patch(AgentRunBytes {
+                run_id: run_id.clone(),
+                data: chunk.to_vec(),
+            }),
+        )
+        .await?;
+    }
+    for chunk in checkpoint.commits.chunks(CHUNK_BYTES) {
+        send(
+            &outgoing,
+            WorkerMessage::Commits(AgentRunBytes {
                 run_id: run_id.clone(),
                 data: chunk.to_vec(),
             }),

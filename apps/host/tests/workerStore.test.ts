@@ -38,6 +38,10 @@ describe('the private worker ledger', () => {
       expect(first.agents.begin(worker, run)).toBe(false)
       expect(first.agents.bind(worker, journal)).toBe(true)
       expect(first.agents.bind(other, otherJournal)).toBe(true)
+      expect(first.agents.begin(worker, run)).toBe(false)
+      expect(first.enroll(fingerprint, run.projectId)).toBe(worker)
+      expect(first.enroll(otherFingerprint, run.projectId)).toBe(other)
+      expect(first.agents.permits(worker, run.projectId)).toBe(true)
       expect(first.agents.begin(worker, run)).toBe(true)
       expect(() => first.enqueue(worker)).toThrow('no outstanding')
     } finally {

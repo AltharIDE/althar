@@ -29,6 +29,7 @@ const STOP_TIMEOUT_MS = 6_000
 const CHECKOUT_TIMEOUT_MS = 180_000
 const SNAPSHOT_TIMEOUT_MS = 60_000
 const MAX_PATCH_BYTES = 16 * 1024 * 1024
+const MAX_COMMIT_BUNDLE_BYTES = 64 * 1024 * 1024
 export const MAX_WORKER_BUNDLE_BYTES = 128 * 1024 * 1024
 const PROVIDER_ID = /^[a-z][a-z0-9-]{0,47}$/
 
@@ -69,6 +70,7 @@ export interface WorkerCheckout {
 /** The home records authority before sending a start and clears it only on confirmed exit. */
 export interface AgentRunLedger {
   readonly bind: (workerId: string, journalId: string) => boolean
+  readonly permits: (workerId: string, projectId: string) => boolean
   readonly outstanding: (workerId: string) => AgentRunAssignment | undefined
   readonly begin: (workerId: string, run: AgentRunAssignment) => boolean
   readonly finish: (workerId: string, result: AgentRunExit) => boolean
@@ -76,7 +78,9 @@ export interface AgentRunLedger {
 
 export interface WorkerPatch {
   readonly tree: string
+  readonly head: string
   readonly patch: Uint8Array
+  readonly commits: Uint8Array
 }
 
 export interface WorkerAgentProcess {
@@ -87,7 +91,7 @@ export interface WorkerAgentProcess {
   readonly exit: Promise<AgentRunExit>
   readonly write: (chunk: Uint8Array) => Promise<void>
   readonly stop: () => Promise<AgentRunExit>
-  readonly readPatch: (baseTree: string) => Promise<WorkerPatch>
+  readonly readPatch: (baseTree: string, baseHead: string) => Promise<WorkerPatch>
 }
 
 export interface AvailableAgentWorker {
@@ -120,10 +124,17 @@ const deferred = <A>(): Deferred<A> => {
   return { promise, resolve, reject }
 }
 
+interface SnapshotPart {
+  readonly hash: Uint8Array
+  readonly bytes: Buffer
+  written: number
+}
+
 interface PendingSnapshot {
   readonly result: Deferred<WorkerPatch>
   readonly timer: NodeJS.Timeout
-  transfer?: { tree: string; hash: Uint8Array; patch: Buffer; written: number }
+  readonly baseHead: string
+  transfer?: { tree: string; head: string; patch: SnapshotPart; commits: SnapshotPart }
 }
 
 interface Run {
@@ -261,8 +272,14 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       clearTimeout(pending.timer)
       pending.result.reject(error)
     }
-    const readPatch = (current: Run, baseTree: string): Promise<WorkerPatch> => {
-      if (run !== current || current.phase !== 'running' || current.snapshot !== undefined || !objectId.test(baseTree))
+    const readPatch = (current: Run, baseTree: string, baseHead: string): Promise<WorkerPatch> => {
+      if (
+        run !== current ||
+        current.phase !== 'running' ||
+        current.snapshot !== undefined ||
+        !objectId.test(baseTree) ||
+        !objectId.test(baseHead)
+      )
         return Promise.reject(new Error('The worker cannot check that workspace now.'))
       const result = deferred<WorkerPatch>()
       const timer = setTimeout(
@@ -270,18 +287,20 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
         SNAPSHOT_TIMEOUT_MS,
       )
       timer.unref()
-      current.snapshot = { result, timer }
-      sendControl({ case: 'snapshot', value: create(AgentSnapshotRequestSchema, { runId: current.id, baseTree }) })
+      current.snapshot = { result, timer, baseHead }
+      sendControl({ case: 'snapshot', value: create(AgentSnapshotRequestSchema, { runId: current.id, baseTree, baseHead }) })
       return result.promise
     }
     const finishSnapshot = (current: Run, pending: PendingSnapshot): void => {
       const transfer = pending.transfer
       if (transfer === undefined) return
-      if (!createHash('sha256').update(transfer.patch).digest().equals(transfer.hash))
-        return fail(status.INVALID_ARGUMENT, 'The worker returned the wrong workspace patch digest.')
+      const parts = [transfer.patch, transfer.commits]
+      if (parts.some((part) => part.written !== part.bytes.length)) return
+      if (parts.some((part) => !createHash('sha256').update(part.bytes).digest().equals(part.hash)))
+        return fail(status.INVALID_ARGUMENT, 'The worker returned the wrong workspace transfer digest.')
       clearTimeout(pending.timer)
       delete current.snapshot
-      pending.result.resolve({ tree: transfer.tree, patch: transfer.patch })
+      pending.result.resolve({ tree: transfer.tree, head: transfer.head, patch: transfer.patch.bytes, commits: transfer.commits.bytes })
     }
     const start: Slot['start'] = (placement, { checkout, signal, toolPort }) => {
       if (closed || run !== undefined || recovering !== undefined)
@@ -417,7 +436,8 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
             payload.case !== 'output' &&
             payload.case !== 'exit' &&
             payload.case !== 'snapshot' &&
-            payload.case !== 'patch') ||
+            payload.case !== 'patch' &&
+            payload.case !== 'commits') ||
           payload.value.runId !== current.id
         )
           return fail(status.PERMISSION_DENIED, 'This stream does not own that agent run.')
@@ -440,7 +460,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
             exit: current.exit.promise,
             write: (chunk) => write(current, chunk),
             stop: () => stop(current),
-            readPatch: (baseTree) => readPatch(current, baseTree),
+            readPatch: (baseTree, baseHead) => readPatch(current, baseTree, baseHead),
           })
           return
         }
@@ -456,31 +476,44 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
           }
           return
         }
-        if (payload.case === 'snapshot' || payload.case === 'patch') {
+        if (payload.case === 'snapshot' || payload.case === 'patch' || payload.case === 'commits') {
           const pending = current.snapshot
           if (pending === undefined) return fail(status.FAILED_PRECONDITION, 'There is no request for workspace changes.')
           if (payload.case === 'snapshot') {
-            const { size, sha256, tree, unavailable } = payload.value
+            const { size, sha256, tree, head, commitsSize, commitsSha256, unavailable } = payload.value
             if (pending.transfer !== undefined) return fail(status.INVALID_ARGUMENT, 'The worker already sent its patch metadata.')
             if (unavailable) return interruptSnapshot(current, new Error('The worker could not read its workspace changes.'))
-            if (size > MAX_PATCH_BYTES || !objectId.test(tree) || sha256.byteLength !== 32)
-              return fail(status.INVALID_ARGUMENT, 'The worker sent invalid workspace patch metadata.')
-            pending.transfer = { patch: Buffer.alloc(size), hash: sha256, tree, written: 0 }
-            if (size === 0) finishSnapshot(current, pending)
+            if (
+              size > MAX_PATCH_BYTES ||
+              commitsSize > MAX_COMMIT_BUNDLE_BYTES ||
+              !objectId.test(tree) ||
+              !objectId.test(head) ||
+              sha256.byteLength !== 32 ||
+              commitsSha256.byteLength !== 32 ||
+              (head === pending.baseHead) !== (commitsSize === 0)
+            )
+              return fail(status.INVALID_ARGUMENT, 'The worker sent invalid workspace transfer metadata.')
+            pending.transfer = {
+              tree,
+              head,
+              patch: { bytes: Buffer.alloc(size), hash: sha256, written: 0 },
+              commits: { bytes: Buffer.alloc(commitsSize), hash: commitsSha256, written: 0 },
+            }
+            finishSnapshot(current, pending)
             return
           }
-          const transfer = pending.transfer
+          const part = payload.case === 'patch' ? pending.transfer?.patch : pending.transfer?.commits
           const { data } = payload.value
           if (
-            transfer === undefined ||
+            part === undefined ||
             data.byteLength === 0 ||
             data.byteLength > MAX_AGENT_CHUNK ||
-            transfer.written + data.byteLength > transfer.patch.byteLength
+            part.written + data.byteLength > part.bytes.length
           )
-            return fail(status.INVALID_ARGUMENT, 'The worker sent invalid workspace patch bytes.')
-          transfer.patch.set(data, transfer.written)
-          transfer.written += data.byteLength
-          if (transfer.written === transfer.patch.byteLength) finishSnapshot(current, pending)
+            return fail(status.INVALID_ARGUMENT, 'The worker sent invalid workspace transfer bytes.')
+          part.bytes.set(data, part.written)
+          part.written += data.byteLength
+          finishSnapshot(current, pending)
           return
         }
         if (!validOutcome(payload.value)) return fail(status.INVALID_ARGUMENT, 'The worker sent an invalid agent outcome.')
@@ -507,6 +540,7 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
     connect,
     list: (projectId: string): ReadonlyArray<AvailableAgentWorker> =>
       [...slots.values()]
+        .filter(({ workerId }) => ledger.permits(workerId, projectId))
         .map(({ workerId, capabilities, busy }) => ({
           workerId,
           capabilities: capabilities.filter((item) => item.projectId === projectId),
@@ -519,7 +553,11 @@ export const makeAgentWorkerPool = (ledger: AgentRunLedger) => {
       if (toolPort !== undefined && (!Number.isInteger(toolPort) || toolPort < 1 || toolPort > 65_535))
         throw new Error('The worker needs a valid local tool server port.')
       const slot = slots.get(workerId)
-      if (slot === undefined || !supports(slot, placement.projectId, placement.providerId))
+      if (
+        slot === undefined ||
+        !ledger.permits(workerId, placement.projectId) ||
+        !supports(slot, placement.projectId, placement.providerId)
+      )
         return Promise.reject(new Error('This worker is unavailable for that project and provider.'))
       if (!validWorkerProtocolId(placement.workspaceId, 'ws_')) return Promise.reject(new Error('The worker needs a valid workspace ID.'))
       if (

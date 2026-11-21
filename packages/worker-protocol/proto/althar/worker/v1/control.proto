@@ -21,6 +21,7 @@ message AgentWorkerFrame {
     AgentWorkerHeartbeat heartbeat = 5;
     AgentSnapshotResult snapshot = 6;
     AgentRunBytes patch = 7;
+    AgentRunBytes commits = 8;
   }
 }
 
@@ -117,6 +118,7 @@ message AgentWorkerHeartbeat {
 message AgentSnapshotRequest {
   string run_id = 1;
   string base_tree = 2;
+  string base_head = 3;
 }
 
 // A Git binary patch against the requested tree. The home verifies its own
@@ -127,6 +129,9 @@ message AgentSnapshotResult {
   uint32 size = 3;
   bytes sha256 = 4;
   bool unavailable = 5;
+  string head = 6;
+  uint32 commits_size = 7;
+  bytes commits_sha256 = 8;
 }
 
 // A connection to just the home tool server for this active run. Tool

@@ -113,6 +113,11 @@ export const openWorkerStore = async (profile: string, homeId: string, now = Dat
         worker_id TEXT PRIMARY KEY REFERENCES worker_enrollment(id),
         journal_id TEXT NOT NULL UNIQUE
       ) STRICT;
+      CREATE TABLE IF NOT EXISTS agent_worker_project (
+        worker_id TEXT NOT NULL REFERENCES worker_enrollment(id),
+        project_id TEXT NOT NULL,
+        PRIMARY KEY (worker_id, project_id)
+      ) STRICT;
       CREATE TABLE IF NOT EXISTS agent_worker_run (
         id TEXT PRIMARY KEY,
         worker_id TEXT NOT NULL REFERENCES agent_worker_journal(worker_id),
@@ -190,6 +195,7 @@ export const openWorkerStore = async (profile: string, homeId: string, now = Dat
       INSERT INTO agent_worker_run (id, worker_id, project_id, provider_id, workspace_id, state)
       SELECT ?, candidate.id, ?, ?, ?, 'active' FROM (${availableWorker}) candidate
       WHERE EXISTS (SELECT 1 FROM agent_worker_journal WHERE worker_id = candidate.id)
+        AND EXISTS (SELECT 1 FROM agent_worker_project WHERE worker_id = candidate.id AND project_id = ?)
         AND NOT EXISTS (SELECT 1 FROM agent_worker_run WHERE workspace_id = ? AND state = 'active')
       RETURNING id
     `)
@@ -199,9 +205,14 @@ export const openWorkerStore = async (profile: string, homeId: string, now = Dat
     `)
     const agents: AgentRunLedger = {
       bind: (workerId, journalId) => journal.get(journalId, workerId) !== undefined,
+      permits: (workerId, projectId) =>
+        db
+          .prepare(`SELECT 1 FROM agent_worker_project p JOIN worker_enrollment w ON p.worker_id = w.id
+          WHERE p.worker_id = ? AND p.project_id = ? AND w.revoked = 0`)
+          .get(workerId, projectId) !== undefined,
       outstanding: (workerId) => runningAgent.get(workerId) as ReturnType<AgentRunLedger['outstanding']>,
       begin: (workerId, run) =>
-        beginAgent.get(run.runId, run.projectId, run.providerId, run.workspaceId, workerId, run.workspaceId) !== undefined,
+        beginAgent.get(run.runId, run.projectId, run.providerId, run.workspaceId, workerId, run.projectId, run.workspaceId) !== undefined,
       finish: (workerId, result) => {
         const state =
           result.outcome === AgentRunOutcome.EXITED
@@ -218,13 +229,18 @@ export const openWorkerStore = async (profile: string, homeId: string, now = Dat
       agents,
       close: () => db.close(),
       workerForCertificate: (fingerprint: string) => enrolled.get(fingerprint)?.id as string | undefined,
-      enroll(fingerprint: string) {
+      enroll(fingerprint: string, projectId?: string) {
         db.prepare('INSERT INTO worker_enrollment (id, fingerprint) VALUES (?, ?) ON CONFLICT(fingerprint) DO NOTHING').run(
           id('wrk'),
           fingerprint,
         )
         const workerId = enrolled.get(fingerprint)?.id
         if (typeof workerId !== 'string') throw invalid('This certificate was revoked. Enroll a replacement certificate')
+        if (projectId !== undefined)
+          db.prepare('INSERT INTO agent_worker_project (worker_id, project_id) VALUES (?, ?) ON CONFLICT DO NOTHING').run(
+            workerId,
+            projectId,
+          )
         return workerId
       },
       revoke(workerId: string) {

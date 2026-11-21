@@ -35,6 +35,7 @@ const fixture = async (t: TestContext) => {
   const outstanding = new Map<string, AgentRunAssignment>()
   const journals = new Map<string, string>()
   const pool = makeAgentWorkerPool({
+    permits: (id, project) => id === workerId && project === projectId,
     bind: (id, bound) => {
       if (!journals.has(id)) journals.set(id, bound)
       return journals.get(id) === bound
@@ -286,7 +287,7 @@ void test(
       const echoed = once(agent.output, 'data', { signal: AbortSignal.timeout(8000) })
       await agent.write(Buffer.from(data + '\n'))
       deepEqual(await echoed, [Buffer.from('Home source\n' + data + '\n')])
-      const change = await agent.readPatch(tree)
+      const change = await agent.readPatch(tree, head)
       ok(Buffer.from(change.patch).includes('+' + data))
       const response = await fetch('http://127.0.0.1:' + agent.toolPort + '/mcp', {
         headers: { Authorization: 'Bearer tool-token' },
@@ -310,7 +311,7 @@ void test(
     const start = await worker.read()
     ok(start?.case === 'start')
     const { runId } = start.value
-    const interrupted = rejects(pending, /connection closed/)
+    const interrupted = rejects(pending, /closed/)
     worker.call.cancel()
     await interrupted
     const changed = connect()

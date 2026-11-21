@@ -27,7 +27,7 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
             try: (signal) => pool.start(workerId, { projectId, workspaceId, providerId }, { signal, checkout, toolPort }),
             catch: failed,
           })
-          return { agent, tree: checkout.tree }
+          return { agent, base: { head: checkout.head, tree: checkout.tree } }
         }),
       ).pipe(Effect.mapError(failed))
       const stop = (agent: Awaited<ReturnType<AgentWorkerPool['start']>>) =>
@@ -37,15 +37,15 @@ export const workerExecution = (active: () => AgentWorkerPool | undefined): Work
             () => undefined,
           ),
         )
-      const { agent, tree } = yield* Effect.acquireRelease(made, ({ agent }) => stop(agent))
+      const { agent, base: prepared } = yield* Effect.acquireRelease(made, ({ agent }) => stop(agent))
       if (agent.toolPort === undefined) return yield* failed(new Error('The worker did not open the Althar tools connection.'))
       const writes = yield* Semaphore.make(1)
-      let base = tree
+      let base = prepared
       const checkpoint = writes.withPermits(1)(
         Effect.gen(function* () {
-          const incoming = yield* Effect.tryPromise({ try: () => agent.readPatch(base), catch: unavailable })
-          yield* acceptWorkerPatch(worktree, base, incoming.tree, incoming.patch)
-          base = incoming.tree
+          const incoming = yield* Effect.tryPromise({ try: () => agent.readPatch(base.tree, base.head), catch: unavailable })
+          yield* acceptWorkerPatch(worktree, base, incoming)
+          base = { head: incoming.head, tree: incoming.tree }
         }).pipe(
           Effect.mapError(
             (error) => new AgentRequestFailed({ method: 'workspace/checkpoint', failure: 'transient', message: unavailable(error) }),

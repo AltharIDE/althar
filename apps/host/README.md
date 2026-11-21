@@ -212,7 +212,11 @@ The preview runs one configured command per worker with a one-minute budget. The
 
 Use a Linux worker with Git, systemd 254 or later, and a working systemd user manager. Set it up under a dedicated account for your own trusted projects. The agent uses the provider account you sign into on that machine.
 
-1. On the home, [configure the worker listener and enroll the worker certificate](#native-worker-diagnostic). For a separate machine, bind to a private address the worker can reach, and include the home’s worker-facing DNS name in the home certificate. Record the **home ID**, **worker ID** and **project ID**. Give the worker its own client certificate and key, plus the public CA certificate.
+1. On the home, [configure the worker listener and enroll the worker certificate](#native-worker-diagnostic). For a separate machine, bind to a private address the worker can reach, and include the home’s worker-facing DNS name in the home certificate. Record the **home ID** and **project ID**. Once the host is running, assign the worker to that project with the command below. Give the worker its own client certificate and key, plus the public CA certificate. Save the **worker ID** the command prints.
+
+   ~~~sh
+   althar-host enroll-worker --worker-certificate "$tls/client.pem" --project-id "$PROJECT_ID" --json
+   ~~~
 2. On the worker, sign in with the provider’s supported command. Install its compatible ACP adapter there. Run the following as the worker user, substituting the project ID and the adapter executable. Use an absolute path. Put any fixed executable arguments after it, with one tab per argument.
 
    ```sh
@@ -235,7 +239,7 @@ Use a Linux worker with Git, systemd 254 or later, and a working systemd user ma
 4. In Desktop, open the home and its project. Prepare a task with one repository and an Implement lead that matches the worker’s provider. **Hold** the plan. Use **Run on** to pick the Linux worker, then start the task.
 5. Watch the task thread and open its diff after the agent has responded. The home receives the changes before it records the turn as finished. Try a follow-up and stop a task while the agent is working. If a worker drops out, the home waits for it to confirm that its old run stopped before dispatching another run for that workspace.
 
-The home sends a Git bundle with the task’s tracked and unignored files and reachable history. It keeps the task’s own checkout and receives binary Git patches back. The bundle limit is 128 MiB and a returned patch is limited to 16 MiB. If the home checkout changes independently, the home reports the conflict and the worker keeps its files. Interrupted runs keep their checkouts under the worker’s workspace root so you can recover unsynced edits.
+The home sends a Git bundle with the task’s tracked and unignored files and reachable history. It keeps the task’s own checkout and receives the agent’s original commits and binary Git patches back. The initial bundle limit is 128 MiB. A checkpoint can contain up to 64 MiB of new commits and a 16 MiB patch. If the home checkout changes independently, the home reports the conflict and the worker keeps its files. Interrupted runs keep their checkouts under the worker’s workspace root so you can recover unsynced edits.
 
 ## Managed releases and updates
 

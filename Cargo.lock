@@ -23,6 +23,7 @@ dependencies = [
  "ring",
  "rustix",
  "rustls",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",

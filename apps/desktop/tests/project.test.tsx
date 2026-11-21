@@ -606,6 +606,21 @@ describe('the Talk room', () => {
     expect(screen.getByText('Changed')).toBeTruthy()
   })
 
+  it('starts a held plan on the chosen worker', async () => {
+    const workerId = 'wrk_' + 'a'.repeat(32)
+    const planned = card()
+    const held = { ...planned, phase: 'held' as const, plan: planned.plan === undefined ? undefined : { ...planned.plan, startsAt: null } }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(held)] })),
+      listProjectWorkers: vi.fn(async () => [{ workerId, providers: ['claude-code'], busy: false }]),
+    })
+    withServices(<Project room={Room.Talk} />, client)
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Run on' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Linux worker aaaaaa' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Start' }))
+    expect(client.startPlan).toHaveBeenCalledWith('pln1', workerId)
+  })
+
   it('holds, changes and starts a plan before it starts on its own', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card())] })) })
     withServices(<Project room={Room.Talk} />, client)

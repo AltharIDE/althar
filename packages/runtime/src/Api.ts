@@ -1875,7 +1875,6 @@ export const handlers = apiLayer(
                 title,
                 ...(description === undefined ? {} : { description }),
                 draft: true,
-                ...(workerId === undefined ? {} : { workerId }),
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
                 ...(taskId === undefined ? {} : { taskId }),
@@ -1895,6 +1894,7 @@ export const handlers = apiLayer(
                 reason: null,
                 actorId: actorId,
                 startsIn: Duration.zero,
+                ...(workerId === undefined ? {} : { held: true }),
                 // An aside, as a chat the coordinator starts: nothing of it goes outside the project when it is done; it has its pill
                 // rather than a card, and the coordinator hears nothing of it.
                 ...(aside
@@ -1905,7 +1905,7 @@ export const handlers = apiLayer(
                       ...(end !== undefined && end !== projectEnd ? { endChosen: true } : {}),
                     }),
               })
-              yield* plans.start(planId, actorId)
+              yield* plans.start(planId, actorId, workerId)
               return yield* queries.task(created.taskId)
             }),
           ),

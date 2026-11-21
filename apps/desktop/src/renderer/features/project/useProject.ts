@@ -707,7 +707,7 @@ export const useProject = (projectId: string): ProjectModel => {
         (failure: unknown) => messageOf(failure),
       ),
     workers,
-    startPlan: (planId, workerId) => act(() => client.startPlan(planId, workerId)),
+    startPlan: (planId, workerId) => act(() => (workerId === undefined ? client.startPlan(planId) : client.startPlan(planId, workerId))),
     stopWaiting: (taskId, on) => act(() => client.stopWaiting(taskId, on)),
     reopenTask: (taskId) => act(() => client.reopenTask(taskId)),
     discardTask: (taskId) =>

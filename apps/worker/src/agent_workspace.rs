@@ -215,6 +215,15 @@ async fn run_git(directory: &Path, args: &[&str]) -> io::Result<String> {
 }
 
 const MAX_PATCH_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_COMMIT_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
+const COMMITS_REF: &str = "refs/althar/worker-head";
+
+pub(crate) struct WorkspacePatch {
+    pub tree: String,
+    pub head: String,
+    pub patch: Vec<u8>,
+    pub commits: Vec<u8>,
+}
 
 struct TemporaryIndex(PathBuf);
 
@@ -229,14 +238,24 @@ pub(crate) async fn workspace_patch(
     directory: &Path,
     run_id: &str,
     base: &str,
-) -> io::Result<(String, Vec<u8>)> {
+    base_head: &str,
+) -> io::Result<WorkspacePatch> {
     use tokio::io::AsyncReadExt as _;
-    if !matches!(base.len(), 40 | 64)
-        || !base
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-    {
-        return Err(invalid("Invalid workspace checkpoint tree"));
+    let object_id = |value: &str| {
+        matches!(value.len(), 40 | 64)
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    };
+    if !object_id(base) || !object_id(base_head) || base.len() != base_head.len() {
+        return Err(invalid("Invalid workspace checkpoint identity"));
+    }
+    let head = run_git(directory, &["rev-parse", "--verify", "HEAD^{commit}"])
+        .await?
+        .trim()
+        .to_owned();
+    if !object_id(&head) || base.len() != head.len() {
+        return Err(invalid("Invalid worker checkout commit"));
     }
     let parent = directory
         .parent()
@@ -270,7 +289,7 @@ pub(crate) async fn workspace_patch(
         git
     };
     let mut git = checkpoint_git();
-    git.args(["read-tree", base]);
+    git.args(["read-tree", &head]);
     if !git.status().await?.success() {
         return Err(invalid("Could not start the worker's workspace checkpoint"));
     }
@@ -316,5 +335,140 @@ pub(crate) async fn workspace_patch(
             "The worker changes could not fit in a workspace checkpoint",
         ));
     }
-    Ok((tree, patch))
+    if run_git(directory, &["rev-parse", "--verify", "HEAD^{commit}"])
+        .await?
+        .trim()
+        != head
+    {
+        return Err(invalid(
+            "The worker committed while its files were being read",
+        ));
+    }
+    let commits = if head == base_head {
+        Vec::new()
+    } else {
+        if !checkpoint_git()
+            .args(["merge-base", "--is-ancestor", base_head, &head])
+            .status()
+            .await?
+            .success()
+        {
+            return Err(invalid(
+                "The worker rewrote the history the home already had",
+            ));
+        }
+        if !checkpoint_git()
+            .args(["update-ref", COMMITS_REF, &head])
+            .status()
+            .await?
+            .success()
+        {
+            return Err(invalid("Could not reference the worker's new commits"));
+        }
+        let bundle = index.0.join("commits.bundle");
+        if !checkpoint_git()
+            .args(["bundle", "create"])
+            .arg(&bundle)
+            .arg(COMMITS_REF)
+            .arg(format!("^{base_head}"))
+            .status()
+            .await?
+            .success()
+        {
+            return Err(invalid("Could not package the worker's new commits"));
+        }
+        if fs::metadata(&bundle)?.len() > MAX_COMMIT_BUNDLE_BYTES {
+            return Err(invalid(
+                "The worker committed more than the home can receive in one checkpoint",
+            ));
+        }
+        fs::read(bundle)?
+    };
+    Ok(WorkspacePatch {
+        tree,
+        head,
+        patch,
+        commits,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stages_an_authenticated_bundle_and_exports_worker_commits_and_dirty_files()
+    -> io::Result<()> {
+        let fixture = tempfile::tempdir()?;
+        let source = fixture.path().join("source");
+        private_directory(&source)?;
+        run_git(
+            &source,
+            &["init", "--quiet", "--template=", "--object-format=sha1"],
+        )
+        .await?;
+        fs::write(source.join("README.md"), "Home\n")?;
+        run_git(&source, &["add", "README.md"]).await?;
+        let author = [
+            "-c",
+            "user.name=Worker",
+            "-c",
+            "user.email=worker@althar.test",
+        ];
+        let mut commit = author.to_vec();
+        commit.extend(["commit", "--quiet", "-m", "Base"]);
+        run_git(&source, &commit).await?;
+        let head = run_git(&source, &["rev-parse", "HEAD"])
+            .await?
+            .trim()
+            .to_owned();
+        let tree = run_git(&source, &["rev-parse", "HEAD^{tree}"])
+            .await?
+            .trim()
+            .to_owned();
+        let mut snapshot = author.to_vec();
+        snapshot.extend(["commit-tree", &tree, "-p", &head, "-m", "Snapshot"]);
+        let snapshot = run_git(&source, &snapshot).await?;
+        run_git(&source, &["update-ref", SNAPSHOT_REF, snapshot.trim()]).await?;
+        let archive = fixture.path().join("input.bundle");
+        let archive_name = archive
+            .to_str()
+            .ok_or_else(|| invalid("The bundle path must be UTF-8"))?;
+        run_git(&source, &["bundle", "create", archive_name, SNAPSHOT_REF]).await?;
+        let bytes = fs::read(archive)?;
+        let specification = AgentWorkspaceSource {
+            size: bytes.len() as u32,
+            head: head.clone(),
+            sha256: ring::digest::digest(&SHA256, &bytes).as_ref().to_vec(),
+        };
+        let destination = fixture.path().join("project").join("attempt");
+        let mut bad_transfer =
+            WorkspaceTransfer::create(destination.clone(), "bad", &specification)?;
+        bad_transfer.put(&vec![0; bytes.len()])?;
+        assert!(bad_transfer.install(&specification).await.is_err());
+        assert!(!destination.exists());
+        let mut transfer = WorkspaceTransfer::create(destination, "good", &specification)?;
+        for chunk in bytes.chunks(128) {
+            transfer.put(chunk)?;
+        }
+        let worker = transfer.install(&specification).await?;
+        assert_eq!(fs::read_to_string(worker.join("README.md"))?, "Home\n");
+        fs::write(worker.join("README.md"), "On the worker\n")?;
+        run_git(&worker, &["add", "README.md"]).await?;
+        run_git(&worker, &commit).await?;
+        fs::write(worker.join("draft.txt"), "Unsaved in Git\n")?;
+        let update = workspace_patch(&worker, "check", &tree, &head).await?;
+        assert!(String::from_utf8_lossy(&update.patch).contains("+On the worker"));
+        assert!(String::from_utf8_lossy(&update.patch).contains("+Unsaved in Git"));
+        assert!(!update.commits.is_empty());
+        assert_eq!(
+            update.head,
+            run_git(&worker, &["rev-parse", "HEAD"]).await?.trim()
+        );
+        assert_eq!(
+            run_git(&worker, &["status", "--porcelain"]).await?.trim(),
+            "?? draft.txt"
+        );
+        Ok(())
+    }
 }

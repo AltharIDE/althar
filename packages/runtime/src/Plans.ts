@@ -170,7 +170,7 @@ export class Plans extends Context.Service<
         set: (plan: PlanRow) => Readonly<Record<string, unknown>>,
         type: string,
         actorId: ActorId,
-        before?: (plan: PlanRow) => Effect.Effect<void, unknown, SqlClient.SqlClient>,
+        before?: (plan: PlanRow) => Effect.Effect<Readonly<Record<string, unknown>>, unknown, SqlClient.SqlClient>,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -178,8 +178,8 @@ export class Plans extends Context.Service<
             Effect.gen(function* () {
               const plan = yield* load(planId)
               if (!when(plan)) return undefined
-              if (before !== undefined) yield* before(plan)
-              const revision = yield* change('task_plans', planId, set(plan))
+              const placement = before === undefined ? {} : yield* before(plan)
+              const revision = yield* change('task_plans', planId, { ...set(plan), ...placement })
               yield* fact({ projectId: plan.projectId, aggregateType: 'task_plan', aggregateId: planId, revision, type, actorId })
               return plan
             }),
@@ -344,7 +344,7 @@ export class Plans extends Context.Service<
           ])
           if (repositories.length !== 1)
             return yield* new ApiError({ reason: 'Invalid', message: 'Choose a task that works in one repository.' })
-          yield* change('tasks', plan.taskId, { executionWorkerId: workerId })
+          return { parameters: JSON.stringify({ ...parameters, workerId }) }
         })
 
       const start = (planId: string, actorId: ActorId, due = false, workerId?: string) =>

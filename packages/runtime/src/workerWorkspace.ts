@@ -10,6 +10,7 @@ import { GitFailed } from './errors'
 import { commitTree, git, treeOf } from './git'
 
 const SNAPSHOT_REF = 'refs/althar/worker-snapshot'
+const COMMITS_REF = 'refs/althar/worker-head'
 
 const failed = (cwd: string, args: ReadonlyArray<string>, reason: string) => new GitFailed({ cwd, args, reason, stderr: '' })
 
@@ -69,17 +70,31 @@ export const prepareWorkerWorkspace = (worktree: string, maxBytes: number) => {
   })
 }
 
-/** Land the worker's changes on the exact tree the home last sent or received. */
-export const acceptWorkerPatch = (worktree: string, base: string, tree: string, patch: Uint8Array) =>
+export interface WorkerGitState {
+  readonly head: string
+  readonly tree: string
+}
+
+/** Land the worker's changes on the exact tree and commit the home last sent or received. */
+export const acceptWorkerPatch = (
+  worktree: string,
+  base: WorkerGitState,
+  incoming: WorkerGitState & {
+    readonly patch: Uint8Array
+    readonly commits: Uint8Array
+  },
+) =>
   Effect.scoped(
     Effect.gen(function* () {
       const refuse = (reason: string) => failed(worktree, ['apply'], reason)
-      if ((yield* treeOf(worktree)) !== base)
+      const head = yield* git(worktree, 'rev-parse', '--verify', 'HEAD')
+      if (head !== base.head || (yield* treeOf(worktree)) !== base.tree)
         return yield* refuse('This task’s checkout changed on the home. The worker’s changes are still on the worker.')
-      if (patch.byteLength === 0) {
-        if (base !== tree) return yield* refuse('The worker reported a new tree without a patch.')
-        return
-      }
+      if (incoming.patch.byteLength === 0 && incoming.tree !== base.tree)
+        return yield* refuse('The worker reported a new tree without a patch.')
+      if ((incoming.head === base.head) !== (incoming.commits.byteLength === 0))
+        return yield* refuse('The worker’s commit transfer does not match its checkout.')
+      if (incoming.patch.byteLength === 0 && incoming.commits.byteLength === 0) return
       const folder = yield* Effect.acquireRelease(
         Effect.tryPromise({
           try: () => mkdtemp(join(tmpdir(), 'althar-worker-patch-')),
@@ -87,16 +102,45 @@ export const acceptWorkerPatch = (worktree: string, base: string, tree: string, 
         }),
         (path) => cleanUp(path, 'the received worker patch'),
       )
-      const received = join(folder, 'received.diff')
-      yield* Effect.tryPromise({
-        try: () => writeFile(received, patch, { mode: 0o600 }),
-        catch: () => refuse('Could not save the worker’s patch.'),
-      })
-      // Git apply checks every file before updating any. The worktree can
-      // still change between checkout verification and apply, so keep its
-      // checks and never pass --unsafe-paths or force an overwrite.
-      yield* git(worktree, 'apply', '--whitespace=nowarn', '--', received)
-      if ((yield* treeOf(worktree)) !== tree)
+      const received = (filename: string, bytes: Uint8Array) =>
+        Effect.tryPromise({
+          try: async () => {
+            const path = join(folder, filename)
+            await writeFile(path, bytes, { mode: 0o600 })
+            return path
+          },
+          catch: () => refuse('Could not save the worker’s changes.'),
+        })
+      if (incoming.commits.byteLength > 0) {
+        const archive = yield* received('commits.bundle', incoming.commits)
+        if ((yield* git(worktree, 'bundle', 'list-heads', archive)) !== incoming.head + ' ' + COMMITS_REF)
+          return yield* refuse('The worker sent a different commit than the one it reported.')
+        yield* git(
+          worktree,
+          '-c',
+          'protocol.file.allow=always',
+          'fetch',
+          '--no-write-fetch-head',
+          '--no-tags',
+          '--no-recurse-submodules',
+          archive,
+          COMMITS_REF,
+        )
+        yield* git(worktree, 'merge-base', '--is-ancestor', base.head, incoming.head)
+      }
+      if (incoming.patch.byteLength > 0) {
+        const patch = yield* received('files.diff', incoming.patch)
+        // Git apply checks every file before updating any. Keep its checks
+        // against edits made since the base was read and against escaping paths.
+        yield* git(worktree, 'apply', '--whitespace=nowarn', '--', patch)
+      }
+      if (incoming.head !== base.head) {
+        // Import the worker's original commits, with the worker's author and
+        // object IDs intact. Setting the index alone keeps its remaining edits.
+        yield* git(worktree, 'update-ref', 'HEAD', incoming.head, base.head)
+        yield* git(worktree, 'read-tree', incoming.head)
+      }
+      if ((yield* treeOf(worktree)) !== incoming.tree)
         return yield* refuse('The home’s checkout does not match the worker’s checkpoint. Inspect the changes in both places.')
     }),
   )

@@ -300,8 +300,9 @@ export const makeSessionConnections = (dependencies: SessionConnectionsDependenc
       const selectedWorker =
         thread.role !== 'task' || thread.helper !== undefined
           ? null
-          : ((yield* sql<{ workerId: string | null }>`SELECT execution_worker_id AS worker_id FROM tasks WHERE id = ${thread.taskId}`)[0]
-              ?.workerId ?? null)
+          : ((yield* sql<{ workerId: string | null }>`SELECT json_extract(parameters, '$.workerId') AS worker_id
+              FROM task_plans WHERE state = 'accepted' AND task_id = ${thread.taskId}
+              ORDER BY decided_at DESC, rowid DESC LIMIT 1`)[0]?.workerId ?? null)
       // Local providers use the account's home. An enrolled worker uses its own provider sign-in.
       if (selectedWorker === null) yield* accounts.prepare(account)
       // The session's own scope, from here, so whatever it is given goes with it.
